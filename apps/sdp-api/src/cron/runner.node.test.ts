@@ -9,7 +9,7 @@ import {
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "./dvp-trades";
-import { EARN_CATALOGUE_SYNC_CRON } from "./earn-catalogue-sync";
+import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSyncIfDue } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_CRON } from "./earn-split-swaps";
 import {
@@ -64,6 +64,11 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 vi.mock("node-cron", () => ({
   schedule: (...args: unknown[]) => scheduleMock(...args),
+}));
+
+vi.mock("./earn-catalogue-sync", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./earn-catalogue-sync")>()),
+  runEarnCatalogueSyncIfDue: vi.fn(async () => "synced" as const),
 }));
 
 vi.mock("./approved-wallet-operations", () => ({
@@ -173,6 +178,7 @@ describe("startCron", () => {
     vi.mocked(runRingsIndexingPoll).mockReset();
     vi.mocked(runSecretRetirements).mockReset();
     vi.mocked(runProviderCredentialSecretCleanup).mockReset();
+    vi.mocked(runEarnCatalogueSyncIfDue).mockClear();
   });
 
   // The secret-retirement sweep is registered behind no flag at all, so it is
@@ -405,6 +411,25 @@ describe("startCron", () => {
         status: "ok",
       })
     );
+  });
+
+  it("runs one slotted catalogue sync at boot when earn is enabled", async () => {
+    const bg = makeBg();
+    startCron({ env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env, bg });
+
+    // Handed to the background runner, never awaited by startCron itself.
+    expect(bg.run).toHaveBeenCalledTimes(1);
+    await vi.mocked(bg.run).mock.calls[0][0];
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
+    // The scheduled hourly task is still registered alongside the boot run.
+    expect(scheduleMock.mock.calls[7][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
+  });
+
+  it("does not sync the catalogue at boot when earn is off", () => {
+    const bg = makeBg();
+    startCron({ env: {} as Env, bg });
+    expect(bg.run).not.toHaveBeenCalled();
+    expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
   });
 
   it("schedules when DISABLE_CRON is set to a recognised falsy value ('false' / '0')", () => {

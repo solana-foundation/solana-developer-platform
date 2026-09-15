@@ -178,3 +178,36 @@ function ownerTelemetryFields(
 function isBoundedSnapshotAmount(value: unknown): value is string {
   return typeof value === "string" && value.length <= 128 && isDecimalString(value);
 }
+
+/**
+ * Close holdings the live read has just proven empty.
+ *
+ * Settlement closes a position when its exit empties it, but a position exited
+ * before that close-out existed, or whose close-out lost its chain read, would
+ * otherwise stay open with zero shares and keep counting as live. The next read
+ * that observes an exact "0" closes it. The repository refuses while a movement
+ * is unsettled, and a later deposit re-opens the row, so this can only ever
+ * retire a holding that is truly empty. Fail-soft: this page still answers as
+ * observed, and the close is retried by the next read.
+ */
+export async function closeEmptyHydratedPositions(
+  close: (positionId: string) => Promise<boolean>,
+  positions: ReadonlyArray<{ id: string; closedAt: string | null }>,
+  live: ReadonlyMap<string, HydratedVaultPositionValue>
+): Promise<void> {
+  const empty = positions.filter(
+    (position) => position.closedAt === null && live.get(position.id)?.shares === "0"
+  );
+  await Promise.all(
+    empty.map(async (position) => {
+      try {
+        await close(position.id);
+      } catch (error) {
+        getLogger().warn(
+          { positionId: position.id, error },
+          "vault position close-out on read failed; the next read retries"
+        );
+      }
+    })
+  );
+}

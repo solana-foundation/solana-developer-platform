@@ -25,6 +25,7 @@ import {
   EARN_CATALOGUE_SYNC_CRON,
   EARN_CATALOGUE_SYNC_MONITOR,
   runEarnCatalogueSync,
+  runEarnCatalogueSyncIfDue,
 } from "./earn-catalogue-sync";
 import {
   EARN_METRICS_REFRESH_CRON,
@@ -225,6 +226,17 @@ export function startCron(deps: CronDeps): CronHandle | null {
   if (isEarnEnabled(deps.env)) {
     tasks.push(
       scheduleSystemTask(EARN_CATALOGUE_SYNC_CRON, "cron:earn-catalogue-sync", runEarnCatalogueSync)
+    );
+    // One sync at boot, so a fresh database serves a catalogue before the first
+    // top-of-hour tick instead of "No strategies available" for up to an hour.
+    // The slotted entry point makes this idempotent: restarts inside the hour
+    // find the slot held and skip, so a crash loop cannot hammer providers.
+    // No observability on purpose: the scheduled task owns the monitor slug and
+    // an off-schedule check-in would only confuse it.
+    deps.bg.run(
+      runWithSystemDatabaseIdentity("cron:earn-catalogue-sync:boot", () =>
+        runEarnCatalogueSyncIfDue(deps.env)
+      )
     );
     // Separate task, not folded into the sync above: the two have different
     // cadences on purpose (catalogue drift is hourly, rates are not) and

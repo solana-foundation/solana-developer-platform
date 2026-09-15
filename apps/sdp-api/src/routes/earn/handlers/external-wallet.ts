@@ -2,7 +2,11 @@ import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnVaultWithdrawQuote } from "@sdp/earn/types";
-import { subtractDecimalAmounts, sumDecimalAmounts } from "@sdp/payments/decimal";
+import {
+  addDecimalAmounts,
+  subtractDecimalAmounts,
+  sumDecimalAmounts,
+} from "@sdp/payments/decimal";
 import type {
   EarnDepositSwap,
   EarnExternalWalletDepositResponse,
@@ -33,7 +37,9 @@ import { getDb } from "@/db";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
+  type EarnMovementsRepository,
   type EarnPositionRow,
+  type ExternalWalletMovementTotals,
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
@@ -91,7 +97,11 @@ import {
   encodeVaultPositionCursor,
   type VaultPositionCursor,
 } from "./vault-position-cursor";
-import { type HydratedVaultPositionValue, hydrateVaultPositions } from "./vault-position-hydration";
+import {
+  closeEmptyHydratedPositions,
+  type HydratedVaultPositionValue,
+  hydrateVaultPositions,
+} from "./vault-position-hydration";
 
 /**
  * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
@@ -161,6 +171,12 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
   });
+  await closeEmptyHydratedPositions(
+    (positionId) =>
+      repo.closeVaultPositionIfEmpty({ positionId, organizationId: auth.organizationId }),
+    holdings,
+    live
+  );
   const summary = summarizeExternalWalletPositions(holdings, live, {
     includeOwnerAddresses,
     includePositions,
@@ -189,6 +205,12 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
  * holdings. The owner is a REQUIRED query filter, the same addressing every
  * per-owner read on this surface uses (see the movements list for the original
  * reasoning).
+ *
+ * A wallet with nothing in this project's scope answers an EMPTY page, never
+ * 404: a partner's balance screen renders for a customer who has not deposited
+ * yet, and the query is already org/project/environment scoped, so a wallet
+ * claimed by another organization answers the same empty page (the caller
+ * learns nothing it could not learn from the content).
  */
 export async function listEarnExternalWalletPositions(c: AppContext) {
   const query = parseQuery(c, earnExternalWalletPositionsQuerySchema);
@@ -202,16 +224,6 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
   const projectId = requireProjectId(c);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
 
-  // Existence and ownership intentionally collapse to one 404. This separate
-  // scoped check keeps a valid wallet answerable on an empty later page.
-  const owned = await repo.hasExternalWalletPositionOwner({
-    organizationId: auth.organizationId,
-    projectId,
-    environment,
-    ownerAddress,
-  });
-  if (!owned) throw notFound("Earn external wallet");
-
   const page = await repo.listExternalWalletPositions({
     organizationId: auth.organizationId,
     projectId,
@@ -224,6 +236,12 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
   });
+  await closeEmptyHydratedPositions(
+    (positionId) =>
+      repo.closeVaultPositionIfEmpty({ positionId, organizationId: auth.organizationId }),
+    holdings,
+    live
+  );
   const last = holdings.at(-1);
   const response: EarnExternalWalletPositionsPage = {
     ownerAddress,
@@ -283,11 +301,10 @@ function cursorStrictlyPrecedes(next: VaultPositionCursor, before: VaultPosition
  * to say about them.
  *
  * The owner is a REQUIRED query filter, not a path segment, so the collection
- * keeps its `:movementId` detail route unambiguous. An owner this exact
- * project has never claimed a position for answers 404 — the same
- * existence-and-ownership collapse the positions read performs — so a partner
- * cannot distinguish "not yours" from "never seen" and an owner with only
- * in-flight history still answers an honest empty page.
+ * keeps its `:movementId` detail route unambiguous. An owner with no recorded
+ * movements in this exact project answers an EMPTY page, never 404 (same rule
+ * as the positions read): every query is already org/project/environment
+ * scoped, so "not yours" and "never seen" are the same empty answer.
  */
 export async function listEarnExternalWalletMovements(c: AppContext) {
   const query = parseQuery(c, earnExternalWalletMovementsQuerySchema);
@@ -300,14 +317,6 @@ export async function listEarnExternalWalletMovements(c: AppContext) {
   const projectId = requireProjectId(c);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
 
-  const owned = await repo.hasExternalWalletPositionOwner({
-    organizationId: auth.organizationId,
-    projectId,
-    environment,
-    ownerAddress: query.ownerAddress,
-  });
-  if (!owned) throw notFound("Earn external wallet");
-
   const page = await repo.listExternalWalletMovements({
     organizationId: auth.organizationId,
     projectId,
@@ -318,14 +327,53 @@ export async function listEarnExternalWalletMovements(c: AppContext) {
     limit: query.limit,
     before,
   });
+  const tokenMints = await resolveMovementTokenMints(repo, auth.organizationId, page.rows);
   const last = page.rows.at(-1);
   const response: EarnExternalWalletMovementsPage = {
     ownerAddress: query.ownerAddress,
-    movements: page.rows.map((row) => toExternalWalletMovementWire(row)),
+    movements: page.rows.map((row) =>
+      toExternalWalletMovementWire(row, requireMovementTokenMint(row, tokenMints))
+    ),
     hasMore: page.hasMore,
     nextCursor: page.hasMore && last ? encodeKeysetCursor(last.created_at, last.id) : null,
   };
   return success(c, response);
+}
+
+/**
+ * The deposit-token mint behind each movement, from its position: a withdrawal
+ * row carries only its SHARE mint, and the wire shape names the token unit a
+ * feed renders in.
+ */
+async function resolveMovementTokenMints(
+  repo: EarnMovementsRepository,
+  organizationId: string,
+  rows: readonly EarnMovementRow[]
+): Promise<ReadonlyMap<string, string>> {
+  return repo.listPositionTokenMints({
+    organizationId,
+    positionIds: rows.map((row) => row.position_id),
+  });
+}
+
+function requireMovementTokenMint(
+  movement: EarnMovementRow,
+  tokenMints: ReadonlyMap<string, string>
+): string {
+  const tokenMint = tokenMints.get(movement.position_id);
+  if (!tokenMint) {
+    throw internalError(
+      `Earn external-wallet movement ${movement.id} has no deposit-token mint on its position`
+    );
+  }
+  return tokenMint;
+}
+
+function requirePositionTokenMint(position: EarnPositionRow): string {
+  if (!position.token_mint) {
+    throw internalError(`Earn external-wallet position ${position.id} has no deposit-token mint`);
+  }
+  return position.token_mint;
 }
 
 /**
@@ -348,7 +396,8 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const row = await createPostgresEarnMovementsRepository(getDb(c.env)).getExternalWalletMovement({
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const row = await repo.getExternalWalletMovement({
     organizationId: auth.organizationId,
     projectId,
     environment,
@@ -360,9 +409,15 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
   // cannot use RPC timing to learn that another project's transaction exists.
   // The service's own post-write re-read is only organization-scoped, which is
   // fine here because this row already passed the four-rule scope above.
-  const currentMovement = await reconcileEarnVaultMovementReadThrough(c.env, row);
+  const [currentMovement, tokenMints] = await Promise.all([
+    reconcileEarnVaultMovementReadThrough(c.env, row),
+    resolveMovementTokenMints(repo, auth.organizationId, [row]),
+  ]);
   const response: EarnExternalWalletMovementResponse = {
-    movement: toExternalWalletMovementWire(currentMovement),
+    movement: toExternalWalletMovementWire(
+      currentMovement,
+      requireMovementTokenMint(currentMovement, tokenMints)
+    ),
   };
   return success(c, response);
 }
@@ -371,19 +426,24 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  * GET /v1/earn/external-wallet/earnings?ownerAddress=…: balance and total
  * earned for one end user, grouped by deposit token (PRO-1772).
  *
- * `earned` is live current value minus finalized SDP deposits — both facts,
- * one from the chain and one from the ledger — and it is stated only when it
- * is exact. Three things make it unstatable, each reported by name and none
- * of them ever coerced to zero:
+ * `earned` is live current value, plus the observed token payouts of
+ * finalized withdrawals, minus finalized SDP deposits (chain for the first,
+ * ledger for the other two), and it is stated only when it is exact. Three
+ * things make it unstatable, each reported by name and none of them ever
+ * coerced to zero:
  *
  * - a position's live value failed to hydrate (`live_value_unavailable`);
  * - a movement is still settling, so the chain and the ledger describe
  *   different moments (`movements_pending` — detail polling performs a bounded
  *   live chain read and the scheduled reconciler remains the recovery path);
- * - the wallet has a finalized withdrawal (`withdrawals_not_valued`): the
- *   ledger records exits in SHARES (migration 0070 pins `payout_token` NULL
- *   for vault rows), so no exact token-denominated earned figure exists once
- *   money has gone out.
+ * - a finalized withdrawal has NO observed payout (`withdrawals_not_valued`):
+ *   exits are ledgered in SHARES, and the deposit-token payout is observed
+ *   from the landed transaction at settlement (`token_amount_settled`,
+ *   migration 0103); a row that predates that, or whose transaction read
+ *   failed, leaves `totalWithdrawn` incomplete.
+ *
+ * A wallet with no positions in scope answers `positionCount: 0` and empty
+ * totals, never 404 (same rule as the other per-owner reads).
  *
  * The ADR 0002 caveat applies at full strength: live hydration reads the
  * owner's WHOLE vault balance, so shares acquired outside SDP inflate
@@ -397,14 +457,6 @@ export async function getEarnExternalWalletEarnings(c: AppContext) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
-
-  const owned = await repo.hasExternalWalletPositionOwner({
-    organizationId: auth.organizationId,
-    projectId,
-    environment,
-    ownerAddress,
-  });
-  if (!owned) throw notFound("Earn external wallet");
 
   const scope = { organizationId: auth.organizationId, projectId, environment };
   const [rows, movementTotals] = await Promise.all([
@@ -422,6 +474,12 @@ export async function getEarnExternalWalletEarnings(c: AppContext) {
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
   });
+  await closeEmptyHydratedPositions(
+    (positionId) =>
+      repo.closeVaultPositionIfEmpty({ positionId, organizationId: auth.organizationId }),
+    holdings,
+    live
+  );
 
   const response: EarnExternalWalletEarningsResponse = {
     earnings: summarizeExternalWalletEarnings(ownerAddress, holdings, live, movementTotals),
@@ -435,6 +493,7 @@ interface MutableTokenEarnings {
   unavailablePositionCount: number;
   values: string[];
   deposits: string[];
+  withdrawals: string[];
   earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;
 }
 
@@ -449,10 +508,7 @@ function summarizeExternalWalletEarnings(
   ownerAddress: string,
   holdings: readonly ExternalWalletHolding[],
   live: ReadonlyMap<string, HydratedVaultPositionValue>,
-  movementTotals: ReadonlyMap<
-    string,
-    { finalizedDeposits: string; finalizedWithdrawalCount: number; unsettledMovementCount: number }
-  >
+  movementTotals: ReadonlyMap<string, ExternalWalletMovementTotals>
 ): EarnExternalWalletEarnings {
   const tokens = new Map<string, MutableTokenEarnings>();
   let unavailablePositionCount = 0;
@@ -470,13 +526,17 @@ function summarizeExternalWalletEarnings(
         unavailablePositionCount: 0,
         values: [],
         deposits: [],
+        withdrawals: [],
       };
       tokens.set(holding.tokenMint, token);
     }
     token.positionCount += 1;
     if (value === undefined) token.unavailablePositionCount += 1;
     else token.values.push(value);
-    if (totals) token.deposits.push(totals.finalizedDeposits);
+    if (totals) {
+      token.deposits.push(totals.finalizedDeposits);
+      token.withdrawals.push(totals.finalizedWithdrawals);
+    }
 
     const reason = earnedUnavailableReason(value, totals);
     if (
@@ -496,6 +556,7 @@ function summarizeExternalWalletEarnings(
     totalsByToken: [...tokens.values()]
       .map((token) => {
         const totalDeposited = sumDecimalAmounts(token.deposits);
+        const totalWithdrawn = sumDecimalAmounts(token.withdrawals);
         const currentValue =
           token.unavailablePositionCount === 0 ? sumDecimalAmounts(token.values) : undefined;
         return {
@@ -504,12 +565,19 @@ function summarizeExternalWalletEarnings(
           unavailablePositionCount: token.unavailablePositionCount,
           ...(currentValue === undefined ? {} : { currentValue }),
           totalDeposited,
-          // Σ(live_i − deposited_i) = Σlive − Σdeposited, so the token-level
-          // difference IS the per-position sum — computed once, and only when
-          // every contributing position can state it.
+          totalWithdrawn,
+          // Σ(live_i + withdrawn_i − deposited_i) = Σlive + Σwithdrawn −
+          // Σdeposited, so the token-level figure IS the per-position sum,
+          // computed once, and only when every contributing position can
+          // state it.
           ...(token.earnedUnavailableReason || currentValue === undefined
             ? { earnedUnavailableReason: token.earnedUnavailableReason ?? "live_value_unavailable" }
-            : { earned: subtractDecimalAmounts(currentValue, totalDeposited) }),
+            : {
+                earned: subtractDecimalAmounts(
+                  addDecimalAmounts(currentValue, totalWithdrawn),
+                  totalDeposited
+                ),
+              }),
         };
       })
       .sort((left, right) => compareWireStrings(left.tokenMint, right.tokenMint)),
@@ -518,17 +586,13 @@ function summarizeExternalWalletEarnings(
 
 function earnedUnavailableReason(
   liveTokenValue: string | undefined,
-  totals:
-    | {
-        finalizedDeposits: string;
-        finalizedWithdrawalCount: number;
-        unsettledMovementCount: number;
-      }
-    | undefined
+  totals: ExternalWalletMovementTotals | undefined
 ): EarnExternalWalletEarnedUnavailableReason | null {
   if (liveTokenValue === undefined) return "live_value_unavailable";
   if (totals && totals.unsettledMovementCount > 0) return "movements_pending";
-  if (totals && totals.finalizedWithdrawalCount > 0) return "withdrawals_not_valued";
+  // A valued withdrawal is a ledger fact like a deposit; only an UNVALUED one
+  // (no observed payout) leaves the figure inexact.
+  if (totals && totals.unvaluedWithdrawalCount > 0) return "withdrawals_not_valued";
   return null;
 }
 
@@ -991,7 +1055,11 @@ export async function createEarnExternalWalletDeposit(
   });
 
   const response: EarnExternalWalletDepositResponse = {
-    deposit: toExternalWalletMovementWire(result.movement, result.replayed),
+    deposit: toExternalWalletMovementWire(
+      result.movement,
+      requirePositionTokenMint(result.position),
+      result.replayed
+    ),
   };
   return success(c, response);
 }
@@ -1042,7 +1110,11 @@ export async function createEarnExternalWalletWithdrawal(
   );
 
   const response: EarnExternalWalletWithdrawalResponse = {
-    withdrawal: toExternalWalletMovementWire(result.movement, result.replayed),
+    withdrawal: toExternalWalletMovementWire(
+      result.movement,
+      requirePositionTokenMint(result.position),
+      result.replayed
+    ),
   };
   return success(c, response);
 }
@@ -1319,9 +1391,14 @@ function toExternalWalletTransactionWire(built: ExternalWalletBuiltTransaction) 
  * ledger, so `finalized` keeps its own name and there is no legacy status
  * table to translate through. `replayed` is a POST-only fact — the reads
  * leave it absent, because a stored row cannot say how it was asked for.
+ *
+ * `amount`/`denomination` stay the on-chain quantity (shares on a withdrawal);
+ * `tokenAmount`/`tokenMint` are the deposit-token view a feed renders: the
+ * deposit amount, or the payout observed at settlement (0103), null until then.
  */
 function toExternalWalletMovementWire(
   movement: EarnMovementRow,
+  tokenMint: string,
   replayed?: boolean
 ): EarnExternalWalletMovement {
   if (!movement.vault_address || !movement.signature || !movement.owner_address) {
@@ -1340,6 +1417,11 @@ function toExternalWalletMovementWire(
     ownerAddress: movement.owner_address,
     amount: movement.amount_requested,
     denomination: movement.denomination,
+    tokenMint,
+    tokenAmount:
+      movement.direction === "deposit"
+        ? (movement.token_amount_settled ?? movement.amount_requested)
+        : movement.token_amount_settled,
     failureReason: movement.failure_reason,
     createdAt: movement.created_at,
     confirmedAt: movement.confirmed_at,

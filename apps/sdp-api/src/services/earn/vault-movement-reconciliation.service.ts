@@ -1,4 +1,12 @@
-import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
+import {
+  createRpc,
+  getSignatureStatuses,
+  getTransaction,
+  type SignatureStatusInfo,
+  type SolanaRpc,
+  tokenBalanceDelta,
+} from "@sdp/rpc/solana";
+import { compareDecimalAmounts, formatDecimalAmount, isDecimalString } from "@sdp/solana/amount";
 import {
   EARN_TERMINAL_MOVEMENT_STATUSES,
   type SdpEnvironment,
@@ -9,6 +17,7 @@ import { getDb } from "@/db";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
+  type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -16,6 +25,7 @@ import {
   assertClusterEndpoint,
   earnClusterFor,
   resolveClusterRpcUrl,
+  resolveVaultDirectClient,
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
@@ -126,6 +136,7 @@ async function observeEarnVaultMovement(
   await reconcileMovement(env, ledger, movement, status ?? null, {
     cluster,
     rpcUrl,
+    rpc,
     currentBlockHeight: null,
   });
 
@@ -287,6 +298,7 @@ async function reconcileEnvironment(
       const outcome = await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
         cluster,
         rpcUrl,
+        rpc,
         currentBlockHeight,
       });
       if (outcome === "settled") stats.settled += 1;
@@ -305,24 +317,26 @@ async function reconcileEnvironment(
   return stats;
 }
 
+interface ChainObservation {
+  cluster: SolanaCluster;
+  rpcUrl: string;
+  rpc: SolanaRpc;
+  currentBlockHeight: bigint | null;
+}
+
 async function reconcileMovement(
   env: Env,
   ledger: EarnMovementsLedger,
   movement: EarnMovementRow,
   status: SignatureStatusInfo | null,
-  chain: { cluster: SolanaCluster; rpcUrl: string; currentBlockHeight: bigint | null }
+  chain: ChainObservation
 ): Promise<MovementOutcome> {
   if (status?.err) {
     await failMovement(ledger, movement, describeVaultSimulationError(status.err).message);
     return "failed";
   }
   if (status?.confirmationStatus === "finalized") {
-    const observedAt = new Date().toISOString();
-    await advanceTransaction(ledger, movement, {
-      toStatus: "finalized",
-      confirmedAt: observedAt,
-      settledAt: observedAt,
-    });
+    await settleMovement(env, ledger, movement, chain);
     return "settled";
   }
   if (status?.confirmationStatus === "confirmed") {
@@ -414,4 +428,138 @@ async function advanceTransaction(
     organizationId: movement.organization_id,
     ...change,
   });
+}
+
+/**
+ * Finalize one movement and record what settlement means for the holding.
+ *
+ * Two settle-time observations ride the finalization (ADR 0002, the same shape
+ * as the rent-funder residual): a withdrawal's token payout, read from the
+ * landed transaction, and whether the holding is now EMPTY, read live from the
+ * provider. Both are fail-soft. A payout that cannot be observed stays NULL
+ * (the earnings read withholds `earned` rather than guessing) and a balance
+ * that cannot be read leaves the position open; neither ever blocks the
+ * finalization itself. Only the writer that wins the guarded CAS runs the
+ * close check: a lost race means another observer finalized this row and is
+ * running the same check.
+ */
+async function settleMovement(
+  env: Env,
+  ledger: EarnMovementsLedger,
+  movement: EarnMovementRow,
+  chain: ChainObservation
+): Promise<void> {
+  const position =
+    movement.direction === "withdrawal"
+      ? await ledger.getPositionById({
+          organizationId: movement.organization_id,
+          environment: movement.environment,
+          positionId: movement.position_id,
+        })
+      : null;
+  const tokenAmountSettled = position
+    ? await observeWithdrawalPayout(chain.rpc, movement, position)
+    : null;
+
+  const observedAt = new Date().toISOString();
+  const settled = await ledger.advanceVaultMovement({
+    movementId: movement.id,
+    organizationId: movement.organization_id,
+    toStatus: "finalized",
+    confirmedAt: observedAt,
+    settledAt: observedAt,
+    ...(movement.direction === "withdrawal" ? { tokenAmountSettled } : {}),
+  });
+  if (settled && position) {
+    await closePositionIfEmpty(env, ledger, settled, position);
+  }
+}
+
+/**
+ * The wallet a withdrawal paid out to, as recorded at intent: the external
+ * wallet on an owner-signed row, the custody wallet's public key on an
+ * SDP-signed row (both write it as `destination_address`).
+ */
+function withdrawalReceiver(movement: EarnMovementRow): string | null {
+  return movement.destination_address ?? movement.owner_address;
+}
+
+/**
+ * A withdrawal's payout in the position's deposit token, observed as the
+ * receiving wallet's post-minus-pre token balance in the landed transaction
+ * and formatted at the mint's own decimals. Null whenever that cannot be
+ * stated: no landed transaction, no token balances for the pair, a
+ * non-positive delta, or an RPC failure. Never estimated.
+ */
+async function observeWithdrawalPayout(
+  rpc: SolanaRpc,
+  movement: EarnMovementRow,
+  position: EarnPositionRow
+): Promise<string | null> {
+  const receiver = withdrawalReceiver(movement);
+  const tokenMint = position.token_mint;
+  if (!movement.signature || !receiver || !tokenMint) return null;
+  try {
+    const transaction = await getTransaction(rpc, movement.signature as Signature);
+    if (!transaction || transaction.err !== null) return null;
+    const delta = tokenBalanceDelta(transaction, { mint: tokenMint, owner: receiver });
+    if (!delta || delta.baseUnits <= 0n) return null;
+    return formatDecimalAmount(delta.baseUnits, delta.decimals);
+  } catch (error) {
+    getLogger().warn(
+      { movementId: movement.id, signature: movement.signature, error: errorMessage(error) },
+      "earn vault reconciliation: withdrawal payout not observed"
+    );
+    return null;
+  }
+}
+
+/**
+ * After a finalized withdrawal, read the holding's live balance for exactly
+ * this vault and owner and stamp `closed_at` when it is zero. The same identity
+ * checks the position hydration applies (owner, cluster, vault, both mints)
+ * guard the read, so a foreign snapshot can never close somebody's position.
+ * Fail-soft: an unreadable balance leaves the row open for a later settlement.
+ */
+async function closePositionIfEmpty(
+  env: Env,
+  ledger: EarnMovementsLedger,
+  movement: EarnMovementRow,
+  position: EarnPositionRow
+): Promise<void> {
+  const owner = position.owner_address ?? withdrawalReceiver(movement);
+  const vault = position.vault_address;
+  if (!owner || !vault || !position.token_mint || !position.share_mint) return;
+  try {
+    const client = resolveVaultDirectClient(env, movement.provider, createVaultDeadline());
+    if (!client) return;
+    const snapshots = await client.readVaultPositions(
+      { env, environment: movement.environment },
+      { owner, providerReferences: [vault] }
+    );
+    const snapshot = snapshots.find(
+      (candidate) =>
+        candidate.providerReference === vault &&
+        candidate.owner === owner &&
+        candidate.cluster === earnClusterFor(movement.environment) &&
+        candidate.tokenMint === position.token_mint &&
+        candidate.shareMint === position.share_mint
+    );
+    if (
+      !snapshot ||
+      !isDecimalString(snapshot.shares) ||
+      compareDecimalAmounts(snapshot.shares, "0") !== 0
+    ) {
+      return;
+    }
+    await ledger.closeVaultPositionIfEmpty({
+      positionId: position.id,
+      organizationId: movement.organization_id,
+    });
+  } catch (error) {
+    getLogger().warn(
+      { movementId: movement.id, positionId: position.id, error: errorMessage(error) },
+      "earn vault reconciliation: post-exit balance not observed"
+    );
+  }
 }

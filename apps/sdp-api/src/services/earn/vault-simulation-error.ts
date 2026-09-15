@@ -32,6 +32,35 @@
  */
 
 import { safeStringify } from "@sdp/solana";
+import {
+  isSolanaError,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND,
+  unwrapSimulationError,
+} from "@solana/kit";
+
+/** The cluster's own variant name for a blockhash it does not know. */
+const BLOCKHASH_NOT_FOUND_VARIANT = "BlockhashNotFound";
+
+/**
+ * True when the cluster refused a transaction because it does not recognize
+ * its blockhash, in either shape the earn paths meet: the raw
+ * `TransactionError` variant a simulation result carries, or the preflight
+ * rejection `sendTransaction` throws. A preflight rejection also proves the
+ * bytes were never forwarded to the network.
+ */
+export function isBlockhashNotFoundError(err: unknown): boolean {
+  if (err === BLOCKHASH_NOT_FOUND_VARIANT) return true;
+  if (
+    !isSolanaError(err, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)
+  ) {
+    return false;
+  }
+  return isSolanaError(
+    unwrapSimulationError(err),
+    SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND
+  );
+}
 
 /**
  * The slice of `VaultFeeMode` (vault-sponsorship.ts) the wording needs: the
@@ -362,7 +391,7 @@ export function describeVaultSimulationError(
           message: `a program this transaction calls does not exist on this cluster (${raw})`,
           fault: "caller",
         };
-      case "BlockhashNotFound":
+      case BLOCKHASH_NOT_FOUND_VARIANT:
         return {
           message: `the network no longer recognizes this transaction's blockhash. Retry the request (${raw})`,
           fault: "caller",

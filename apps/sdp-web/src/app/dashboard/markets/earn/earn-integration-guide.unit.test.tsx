@@ -145,7 +145,16 @@ describe("EarnIntegrationGuide", () => {
       within(serverFlow).getByRole("button", { name: "Client" }).getAttribute("aria-pressed")
     ).toBe("true");
     expect(screen.getAllByText("embedded-yield.ts")).toHaveLength(1);
-    expect(screen.getByText("Keep SDP_API_KEY on your server, never in the client.")).toBeTruthy();
+    // The key callout says which key, says it covers Earn, and links to where it
+    // is made. A warning with no way to act on it is not guidance.
+    expect(
+      screen.getByText(
+        /for this project \(it includes earn:read and earn:write\)\. Keep it on your server, never in the client\./
+      )
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Developer API key" }).getAttribute("href")).toBe(
+      "/dashboard/api-keys"
+    );
 
     // The snippet is the REAL B2B2C contract (PRO-1722): build the unsigned
     // transaction, the customer's wallet signs, submit the signed bytes. The
@@ -166,14 +175,22 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("/v1/earn/external-wallet/deposits");
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
     expect(code).not.toContain("crypto.randomUUID()");
-    expect(code).toContain('"id": "earn_strategy_live"');
+    expect(code).toContain('const STRATEGY_ID = "earn_strategy_live"');
     expect(code).toContain("/v1/earn/strategies?page=1&pageSize=100");
     expect(code).toContain("ownerAddress");
-    expect(code).not.toContain("/v1/earn/vault-deposit-previews");
-    expect(code).not.toContain("/v1/earn/external-wallet/withdrawal-previews");
+    // The preview helpers ship for every strategy, but a strategy with no
+    // slippage contract must not compute or send a floor from one.
+    expect(code).toContain("const minSharesOut = undefined");
+    expect(code).toContain("const minAmountOut = undefined");
+    expect(code).not.toContain("floorForTolerance(quote.sharesOut");
+    expect(code).not.toContain("floorForTolerance(quote.assetsOut");
     expect(code).toContain("signedTransaction");
     expect(code).toContain("feePayer?: string");
-    expect(code).toContain("sourceTokenMint: EMBEDDED_YIELD_STRATEGY.directDepositMint");
+    // The deposit body names the strategy by id only; the old client-side
+    // strategy object and its source mint are gone from the copied module.
+    expect(code).toContain("strategyId: STRATEGY_ID");
+    expect(code).not.toContain("sourceTokenMint");
+    expect(code).not.toContain("EMBEDDED_YIELD_STRATEGY");
     expect(code.match(/return data\.transaction;/g)).toHaveLength(2);
     expect(code).not.toContain("custodyWalletId");
     expect(code).not.toContain("vault-deposits");
@@ -250,7 +267,7 @@ describe("EarnIntegrationGuide", () => {
     // rendered as code.
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/different network from this project/)).toBeTruthy();
-    expect(screen.queryByText(/"id": "earn_strategy_mainnet"/)).toBeNull();
+    expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeNull();
 
     await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
     const mainnetRow = await screen.findByRole("option", {
@@ -287,14 +304,14 @@ describe("EarnIntegrationGuide", () => {
     );
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.queryByText(/"id": "earn_strategy_mainnet"/)).toBeNull();
+    expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeNull();
   });
 
   it("generates quote-derived deposit and withdrawal floors for Veda", () => {
+    // The snippet builder reads only the id and the two slippage contracts; the
+    // provider no longer shapes the copied module.
     const sections = buildEarnIntegrationSections({
-      ...liveStrategy,
       id: "earn_strategy_veda",
-      provider: "veda",
       depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
       withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
     });
@@ -319,7 +336,7 @@ describe("EarnIntegrationGuide", () => {
 
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(screen.getByText("earn_strategy_live")).toBeTruthy();
-    expect(screen.getByText(/"id": "earn_strategy_live"/)).toBeTruthy();
+    expect(screen.getByText(/STRATEGY_ID = "earn_strategy_live"/)).toBeTruthy();
   });
 
   it("keeps the strategy dropdown available when a deep-linked id no longer resolves", () => {
@@ -349,7 +366,7 @@ describe("EarnIntegrationGuide", () => {
     await user.click(await screen.findByRole("option", { name: /Kamino Growth Vault.*8\.1%/ }));
 
     expect(screen.getByText("earn_strategy_growth")).toBeTruthy();
-    expect(screen.getByText(/"id": "earn_strategy_growth"/)).toBeTruthy();
+    expect(screen.getByText(/STRATEGY_ID = "earn_strategy_growth"/)).toBeTruthy();
     expect(screen.queryByText("earn_strategy_live")).toBeNull();
   });
 

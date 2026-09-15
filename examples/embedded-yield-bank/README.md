@@ -70,9 +70,9 @@ Prerequisites are Node.js 24+, pnpm 10.16+, Docker, and the team Doppler develop
    pnpm dev
    ```
 
-   This starts local Postgres and Redis, applies migrations, and serves the SDP API at `http://127.0.0.1:8787` and dashboard at `http://localhost:3000`.
+   This starts local Postgres and Redis, applies migrations, and serves the SDP API at `http://127.0.0.1:8787` and dashboard at `http://localhost:3000`. The API syncs the Earn strategy catalogue once at start-up and hourly after that, so a fresh database lists strategies within a few seconds of the API coming up.
 
-4. In the local SDP dashboard, select a sandbox project and create a Developer API key. The Developer role includes `earn:read` and `earn:write`. Copy the full key when it is shown.
+4. In the local SDP dashboard, select a sandbox project and create a Developer API key (**API keys** in the sidebar; the Developer role includes `earn:read` and `earn:write`). Copy the full key when it is shown.
 
 5. Generate the demo customer's managed wallet:
 

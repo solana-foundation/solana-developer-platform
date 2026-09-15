@@ -705,6 +705,14 @@ export interface EarnExternalWalletMovement {
   amount: string;
   /** Token mint for a deposit; share mint for a withdrawal. */
   denomination: string;
+  /** The position's deposit-token mint: the unit an activity feed renders in. */
+  tokenMint: string;
+  /**
+   * Quantity in `tokenMint` units. A deposit's amount; a withdrawal's observed
+   * payout once finalized, null before that or when it could not be observed.
+   * `amount`/`denomination` stay the on-chain quantity (shares on a withdrawal).
+   */
+  tokenAmount: string | null;
   failureReason: string | null;
   createdAt: string;
   confirmedAt: string | null;
@@ -742,14 +750,14 @@ export interface EarnExternalWalletMovementResponse {
  * - `movements_pending`: a movement is still settling, so live value and the
  *   ledger describe different moments.
  * - `withdrawals_not_valued`: a currently held position has a finalized
- *   withdrawal, and the ledger records exits in shares, not in the deposit
- *   token, so no exact token-denominated earned figure exists (ADR 0002).
+ *   withdrawal whose token payout was not observed at settlement (rows that
+ *   predate the observation, or a settlement whose transaction read failed),
+ *   so `totalWithdrawn` is incomplete and earned cannot be exact (ADR 0002).
  *
  * Every earnings figure covers the wallet's CURRENTLY HELD positions: a fully
  * exited position drops out entirely (its deposits leave `totalDeposited`
- * along with its unvalued withdrawal), so one full exit does not withhold the
- * open positions' earned forever. The exited history stays on the movements
- * list.
+ * along with its withdrawals), so one full exit does not withhold the open
+ * positions' earned. The exited history stays on the movements list.
  */
 export type EarnExternalWalletEarnedUnavailableReason =
   | "live_value_unavailable"
@@ -767,10 +775,17 @@ export interface EarnExternalWalletTokenEarnings {
   /** Sum of finalized SDP deposits, a pure ledger fact — always present. */
   totalDeposited: string;
   /**
-   * `currentValue − totalDeposited`, signed. Absent (with the reason below)
-   * whenever it cannot be stated exactly. Live value reads the owner's WHOLE
-   * vault balance, so shares acquired outside SDP inflate this figure — a
-   * documented property of non-custodial hydration, not a bug (ADR 0002).
+   * Sum of the observed token payouts of finalized withdrawals, a ledger fact,
+   * always present. Excludes withdrawals whose payout was not observed; those
+   * are what `withdrawals_not_valued` reports.
+   */
+  totalWithdrawn: string;
+  /**
+   * `currentValue + totalWithdrawn − totalDeposited`, signed. Absent (with the
+   * reason below) whenever it cannot be stated exactly. Live value reads the
+   * owner's WHOLE vault balance, so shares acquired outside SDP inflate this
+   * figure, a documented property of non-custodial hydration, not a bug
+   * (ADR 0002).
    */
   earned?: string;
   earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;

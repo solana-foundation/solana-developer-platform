@@ -104,7 +104,7 @@ import {
 import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
 import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import { decodeVaultPositionCursor, encodeVaultPositionCursor } from "./vault-position-cursor";
-import { hydrateVaultPositions } from "./vault-position-hydration";
+import { closeEmptyHydratedPositions, hydrateVaultPositions } from "./vault-position-hydration";
 
 /**
  * POST /v1/earn/vault-deposits — open or add to a non-custodial vault position,
@@ -1125,6 +1125,12 @@ export async function listEarnVaultPositions(c: AppContext) {
       };
     }),
     { ownerKind: "custody" }
+  );
+  await closeEmptyHydratedPositions(
+    (positionId) =>
+      repo.closeVaultPositionIfEmpty({ positionId, organizationId: auth.organizationId }),
+    rows,
+    live
   );
 
   const last = rows.at(-1);
