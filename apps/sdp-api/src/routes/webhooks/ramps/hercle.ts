@@ -76,19 +76,36 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/**
+ * The `data` envelope is guaranteed for every event Hercle documents, so a known event arriving
+ * without it is a broken envelope and fails loudly rather than being read defensively.
+ */
+function requireData(event: string, root: Record<string, unknown>): Record<string, unknown> {
+  const data = readRecord(root.data);
+  if (data === undefined) {
+    throw badRequest(`Hercle "${event}" webhook is missing its data envelope`, {
+      provider: "hercle",
+    });
+  }
+  return data;
+}
+
 export function parseHercleWebhookEvent(payload: unknown): HercleWebhookEvent {
   const root = readRecord(payload);
-  const event = root === undefined ? undefined : readString(root.event);
-  if (event === undefined) {
+  if (root === undefined) {
     // A violated envelope guarantee must fail loudly — everything else is a skip.
+    throw badRequest("Hercle webhook body must be a JSON object", { provider: "hercle" });
+  }
+  const event = readString(root.event);
+  if (event === undefined) {
     throw badRequest("Hercle webhook is missing the event field", { provider: "hercle" });
   }
-  const data = readRecord(root?.data);
 
   switch (event) {
     case "ramp.settlement.status_changed": {
-      const reference = data === undefined ? undefined : readString(data.reference);
-      const status = data === undefined ? undefined : readString(data.status);
+      const data = requireData(event, root);
+      const reference = readString(data.reference);
+      const status = readString(data.status);
       if (!reference || !status) {
         throw badRequest(`Hercle "${event}" webhook is missing reference or status`, {
           provider: "hercle",
@@ -101,13 +118,14 @@ export function parseHercleWebhookEvent(payload: unknown): HercleWebhookEvent {
         kind: "settlement",
         reference,
         status: status as HercleSettlementStatus,
-        receivedAmount: data === undefined ? undefined : readString(data.receivedAmount),
-        error: data === undefined ? undefined : readString(data.error),
+        receivedAmount: readString(data.receivedAmount),
+        error: readString(data.error),
       };
     }
     case "customer.verification.status_changed": {
-      const accountId = data === undefined ? undefined : readString(data.accountId);
-      const status = data === undefined ? undefined : readString(data.status);
+      const data = requireData(event, root);
+      const accountId = readString(data.accountId);
+      const status = readString(data.status);
       if (!accountId || !status) {
         throw badRequest(`Hercle "${event}" webhook is missing accountId or status`, {
           provider: "hercle",
@@ -123,7 +141,7 @@ export function parseHercleWebhookEvent(payload: unknown): HercleWebhookEvent {
         kind: "verification",
         accountId,
         status: verificationStatus,
-        verificationUrl: data === undefined ? undefined : readString(data.verificationUrl),
+        verificationUrl: readString(data.verificationUrl),
       };
     }
     default:

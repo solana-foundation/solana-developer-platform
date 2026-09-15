@@ -114,10 +114,18 @@ describe("parseHercleWebhookEvent", () => {
     expect(parseHercleWebhookEvent({ event: "something.new", data: {} })).toMatchObject({
       kind: "ignore",
     });
+    expect(() => parseHercleWebhookEvent("not an object")).toThrow(AppError);
     expect(() => parseHercleWebhookEvent({ data: {} })).toThrow(AppError);
     expect(() =>
       parseHercleWebhookEvent({ event: "ramp.settlement.status_changed", data: {} })
     ).toThrow(AppError);
+    // A known event is guaranteed its data envelope; without it the delivery is malformed, not skippable.
+    expect(() => parseHercleWebhookEvent({ event: "ramp.settlement.status_changed" })).toThrow(
+      /missing its data envelope/
+    );
+    expect(() =>
+      parseHercleWebhookEvent({ event: "customer.verification.status_changed", data: "x" })
+    ).toThrow(/missing its data envelope/);
   });
 
   it("skips unknown settlement statuses instead of guessing", () => {
