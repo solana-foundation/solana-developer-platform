@@ -101,11 +101,12 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 
 ### 4. Get catalogue data — live provider sync
 
-With sandbox provider credentials set and both flags on, the hourly
-catalogue-sync cron populates `earn_strategies` from live provider sources. It
-fires on the hour, so a freshly started API has an empty catalogue until a live
-pass succeeds. This is intentional: the sync is the only admitting writer and
-every row must pass the provider's declared-support checks.
+With sandbox provider credentials set and both flags on, the catalogue-sync
+cron populates `earn_strategies` from live provider sources. It runs once at
+API boot (through the slotted `runEarnCatalogueSyncIfDue`, so restarts inside
+the hour skip) and then on the hour, so a freshly started API lists strategies
+within seconds of coming up. The sync is the only admitting writer and every
+row must pass the provider's declared-support checks.
 
 See README.md → "Catalogue data" for cadence and failure behaviour. A database
 still holding `seed-demo-` rows from the removed `db:seed:earn` needs a one-time
@@ -464,10 +465,11 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
   `resolveEarnProviderClient` — DB provider ids are open strings and MUST be
   resolved through this, never direct-indexed.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, live
-  metrics, vault-direct (deposit + read) and vault-withdraw. All are
-  method-presence guards in capabilities.ts and a provider may implement any
-  subset — Kamino has live metrics, vault-direct and vault-withdraw
-  (PRO-1702); Veda has vault-direct and vault-withdraw (instant redemption
+  metrics, vault-direct (deposit + read), vault-withdraw, and the two live
+  quotes (deposit and withdrawal previews). All are method-presence guards in
+  capabilities.ts and a provider may implement any subset. Kamino has live
+  metrics, vault-direct, vault-withdraw (PRO-1702) and both quotes
+  (`@sdp/kamino`); Veda has vault-direct and vault-withdraw (instant redemption
   only — the queued exit waits on its own capability, see
   `docs/decisions/0003-veda-vault-withdrawals.md`). A deposit-only provider's
   exit route answers 501, which is a statement about SDP's plumbing rather
