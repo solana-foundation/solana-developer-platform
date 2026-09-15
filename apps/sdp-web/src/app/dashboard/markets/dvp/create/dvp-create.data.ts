@@ -33,7 +33,12 @@ export interface DvpCreateOption {
 /** Wallet choices are derived from the validated custody response. */
 export type DvpCreateWallet = Omit<z.infer<typeof walletRowSchema>, "publicKey" | "balances"> & {
   address: string;
-  balances: DvpWalletBalance[];
+  /**
+   * What this wallet holds, or null when balances were not loaded. The page
+   * does not wait on them: reading every wallet's balances took seconds and
+   * nothing on the form renders one (PRO-1851). Null is never read as zero.
+   */
+  balances: DvpWalletBalance[] | null;
 };
 
 /** One token balance, as much of it as the amount field needs. */
@@ -113,8 +118,8 @@ const walletsResponseSchema = z.object({
   data: z.union([z.array(walletRowSchema), z.object({ wallets: z.array(walletRowSchema) })]),
 });
 
-function mapBalances(rows: WalletBalanceRow[] | null | undefined): DvpWalletBalance[] {
-  return (rows ?? []).flatMap((balance) =>
+function mapBalances(rows: WalletBalanceRow[]): DvpWalletBalance[] {
+  return rows.flatMap((balance) =>
     balance.mint && typeof balance.decimals === "number" && balance.amount
       ? [
           {
@@ -139,7 +144,11 @@ function mapWallets(rows: z.infer<typeof walletRowSchema>[]): DvpCreateWallet[] 
     custodyConfigId: wallet.custodyConfigId,
     custodyConnectionId: wallet.custodyConnectionId,
     isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
-    balances: mapBalances(wallet.balances),
+    // Absent or null means the read did not carry balances, which is not "holds nothing".
+    balances:
+      wallet.balances === undefined || wallet.balances === null
+        ? null
+        : mapBalances(wallet.balances),
   }));
 }
 
@@ -172,11 +181,10 @@ export async function fetchDvpCreateContext(
 ): Promise<DvpCreateContext> {
   try {
     const [walletsResponse, tokensResponse, counterpartiesResponse] = await Promise.all([
-      // Balances come along for the ride. The form is asking someone to commit
-      // a quantity of an asset, and it was doing so without ever showing how
-      // much of it they hold — so an over-commitment only surfaced later, as a
-      // funding transfer that failed for insufficient funds.
-      request("/v1/wallets?includeBalances=true&includeAllProviders=true"),
+      // Without balances. Reading them costs a chain read per wallet, which
+      // held the whole form back by five to seven seconds, and no field shows
+      // one. Funding still refuses a short balance with the amount named.
+      request("/v1/wallets?includeAllProviders=true"),
       request("/v1/issuance/tokens?pageSize=100"),
       // The registered crypto-wallet accounts a slot can name, address resolved
       // server-side the same way create will resolve `counterpartyAccountId`.

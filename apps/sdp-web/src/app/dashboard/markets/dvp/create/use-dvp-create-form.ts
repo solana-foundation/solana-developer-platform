@@ -155,14 +155,15 @@ function canCreateTrade(input: {
  * and the over-balance guard with it, so switching to a wallet that cannot
  * deliver the leg would silently look fine. Zero is only knowable once the
  * wallet and the mint's scale are both settled; before that there is genuinely
- * nothing to claim, and this returns null.
+ * nothing to claim, and this returns null. So it does for a wallet whose
+ * balances were never loaded: not loaded is unknown, never zero.
  */
 function resolveWalletBalance(
   wallet: DvpCreateWallet | null,
   leg: DvpLeg
 ): DvpWalletBalance | null {
   const decimals = leg.token?.decimals ?? leg.pasted.mint?.decimals ?? null;
-  if (!(wallet && leg.mint) || decimals === null) {
+  if (!(wallet && leg.mint) || wallet.balances === null || decimals === null) {
     return null;
   }
   return (

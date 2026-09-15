@@ -254,6 +254,20 @@ describe("useDvpCreateForm", () => {
       expect(result.current.assetBalance).toMatchObject({ amount: "0", decimals: 6 });
     });
 
+    // PRO-1851. The page no longer waits on balances. One that was never
+    // loaded is unknown, and reading it as zero would claim the wallet holds none.
+    it("reports nothing, not zero, when balances were not loaded", () => {
+      const unloaded = { ...context, wallets: [{ ...context.wallets[0], balances: null }] };
+      const { result } = renderHook(() => useDvpCreateForm("devnet", unloaded), {
+        wrapper: withI18n,
+      });
+
+      act(() => result.current.setParty("a", { mode: "wallet", walletId: "cwlt_1" }));
+      act(() => result.current.asset.setChoice(ASSET_MINT));
+
+      expect(result.current.assetBalance).toBeNull();
+    });
+
     // The asset slot names a wallet that is not the cash leg's, and a pasted
     // cash party has no wallet at all — showing a balance against the cash leg
     // would claim we hold what the other party owes.
