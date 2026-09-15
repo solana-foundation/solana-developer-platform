@@ -1036,13 +1036,25 @@ export async function quoteKaminoWithdraw(
   }
   assertActive();
 
+  // One entry per withdraw instruction the exit will emit, in plan order: the
+  // idle-liquidity leg when the plan draws on it, then each reserve leg.
+  const availableLeg = lamportsToBaseUnits(
+    "idle-liquidity exit leg",
+    plan.availableTokenLamportsToWithdraw
+  );
+  const legNetBaseUnits = [
+    ...(availableLeg > 0n ? [availableLeg] : []),
+    ...[...(plan.reserveTokenLamportsToWithdraw as Map<unknown, Kit2>).values()].map((leg) =>
+      lamportsToBaseUnits("reserve exit leg", leg)
+    ),
+  ];
   return deriveKaminoWithdrawQuote({
     netBaseUnits: lamportsToBaseUnits("net exit amount", plan.netTokenLamportsToWithdraw),
     flatPenaltyBaseUnits: lamportsToBaseUnits(
       "flat withdrawal penalty",
       withdrawalPenalties.withdrawalPenaltyLamports
     ),
-    reserveCount: plan.reserveTokenLamportsToWithdraw.size,
+    legNetBaseUnits,
     remainingBaseUnits: lamportsToBaseUnits(
       "unfilled exit amount",
       plan.remainingNetTokenLamportsToWithdraw

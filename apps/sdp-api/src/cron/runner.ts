@@ -15,6 +15,7 @@ import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-sp
 import { runWithSystemDatabaseIdentity } from "@/db";
 import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { noopObservability, type Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
@@ -123,10 +124,21 @@ function withCheckinMargin(observability: Observability): Observability {
  */
 export function startEarnCatalogueBootSync(deps: Pick<CronDeps, "env" | "bg">): void {
   if (!isEarnEnabled(deps.env)) return;
+  // The background runner absorbs tracked rejections by design, and this path
+  // carries no Sentry monitor, so an infrastructure failure here (Redis, the
+  // sync deadline, a provider outage) must be logged or a fresh database stays
+  // empty in silence until the scheduled sync retries. Same structured shape
+  // as the tick events, so Loki can alert on the name.
   deps.bg.run(
     runWithSystemDatabaseIdentity("boot:earn-catalogue-sync", () =>
       runEarnCatalogueSyncIfDue(deps.env)
-    )
+    ).catch((error: unknown) => {
+      logEvent("error", {
+        event: "sdp_api_earn_catalogue_boot_sync_failed",
+        ...describeError(error),
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+    })
   );
 }
 

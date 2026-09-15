@@ -124,8 +124,13 @@ export interface KaminoExitPlanObservation {
   netBaseUnits: bigint;
   /** Effective flat penalty per withdraw instruction, `max(vault, global config)`. */
   flatPenaltyBaseUnits: bigint;
-  /** Reserves the exit draws on (`reserveTokenLamportsToWithdraw.size`), one withdraw instruction each. */
-  reserveCount: number;
+  /**
+   * The plan's net amount per withdraw instruction, in plan order: the leg
+   * drawn from the vault's idle liquidity (`availableTokenLamportsToWithdraw`)
+   * when it is positive, then one leg per reserve (`reserveTokenLamportsToWithdraw`).
+   * Empty when the plan draws nothing.
+   */
+  legNetBaseUnits: readonly bigint[];
   /** Net tokens the vault and its reserves cannot cover right now (`remainingNetTokenLamportsToWithdraw`). */
   remainingBaseUnits: bigint;
   /** The vault's `minWithdrawAmount`; the program refuses a net amount at or below it. */
@@ -134,12 +139,13 @@ export interface KaminoExitPlanObservation {
 }
 
 /**
- * Withdraw instructions the SDK's exit builder emits for a plan: one per
- * reserve it draws on, or a single `withdraw_from_available` when the vault's
- * idle liquidity covers everything.
+ * Withdraw instructions the SDK's exit builder emits for a plan: one per leg
+ * (the idle-liquidity leg plus one per reserve it draws on), never fewer than
+ * one, because an exit the idle liquidity covers is still one
+ * `withdraw_from_available` instruction.
  */
-export function exitInstructionCount(reserveCount: number): number {
-  return Math.max(1, reserveCount);
+export function exitInstructionCount(legNetBaseUnits: readonly bigint[]): number {
+  return Math.max(1, legNetBaseUnits.length);
 }
 
 /**
@@ -157,10 +163,10 @@ export function exitInstructionCount(reserveCount: number): number {
 export function conservativeExitNetBaseUnits(
   observation: Pick<
     KaminoExitPlanObservation,
-    "netBaseUnits" | "flatPenaltyBaseUnits" | "reserveCount"
+    "netBaseUnits" | "flatPenaltyBaseUnits" | "legNetBaseUnits"
   >
 ): bigint {
-  const extraInstructions = BigInt(exitInstructionCount(observation.reserveCount) - 1);
+  const extraInstructions = BigInt(exitInstructionCount(observation.legNetBaseUnits) - 1);
   const overstatement = extraInstructions * (observation.flatPenaltyBaseUnits + 1n);
   return observation.netBaseUnits > overstatement ? observation.netBaseUnits - overstatement : 0n;
 }
@@ -190,16 +196,31 @@ export function deriveKaminoWithdrawQuote(
         "Kamino's withdrawal penalties consume this exit at the current share price; no tokens " +
         "would be returned.",
     });
-  } else if (observation.netBaseUnits <= observation.minimumWithdrawalBaseUnits) {
-    // Checked on the SDK's aggregate net rather than the conservative one: a
-    // split exit's per-instruction nets are each below the aggregate, so this
-    // is a refusal the program will definitely make, never a guess.
-    issues.push({
-      code: "BELOW_MINIMUM_WITHDRAWAL",
-      message:
-        "Kamino refuses an exit whose net amount is at or below the vault's minimum withdrawal " +
-        `of ${format(observation.minimumWithdrawalBaseUnits)}.`,
-    });
+  } else {
+    // The program applies `min_withdraw_amount` to EACH withdraw instruction's
+    // net amount (`buildInstantWithdrawPlan`: allowed = net > minimum), so a
+    // split exit that clears the minimum in aggregate still fails when one
+    // reserve leg does not. Check every emitted leg; a plan with no legs is
+    // judged on its aggregate net. Both are on the SDK's own figures, never
+    // the conservative one, so this is a refusal the program will make.
+    const minimum = observation.minimumWithdrawalBaseUnits;
+    const legs =
+      observation.legNetBaseUnits.length > 0
+        ? observation.legNetBaseUnits
+        : [observation.netBaseUnits];
+    const shortLeg = legs.find((leg) => leg <= minimum);
+    if (shortLeg !== undefined) {
+      issues.push({
+        code: "BELOW_MINIMUM_WITHDRAWAL",
+        message:
+          legs.length > 1
+            ? "Kamino refuses this exit: it is split across the vault's reserves and one leg " +
+              `would return ${format(shortLeg)}, at or below the vault's minimum withdrawal of ` +
+              `${format(minimum)} per withdraw instruction. Withdraw a larger amount.`
+            : "Kamino refuses an exit whose net amount is at or below the vault's minimum " +
+              `withdrawal of ${format(minimum)}.`,
+      });
+    }
   }
 
   return { assetsOut: format(net), assetDecimals, issues };

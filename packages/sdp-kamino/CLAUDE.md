@@ -169,6 +169,10 @@ nothing and return blocking conditions as `issues` (`DEPOSIT_CAP_EXCEEDED`,
   `max(bps x gross, flat)` **per withdraw instruction**, so for an exit split
   across N reserves the quote subtracts a further `(N - 1) x (flat + 1)` base
   units and can only understate what lands (`conservativeExitNetBaseUnits`).
+  `min_withdraw_amount` is a per-instruction guard on the NET amount, so the
+  quote checks every planned leg (the idle-liquidity leg plus one per reserve)
+  and reports `BELOW_MINIMUM_WITHDRAWAL` when any leg is at or below it, not
+  only when the aggregate is.
   The kvault withdraw instruction takes only a share amount, so `assetsOut`
   informs the caller and nothing enforces it on chain; the Kamino slippage
   policy leaves the exit floor-less.

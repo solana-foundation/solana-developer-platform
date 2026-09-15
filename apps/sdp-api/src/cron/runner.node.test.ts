@@ -610,6 +610,24 @@ describe("startEarnCatalogueBootSync", () => {
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(2);
   });
 
+  it("logs a failed boot sync instead of letting the background runner swallow it", async () => {
+    vi.mocked(runEarnCatalogueSyncIfDue).mockRejectedValueOnce(new Error("redis unavailable"));
+    const bg = makeBg();
+    startEarnCatalogueBootSync({
+      env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
+      bg,
+    });
+    // The tracked promise settles cleanly: the failure is reported, not rethrown.
+    await expect(vi.mocked(bg.run).mock.calls[0][0]).resolves.toBeUndefined();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_earn_catalogue_boot_sync_failed",
+        error_message: "redis unavailable",
+      })
+    );
+  });
+
   it("does nothing when earn is off", () => {
     const bg = makeBg();
     startEarnCatalogueBootSync({ env: {} as Env, bg });

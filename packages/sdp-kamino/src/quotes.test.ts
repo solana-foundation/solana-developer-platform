@@ -120,7 +120,7 @@ function observation(
   return {
     netBaseUnits: 1_000_000n,
     flatPenaltyBaseUnits: 10n,
-    reserveCount: 0,
+    legNetBaseUnits: [],
     remainingBaseUnits: 0n,
     minimumWithdrawalBaseUnits: 0n,
     assetDecimals: 6,
@@ -130,33 +130,39 @@ function observation(
 
 describe("conservativeExitNetBaseUnits", () => {
   it("emits one instruction for an exit the idle liquidity covers", () => {
-    expect(exitInstructionCount(0)).toBe(1);
-    expect(exitInstructionCount(1)).toBe(1);
-    expect(exitInstructionCount(3)).toBe(3);
+    expect(exitInstructionCount([])).toBe(1);
+    expect(exitInstructionCount([1_000_000n])).toBe(1);
+    expect(exitInstructionCount([500_000n, 300_000n, 200_000n])).toBe(3);
   });
 
   it("leaves a single-instruction exit at the SDK's net", () => {
     expect(conservativeExitNetBaseUnits(observation())).toBe(1_000_000n);
-    expect(conservativeExitNetBaseUnits(observation({ reserveCount: 1 }))).toBe(1_000_000n);
+    expect(conservativeExitNetBaseUnits(observation({ legNetBaseUnits: [1_000_000n] }))).toBe(
+      1_000_000n
+    );
   });
 
   /** (N - 1) x flat for the per-instruction floor, plus (N - 1) for per-instruction rounding. */
   it("subtracts the per-instruction penalty bound for a split exit", () => {
-    expect(conservativeExitNetBaseUnits(observation({ reserveCount: 3 }))).toBe(
-      1_000_000n - 2n * 11n
-    );
+    expect(
+      conservativeExitNetBaseUnits(observation({ legNetBaseUnits: [400_000n, 300_000n, 300_000n] }))
+    ).toBe(1_000_000n - 2n * 11n);
   });
 
   it("floors at zero rather than going negative", () => {
-    expect(conservativeExitNetBaseUnits(observation({ netBaseUnits: 15n, reserveCount: 3 }))).toBe(
-      0n
-    );
+    expect(
+      conservativeExitNetBaseUnits(
+        observation({ netBaseUnits: 15n, legNetBaseUnits: [5n, 5n, 5n] })
+      )
+    ).toBe(0n);
   });
 });
 
 describe("deriveKaminoWithdrawQuote", () => {
   it("formats the conservative net at token decimals with no issues on a clean quote", () => {
-    expect(deriveKaminoWithdrawQuote(observation({ reserveCount: 2 }))).toEqual({
+    expect(
+      deriveKaminoWithdrawQuote(observation({ legNetBaseUnits: [600_000n, 400_000n] }))
+    ).toEqual({
       assetsOut: "0.999989",
       assetDecimals: 6,
       issues: [],
@@ -177,6 +183,40 @@ describe("deriveKaminoWithdrawQuote", () => {
     const quote = deriveKaminoWithdrawQuote(observation({ netBaseUnits: 0n }));
     expect(quote.assetsOut).toBe("0");
     expect(quote.issues.map((issue) => issue.code)).toEqual(["ZERO_ASSETS_OUT"]);
+  });
+
+  it("reports a split exit whose smallest leg is at or below the minimum, even when the aggregate clears it", () => {
+    const quote = deriveKaminoWithdrawQuote(
+      observation({
+        netBaseUnits: 1_000_000n,
+        legNetBaseUnits: [995_000n, 5_000n],
+        minimumWithdrawalBaseUnits: 5_000n,
+      })
+    );
+    expect(quote.issues).toEqual([
+      {
+        code: "BELOW_MINIMUM_WITHDRAWAL",
+        message: expect.stringContaining("one leg would return 0.005"),
+      },
+    ]);
+    expect(quote.issues[0]?.message).toContain("per withdraw instruction");
+  });
+
+  it("accepts a split exit whose every leg clears the minimum", () => {
+    expect(
+      deriveKaminoWithdrawQuote(
+        observation({
+          netBaseUnits: 1_000_000n,
+          legNetBaseUnits: [994_999n, 5_001n],
+          minimumWithdrawalBaseUnits: 5_000n,
+        })
+      ).issues
+    ).toEqual([]);
+  });
+
+  it("counts the idle-liquidity leg as an instruction when the plan draws on it", () => {
+    expect(exitInstructionCount([700_000n, 300_000n])).toBe(2);
+    expect(exitInstructionCount([])).toBe(1);
   });
 
   it("reports a net at or below the vault's minimum withdrawal", () => {
