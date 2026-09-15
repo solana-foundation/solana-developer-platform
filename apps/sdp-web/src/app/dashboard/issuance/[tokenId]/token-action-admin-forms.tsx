@@ -610,9 +610,8 @@ export function TokenActionAdminForms({
               : (controlListDescription ?? t("DashboardIssuance.forms.controlListDescription"))
           }
         >
-          {signerWallets.length > 0 ? (
-            // The list authority is a known wallet: show it, and let a runtime
-            // restriction read as a warning rather than a structural error.
+          {signerWallets.length === 1 ? (
+            // Show a single authority here; multiple signers are selected in confirmation.
             <TokenSignerSelect
               signerWallets={signerWallets}
               signerWalletId={defaultSignerWalletId}

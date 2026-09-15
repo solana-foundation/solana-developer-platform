@@ -12,6 +12,7 @@ import {
   type DvpTradeSide,
   type DvpTradeStatus,
 } from "@sdp/types";
+import { z } from "zod";
 
 export { DVP_TRADE_SIDES, type DvpTradeSide, type DvpTradeStatus };
 
@@ -33,9 +34,13 @@ export interface DvpCallerWallet {
   name: string | null;
 }
 
-export interface DvpActionWallet extends DvpCallerWallet {
-  isRuntimeExecutionAllowed: boolean;
-}
+export const dvpActionWalletSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().nullable(),
+  isRuntimeExecutionAllowed: z.boolean(),
+});
+
+export type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
 
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
