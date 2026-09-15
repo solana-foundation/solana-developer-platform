@@ -517,7 +517,8 @@
       "devnetStrategiesLoading": "Đang tải chiến lược Devnet. Chiến lược Mainnet vẫn khả dụng.",
       "devnetStrategiesUnavailable": "Không tải được chiến lược Devnet. Chiến lược Mainnet vẫn khả dụng.",
       "mainnetStrategiesLoading": "Đang tải chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng.",
-      "mainnetStrategiesUnavailable": "Không tải được chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng."
+      "mainnetStrategiesUnavailable": "Không tải được chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng.",
+      "sandboxUnavailable": "Chỉ Production"
     },
     "earnProgram": {
       "eyebrow": "Yield nhúng",
@@ -696,7 +697,16 @@
       "ageUnderWeek": "0–7 ngày",
       "ageUnderMonth": "8–30 ngày",
       "ageUnderQuarter": "31–90 ngày",
-      "ageOlder": "90+ ngày"
+      "ageOlder": "90+ ngày",
+      "sandboxUnavailable": "Chỉ Production",
+      "stepChooseStrategy": "1. Chọn chiến lược",
+      "stepServerCode": "2. Thiết lập mã máy chủ",
+      "copyAllCode": "Sao chép toàn bộ mã",
+      "guideIntro": "Khách hàng của bạn nhận lợi suất ngay trong sản phẩm của bạn và giữ quyền lưu ký đối với số tiền của họ. Chọn một chiến lược, sau đó thêm embedded-yield.ts vào máy chủ của bạn. Máy chủ của bạn tạo từng khoản nạp hoặc rút, Wallet của khách hàng ký chúng, và SDP theo dõi số dư và lợi nhuận.",
+      "liquidityFact": "Thanh khoản {liquidity}",
+      "apyFact": "{apy} APY",
+      "unavailableClusterDescription": "Chiến lược này chạy trên mạng lưới khác với dự án này. Chuyển sang một dự án trên mạng lưới đó để tích hợp.",
+      "unavailableEnvironmentProductionDescription": "Provider này chỉ chấp nhận khoản nạp vault mới từ các dự án Production. Chuyển sang một dự án Production để tích hợp."
     },
     "liquidity": {
       "instant": "Tức thì",
@@ -918,7 +928,34 @@
       "youDeliver": "Bạn giao",
       "youDelivered": "Bạn đã giao",
       "youReceive": "Bạn nhận",
-      "youReceived": "Bạn đã nhận"
+      "youReceived": "Bạn đã nhận",
+      "actionCancelling": "Đang hủy…",
+      "actionFailed": "Yêu cầu thất bại ({status}).",
+      "actionUnconfirmed": "SDP đã gửi nhưng không đọc được phản hồi. Kiểm tra giao dịch trước khi thử lại.",
+      "actionFunding": "Đang nạp…",
+      "actionReclaim": "Thu hồi",
+      "actionReclaiming": "Đang thu hồi…",
+      "actionSettling": "Đang thanh toán…",
+      "fundRefusedAlreadyFunded": "Leg này đã có đủ số tiền.",
+      "fundRefusedBalanceChanged": "Một khoản nạp đã đến trong khi khoản này đang được chuẩn bị. Chưa có gì được gửi đi, nên hãy nạp lại số tiền còn thiếu.",
+      "fundRefusedBalanceShort": "Wallet này không đủ {symbol} để nạp cho leg này. Chưa có gì được gửi đi.",
+      "fundRefusedBalanceShortUnnamed": "Wallet này không đủ Token này để nạp cho leg này. Chưa có gì được gửi đi.",
+      "fundRefusedFrozen": "Escrow của leg này đang bị đóng băng, nên việc chuyển vào sẽ bị từ chối. Tổ chức phát hành Token phải bỏ đóng băng trước.",
+      "fundRefusedInProgress": "Leg này đang được xử lý. Hãy quay lại sau một lát.",
+      "fundRefusedNoToken": "Wallet này chưa có {symbol} nào. Hãy gửi một ít, rồi nạp cho leg.",
+      "fundRefusedNoTokenUnnamed": "Wallet này chưa có Token này. Hãy gửi một ít, rồi nạp cho leg.",
+      "fundRefusedNotFundable": "Giao dịch này không thể nạp thêm được nữa.",
+      "fundRefusedUnverified": "SDP không thể xác minh giao dịch này on-chain, nên chưa có gì được gửi đi.",
+      "reclaimRefusedClosed": "Giao dịch này đã đóng, nên không còn gì để thu hồi.",
+      "reclaimRefusedEmpty": "Escrow của leg này đã trống.",
+      "reclaimRefusedSignerChanged": "Wallet của bên này không còn ký cho bên đó nữa, nên chưa có gì được gửi đi.",
+      "reclaimRefusedTransferHook": "Reclaim chưa hỗ trợ các Token có transfer hook. Chưa có gì được gửi đi.",
+      "createUnconfirmed": "Giao dịch có thể đã được tạo, nhưng SDP không đọc được phản hồi. Nhấn Tạo lại để mở nó; sẽ không tạo thêm giao dịch thứ hai.",
+      "settleTooEarly": "Giao dịch này có thể thanh toán từ {when}.",
+      "statusFundedTooEarly": "Đã nạp",
+      "toastReclaimed": "Khoản nạp của bạn đang được hoàn về.",
+      "txFundingSent": "Đã gửi từ Wallet của bạn",
+      "viewTransaction": "Xem giao dịch"
     }
   }
 }

@@ -245,7 +245,10 @@
         "preparing": "Đang chuẩn bị trạng thái chuyển",
         "preparingDescription": "Đang chờ bản ghi chuyển gắn với Báo giá này.",
         "waitingForPayment": "Đang chờ thanh toán",
-        "waitingForPaymentHostedDescription": "Hoàn tất thanh toán trong cửa sổ Provider ở trên. Khoản nạp này tự động cập nhật sau khi Provider xác nhận."
+        "waitingForPaymentHostedDescription": "Hoàn tất thanh toán trong cửa sổ Provider ở trên. Khoản nạp này tự động cập nhật sau khi Provider xác nhận.",
+        "canceled": "Đã hủy chuyển",
+        "canceledFundingDescription": "Lần chuyển này đã bị hủy, nên hướng dẫn nạp không còn hiệu lực. Tạo Báo giá mới để tiếp tục.",
+        "canceledPayoutDescription": "Khoản chi trả này đã bị hủy, nên hướng dẫn nhận tiền không còn hiệu lực. Tạo Báo giá mới để tiếp tục."
       },
       "untrustedProviderUrl": "Provider trả về URL không đáng tin cậy nên không được tải. Hãy tạo Báo giá mới hoặc liên hệ hỗ trợ.",
       "destinationCountry": "Quốc gia đích",

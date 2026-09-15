@@ -125,7 +125,8 @@
       "devnetStrategiesLoading": "Cargando estrategias de Devnet. Las estrategias de Mainnet siguen disponibles.",
       "devnetStrategiesUnavailable": "No se pudieron cargar las estrategias de Devnet. Las estrategias de Mainnet siguen disponibles.",
       "mainnetStrategiesLoading": "Cargando estrategias de Mainnet. Las estrategias de Devnet siguen disponibles.",
-      "mainnetStrategiesUnavailable": "No se pudieron cargar las estrategias de Mainnet. Las estrategias de Devnet siguen disponibles."
+      "mainnetStrategiesUnavailable": "No se pudieron cargar las estrategias de Mainnet. Las estrategias de Devnet siguen disponibles.",
+      "sandboxUnavailable": "Solo producción"
     },
     "earnProgram": {
       "eyebrow": "Yield integrado",
@@ -304,7 +305,16 @@
       "ageUnderWeek": "0–7 días",
       "ageUnderMonth": "8–30 días",
       "ageUnderQuarter": "31–90 días",
-      "ageOlder": "Más de 90 días"
+      "ageOlder": "Más de 90 días",
+      "sandboxUnavailable": "Solo producción",
+      "stepChooseStrategy": "1. Elige una estrategia",
+      "stepServerCode": "2. Configura el código del servidor",
+      "copyAllCode": "Copiar todo el código",
+      "guideIntro": "Tus clientes generan rendimiento dentro de tu producto y conservan la custodia de sus fondos. Elige una estrategia y luego agrega embedded-yield.ts a tu servidor. Tu servidor arma cada depósito o retiro, la Wallet del cliente lo firma y SDP registra el saldo y las ganancias.",
+      "liquidityFact": "{liquidity} de liquidez",
+      "apyFact": "{apy} APY",
+      "unavailableClusterDescription": "Esta estrategia corre en una red distinta a la de este proyecto. Cambia a un proyecto de esa red para integrarla.",
+      "unavailableEnvironmentProductionDescription": "Este proveedor acepta nuevos depósitos en vaults solo desde proyectos de Producción. Cambia a un proyecto de Producción para integrarlo."
     },
     "liquidity": {
       "instant": "Instantánea",
@@ -526,7 +536,34 @@
       "youDeliver": "Tú entregas",
       "youDelivered": "Tú entregaste",
       "youReceive": "Tú recibes",
-      "youReceived": "Tú recibiste"
+      "youReceived": "Tú recibiste",
+      "actionCancelling": "Cancelando…",
+      "actionFailed": "La solicitud falló ({status}).",
+      "actionUnconfirmed": "SDP envió esto, pero no pudo leer la respuesta. Revisa la operación antes de intentar de nuevo.",
+      "actionFunding": "Fondeando…",
+      "actionReclaim": "Recuperar",
+      "actionReclaiming": "Recuperando…",
+      "actionSettling": "Liquidando…",
+      "fundRefusedAlreadyFunded": "Esta pierna ya tiene su monto completo.",
+      "fundRefusedBalanceChanged": "Llegó un depósito mientras esto se preparaba. No se envió nada, así que vuelve a fondear lo que aún falta.",
+      "fundRefusedBalanceShort": "Esta Wallet no tiene suficiente {symbol} para fondear esta pierna. No se envió nada.",
+      "fundRefusedBalanceShortUnnamed": "Esta Wallet no tiene suficiente de este Token para fondear esta pierna. No se envió nada.",
+      "fundRefusedFrozen": "El escrow de esta pierna está congelado, por lo que una transferencia hacia él rebotaría. El emisor del Token debe descongelarlo primero.",
+      "fundRefusedInProgress": "Esta pierna ya se está moviendo. Revisa en un momento.",
+      "fundRefusedNoToken": "Esta Wallet todavía no tiene {symbol}. Envíale algo y luego fondea la pierna.",
+      "fundRefusedNoTokenUnnamed": "Esta Wallet todavía no tiene este Token. Envíale algo y luego fondea la pierna.",
+      "fundRefusedNotFundable": "Este trade ya no se puede fondear.",
+      "fundRefusedUnverified": "SDP no pudo verificar este trade on-chain, así que no se envió nada.",
+      "reclaimRefusedClosed": "Este trade está cerrado, así que no queda nada por recuperar.",
+      "reclaimRefusedEmpty": "El escrow de esta pierna ya está vacío.",
+      "reclaimRefusedSignerChanged": "La Wallet de este lado ya no firma por él, así que no se envió nada.",
+      "reclaimRefusedTransferHook": "Recuperar todavía no admite Tokens con transfer hook. No se envió nada.",
+      "createUnconfirmed": "El trade puede haberse creado, pero SDP no pudo leer la respuesta. Presiona Crear de nuevo para abrirlo; no creará un segundo.",
+      "settleTooEarly": "Este trade se puede liquidar a partir de {when}.",
+      "statusFundedTooEarly": "Fondeada",
+      "toastReclaimed": "Tu depósito va de regreso.",
+      "txFundingSent": "Enviada desde tu Wallet",
+      "viewTransaction": "Ver transacción"
     }
   },
   "DashboardEarn": {
