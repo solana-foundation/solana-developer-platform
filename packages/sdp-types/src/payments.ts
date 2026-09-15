@@ -176,19 +176,17 @@ export const ONCHAIN_TRANSFER_STATUSES = [
 
 export type OnchainTransferStatus = (typeof ONCHAIN_TRANSFER_STATUSES)[number];
 
-/** Whether each onchain transfer status is final. Confirmed is transitional: the tracker upgrades it to finalized. */
-export const ONCHAIN_TRANSFER_STATUS_TERMINAL = {
-  pending: false,
-  processing: false,
-  confirmed: false,
-  finalized: true,
-  failed: true,
-} as const satisfies Record<OnchainTransferStatus, boolean>;
+/** Onchain transfer statuses that still await a chain verdict. */
+export const ONCHAIN_TRANSFER_IN_FLIGHT_STATUSES = [
+  "pending",
+  "processing",
+] as const satisfies readonly OnchainTransferStatus[];
 
-/** Reports whether an onchain transfer can never leave the given status. */
-export function isTerminalOnchainTransferStatus(status: OnchainTransferStatus): boolean {
-  return ONCHAIN_TRANSFER_STATUS_TERMINAL[status];
-}
+/** Onchain transfer statuses whose transaction landed; confirmed still awaits finality. */
+export const ONCHAIN_TRANSFER_SETTLED_STATUSES = [
+  "confirmed",
+  "finalized",
+] as const satisfies readonly OnchainTransferStatus[];
 
 /** The statuses a chain lookup can settle a processing transfer into. */
 export const TRANSFER_CHAIN_VERDICT_STATUSES = [

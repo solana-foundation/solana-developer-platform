@@ -8,7 +8,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   unwrapSimulationError,
 } from "@solana/kit";
-import { AppError, accountFrozen, transactionFailed } from "@/lib/errors";
+import { AppError, accountFrozen, solanaRpcError, transactionFailed } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 
 const PROGRAM_ERROR_LINE = /^Program log: Error: /;
@@ -108,16 +108,16 @@ export async function submitSponsoredTransaction(input: {
       }
       const transient = isTransientRpcError(error);
       if (sawTransientFailure && !transient) {
-        throw new Error("Solana RPC submission outcome is ambiguous after a transient failure", {
-          cause: error,
-        });
+        throw solanaRpcError(
+          "Solana RPC submission outcome is ambiguous after a transient failure"
+        );
       }
       sawTransientFailure ||= transient;
       throw error;
     }
   });
   if (submittedSignature !== submission.signature) {
-    throw new Error("Solana RPC returned a different transaction signature");
+    throw solanaRpcError("Solana RPC returned a different transaction signature");
   }
   return submission.signature;
 }

@@ -7,12 +7,15 @@ import {
   type PolicyCandidate,
   type PrivateTransferRequest,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
+  TRANSFER_CHAIN_VERDICT_STATUSES,
 } from "@sdp/types";
-import type { Address } from "@solana/kit";
+import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
+  address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   createTransactionMessage,
+  getBase64Encoder,
   getCompiledTransactionMessageDecoder,
   getCompiledTransactionMessageEncoder,
   getTransactionDecoder,
@@ -49,8 +52,12 @@ import {
   badRequest,
   badRequestQuery,
   conflict,
+  forbidden,
+  internalError,
   notFound,
+  providerUnavailable,
   solanaRpcError,
+  transactionFailed,
 } from "@/lib/errors";
 import {
   buildLegacyPaymentTransferFingerprint,
@@ -264,7 +271,7 @@ async function createTransferRecord(
       });
 
       if (!createdRow) {
-        throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
+        throw internalError("Failed to create payment transfer record");
       }
 
       return { row: createdRow, replayed: false };
@@ -310,10 +317,7 @@ async function assertApprovedTransferReplayCompleted(c: AppContext, transfer: Tr
   // external database damage. Fence it before failing so recovery never turns
   // the incomplete idempotency replay into a successful approved operation.
   await beginApprovedWalletOperationEffect(c);
-  throw new AppError(
-    "CONFLICT",
-    "Approved transfer execution is incomplete and requires manual reconciliation"
-  );
+  throw conflict("Approved transfer execution is incomplete and requires manual reconciliation");
 }
 
 /**
@@ -566,7 +570,9 @@ async function updateTransferRecord(
     fee?: number | null;
     error?: string | null;
   }
-): Promise<TransferRow> {
+): Promise<
+  { outcome: "updated"; row: TransferRow } | { outcome: "settled_concurrently"; row: TransferRow }
+> {
   const repository = getPaymentsRepository(c);
   const now = new Date().toISOString();
 
@@ -586,7 +592,7 @@ async function updateTransferRecord(
   });
 
   if (updated) {
-    return updated;
+    return { outcome: "updated", row: updated };
   }
 
   const current = await repository.getTransferById({
@@ -595,10 +601,20 @@ async function updateTransferRecord(
     projectId: transfer.project_id,
   });
   if (!current) {
-    throw new AppError("INTERNAL_ERROR", "Payment transfer record not found for update");
+    throw internalError("Payment transfer record not found for update");
   }
 
-  return current;
+  return { outcome: "settled_concurrently", row: current };
+}
+
+function resolveTransferUpdateResult(
+  result: Awaited<ReturnType<typeof updateTransferRecord>>
+): TransferRow {
+  if (result.outcome === "updated") return result.row;
+  if (TRANSFER_CHAIN_VERDICT_STATUSES.some((status) => status === result.row.status)) {
+    return result.row;
+  }
+  throw conflict("Payment transfer was concurrently updated without a chain verdict");
 }
 
 /** A chain verdict or preflight simulation proves this exact transaction cannot land. */
@@ -640,12 +656,14 @@ async function settleTransferExecutionFailure(
     return success(c, toPayload(submitted));
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
-  const settled = await updateTransferRecord(c, transfer, {
-    status: "failed",
-    error: message,
-    signature: submitted?.signature,
-    blockTime: null,
-  });
+  const settled = resolveTransferUpdateResult(
+    await updateTransferRecord(c, transfer, {
+      status: "failed",
+      error: message,
+      signature: submitted?.signature,
+      blockTime: null,
+    })
+  );
   if (settled.status !== "failed") {
     return success(c, toPayload(settled));
   }
@@ -672,27 +690,27 @@ export function mapTransferExecutionError(error: unknown): AppError {
   return programErrorCode === "0x11" ? accountFrozen(message) : solanaRpcError(message);
 }
 
-async function executeSolTransfer(
+async function executeSponsoredTransfer(
   c: AppContext,
-  sourceWallet: CustodyWallet,
-  destinationAddress: Address,
-  amount: string,
-  submissionStore: SignedSubmissionStore
-): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const lamports = parseDecimalAmount(amount, 9);
-  if (lamports <= 0n) {
-    throw badRequest("Transfer amount must be greater than zero");
+  params: {
+    sourceWallet: CustodyWallet;
+    submissionStore: SignedSubmissionStore;
+    buildInstructions: (context: {
+      signer: TransactionSigner;
+      feePayer: Address;
+      rpc: solanaRpc.SolanaRpc;
+    }) => Promise<readonly Instruction[]>;
   }
-
+): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const auth = getAuth(c);
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     c.env,
     auth.organizationId,
-    auth.projectId ?? undefined,
-    sourceWallet.id
+    auth.projectId,
+    params.sourceWallet.id
   );
 
-  if (signer.address !== sourceWallet.publicKey) {
+  if (signer.address !== params.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
 
@@ -700,18 +718,13 @@ async function executeSolTransfer(
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
-
-  const instruction = getTransferSolInstruction({
-    source: signer,
-    destination: destinationAddress,
-    amount: lamports,
-  });
+  const instructions = await params.buildInstructions({ signer, feePayer, rpc });
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(feePayer, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions([instruction], m),
+    (m) => appendTransactionMessageInstructions(instructions, m),
     (m) => addSignersToTransactionMessage([signer], m)
   );
 
@@ -724,7 +737,7 @@ async function executeSolTransfer(
     rpc,
     transaction: txBytes,
     lastValidBlockHeight,
-    store: submissionStore,
+    store: params.submissionStore,
   });
 
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
@@ -732,7 +745,7 @@ async function executeSolTransfer(
   });
 
   if (confirmation.err) {
-    throw new AppError("TRANSACTION_FAILED", "SOL transfer failed on-chain");
+    throw transactionFailed("Transfer failed on-chain");
   }
 
   return {
@@ -740,6 +753,30 @@ async function executeSolTransfer(
     slot: Number(confirmation.slot),
     blockTime: null,
   };
+}
+
+async function executeSolTransfer(
+  c: AppContext,
+  sourceWallet: CustodyWallet,
+  destinationAddress: Address,
+  amount: string,
+  submissionStore: SignedSubmissionStore
+): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+  const lamports = parseDecimalAmount(amount, 9);
+  if (lamports <= 0n) {
+    throw badRequest("Transfer amount must be greater than zero");
+  }
+  return executeSponsoredTransfer(c, {
+    sourceWallet,
+    submissionStore,
+    buildInstructions: async ({ signer }) => [
+      getTransferSolInstruction({
+        source: signer,
+        destination: destinationAddress,
+        amount: lamports,
+      }),
+    ],
+  });
 }
 
 type MagicBlockProductOptions = Extract<
@@ -815,8 +852,7 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
   const { c, operation, privateTransfer, memo } = params;
 
   if (isNativePaymentToken(operation.token)) {
-    throw new AppError(
-      "BAD_REQUEST",
+    throw badRequest(
       "MagicBlock private transfers support SPL tokens only. Provide a token mint address."
     );
   }
@@ -832,10 +868,7 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
   }
 
   if (amountBaseUnits > MAX_SAFE_BASE_UNITS) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "MagicBlock transfer amount is too large to send as a JSON integer."
-    );
+    throw badRequest("MagicBlock transfer amount is too large to send as a JSON integer.");
   }
 
   const [magicBlockPrepared, { lastValidBlockHeight }] = await Promise.all([
@@ -857,21 +890,19 @@ async function prepareMagicBlockPrivateTransferForOperation(params: {
 
 function assertMagicBlockKoraSponsoredExecutionOptions(options: MagicBlockProductOptions): void {
   if (options.gasless === false) {
-    throw new AppError(
-      "BAD_REQUEST",
+    throw badRequest(
       "MagicBlock private transfer execution is sponsored by Kora and requires gasless transactions. Remove gasless or set it to true."
     );
   }
 }
 
 function decodeMagicBlockPreparedTransaction(serializedTx: string) {
-  const txBytes = Buffer.from(serializedTx, "base64");
+  const txBytes = getBase64Encoder().encode(serializedTx);
   const transaction = getTransactionDecoder().decode(txBytes);
   const compiledMessage = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
 
   if (!("instructions" in compiledMessage) || !("staticAccounts" in compiledMessage)) {
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
+    throw providerUnavailable(
       "MagicBlock transaction version is not supported for Kora fee sponsorship."
     );
   }
@@ -879,7 +910,7 @@ function decodeMagicBlockPreparedTransaction(serializedTx: string) {
   const existingFeePayer = compiledMessage.staticAccounts[0];
 
   if (!existingFeePayer) {
-    throw new AppError("PROVIDER_UNAVAILABLE", "MagicBlock transaction has no fee payer.");
+    throw providerUnavailable("MagicBlock transaction has no fee payer.");
   }
 
   return { transaction, compiledMessage, existingFeePayer };
@@ -894,8 +925,7 @@ const MAGICBLOCK_DECLARED_VERSIONS: Readonly<Record<string, 0 | "legacy">> = {
 };
 
 function hostileMagicBlockTransaction(reason: string, details?: Record<string, unknown>): AppError {
-  return new AppError(
-    "PROVIDER_UNAVAILABLE",
+  return providerUnavailable(
     `MagicBlock returned a transaction that does not match the requested transfer: ${reason}`,
     { provider: "magicblock", ...details }
   );
@@ -1011,8 +1041,7 @@ function addSponsoredFeePayerToPreparedTransaction(
   }
 
   if (compiledMessage.staticAccounts.includes(feePayer)) {
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
+    throw providerUnavailable(
       "MagicBlock transaction already includes the Kora fee payer in a non-fee-payer position."
     );
   }
@@ -1156,8 +1185,7 @@ async function resolvePreparedPrivateTransferSignerPlan(
     ? requiredSigners.filter((signer) => signer !== existingFeePayer)
     : requiredSigners;
   if (!custodyRequiredSigners.includes(operation.sourceWallet.publicKey)) {
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
+    throw providerUnavailable(
       "MagicBlock prepared transaction does not require the selected source wallet."
     );
   }
@@ -1171,8 +1199,7 @@ async function resolvePreparedPrivateTransferSignerPlan(
 
     const addressMatches = scope.wallets.filter((wallet) => wallet.publicKey === requiredSigner);
     if (addressMatches.length === 0) {
-      throw new AppError(
-        "BAD_REQUEST",
+      throw badRequest(
         "MagicBlock private transfer requires signer(s) that are not controlled by SDP."
       );
     }
@@ -1190,14 +1217,14 @@ async function resolvePreparedPrivateTransferSignerPlan(
     }
 
     if (authorizedMatches.length === 0) {
-      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+      throw forbidden("API key is not authorized for the requested wallet");
     }
     if (authorizedMatches.length > 1) {
-      throw new AppError("CONFLICT", "MagicBlock additional signer is ambiguous");
+      throw conflict("MagicBlock additional signer is ambiguous");
     }
 
     const wallet = authorizedMatches[0];
-    if (!wallet) throw new AppError("INTERNAL_ERROR", "MagicBlock signer resolution failed");
+    if (!wallet) throw internalError("MagicBlock signer resolution failed");
     await admitExactPaymentWallet(c, wallet, ["payments:write"]);
 
     const signerOperation: OutboundPaymentOperation = {
@@ -1216,11 +1243,10 @@ async function resolvePreparedPrivateTransferSignerPlan(
     );
     const details = { decision: evaluation.decision, reason: evaluation.reason };
     if (evaluation.decision === "deny" || evaluation.decision === "not_evaluated") {
-      throw new AppError("FORBIDDEN", "Wallet operation denied by policy", details);
+      throw forbidden("Wallet operation denied by policy", details);
     }
     if (evaluation.decision !== "allow") {
-      throw new AppError(
-        "CONFLICT",
+      throw conflict(
         "MagicBlock additional signer requires policy approval, but multi-wallet approval replay is not supported",
         details
       );
@@ -1291,7 +1317,7 @@ async function executePreparedPrivateTransfer(
   });
 
   if (confirmation.err) {
-    throw new AppError("TRANSACTION_FAILED", "MagicBlock private transfer failed on-chain");
+    throw transactionFailed("MagicBlock private transfer failed on-chain");
   }
 
   return {
@@ -1309,69 +1335,21 @@ async function executeSplTransfer(
   amount: string,
   submissionStore: SignedSubmissionStore
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const auth = getAuth(c);
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
-    c.env,
-    auth.organizationId,
-    auth.projectId ?? undefined,
-    sourceWallet.id
-  );
-
-  if (signer.address !== sourceWallet.publicKey) {
-    throw badRequest("Resolved signing wallet does not match source wallet");
-  }
-
-  const rpc = solanaRpc.createRpc(c.env);
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = getFeePayment(c);
-  const feePayer = await feePayment.getFeePayer();
-
-  const { createDestinationAtaInstruction, transferInstruction } =
-    await tokenAccounts.buildSplTransferInstructions(rpc, {
-      authority: signer,
-      destination: destinationAddress,
-      mint: mintAddress,
-      amount,
-      ataRentPayer: feePayer,
-    });
-
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(feePayer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) =>
-      appendTransactionMessageInstructions(
-        [createDestinationAtaInstruction, transferInstruction],
-        m
-      ),
-    (m) => addSignersToTransactionMessage([signer], m)
-  );
-
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-  const txEncoder = getTransactionEncoder();
-  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
-  await beginApprovedWalletOperationEffect(c);
-  const signature = await submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: txBytes,
-    lastValidBlockHeight,
-    store: submissionStore,
+  return executeSponsoredTransfer(c, {
+    sourceWallet,
+    submissionStore,
+    buildInstructions: async ({ signer, feePayer, rpc }) => {
+      const { createDestinationAtaInstruction, transferInstruction } =
+        await tokenAccounts.buildSplTransferInstructions(rpc, {
+          authority: signer,
+          destination: destinationAddress,
+          mint: mintAddress,
+          amount,
+          ataRentPayer: feePayer,
+        });
+      return [createDestinationAtaInstruction, transferInstruction];
+    },
   });
-
-  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
-    commitment: "confirmed",
-  });
-
-  if (confirmation.err) {
-    throw new AppError("TRANSACTION_FAILED", "SPL token transfer failed on-chain");
-  }
-
-  return {
-    signature,
-    slot: Number(confirmation.slot),
-    blockTime: null,
-  };
 }
 
 function buildTransferReplayPayload(replay: TransferRow) {
@@ -1495,13 +1473,15 @@ export async function createTransfer(c: AppContext) {
         signerPlan,
         submissionStore
       );
-      const updated = await updateTransferRecord(c, transfer, {
-        status: "confirmed",
-        signature: result.signature,
-        slot: result.slot,
-        blockTime: result.blockTime,
-        error: null,
-      });
+      const updated = resolveTransferUpdateResult(
+        await updateTransferRecord(c, transfer, {
+          status: "confirmed",
+          signature: result.signature,
+          slot: result.slot,
+          blockTime: result.blockTime,
+          error: null,
+        })
+      );
 
       return success(c, {
         transfer: mapTransferRow(updated),
@@ -1556,13 +1536,15 @@ export async function createTransfer(c: AppContext) {
         operation.amount,
         submissionStore
       );
-      const updated = await updateTransferRecord(c, transfer, {
-        status: reusedRampTransfer ? "settling" : "confirmed",
-        signature: solResult.signature,
-        slot: solResult.slot,
-        blockTime: solResult.blockTime,
-        error: null,
-      });
+      const updated = resolveTransferUpdateResult(
+        await updateTransferRecord(c, transfer, {
+          status: reusedRampTransfer ? "settling" : "confirmed",
+          signature: solResult.signature,
+          slot: solResult.slot,
+          blockTime: solResult.blockTime,
+          error: null,
+        })
+      );
       return success(c, { transfer: mapTransferRow(updated) });
     }
 
@@ -1576,13 +1558,15 @@ export async function createTransfer(c: AppContext) {
       submissionStore
     );
 
-    const updated = await updateTransferRecord(c, transfer, {
-      status: reusedRampTransfer ? "settling" : "confirmed",
-      signature: result.signature,
-      slot: result.slot,
-      blockTime: result.blockTime,
-      error: null,
-    });
+    const updated = resolveTransferUpdateResult(
+      await updateTransferRecord(c, transfer, {
+        status: reusedRampTransfer ? "settling" : "confirmed",
+        signature: result.signature,
+        slot: result.slot,
+        blockTime: result.blockTime,
+        error: null,
+      })
+    );
 
     return success(c, { transfer: mapTransferRow(updated) });
   } catch (error) {
@@ -1684,7 +1668,7 @@ export async function listTransfers(c: AppContext) {
     categoryTypes &&
     requestedTypes.some((type) => !categoryTypes.includes(type as never))
   ) {
-    throw new AppError("BAD_REQUEST", "type must match the requested transfer category");
+    throw badRequest("type must match the requested transfer category");
   }
   const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
   // Rows store mints, so a symbol or native-SOL filter must be normalized to
@@ -1697,7 +1681,7 @@ export async function listTransfers(c: AppContext) {
   let exactWallet: CustodyWallet | null = null;
   if (custodyWalletId) {
     if (walletAuthorization && !walletAuthorization.custodyWalletIds.includes(custodyWalletId)) {
-      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+      throw forbidden("API key is not authorized for the requested wallet");
     }
     if (includeObserved) {
       const scope = await resolveScope(c);
@@ -1706,11 +1690,11 @@ export async function listTransfers(c: AppContext) {
   }
 
   if (includeObserved && !exactWallet) {
-    throw new AppError("BAD_REQUEST", "custodyWalletId is required when includeObserved=true");
+    throw badRequest("custodyWalletId is required when includeObserved=true");
   }
 
   if (hasProviderReference && !hasProvider) {
-    throw new AppError("BAD_REQUEST", "provider is required for provider reference lookup");
+    throw badRequest("provider is required for provider reference lookup");
   }
 
   if (hasExactProviderReference) {
@@ -1752,7 +1736,7 @@ export async function listTransfers(c: AppContext) {
 
     // 1. Fetch on-chain signature history via Helius (or fallback RPC)
     const heliusRpc = createSignatureHistoryRpc(c.env);
-    const ownerAddress = sourceAddress as Address;
+    const ownerAddress = address(sourceAddress);
     const historyLimit = Math.min(pageSize * 5, 200);
     const signatureSearchAddresses: Address[] = [ownerAddress];
 
@@ -1945,7 +1929,7 @@ export async function getTransfer(c: AppContext) {
     projectId: auth.projectId,
   });
 
-  if (!row) throw new AppError("NOT_FOUND", "Transfer not found");
+  if (!row) throw notFound("Transfer");
   assertTransferReadAccess(c, row);
 
   return success(c, { transfer: mapTransferRow(row) });
