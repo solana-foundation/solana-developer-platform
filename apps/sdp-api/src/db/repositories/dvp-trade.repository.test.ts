@@ -1,6 +1,9 @@
+import { DVP_SETTLEMENT_AVAILABILITY } from "@sdp/types";
 import { type Address, address, signature } from "@solana/kit";
+import { generateKeyPairSigner } from "@solana/signers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import {
@@ -81,7 +84,7 @@ function tradeInsert(overrides: Partial<DvpTradeInsert> = {}): DvpTradeInsert {
 const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
 
 /** The explicit no-filter filters: unfiltered is a choice, never a default. */
-const UNFILTERED: DvpTradeListFilters = { statuses: null, q: null };
+const UNFILTERED: DvpTradeListFilters = { statuses: null, settlementAvailability: null, q: null };
 
 describe("DvpTradeRepository (postgres)", () => {
   let repo: DvpTradeRepository;
@@ -289,6 +292,7 @@ describe("DvpTradeRepository (postgres)", () => {
       escrowBFrozen: false,
       closeSignature: null,
       observedAt: "2026-09-10T00:00:00.000Z",
+      observedClusterTimestamp: "1800000000",
     });
     const reclaimed = await repo.recordObservation({
       id: created.id,
@@ -300,8 +304,12 @@ describe("DvpTradeRepository (postgres)", () => {
       escrowBFrozen: false,
       closeSignature: null,
       observedAt: "2026-09-10T00:01:00.000Z",
+      observedClusterTimestamp: "1800000060",
     });
 
+    // The cluster clock rides with every observation, the latest one kept.
+    expect(first?.observedClusterTimestamp).toBe("1800000000");
+    expect(reclaimed?.observedClusterTimestamp).toBe("1800000060");
     expect(first?.escrowAPeakAmount).toBe("900");
     expect(reclaimed?.escrowAPeakAmount).toBe("900");
     expect(reclaimed?.escrowAAmount).toBe("100");
@@ -359,6 +367,7 @@ describe("DvpTradeRepository (postgres)", () => {
       escrowBFrozen: null,
       closeSignature: CLOSE_SIGNATURE,
       observedAt: "2026-09-11T00:00:00.000Z",
+      observedClusterTimestamp: "1800000000",
     });
 
     expect(observed).toMatchObject({
@@ -382,6 +391,7 @@ describe("DvpTradeRepository (postgres)", () => {
       escrowBFrozen: null,
       closeSignature: null,
       observedAt: "2026-09-10T00:00:00.000Z",
+      observedClusterTimestamp: "1800000000",
     });
     const first = await db
       .prepare("SELECT closed_at, updated_at FROM dvp_trades WHERE id = ?")
@@ -402,6 +412,7 @@ describe("DvpTradeRepository (postgres)", () => {
       escrowBFrozen: null,
       closeSignature: null,
       observedAt: "2026-09-10T00:01:00.000Z",
+      observedClusterTimestamp: "1800000000",
     });
     const second = await db
       .prepare("SELECT closed_at, updated_at FROM dvp_trades WHERE id = ?")
@@ -742,23 +753,31 @@ describe("DvpTradeRepository (postgres)", () => {
     it("narrows to the listed statuses", async () => {
       const open = await repo.listByProject(
         scope,
-        { statuses: ["created", "creating"], q: null },
+        { statuses: ["created", "creating"], settlementAvailability: null, q: null },
         10
       );
       expect(open.map((t) => t.id)).toEqual(["dvp_fl_open"]);
 
-      const settled = await repo.listByProject(scope, { statuses: ["settled"], q: null }, 10);
+      const settled = await repo.listByProject(
+        scope,
+        { statuses: ["settled"], settlementAvailability: null, q: null },
+        10
+      );
       expect(settled.map((t) => t.id)).toEqual(["dvp_fl_settled"]);
     });
 
     it("matches q against the trade id, a party address and a mint, case-insensitively", async () => {
-      const byId = await repo.listByProject(scope, { statuses: null, q: "dvp_fl_open" }, 10);
+      const byId = await repo.listByProject(
+        scope,
+        { statuses: null, settlementAvailability: null, q: "dvp_fl_open" },
+        10
+      );
       expect(byId.map((t) => t.id)).toEqual(["dvp_fl_open"]);
 
       // WALLET_A_PUBKEY is user_a on both seeded trades.
       const byParty = await repo.listByProject(
         scope,
-        { statuses: null, q: WALLET_A_PUBKEY.toLowerCase() },
+        { statuses: null, settlementAvailability: null, q: WALLET_A_PUBKEY.toLowerCase() },
         10
       );
       expect(byParty.map((t) => t.id).sort()).toEqual(["dvp_fl_open", "dvp_fl_settled"]);
@@ -766,7 +785,11 @@ describe("DvpTradeRepository (postgres)", () => {
       // mint_a on both seeded trades.
       const byMint = await repo.listByProject(
         scope,
-        { statuses: null, q: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1" },
+        {
+          statuses: null,
+          settlementAvailability: null,
+          q: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+        },
         10
       );
       expect(byMint.map((t) => t.id).sort()).toEqual(["dvp_fl_open", "dvp_fl_settled"]);
@@ -774,27 +797,89 @@ describe("DvpTradeRepository (postgres)", () => {
 
     it("matches q against a leg symbol", async () => {
       // tradeInsert seeds symbolA "ATD", symbolB "USDC".
-      const bySymbol = await repo.listByProject(scope, { statuses: null, q: "usdc" }, 10);
+      const bySymbol = await repo.listByProject(
+        scope,
+        { statuses: null, settlementAvailability: null, q: "usdc" },
+        10
+      );
       expect(bySymbol.map((t) => t.id).sort()).toEqual(["dvp_fl_open", "dvp_fl_settled"]);
 
-      const byNothing = await repo.listByProject(scope, { statuses: null, q: "ZZZZ" }, 10);
+      const byNothing = await repo.listByProject(
+        scope,
+        { statuses: null, settlementAvailability: null, q: "ZZZZ" },
+        10
+      );
       expect(byNothing).toEqual([]);
     });
 
     // A raw `%` in the query is a literal, not a wildcard: unescaped it would
     // match every row and quietly turn the filter off.
     it("treats ILIKE wildcards in the query as literal characters", async () => {
-      const percent = await repo.listByProject(scope, { statuses: null, q: "%" }, 10);
+      const percent = await repo.listByProject(
+        scope,
+        { statuses: null, settlementAvailability: null, q: "%" },
+        10
+      );
       expect(percent).toEqual([]);
 
-      const underscore = await repo.listByProject(scope, { statuses: null, q: "dvp_fl_ope_" }, 10);
+      const underscore = await repo.listByProject(
+        scope,
+        { statuses: null, settlementAvailability: null, q: "dvp_fl_ope_" },
+        10
+      );
       expect(underscore).toEqual([]);
+    });
+
+    // The list narrows in SQL before its LIMIT; the response derives availability
+    // in TypeScript. Every case goes through both, and they must agree.
+    it("narrows by settlement availability exactly as the response derives it", async () => {
+      const db = getDb(env);
+      const cases = [
+        { id: "dvp_av_ready", status: "funded", earliest: null, cluster: "1800000000" },
+        { id: "dvp_av_edge", status: "funded", earliest: "1800000000", cluster: "1800000000" },
+        { id: "dvp_av_early", status: "funded", earliest: "1800000001", cluster: "1800000000" },
+        { id: "dvp_av_unobserved", status: "funded", earliest: null, cluster: null },
+        { id: "dvp_av_partial", status: "partially_funded", earliest: null, cluster: "1800000000" },
+        { id: "dvp_av_expired", status: "expired", earliest: null, cluster: "1800000000" },
+      ] as const;
+      for (const trade of cases) {
+        await repo.create(
+          tradeInsert({
+            id: trade.id,
+            swapDvp: (await generateKeyPairSigner()).address,
+            earliestSettlementTimestamp: trade.earliest,
+          })
+        );
+        await db
+          .prepare("UPDATE dvp_trades SET status = ?, observed_cluster_timestamp = ? WHERE id = ?")
+          .bind(trade.status, trade.cluster, trade.id)
+          .run();
+      }
+
+      const every = await repo.listByProject(scope, UNFILTERED, 50);
+      for (const availability of DVP_SETTLEMENT_AVAILABILITY) {
+        const listed = await repo.listByProject(
+          scope,
+          { statuses: null, settlementAvailability: [availability], q: null },
+          50
+        );
+        const derived = every
+          .filter((row) => deriveDvpSettlementAvailability(row) === availability)
+          .map((row) => row.id);
+        expect(listed.map((row) => row.id).sort()).toEqual(derived.sort());
+      }
+      const ready = await repo.listByProject(
+        scope,
+        { statuses: null, settlementAvailability: ["available"], q: null },
+        50
+      );
+      expect(ready.map((row) => row.id).sort()).toEqual(["dvp_av_edge", "dvp_av_ready"]);
     });
 
     it("composes with the wallet-scope clause: a bound wallet still sees only its party trades, filtered", async () => {
       const listed = await repo.listByProject(
         { ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] },
-        { statuses: ["settled"], q: null },
+        { statuses: ["settled"], settlementAvailability: null, q: null },
         10
       );
       expect(listed.map((t) => t.id)).toEqual(["dvp_fl_settled"]);

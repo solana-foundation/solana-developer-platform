@@ -2,7 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/i18n/provider";
-import type { DvpTradeStatus } from "./dvp-trade";
+import type { DvpSettlementAvailability, DvpTradeStatus } from "./dvp-trade";
 
 /**
  * Status tone.
@@ -28,8 +28,23 @@ const STATUS_VARIANT: Record<
   closed_unknown: "default",
 };
 
-export function DvpStatusBadge({ status }: { status: DvpTradeStatus }) {
+/**
+ * The trade's status, with one refinement: `funded` reads "Ready to settle", which
+ * is false while the earliest settlement time is still ahead, so that case says
+ * "Funded" instead. Judged by the API's `settlementAvailability`, never a
+ * browser clock.
+ */
+export function DvpStatusBadge({
+  status,
+  settlementAvailability,
+}: {
+  status: DvpTradeStatus;
+  settlementAvailability: DvpSettlementAvailability | null;
+}) {
   const t = useTranslations();
+  if (status === "funded" && settlementAvailability === "too_early") {
+    return <Badge variant="info">{t("DashboardMarkets.dvp.statusFundedTooEarly")}</Badge>;
+  }
   return (
     <Badge variant={STATUS_VARIANT[status]}>
       {t(`DashboardMarkets.dvp.status.${status}` as never)}

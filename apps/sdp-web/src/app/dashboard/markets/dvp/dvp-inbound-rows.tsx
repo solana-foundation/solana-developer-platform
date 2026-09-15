@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
@@ -56,15 +57,19 @@ function InboundLegCell({ leg, yours }: { leg: DvpInboundLeg; yours: boolean }) 
 function InboundFundAction({
   frozen,
   side,
+  symbol,
   tradeId,
 }: {
   frozen: boolean;
   /** The leg the custody lookup made this caller's. */
   side: "a" | "b";
+  /** That leg's token symbol, so a refusal names the token. */
+  symbol: string | null;
   tradeId: string;
 }) {
   const t = useTranslations();
-  const { act, pending } = useDvpTradeActions(tradeId);
+  const cluster = useSolanaCluster();
+  const { act, pending } = useDvpTradeActions(tradeId, cluster);
 
   return (
     <span className="relative z-10 flex flex-col items-end gap-1">
@@ -72,7 +77,7 @@ function InboundFundAction({
         // A transfer into a frozen escrow bounces, so offering to send one is
         // offering to waste a signature and a fee.
         disabled={frozen || pending.has(`fund:${side}`)}
-        onClick={() => act("fund", { side })}
+        onClick={() => act("fund", { side, symbol })}
         size="sm"
         type="button"
         variant="secondary"
@@ -146,6 +151,7 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
             <InboundFundAction
               frozen={yours.frozen === true}
               side={trade.yourSide}
+              symbol={yours.symbol}
               tradeId={trade.id}
             />
           )}

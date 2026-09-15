@@ -26,6 +26,7 @@ import {
   custodyWalletsResponseSchema,
   deleteWalletResponseSchema,
   dvpCloseResponseSchema,
+  dvpLegActionResponseSchema,
   dvpTradeResponseSchema,
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
@@ -142,6 +143,7 @@ export const listAssetProfilesResponse = successResponseSchema(listAssetProfiles
 
 export const dvpTradeResponse = successResponseSchema(dvpTradeResponseSchema);
 export const dvpCloseResponse = successResponseSchema(dvpCloseResponseSchema);
+export const dvpLegActionResponse = successResponseSchema(dvpLegActionResponseSchema);
 export const listDvpTradesResponse = successResponseSchema(listDvpTradesResponseSchema);
 export const listDvpInboundTradesResponse = successResponseSchema(
   listDvpInboundTradesResponseSchema
