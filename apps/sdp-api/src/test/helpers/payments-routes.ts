@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -9,9 +8,7 @@ import {
   createNoopSigner,
   getSignatureFromTransaction,
   getTransactionDecoder,
-  getTransactionEncoder,
   type Signature,
-  type SignatureBytes,
   SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
@@ -25,6 +22,7 @@ import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -103,7 +101,7 @@ export const TEST_API_KEY = {
 export const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
 
 export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
-  signerAddress: address(TEST_KORA_FEE_PAYER),
+  signerAddress: TEST_MOCK_FEE_PAYER,
   maxAllowedLamports: 0n,
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
@@ -132,20 +130,6 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
     unitsConsumed: null,
     ...(cause === undefined ? {} : { cause }),
   });
-}
-
-export function fullySignTestTransaction(transactionBytes: Uint8Array): Uint8Array {
-  const transaction = getTransactionDecoder().decode(transactionBytes);
-  const signatureSeed = createHash("sha512")
-    .update(new Uint8Array(transaction.messageBytes))
-    .digest();
-  const signatures = Object.fromEntries(
-    Object.entries(transaction.signatures).map(([signer, signature], index) => [
-      signer,
-      signature ?? (new Uint8Array(signatureSeed.map((byte) => byte ^ index)) as SignatureBytes),
-    ])
-  ) as typeof transaction.signatures;
-  return new Uint8Array(getTransactionEncoder().encode({ ...transaction, signatures }));
 }
 
 const TEST_CACHED_API_KEY: CachedApiKey = {
@@ -598,10 +582,10 @@ export function installPaymentsRouteTestHooks(): void {
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
     createFeePaymentAdapterMock.mockReturnValue({
       providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
       getSponsorshipConfiguration: vi.fn().mockResolvedValue({
         ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: address("7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv"),
+        signerAddress: TEST_MOCK_FEE_PAYER,
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi

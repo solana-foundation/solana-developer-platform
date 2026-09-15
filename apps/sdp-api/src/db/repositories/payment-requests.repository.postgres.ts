@@ -227,7 +227,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              SET sponsored_tx_signed = ?, updated_at = sdp_iso_now()
            WHERE id = ?
              AND sponsored_tx_account = ?
-             AND sponsored_tx_unsigned = ?`
+             AND sponsored_tx_unsigned = ?
+             AND sponsored_tx_signed IS NULL`
         )
         .bind(
           params.signedTransaction,
