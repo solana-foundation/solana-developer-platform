@@ -1,6 +1,15 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import { type EarnProviderId, type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import {
+  type EarnProviderId,
+  type EarnStrategy,
+  SOLANA_CLUSTER_LABELS,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import {
+  type EarnVaultDepositAvailability,
+  earnVaultDepositOnlyEnvironment,
+} from "./earn-surfacing";
 
 /**
  * Pure display formatters shared by every Earn surface.
@@ -147,4 +156,33 @@ export function earnStrategyLiquidityLabel(
   return days === 1
     ? t("DashboardMarkets.liquidity.delayedDay")
     : t("DashboardMarkets.liquidity.delayedDays", { days });
+}
+
+/**
+ * Label keys per availability verdict, plus `production_only`: the
+ * `environment_unavailable` verdict is about the CURRENT project, so the label
+ * names the other side. Providers that deposit only in production (Jupiter
+ * Lend, Ondo) read "Production only"; the sandbox-era providers keep
+ * "Sandbox only".
+ */
+export type EarnDepositAvailabilityLabels = Readonly<
+  Record<EarnVaultDepositAvailability | "production_only", MessageKey>
+>;
+
+export function earnDepositAvailabilityLabel(
+  availability: EarnVaultDepositAvailability,
+  labels: EarnDepositAvailabilityLabels,
+  strategy: Pick<EarnStrategy, "hostCluster" | "provider">,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): string {
+  if (availability === "cluster_unavailable") {
+    return t(labels.cluster_unavailable, { cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster] });
+  }
+  if (
+    availability === "environment_unavailable" &&
+    earnVaultDepositOnlyEnvironment(strategy.provider) === "production"
+  ) {
+    return t(labels.production_only);
+  }
+  return t(labels[availability]);
 }

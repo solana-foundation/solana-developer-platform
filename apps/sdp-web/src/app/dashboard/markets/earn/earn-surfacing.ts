@@ -95,6 +95,19 @@ export function earnVaultDepositAvailability(
   return providerAccess[provider]?.enabled === true ? "available" : "provider_unavailable";
 }
 
+/**
+ * The ONE environment whose projects may open a deposit with this provider, or
+ * `undefined` when neither or both may. "environment_unavailable" is a verdict
+ * about the current project; this names the other side so a label can say
+ * "Production only" for Jupiter and Ondo instead of the sandbox-era default.
+ */
+export function earnVaultDepositOnlyEnvironment(provider: string): SdpEnvironment | undefined {
+  const sandbox = isVaultDirectDepositEnabled("sandbox", provider);
+  const production = isVaultDirectDepositEnabled("production", provider);
+  if (sandbox === production) return undefined;
+  return sandbox ? "sandbox" : "production";
+}
+
 export function isEarnVaultDepositAvailable(
   strategy: EarnStrategy,
   environment: SdpEnvironment,

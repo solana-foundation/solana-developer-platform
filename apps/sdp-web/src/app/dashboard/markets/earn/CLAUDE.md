@@ -89,7 +89,13 @@ program create still sends the body `requestId` form.
 - `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
   configuration surface with a strategy dropdown, the selected strategy ID,
   live APY and liquidity, and code that updates in place. The legacy
-  `/integrate` deep link renders the same surface for bookmarked strategy URLs.
+  `/integrate` deep link renders the same surface for bookmarked strategy URLs
+  (`?strategy=` only; the former `?cluster=` toggle is gone). No network
+  toggle: sandbox reads both shelves (`useIntegrationCatalogue`) and lists the
+  devnet rows first, then the mirrored mainnet rows disabled as "Mainnet only",
+  the same posture as the Treasury table. There is no mainnet "preview" mode
+  in the guide any more: a mainnet deep link in sandbox is refused as a
+  network mismatch.
   The guide covers the sectioned **server-side** EXTERNAL-WALLET flow —
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
@@ -124,8 +130,10 @@ program create still sends the body `requestId` form.
   configuration and integration-guide shapes. The shell's navigation-loading
   resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
   same route-specific skeleton used by its `loading.tsx` boundary.
-- The portfolio's zero-position state is the onboarding card. The removed UI
-  builder persisted the only former configuration state, so there is no honest
+- The portfolio's zero-position state is the onboarding card alone: the three
+  metric tiles are hidden at zero positions because all-zero tiles with empty
+  charts read as data rather than "nothing yet". The removed UI builder
+  persisted the only former configuration state, so there is no honest
   "configured but awaiting a deposit" distinction to infer from the live
   position summary.
 
@@ -133,8 +141,11 @@ program create still sends the body `requestId` form.
 
 - `earn-surfacing.ts` — the availability brain. `SURFACED_CUSTODIAL_EARN_PROVIDERS`,
   `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`, `EARN_PROGRAM_CREATION_ENABLED`,
-  `EARN_PROGRAM_CREATE_PROVIDER` and `earnVaultDepositAvailability`, all DERIVED
-  from `@sdp/types` — **no provider id is hand-set here**. Carries no
+  `EARN_PROGRAM_CREATE_PROVIDER`, `earnVaultDepositAvailability` and
+  `earnVaultDepositOnlyEnvironment` (which side an `environment_unavailable`
+  verdict points at, so Jupiter/Ondo read "Production only" rather than the
+  sandbox-era "Sandbox only"), all DERIVED from `@sdp/types` — **no provider id
+  is hand-set here**. Carries no
   `"use client"` directive, on purpose (see "The client/server boundary bug").
 - `earn-provider-access.server.ts` — `loadEarnProviderAccess()`: reads
   `/v1/onboarding/status` then provider availability for that organization.
@@ -144,9 +155,13 @@ program create still sends the body `requestId` form.
 - `earn-integration-guide.tsx` — owns strategy selection and re-checks
   availability rather than trusting a deep link. Unavailable strategies stay
   visible but disabled. The selected strategy's ID, APY, liquidity, provider,
-  and availability remain beside four freely navigable reference tabs (client
-  setup, deposits, reads, withdraw). The snippets remain server-only and say so,
-  because the module they document carries a secret API key.
+  and availability sit in one plain line under the dropdown ("Kamino · Instant
+  liquidity · 6.2% APY", APY omitted when unknown) with the ID as its own
+  copyable code block. A short intro paragraph explains the loop, then four
+  freely navigable reference tabs (client setup, deposits, reads, withdraw).
+  "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
+  just the active tab. The snippets remain server-only and the page says so in
+  a warning callout, because the module they document carries a secret API key.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is
