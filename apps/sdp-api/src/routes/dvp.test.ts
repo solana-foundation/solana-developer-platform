@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, Permission } from "@sdp/types";
+import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
@@ -1482,6 +1483,69 @@ describe("DvP routes", () => {
 
     beforeEach(async () => {
       await seedCustodyWallets();
+    });
+
+    it("keeps database reads constant for 50 trades with 100 distinct party addresses", async () => {
+      await seedPartyOrg();
+      const db = getDb(env);
+      const reads = vi.spyOn(db, "prepare");
+      const expectedTrades = [];
+      let singleTradeReads = 0;
+
+      for (let index = 0; index < 50; index += 1) {
+        const userA = getAddressDecoder().decode(new Uint8Array(32).fill(index * 2 + 1));
+        const userB = getAddressDecoder().decode(new Uint8Array(32).fill(index * 2 + 2));
+        const walletA = `cwlt_inbound_${index}_a`;
+        const walletB = `cwlt_inbound_${index}_b`;
+        await db.batch(
+          [
+            { id: walletA, publicKey: userA },
+            { id: walletB, publicKey: userB },
+          ].map((wallet) =>
+            db
+              .prepare(`INSERT INTO custody_wallets
+                (id, custody_config_id, wallet_id, public_key, status)
+                VALUES (?, 'cust_dvp_party', ?, ?, 'active')`)
+              .bind(wallet.id, wallet.id, wallet.publicKey)
+          )
+        );
+        const tradeId = `dvp_inbound_${index}`;
+        await seedTradeFor({ tradeId, swapDvp: userA, userA, userB });
+        expectedTrades.push({
+          id: tradeId,
+          legs: {
+            a: { party: { actionWallet: { id: walletA } } },
+            b: { party: { actionWallet: { id: walletB } } },
+          },
+        });
+
+        if (index === 0) {
+          reads.mockClear();
+          const res = await app.request(
+            "/v1/dvp/trades/inbound",
+            { headers: partyAuthHeaders() },
+            env
+          );
+          singleTradeReads = reads.mock.calls.length;
+          expect(res.status).toBe(200);
+          expect(await res.json()).toMatchObject({ data: { trades: expectedTrades } });
+          expect(singleTradeReads).toBeGreaterThan(0);
+        }
+      }
+
+      reads.mockClear();
+      const res = await app.request("/v1/dvp/trades/inbound", { headers: partyAuthHeaders() }, env);
+      const fullPageReads = reads.mock.calls.length;
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.trades).toHaveLength(50);
+      for (const expected of expectedTrades) {
+        expect(
+          body.data.trades.find((trade: { id: string }) => trade.id === expected.id)
+        ).toMatchObject(expected);
+      }
+      // Auth caches can reduce the second request's reads; more trades must not add any.
+      expect(fullPageReads).toBeLessThanOrEqual(singleTradeReads);
     });
 
     it.each([false, true])(

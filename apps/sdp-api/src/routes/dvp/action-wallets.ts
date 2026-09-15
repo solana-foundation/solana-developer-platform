@@ -2,7 +2,6 @@ import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { custodyWalletForParty } from "@/services/dvp/custody-party";
 import type { DvpCallerWallet, DvpInboundRequest } from "@/services/dvp/inbound";
 import type { Env } from "@/types/env";
 
@@ -33,7 +32,8 @@ export async function readDvpActionWallets(
 
   const readable = getAllowedApiKeyCustodyWalletIdsForPermissions(request.auth, ["wallets:read"]);
   const writable = getAllowedApiKeyCustodyWalletIdsForPermissions(request.auth, ["payments:write"]);
-  const wallets = await new CustodyRuntimeTargets(getDb(env), env, new Map()).listWallets({
+  const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+  const wallets = await targets.listWallets({
     organizationId: request.organizationId,
     projectId: request.projectId,
     includeAllProviders: true,
@@ -44,18 +44,23 @@ export async function readDvpActionWallets(
       .map((wallet) => [wallet.id, wallet])
   );
 
-  await Promise.all(
-    addresses.map(async (key) => {
-      const id = await custodyWalletForParty(env, request, address(key), writable);
-      const wallet = id === null ? undefined : visible.get(id);
-      if (wallet?.publicKey === key) {
-        result.set(key, {
-          id: wallet.id,
-          name: wallet.label,
-          isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
-        });
-      }
-    })
-  );
+  const candidates = await targets.findOperationalWalletIdsByAddresses({
+    organizationId: request.organizationId,
+    projectId: request.projectId,
+    publicKeys: addresses.map((key) => address(key)),
+  });
+  for (const key of addresses) {
+    // Choose by write scope before applying read visibility: a hidden or
+    // restricted first choice must never fall back to another signer.
+    const id = candidates.get(key)?.find((id) => writable === null || writable.includes(id));
+    const wallet = id === undefined ? undefined : visible.get(id);
+    if (wallet?.publicKey === key) {
+      result.set(key, {
+        id: wallet.id,
+        name: wallet.label,
+        isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
+      });
+    }
+  }
   return result;
 }
