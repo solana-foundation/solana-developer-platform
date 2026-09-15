@@ -209,7 +209,11 @@ describe("reconcileDvpTrades", () => {
 
   it("records the observed balances and advances the status", async () => {
     await seedTrade("dvp_funding", "created");
-    readDvpTradeObservation.mockResolvedValue(observation({ legA: leg(1000n), legB: leg(2000n) }));
+    // Pinned, not read from the wall clock again after the sweep: a second can tick between the two.
+    const clusterUnixTimestamp = BigInt(Math.floor(Date.now() / 1000));
+    readDvpTradeObservation.mockResolvedValue(
+      observation({ legA: leg(1000n), legB: leg(2000n), clusterUnixTimestamp })
+    );
 
     await reconcileDvpTrades(env);
 
@@ -222,7 +226,7 @@ describe("reconcileDvpTrades", () => {
     // The observation timestamp is part of the answer: a status with no
     // recorded reading time is a claim with no provenance.
     expect(row?.observed_at).toBeTruthy();
-    expect(row?.observed_cluster_timestamp).toBe(String(Math.floor(Date.now() / 1000)));
+    expect(row?.observed_cluster_timestamp).toBe(clusterUnixTimestamp.toString());
   });
 
   // The program judges expiry by its own Clock. A cluster clock already past
