@@ -16,10 +16,20 @@ import { assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import {
+  createPostgresDvpLegTransferRepository,
+  type DvpLegTransferRepository,
+} from "@/db/repositories/dvp-leg-transfer.repository";
 import { isMarketsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";
 import { classifyDvpFundingReceipt } from "@/services/dvp/funding-receipt";
+import {
+  createDvpEscrowHistoryReader,
+  type DvpEscrowHistoryReader,
+  type DvpLegTransferBudget,
+  syncDvpLegTransfers,
+} from "@/services/dvp/leg-transfers";
 import { closeIsKnown, deriveDvpTradeState } from "@/services/dvp/observe";
 import { readDvpTradeObservation } from "@/services/dvp/read-chain";
 import type { Env } from "@/types/env";
@@ -29,6 +39,16 @@ import type { Env } from "@/types/env";
  * vanished trades with unknown closes can additionally scan bounded history.
  */
 const BATCH_SIZE = 64;
+/**
+ * Transactions the escrow ledger may read in one sweep, across every leg. A
+ * leg left unread carries on from its read position next sweep.
+ */
+const TRANSFER_TRANSACTION_BUDGET = 128;
+/**
+ * A leg whose trade looks unchanged is still re-read this often: a deposit and
+ * a reclaim between two sweeps leave the balance where it was.
+ */
+const TRANSFER_RESCAN_MS = 5 * 60_000;
 const CLOSE_RESOLUTION_MAX_BACKOFF_MINUTES = 360;
 const MILLISECONDS_PER_MINUTE = 60_000;
 
@@ -155,10 +175,15 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
   // Sequential on purpose. A batch of 64 fanned out with Promise.all would put
   // 192 account reads on the endpoint from one tick; the batch is already
   // bounded and pacing is the point. Same shape as every other job here.
+  const ledger: TransferLedger = {
+    transfers: createPostgresDvpLegTransferRepository(getDb(env)),
+    reader: createDvpEscrowHistoryReader(rpc),
+    budget: { remaining: TRANSFER_TRANSACTION_BUDGET },
+  };
   for (const trade of trades) {
     try {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing protects the RPC endpoint from a 64-way fanout.
-      await reconcileTrade(repository, rpc, trade, blockHeight);
+      await reconcileTrade(repository, ledger, rpc, trade, blockHeight);
     } catch (error) {
       // One unreadable trade must not end the sweep. The row keeps its status
       // and its stale `observed_at`, so the next tick picks it up first.
@@ -170,8 +195,61 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
   }
 }
 
+/** What the escrow transfer ledger needs for one sweep. */
+interface TransferLedger {
+  transfers: DvpLegTransferRepository;
+  reader: DvpEscrowHistoryReader;
+  /** Shared by every leg in the sweep. */
+  budget: DvpLegTransferBudget;
+}
+
+/**
+ * Brings both legs' transfer ledgers up to date when they may have moved.
+ *
+ * Never fatal to the trade's reconciliation: the ledger is a record of what the
+ * observation already shows, and a leg that fails to read is retried next sweep.
+ */
+async function syncTradeTransfers(
+  ledger: TransferLedger,
+  trade: DvpTradeRow,
+  changed: boolean,
+  now: number
+): Promise<void> {
+  try {
+    const scans = await ledger.transfers.listScans(trade.id);
+    for (const leg of [
+      { side: "a", escrow: trade.escrowA, mint: trade.mintA },
+      { side: "b", escrow: trade.escrowB, mint: trade.mintB },
+    ] as const) {
+      const scan = scans.find((entry) => entry.side === leg.side) ?? null;
+      const due =
+        changed ||
+        scan === null ||
+        scan.scannedAt === null ||
+        Date.parse(scan.scannedAt) <= now - TRANSFER_RESCAN_MS;
+      if (!due || ledger.budget.remaining <= 0) {
+        continue;
+      }
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- two legs, paced like every other read in the sweep.
+      await syncDvpLegTransfers(
+        ledger.reader,
+        ledger.transfers,
+        { tradeId: trade.id, createdAt: trade.createdAt, ...leg },
+        scan,
+        ledger.budget
+      );
+    }
+  } catch (error) {
+    getLogger().error(
+      { tradeId: trade.id, error },
+      "dvp reconcile: leg transfers could not be read; the next sweep asks again"
+    );
+  }
+}
+
 async function reconcileTrade(
   repository: ReturnType<typeof createDvpTradeRepository>,
+  ledger: TransferLedger,
   rpc: ReturnType<typeof createRpc>,
   trade: DvpTradeRow,
   blockHeight: bigint
@@ -232,14 +310,27 @@ async function reconcileTrade(
 
   const derived = deriveDvpTradeState(observation, trade, now);
 
+  // Before the compare-and-swap below, which can lose to a fresher writer: the
+  // escrow's history is the chain's, whoever recorded the status.
+  const escrowAAmount = observation.legA.exists ? observation.legA.amount.toString() : null;
+  const escrowBAmount = observation.legB.exists ? observation.legB.amount.toString() : null;
+  await syncTradeTransfers(
+    ledger,
+    trade,
+    derived.status !== trade.status ||
+      escrowAAmount !== trade.escrowAAmount ||
+      escrowBAmount !== trade.escrowBAmount,
+    now
+  );
+
   const updated = await repository.recordObservation({
     id: trade.id,
     // The status this derivation was computed from. A row something better
     // informed has already advanced makes this match nothing.
     expectedStatus: trade.status,
     status: derived.status,
-    escrowAAmount: observation.legA.exists ? observation.legA.amount.toString() : null,
-    escrowBAmount: observation.legB.exists ? observation.legB.amount.toString() : null,
+    escrowAAmount,
+    escrowBAmount,
     escrowAFrozen: observation.legA.exists ? observation.legA.frozen : null,
     escrowBFrozen: observation.legB.exists ? observation.legB.frozen : null,
     observedAt: new Date().toISOString(),

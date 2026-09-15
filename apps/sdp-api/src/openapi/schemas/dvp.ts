@@ -116,6 +116,32 @@ export const dvpTradePartySchema = z
   })
   .openapi({ description: "One party of the trade, as the caller may see it." });
 
+const dvpLegTransferSchema = z
+  .object({
+    signature: z.string().openapi({ description: "The transaction that moved the tokens." }),
+    direction: z.enum(["in", "out"]).openapi({
+      description: "Into the escrow or out of it.",
+    }),
+    amount: z.string().openapi({
+      description: "Base units moved, always positive, as a decimal string (u64).",
+      example: "1000000",
+    }),
+    slot: z.string().openapi({ description: "Slot the transaction landed in, as a string (u64)." }),
+    blockTime: isoDateTimeSchema.nullable().openapi({
+      description: "When the block was produced, or null when the cluster recorded no time.",
+    }),
+    feePayer: z.string().openapi({ description: "The account that paid the transaction's fee." }),
+  })
+  .openapi({
+    description:
+      "One token movement in or out of a leg's escrow, read off the chain from the escrow's balance before and after the transaction. Deposits from any address, settlement, cancellation and reclaims all appear here, whoever sent them.",
+  });
+
+const dvpLegTransfersSchema = z.array(dvpLegTransferSchema).openapi({
+  description:
+    "Every recorded token movement in and out of this leg's escrow, oldest first. Filled by a background read of the escrow's history, so a transaction appears shortly after it confirms, not at once. A confirmed transaction the cluster later drops is removed. History before the trade was created is not read.",
+});
+
 const dvpTradeLegSchema = z
   .object({
     party: dvpTradePartySchema,
@@ -168,9 +194,10 @@ const dvpTradeLegSchema = z
       }),
     fundingSignature: z.string().nullable().openapi({
       description:
-        "The transfer the calling organization sent into this leg's escrow, once it was broadcast. Null while that transfer is still being sent, for a leg funded by anyone else, and for an organization that did not fund it. Not a record of every deposit: the escrow accepts transfers from any address.",
+        "The transfer the calling organization sent into this leg's escrow, once it was broadcast. Null while that transfer is still being sent, for a leg funded by anyone else, and for an organization that did not fund it. Not a record of every deposit: the escrow accepts transfers from any address, and `transfers` lists them all.",
     }),
     outcome: dvpLegOutcomeSchema,
+    transfers: dvpLegTransfersSchema,
   })
   .openapi({ description: "One leg of the trade." });
 
@@ -268,6 +295,7 @@ const dvpInboundLegSchema = z
         "Whether the escrow account was last observed frozen. Null before the reconciler looked, which is not the same as thawed.",
     }),
     outcome: dvpLegOutcomeSchema,
+    transfers: dvpLegTransfersSchema,
   })
   .openapi({ description: "One leg of an inbound trade." });
 

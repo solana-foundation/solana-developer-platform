@@ -41,6 +41,7 @@ import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
+  type DvpLegTransfer,
   type DvpPartyRef,
   type DvpTrade,
   type DvpTradeKind,
@@ -50,6 +51,7 @@ import {
   isDvpPartyView,
   isDvpTradeClosed,
   legFundingRatio,
+  legTransfers,
   overFundedLegs,
 } from "./dvp-trade";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
@@ -109,10 +111,6 @@ function CopyableAddress({
       <span className="sr-only">{label}</span>
     </button>
   );
-}
-
-function shortenSignature(signature: string): string {
-  return `${signature.slice(0, 8)}…${signature.slice(-8)}`;
 }
 
 /**
@@ -326,6 +324,60 @@ function LegFooterFrame({
   );
 }
 
+/**
+ * Every movement in and out of the escrow, oldest first: who paid in, and what
+ * settle, cancel or a reclaim took out, whoever sent it. Each row links its
+ * transaction.
+ */
+function LegTransferList({
+  cluster,
+  leg,
+  transfers,
+}: {
+  cluster: SolanaCluster;
+  leg: DvpTradeLeg;
+  transfers: readonly DvpLegTransfer[];
+}) {
+  const t = useTranslations();
+  return (
+    <ul className="flex flex-col">
+      {transfers.map((transfer) => {
+        const amount = `${formatLegAmount(transfer.amount, leg.decimals)}${leg.symbol ? ` ${leg.symbol}` : ""}`;
+        return (
+          <li
+            className="flex flex-wrap items-center gap-x-3 py-1 text-secondary text-xs"
+            key={transfer.signature}
+          >
+            {/* Wraps rather than truncates: the amount is the point of the row. */}
+            <span>
+              {t(
+                transfer.direction === "in"
+                  ? "DashboardMarkets.dvp.transferIn"
+                  : "DashboardMarkets.dvp.transferOut",
+                { amount }
+              )}
+            </span>
+            <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 tabular-nums">
+              {transfer.blockTime === null ? null : (
+                <span suppressHydrationWarning>{formatTimestamp(transfer.blockTime, t)}</span>
+              )}
+              <a
+                aria-label={t("DashboardMarkets.dvp.viewTransaction")}
+                className="text-secondary hover:text-primary"
+                href={explorerTxUrl(transfer.signature, cluster)}
+                rel="noreferrer noopener"
+                target="_blank"
+              >
+                <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
+              </a>
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function LegFundingFooter({
   cluster,
   leg,
@@ -339,6 +391,11 @@ function LegFundingFooter({
   reclaim: ReactNode | undefined;
 }) {
   const t = useTranslations();
+  const transfers = legTransfers(leg);
+  const history =
+    transfers !== null && transfers.length > 0 ? (
+      <LegTransferList cluster={cluster} leg={leg} transfers={transfers} />
+    ) : null;
 
   if (receiving) {
     return (
@@ -359,30 +416,15 @@ function LegFundingFooter({
             <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
           </a>
         </span>
+        {history}
       </LegFooterFrame>
     );
   }
 
-  if (leg.fundingSignature) {
+  if (history !== null) {
     return (
-      <LegFooterFrame caption={t("DashboardMarkets.dvp.txFundingSent")} trailing={reclaim}>
-        <span className="inline-flex items-center gap-1.5">
-          <CopyableAddress
-            address={leg.fundingSignature}
-            className="px-0 hover:bg-transparent"
-            display={shortenSignature(leg.fundingSignature)}
-            label={t("DashboardMarkets.dvp.txFundingSent")}
-          />
-          <a
-            aria-label={t("DashboardMarkets.dvp.txFundingSent")}
-            className="text-secondary hover:text-primary"
-            href={explorerTxUrl(leg.fundingSignature, cluster)}
-            rel="noreferrer noopener"
-            target="_blank"
-          >
-            <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
-          </a>
-        </span>
+      <LegFooterFrame caption={t("DashboardMarkets.dvp.transfersLabel")} trailing={reclaim}>
+        {history}
       </LegFooterFrame>
     );
   }

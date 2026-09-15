@@ -60,6 +60,23 @@ export interface DvpPartyRef {
   actionWallet?: DvpActionWallet | null;
 }
 
+/**
+ * One token movement in or out of a leg's escrow, read off the chain. Parsed at
+ * the card rather than trusted: the dashboard and the API deploy separately.
+ */
+export const dvpLegTransferSchema = z.object({
+  signature: z.string().min(1),
+  direction: z.enum(["in", "out"]),
+  /** Base units moved, always positive. */
+  amount: z.string().regex(/^[1-9]\d*$/),
+  slot: z.string(),
+  /** When the block was produced, or null when the cluster recorded no time. */
+  blockTime: z.string().nullable(),
+  feePayer: z.string(),
+});
+
+export type DvpLegTransfer = z.infer<typeof dvpLegTransferSchema>;
+
 export interface DvpTradeLeg {
   /** The mint's decimals, or null when unknown. Never guessed. */
   decimals: number | null;
@@ -82,6 +99,17 @@ export interface DvpTradeLeg {
    */
   fundingSignature: string | null;
   outcome: DvpLegOutcome;
+  /** Every recorded movement in and out of the escrow, oldest first. Unvalidated wire data. */
+  transfers: unknown;
+}
+
+/**
+ * A leg's transfers, or null when the answer cannot be read. Null is not "no
+ * transfers": the card shows none rather than claiming nothing moved.
+ */
+export function legTransfers(leg: DvpTradeLeg): DvpLegTransfer[] | null {
+  const parsed = z.array(dvpLegTransferSchema).safeParse(leg.transfers);
+  return parsed.success ? parsed.data : null;
 }
 
 export interface DvpTrade {
