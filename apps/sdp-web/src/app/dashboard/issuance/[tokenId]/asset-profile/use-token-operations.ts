@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
+import { buildDraftDeployRequest } from "../../draft-permissions";
 import type { FundManagementModalAction } from "../token-fund-management-section";
 import type {
   ActionExecutionInput,
@@ -85,6 +86,7 @@ export function useTokenOperations({
     useState<FundManagementModalAction | null>(null);
   const [deployWalletDialogOpen, setDeployWalletDialogOpen] = useState(false);
   const [deployCustodyWalletId, setDeployCustodyWalletId] = useState("");
+  const [deployAuthorities, setDeployAuthorities] = useState<Record<string, string>>();
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
   const [seizeForm, setSeizeForm] = useState(createInitialSeizeForm);
@@ -324,16 +326,13 @@ export function useTokenOperations({
     }
   };
 
-  const submitDeploy = (signingCustodyWalletId: string) => {
+  const submitDeploy = (signingCustodyWalletId: string, assignments?: Record<string, string>) => {
     void runActionImmediately(
       {
         label: t("DashboardIssuance.management.deployToken"),
         method: "POST",
         path: `${tokenBasePath}/deploy`,
-        body: {
-          feePayment: "sponsored",
-          signingCustodyWalletId,
-        },
+        body: buildDraftDeployRequest(signingCustodyWalletId, assignments),
       },
       {
         submitToast: t("DashboardIssuance.management.submittingDeploy"),
@@ -342,9 +341,10 @@ export function useTokenOperations({
     );
   };
 
-  const deployToken = () => {
-    if (token.signingCustodyWalletId) {
-      submitDeploy(token.signingCustodyWalletId);
+  const deployToken = (assignments?: Record<string, string>) => {
+    const signingCustodyWalletId = assignments?.["mint-authority"] || token.signingCustodyWalletId;
+    if (signingCustodyWalletId) {
+      submitDeploy(signingCustodyWalletId, assignments);
       return;
     }
 
@@ -356,6 +356,7 @@ export function useTokenOperations({
     setDeployCustodyWalletId(
       deploySignerSelection.wallets.length === 1 ? deploySignerSelection.wallets[0].id : ""
     );
+    setDeployAuthorities(assignments);
     setDeployWalletDialogOpen(true);
   };
 
@@ -364,7 +365,7 @@ export function useTokenOperations({
       return;
     }
     setDeployWalletDialogOpen(false);
-    submitDeploy(deployCustodyWalletId);
+    submitDeploy(deployCustodyWalletId, deployAuthorities);
   };
 
   const handleRefreshSupply = () => {
