@@ -1,5 +1,6 @@
 "use client";
 
+import { decimalScale } from "@sdp/solana/amount";
 import { useEffect, useRef, useState } from "react";
 
 /**
@@ -23,8 +24,16 @@ function atomsToDecimalString(atoms: bigint, decimals: number): string {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
-/** Inverse of `atomsToDecimalString` for a CANONICAL value at ≤ `decimals` scale. */
-function decimalStringToAtoms(canonical: string, decimals: number): bigint {
+/**
+ * Inverse of `atomsToDecimalString` for a CANONICAL value at ≤ `decimals`
+ * scale. Answers `null` for a value FINER than that scale: a quote with more
+ * fractional digits than the mint has atoms is a malformed server response,
+ * and `padEnd` would silently over-count its atoms ("1.234" at scale 2 reads
+ * as 1234). Callers treat `null` as unusable — the same fail-closed posture as
+ * an unavailable quote.
+ */
+function decimalStringToAtoms(canonical: string, decimals: number): bigint | null {
+  if (decimalScale(canonical) > decimals) return null;
   const [whole, fraction = ""] = canonical.split(".");
   return BigInt((whole || "0") + fraction.padEnd(decimals, "0"));
 }
@@ -53,7 +62,8 @@ export function parseSlippageToleranceBps(value: string): number | null {
  * satisfiable protection at or below zero expected output, and clamping to one
  * atom would demand MORE than the vault expects to return — an order that can
  * only ever be refused, however often it is re-quoted. Callers block the
- * submission instead.
+ * submission instead. A quote FINER than the mint's own scale is unusable the
+ * same way: `null`, never a floor computed from a miscount.
  */
 export function floorForTolerance(
   quotedQuantity: string,
@@ -61,12 +71,16 @@ export function floorForTolerance(
   toleranceBps: number
 ): string | null {
   const atoms = decimalStringToAtoms(quotedQuantity, decimals);
-  if (atoms === 0n) return null;
+  if (atoms === null || atoms === 0n) return null;
   const floor = (atoms * BigInt(10_000 - toleranceBps)) / 10_000n;
   return atomsToDecimalString(floor > 0n ? floor : 1n, decimals);
 }
 
-/** True when the quote expects ZERO atoms out — nothing any floor could protect. */
+/**
+ * True when the quote expects ZERO atoms out — nothing any floor could protect.
+ * An over-scale (malformed) quote is not PROVABLY zero, so it answers `false`;
+ * the floor it derives is `null` and blocks the submission instead.
+ */
 export function isZeroQuote(quotedQuantity: string, decimals: number): boolean {
   return decimalStringToAtoms(quotedQuantity, decimals) === 0n;
 }

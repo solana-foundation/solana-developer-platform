@@ -17,6 +17,7 @@ import {
 import {
   floorForTolerance,
   isSlippageExceededRefusal,
+  isZeroQuote,
   parseSlippageToleranceBps,
   VAULT_QUOTE_DEBOUNCE_MS,
   VAULT_QUOTE_TTL_MS,
@@ -1063,6 +1064,25 @@ describe("slippage tolerance helpers", () => {
     // A ZERO quote has no satisfiable floor: one atom would demand MORE than
     // the vault expects to return. `null` tells the caller to block, not clamp.
     expect(floorForTolerance("0", 6, 10)).toBeNull();
+    // A quote FINER than the mint's scale is a malformed response — `padEnd`
+    // would silently over-count it — so there is no honest floor either.
+    expect(floorForTolerance("1.234", 2, 10)).toBeNull();
+    expect(floorForTolerance("0.0000001", 6, 10)).toBeNull();
+  });
+
+  it("answers fail-closed for an over-scale quote, and keeps valid zero reads exact", () => {
+    // "1.234" at scale 2 has more fractional digits than the mint has atoms:
+    // unusable, never a floor computed from a miscount.
+    expect(floorForTolerance("1.234", 2, 10)).toBeNull();
+    // A malformed read is not PROVABLY zero — `isZeroQuote` answers `false`,
+    // and the `null` floor above is what actually blocks the submission.
+    expect(isZeroQuote("0.001", 2)).toBe(false);
+    // Regression: canonical values at the mint scale keep their contracts.
+    expect(floorForTolerance("1.23", 2, 10)).toBe("1.22");
+    expect(isZeroQuote("0", 2)).toBe(true);
+    expect(isZeroQuote("0.00", 2)).toBe(true);
+    expect(isZeroQuote("0.01", 2)).toBe(false);
+    expect(isZeroQuote("0.000000", 6)).toBe(true);
   });
 
   it("recognizes the API's slippage refusal envelope and nothing else", () => {
