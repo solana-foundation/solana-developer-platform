@@ -62,6 +62,7 @@ function pendingRequest(
       ...operation,
     },
     policyEvaluation: null,
+    viewerIsRequester: false,
   };
 }
 
