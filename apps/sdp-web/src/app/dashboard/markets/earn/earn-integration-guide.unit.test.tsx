@@ -128,7 +128,7 @@ describe("EarnIntegrationGuide", () => {
       />
     );
 
-    expect(screen.getByText("Server code")).toBeTruthy();
+    expect(screen.getByText("2. Set up the server code")).toBeTruthy();
     expect(screen.getByText("Kamino · Instant liquidity · 6.2% APY")).toBeTruthy();
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
 
@@ -228,24 +228,47 @@ describe("EarnIntegrationGuide", () => {
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
   });
 
-  it("renders a mainnet vault as a sandbox preview with an explicit warning", async () => {
+  it("lists mainnet strategies disabled in sandbox, with no network toggle", async () => {
     const user = userEvent.setup();
     renderWithEnglish(
       <EarnIntegrationGuide
         earnHref="/dashboard/markets/embedded-yield"
         providerAccess={providerAccess}
-        strategyCluster="mainnet-beta"
         strategyId={mainnetStrategy.id}
       />
     );
 
+    // Sandbox reads both shelves and shows them as one list.
     expect(mocks.strategyClusters).toContain("mainnet-beta");
-    expect(screen.getAllByText("Kamino JLP Vault").length).toBeGreaterThan(0);
-    expect(screen.getByText("Mainnet vault preview")).toBeTruthy();
-    expect(screen.getByText(/Production project is required/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Client" }));
-    expect(screen.getByText(/"id": "earn_strategy_mainnet"/)).toBeTruthy();
-    expect(screen.getByText("earn_strategy_mainnet")).toBeTruthy();
+    expect(screen.queryByLabelText("Strategy network")).toBeNull();
+
+    // A mainnet deep link is refused, named as a network mismatch, and never
+    // rendered as code.
+    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.getByText(/different network from this project/)).toBeTruthy();
+    expect(screen.queryByText(/"id": "earn_strategy_mainnet"/)).toBeNull();
+
+    await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
+    const mainnetRow = await screen.findByRole("option", {
+      name: /Kamino JLP Vault.*Mainnet only/,
+    });
+    expect(mainnetRow.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      screen.getByRole("option", { name: /Kamino USDC Vault/ }).getAttribute("aria-disabled")
+    ).not.toBe("true");
+  });
+
+  it("does not let a mainnet deep link bypass the cluster check even with provider access", () => {
+    renderWithEnglish(
+      <EarnIntegrationGuide
+        earnHref="/dashboard/markets/embedded-yield"
+        providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
+        strategyId={mainnetStrategy.id}
+      />
+    );
+
+    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
+    expect(screen.queryByText(/"id": "earn_strategy_mainnet"/)).toBeNull();
   });
 
   it("generates quote-derived deposit and withdrawal floors for Veda", () => {
@@ -265,22 +288,6 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("minSharesOut");
     expect(code).toContain("minAmountOut");
     expect(code).toContain("slippageBps = 10");
-  });
-
-  it("does not let a mainnet deep link bypass provider access", () => {
-    renderWithEnglish(
-      <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
-        providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
-        strategyCluster="mainnet-beta"
-        strategyId={mainnetStrategy.id}
-      />
-    );
-
-    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.getByText(/provider is not enabled/)).toBeTruthy();
-    expect(screen.queryByText("Mainnet vault preview")).toBeNull();
-    expect(screen.queryByText(/"id": "earn_strategy_mainnet"/)).toBeNull();
   });
 
   it("defaults to the first available strategy without a separate selection step", () => {
@@ -365,7 +372,7 @@ describe("EarnIntegrationGuide", () => {
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/sandbox-only/)).toBeTruthy();
-    expect(screen.queryByText("Server code")).toBeNull();
+    expect(screen.queryByText("2. Set up the server code")).toBeNull();
   });
 
   it("names provider setup as the reason an otherwise live strategy cannot be integrated", () => {

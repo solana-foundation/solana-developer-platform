@@ -89,7 +89,13 @@ program create still sends the body `requestId` form.
 - `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
   configuration surface with a strategy dropdown, the selected strategy ID,
   live APY and liquidity, and code that updates in place. The legacy
-  `/integrate` deep link renders the same surface for bookmarked strategy URLs.
+  `/integrate` deep link renders the same surface for bookmarked strategy URLs
+  (`?strategy=` only; the former `?cluster=` toggle is gone). No network
+  toggle: sandbox reads both shelves (`useIntegrationCatalogue`) and lists the
+  devnet rows first, then the mirrored mainnet rows disabled as "Mainnet only",
+  the same posture as the Treasury table. There is no mainnet "preview" mode
+  in the guide any more: a mainnet deep link in sandbox is refused as a
+  network mismatch.
   The guide covers the sectioned **server-side** EXTERNAL-WALLET flow —
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet

@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type EarnStrategy,
-  type SdpEnvironment,
-  SOLANA_CLUSTER_LABELS,
-  SOLANA_CLUSTERS,
-  type SolanaCluster,
-} from "@sdp/types";
+import type { EarnStrategy, SdpEnvironment } from "@sdp/types";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
 import { ArrowLeftIcon, CheckIcon, CopyIcon, InfoIcon } from "lucide-react";
 import Link from "next/link";
@@ -15,7 +8,7 @@ import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { CodeBlock } from "@/components/ui/code-block";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -48,7 +41,6 @@ type EarnIntegrationGuideProps = {
   apiBaseUrl?: string | null;
   earnHref: string;
   providerAccess: EarnProviderAccess | null;
-  strategyCluster?: SolanaCluster;
   strategyId?: string;
 };
 
@@ -100,6 +92,8 @@ function unavailableDescriptionKey(
   provider: string
 ): MessageKey {
   switch (availability) {
+    case "cluster_unavailable":
+      return "DashboardMarkets.earnProgram.unavailableClusterDescription";
     case "environment_unavailable":
       return earnVaultDepositOnlyEnvironment(provider) === "production"
         ? "DashboardMarkets.earnProgram.unavailableEnvironmentProductionDescription"
@@ -113,33 +107,27 @@ function unavailableDescriptionKey(
   }
 }
 
-function strategyOptionState(
-  strategy: EarnStrategy,
-  sdpEnvironment: SdpEnvironment,
-  providerAccess: EarnProviderAccess | null,
-  previewingMainnet: boolean
-): { availability: EarnVaultDepositAvailability; selectable: boolean } {
-  const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
-  const isMainnetPreview =
-    previewingMainnet &&
-    availability === "cluster_unavailable" &&
-    strategy.hostCluster === "mainnet-beta";
+/**
+ * The one list the picker shows. Production lists its own (mainnet) shelf.
+ * Sandbox lists the fundable devnet shelf first, then the mirrored mainnet
+ * catalogue: those rows stay visible but disabled ("Mainnet only"), the same
+ * posture as the Treasury strategy table, so nothing is hidden behind a toggle.
+ * Each shelf renders as soon as it lands; a failed mainnet read only drops its
+ * own rows.
+ */
+function useIntegrationCatalogue(sdpEnvironment: SdpEnvironment) {
+  const sandbox = sdpEnvironment === "sandbox";
+  const shelf = useEarnStrategies();
+  const mainnet = useEarnStrategies({ cluster: sandbox ? "mainnet-beta" : undefined });
+  if (!sandbox) return shelf;
 
-  if (!isMainnetPreview) {
-    return { availability, selectable: availability === "available" };
-  }
-
-  // Preview ignores only the cluster mismatch. Re-run the canonical checks so
-  // strategy status, deposit style, environment, and provider access still fail closed.
-  const previewAvailability = earnVaultDepositAvailability(
-    { ...strategy, fundable: true },
-    sdpEnvironment,
-    providerAccess
-  );
-
+  const devnetRows = shelf.strategies ?? [];
+  const mainnetRows = mainnet.error ? [] : (mainnet.strategies ?? []);
+  const seen = new Set(devnetRows.map((strategy) => strategy.id));
   return {
-    availability: previewAvailability === "available" ? availability : previewAvailability,
-    selectable: previewAvailability === "available",
+    strategies: [...devnetRows, ...mainnetRows.filter((strategy) => !seen.has(strategy.id))],
+    error: shelf.error,
+    isLoading: shelf.isLoading,
   };
 }
 
@@ -147,20 +135,12 @@ export function EarnIntegrationGuide({
   apiBaseUrl,
   earnHref,
   providerAccess,
-  strategyCluster: initialCluster,
   strategyId: initialStrategyId,
 }: EarnIntegrationGuideProps) {
   const t = useTranslations();
   const locale = useLocale();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const environmentCluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
-  const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(() =>
-    initialCluster === environmentCluster ? undefined : initialCluster
-  );
-  const strategiesCluster = sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
-  const activeCluster = strategiesCluster ?? environmentCluster;
-  const previewingMainnet = sdpEnvironment === "sandbox" && activeCluster === "mainnet-beta";
-  const { strategies, error, isLoading } = useEarnStrategies({ cluster: strategiesCluster });
+  const { strategies, error, isLoading } = useIntegrationCatalogue(sdpEnvironment);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(
     initialStrategyId ?? null
   );
@@ -169,19 +149,9 @@ export function EarnIntegrationGuide({
   );
   if (isLoading) return <EarnIntegrationGuideSkeleton />;
 
-  const rows = strategies ?? [];
-  const options = rows.map((strategy) => {
-    const { availability, selectable } = strategyOptionState(
-      strategy,
-      sdpEnvironment,
-      providerAccess,
-      previewingMainnet
-    );
-    return {
-      availability,
-      selectable,
-      strategy,
-    };
+  const options = (strategies ?? []).map((strategy) => {
+    const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
+    return { availability, selectable: availability === "available", strategy };
   });
   const requestedStrategy = options.find(({ strategy }) => strategy.id === selectedStrategyId);
   const selectedOption =
@@ -192,11 +162,6 @@ export function EarnIntegrationGuide({
       ? unavailableDescriptionKey(selectedOption.availability, selectedOption.strategy.provider)
       : undefined;
   const initialStrategyMissing = Boolean(initialStrategyId && !requestedStrategy);
-
-  const changeCluster = (cluster: SolanaCluster) => {
-    setSelectedStrategyId(null);
-    setCatalogueCluster(cluster === environmentCluster ? undefined : cluster);
-  };
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -210,18 +175,14 @@ export function EarnIntegrationGuide({
         </p>
 
         <CatalogueContent
-          activeCluster={activeCluster}
           activeSectionId={activeSectionId}
           apiBaseUrl={apiBaseUrl}
           catalogueError={error}
           initialStrategyMissing={initialStrategyMissing}
           locale={locale}
-          onClusterChange={changeCluster}
           onSectionChange={setActiveSectionId}
           onStrategyChange={setSelectedStrategyId}
           options={options}
-          previewingMainnet={previewingMainnet}
-          sdpEnvironment={sdpEnvironment}
           selectedOption={selectedOption}
           selectionIssue={selectionIssue}
         />
@@ -237,33 +198,25 @@ type StrategyOption = {
 };
 
 function CatalogueContent({
-  activeCluster,
   activeSectionId,
   apiBaseUrl,
   catalogueError,
   initialStrategyMissing,
   locale,
-  onClusterChange,
   onSectionChange,
   onStrategyChange,
   options,
-  previewingMainnet,
-  sdpEnvironment,
   selectedOption,
   selectionIssue,
 }: {
-  activeCluster: SolanaCluster;
   activeSectionId: keyof EarnIntegrationSections;
   apiBaseUrl?: string | null;
   catalogueError: unknown;
   initialStrategyMissing: boolean;
   locale: string;
-  onClusterChange: (cluster: SolanaCluster) => void;
   onSectionChange: (section: keyof EarnIntegrationSections) => void;
   onStrategyChange: (strategyId: string | null) => void;
   options: StrategyOption[];
-  previewingMainnet: boolean;
-  sdpEnvironment: SdpEnvironment;
   selectedOption: StrategyOption | undefined;
   selectionIssue: MessageKey | undefined;
 }) {
@@ -292,24 +245,17 @@ function CatalogueContent({
 
   return (
     <>
-      {previewingMainnet && showIntegration ? (
-        <Callout title={t("DashboardMarkets.earnProgram.mainnetPreviewTitle")} variant="warning">
-          {t("DashboardMarkets.earnProgram.mainnetPreviewDescription")}
-        </Callout>
-      ) : null}
-
-      <StrategyPickerCard
-        activeCluster={activeCluster}
-        initialStrategyMissing={initialStrategyMissing}
-        locale={locale}
-        onClusterChange={onClusterChange}
-        onStrategyChange={onStrategyChange}
-        options={options}
-        previewingMainnet={previewingMainnet}
-        sdpEnvironment={sdpEnvironment}
-        selectedOption={selectedOption}
-        selectionIssue={selectionIssue}
-      />
+      <section className="flex flex-col gap-4">
+        <StepHeading>{t("DashboardMarkets.earnProgram.stepChooseStrategy")}</StepHeading>
+        <StrategyPickerCard
+          initialStrategyMissing={initialStrategyMissing}
+          locale={locale}
+          onStrategyChange={onStrategyChange}
+          options={options}
+          selectedOption={selectedOption}
+          selectionIssue={selectionIssue}
+        />
+      </section>
 
       {showIntegration && selectedStrategy ? (
         <IntegrationReference
@@ -323,26 +269,23 @@ function CatalogueContent({
   );
 }
 
+/** The two numbered section titles share one style so the page reads as one flow. */
+function StepHeading({ children }: { children: string }) {
+  return <h3 className="text-[19px] leading-6 font-medium text-primary">{children}</h3>;
+}
+
 function StrategyPickerCard({
-  activeCluster,
   initialStrategyMissing,
   locale,
-  onClusterChange,
   onStrategyChange,
   options,
-  previewingMainnet,
-  sdpEnvironment,
   selectedOption,
   selectionIssue,
 }: {
-  activeCluster: SolanaCluster;
   initialStrategyMissing: boolean;
   locale: string;
-  onClusterChange: (cluster: SolanaCluster) => void;
   onStrategyChange: (strategyId: string | null) => void;
   options: StrategyOption[];
-  previewingMainnet: boolean;
-  sdpEnvironment: SdpEnvironment;
   selectedOption: StrategyOption | undefined;
   selectionIssue: MessageKey | undefined;
 }) {
@@ -351,29 +294,7 @@ function StrategyPickerCard({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("DashboardMarkets.earnProgram.strategy")}</CardTitle>
-        {sdpEnvironment === "sandbox" ? (
-          <CardAction>
-            <SegmentedControl
-              aria-label={t("DashboardMarkets.earnProgram.clusterToggleLabel")}
-              items={SOLANA_CLUSTERS.map((cluster) => ({
-                value: cluster,
-                label: SOLANA_CLUSTER_LABELS[cluster],
-              }))}
-              onValueChange={(value) => value && onClusterChange(value as SolanaCluster)}
-              value={activeCluster}
-            />
-          </CardAction>
-        ) : null}
-      </CardHeader>
       <CardContent className="space-y-4">
-        {previewingMainnet ? (
-          <p className="max-w-2xl text-sm leading-6 text-secondary">
-            {t("DashboardMarkets.earnProgram.mainnetCatalogueDescription")}
-          </p>
-        ) : null}
-
         <Select
           ariaLabel={t("DashboardMarkets.earnProgram.selectTitle")}
           onValueChange={onStrategyChange}
@@ -495,11 +416,9 @@ function IntegrationReference({
     GUIDE_SECTIONS.find(({ id }) => id === activeSectionId) ?? GUIDE_SECTIONS[0];
 
   return (
-    <section className="flex flex-col gap-5">
+    <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h3 className="text-[19px] leading-6 font-medium text-primary">
-          {t("DashboardMarkets.earnProgram.guideTitle")}
-        </h3>
+        <StepHeading>{t("DashboardMarkets.earnProgram.stepServerCode")}</StepHeading>
         <Button
           iconLeft={copied ? <CheckIcon /> : <CopyIcon />}
           onClick={() => void copy(serverModule)}
