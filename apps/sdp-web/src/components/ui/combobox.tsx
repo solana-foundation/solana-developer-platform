@@ -48,6 +48,27 @@ export interface ComboboxOption {
   disabled?: boolean;
 }
 
+function ComboboxOptionContent({ option }: { option: ComboboxOption }) {
+  return (
+    <>
+      {option.icon ? <span className="shrink-0">{option.icon}</span> : null}
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-primary">{option.label}</span>
+          {option.badge ? (
+            <Badge variant={option.badgeVariant} className="shrink-0">
+              {option.badge}
+            </Badge>
+          ) : null}
+        </span>
+        {option.description ? (
+          <span className="block truncate text-sm text-tertiary">{option.description}</span>
+        ) : null}
+      </span>
+    </>
+  );
+}
+
 interface ComboboxProps {
   value: string | null;
   onChange: (value: string) => void;
@@ -302,22 +323,7 @@ export function Combobox({
                 onMouseEnter={option.disabled ? undefined : () => setActiveIndex(index)}
                 onClick={() => selectOption(option, false)}
               >
-                {option.icon ? <span className="shrink-0">{option.icon}</span> : null}
-                <span className="min-w-0 flex-1">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-primary">{option.label}</span>
-                    {option.badge ? (
-                      <Badge variant={option.badgeVariant} className="shrink-0">
-                        {option.badge}
-                      </Badge>
-                    ) : null}
-                  </span>
-                  {option.description ? (
-                    <span className="block truncate text-sm text-tertiary">
-                      {option.description}
-                    </span>
-                  ) : null}
-                </span>
+                <ComboboxOptionContent option={option} />
                 {active ? <CheckIcon className="size-4 shrink-0 text-primary" /> : null}
               </button>
             );
