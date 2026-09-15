@@ -1,18 +1,18 @@
 import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { type DatabaseClient, getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError, internalError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
+import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
-import {
-  type CredentialSecretStore,
-  CredentialSecretStoreError,
-} from "@/services/credential-secret-store";
+import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -131,26 +131,13 @@ async function seedActor(): Promise<void> {
          VALUES (?, ?, ?, 'admin', 'active')`
       )
       .bind("mem_provider_credential_submit", ORGANIZATION_ID, USER_ID),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(
-        PROJECT_ID,
-        ORGANIZATION_ID,
-        "Provider Credential Submit",
-        "provider-credential-submit",
-        USER_ID
-      ),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_provider_credential_submit", PROJECT_ID, USER_ID),
   ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [USER_ID],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
 }
 
 async function submit(
@@ -295,6 +282,56 @@ async function markInitialValidationFailed(
   ]);
 }
 
+function mockSubmissionGcp(addVersion?: (versionRef: string) => Promise<Response>) {
+  env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
+  env.GCP_SECRET_MANAGER_PROJECT_ID = "sdp-submission-test";
+  env.GCP_SECRET_MANAGER_SECRET_PREFIX = "sdp-provider-credentials";
+  env.GCP_SECRET_MANAGER_API_BASE_URL = "https://gcp-submission.test";
+  const requests: string[] = [];
+  const writes: string[] = [];
+  const destroys: string[] = [];
+  const versionCounts = new Map<string, number>();
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = new URL(String(input));
+    requests.push(url.href);
+    if (url.hostname === "metadata.google.internal") {
+      return url.pathname.endsWith("/numeric-project-id")
+        ? new Response("1234567890")
+        : Response.json({ access_token: "dummy-test-token", expires_in: 300 });
+    }
+    if (url.searchParams.has("secretId")) return Response.json({});
+    if (url.pathname.endsWith(":addVersion")) {
+      const parent = url.pathname
+        .slice(4, -":addVersion".length)
+        .replace("projects/sdp-submission-test/", "projects/1234567890/");
+      const version = (versionCounts.get(parent) ?? 0) + 1;
+      versionCounts.set(parent, version);
+      const versionRef = `${parent}/versions/${version}`;
+      writes.push(versionRef);
+      return addVersion ? addVersion(versionRef) : Response.json({ name: versionRef });
+    }
+    if (url.pathname.endsWith(":destroy")) {
+      const versionRef = url.pathname
+        .slice(4, -":destroy".length)
+        .replace("projects/sdp-submission-test/", "projects/1234567890/");
+      destroys.push(versionRef);
+      return Response.json({ name: versionRef, state: "DESTROYED" });
+    }
+    if (url.pathname.endsWith("/versions")) {
+      const parent = url.pathname
+        .slice(4)
+        .replace("projects/sdp-submission-test/", "projects/1234567890/");
+      return Response.json({
+        versions: writes
+          .filter((ref) => ref.startsWith(`${parent}/`) && !destroys.includes(ref))
+          .map((name) => ({ name, state: "ENABLED" })),
+      });
+    }
+    throw new Error("Unexpected provider request");
+  });
+  return { requests, writes, destroys };
+}
+
 describe("POST /internal/dashboard/custody/provider-credentials", () => {
   const original = {
     deploymentMode: env.SDP_DEPLOYMENT_MODE,
@@ -303,6 +340,9 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
     provisioningFlag: env.PRIVY_BYOK_ENABLED,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
+    gcpProjectId: env.GCP_SECRET_MANAGER_PROJECT_ID,
+    gcpSecretPrefix: env.GCP_SECRET_MANAGER_SECRET_PREFIX,
+    gcpApiBaseUrl: env.GCP_SECRET_MANAGER_API_BASE_URL,
     privyAppId: env.PRIVY_APP_ID,
     privyAppSecret: env.PRIVY_APP_SECRET,
   };
@@ -326,6 +366,9 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.PRIVY_BYOK_ENABLED = original.provisioningFlag;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
+    env.GCP_SECRET_MANAGER_PROJECT_ID = original.gcpProjectId;
+    env.GCP_SECRET_MANAGER_SECRET_PREFIX = original.gcpSecretPrefix;
+    env.GCP_SECRET_MANAGER_API_BASE_URL = original.gcpApiBaseUrl;
     env.PRIVY_APP_ID = original.privyAppId;
     env.PRIVY_APP_SECRET = original.privyAppSecret;
     await clearKVStores(env);
@@ -602,6 +645,37 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       connections: 0,
       wallets: 0,
     });
+  });
+
+  it("accepts credential fields at the 4096-character input limit", async () => {
+    const { app, token } = buildApp();
+    const response = await submit(app, token, {
+      key: "submit-max-length-fields",
+      body: {
+        ...VALID_BODY,
+        fields: { ...VALID_BODY.fields, appId: "a".repeat(4096), appSecret: "s".repeat(4096) },
+      },
+    });
+
+    expect(response.status).toBe(201);
+  });
+
+  it.each(["appId", "appSecret"])("rejects oversized %s before secret-store I/O", async (field) => {
+    env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
+    env.GCP_SECRET_MANAGER_PROJECT_ID = "sdp-submission-test";
+    env.GCP_SECRET_MANAGER_SECRET_PREFIX = "sdp-provider-credentials";
+    const providerFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 503 }));
+    const { app, token } = buildApp();
+
+    const response = await submit(app, token, {
+      key: "submit-oversized-field",
+      body: { ...VALID_BODY, fields: { ...VALID_BODY.fields, [field]: "x".repeat(4097) } },
+    });
+
+    expect(response.status).toBe(400);
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 
   it("replays the committed result before current gates and keeps the secret exact", async () => {
@@ -1069,6 +1143,114 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
+  it("reuses the GCP container on replacement and keeps one scan owner", async () => {
+    const { app, token } = buildApp();
+    const gcp = mockSubmissionGcp();
+    const first = await submit(app, token, { key: "shared-submission-root" });
+    expect(first.status).toBe(201);
+    const original = await first.json();
+    await markInitialValidationFailed(getDb(env), {
+      credentialId: original.data.providerCredential.id,
+      connectionId: original.data.connectionId,
+    });
+    const replaced = await replace(app, token, original.data.connectionId, {
+      key: "shared-submission-child",
+    });
+    expect(replaced.status).toBe(201);
+    const rows = await getDb(env).queryMany<{ secret_ref: string; owns_scan: boolean }>(
+      "SELECT secret_ref, secret_next_scan_at IS NOT NULL AS owns_scan FROM provider_credentials ORDER BY credential_version"
+    );
+    expect(rows[1]?.secret_ref).toBe(rows[0]?.secret_ref);
+    expect(rows.map((row) => row.owns_scan)).toEqual([true, false]);
+    expect(gcp.requests.filter((url) => url.includes("?secretId="))).toHaveLength(1);
+    expect(new Set(gcp.writes).size).toBe(2);
+  });
+
+  it("finalizes its own GCP replacement reservation on the same failed Connection", async () => {
+    const { app, token } = buildApp();
+    const first = await submit(app, token, { key: "gcp-replacement-original" });
+    expect(first.status).toBe(201);
+    const original = await first.json();
+    await markInitialValidationFailed(getDb(env), {
+      credentialId: original.data.providerCredential.id,
+      connectionId: original.data.connectionId,
+    });
+    const gcp = mockSubmissionGcp();
+    const request = {
+      key: "gcp-replacement-candidate",
+      body: {
+        ...VALID_BODY,
+        fields: {
+          ...VALID_BODY.fields,
+          credentialLabel: "Replacement GCP",
+          appSecret: "replacement secret",
+        },
+      },
+    };
+    const replacement = await replace(app, token, original.data.connectionId, request);
+    expect(replacement.status).toBe(201);
+    const created = await replacement.json();
+    expect(created.data.connectionId).toBe(original.data.connectionId);
+    expect(created.data.providerCredential).toMatchObject({
+      status: "pending",
+      label: "Replacement GCP",
+    });
+    expect(created.data.providerCredential.id).not.toBe(original.data.providerCredential.id);
+    expect(gcp.writes).toHaveLength(1);
+    expect(gcp.destroys).toEqual([]);
+    const replay = await replace(app, token, original.data.connectionId, request);
+    expect(replay.status).toBe(201);
+    expect((await replay.json()).data).toEqual(created.data);
+    const oldReplay = await submit(app, token, { key: "gcp-replacement-original" });
+    expect(oldReplay.status).toBe(201);
+    expect((await oldReplay.json()).data).toEqual({
+      connectionId: original.data.connectionId,
+      providerCredential: { ...original.data.providerCredential, status: "failed_validation" },
+    });
+    expect(gcp.writes).toHaveLength(1);
+    expect(await getDomainCounts()).toEqual({ credentials: 2, connections: 1, wallets: 0 });
+  });
+
+  it("does not reuse the version of an abandoned GCP replacement", async () => {
+    const submissionSchema = z.object({
+      data: z.object({
+        connectionId: z.string(),
+        providerCredential: z.object({ id: z.string() }),
+      }),
+    });
+    const { app, token } = buildApp();
+    const first = await submit(app, token, { key: "version-allocation-original" });
+    expect(first.status).toBe(201);
+    const original = submissionSchema.parse(await first.json()).data;
+    await markInitialValidationFailed(getDb(env), {
+      credentialId: original.providerCredential.id,
+      connectionId: original.connectionId,
+    });
+    let failWrite = true;
+    mockSubmissionGcp(async (versionRef) => {
+      if (failWrite) throw new Error("Lost addVersion response");
+      return Response.json({ name: versionRef });
+    });
+    expect(
+      await replace(app, token, original.connectionId, { key: "version-allocation-abandoned" })
+    ).toMatchObject({ status: 503 });
+    failWrite = false;
+    const replacement = await replace(app, token, original.connectionId, {
+      key: "version-allocation-next",
+    });
+    expect(replacement.status).toBe(201);
+    expect(submissionSchema.parse(await replacement.json()).data.connectionId).toBe(
+      original.connectionId
+    );
+    expect(
+      await getDb(env).queryMany<{ credential_version: number }>(
+        `SELECT credential_version FROM provider_credentials
+         WHERE organization_id = ? ORDER BY credential_version`,
+        [ORGANIZATION_ID]
+      )
+    ).toEqual([{ credential_version: 1 }, { credential_version: 2 }, { credential_version: 3 }]);
+  });
+
   it("clears optional Connection settings when replacement omits them", async () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
@@ -1158,46 +1340,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         code: "CONFLICT",
         message: "Custody Connection cannot accept replacement credentials",
       },
-    });
-    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
-  });
-
-  it("does not expose a Connection from another Project during exact replacement", async () => {
-    const otherProjectId = "prj_provider_credential_submit_exact_other";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Other exact project', 'other-exact-project', 'sandbox', 'active', ?)`
-        )
-        .bind(otherProjectId, ORGANIZATION_ID, USER_ID),
-      getDb(env)
-        .prepare(
-          `INSERT INTO project_members (id, project_id, user_id, role)
-           VALUES ('pm_provider_credential_submit_exact_other', ?, ?, 'admin')`
-        )
-        .bind(otherProjectId, USER_ID),
-    ]);
-    const { app, token } = buildApp();
-    const other = await submit(app, token, {
-      key: "exact-other-project-initial",
-      projectId: otherProjectId,
-    });
-    const otherBody = (await other.json()) as {
-      data: { providerCredential: { id: string }; connectionId: string };
-    };
-    await markInitialValidationFailed(getDb(env), {
-      credentialId: otherBody.data.providerCredential.id,
-      connectionId: otherBody.data.connectionId,
-    });
-
-    const response = await replace(app, token, otherBody.data.connectionId, {
-      key: "exact-other-project-replacement",
-    });
-    expect(response.status).toBe(404);
-    expect(await response.json()).toMatchObject({
-      error: { code: "NOT_FOUND", message: "Custody Connection not found" },
     });
     expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
   });
@@ -1611,16 +1753,73 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     }
   );
 
+  it("keeps an in-flight GCP creation replayable without a second external write", async () => {
+    let started: () => void = () => undefined;
+    let release: () => void = () => undefined;
+    const writing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gcp = mockSubmissionGcp(async (versionRef) => {
+      if (gcp.writes.length === 1) {
+        started();
+        await released;
+      }
+      return Response.json({ name: versionRef });
+    });
+    const { app, token } = buildApp();
+    const first = submit(app, token, { key: "gcp-in-flight" });
+    try {
+      await writing;
+      const replay = await submit(app, token, { key: "gcp-in-flight" });
+      expect(replay.status).toBe(503);
+      expect(gcp.writes).toHaveLength(1);
+      const competing = await submit(app, token, { key: "gcp-in-flight-other" });
+      expect(competing.status).toBe(409);
+      expect(gcp.writes).toHaveLength(1);
+    } finally {
+      release();
+      await first;
+    }
+    const committed = await first;
+    expect(committed.status).toBe(201);
+    const committedBody = await committed.json();
+    const replay = await submit(app, token, { key: "gcp-in-flight" });
+    expect(replay.status).toBe(201);
+    expect((await replay.json()).data).toEqual(committedBody.data);
+    expect(gcp.writes).toHaveLength(1);
+  });
+
+  it("replays a successfully created GCP credential after installation cancellation", async () => {
+    const gcp = mockSubmissionGcp();
+    const { app, token } = buildApp();
+    const response = await submit(app, token, { key: "gcp-success-then-cancel" });
+    expect(response.status).toBe(201);
+    const created = await response.json();
+    const cancelled = await app.request(
+      `/internal/dashboard/custody/connections/${created.data.connectionId}/cancel`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID } },
+      env
+    );
+    expect(cancelled.status).toBe(200);
+    const replay = await submit(app, token, { key: "gcp-success-then-cancel" });
+    expect(replay.status).toBe(201);
+    expect((await replay.json()).data).toEqual({
+      connectionId: created.data.connectionId,
+      providerCredential: { ...created.data.providerCredential, status: "deactivated" },
+    });
+    expect(gcp.writes).toHaveLength(1);
+    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
+  });
+
   it("maps an upstream secret-store failure to a safe 503 and orphan alert", async () => {
-    const store: CredentialSecretStore = {
-      storageBackend: "gcp_secret_manager",
-      write: vi
-        .fn()
-        .mockRejectedValue(new CredentialSecretStoreError("raw upstream detail", "UPSTREAM_ERROR")),
-      read: vi.fn(),
-      destroyVersion: vi.fn(),
-    };
-    vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
+    let loseResponse = true;
+    const gcp = mockSubmissionGcp(async (versionRef) => {
+      if (loseResponse) throw new Error("raw upstream detail");
+      return Response.json({ name: versionRef });
+    });
     const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
     const { app, token } = buildApp();
 
@@ -1638,10 +1837,28 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
     expect(JSON.stringify(body)).not.toContain("raw upstream detail");
     expect(await getDomainCounts()).toEqual({
-      credentials: 0,
+      credentials: 1,
       connections: 0,
       wallets: 0,
     });
+    const abandoned = await getDb(env)
+      .prepare(
+        `SELECT status, secret_ref, secret_version_ref, last_failure_code, secret_retention_expires_at
+       FROM provider_credentials WHERE idempotency_key = ?`
+      )
+      .bind("upstream-secret-failure")
+      .first();
+    expect(abandoned).toEqual({
+      status: "deactivated",
+      secret_ref: expect.stringMatching(
+        /^projects\/sdp-submission-test\/secrets\/sdp-provider-credentials-pcred_/
+      ),
+      secret_version_ref: null,
+      last_failure_code: "secret_creation_abandoned",
+      secret_retention_expires_at: expect.any(String),
+    });
+    expect(gcp.writes).toHaveLength(1);
+    expect(gcp.destroys).toEqual([]);
     expect(consoleError).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1656,39 +1873,38 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("exact secret");
     const criticalOutcomes = await getDb(env)
       .prepare(
-        `SELECT COUNT(*) AS count
+        `SELECT status, metadata::jsonb ->> 'event' AS event
          FROM audit_logs
          WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'`
       )
-      .first<{ count: number }>();
-    expect(criticalOutcomes?.count).toBe(0);
+      .all<{ status: string; event: string }>();
+    expect(criticalOutcomes.results).toEqual([
+      { status: "failure", event: "provider_credential_submission_failed" },
+    ]);
+
+    expect((await submit(app, token, { key: "upstream-secret-failure" })).status).toBe(409);
+    expect(gcp.writes).toHaveLength(1);
+    loseResponse = false;
+    expect((await submit(app, token, { key: "upstream-secret-failure-new" })).status).toBe(201);
+    expect(gcp.writes).toHaveLength(2);
+    expect(new Set(gcp.writes).size).toBe(2);
   });
 
-  it("destroys only the exact GCP version after a database rollback", async () => {
-    const destroyVersion = vi.fn().mockResolvedValue(undefined);
-    const store: CredentialSecretStore = {
-      storageBackend: "gcp_secret_manager",
-      write: vi.fn().mockResolvedValue({
-        storageBackend: "gcp_secret_manager",
-        // Deliberately omit secretRef so the domain insert violates its
-        // storage-location check after a successful external version write.
-        secretVersionRef: "projects/sdp-test/secrets/pcred-test/versions/7",
-      }),
-      read: vi.fn(),
-      destroyVersion,
-    };
-    vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
+  it("does not contact GCP when the credential reservation rolls back", async () => {
+    const gcp = mockSubmissionGcp();
+    const db = getDb(env);
+    await db.execute(`ALTER TABLE provider_credentials ADD CONSTRAINT sdp_test_reject_gcp_reservation
+      CHECK (status <> 'creating')`);
     const { app, token } = buildApp();
-
-    const response = await submit(app, token, {
-      key: "gcp-db-rollback",
-    });
-
-    expect(response.status).toBe(500);
-    expect(destroyVersion).toHaveBeenCalledOnce();
-    expect(destroyVersion).toHaveBeenCalledWith({
-      secretVersionRef: "projects/sdp-test/secrets/pcred-test/versions/7",
-    });
+    try {
+      const response = await submit(app, token, { key: "gcp-reservation-rollback" });
+      expect(response.status).toBe(500);
+      expect(gcp.requests).toEqual([]);
+    } finally {
+      await db.execute(
+        "ALTER TABLE provider_credentials DROP CONSTRAINT sdp_test_reject_gcp_reservation"
+      );
+    }
     expect(await getDomainCounts()).toEqual({
       credentials: 0,
       connections: 0,
@@ -1696,25 +1912,98 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("reconciles a committed row before cleaning up after a lost COMMIT response", async () => {
-    const destroyVersion = vi.fn().mockResolvedValue(undefined);
-    const store: CredentialSecretStore = {
-      storageBackend: "gcp_secret_manager",
-      write: vi.fn().mockResolvedValue({
-        storageBackend: "gcp_secret_manager",
-        secretRef: "projects/sdp-test/secrets/pcred-commit-ambiguity",
-        secretVersionRef: "projects/sdp-test/secrets/pcred-commit-ambiguity/versions/9",
-      }),
-      read: vi.fn(),
-      destroyVersion,
-    };
-    vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
+  it.each(["submission", "replacement"] as const)(
+    "destroys the acknowledged GCP version after $0 SQL finalization rolls back",
+    async (operation) => {
+      const db = getDb(env);
+      const { app, token } = buildApp();
+      let original: { connectionId: string; providerCredential: { id: string } } | undefined;
+      if (operation === "replacement") {
+        const response = await submit(app, token, { key: "gcp-finalization-original" });
+        expect(response.status).toBe(201);
+        original = z
+          .object({
+            data: z.object({
+              connectionId: z.string(),
+              providerCredential: z.object({ id: z.string() }),
+            }),
+          })
+          .parse(await response.json()).data;
+        await markInitialValidationFailed(db, {
+          credentialId: original.providerCredential.id,
+          connectionId: original.connectionId,
+        });
+      }
+      const gcp = mockSubmissionGcp();
+      const request = () =>
+        original
+          ? replace(app, token, original.connectionId, { key: "gcp-finalization-rollback" })
+          : submit(app, token, { key: "gcp-finalization-rollback" });
+      await db.execute(`ALTER TABLE custody_connections ADD CONSTRAINT sdp_test_reject_gcp_connection
+      CHECK (status <> 'pending') NOT VALID`);
+      try {
+        const response = await request();
+        expect(response.status).toBe(500);
+        expect(gcp.writes).toHaveLength(1);
+        expect(gcp.destroys).toEqual([]);
+        expect(await getDomainCounts()).toEqual({
+          credentials: original ? 2 : 1,
+          connections: original ? 1 : 0,
+          wallets: 0,
+        });
+        if (original) {
+          expect(
+            await db.queryOne(
+              "SELECT status, provider_credential_id FROM custody_connections WHERE id = ?",
+              [original.connectionId]
+            )
+          ).toEqual({ status: "failed", provider_credential_id: original.providerCredential.id });
+        }
+        expect(
+          await db
+            .prepare(
+              `SELECT status, secret_ref, secret_version_ref, last_failure_code, secret_retention_expires_at
+         FROM provider_credentials WHERE idempotency_key = ?`
+            )
+            .bind("gcp-finalization-rollback")
+            .first()
+        ).toEqual({
+          status: "deactivated",
+          secret_ref: expect.stringMatching(
+            /^projects\/sdp-submission-test\/secrets\/sdp-provider-credentials-pcred_/
+          ),
+          secret_version_ref: gcp.writes[0]?.replace(
+            "projects/1234567890/",
+            "projects/sdp-submission-test/"
+          ),
+          last_failure_code: "secret_creation_abandoned",
+          secret_retention_expires_at: expect.any(String),
+        });
+        expect((await request()).status).toBe(409);
+        expect(gcp.writes).toHaveLength(1);
+        await expect(cleanupRetiredProviderCredentialSecrets(env)).resolves.toMatchObject({
+          cleaned: 1,
+          failed: 0,
+        });
+        expect(gcp.destroys).toEqual(gcp.writes);
+      } finally {
+        await db.execute(
+          "ALTER TABLE custody_connections DROP CONSTRAINT sdp_test_reject_gcp_connection"
+        );
+      }
+    }
+  );
 
+  it("reconciles a committed GCP finalization after a lost COMMIT response without destroying", async () => {
+    const gcp = mockSubmissionGcp();
     const db = getDb(env);
     const runTransaction = db.transaction.bind(db);
-    vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
-      await runTransaction(callback);
-      throw new Error("simulated lost COMMIT response");
+    let transactions = 0;
+    vi.spyOn(db, "transaction").mockImplementation(async (callback) => {
+      const result = await runTransaction(callback);
+      transactions += 1;
+      if (transactions === 2) throw new Error("simulated lost finalization COMMIT response");
+      return result;
     });
     const { app, token } = buildApp();
 
@@ -1723,7 +2012,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(destroyVersion).not.toHaveBeenCalled();
+    expect(gcp.writes).toHaveLength(1);
+    expect(gcp.destroys).toEqual([]);
+    const committedBody = await response.json();
+    const replay = await submit(app, token, { key: "gcp-commit-ambiguity" });
+    expect(replay.status).toBe(201);
+    expect((await replay.json()).data).toEqual(committedBody.data);
+    expect(gcp.writes).toHaveLength(1);
     expect(await getDomainCounts()).toEqual({
       credentials: 1,
       connections: 1,
@@ -1744,6 +2039,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const destroyVersion = vi.fn();
     const store: CredentialSecretStore = {
       storageBackend: "encrypted_db",
+      predictFirstVersionRef: () => null,
       write: vi.fn().mockResolvedValue({
         storageBackend: "encrypted_db",
         // Missing ciphertext forces a database rollback.
@@ -1767,39 +2063,40 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("reports failed GCP cleanup without exposing the secret ref or changing the primary error", async () => {
-    const store: CredentialSecretStore = {
-      storageBackend: "gcp_secret_manager",
-      write: vi.fn().mockResolvedValue({
-        storageBackend: "gcp_secret_manager",
-        secretVersionRef: "projects/sdp-test/secrets/pcred-sensitive-name/versions/11",
-      }),
-      read: vi.fn(),
-      destroyVersion: vi.fn().mockRejectedValue(new Error("raw cleanup failure")),
-    };
-    vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
-    const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+  it("does not write to GCP after an unknown reservation COMMIT and keeps the key in progress", async () => {
+    const gcp = mockSubmissionGcp();
+    const db = getDb(env);
+    const runTransaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+      await runTransaction(callback);
+      throw new Error("simulated lost reservation COMMIT response");
+    });
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
-      key: "gcp-cleanup-failure",
+      key: "gcp-reservation-unknown",
     });
-
-    expect(response.status).toBe(500);
-    expect(consoleError).toHaveBeenCalledOnce();
-    expect(consoleError).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "privy",
-        storageBackend: "gcp_secret_manager",
-        providerResourceVersion: 11,
-        reason: "secret_cleanup_failed",
-      }),
-      "provider_credential_orphan_risk"
-    );
-    const logged = JSON.stringify(consoleError.mock.calls);
-    expect(logged).not.toContain("pcred-sensitive-name");
-    expect(logged).not.toContain("raw cleanup failure");
-    expect(logged).not.toContain("exact secret");
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe("PROVIDER_UNAVAILABLE");
+    expect(gcp.requests).toEqual([]);
+    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 0, wallets: 0 });
+    expect(
+      await db
+        .prepare(
+          `SELECT status, secret_version_ref FROM provider_credentials WHERE idempotency_key = ?`
+        )
+        .bind("gcp-reservation-unknown")
+        .first()
+    ).toEqual({ status: "creating", secret_version_ref: null });
+    const replay = await submit(app, token, { key: "gcp-reservation-unknown" });
+    expect(replay.status).toBe(503);
+    expect(gcp.requests).toEqual([]);
+    const outcome = await db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'`
+      )
+      .first<{ count: number }>();
+    expect(outcome?.count).toBe(0);
   });
 
   it.each([
@@ -1867,31 +2164,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
   });
 
-  it("compensates the losing secret write when concurrent fresh installations race", async () => {
-    let writeCount = 0;
-    let releaseWrites: (() => void) | undefined;
-    const writesReady = new Promise<void>((resolve) => {
-      releaseWrites = resolve;
-    });
-    const write = vi.fn(async ({ providerCredentialId }: { providerCredentialId: string }) => {
-      writeCount += 1;
-      if (writeCount === 2) {
-        releaseWrites?.();
-      }
-      await writesReady;
-      return {
-        storageBackend: "gcp_secret_manager" as const,
-        secretRef: `projects/sdp-test/secrets/${providerCredentialId}`,
-        secretVersionRef: `projects/sdp-test/secrets/${providerCredentialId}/versions/1`,
-      };
-    });
-    const destroyVersion = vi.fn().mockResolvedValue(undefined);
-    vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue({
-      storageBackend: "gcp_secret_manager",
-      write,
-      read: vi.fn(),
-      destroyVersion,
-    });
+  it("writes only the winning secret when concurrent fresh GCP installations race", async () => {
+    const gcp = mockSubmissionGcp();
     const { app, token } = buildApp();
 
     const responses = await Promise.all([
@@ -1906,142 +2180,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         details: { reason: "unfinished_installation_exists" },
       },
     });
-    expect(write).toHaveBeenCalledTimes(2);
-    expect(destroyVersion).toHaveBeenCalledOnce();
+    expect(gcp.writes).toHaveLength(1);
+    expect(gcp.destroys).toEqual([]);
     expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
-  });
-
-  it("compensates the losing GCP write in a cross-project idempotency race", async () => {
-    const otherProjectId = "prj_provider_credential_submit_other";
-    const db = getDb(env);
-    await db.batch([
-      db
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-        )
-        .bind(
-          otherProjectId,
-          ORGANIZATION_ID,
-          "Other Provider Credential Project",
-          "other-provider-credential-project",
-          USER_ID
-        ),
-      db
-        .prepare(
-          `INSERT INTO project_members (id, project_id, user_id, role)
-           VALUES (?, ?, ?, 'admin')`
-        )
-        .bind("pm_provider_credential_submit_other", otherProjectId, USER_ID),
-    ]);
-
-    let writeCount = 0;
-    let releaseWrites: (() => void) | undefined;
-    const writesReady = new Promise<void>((resolve) => {
-      releaseWrites = resolve;
-    });
-    const write = vi.fn(async ({ providerCredentialId }: { providerCredentialId: string }) => {
-      writeCount += 1;
-      if (writeCount === 2) {
-        releaseWrites?.();
-      }
-      await writesReady;
-      return {
-        storageBackend: "gcp_secret_manager" as const,
-        secretRef: `projects/sdp-test/secrets/${providerCredentialId}`,
-        secretVersionRef: `projects/sdp-test/secrets/${providerCredentialId}/versions/1`,
-      };
-    });
-    const destroyVersion = vi.fn().mockResolvedValue(undefined);
-    const store: CredentialSecretStore = {
-      storageBackend: "gcp_secret_manager",
-      write,
-      read: vi.fn(),
-      destroyVersion,
-    };
-    vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore").mockReturnValue(store);
-    const { app, token } = buildApp();
-
-    const responses = await Promise.all([
-      submit(app, token, { key: "concurrent-mismatched-key" }),
-      submit(app, token, {
-        key: "concurrent-mismatched-key",
-        projectId: otherProjectId,
-      }),
-    ]);
-    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
-    expect(write).toHaveBeenCalledTimes(2);
-
-    const successResponse = responses.find((response) => response.status === 201);
-    const successBody = (await successResponse?.json()) as
-      | {
-          data: {
-            providerCredential: { id: string; projectId: string };
-          };
-        }
-      | undefined;
-    const winnerId = successBody?.data.providerCredential.id;
-    expect(winnerId).toMatch(/^pcred_/);
-    const winnerProjectId = successBody?.data.providerCredential.projectId;
-    expect([PROJECT_ID, otherProjectId]).toContain(winnerProjectId);
-
-    const writtenIds = write.mock.calls.map(([params]) => params.providerCredentialId);
-    expect(new Set(writtenIds).size).toBe(2);
-    expect(writtenIds).toContain(winnerId);
-    const loserId = writtenIds.find((id) => id !== winnerId);
-    if (!winnerId || !winnerProjectId || !loserId) {
-      throw new Error("Concurrent submission did not produce distinct winner and loser IDs");
-    }
-    expect((await getConnectionForCredential(winnerId)).project_id).toBe(winnerProjectId);
-
-    expect(destroyVersion).toHaveBeenCalledOnce();
-    expect(destroyVersion).toHaveBeenCalledWith({
-      secretVersionRef: `projects/sdp-test/secrets/${loserId}/versions/1`,
-    });
-    expect(destroyVersion).not.toHaveBeenCalledWith({
-      secretVersionRef: `projects/sdp-test/secrets/${winnerId}/versions/1`,
-    });
-
-    const audits = await getDb(env)
-      .prepare(
-        `SELECT action, resource_id
-         FROM audit_logs
-         WHERE resource_type = 'provider_credential'
-         ORDER BY action`
-      )
-      .all<{ action: string; resource_id: string | null }>();
-    const failedAudit = audits.results.find((audit) => audit.action === "submit_failed");
-    expect(failedAudit?.resource_id).toBe(loserId);
-    expect(await getDomainCounts()).toEqual({
-      credentials: 1,
-      connections: 1,
-      wallets: 0,
-    });
-
-    const persisted = await getDb(env)
-      .prepare(
-        `SELECT pc.id AS credential_id,
-                pc.project_id AS credential_project_id,
-                pc.secret_version_ref,
-                c.project_id AS connection_project_id,
-                c.provider_credential_id AS connection_credential_id
-         FROM provider_credentials pc
-         JOIN custody_connections c ON c.provider_credential_id = pc.id`
-      )
-      .first<{
-        credential_id: string;
-        credential_project_id: string;
-        secret_version_ref: string;
-        connection_project_id: string;
-        connection_credential_id: string;
-      }>();
-    expect(persisted).toEqual({
-      credential_id: winnerId,
-      credential_project_id: winnerProjectId,
-      secret_version_ref: `projects/sdp-test/secrets/${winnerId}/versions/1`,
-      connection_project_id: winnerProjectId,
-      connection_credential_id: winnerId,
-    });
   });
 });

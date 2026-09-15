@@ -42,11 +42,13 @@ describe("buildPaymentsPlaygroundEndpointConfigs", () => {
       defaultValue: "cwlt_1",
     });
     expect(execute?.bodyFields.some(({ key }) => key === "source")).toBe(false);
-    expect(onramp?.bodyFields.find(({ key }) => key === "destinationWallet")).toMatchObject({
-      defaultValue: "privy_1",
+    expect(
+      onramp?.bodyFields.find(({ key }) => key === "destinationCustodyWalletId")
+    ).toMatchObject({
+      defaultValue: "cwlt_1",
     });
-    expect(offramp?.bodyFields.find(({ key }) => key === "sourceWallet")).toMatchObject({
-      defaultValue: "privy_1",
+    expect(offramp?.bodyFields.find(({ key }) => key === "sourceCustodyWalletId")).toMatchObject({
+      defaultValue: "cwlt_1",
     });
   });
 });

@@ -7,7 +7,9 @@ import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_PROJECT_ID = "prj_rpc_relay";
 const TEST_API_KEY_ID = "key_rpc_relay";
@@ -183,6 +185,42 @@ async function clearKvStore(store: KVStore) {
   }
 }
 
+/**
+ * Register `publicKey` as a custody wallet of `organizationId`, the ownership
+ * the faucet guard proves airdrop destinations against. Rows cascade away with
+ * the organization delete in beforeEach.
+ */
+async function seedCustodyWalletForOrg(
+  organizationId: string,
+  publicKey: string,
+  suffix: string,
+  options: { walletStatus?: string } = {}
+): Promise<void> {
+  const db = getDb(env);
+  await db
+    .prepare(
+      `INSERT INTO custody_configs
+         (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
+       VALUES (?, ?, NULL, 'local', 'test-config', 'sdp-custody-encryption-v1', NULL, 'active')`
+    )
+    .bind(`cfg_faucet_${suffix}`, organizationId)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO custody_wallets
+         (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+       VALUES (?, ?, ?, ?, 'Faucet Wallet', 'transfer', ?)`
+    )
+    .bind(
+      `cw_faucet_${suffix}`,
+      `cfg_faucet_${suffix}`,
+      `wallet_faucet_${suffix}`,
+      publicKey,
+      options.walletStatus ?? "active"
+    )
+    .run();
+}
+
 describe("RPC Relay Routes", () => {
   let apiKeyHash: string;
 
@@ -243,13 +281,12 @@ describe("RPC Relay Routes", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by, settings)
-         VALUES (?, ?, 'RPC Project', 'rpc-project', 'sandbox', 'active', ?, NULL)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
 
     await db
       .prepare(
@@ -545,6 +582,11 @@ describe("RPC Relay Routes", () => {
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
       .run();
+    await seedCustodyWalletForOrg(
+      TEST_ORG.id,
+      "6bh8QhvDDd4rWRXggYpYwwCCkdaqSpkBg77vK39Tvujg",
+      "round_robin"
+    );
     await kv.cache.put("rpc:relay:round-robin-cursor", "1");
 
     rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
@@ -606,6 +648,135 @@ describe("RPC Relay Routes", () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+
+  describe("faucet destination binding", () => {
+    const UNOWNED_ADDRESS = "So11111111111111111111111111111111111111112";
+    const OTHER_ORG_ID = "org_other_faucet_tenant";
+    const OTHER_ORG_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+
+    async function relayAirdrop(payload: unknown): Promise<Response> {
+      return app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify(payload),
+        },
+        env
+      );
+    }
+
+    function airdropRequest(destination: unknown) {
+      return {
+        jsonrpc: "2.0",
+        id: "faucet-binding-test",
+        method: "requestAirdrop",
+        params: [destination, 1],
+      };
+    }
+
+    beforeEach(() => {
+      rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    });
+
+    it("refuses a destination no tenant wallet owns, before any upstream call", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      try {
+        const response = await relayAirdrop(airdropRequest(UNOWNED_ADDRESS));
+        expect(response.status).toBe(403);
+        const body = await response.json();
+        expect(body.error.message).toContain("not a wallet of this organization");
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("refuses another organization's wallet as a destination", async () => {
+      const db = getDb(env);
+      await db
+        .prepare(
+          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Other Org', 'other-org-faucet', 'enterprise', 'active')"
+        )
+        .bind(OTHER_ORG_ID)
+        .run();
+      await seedCustodyWalletForOrg(OTHER_ORG_ID, OTHER_ORG_ADDRESS, "other_org");
+
+      const response = await relayAirdrop(airdropRequest(OTHER_ORG_ADDRESS));
+      expect(response.status).toBe(403);
+    });
+
+    it("refuses an unowned destination smuggled inside a JSON-RPC batch array", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      try {
+        const response = await relayAirdrop([
+          { jsonrpc: "2.0", id: 1, method: "getVersion", params: [] },
+          airdropRequest(UNOWNED_ADDRESS),
+        ]);
+        expect(response.status).toBe(403);
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("refuses the tenant's own wallet once it is no longer active", async () => {
+      await seedCustodyWalletForOrg(
+        TEST_ORG.id,
+        "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
+        "inactive_wallet",
+        { walletStatus: "inactive" }
+      );
+
+      const response = await relayAirdrop(
+        airdropRequest("4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T")
+      );
+      expect(response.status).toBe(403);
+    });
+
+    it("refuses a malformed destination as bad input rather than forwarding it", async () => {
+      const response = await relayAirdrop(airdropRequest("not-a-base58-address"));
+      expect(response.status).toBe(400);
+
+      const missingParams = await relayAirdrop({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "requestAirdrop",
+      });
+      expect(missingParams.status).toBe(400);
+    });
+
+    it("relays an airdrop bound to the tenant's own wallet inside a batch array", async () => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
+        .run();
+      rpcEnv.SOLANA_RPC_TRITON_API_KEY = "triton_key";
+      await seedCustodyWalletForOrg(
+        TEST_ORG.id,
+        "6bh8QhvDDd4rWRXggYpYwwCCkdaqSpkBg77vK39Tvujg",
+        "batch_owned"
+      );
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify([{ jsonrpc: "2.0", id: 1, result: "owned_airdrop_sig" }]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      try {
+        const response = await relayAirdrop([
+          airdropRequest("6bh8QhvDDd4rWRXggYpYwwCCkdaqSpkBg77vK39Tvujg"),
+        ]);
+        expect(response.status).toBe(200);
+        expect(fetchSpy).toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
   });
 
   it("tracks transaction telemetry and origins per provider", async () => {
@@ -671,5 +842,197 @@ describe("RPC Relay Routes", () => {
     expect(tritonProvider.stats.errorsTotal).toBe(0);
     expect(tritonProvider.stats.lastMethod).toBe("sendTransaction");
     expect(tritonProvider.stats.origins["https://wallet.example.com"]).toBe(1);
+  });
+
+  describe("relay boundaries", () => {
+    it("refuses a method outside the Solana JSON-RPC surface without dialling upstream", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "qn_fetchNFTs", params: [] }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("refuses an oversized body before parsing it", async () => {
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "getVersion",
+            params: ["x".repeat(1024 * 1024 + 1024)],
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(413);
+    });
+
+    it("429s the relay once the actor's quota is exhausted", async () => {
+      await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 100_000);
+
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getVersion", params: [] }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(429);
+      const body = await response.json();
+      expect(body.error.code).toBe("RATE_LIMITED");
+    });
+
+    it("refuses an invalid query without charging the exhausted quota's answer", async () => {
+      // Validation runs before the quota: a request the route would reject
+      // must answer 400, not spend the pool and answer 429.
+      await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 100_000);
+
+      const response = await app.request(
+        "/v1/rpc/proxy?projectId=",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getVersion", params: [] }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+    });
+
+    it("answers a distinct code when the upstream times out", async () => {
+      const db = getDb(env);
+      await db
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
+        .run();
+      rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+      rpcEnv.SOLANA_RPC_TRITON_API_KEY = "triton_key";
+
+      const timeoutError = new DOMException("The operation timed out.", "TimeoutError");
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(timeoutError);
+
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params: [] }),
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+      expect(response.status).toBe(504);
+      const body = await response.json();
+      expect(body.error.code).toBe("SOLANA_RPC_TIMEOUT");
+    });
+
+    it("answers a distinct code when the upstream body exceeds the relay bound", async () => {
+      const db = getDb(env);
+      await db
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_ORG.id)
+        .run();
+      rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+      rpcEnv.SOLANA_RPC_TRITON_API_KEY = "triton_key";
+
+      const { EgressResponseTooLargeError } = await import("@/services/guarded-egress");
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new EgressResponseTooLargeError("rpc.example"));
+
+      const response = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [] }),
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+      expect(response.status).toBe(502);
+      const body = await response.json();
+      expect(body.error.code).toBe("UPSTREAM_RESPONSE_TOO_LARGE");
+    });
+
+    it("charges the quota by batch size", async () => {
+      // One admitted batch of N is N node calls; the pool must see N, or the
+      // per-minute ceiling is really ceiling × batch cap.
+      await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 299);
+
+      const batch = await app.request(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+          body: JSON.stringify([
+            { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] },
+            { jsonrpc: "2.0", id: 2, method: "getSlot", params: [] },
+          ]),
+        },
+        env
+      );
+
+      expect(batch.status).toBe(429);
+    });
+
+    it("429s the connectivity test once the actor's quota is exhausted", async () => {
+      await seedRateLimit(env, `metered:rpc:org:${TEST_ORG.id}:key:${TEST_API_KEY_ID}`, 100_000);
+
+      const response = await app.request(
+        "/v1/rpc/test",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY_RAW}`,
+          },
+        },
+        env
+      );
+
+      expect(response.status).toBe(429);
+    });
   });
 });

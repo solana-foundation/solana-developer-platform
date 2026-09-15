@@ -1,0 +1,16 @@
+-- Drop helius_rings_key_refs: the key authority it was reserved for never needs it.
+--
+-- 0057 created the table to hold wrapped viewing and nullifier material, and
+-- 0067 recorded that nothing writes it — keeping it because "the table is the
+-- shape a real key authority needs", the deterministic seed being an interim.
+--
+-- That reservation is now answered, and the answer is no. A wallet's shielded
+-- keys derive from its own custody key: the owner signs Zolana's derivation
+-- message, and that signature is the seed. Ed25519 signing is deterministic, so
+-- the keys are reproducible from custody on demand and there is nothing at rest
+-- to wrap. Under an enclave-backed holder the keys would live in the enclave,
+-- which is equally not this table.
+--
+-- Safe without a backfill: the table has never had a writer, so every
+-- deployment's copy is empty. CASCADE covers the RLS policy 0081 attached to it.
+DROP TABLE IF EXISTS helius_rings_key_refs CASCADE;

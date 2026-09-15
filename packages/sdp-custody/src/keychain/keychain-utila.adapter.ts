@@ -5,6 +5,7 @@
  * Utila provides transaction signing for existing Solana wallets in Utila vaults.
  */
 
+import { redactCredentialString } from "@sdp/redaction";
 import type { SolanaSigner } from "@solana/keychain-core";
 import { createUtilaSigner } from "@solana/keychain-utila";
 import type { Address, TransactionSigner } from "@solana/kit";
@@ -87,10 +88,12 @@ export class KeychainUtilaAdapter extends BaseKeychainAdapter {
         signatures: toSignatureMap(signatureDict),
       };
     } catch (error) {
+      // Utila SDK errors embed the upstream response, which can carry the
+      // service-account bearer token; redact before it reaches the caller.
       const message = error instanceof Error ? error.message : "Unknown signing error";
       return {
         status: "failed",
-        error: `utila: ${message}`,
+        error: `utila: ${redactCredentialString(message)}`,
       };
     }
   }

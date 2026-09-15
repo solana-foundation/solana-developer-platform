@@ -116,6 +116,10 @@ const RINGS_ERROR_CODES: Record<HeliusRingsError["code"], ErrorCode> = {
   // The caller asked to move more than the wallet holds. Their request, not
   // our outage, and no amount of retrying changes it.
   insufficient_balance: "BAD_REQUEST",
+  // Nothing signed and nothing broke: the wallet's custody provider cannot
+  // serve Rings at all. A bad request rather than an outage, because the fix
+  // is a different custody provider and not a retry.
+  provider_unsupported: "BAD_REQUEST",
   // A conflict a caller cannot resolve: an operator has to reconcile the
   // signature against the chain before anything else happens to this wallet.
   manual_reconciliation_required: "CONFLICT",

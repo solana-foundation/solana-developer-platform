@@ -1,20 +1,21 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import type { ListProjectsResponse } from "@sdp/types";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 import {
-  PROXY_PROJECT_BOOTSTRAP_RETRY_DELAYS_MS,
-  retryProjectBootstrap,
-} from "@/lib/project-bootstrap-retry";
-import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "@/lib/project-cookie";
-import { acquireClerkToken, createTokenSdpApiClient } from "@/lib/sdp-api";
+  PROJECT_COOKIE_NAME,
+  WORKSPACE_SCOPE_COOKIE_NAME,
+  workspaceScope,
+} from "@/lib/project-cookie";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 
 export const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   WORKSPACE_LOADING_PATH,
+  // This polling endpoint performs its own auth check and must return JSON 401,
+  // not redirect fetch() to the HTML sign-in page when the session expires.
+  "/api/workspace-status",
   "/pay/:token",
   "/",
   "/docs(.*)",
@@ -30,64 +31,75 @@ const needsSelectedProject = createRouteMatcher([
   "/api/playground(.*)",
 ]);
 
+const isBrowserWriteGated = createRouteMatcher(["/api/dashboard(.*)", "/api/playground(.*)"]);
+
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * CSRF backstop for the BFF write routes (threat model EARN-021, PRO-1865).
+ * The only ambient credential on these routes is the Clerk session cookie, so
+ * a write arriving with a cross-origin `Origin` (including the sandboxed
+ * literal "null") is never legitimate. A write without an `Origin` header
+ * passes unless `Sec-Fetch-Site` positively marks it cross-site: origin-less
+ * callers are non-browser clients, which carry no ambient credentials for
+ * CSRF to ride on.
+ */
+export function rejectCrossSiteWrite(req: NextRequest): NextResponse | null {
+  if (!WRITE_METHODS.has(req.method) || !isBrowserWriteGated(req)) {
+    return null;
+  }
+
+  const origin = req.headers.get("origin");
+  const crossSite =
+    origin !== null
+      ? origin !== req.nextUrl.origin
+      : ["cross-site", "same-site"].includes(req.headers.get("sec-fetch-site") ?? "");
+
+  if (!crossSite) {
+    return null;
+  }
+  return NextResponse.json({ error: { message: "Cross-origin request refused" } }, { status: 403 });
+}
+
 function getUnauthenticatedUrl(req: NextRequest): string {
   const authEntryUrl = new URL(AUTH_ENTRY_PATH, req.url);
   authEntryUrl.searchParams.set("redirect_url", `${req.nextUrl.pathname}${req.nextUrl.search}`);
   return authEntryUrl.toString();
 }
 
-/**
- * Resolves the org's default project (sandbox, else first) so a fresh session
- * enters the dashboard with the project cookie already in place — before any
- * page SSR or dashboard API route runs. Returns null when the org has no
- * projects or the lookup fails; the request then proceeds cookieless and the
- * existing route-level "Selected project required" handling surfaces the
- * failure instead of the proxy taking down every dashboard request.
- *
- * The "default-sandbox" slug is safe to hardcode: sdp-api's project
- * provisioning (project.service.ts) assigns exactly that slug to every org's
- * auto-created sandbox project and slugs aren't user-editable, so it's a
- * platform invariant — the same discriminator DashboardWorkspaceProvider and
- * reconcileProjectCookieAction already match on.
- */
-async function resolveDefaultProjectId(
-  getToken: () => Promise<string | null>
-): Promise<string | null> {
-  const projects = await retryProjectBootstrap({
-    load: async () => {
-      const client = createTokenSdpApiClient(await acquireClerkToken(getToken));
-      return (await client.fetch<ListProjectsResponse>("/v1/projects")).projects;
-    },
-    isReady: (value) => value.length > 0,
-    // Next 16 Proxy runs on Node.js, but keeping deliberate waits below five
-    // seconds also leaves room for upstream calls on the smallest deployments.
-    delaysMs: PROXY_PROJECT_BOOTSTRAP_RETRY_DELAYS_MS,
-  });
-
-  return (
-    (projects?.find((project) => project.slug === "default-sandbox") ?? projects?.[0])?.id ?? null
-  );
-}
-
 export const proxy = clerkMiddleware(async (auth, req) => {
+  const crossSiteWrite = rejectCrossSiteWrite(req);
+  if (crossSiteWrite) {
+    return crossSiteWrite;
+  }
+
   if (!isPublicRoute(req)) {
     await auth.protect({
       unauthenticatedUrl: getUnauthenticatedUrl(req),
     });
   }
 
-  let bootstrappedProjectId: string | null = null;
-  if (needsSelectedProject(req) && !req.cookies.has(PROJECT_COOKIE_NAME)) {
-    const { getToken, orgId } = await auth();
-    if (orgId) {
-      bootstrappedProjectId = await resolveDefaultProjectId(getToken);
-      if (bootstrappedProjectId) {
-        req.cookies.set(PROJECT_COOKIE_NAME, bootstrappedProjectId);
-      } else {
-        const loadingUrl = new URL(WORKSPACE_LOADING_PATH, req.url);
-        loadingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
-        return NextResponse.redirect(loadingUrl);
+  if (needsSelectedProject(req)) {
+    const { userId, orgId } = await auth();
+    const projectId = req.cookies.get(PROJECT_COOKIE_NAME)?.value;
+    if (
+      userId &&
+      orgId &&
+      (!projectId ||
+        req.cookies.get(WORKSPACE_SCOPE_COOKIE_NAME)?.value !==
+          workspaceScope(userId, orgId, projectId))
+    ) {
+      // Never send a previous organization's project to a dashboard data fetch.
+      // Slow webhook polling belongs in the loading page, not Proxy.
+      if (req.nextUrl.pathname.startsWith("/api/")) {
+        return NextResponse.json(
+          { error: { message: "Workspace is still being prepared" } },
+          { status: 425 }
+        );
       }
+      const loadingUrl = new URL(WORKSPACE_LOADING_PATH, req.url);
+      loadingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
+      return NextResponse.redirect(loadingUrl);
     }
   }
 
@@ -99,9 +111,6 @@ export const proxy = clerkMiddleware(async (auth, req) => {
       headers: requestHeaders,
     },
   });
-  if (bootstrappedProjectId) {
-    response.cookies.set(PROJECT_COOKIE_NAME, bootstrappedProjectId, PROJECT_COOKIE_OPTIONS);
-  }
   return response;
 });
 

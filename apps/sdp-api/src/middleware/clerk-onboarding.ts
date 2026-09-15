@@ -4,6 +4,7 @@ import {
   type ClerkJwtPayload,
   extractBearerToken,
   resolveClerkEmail,
+  resolveClerkOrganizationClaims,
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
@@ -30,7 +31,8 @@ export function clerkOnboardingMiddleware() {
       throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
     }
 
-    if (!payload.org_id) {
+    const organization = resolveClerkOrganizationClaims(payload);
+    if (!organization.organizationId) {
       throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
     }
 
@@ -44,9 +46,9 @@ export function clerkOnboardingMiddleware() {
 
     c.set("clerkOnboarding", {
       clerkUserId: payload.sub,
-      clerkOrgId: payload.org_id,
-      orgSlug: payload.org_slug ?? null,
-      orgRole: payload.org_role ?? null,
+      clerkOrgId: organization.organizationId,
+      orgSlug: organization.organizationSlug,
+      orgRole: organization.organizationRole,
       email,
     });
 
@@ -64,7 +66,7 @@ export function clerkOnboardingMiddleware() {
            FROM auth_organization_identities
            WHERE provider = 'clerk' AND provider_org_id = ?`
         )
-        .bind(payload.org_id)
+        .bind(organization.organizationId)
         .first<{ organization_id: string }>()
     );
 

@@ -236,6 +236,7 @@ export function OnchainSendStepContent({
   );
 
   if (transferResult) {
+    const signature = transferResult.signature;
     return (
       <div className="flex flex-col items-center gap-6">
         <div className="flex size-16 items-center justify-center rounded-full bg-success-bg text-success">
@@ -246,7 +247,7 @@ export function OnchainSendStepContent({
             {t("DashboardPayments.onchainSend.transferSubmitted")}
           </p>
           <p className="text-sm text-tertiary">
-            {transferResult.signature
+            {signature
               ? t("DashboardPayments.onchainSend.transferSuccess")
               : t("DashboardPayments.onchainSend.transferStatus", {
                   status: transferResult.status,
@@ -257,15 +258,13 @@ export function OnchainSendStepContent({
           {amountHero}
           {detailRows}
         </section>
-        {transferResult.signature ? (
+        {signature ? (
           <Button
             type="button"
             variant="secondary"
             className="w-full"
             iconLeft={<ExternalLink />}
-            onClick={() =>
-              window.open(explorerTxUrl(transferResult.signature ?? "", cluster), "_blank")
-            }
+            onClick={() => window.open(explorerTxUrl(signature, cluster), "_blank")}
           >
             {t("DashboardPayments.onchainSend.viewOnExplorer")}
           </Button>

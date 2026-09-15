@@ -25,6 +25,7 @@ import {
   provisionTurnkeyPrivateKey as provisionTurnkeyPrivateKeyInCustody,
   provisionUtilaWallet as provisionUtilaWalletInCustody,
 } from "@sdp/custody/provisioning";
+import type { PrivyCredentialAuthentication } from "@/services/custody/privy-credential";
 import type { Env } from "@/types/env";
 
 // Credential-bearing provider requests must resolve destinations from trusted
@@ -37,12 +38,7 @@ export type ProvisionFireblocksOptions = CustodyProvisionFireblocksOptions & {
 export type { ProvisionFireblocksResult };
 
 export type ProvisionPrivyOptions = CustodyProvisionPrivyOptions;
-export type { ProvisionPrivyResult };
-
-export interface PrivyCredentialAuthentication {
-  appId: string;
-  appSecret: string;
-}
+export type { PrivyCredentialAuthentication, ProvisionPrivyResult };
 
 export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions & {
   network?: "solana" | "solana-devnet";

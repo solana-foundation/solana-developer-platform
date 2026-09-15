@@ -1,5 +1,6 @@
 import type { AppDb } from "@/db";
 import {
+  type ClaimHeliusRingsWalletInput,
   type CreateHeliusRingsWalletInput,
   DEFAULT_RINGS_WALLET_LIST_LIMIT,
   generateHeliusRingsWalletId,
@@ -8,6 +9,8 @@ import {
   type HeliusRingsWalletRow,
   type ListHeliusRingsWalletsInput,
   type MarkHeliusRingsWalletProvisionedInput,
+  type QuarantineHeliusRingsWalletInput,
+  type RekeyHeliusRingsWalletInput,
   type UpdateHeliusRingsWalletStatusInput,
   type UpdateHeliusRingsWalletSyncCursorInput,
 } from "./helius-rings-wallet.repository";
@@ -161,6 +164,66 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
           input.projectId,
           input.expectedStatus
         )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async rekeyWallet(input: RekeyHeliusRingsWalletInput) {
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_wallets
+              SET status = 'ready',
+                  shielded_address = ?,
+                  owner_address = ?,
+                  material_tag = ?,
+                  sync_cursor = NULL,
+                  last_indexed_slot = NULL,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+          RETURNING *`
+        )
+        .bind(
+          input.shieldedAddress,
+          input.ownerAddress,
+          input.materialTag,
+          input.id,
+          input.organizationId,
+          input.projectId
+        )
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async quarantineWallet(input: QuarantineHeliusRingsWalletInput) {
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_wallets
+              SET status = 'paused', updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND shielded_address = ?
+          RETURNING *`
+        )
+        .bind(input.id, input.organizationId, input.projectId, input.expectedShieldedAddress)
+        .first<Record<string, unknown>>();
+      return row ? mapRow(row) : null;
+    },
+
+    async claimWalletForRekey(input: ClaimHeliusRingsWalletInput) {
+      const row = await db
+        .prepare(
+          `UPDATE helius_rings_wallets
+              SET status = 'paused', updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND updated_at = ?
+          RETURNING *`
+        )
+        .bind(input.id, input.organizationId, input.projectId, input.expectedUpdatedAt)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },

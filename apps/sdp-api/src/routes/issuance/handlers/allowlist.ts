@@ -1,14 +1,15 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenAllowlistEntry, TokenAllowlistResponse } from "@sdp/types";
+import type { TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { createOrgSigner } from "@/services/solana";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -16,7 +17,17 @@ import {
   getTenantTokenService,
   requireProjectScope,
 } from "../helpers";
-import { type addAllowlistSchema, listAllowlistQuerySchema } from "../schemas";
+import {
+  type addAllowlistSchema,
+  listAllowlistQuerySchema,
+  removeAllowlistQuerySchema,
+} from "../schemas";
+import {
+  admitIssuanceRuntimeExecution,
+  createResolvedAuthoritySigner,
+  resolveAllowlistAuthority,
+  resolveAuthorityWallet,
+} from "./authority-resolution";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -69,21 +80,13 @@ async function withTimeout<T>(
  */
 async function syncNewAllowlistEntryOnChain(opts: {
   c: AppContext;
-  organizationId: string;
-  projectId: string;
-  signingWalletId: string | null | undefined;
+  signer: TransactionSigner;
   tokenService: TokenService;
   entryId: string;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
 }): Promise<TokenAllowlistEntry> {
-  const signer = await createOrgSigner(
-    opts.c.env,
-    opts.organizationId,
-    opts.projectId,
-    opts.signingWalletId ?? undefined
-  );
-  const mosaic = createIssuanceMosaicService(opts.c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored");
 
   try {
     await mosaic.addToList({ list: opts.list, wallet: opts.wallet });
@@ -98,19 +101,11 @@ async function syncNewAllowlistEntryOnChain(opts: {
 
 async function removeExistingAllowlistEntryOnChain(opts: {
   c: AppContext;
+  signer: TransactionSigner;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
-  organizationId: string;
-  projectId: string;
-  signingWalletId: string | null | undefined;
 }): Promise<void> {
-  const signer = await createOrgSigner(
-    opts.c.env,
-    opts.organizationId,
-    opts.projectId,
-    opts.signingWalletId ?? undefined
-  );
-  const mosaic = createIssuanceMosaicService(opts.c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored");
   const removeOperation = mosaic.removeFromList({
     list: opts.list,
     wallet: opts.wallet,
@@ -163,6 +158,37 @@ async function removeExistingAllowlistEntryOnChain(opts: {
 
     throw error;
   }
+}
+
+async function resolveAllowlistAuthoritySigner(
+  c: AppContext,
+  auth: ApiKeyContext,
+  tokenService: TokenService,
+  list: ReturnType<typeof assertValidAddress>,
+  signingCustodyWalletId?: string
+) {
+  const authority = await resolveAllowlistAuthority(c.env, list);
+  const authorityWallet = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    currentAuthority: authority,
+    requestedCustodyWalletId: signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: authorityWallet.custodyWalletId,
+    tokenService,
+  });
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    custodyWalletId: authorityWallet.custodyWalletId,
+    currentAuthority: authority,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+  return { ...authorityWallet, signer };
 }
 
 export const listAllowlist = async (c: AppContext) => {
@@ -236,6 +262,19 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
   }
 
   try {
+    const list = token.ablListAddress
+      ? assertValidAddress(token.ablListAddress, "ablListAddress")
+      : null;
+    const authorityWallet = list
+      ? await resolveAllowlistAuthoritySigner(
+          c,
+          auth,
+          tokenService,
+          list,
+          body.signingCustodyWalletId
+        )
+      : null;
+
     let { entry } = await tokenService.addAllowlistEntry({
       tokenId,
       address: body.address,
@@ -245,29 +284,53 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
     });
 
     const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "create",
-      resourceType: "token_allowlist",
-      resourceId: entry.id,
-      metadata: {
-        tokenId,
-        address: body.address,
-        label: body.label,
-        mode: token.ablListAddress ? "on-chain" : "database",
-        syncStatus: token.ablListAddress ? "pending" : "not_required",
-      },
-    });
-
-    if (token.ablListAddress) {
-      entry = await syncNewAllowlistEntryOnChain({
-        c,
-        organizationId: auth.organizationId,
-        projectId,
-        signingWalletId: token.signingWalletId,
-        tokenService,
-        entryId: entry.id,
-        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
-        wallet: assertValidAddress(body.address, "address"),
+    if (list && authorityWallet) {
+      const auditIntent = await auditService.beginCritical(c, {
+        action: "create",
+        resourceType: "token_allowlist",
+        resourceId: entry.id,
+        metadata: {
+          tokenId,
+          address: body.address,
+          label: body.label,
+          mode: "on-chain",
+          syncStatus: "pending",
+          custodyWalletId: authorityWallet.custodyWalletId,
+        },
+      });
+      try {
+        entry = await syncNewAllowlistEntryOnChain({
+          c,
+          signer: authorityWallet.signer,
+          tokenService,
+          entryId: entry.id,
+          list,
+          wallet: assertValidAddress(body.address, "address"),
+        });
+        await auditService.completeCritical(c, auditIntent, {
+          metadata: { syncStatus: "active" },
+        });
+      } catch (error) {
+        await auditService.completeCritical(c, auditIntent, {
+          status: "failure",
+          metadata: {
+            error: error instanceof Error ? error.message : "Unknown error",
+          },
+        });
+        throw error;
+      }
+    } else {
+      await auditService.log(c, {
+        action: "create",
+        resourceType: "token_allowlist",
+        resourceId: entry.id,
+        metadata: {
+          tokenId,
+          address: body.address,
+          label: body.label,
+          mode: "database",
+          syncStatus: "not_required",
+        },
       });
     }
 
@@ -284,6 +347,10 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
 export const removeAllowlistEntry = async (c: AppContext) => {
   const { tokenId, entryId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
+  const parsed = removeAllowlistQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
 
   const tokenService = getTenantTokenService(c);
   const token = await tokenService.getToken({
@@ -304,6 +371,18 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     return noContent(c);
   }
 
+  const list = token.ablListAddress
+    ? assertValidAddress(token.ablListAddress, "ablListAddress")
+    : null;
+  const authorityWallet = list
+    ? await resolveAllowlistAuthoritySigner(
+        c,
+        auth,
+        tokenService,
+        list,
+        parsed.data.signingCustodyWalletId
+      )
+    : null;
   const auditService = new AuditService(getDb(c.env));
   const auditIntent = await auditService.beginCritical(c, {
     action: "revoke",
@@ -312,7 +391,8 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     metadata: {
       tokenId,
       address: entry.address,
-      mode: token.ablListAddress ? "on-chain" : "database",
+      mode: list ? "on-chain" : "database",
+      custodyWalletId: authorityWallet?.custodyWalletId ?? null,
     },
   });
   let authoritativeEffectCompleted = false;
@@ -322,13 +402,11 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     // final DB state. The helper reconciles ambiguous submission errors by
     // reading membership, so a timeout that landed still completes, while a
     // definite failure leaves the entry accurately active and safely retryable.
-    if (token.ablListAddress) {
+    if (list && authorityWallet) {
       await removeExistingAllowlistEntryOnChain({
         c,
-        organizationId: auth.organizationId,
-        projectId,
-        signingWalletId: token.signingWalletId,
-        list: assertValidAddress(token.ablListAddress, "ablListAddress"),
+        signer: authorityWallet.signer,
+        list,
         wallet: assertValidAddress(entry.address, "address"),
       });
       authoritativeEffectCompleted = true;

@@ -69,12 +69,7 @@ import {
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
-import {
-  createTransferSignedSubmissionStore,
-  isDefiniteSubmissionError,
-  type SignedSubmissionStore,
-  submitSignedPaymentTransaction,
-} from "@/services/payments/signed-submission";
+import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import {
   approvedWalletOperationId,
   assertApprovedWalletOperationCustodyWallet,
@@ -83,6 +78,11 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import * as solanaServices from "@/services/solana";
+import {
+  isDefiniteSubmissionError,
+  type SignedSubmissionStore,
+  submitSponsoredTransaction,
+} from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { type AppContext, getFeePayment, getPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
@@ -713,7 +713,7 @@ async function executeSolTransfer(
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   await beginApprovedWalletOperationEffect(c);
-  const signature = await submitSignedPaymentTransaction({
+  const signature = await submitSponsoredTransaction({
     feePayment,
     rpc,
     transaction: txBytes,
@@ -786,7 +786,7 @@ async function executeSplTransfer(
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   await beginApprovedWalletOperationEffect(c);
-  const signature = await submitSignedPaymentTransaction({
+  const signature = await submitSponsoredTransaction({
     feePayment,
     rpc,
     transaction: txBytes,

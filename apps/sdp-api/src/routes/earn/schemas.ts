@@ -534,7 +534,34 @@ export const earnExternalWalletPositionsQuerySchema = z
   })
   .strict();
 
-export const earnExternalWalletPositionSummaryQuerySchema = z.object({}).strict();
+/**
+ * `includeOwnerAddresses=false` drops every owner-identifying field
+ * (PRO-1873, threat model EARN-028). `includePositions=true` adds the already
+ * hydrated positions to each strategy total so an interactive surface can
+ * drill down without N more paid chain reads. Position details require owner
+ * addresses; totals-only consumers should request neither.
+ */
+export const earnExternalWalletPositionSummaryQuerySchema = z
+  .object({
+    includeOwnerAddresses: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
+    includePositions: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.includePositions && value.includeOwnerAddresses === false) {
+      ctx.addIssue({
+        code: "custom",
+        message: "includePositions=true requires includeOwnerAddresses=true",
+        path: ["includePositions"],
+      });
+    }
+  });
 
 /**
  * One external wallet's activity, newest first (PRO-1772). The owner is a

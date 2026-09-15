@@ -61,5 +61,9 @@ export function useInlineValidationMessage(fieldLabel: string) {
     setMessage((previous) => (previous === null ? null : messageFor(el)));
   };
 
-  return { message, onInvalid, revalidate };
+  // A picker replaces the field value without firing a native input event.
+  // Dismiss the old message; native constraints still validate the next submit.
+  const clearValidationMessage = () => setMessage(null);
+
+  return { message, onInvalid, revalidate, clearValidationMessage };
 }

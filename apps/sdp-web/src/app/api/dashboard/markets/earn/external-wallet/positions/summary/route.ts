@@ -12,6 +12,6 @@ export async function GET(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.external_wallet_positions.summary",
-    path: "/v1/earn/external-wallet/positions/summary",
+    path: "/v1/earn/external-wallet/positions/summary?includePositions=true",
   });
 }

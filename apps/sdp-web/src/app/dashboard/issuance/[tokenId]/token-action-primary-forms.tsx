@@ -1,11 +1,11 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { type ComponentProps, type Dispatch, type SetStateAction, useId } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
 import { TokenActionCard } from "./token-action-card";
+import { ActionField } from "./token-action-field";
 import type {
   AdminAction,
   BurnFormState,
@@ -22,7 +22,6 @@ import {
 import { TokenSignerSelect } from "./token-signer-select";
 import { TokenValidationMessage } from "./token-validation-message";
 import { TokenWalletAddressField } from "./token-wallet-address-field";
-import { useInlineValidationMessage } from "./use-inline-validation-message";
 
 interface TokenActionPrimaryFormsProps {
   activeAction: AdminAction | null;
@@ -76,8 +75,18 @@ export function TokenActionPrimaryForms({
   // Mirrors the non-pending half of each submit button's `disabled` condition so the
   // note adjacent to the button explains why the action is unavailable (e.g. the
   // destination is denylisted) without the user having to scan the form fields.
-  const mintDisabledReason = signerUnavailableReason || mintValidationReason;
-  const burnDisabledReason = signerUnavailableReason || burnValidationReason;
+  const mintDisabledReason =
+    signerUnavailableReason ||
+    (signerWallets.length > 1 && !mintForm.signingWalletId
+      ? t("DashboardIssuance.signer.select")
+      : null) ||
+    mintValidationReason;
+  const burnDisabledReason =
+    signerUnavailableReason ||
+    (signerWallets.length > 1 && !burnForm.signingWalletId
+      ? t("DashboardIssuance.signer.select")
+      : null) ||
+    burnValidationReason;
 
   return (
     <>
@@ -331,73 +340,5 @@ export function TokenActionPrimaryForms({
         </TokenActionCard>
       ) : null}
     </>
-  );
-}
-
-function ActionField({
-  label,
-  value,
-  onChange,
-  type = "text",
-  required = false,
-  pattern,
-  title,
-  min,
-  step,
-  placeholder,
-  inputMode,
-  description,
-  error,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: ComponentProps<typeof Input>["type"];
-  required?: boolean;
-  pattern?: string;
-  title?: string;
-  min?: string;
-  step?: string;
-  placeholder?: string;
-  inputMode?: ComponentProps<typeof Input>["inputMode"];
-  description?: string;
-  error?: string | null;
-}) {
-  const fieldId = useId();
-  const errorId = useId();
-  const { message: nativeError, onInvalid, revalidate } = useInlineValidationMessage(label);
-  const hasError = Boolean(error) || nativeError !== null;
-
-  return (
-    <div className="space-y-2">
-      <label
-        htmlFor={fieldId}
-        className="block text-[12px] leading-5 font-medium tracking-[0.02em] text-secondary"
-      >
-        {label}
-      </label>
-      {description ? <p className="text-[13px] leading-5 text-secondary">{description}</p> : null}
-      <Input
-        id={fieldId}
-        type={type}
-        value={value}
-        required={required}
-        pattern={pattern}
-        title={title}
-        min={min}
-        step={step}
-        placeholder={placeholder}
-        inputMode={inputMode}
-        aria-invalid={hasError}
-        aria-describedby={hasError ? errorId : undefined}
-        onInvalid={onInvalid}
-        onChange={(event) => {
-          onChange(event.currentTarget.value);
-          revalidate(event.currentTarget);
-        }}
-        className="h-11 rounded-[12px] border-border-default bg-surface-raised px-4 shadow-none"
-      />
-      <TokenValidationMessage id={errorId} message={error ?? nativeError} />
-    </div>
   );
 }

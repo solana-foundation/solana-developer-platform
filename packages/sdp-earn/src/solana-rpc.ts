@@ -2,6 +2,7 @@ import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { internalError, providerNotConfigured } from "./errors";
 import { providerFetchJson } from "./fetch";
+import type { EarnRuntimeEnvironment } from "./types";
 
 /**
  * Raw Solana JSON-RPC for CATALOGUE reads, shared by every provider whose shelf
@@ -20,6 +21,33 @@ import { providerFetchJson } from "./fetch";
 
 /** Default deadline for a catalogue RPC read, inherited from the Kamino path. */
 export const CATALOGUE_RPC_TIMEOUT_MS = 20_000;
+
+/**
+ * The RPC endpoint a catalogue read should use for `cluster`.
+ *
+ * `SOLANA_RPC_URL` is the PROCESS endpoint: it serves whichever cluster the
+ * deployment is configured for. The catalogue sync walks BOTH environments in
+ * that one process, so a provider whose instrument lives on the OTHER cluster
+ * can only be read when that cluster has an endpoint of its own. Without one,
+ * a mainnet-only provider (Ondo) is invisible to every non-production
+ * deployment: its production fetch fails the genesis proof, the sync treats
+ * that as a steady-state skip, and the browse-only mirror converges to empty.
+ *
+ * `SOLANA_MAINNET_RPC_URL` / `SOLANA_DEVNET_RPC_URL` are the same two override
+ * keys the API's execution path reads (`resolveClusterRpcUrl`), so one Doppler
+ * value serves catalogue and execution alike. Falling back to the process
+ * endpoint keeps today's behaviour for every single-cluster deployment, and
+ * `assertRpcServesCluster` still measures whatever URL comes back — an
+ * override pointed at the wrong chain is refused exactly like the default.
+ */
+export function resolveCatalogueRpcUrl(
+  env: EarnRuntimeEnvironment,
+  cluster: SolanaCluster
+): string {
+  const override = cluster === "devnet" ? env.SOLANA_DEVNET_RPC_URL : env.SOLANA_MAINNET_RPC_URL;
+  if (typeof override === "string" && override.trim() !== "") return override.trim();
+  return env.SOLANA_RPC_URL?.trim() ?? "";
+}
 
 // biome-ignore lint/security/noSecrets: the bitcoin/Solana base58 alphabet
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";

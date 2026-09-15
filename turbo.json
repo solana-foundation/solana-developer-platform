@@ -35,6 +35,7 @@
     "IBM_HAVEN_CREDENTIAL_ID",
     "IBM_HAVEN_PRIVATE_KEY",
     "IBM_HAVEN_WALLET_ID",
+    "JUPITER_SWAP_API_KEY",
     "FEE_PAYER_PRIVATE_KEY",
     "FIREBLOCKS_API_BASE_URL",
     "FIREBLOCKS_API_KEY",
@@ -44,10 +45,6 @@
     "FLAGS",
     "FLAGS_SECRET",
     "HELIUS_RINGS_ENABLED",
-    "HELIUS_RINGS_RPC_URL",
-    "HELIUS_RINGS_INDEXER_URL",
-    "HELIUS_RINGS_PROVER_URL",
-    "HELIUS_RINGS_ALLOW_INSECURE_HTTP",
     "CHAINALYSIS_API_BASE_URL",
     "CHAINALYSIS_API_KEY",
     "ELLIPTIC_API_BASE_URL",
@@ -101,6 +98,8 @@
     "SDP_API_RESET_LOCAL_STATE",
     "SDP_DOCS_PROXY_ORIGIN",
     "SIGNING_PROVIDER",
+    "SOLANA_DEVNET_RPC_URL",
+    "SOLANA_MAINNET_RPC_URL",
     "SOLANA_NETWORK",
     "SOLANA_RPC_ALCHEMY_API_KEY",
     "SOLANA_RPC_ALCHEMY_URL",
@@ -175,8 +174,6 @@
     "UPSHIFT_SANDBOX_API_KEY",
     "PERENA_API_KEY",
     "PERENA_SANDBOX_API_KEY",
-    "GROUND_API_KEY",
-    "GROUND_SANDBOX_API_KEY",
     "GOOGLE_ADDRESS_COMPLETION_API_KEY"
   ],
   "tasks": {
@@ -211,7 +208,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "env": ["TEST_SHARD"],
+      "outputs": ["coverage/**", ".vitest-reports/**"]
     },
     "test:coverage": {
       "dependsOn": ["^build"],

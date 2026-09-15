@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { getDeploymentMode } from "@/lib/runtime-env";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
@@ -5,6 +6,19 @@ import type { Env } from "@/types/env";
 export type CredentialSecretStorageBackend = "gcp_secret_manager" | "encrypted_db" | "runtime_env";
 
 export type CredentialSecretPayload = Record<string, unknown>;
+
+const gcpSecretVersionMetadataSchema = z.object({
+  name: z.string().min(1),
+  state: z.enum(["ENABLED", "DISABLED", "DESTROYED"]),
+});
+const gcpSecretVersionPageSchema = z.object({
+  // GCP's protobuf JSON omits an empty repeated field; {} is a valid empty page.
+  versions: z.array(gcpSecretVersionMetadataSchema).max(25).default([]),
+  nextPageToken: z.string().optional(),
+});
+const gcpNotFoundSchema = z.object({
+  error: z.object({ status: z.literal("NOT_FOUND"), code: z.literal(404).optional() }),
+});
 
 export interface StoredCredentialSecret {
   storageBackend: CredentialSecretStorageBackend;
@@ -29,6 +43,25 @@ export interface ReadCredentialSecretParams {
 
 export interface DestroyCredentialSecretVersionParams {
   secretVersionRef: string;
+  signal?: AbortSignal;
+  /** Require confirmed destruction; by default a successful destroy request is enough. */
+  requireDestroyed?: boolean;
+}
+
+export interface ListCredentialSecretVersionsParams {
+  secretRef: string;
+  pageToken?: string;
+  signal?: AbortSignal;
+  /** Exclude destroyed payloads from recurring scans; exact-version verification is separate. */
+  liveOnly?: boolean;
+}
+
+export interface CredentialSecretVersionPage {
+  versions: Array<{
+    secretVersionRef: string;
+    state: z.infer<typeof gcpSecretVersionMetadataSchema>["state"];
+  }>;
+  nextPageToken?: string;
 }
 
 export interface CredentialSecretStore {
@@ -36,6 +69,15 @@ export interface CredentialSecretStore {
   write(params: WriteCredentialSecretParams): Promise<StoredCredentialSecret>;
   read(params: ReadCredentialSecretParams): Promise<CredentialSecretPayload>;
   destroyVersion(params: DestroyCredentialSecretVersionParams): Promise<void>;
+  /**
+   * The version ref a fresh write for this credential will create, known
+   * BEFORE anything external exists. Lets a caller record a durable cleanup
+   * obligation ahead of the write, so no externally readable version can ever
+   * outlive both the write's transaction and the record of its existence.
+   * Backends without an external artifact return null.
+   */
+  predictFirstVersionRef(params: { providerCredentialId: string }): string | null;
+  listVersions?(params: ListCredentialSecretVersionsParams): Promise<CredentialSecretVersionPage>;
 }
 
 export class CredentialSecretStoreError extends Error {
@@ -111,6 +153,10 @@ export class EncryptedDbCredentialSecretStore implements CredentialSecretStore {
       "UNSUPPORTED_OPERATION"
     );
   }
+
+  predictFirstVersionRef(): string | null {
+    return null;
+  }
 }
 
 export class RuntimeEnvCredentialSecretStore implements CredentialSecretStore {
@@ -123,6 +169,10 @@ export class RuntimeEnvCredentialSecretStore implements CredentialSecretStore {
       "Runtime env credentials are read-only and must be supplied by deployment configuration",
       "UNSUPPORTED_OPERATION"
     );
+  }
+
+  predictFirstVersionRef(): string | null {
+    return null;
   }
 
   async read(params: ReadCredentialSecretParams): Promise<CredentialSecretPayload> {
@@ -195,6 +245,7 @@ interface CachedAccessToken {
  * configured stores, which is also what keeps it inert under test.
  */
 const projectNumberCache = new Map<string, string>();
+const GCP_REQUEST_TIMEOUT_MS = 10_000;
 
 export class GcpSecretManagerCredentialSecretStore implements CredentialSecretStore {
   readonly storageBackend = "gcp_secret_manager" as const;
@@ -290,12 +341,103 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
   }
 
   async destroyVersion(params: DestroyCredentialSecretVersionParams): Promise<void> {
-    assertManagedSecretRef(params.secretVersionRef, await this.managedRefOptions(true));
+    assertManagedSecretRef(
+      params.secretVersionRef,
+      await this.managedRefOptions(true, params.signal)
+    );
 
-    await this.request(`${params.secretVersionRef}:destroy`, {
-      method: "POST",
-      body: "{}",
+    try {
+      const destroyed = await this.request<{ state?: unknown }>(
+        `${params.secretVersionRef}:destroy`,
+        {
+          method: "POST",
+          body: "{}",
+          signal: params.signal,
+        }
+      );
+      if (params.requireDestroyed && destroyed.state !== "DESTROYED") {
+        throw new CredentialSecretStoreError(
+          "GCP secret version destruction is not confirmed",
+          "UPSTREAM_ERROR"
+        );
+      }
+    } catch (error) {
+      params.signal?.throwIfAborted();
+      if (await this.isVersionDestroyed(params.secretVersionRef, params.signal)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async listVersions(
+    params: ListCredentialSecretVersionsParams
+  ): Promise<CredentialSecretVersionPage> {
+    const refOptions = await this.managedRefOptions(false, params.signal);
+    const parent = assertManagedSecretRef(params.secretRef, refOptions);
+    const query = new URLSearchParams({ pageSize: "25" });
+    if (params.pageToken) query.set("pageToken", params.pageToken);
+    if (params.liveOnly) query.set("filter", "state:(ENABLED OR DISABLED)");
+    const httpResponse = await this.rawRequest(`${params.secretRef}/versions?${query}`, {
+      method: "GET",
+      signal: params.signal,
     });
+    // Only a first-page inventory miss is an absence observation. Losing a later
+    // page must fail rather than turn a partial inventory into a complete one.
+    if (httpResponse.status === 404 && !params.pageToken) {
+      const missing = gcpNotFoundSchema.safeParse(await httpResponse.json().catch(() => null));
+      if (missing.success) return { versions: [] };
+      throw new CredentialSecretStoreError(
+        "GCP Secret Manager returned an invalid not-found response",
+        "UPSTREAM_ERROR"
+      );
+    }
+    const response = await parseGcpResponse<unknown>(httpResponse);
+    try {
+      const page = gcpSecretVersionPageSchema.parse(response);
+      const versions: CredentialSecretVersionPage["versions"] = [];
+      for (const version of page.versions) {
+        const parsed = assertManagedSecretRef(version.name, {
+          ...refOptions,
+          requireVersion: true,
+        });
+        if (parsed.secretId !== parent.secretId)
+          throw new Error("Version belongs to another secret");
+        versions.push({ secretVersionRef: version.name, state: version.state });
+      }
+      const result: CredentialSecretVersionPage = { versions };
+      if (page.nextPageToken) result.nextPageToken = page.nextPageToken;
+      return result;
+    } catch {
+      throw new CredentialSecretStoreError(
+        "GCP Secret Manager returned an invalid secret version page",
+        "UPSTREAM_ERROR"
+      );
+    }
+  }
+
+  private async isVersionDestroyed(
+    secretVersionRef: string,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    try {
+      const version = await this.request<{ state?: unknown }>(secretVersionRef, {
+        method: "GET",
+        signal,
+      });
+      return version.state === "DESTROYED";
+    } catch {
+      return false;
+    }
+  }
+
+  predictFirstVersionRef(params: { providerCredentialId: string }): string | null {
+    const secretRef = buildGcpSecretRef({
+      projectId: this.options.projectId,
+      secretPrefix: this.options.secretPrefix,
+      providerCredentialId: params.providerCredentialId,
+    });
+    return `${secretRef}/versions/1`;
   }
 
   private async createSecretIfMissing(
@@ -356,6 +498,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
     // message instead of being reported as a malformed response from GCP.
     const refOptions = await this.managedRefOptions(true);
 
+    let version: string | undefined;
     try {
       // Secret Manager answers with the canonical resource name, which spells
       // the project as its number, so the reply never matches the ref we asked
@@ -367,6 +510,10 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       if (!requestedSecretId || parsed.secretId !== requestedSecretId) {
         throw new Error("Version name does not belong to the requested secret");
       }
+      version = parsed.version;
+      if (!version) {
+        throw new Error("Version name is missing its version number");
+      }
     } catch {
       throw new CredentialSecretStoreError(
         "GCP Secret Manager addVersion response included an invalid version name",
@@ -374,7 +521,12 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       );
     }
 
-    return name;
+    // Returned in the project-ID spelling the write was addressed with, not the
+    // canonical project-number name GCP answered — every ref this deployment
+    // records (retirement obligations, credential rows, the pre-write
+    // reservation) must live in ONE spelling, or the same version becomes two
+    // different bookkeeping keys.
+    return `${secretRef}/versions/${version}`;
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
@@ -383,10 +535,11 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
   }
 
   private async rawRequest(path: string, init: RequestInit): Promise<Response> {
-    const accessToken = await this.getAccessToken();
+    const accessToken = await this.getAccessToken(init.signal);
     try {
       return await this.fetcher(`${this.apiBaseUrl}/v1/${path}`, {
         ...init,
+        signal: gcpRequestSignal(init.signal),
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
@@ -405,10 +558,13 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
     }
   }
 
-  private async managedRefOptions(requireVersion: boolean): Promise<ManagedSecretRefOptions> {
+  private async managedRefOptions(
+    requireVersion: boolean,
+    signal?: AbortSignal
+  ): Promise<ManagedSecretRefOptions> {
     return {
       projectId: this.options.projectId,
-      projectNumber: await this.resolveProjectNumber(),
+      projectNumber: await this.resolveProjectNumber(signal),
       secretPrefix: this.options.secretPrefix,
       requireVersion,
     };
@@ -423,7 +579,8 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
    * request, and the number cannot change under a running revision, so an
    * instance-level cache would refetch on every credential operation.
    */
-  private async resolveProjectNumber(): Promise<string> {
+  private async resolveProjectNumber(signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
     if (this.options.projectNumber) {
       return this.options.projectNumber;
     }
@@ -436,6 +593,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
     let response: Response;
     try {
       response = await this.fetcher(this.metadataProjectNumberUrl, {
+        signal: gcpRequestSignal(signal),
         headers: {
           "Metadata-Flavor": "Google",
         },
@@ -458,14 +616,23 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
       );
     }
 
-    const projectNumber = (await response.text()).trim();
+    let projectNumber: string;
+    try {
+      projectNumber = (await response.text()).trim();
+    } catch {
+      throw new CredentialSecretStoreError(
+        "GCP metadata project number response could not be read",
+        "UPSTREAM_ERROR"
+      );
+    }
     assertGcpProjectNumber(projectNumber);
     projectNumberCache.set(this.metadataProjectNumberUrl, projectNumber);
 
     return projectNumber;
   }
 
-  private async getAccessToken(): Promise<string> {
+  private async getAccessToken(signal?: AbortSignal | null): Promise<string> {
+    signal?.throwIfAborted();
     if (this.options.accessToken) {
       return this.options.accessToken;
     }
@@ -477,6 +644,7 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
     let response: Response;
     try {
       response = await this.fetcher(this.metadataTokenUrl, {
+        signal: gcpRequestSignal(signal),
         headers: {
           "Metadata-Flavor": "Google",
         },
@@ -509,6 +677,12 @@ export class GcpSecretManagerCredentialSecretStore implements CredentialSecretSt
   }
 }
 
+function gcpRequestSignal(signal?: AbortSignal | null): AbortSignal {
+  signal?.throwIfAborted();
+  const timeout = AbortSignal.timeout(GCP_REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 export function createCredentialSecretStore(
   env: Env,
   persistedBackend?: CredentialSecretStorageBackend
@@ -516,11 +690,7 @@ export function createCredentialSecretStore(
   const backend = persistedBackend ?? resolveCredentialSecretStoreBackend(env);
 
   if (backend === "gcp_secret_manager") {
-    return new GcpSecretManagerCredentialSecretStore({
-      projectId: requireEnv(env.GCP_SECRET_MANAGER_PROJECT_ID, "GCP_SECRET_MANAGER_PROJECT_ID"),
-      secretPrefix: env.GCP_SECRET_MANAGER_SECRET_PREFIX ?? "sdp-provider-credentials",
-      apiBaseUrl: env.GCP_SECRET_MANAGER_API_BASE_URL,
-    });
+    return new GcpSecretManagerCredentialSecretStore(gcpCredentialSecretOptions(env));
   }
 
   if (backend === "runtime_env") {
@@ -529,6 +699,25 @@ export function createCredentialSecretStore(
 
   requireEnv(env.CUSTODY_ENCRYPTION_KEY, "CUSTODY_ENCRYPTION_KEY");
   return new EncryptedDbCredentialSecretStore(createCustodyCipher(env));
+}
+
+/** Reserve this location durably before the first external write for this credential ID. */
+export function prepareGcpCredentialSecret(
+  env: Env,
+  providerCredentialId: string
+): StoredCredentialSecret {
+  return {
+    storageBackend: "gcp_secret_manager",
+    secretRef: buildGcpSecretRef({ ...gcpCredentialSecretOptions(env), providerCredentialId }),
+  };
+}
+
+function gcpCredentialSecretOptions(env: Env): GcpSecretManagerCredentialSecretStoreOptions {
+  const projectId = requireEnv(env.GCP_SECRET_MANAGER_PROJECT_ID, "GCP_SECRET_MANAGER_PROJECT_ID");
+  const secretPrefix = env.GCP_SECRET_MANAGER_SECRET_PREFIX ?? "sdp-provider-credentials";
+  assertGcpProjectId(projectId);
+  assertGcpSecretPrefix(secretPrefix);
+  return { projectId, secretPrefix, apiBaseUrl: env.GCP_SECRET_MANAGER_API_BASE_URL };
 }
 
 export function resolveCredentialSecretStoreBackend(env: Env): CredentialSecretStorageBackend {

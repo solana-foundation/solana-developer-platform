@@ -5,6 +5,7 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import DashboardLoading from "@/app/dashboard/(home)/loading";
 import {
   ApiKeyAuthoringSkeleton,
   ApiKeysListSkeleton,
@@ -13,18 +14,19 @@ import {
   ApprovalDetailSkeleton,
   ApprovalInboxSkeleton,
 } from "@/app/dashboard/approvals/approval-page-skeletons";
+import { HeliusRingsSkeleton } from "@/app/dashboard/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
   IntegrationsSkeleton,
 } from "@/app/dashboard/integrations/integrations-skeleton";
 import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
+import { IssuanceCreateSkeleton } from "@/app/dashboard/issuance/issuance-create-skeleton";
+import { IssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail-skeleton";
+import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
 import {
-  IssuanceCreateSkeleton,
-  IssuanceDetailSkeleton,
-  IssuancePageSkeleton,
-} from "@/app/dashboard/issuance/issuance-page-skeleton";
-import DashboardLoading from "@/app/dashboard/loading";
-import {
+  DvpCreateSkeleton,
+  DvpTradeDetailSkeleton,
+  DvpTradesSkeleton,
   EarnIntegrationGuideSkeleton,
   EmbeddedYieldPortfolioSkeleton,
   MarketsLandingSkeleton,
@@ -76,6 +78,7 @@ import {
   withSubnavOpen,
   withSubnavToggled,
 } from "@/components/dashboard-nav";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
@@ -162,6 +165,12 @@ function resolvePageLoadingComponent(
       return EarnIntegrationGuideSkeleton;
     case "embedded-yield-integrate":
       return EarnIntegrationGuideSkeleton;
+    case "dvp-trades":
+      return DvpTradesSkeleton;
+    case "dvp-trade-create":
+      return DvpCreateSkeleton;
+    case "dvp-trade-detail":
+      return DvpTradeDetailSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
     case "payments-pay":
@@ -196,6 +205,8 @@ function resolvePageLoadingComponent(
       return ApprovalDetailSkeleton;
     case "settings":
       return SettingsPageSkeleton;
+    case "helius-rings":
+      return HeliusRingsSkeleton;
     case "allowlist":
       return AllowlistLoading;
   }
@@ -393,6 +404,7 @@ function DashboardSidebarContent({
   onClose,
   isCollapsed,
   variant,
+  showQuickStart,
   onOrganizationSwitchingChange,
   openSubnavs,
   onSubnavToggle,
@@ -405,6 +417,7 @@ function DashboardSidebarContent({
   onClose: () => void;
   isCollapsed: boolean;
   variant: "desktop" | "mobile";
+  showQuickStart: boolean;
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
@@ -454,7 +467,8 @@ function DashboardSidebarContent({
           />
         ))}
       </div>
-      <div className="shrink-0 px-3 pb-3">
+      <div className="shrink-0 space-y-3 px-3 pb-3">
+        {showQuickStart ? <DashboardQuickStart collapsed={isCollapsed} /> : null}
         <SidebarUserMenu
           collapsed={isCollapsed}
           canManageOrgSettings={canManageOrgSettings}
@@ -516,6 +530,7 @@ export function DashboardShell({
   const {
     assetProfiles: assetProfilesEnabled,
     custody: custodyEnabled,
+    dvp: dvpEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,
@@ -559,6 +574,7 @@ export function DashboardShell({
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     custodyEnabled,
+    dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
     issuanceEnabled,
@@ -579,7 +595,6 @@ export function DashboardShell({
   const headerTabs = pageConfig.headerTabs;
   const routeTabs = pageConfig.routeTabs;
   const hasHeaderTabs = Boolean(headerTabs || routeTabs);
-  const isMarketsHeader = pageConfig.headerVariant === "markets";
   const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs;
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
   const shouldRenderTopBarBorder =
@@ -587,6 +602,18 @@ export function DashboardShell({
   const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
   const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
+
+  useEffect(() => {
+    const tabletViewport = window.matchMedia("(min-width: 768px)");
+    const closeMobileNavigation = () => {
+      if (tabletViewport.matches) {
+        setMobileSidebarOpen(false);
+        setMoreSheetOpen(false);
+      }
+    };
+    tabletViewport.addEventListener("change", closeMobileNavigation);
+    return () => tabletViewport.removeEventListener("change", closeMobileNavigation);
+  }, []);
 
   useEffect(() => {
     setOpenSubnavs((current) => {
@@ -728,14 +755,14 @@ export function DashboardShell({
         className={[
           "mx-auto grid min-h-screen w-full max-w-none gap-0",
           shouldLockViewportScroll ? "h-full" : "",
-          "xl:grid-cols-[auto_1fr]",
+          "md:grid-cols-[auto_1fr]",
         ].join(" ")}
       >
         <aside
           style={{
             width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
           }}
-          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col xl:justify-between"
+          className="relative z-10 hidden bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between"
         >
           <DashboardSidebarContent
             canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
@@ -745,6 +772,7 @@ export function DashboardShell({
             onClose={() => setSidebarOpen(false)}
             isCollapsed={!isSidebarOpen}
             variant="desktop"
+            showQuickStart={!isWorkspaceSwitching}
             onOrganizationSwitchingChange={setOrganizationSwitching}
             openSubnavs={openSubnavs}
             onSubnavToggle={toggleSubnav}
@@ -786,6 +814,7 @@ export function DashboardShell({
             pathname={pathname}
             canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
             canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
+            dvpEnabled={dvpEnabled}
             earnEnabled={earnEnabled}
             heliusRingsEnabled={heliusRingsEnabled}
             marketsEnabled={marketsEnabled}
@@ -795,7 +824,7 @@ export function DashboardShell({
         ) : null}
 
         {isMobileSidebarOpen ? (
-          <div className="fixed inset-0 z-50 flex xl:hidden">
+          <div className="fixed inset-0 z-50 flex md:hidden">
             <button
               type="button"
               aria-label={t("Shared.dashboardShell.closeNavigationOverlay")}
@@ -811,6 +840,7 @@ export function DashboardShell({
                 onClose={() => setMobileSidebarOpen(false)}
                 isCollapsed={false}
                 variant="mobile"
+                showQuickStart={!isWorkspaceSwitching}
                 onOrganizationSwitchingChange={setOrganizationSwitching}
                 openSubnavs={openSubnavs}
                 onSubnavToggle={toggleSubnav}
@@ -823,36 +853,44 @@ export function DashboardShell({
         <section
           className={[
             "relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
-            shouldLockViewportScroll ? "flex min-h-0 flex-col overflow-hidden" : "px-3 py-5 md:p-6",
+            shouldLockViewportScroll
+              ? "flex min-h-0 flex-col overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
+              : "px-3 py-5 md:p-6",
           ].join(" ")}
         >
           <div
             className={[
               "min-w-0 w-full",
-              shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
+              shouldLockViewportScroll
+                ? "flex min-h-0 flex-1 flex-col"
+                : pageConfig.hideTitleOnMobile
+                  ? "space-y-4 sm:space-y-6"
+                  : "space-y-6",
             ].join(" ")}
           >
-            <div className={cn("shrink-0", !isMarketsHeader && "space-y-4")}>
+            <div className="shrink-0 space-y-4">
               <div
                 className={cn(
                   shouldRenderTopBarBorder && "border-b border-border-default pb-5 md:pb-6",
                   shouldLockViewportScroll
-                    ? isMarketsHeader
-                      ? "px-4 pt-8 md:px-8 md:pt-10 xl:px-16 xl:pt-11"
-                      : "px-3 pt-5 md:px-6 md:pt-6"
+                    ? "px-3 pt-5 md:px-6 md:pt-6"
                     : shouldRenderTopBarBorder && "-mx-3 px-3 md:-mx-6 md:px-6"
                 )}
               >
                 <DashboardTopBar
                   isMobileSidebarOpen={isMobileSidebarOpen}
                   setMobileSidebarOpen={setMobileSidebarOpen}
-                  hideTitle={pageConfig.hideTitle}
+                  titleVisibility={
+                    pageConfig.hideTitle
+                      ? "screen-reader-only"
+                      : pageConfig.hideTitleOnMobile
+                        ? "desktop-only"
+                        : "visible"
+                  }
                   title={pageConfig.title}
                   titlePosition={pageConfig.titlePosition}
                   topBarLeadingContent={topBarLeadingContent}
                   hasHeaderTabs={hasHeaderTabs}
-                  alignTitleWithTabs={hasHeaderTabs && !isMarketsHeader}
-                  showNotifications={assetProfilesEnabled && issuanceEnabled}
                 />
               </div>
 
@@ -870,8 +908,15 @@ export function DashboardShell({
               ) : null}
 
               {routeTabs ? (
-                <div className="mt-6 border-b border-border-default px-4 md:px-8 xl:px-16">
-                  <DashboardRouteTabs {...routeTabs} pathname={pathname} />
+                <div
+                  className={cn(
+                    "border-b border-border-default",
+                    !shouldLockViewportScroll && "-mx-3 md:-mx-6"
+                  )}
+                >
+                  <div className="flex items-end px-3 md:px-6">
+                    <DashboardRouteTabs {...routeTabs} pathname={pathname} />
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -881,8 +926,8 @@ export function DashboardShell({
                 "mx-auto min-w-0 w-full",
                 contentWidthClass,
                 // Clears the fixed mobile bottom bar so the last row of any page is
-                // still reachable; the bar is xl:hidden, so the padding is too.
-                shouldLockViewportScroll ? "" : "pb-20 xl:pb-0",
+                // still reachable; the bar is md:hidden, so the padding is too.
+                !shouldLockViewportScroll ? "pb-20 md:pb-0" : "",
                 shouldClipHorizontalOverflow && !shouldLockViewportScroll
                   ? "overflow-x-hidden"
                   : "",

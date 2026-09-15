@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
@@ -76,20 +77,14 @@ async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promi
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -337,10 +332,13 @@ describe("Compliance routes", () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
+        // The documented synchronous wallet analysis carries risk_score at the
+        // TOP level; the old nested fixture only passed under the deep search
+        // this change removes (a nested per-rule score must never read as the
+        // wallet's verdict).
         JSON.stringify({
-          analysis: {
-            risk_score: 42,
-          },
+          risk_score: 42,
+          risk_level: "high",
         }),
         {
           status: 200,

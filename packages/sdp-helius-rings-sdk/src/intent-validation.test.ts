@@ -111,8 +111,28 @@ function withdrawalIntent(overrides: Partial<PreparedSpendIntent> = {}): Prepare
   return {
     kind: "withdraw",
     owner: address(OWNER),
-    recipient: address(RECIPIENT),
+    asset: SOL,
     amount: 10n,
+    target: { kind: "sol", recipient: address(RECIPIENT) },
+    ...overrides,
+  } as PreparedSpendIntent;
+}
+
+const USDC_VAULT = address("3Nu7iuBLPnQ5MoLZWNr3cQ9WVFwQNXvzs1AQGpTLDzYm");
+const USDC_RECIPIENT_ATA = address("2vpVxdhtCzZ7YFuLYCQeMz1CRLgVSLDoZjhWDPPfJVsy");
+
+function usdcWithdrawalIntent(overrides: Partial<PreparedSpendIntent> = {}): PreparedSpendIntent {
+  return {
+    kind: "withdraw",
+    owner: address(OWNER),
+    asset: OTHER_ASSET,
+    amount: 10n,
+    target: {
+      kind: "spl",
+      recipientTokenAccount: USDC_RECIPIENT_ATA,
+      splTokenInterface: USDC_VAULT,
+      splInterfaceBump: 254,
+    },
     ...overrides,
   } as PreparedSpendIntent;
 }
@@ -278,6 +298,71 @@ describe("validatePreparedTransferIntent", () => {
       ],
     ])("rejects a mismatched %s", (_field, buildPrepared) => {
       expectPolicyError(() => validatePreparedTransferIntent(buildPrepared(), withdrawalIntent()));
+    });
+  });
+
+  describe("USDC withdrawal", () => {
+    function settlement(
+      overrides: Partial<Extract<SettlementTransfer, { kind: "spl" }>> = {}
+    ): SettlementTransfer {
+      return {
+        kind: "spl",
+        isDeposit: false,
+        amount: 10n,
+        mint: OTHER_ASSET,
+        tokenAccount: USDC_RECIPIENT_ATA,
+        splTokenInterface: USDC_VAULT,
+        splInterfaceBump: 254,
+        ...overrides,
+      };
+    }
+
+    // The USDC change lands in the sender's SPL slot and the SOL slot stays a
+    // zero-value dummy: an SPL withdrawal moves no lamports.
+    function outputs(): readonly ProofOutputUtxo[] {
+      return [ownerOutput(OTHER_ASSET, 4n), dummyOutput()];
+    }
+
+    it("accepts an SPL settlement to the derived vault and recipient token account", () => {
+      const value = prepared(outputs(), { interfaceTransfers: [settlement()] });
+
+      expect(() => validatePreparedTransferIntent(value, usdcWithdrawalIntent())).not.toThrow();
+    });
+
+    it.each([
+      ["settlement mint", () => settlement({ mint: SOL })],
+      ["recipient token account", () => settlement({ tokenAccount: address(RECIPIENT) })],
+      ["vault", () => settlement({ splTokenInterface: address(OTHER) })],
+      ["vault bump", () => settlement({ splInterfaceBump: 253 })],
+      ["settlement amount", () => settlement({ amount: 11n })],
+      ["deposit settlement", () => settlement({ isDeposit: true })],
+      [
+        "SOL settlement",
+        (): SettlementTransfer => ({
+          kind: "sol",
+          isDeposit: false,
+          amount: 10n,
+          userSolAccount: address(RECIPIENT),
+        }),
+      ],
+    ])("rejects a mismatched %s", (_field, buildSettlement) => {
+      expectPolicyError(() =>
+        validatePreparedTransferIntent(
+          prepared(outputs(), { interfaceTransfers: [buildSettlement()] }),
+          usdcWithdrawalIntent()
+        )
+      );
+    });
+
+    it("rejects a sender change slot holding a different asset than the withdrawal", () => {
+      expectPolicyError(() =>
+        validatePreparedTransferIntent(
+          prepared([ownerOutput(SOL, 4n), dummyOutput()], {
+            interfaceTransfers: [settlement()],
+          }),
+          usdcWithdrawalIntent()
+        )
+      );
     });
   });
 

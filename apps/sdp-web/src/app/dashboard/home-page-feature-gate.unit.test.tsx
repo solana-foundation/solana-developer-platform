@@ -28,7 +28,7 @@ vi.mock("./payments/payments-page.data", () => ({
   fetchPaymentsWallets: fetchPaymentsWalletsMock,
 }));
 
-import DashboardPage from "./page";
+import DashboardPage from "./(home)/page";
 
 describe("dashboard home module flags", () => {
   beforeEach(() => {

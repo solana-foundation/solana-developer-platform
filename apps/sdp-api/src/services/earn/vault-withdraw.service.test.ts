@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { VaultWithdrawalInput } from "./vault-withdraw.service";
 
@@ -92,12 +94,14 @@ async function seedPosition(): Promise<void> {
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER, "vault-withdraw@example.com", 1, "active"),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, "Vault Withdraw Project", "vault-withdraw-project", USER),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
@@ -216,6 +220,38 @@ describe("withdrawFromVault", () => {
     await expect(withdrawFromVault(env, input())).rejects.toMatchObject({
       code: "NOT_IMPLEMENTED",
     });
+  });
+
+  /**
+   * Exit safety (ADR 0002, EARN-012): the service has NO catalogue dependency,
+   * so a paused row for the position's own vault must change nothing. The
+   * route suite pins the same invariant at the gate layer with the service
+   * mocked away; this is the seam a future admission check would actually
+   * land in, so the REAL service is pinned against it here.
+   */
+  it("withdraws while the position's strategy is paused in the catalogue", async () => {
+    await createPostgresEarnRepository(getDb(env)).upsertStrategy({
+      provider: "kamino",
+      providerReference: VAULT,
+      name: "Paused Exit Vault",
+      sourceKind: "defi",
+      underlyingSource: "kamino",
+      depositMints: [TOKEN_MINT],
+      shareMint: SHARE_MINT,
+      apyType: "variable",
+      currentApy: "0.062",
+      liquidityTerm: "instant",
+      redemptionDelayDays: null,
+      riskMetadata: {},
+      status: "paused",
+      hostCluster: "devnet",
+      environment: "sandbox",
+    });
+
+    const result = await withdrawFromVault(env, input());
+
+    expect(result.movement).toMatchObject({ status: "submitted", signature: SIGNATURE });
+    expect(broadcastVaultTransaction).toHaveBeenCalledOnce();
   });
 
   /**

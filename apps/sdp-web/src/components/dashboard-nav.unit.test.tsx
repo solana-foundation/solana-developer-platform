@@ -1,3 +1,4 @@
+import { LandmarkIcon, PercentIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -29,6 +30,7 @@ function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]> = {
   return {
     canReadApprovals: false,
     custodyEnabled: true,
+    dvpEnabled: false,
     earnEnabled: false,
     heliusRingsEnabled: false,
     issuanceEnabled: true,
@@ -55,6 +57,7 @@ function moreSheetMarkup(
       pathname="/dashboard"
       canReadApprovals={false}
       canManageOrgSettings={false}
+      dvpEnabled={false}
       earnEnabled={false}
       heliusRingsEnabled={false}
       marketsEnabled={false}
@@ -78,10 +81,12 @@ describe("Markets dashboard navigation", () => {
       {
         label: "Shared.dashboardShell.treasurySolutions",
         href: "/dashboard/markets/treasury-solutions",
+        icon: LandmarkIcon,
       },
       {
         label: "Shared.dashboardShell.earnProgram",
         href: "/dashboard/markets/embedded-yield",
+        icon: PercentIcon,
       },
     ]);
   });
@@ -93,10 +98,39 @@ describe("Markets dashboard navigation", () => {
     expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.markets");
   });
 
-  it("hides provider-backed Markets when the Earn runtime is off", () => {
-    expect(
-      findMarketsItem(navOptions({ marketsEnabled: true, earnEnabled: false }))
-    ).toBeUndefined();
+  // Treasury Solutions left the Earn gate on main, so it is now listed for any
+  // org with the Markets flag. Markets therefore always has at least one child
+  // and can no longer be emptied by turning the sub-modules off.
+  it("still lists Treasury when every sub-module flag is off", () => {
+    const markets = findMarketsItem(
+      navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: false })
+    );
+
+    expect(markets?.children?.map((child) => child.href)).toEqual([
+      "/dashboard/markets/treasury-solutions",
+    ]);
+  });
+
+  // DvP is the first Markets sub-module that is not Earn-backed, so the entry
+  // point can no longer depend on Earn specifically.
+  it("shows Markets for a DvP-only organization", () => {
+    const markets = findMarketsItem(
+      navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: true })
+    );
+
+    expect(markets).toBeDefined();
+    expect(markets?.children?.map((child) => child.href)).toEqual([
+      "/dashboard/markets/treasury-solutions",
+      "/dashboard/markets/dvp",
+    ]);
+  });
+
+  it("omits DvP from the sub-nav when its own flag is off", () => {
+    const markets = findMarketsItem(
+      navOptions({ marketsEnabled: true, earnEnabled: true, dvpEnabled: false })
+    );
+
+    expect(markets?.children?.map((child) => child.href)).not.toContain("/dashboard/markets/dvp");
   });
 
   it("keeps Markets out of the mobile More sheet when the module flag is off", () => {

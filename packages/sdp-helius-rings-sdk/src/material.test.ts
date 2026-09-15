@@ -1,9 +1,12 @@
+import { isRingsIdentityMismatch } from "@sdp/helius-rings";
 import { describe, expect, it } from "vitest";
 import {
+  assertProvisionedIdentity,
   assertShieldedIdentity,
   canonicalShieldedIdentity,
   createShieldedMaterial,
   isValidViewingKeyBytes,
+  publishedHalves,
   RingsIdentityMismatchError,
   type ShieldedMaterialInput,
 } from "./material.js";
@@ -49,10 +52,12 @@ describe("createShieldedMaterial", () => {
     const second = await createShieldedMaterial({ ...INPUT, owner: OTHER_OWNER });
 
     try {
-      // Identical secrets under different addresses, which is what lets custody
-      // hold the Ed25519 secret while these keys are produced elsewhere.
-      expect(second.viewingKey.secretBytes()).toStrictEqual(first.viewingKey.secretBytes());
-      expect(second.nullifierKey.secretBytes()).toStrictEqual(first.nullifierKey.secretBytes());
+      // Identical published halves under different addresses, which is what lets
+      // custody hold the Ed25519 secret while these keys are produced elsewhere.
+      // Read off the address: the secrets never leave the material.
+      expect(publishedHalves(second.shieldedAddress)).toStrictEqual(
+        publishedHalves(first.shieldedAddress)
+      );
       expect(second.shieldedAddress.ownerHash()).not.toStrictEqual(
         first.shieldedAddress.ownerHash()
       );
@@ -78,12 +83,13 @@ describe("createShieldedMaterial", () => {
     await expect(createShieldedMaterial({ ...INPUT, owner: "not-an-address" })).rejects.toThrow();
   });
 
-  it("leaves both keys unusable after destroy", async () => {
+  it("cannot produce keys after destroy", async () => {
     const material = await createShieldedMaterial(INPUT);
     material.destroy();
 
-    expect(() => material.viewingKey.publicKey()).toThrow();
-    expect(() => material.nullifierKey.publicKey()).toThrow();
+    // The factories copy from the destroyed originals, so both refuse rather
+    // than handing back a zeroed key that would derive a wrong identity.
+    expect(() => material.readKeys()).toThrow();
   });
 });
 
@@ -107,6 +113,45 @@ describe("assertShieldedIdentity", () => {
       expect(() =>
         assertShieldedIdentity(material, canonicalShieldedIdentity(other.shieldedAddress))
       ).toThrow(RingsIdentityMismatchError);
+    } finally {
+      material.destroy();
+      other.destroy();
+    }
+  });
+});
+
+describe("assertProvisionedIdentity", () => {
+  it("accepts the identity the material publishes", async () => {
+    const material = await createShieldedMaterial(INPUT);
+
+    try {
+      const expected = canonicalShieldedIdentity(material.shieldedAddress);
+      expect(() => assertProvisionedIdentity(material, expected)).not.toThrow();
+    } finally {
+      material.destroy();
+    }
+  });
+
+  it("raises a mismatch the service can quarantine on, naming neither address", async () => {
+    const material = await createShieldedMaterial(INPUT);
+    const other = await createShieldedMaterial({ ...INPUT, owner: OTHER_OWNER });
+    const expected = canonicalShieldedIdentity(other.shieldedAddress);
+
+    try {
+      let thrown: unknown;
+      try {
+        assertProvisionedIdentity(material, expected);
+      } catch (error) {
+        thrown = error;
+      }
+
+      // The service pauses the wallet on this, so it has to be recognisable
+      // without reading the message.
+      expect(isRingsIdentityMismatch(thrown)).toBe(true);
+      expect(thrown).toMatchObject({ code: "conflict" });
+      // The two shielded addresses tell an operator nothing they can act on,
+      // and one of them is the wallet's persisted identity.
+      expect((thrown as Error).message).not.toContain(expected);
     } finally {
       material.destroy();
       other.destroy();

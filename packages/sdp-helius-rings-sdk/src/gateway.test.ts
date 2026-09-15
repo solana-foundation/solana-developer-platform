@@ -1,6 +1,7 @@
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { describe, expect, it } from "vitest";
 import { createRingsGateway, type RingsGatewayConfig } from "./gateway.js";
+import { TEST_OWNER, testMaterialSource } from "./test/shielded-identity-fixtures.js";
 
 const CONFIG: RingsGatewayConfig = {
   solanaRpcUrl: "http://127.0.0.1:1/rpc",
@@ -9,6 +10,7 @@ const CONFIG: RingsGatewayConfig = {
   organizationId: "org_1",
   projectId: "proj_1",
   signTransaction: async (unsigned) => unsigned,
+  signMessage: async (message) => message,
   submitTransaction: async () => "sig",
   allowInsecureHttp: true,
   healthTimeoutMs: 50,
@@ -72,21 +74,6 @@ describe("createRingsGateway", () => {
     });
   });
 
-  it("refuses ring bring-up when the message signer is not configured", async () => {
-    const error = await createRingsGateway({ ...CONFIG, ringRpcUrl: "https://ring-rpc.example" })
-      .provisionRing({ ringProgramId: RING_PROGRAM })
-      .then(
-        () => null,
-        (thrown: unknown) => thrown
-      );
-
-    expect(error).toBeInstanceOf(HeliusRingsError);
-    expect(error).toMatchObject({
-      code: "config_error",
-      message: "ring bring-up needs a custody message signer",
-    });
-  });
-
   it("refuses a plain-http ring RPC unless insecure http is explicitly allowed", async () => {
     const error = await createRingsGateway({
       ...CONFIG,
@@ -128,10 +115,10 @@ describe("createRingsGateway", () => {
   });
 
   it("refuses unsupported operation types at build time", async () => {
-    const error = await createRingsGateway(CONFIG)
+    const error = await createRingsGateway({ ...CONFIG, material: testMaterialSource() })
       .buildOperation({
-        operation: { opType: "merge", walletId: "hrw_1", input: {} } as never,
-        owner: "11111111111111111111111111111111",
+        operation: { opType: "zone_create", walletId: "hrw_1", input: {} } as never,
+        owner: TEST_OWNER,
       })
       .then(
         () => null,
@@ -146,6 +133,24 @@ describe("createRingsGateway", () => {
     await expect(createRingsGateway(CONFIG).verifyIndexed("sig")).rejects.toBeInstanceOf(
       HeliusRingsError
     );
+  });
+
+  it("dials every probe leg through the configured fetch", async () => {
+    const seen: string[] = [];
+    const recordingFetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(JSON.stringify({ result: "ok", circuits: ["custom-ring"] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    const health = await createRingsGateway({ ...CONFIG, fetch: recordingFetch }).probeHealth();
+
+    expect(health).toMatchObject({ rpc: "green", photon: "green", prover: "green" });
+    expect(seen).toContain(CONFIG.solanaRpcUrl);
+    expect(seen).toContain(CONFIG.indexerUrl);
+    expect(seen).toContain(`${CONFIG.proverUrl}/health`);
   });
 
   const WITH_KEY = "http://127.0.0.1:1/?api-key=super-secret-key";
@@ -167,5 +172,17 @@ describe("createRingsGateway", () => {
     expect(health.detail?.rpc).toMatch(/^client unavailable: .+/);
     expect(health.detail?.rpc).not.toBe("client unavailable: unknown error");
     expect(JSON.stringify(health)).not.toContain("super-secret-key");
+  });
+
+  it("redacts credentials embedded in every configured upstream", async () => {
+    const health = await createRingsGateway({
+      ...CONFIG,
+      indexerUrl: "not-a-url?token=indexer-secret",
+      proverUrl: "https://prover.example.test/?key=prover-secret",
+    }).probeHealth();
+
+    const serialized = JSON.stringify(health);
+    expect(serialized).not.toContain("indexer-secret");
+    expect(serialized).not.toContain("prover-secret");
   });
 });

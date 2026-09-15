@@ -4,7 +4,12 @@ import {
   type PrivateChannelInstanceEnvelope,
   type PrivateChannelInstanceResponse,
 } from "@sdp/types";
+import { asTransactionalClient, getDb } from "@/db";
 import {
+  createPostgresPrivateChannelDepositRepository,
+  createPostgresPrivateChannelInstanceRepository,
+  createPostgresPrivateChannelTransferRepository,
+  createPostgresPrivateChannelWithdrawalRepository,
   mapPrivateChannelInstanceRow,
   type PrivateChannelInstanceRow,
   type PrivateChannelUserRow,
@@ -23,11 +28,9 @@ import {
 } from "@/services/private-channels";
 import type { AppContext } from "../context";
 import {
-  getPrivateChannelDepositRepository,
   getPrivateChannelInstanceRepository,
   getPrivateChannelRepository,
   getPrivateChannelUserRepository,
-  getPrivateChannelWithdrawalRepository,
   loadPrivateChannelProjectRpcClient,
 } from "../context";
 import { emitLifecycle, emitMember } from "../helpers";
@@ -188,7 +191,8 @@ export const connectPrivateChannelInstance = async (
     if (!alreadyMember) defaultMembershipId = membership.id;
   } catch (error) {
     if (existingByGateway) await repo.deactivateActive(scope);
-    else await repo.deleteActive(scope);
+    // The instance this request just created, which no drain has touched.
+    else await repo.deleteActive(scope, null);
     throw mapPrivateChannelError(error);
   }
 
@@ -324,36 +328,95 @@ export const deletePrivateChannelInstance = async (c: AppContext) => {
     throw notFound("Active private channel instance");
   }
 
-  // Deposits and withdrawals are financial records that survive instance deletion,
-  // but deleting an instance with IN-FLIGHT money movements would strand their
-  // reconciliation. Reject it while any are non-terminal.
-  //
-  // TODO(disconnect-drain): this count->delete is check-then-act, so a deposit or
-  // withdrawal created between the two still slips through and gets stranded. The
-  // guard is worth having (it catches the common case) but it is not a barrier. The
-  // real fix is a draining/read-only state on the instance: flip it first so no new
-  // deposits or transfers are accepted, let the in-flight set settle, then allow the
-  // delete — which also gives the operator a way to disconnect deliberately instead
-  // of retrying against a moving target.
-  const [depositsInFlight, withdrawalsInFlight] = await Promise.all([
-    getPrivateChannelDepositRepository(c).countNonTerminalByInstance(active.id),
-    getPrivateChannelWithdrawalRepository(c).countNonTerminalByInstance(active.id),
-  ]);
-  if (depositsInFlight > 0 || withdrawalsInFlight > 0) {
+  // Money movements are financial records that survive instance deletion, but
+  // deleting an instance with IN-FLIGHT movements would strand their
+  // reconciliation. Deletion therefore drains first, in its own transaction:
+  // the durable draining flag must persist even when the deletion below is
+  // refused, so every later admission keeps refusing (HOO-1011).
+  const draining = await repo.beginDraining(scope);
+  if (!draining) {
+    throw notFound("Active private channel instance");
+  }
+  // The drain this request is acting on. Everything below is guarded by it, so
+  // a resume that lands in between abandons this deletion instead of having it
+  // delete the instance the operator just kept.
+  const drainToken = draining.draining_token;
+  if (drainToken === null) {
     throw new AppError(
       "CONFLICT",
-      `Cannot delete this instance: ${depositsInFlight} deposit(s) and ${withdrawalsInFlight} withdrawal(s) are still in flight. Wait for them to settle or fail first.`
+      "The Private Channels instance is no longer draining. Try again."
     );
   }
 
-  await emitLifecycle(c, active, PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_DISCONNECTED, {
-    payload: { gatewayUrl: active.gateway_url, reason: "deleted" },
+  // Counting and deleting are ONE unit under the instance row lock. Admission
+  // inserts take the same lock, so the counts cannot grow between the check and
+  // the delete, and a failure anywhere rolls the delete back while leaving the
+  // committed drain in place for a retry.
+  const outcome = await getDb(c.env).transaction(async (tx) => {
+    const client = asTransactionalClient(tx);
+    const instances = createPostgresPrivateChannelInstanceRepository(client);
+    const locked = await instances.lockActiveForDeletion(scope, drainToken);
+    if (!locked) {
+      return { deleted: false as const, inFlight: null, locked: null };
+    }
+
+    const [deposits, withdrawals, transfers] = await Promise.all([
+      createPostgresPrivateChannelDepositRepository(client).countNonTerminalByInstance(locked.id),
+      createPostgresPrivateChannelWithdrawalRepository(client).countNonTerminalByInstance(
+        locked.id
+      ),
+      createPostgresPrivateChannelTransferRepository(client).countNonTerminalByInstance(locked.id),
+    ]);
+    if (deposits > 0 || withdrawals > 0 || transfers > 0) {
+      return { deleted: false as const, inFlight: { deposits, withdrawals, transfers }, locked };
+    }
+
+    const deleted = await instances.deleteActive(scope, drainToken);
+    if (!deleted) {
+      throw new AppError("CONFLICT", "The active Private Channels instance changed. Try again.");
+    }
+    return { deleted: true as const, inFlight: null, locked };
   });
 
-  const deleted = await repo.deleteActive(scope);
-  if (!deleted) {
-    throw notFound("Active private channel instance");
+  if (!outcome.deleted) {
+    if (!outcome.inFlight) {
+      // The drain this deletion established is gone: the instance was resumed
+      // (or replaced) while the request was running, and deleting whatever is
+      // active now would contradict the answer that resume already gave.
+      throw new AppError(
+        "CONFLICT",
+        "This instance was resumed or replaced while the deletion was running; nothing was deleted. Delete again if you still want it gone."
+      );
+    }
+    // The drain stays in place on purpose: this is the deliberate-disconnect
+    // path, and reverting it would reopen admission and turn deletion back
+    // into a retry against a moving target.
+    //
+    // But a drain must not be a one-way door. A private-channel transfer has
+    // no reconciler — a silently dropped submission stays `submitted` forever
+    // (see services/private-channels/transfer-confirm.ts) — so "retry once
+    // they settle" can be advice that never comes true, and the instance would
+    // sit refusing every movement with no way back. Updating the connection
+    // clears the drain, so the operator keeps an explicit way to resume
+    // without editing the database.
+    const { deposits, withdrawals, transfers } = outcome.inFlight;
+    throw new AppError(
+      "CONFLICT",
+      `This instance is draining for deletion: ${deposits} deposit(s), ${withdrawals} withdrawal(s), and ${transfers} transfer(s) are still in flight. New movements are refused; retry once they settle or fail, or update the connection to resume this instance.`
+    );
   }
+
+  // Emitted from the row the transaction actually locked and deleted, only
+  // after that commit: `active` was read before the drain, so a concurrent
+  // disconnect-and-reconnect in between would have this request announce the
+  // deletion of an instance it did not delete.
+  const deletedInstance = outcome.locked;
+  await emitLifecycle(
+    c,
+    deletedInstance,
+    PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_DISCONNECTED,
+    { payload: { gatewayUrl: deletedInstance.gateway_url, reason: "deleted" } }
+  );
 
   return success(c, { deleted: true });
 };

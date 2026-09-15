@@ -184,6 +184,7 @@ export interface DraftState {
   advancedSettings: AdvancedSettingsDraft;
   // Step 2 — operational
   signingWalletId: string;
+  authorityWalletIds?: Record<string, string>;
   metadataUri: string;
   // Step 2 — custom fields (custom.customer.*)
   customFields: CustomFieldRow[];

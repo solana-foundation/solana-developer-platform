@@ -246,9 +246,9 @@ export function buildWalletsPlaygroundEndpointConfigs({
       ],
       expectedResponse: {
         data: {
-          transaction: {
-            signature: "5n2ExampleSignature",
-          },
+          walletId: exampleWalletId,
+          signature: "5n2ExampleSignature",
+          simulated: true,
         },
       },
     },

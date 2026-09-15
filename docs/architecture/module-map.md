@@ -14,9 +14,10 @@ This map is generated from the module-boundary check. It records the permitted w
 
 | Module | Purpose | Allowed workspace dependencies |
 | --- | --- | --- |
-| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/jupiter-lend`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda` |
+| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/jupiter-lend`, `@sdp/ondo`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda` |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/redaction`, `@sdp/types` |
+| `@sdp/dvp` | Generated @solana/kit client for the DvP atomic swap program. | None |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | None |
@@ -24,6 +25,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/jupiter-lend` | Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK. | `@sdp/earn`, `@sdp/types` |
 | `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/ondo` | Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/payments` | Payment domain services, fee payment, and ramp providers. | `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/policy` | Wallet-operation policy engine: rule evaluation and enforcement orchestration. | `@sdp/solana`, `@sdp/types` |
 | `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` |
@@ -40,9 +42,10 @@ This map is generated from the module-boundary check. It records the permitted w
 
 ## Declared Workspace Graph
 
-- `@sdp/api` -> `@sdp/custody`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/jupiter-lend`, `@sdp/kamino`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`
+- `@sdp/api` -> `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/jupiter-lend`, `@sdp/kamino`, `@sdp/ondo`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`
 - `@sdp/api-integration` -> `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types`
 - `@sdp/custody` -> `@sdp/redaction`, `@sdp/types`
+- `@sdp/dvp` -> None
 - `@sdp/earn` -> `@sdp/types`
 - `@sdp/env-config` -> None
 - `@sdp/helius-rings` -> None
@@ -50,6 +53,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/jupiter-lend` -> `@sdp/earn`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
+- `@sdp/ondo` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
 - `@sdp/payments` -> `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/policy` -> `@sdp/solana`, `@sdp/types`
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`

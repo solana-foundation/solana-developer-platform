@@ -69,6 +69,7 @@ vi.mock("pg", () => {
 
 let closeDatabasePools: typeof import("./client").closeDatabasePools;
 let createDatabaseClient: typeof import("./client").createDatabaseClient;
+let SessionLockUnavailableError: typeof import("./client").SessionLockUnavailableError;
 
 describe("database client connection management", () => {
   beforeAll(async () => {
@@ -78,6 +79,7 @@ describe("database client connection management", () => {
     const database = await import("./client");
     closeDatabasePools = database.closeDatabasePools;
     createDatabaseClient = database.createDatabaseClient;
+    SessionLockUnavailableError = database.SessionLockUnavailableError;
   });
 
   beforeEach(async () => {
@@ -199,6 +201,72 @@ describe("database client connection management", () => {
       "database",
       "external",
       "database",
+    ]);
+    expect(client?.release).toHaveBeenCalledWith(undefined);
+  });
+
+  it("does not wait for a busy session lock", async () => {
+    pgMock.poolClientQuery = async () => ({
+      rows: [{ acquired: false }],
+      rowCount: 1,
+    });
+    const db = createDatabaseClient("postgresql://node-try-lock-busy/sdp");
+    const afterCommit = vi.fn();
+
+    const operation = db.lockedTransactionWithPostCommit?.(
+      "rings-rekey",
+      async () => "claimed",
+      afterCommit,
+      undefined,
+      { wait: false }
+    );
+    if (!operation) throw new Error("locked post-commit transactions are unavailable");
+    await expect(operation).rejects.toBeInstanceOf(SessionLockUnavailableError);
+
+    const client = pgMock.pools[0]?.connectedClients[0];
+    expect(client?.queries.map(([query]) => query)).toEqual([
+      expect.objectContaining({ text: "SELECT pg_try_advisory_lock(hashtext($1)) AS acquired" }),
+    ]);
+    expect(afterCommit).not.toHaveBeenCalled();
+    expect(client?.release).toHaveBeenCalledWith(undefined);
+  });
+
+  it("acquires a session lock without waiting when the lock is free", async () => {
+    pgMock.poolClientQuery = async () => {
+      const client = pgMock.pools[0]?.connectedClients[0];
+      const latestQuery = client?.queries.at(-1)?.[0];
+      if (
+        typeof latestQuery === "object" &&
+        latestQuery &&
+        "text" in latestQuery &&
+        latestQuery.text === "SELECT pg_try_advisory_lock(hashtext($1)) AS acquired"
+      ) {
+        return { rows: [{ acquired: true }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    };
+    const db = createDatabaseClient("postgresql://node-try-lock-free/sdp");
+
+    const operation = db.lockedTransactionWithPostCommit?.(
+      "rings-rekey",
+      async (tx) => {
+        await tx.execute("UPDATE wallets SET updated_at = datetime('now')");
+        return "claimed";
+      },
+      async () => {},
+      undefined,
+      { wait: false }
+    );
+    if (!operation) throw new Error("locked post-commit transactions are unavailable");
+    await operation;
+
+    const client = pgMock.pools[0]?.connectedClients[0];
+    expect(client?.queries.map(([query]) => query)).toEqual([
+      expect.objectContaining({ text: "SELECT pg_try_advisory_lock(hashtext($1)) AS acquired" }),
+      expect.objectContaining({ text: "BEGIN" }),
+      expect.objectContaining({ text: "UPDATE wallets SET updated_at = sdp_datetime_now()" }),
+      "COMMIT",
+      expect.objectContaining({ text: "SELECT pg_advisory_unlock(hashtext($1))" }),
     ]);
     expect(client?.release).toHaveBeenCalledWith(undefined);
   });

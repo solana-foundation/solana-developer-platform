@@ -10,6 +10,7 @@ export {
   getDb,
   type PreparedStatement,
   type QueryManyResult,
+  SessionLockUnavailableError,
 } from "./client";
 export {
   type DatabaseIdentity,

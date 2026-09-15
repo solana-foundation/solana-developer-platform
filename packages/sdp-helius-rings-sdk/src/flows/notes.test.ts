@@ -2,7 +2,7 @@ import type { Wallet, WalletUtxo } from "@heliuslabs/zolana/transaction";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { type Address, address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { noteId, selectNotes } from "./notes.js";
+import { MERGE_MAX_INPUTS, noteId, selectMergeNotes, selectNotes } from "./notes.js";
 
 /**
  * These tests are about one property: two builds of the same operation must
@@ -137,5 +137,133 @@ describe("selectNotes", () => {
 
       expect((error as HeliusRingsError).code).toBe("insufficient_balance");
     });
+  });
+});
+
+describe("selectMergeNotes", () => {
+  const OTHER_TREE: Address = address("SysvarC1ock11111111111111111111111111111111");
+  const RING: Address = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+
+  function onTree(base: WalletUtxo, tree: Address): WalletUtxo {
+    return { ...base, outputContext: { ...base.outputContext, tree } };
+  }
+
+  function ringBound(base: WalletUtxo): WalletUtxo {
+    return { ...base, utxo: { ...base.utxo, ringProgramId: RING } as WalletUtxo["utxo"] };
+  }
+
+  function refusal(run: () => unknown): Promise<unknown> {
+    return Promise.resolve()
+      .then(run)
+      .then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+  }
+
+  it("consolidates the smallest notes and leaves the large one alone", async () => {
+    // One more note than the cap, so which ones get dropped is a real choice.
+    const wallet = walletOf([
+      note(1, 900n),
+      note(2, 10n),
+      note(3, 20n),
+      note(4, 30n),
+      note(5, 40n),
+      note(6, 50n),
+    ]);
+
+    const selection = selectMergeNotes({ wallet, asset: SOL, tree: SOL });
+
+    // Opposite of a spend: the point is to retire dust, so taking the largest
+    // notes would consolidate value that was never fragmented.
+    expect(selection.ids).toEqual([2, 3, 4, 5, 6].map((c) => noteId(note(c, 0n))));
+    expect(selection.total).toBe(150n);
+  });
+
+  it("takes no more inputs than the prover accepts", async () => {
+    const wallet = walletOf(Array.from({ length: 8 }, (_, index) => note(index + 1, 10n)));
+
+    const selection = selectMergeNotes({ wallet, asset: SOL, tree: SOL });
+
+    expect(selection.notes).toHaveLength(MERGE_MAX_INPUTS);
+  });
+
+  it("refuses a pinned set larger than the prover accepts", async () => {
+    const notes = Array.from({ length: MERGE_MAX_INPUTS + 1 }, (_, index) =>
+      note(index + 1, 10n * BigInt(index + 1))
+    );
+    const wallet = walletOf(notes);
+
+    const error = await refusal(() =>
+      selectMergeNotes({ wallet, asset: SOL, tree: SOL, pinned: notes.map(noteId) })
+    );
+
+    // A pinned rebuild replays a recorded selection rather than re-deciding, so
+    // the cap has to be enforced against it too.
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({ code: "invalid_input" });
+    expect((error as HeliusRingsError).message).toContain("at most");
+  });
+
+  it("refuses a wallet with nothing to consolidate", async () => {
+    const wallet = walletOf([note(1, 100n), note(2, 100n, USDC)]);
+
+    const error = await refusal(() => selectMergeNotes({ wallet, asset: SOL, tree: SOL }));
+
+    expect(error).toBeInstanceOf(HeliusRingsError);
+    expect(error).toMatchObject({ code: "invalid_input" });
+    expect((error as HeliusRingsError).message).toContain("at least");
+  });
+
+  it("ignores spent, foreign-asset, and ring-bound notes", async () => {
+    const wallet = walletOf([
+      note(1, 10n, SOL, true),
+      note(2, 10n, USDC),
+      ringBound(note(3, 10n)),
+      note(4, 10n),
+      note(5, 10n),
+    ]);
+
+    const selection = selectMergeNotes({ wallet, asset: SOL, tree: SOL });
+
+    // Ring notes are spendable only by their ring's own transact, and the merge
+    // builder emits the default pool's.
+    expect(selection.ids).toEqual([noteId(note(4, 10n)), noteId(note(5, 10n))].sort());
+  });
+
+  it("never mixes trees, which the circuit cannot prove across", async () => {
+    const wallet = walletOf([
+      note(1, 10n),
+      note(2, 10n),
+      onTree(note(3, 1n), OTHER_TREE),
+      onTree(note(4, 1n), OTHER_TREE),
+    ]);
+
+    const selection = selectMergeNotes({ wallet, asset: SOL, tree: SOL });
+
+    // The other tree's notes are smaller, so a selector blind to trees would
+    // have taken them first.
+    expect(selection.ids).toEqual([noteId(note(1, 10n)), noteId(note(2, 10n))].sort());
+  });
+
+  it("selects the same notes twice for the same request", async () => {
+    const forward = walletOf([note(1, 10n), note(2, 10n), note(3, 10n)]);
+    const reversed = walletOf([note(3, 10n), note(2, 10n), note(1, 10n)]);
+
+    // Equal amounts, so ordering rests entirely on the commitment tie-break.
+    expect(selectMergeNotes({ wallet: forward, asset: SOL, tree: SOL }).ids).toEqual(
+      selectMergeNotes({ wallet: reversed, asset: SOL, tree: SOL }).ids
+    );
+  });
+
+  it("consolidates exactly what a previous build committed to", async () => {
+    const wallet = walletOf([note(1, 10n), note(2, 20n), note(3, 900n)]);
+    const pinned = [noteId(note(1, 10n)), noteId(note(3, 900n))];
+
+    const selection = selectMergeNotes({ wallet, asset: SOL, tree: SOL, pinned });
+
+    // Not the smallest-first pair a fresh decision would take.
+    expect(selection.ids).toEqual(pinned);
+    expect(selection.total).toBe(910n);
   });
 });

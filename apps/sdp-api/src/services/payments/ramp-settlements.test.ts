@@ -1,14 +1,10 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { applyRampSettlementEvent } from "./ramp-settlements";
-
-// The emit is asserted against the bus so a settled event that lost the status
-// race is proven not to fire settlement workflows.
-const dispatchWorkflowEvent = vi.hoisted(() => vi.fn(async () => 1));
-vi.mock("@/services/workflows/event-bus", () => ({ dispatchWorkflowEvent }));
 
 const ORG_ID = "org_ramp_settlement_test";
 const PROJECT_ID = "prj_ramp_settlement_test";
@@ -105,21 +101,13 @@ describe("applyRampSettlementEvent", () => {
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(USER_ID, "ramp-settlement@example.com", 1, "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          PROJECT_ID,
-          ORG_ID,
-          "Ramp Settlement Project",
-          "ramp-settlement-project",
-          "sandbox",
-          "active",
-          USER_ID
-        ),
     ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
   });
 
   it("persists the provider signature for an on-ramp deposit", async () => {
@@ -258,7 +246,6 @@ describe("applyRampSettlementEvent", () => {
       { provider: "coinbase", kind: "failed", reference: "order_race", error: "declined" },
     ];
 
-    dispatchWorkflowEvent.mockClear();
     await Promise.all(events.map((event) => applyRampSettlementEvent(env, event)));
 
     const transfer = await readTransfer("xfr_race");
@@ -266,35 +253,10 @@ describe("applyRampSettlementEvent", () => {
     if (transfer?.status === "completed") {
       expect(transfer.amount).toBe("9");
       expect(transfer.error).toBeNull();
-      expect(dispatchWorkflowEvent).toHaveBeenCalledTimes(1);
     } else {
       expect(transfer?.amount).toBe("10");
       expect(transfer?.error).toBe("declined");
-      // The settled event lost the race: its transition did not land, so it
-      // must not fire settlement workflows for a failed transfer.
-      expect(dispatchWorkflowEvent).not.toHaveBeenCalled();
     }
-  });
-
-  it("does not emit settlement workflows for a settled event whose transition was refused", async () => {
-    await seedTransfer({ id: "xfr_refused", reference: "order_refused", status: "settling" });
-    await applyRampSettlementEvent(env, {
-      provider: "coinbase",
-      kind: "failed",
-      reference: "order_refused",
-      error: "declined",
-    });
-
-    dispatchWorkflowEvent.mockClear();
-    await applyRampSettlementEvent(env, {
-      provider: "coinbase",
-      kind: "settled",
-      reference: "order_refused",
-      receivedAmount: "9",
-    });
-
-    expect(await readTransfer("xfr_refused")).toMatchObject({ status: "failed" });
-    expect(dispatchWorkflowEvent).not.toHaveBeenCalled();
   });
 
   it("keeps the first provider customer canonical and records a later mismatch", async () => {

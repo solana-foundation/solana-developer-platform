@@ -8,8 +8,11 @@ import {
   CircleDotDashedIcon,
   CoinsIcon,
   FileTextIcon,
+  HandshakeIcon,
   KeyRoundIcon,
+  LandmarkIcon,
   LayoutDashboardIcon,
+  PercentIcon,
   ReceiptTextIcon,
   RepeatIcon,
   ShieldCheckIcon,
@@ -138,21 +141,37 @@ export function getPaymentsActions(
   ];
 }
 
-/** Markets currently consumes Earn provider contracts, so both destinations share its gate. */
+/**
+ * Markets sub-destinations. Treasury Solutions is always listed; Embedded Yield
+ * is Earn-backed and shares its gate; DvP is the first sub-module with a flag of
+ * its own, so an org can have one without the other.
+ */
 export function getMarketsActions(
   t: ReturnType<typeof useTranslations>,
-  earnEnabled: boolean
+  earnEnabled: boolean,
+  dvpEnabled: boolean
 ): SubNavItem[] {
   return [
     {
       label: t("Shared.dashboardShell.treasurySolutions"),
       href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
+      icon: LandmarkIcon,
     },
     ...(earnEnabled
       ? [
           {
             label: t("Shared.dashboardShell.earnProgram"),
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
+            icon: PercentIcon,
+          },
+        ]
+      : []),
+    ...(dvpEnabled
+      ? [
+          {
+            label: t("DashboardMarkets.dvp.navLabel"),
+            href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+            icon: HandshakeIcon,
           },
         ]
       : []),
@@ -221,6 +240,7 @@ export function getNavSections(
   options: {
     canReadApprovals: boolean;
     custodyEnabled: boolean;
+    dvpEnabled: boolean;
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
     issuanceEnabled: boolean;
@@ -231,7 +251,7 @@ export function getNavSections(
     privateChannelsEnabled: boolean;
   }
 ): NavSection[] {
-  const marketsActions = getMarketsActions(t, options.earnEnabled);
+  const marketsActions = getMarketsActions(t, options.earnEnabled, options.dvpEnabled);
   const integrationActions = getIntegrationActions(t, options);
 
   return [
@@ -277,7 +297,10 @@ export function getNavSections(
               },
             ]
           : []),
-        ...(options.marketsEnabled && options.earnEnabled && marketsActions.length > 0
+        // Markets appears whenever it is on AND at least one sub-module is,
+        // rather than requiring Earn specifically — a DvP-only org still needs
+        // the entry point.
+        ...(options.marketsEnabled && marketsActions.length > 0
           ? [
               {
                 label: t("Shared.dashboardShell.markets"),

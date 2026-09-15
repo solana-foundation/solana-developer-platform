@@ -85,6 +85,44 @@ describe("BYOK parity with organization RPC selection", () => {
     expect(files).toContain("routes/rpc/handlers.ts");
   });
 
+  it("dials every resolved target through the guarded transport", () => {
+    // A resolved target can carry the project's own `settings.rpcEndpoint`
+    // (provider `custom`), which is validated as a URL and nothing more. Any
+    // file that resolves a target and then builds a raw client from it is an
+    // SSRF sink reachable by whoever can write that setting — signer-check was
+    // exactly that (HOO-1560). The transport itself is covered behaviourally in
+    // rpc-egress.test.ts; what no runtime test can see is a NEW call site
+    // skipping it, which is what this asserts.
+    const files = readdirSync(apiSrc, { recursive: true, encoding: "utf8" })
+      .filter((entry) => entry.endsWith(".ts") && !entry.includes(".test."))
+      .map((entry) => path.join(apiSrc, entry));
+
+    const unguarded = files.filter((file) => {
+      const source = readFileSync(file, "utf8");
+      if (!source.includes("resolveRpcTarget(")) {
+        return false;
+      }
+      // The binding, not the spelling: an alias or a namespace import is the
+      // same sink under another name.
+      const bindings = [
+        ...source.matchAll(/import\s*{([^}]*)}\s*from\s*"@sdp\/rpc\/solana"/g),
+      ].flatMap((match) =>
+        match[1]
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry === "createRpc" || entry.startsWith("createRpc as "))
+          .map((entry) => entry.split(" as ").at(-1)?.trim() ?? entry)
+      );
+      const namespaces = [
+        ...source.matchAll(/import\s*\*\s*as\s*(\w+)\s*from\s*"@sdp\/rpc\/solana"/g),
+      ].map((match) => `${match[1]}.createRpc`);
+
+      return [...bindings, ...namespaces].some((binding) => source.includes(`${binding}(`));
+    });
+
+    expect(unguarded.map((file) => path.relative(apiSrc, file))).toEqual([]);
+  });
+
   it("keeps the signer check off the tenant rail", () => {
     // The decision, asserted rather than described: if someone wires the lookup
     // back in, this fails and the exclusion above has to be revisited with it.

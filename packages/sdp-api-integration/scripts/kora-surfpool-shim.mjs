@@ -6,6 +6,7 @@ import {
   getBase58Codec,
   getBase64Codec,
   getBase64EncodedWireTransaction,
+  getSignatureFromTransaction,
   getTransactionDecoder,
   partiallySignTransaction,
 } from "@solana/kit";
@@ -18,7 +19,10 @@ const sendTransactionTimeoutMs = Number.parseInt(
   process.env.KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS ?? "30000",
   10
 );
-const sendTransactionStatusWaitMs = 3_000;
+const sendTransactionStatusWaitMs = Number.parseInt(
+  process.env.KORA_SHIM_SEND_STATUS_WAIT_MS ?? "3000",
+  10
+);
 const sendTransactionStatusPollMs = 250;
 const resubmissionTimeoutMs = 3_000;
 const privateKey = process.env.SIGNER_PRIVATE_KEY;
@@ -127,6 +131,16 @@ async function handleRpc(method, params) {
   }
 }
 
+function isAlreadyProcessed(error) {
+  return error instanceof Error && error.message.includes("already been processed");
+}
+
+function signatureOf(signedTransaction) {
+  return getSignatureFromTransaction(
+    getTransactionDecoder().decode(base64.encode(signedTransaction))
+  );
+}
+
 async function sendTransactionWithRetry(signedTransaction) {
   const params = [
     signedTransaction,
@@ -136,9 +150,17 @@ async function sendTransactionWithRetry(signedTransaction) {
       preflightCommitment: "confirmed",
     },
   ];
-  const signature = await solanaRpc("sendTransaction", params, {
-    timeoutMs: sendTransactionTimeoutMs,
-  });
+  let signature;
+  try {
+    signature = await solanaRpc("sendTransaction", params, {
+      timeoutMs: sendTransactionTimeoutMs,
+    });
+  } catch (error) {
+    if (!isAlreadyProcessed(error)) {
+      throw error;
+    }
+    return signatureOf(signedTransaction);
+  }
 
   if (await waitForTransactionStatus(signature)) {
     return signature;
@@ -155,6 +177,9 @@ async function sendTransactionWithRetry(signedTransaction) {
       throw new Error("Resubmitted transaction returned a different signature");
     }
   } catch (error) {
+    if (isAlreadyProcessed(error)) {
+      return signature;
+    }
     console.warn("Transaction resubmission did not complete; continuing confirmation.", error);
   }
 

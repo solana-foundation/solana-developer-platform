@@ -176,6 +176,12 @@ export interface EarnMovementRow {
   creates_share_account: boolean;
   /** Who this movement charged that rent to. Null means the custody wallet. */
   share_ata_rent_funder: string | null;
+  /**
+   * When the sweep first saw this SUBMITTED movement's signature unknown to
+   * RPC after its blockhash window closed (migration 0092, PRO-1904). One
+   * observation parks the row; a second on a later tick expires it.
+   */
+  unknown_signature_observed_at: string | null;
 }
 
 /**
@@ -377,6 +383,23 @@ export interface EarnMovementsRepository {
     limit: number;
     before: EarnMovementCursor | null;
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
+  /**
+   * Every external-wallet DEPOSIT movement for one owner and deposit token
+   * created strictly after a moment, oldest first (PRO-1864). The orphaned
+   * split-swap detector reads these with their STATUS: a `failed` deposit must
+   * not discharge an advisory, and a still-`requested` one is in flight, not
+   * observed. Matches on the deposit token rather than the vault on purpose: a
+   * partner may legitimately deposit the swapped tokens into a sibling
+   * strategy of the same token, and the funds reached a vault either way.
+   */
+  listExternalWalletDepositsSince(params: {
+    organizationId: string;
+    projectId: string | null;
+    environment: SdpEnvironment;
+    ownerAddress: string;
+    depositTokenMint: string;
+    createdAfter: string;
+  }): Promise<EarnMovementRow[]>;
   /** One external-wallet movement under the same four scoping rules, or null. */
   getExternalWalletMovement(params: {
     organizationId: string;
@@ -433,6 +456,28 @@ export interface EarnMovementsRepository {
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
   /** Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease. */
   claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
+  /**
+   * Backlog telemetry over the SAME predicate the claim uses (PRO-1863): how
+   * many vault movements remain unsettled, and how old the oldest one is. Read
+   * after a sweep tick so the reported backlog is what the tick left behind.
+   *
+   * Dimensioned, because the flat total is not alertable. A `confirmed` row
+   * whose signature ages out of RPC history is a PERMANENT member of this set
+   * (PRO-1716 gives `confirmed` no exit but `finalized`, and the sweep must
+   * neither expire nor rebroadcast it), so a total-only age would latch and
+   * page forever. `blockhashBound` is the actionable subset the sweep can
+   * still act on, and the withdrawal split keeps the exit path visible on its
+   * own (ADR 0002).
+   */
+  getUnsettledVaultMovementStats(): Promise<{
+    backlog: number;
+    backlogBlockhashBound: number;
+    backlogConfirmed: number;
+    backlogWithdrawals: number;
+    oldestUnsettledCreatedAt: string | null;
+    oldestBlockhashBoundCreatedAt: string | null;
+    oldestWithdrawalCreatedAt: string | null;
+  }>;
 
   // ── Writes ───────────────────────────────────────────────────────────────
 
@@ -495,6 +540,18 @@ export interface EarnMovementsRepository {
    * merely discouraged, and a lost race returns null rather than an error.
    */
   advanceVaultMovement(input: AdvanceVaultMovementInput): Promise<EarnMovementRow | null>;
+  /**
+   * The sweep's first piece of evidence that a SUBMITTED vault movement did not
+   * land (PRO-1904): its signature came back unknown after the blockhash window
+   * closed. Idempotent (COALESCE) and status-guarded, so a burst of ticks
+   * records one observation and a row that has since moved on is untouched.
+   * Returns the row when the mark was written or already present, null when
+   * the row is no longer `submitted`.
+   */
+  recordUnknownSignatureObservation(input: {
+    movementId: string;
+    organizationId: string;
+  }): Promise<EarnMovementRow | null>;
   /**
    * Insert-at-intent for a custodial movement: the row exists before the provider
    * accepts. Always returns the row — a missing holding heals then retries, and a
@@ -776,6 +833,7 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     updated_at: row.updated_at as string,
     creates_share_account: row.creates_share_account === true,
     share_ata_rent_funder: row.share_ata_rent_funder as string | null,
+    unknown_signature_observed_at: row.unknown_signature_observed_at as string | null,
   };
 }
 
@@ -1082,6 +1140,33 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return Boolean(row);
     },
 
+    async listExternalWalletDepositsSince(params) {
+      // idx_earn_movements_external_wallet_owner drives the range scan; the
+      // direction/denomination predicates filter on the heap.
+      const result = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+            WHERE organization_id = ?
+              AND project_id IS NOT DISTINCT FROM ?
+              AND environment = ?
+              AND owner_address = ?
+              AND direction = 'deposit'
+              AND denomination = ?
+              AND created_at > ?
+            ORDER BY created_at ASC, id ASC`
+        )
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          params.ownerAddress,
+          params.depositTokenMint,
+          params.createdAfter
+        )
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapMovementRow);
+    },
+
     async listExternalWalletMovements(params) {
       const conditions = [
         "organization_id = ?",
@@ -1320,6 +1405,49 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(blockhashBoundQuota, confirmedQuota, limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async getUnsettledVaultMovementStats() {
+      // Keep this predicate in lockstep with claimUnsettledVaultMovements: the
+      // backlog it reports must be the same set the sweep would claim. Bound by
+      // the "reports exactly the rows the next claim would take" test in
+      // services/jobs/reconcile-earn-vault-movements.test.ts, which seeds one
+      // row in every reachable status and asserts this count against the
+      // claimed id SET rather than a literal, so the two fail together instead
+      // of drifting silently.
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*) AS backlog,
+                  COUNT(*) FILTER (WHERE status IN ('requested', 'submitted')) AS backlog_blockhash_bound,
+                  COUNT(*) FILTER (WHERE status = 'confirmed') AS backlog_confirmed,
+                  COUNT(*) FILTER (WHERE direction = 'withdrawal') AS backlog_withdrawals,
+                  MIN(created_at) AS oldest_created_at,
+                  MIN(created_at) FILTER (WHERE status IN ('requested', 'submitted'))
+                    AS oldest_blockhash_bound_created_at,
+                  MIN(created_at) FILTER (WHERE direction = 'withdrawal')
+                    AS oldest_withdrawal_created_at
+             FROM earn_movements
+            WHERE execution_model = 'vault_direct'
+              AND status IN ('requested', 'submitted', 'confirmed')`
+        )
+        .first<{
+          backlog: number | string;
+          backlog_blockhash_bound: number | string;
+          backlog_confirmed: number | string;
+          backlog_withdrawals: number | string;
+          oldest_created_at: string | null;
+          oldest_blockhash_bound_created_at: string | null;
+          oldest_withdrawal_created_at: string | null;
+        }>();
+      return {
+        backlog: Number(row?.backlog ?? 0),
+        backlogBlockhashBound: Number(row?.backlog_blockhash_bound ?? 0),
+        backlogConfirmed: Number(row?.backlog_confirmed ?? 0),
+        backlogWithdrawals: Number(row?.backlog_withdrawals ?? 0),
+        oldestUnsettledCreatedAt: row?.oldest_created_at ?? null,
+        oldestBlockhashBoundCreatedAt: row?.oldest_blockhash_bound_created_at ?? null,
+        oldestWithdrawalCreatedAt: row?.oldest_withdrawal_created_at ?? null,
+      };
     },
 
     async createSignedVaultDepositIntent(input) {
@@ -1643,6 +1771,23 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
         return movement;
       });
+    },
+
+    async recordUnknownSignatureObservation(input) {
+      const row = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET unknown_signature_observed_at = COALESCE(unknown_signature_observed_at, sdp_iso_now()),
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND execution_model = 'vault_direct'
+              AND status = 'submitted'
+            RETURNING *`
+        )
+        .bind(input.movementId, input.organizationId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
     },
 
     async createCustodialMovement(input) {

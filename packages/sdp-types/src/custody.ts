@@ -374,7 +374,18 @@ export type CustodyWalletPurpose =
   | "mint_authority"
   | "freeze_authority"
   | "fee_payer"
-  | "transfer";
+  | "transfer"
+  /**
+   * Signs DvP settlement for a project.
+   *
+   * Its own purpose because it is not an ordinary transfer wallet: it holds the
+   * only key that can settle or cancel any trade in the project, it is baked
+   * into every trade's address as a PDA seed, and deactivating it makes every
+   * open trade under it unsettleable by anyone. A wallet carrying that much
+   * consequence should not be indistinguishable from one somebody made to move
+   * tokens around.
+   */
+  | "dvp_settlement_authority";
 export type CustodyConfigStatus = "active" | "inactive";
 export type CustodyWalletStatus = "active" | "inactive";
 
@@ -672,11 +683,18 @@ export type SwitchSigningResponse =
 export interface SignerCheckResponse {
   walletId: string;
   walletAddress: string;
+  /** Funded fee payer address used in the simulated message; nothing is spent from it. */
   feePayer: string;
   memo: string;
+  /**
+   * The custody wallet's Ed25519 signature over the check message, base58.
+   * Verified server-side and exercised in RPC simulation only — the check
+   * never broadcasts, so this signature does not exist on chain.
+   */
   signature: string;
-  slot: number;
-  blockTime: string;
+  /** Always true: signer checks run in simulation and cannot spend sponsorship. */
+  simulated: true;
+  checkedAt: string;
 }
 
 /**
@@ -712,6 +730,7 @@ export type CustodyConnectionFailureCode = (typeof CUSTODY_CONNECTION_FAILURE_CO
 
 /** Lifecycle of the stored provider credential backing a connection. */
 export const PROVIDER_CREDENTIAL_STATUSES = [
+  "creating",
   "pending",
   "active",
   "failed_validation",

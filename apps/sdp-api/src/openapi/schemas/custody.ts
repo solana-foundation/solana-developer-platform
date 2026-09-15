@@ -30,7 +30,7 @@ export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
-    "Signer-check wallet selection. walletId is optional for an API key with one bound signing wallet and required for session-authenticated dashboard requests.",
+    "walletId is a Provider wallet ID. When omitted for an API key, its authenticated signing-wallet selection is used: the configured preference, otherwise the first resolved binding. Session-authenticated dashboard requests must provide walletId. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record.",
   example: { walletId: "privy_wallet_123" },
 });
 
@@ -217,8 +217,19 @@ const custodyWalletBaseSchema = z.object({
     description: "Optional wallet label.",
     example: "Root Signing Wallet",
   }),
+  // Response shape, so it lists every purpose a wallet may actually carry —
+  // including one only SDP mints. The CREATE schemas stay closed on purpose: a
+  // caller must not be able to mint a wallet claiming to be a settlement
+  // authority, which is why they are not simply kept in step with this.
   purpose: z
-    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
+    .enum([
+      "root",
+      "mint_authority",
+      "freeze_authority",
+      "fee_payer",
+      "transfer",
+      "dvp_settlement_authority",
+    ])
     .nullable()
     .openapi({ description: "Optional wallet purpose.", example: "root" }),
   status: z.enum(["active", "inactive"]).openapi({
@@ -592,25 +603,26 @@ export const signerCheckResponseSchema = z
       example: "privy_wallet_123",
     }),
     walletAddress: solanaAddressSchema.openapi({
-      description: "Resolved signer address used for the memo transaction.",
+      description: "Resolved signer address used for the check message.",
     }),
     feePayer: solanaAddressSchema.openapi({
-      description: "Fee payer address (Kora signer).",
+      description:
+        "Funded fee payer address used in the simulated message; nothing is spent from it.",
     }),
     memo: z.string().openapi({
-      description: "Server-generated memo text submitted on-chain.",
+      description: "Server-generated memo text in the simulated check message.",
       example: "SDP signer check 123e4567-e89b-42d3-a456-426614174000",
     }),
     signature: z.string().openapi({
-      description: "Submitted Solana transaction signature.",
+      description:
+        "The custody wallet's Ed25519 signature over the check message, base58. Verified server-side and exercised in RPC simulation only — the check never broadcasts, so this signature does not exist on chain.",
       example: "sig_example",
     }),
-    slot: z.number().int().openapi({
-      description: "Confirmed slot number.",
-      example: 123456789,
+    simulated: z.literal(true).openapi({
+      description: "Always true: signer checks run in simulation and cannot spend sponsorship.",
     }),
-    blockTime: isoDateTimeSchema.openapi({
-      description: "Timestamp recorded after confirmation.",
+    checkedAt: isoDateTimeSchema.openapi({
+      description: "Timestamp recorded after the simulation succeeded.",
       example: "2026-02-20T00:00:00.000Z",
     }),
   })

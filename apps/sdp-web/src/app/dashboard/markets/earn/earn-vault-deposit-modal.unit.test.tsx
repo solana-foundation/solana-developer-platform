@@ -38,12 +38,23 @@ const mocks = vi.hoisted(() => ({
 const copy = vi.hoisted<Record<string, string>>(() => ({
   "Shared.SharedComponents.closeModal": "Close modal",
   "DashboardEarn.deposit.vaultDepositTitle": "Deposit into {strategy}",
+  "DashboardMarkets.treasury.positionStatusPending": "Pending",
+  "DashboardMarkets.treasury.positionStatusActive": "Active",
   "DashboardEarn.withdraw.availableChecking": "Checking…",
   "DashboardEarn.withdraw.referenceLabel": "Reference",
   "DashboardEarn.withdraw.done": "Done",
   "DashboardEarn.withdraw.amountLabel": "Amount",
   "DashboardEarn.withdraw.errorAmountRequired": "Enter an amount greater than zero.",
+  "DashboardEarn.vaultWithdraw.max": "Max",
   "DashboardEarn.deposit.cancel": "Cancel",
+  "DashboardEarn.deposit.back": "Back",
+  "DashboardEarn.deposit.continueAction": "Continue",
+  "DashboardEarn.deposit.flowDetails": "Details",
+  "DashboardEarn.deposit.flowReview": "Review",
+  "DashboardEarn.deposit.flowProcessing": "Processing",
+  "DashboardEarn.deposit.flowComplete": "Complete",
+  "DashboardEarn.deposit.progressLabel": "Progress",
+  "DashboardEarn.deposit.progressReview": "Review",
   "DashboardEarn.deposit.walletsLoadError": "Wallets could not be loaded.",
   "DashboardEarn.deposit.walletsEmptyTitle": "No active custody wallets",
   "DashboardEarn.deposit.walletsEmptyBody": "Create a wallet before depositing.",
@@ -54,16 +65,22 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultWalletTitle": "Funding wallet",
   "DashboardEarn.deposit.vaultWalletBody":
     "Choose the custody wallet that will sign and own the vault shares.",
-  "DashboardEarn.deposit.vaultAmount": "Amount ({token})",
+  "DashboardEarn.deposit.vaultAmount": "Amount",
+  "DashboardEarn.deposit.vaultPayWith": "Pay with",
   "DashboardEarn.deposit.vaultStrategy": "Strategy",
   "DashboardEarn.deposit.vaultBacking": "Backing",
   "DashboardEarn.deposit.vaultFrom": "From",
   "DashboardEarn.deposit.vaultWalletUnavailable": "Signing unavailable",
   "DashboardEarn.deposit.vaultBalanceUnknown": "Balance unavailable",
-  "DashboardEarn.deposit.vaultBalanceAvailable": "Available: {amount}",
+  "DashboardEarn.deposit.vaultBalanceAvailable": "Available {amount}",
   "DashboardEarn.deposit.vaultAmountPrecision": "Use no more than {decimals} decimal places.",
   "DashboardEarn.deposit.vaultOverBalance":
     "This is above the last observed balance; the provider will verify it on submit.",
+  "DashboardEarn.deposit.vaultSwapRow": "Swap",
+  "DashboardEarn.deposit.vaultSwapVia": "{source} to {target} via Jupiter",
+  "DashboardEarn.deposit.vaultSwapReviewTitle": "Swap required before deposit",
+  "DashboardEarn.deposit.vaultSwapReviewBody":
+    "Your {source} will be swapped to the vault's underlying {target} through Jupiter, then deposited in the same transaction.",
   "DashboardEarn.deposit.vaultConfirmNote":
     "The selected custody wallet signs the vault deposit transaction.",
   "DashboardEarn.deposit.vaultConfirmNoteSponsored": "SDP covers the network fee.",
@@ -160,6 +177,7 @@ const strategy: EarnStrategy = {
   withdrawalSlippage: null,
   hostCluster: "devnet",
   fundable: true,
+  feeSponsored: false,
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
@@ -199,8 +217,9 @@ async function enterDepositAmount(amount = "1.000000") {
   const user = userEvent.setup();
   await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
   await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
-  await user.type(screen.getByLabelText("Amount (USDC)"), amount);
-  await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
+  fireEvent.change(screen.getByLabelText("Amount"), { target: { value: amount } });
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await user.click(await screen.findByRole("button", { name: "Confirm deposit" }));
   return user;
 }
 
@@ -292,6 +311,104 @@ describe("exact vault amount helpers", () => {
 });
 
 describe("EarnVaultDepositModal", () => {
+  it("auto-selects the only wallet and its largest held stablecoin and fills Max", async () => {
+    const user = userEvent.setup();
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    const progress = screen.getByRole("navigation", { name: "Progress" });
+    expect(
+      Array.from(progress.querySelectorAll("li"), (item) => item.textContent?.replace(/^\d/, ""))
+    ).toEqual(["Details", "Review", "Processing", "Complete"]);
+    expect(
+      screen.queryByText("Choose the custody wallet that will sign and own the vault shares.")
+    ).toBeNull();
+    expect(
+      (screen.getByRole("radio", { name: /Treasury wallet/ }) as HTMLInputElement).checked
+    ).toBe(true);
+    expect(screen.getByText("Pay with")).toBeTruthy();
+    expect((screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("radio", { name: "PYUSD" }) as HTMLInputElement).checked).toBe(false);
+    const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
+    const maxButton = screen.getByRole("button", { name: "Max" });
+    expect(amountInput.disabled).toBe(false);
+    expect(amountInput.parentElement?.contains(maxButton)).toBe(true);
+    await user.click(maxButton);
+    expect(amountInput.value).toBe("2.5");
+    expect(screen.getByText("$")).toBeTruthy();
+    expect(screen.getAllByText("Available $2.50").length).toBeGreaterThan(0);
+  });
+
+  it("reviews the dollar amount before confirmation and can go back without losing it", async () => {
+    const user = userEvent.setup();
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1.25" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.getByText("$1.25")).toBeTruthy();
+    expect(screen.getByText("Treasury wallet")).toBeTruthy();
+    expect(screen.queryByText("Swap required before deposit")).toBeNull();
+    const completedMarker = document.querySelector('[data-earn-step-complete="true"]');
+    expect(completedMarker?.className).toContain("bg-white");
+    expect(completedMarker?.className).toContain("text-black");
+    expect(completedMarker?.querySelector('[data-earn-step-check="true"]')).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm deposit" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe("1.25");
+  });
+
+  it("auto-selects a wallet's held stablecoin while showing every supported option", async () => {
+    const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [
+        fundingWallet([
+          { token: "USDG", mint: USDG_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
+        ]),
+      ],
+      error: undefined,
+      isLoading: false,
+    });
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    const user = userEvent.setup();
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    expect(screen.getByText("Pay with")).toBeTruthy();
+    expect((screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("radio", { name: "PYUSD" }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "5" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText("Swap required before deposit")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Your USDG will be swapped to the vault's underlying USDC through Jupiter, then deposited in the same transaction."
+      )
+    ).toBeTruthy();
+    expect(document.querySelector('[data-earn-swap-review="true"]')).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: "Confirm deposit" }));
+
+    expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "wallet_1",
+        amount: "5",
+        sourceTokenMint: USDG_MINT,
+        swapSlippageBps: 2,
+      },
+      IDEMPOTENCY_KEY
+    );
+  });
+
   it("reuses one header idempotency key for an identical retry and never sends requestId", async () => {
     const onDeposited = vi.fn();
     mocks.createEarnVaultDeposit
@@ -525,7 +642,8 @@ describe("EarnVaultDepositModal", () => {
     );
     // The movement is real and may still be settling: refresh and watch it.
     expect(onDeposited).toHaveBeenCalledWith(
-      expect.objectContaining({ movementId: "movement_1", replayed: true })
+      expect.objectContaining({ movementId: "movement_1", replayed: true }),
+      { amount: "1", custodyWalletId: "wallet_1", projectBalance: false }
     );
     // Recorded deposit retires the key, so a deliberate second deposit mints
     // fresh and genuinely moves money.
@@ -668,9 +786,9 @@ describe("EarnVaultDepositModal", () => {
   });
 
   it.each([
-    ["pending", "Deposit pending", "Status unknown"],
-    ["submitted", "Deposit submitted", "Awaiting confirmation"],
-    ["confirmed", "Deposit confirmed", "Confirmed"],
+    ["pending", "Deposit pending", "Pending"],
+    ["submitted", "Deposit submitted", "Pending"],
+    ["confirmed", "Deposit confirmed", "Active"],
   ] as const)(
     "renders a truthful %s result and refresh callback",
     async (status, title, statusLabel) => {
@@ -694,11 +812,30 @@ describe("EarnVaultDepositModal", () => {
 
       expect(await screen.findByText(title)).toBeTruthy();
       expect(screen.getByText(statusLabel)).toBeTruthy();
+      expect(Boolean(document.querySelector(".earn-processing-modal"))).toBe(
+        status !== "confirmed"
+      );
+      expect(document.querySelector('[data-earn-processing="true"]')).toBeNull();
+      expect(document.querySelector('[data-earn-step-processing="true"]')).toBeNull();
+      if (status === "confirmed") {
+        const confirmation = document.querySelector('[data-earn-outcome="success"]');
+        const terminalStep = document.querySelector('[data-earn-step-terminal-active="true"]');
+        expect(confirmation).toBeTruthy();
+        expect(confirmation?.className).toContain("mx-auto");
+        expect(terminalStep?.className).toContain("bg-white");
+        expect(terminalStep?.className).toContain("text-black");
+        expect(terminalStep?.querySelector('[data-earn-step-check="true"]')).toBeTruthy();
+        expect(document.querySelectorAll('[data-earn-step-check="true"]')).toHaveLength(4);
+      }
       const transaction = screen.getByRole("link", { name: /5R3h9G/ });
       expect(transaction.getAttribute("href")).toBe(
         `https://explorer.solana.com/tx/${deposit.signature}?cluster=devnet`
       );
-      expect(onDeposited).toHaveBeenCalledWith(deposit);
+      expect(onDeposited).toHaveBeenCalledWith(deposit, {
+        amount: "1",
+        custodyWalletId: "wallet_1",
+        projectBalance: true,
+      });
     }
   );
 
@@ -739,13 +876,13 @@ describe("EarnVaultDepositModal", () => {
 
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
     expect(screen.getAllByText("Balance unavailable").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Available: 0 USDC")).toBeNull();
-    await user.type(screen.getByLabelText("Amount (USDC)"), "0.0000001");
+    expect(screen.queryByText("Available $0.00")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "0.0000001" } });
 
     expect(screen.getByRole("alert").textContent).toContain("Use no more than 6 decimal places.");
-    expect(
-      (screen.getByRole("button", { name: "Confirm deposit" }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
     expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
   });
 
@@ -776,8 +913,9 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
   });
 
-  it("funds a deposit in another stablecoin: source balance, swap fields, distinct key", async () => {
+  it("defaults to the largest held stablecoin while keeping every supported option selectable", async () => {
     const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+    const onDeposited = vi.fn();
     mocks.useEarnFundingWallets.mockReturnValue({
       wallets: [
         fundingWallet([
@@ -794,16 +932,41 @@ describe("EarnVaultDepositModal", () => {
       data: { kind: "submitted", deposit: vaultDeposit("submitted") },
     });
     const user = userEvent.setup();
-    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={strategy}
+        onClose={vi.fn()}
+        onDeposited={onDeposited}
+      />
+    );
     await screen.findByRole("dialog");
 
-    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
-    await user.click(screen.getByRole("radio", { name: "USDG" }));
+    const pyusdOption = screen.getByRole("radio", { name: "PYUSD" }) as HTMLInputElement;
+    const usdcOption = screen.getByRole("radio", { name: "USDC" }) as HTMLInputElement;
+    const usdgOption = screen.getByRole("radio", { name: "USDG" }) as HTMLInputElement;
+    expect(usdgOption.checked).toBe(true);
+    expect(usdcOption.checked).toBe(false);
+    expect(pyusdOption.checked).toBe(false);
+    expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
+
+    await user.click(pyusdOption);
+    expect(pyusdOption.checked).toBe(true);
+    expect(screen.getAllByText("Available $0.00").length).toBeGreaterThan(0);
+    expect((screen.getByRole("button", { name: "Max" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(usdcOption);
+    expect(usdcOption.checked).toBe(true);
+    expect(screen.getAllByText("Available $2.50").length).toBeGreaterThan(0);
+
+    await user.click(usdgOption);
+    expect(usdgOption.checked).toBe(true);
 
     // The whole form speaks the FUNDING token now: label and balance.
-    expect(screen.getAllByText("Available: 7 USDG").length).toBeGreaterThan(0);
-    await user.type(screen.getByLabelText("Amount (USDG)"), "5");
-    await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
+    expect(screen.getAllByText("Available $7.00").length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "5" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm deposit" }));
 
     expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
       {
@@ -815,6 +978,11 @@ describe("EarnVaultDepositModal", () => {
       },
       IDEMPOTENCY_KEY
     );
+    expect(onDeposited).toHaveBeenCalledWith(expect.anything(), {
+      amount: "5",
+      custodyWalletId: "wallet_1",
+      projectBalance: false,
+    });
     // Paying in a different token is a DIFFERENT request: the held-key
     // fingerprint must not collide with an unswapped deposit of the same
     // amount, or a retry of one would replay the other.
@@ -867,9 +1035,9 @@ describe("EarnVaultDepositModal", () => {
     const walletOption = await screen.findByRole("radio", { name: /Treasury wallet/ });
     expect((walletOption as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByText("Signing unavailable")).toBeTruthy();
-    expect(
-      (screen.getByRole("button", { name: "Confirm deposit" }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
   });
 });
 
@@ -928,7 +1096,8 @@ describe("slippage-floored providers", () => {
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
-    await user.type(screen.getByLabelText("Amount (USDC)"), amount);
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: amount } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     // The floor waits on the debounced live quote; the summary row appearing is
     // the signal that confirm is armed with a quote-derived floor.
     await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
@@ -936,33 +1105,32 @@ describe("slippage-floored providers", () => {
     return user;
   }
 
-  it("switches the confirm note to sponsored copy when the quote says SDP pays", async () => {
-    mocks.fetchEarnVaultDepositPreview.mockResolvedValue({
-      kind: "quoted",
-      preview: {
-        strategyId: vedaStrategy.id,
-        sharesOut: "0.99999",
-        shareDecimals: 6,
-        blockingIssues: [],
-        feeSponsored: true,
-      },
-    });
+  it("reads the confirm note from the strategy, not the quote", async () => {
+    // The quote does not claim sponsorship; the strategy does. The strategy
+    // wins: it is the per-request answer of the execution gate, while a quote is
+    // only ever fetched for floor-declaring providers.
+    primeQuote("0.99999");
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{ ...vedaStrategy, feeSponsored: true }}
+        onClose={vi.fn()}
+      />
     );
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
-    await user.type(screen.getByLabelText("Amount (USDC)"), "1.000000");
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1.000000" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    await screen.findByText("SDP covers the network fee.", undefined, { timeout: 3000 });
+    await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
+    expect(screen.getByText("SDP covers the network fee.")).toBeTruthy();
     expect(
       screen.queryByText("The selected custody wallet signs the vault deposit transaction.")
     ).toBeNull();
   });
 
-  it("keeps the wallet-pays note while no quote claims sponsorship", async () => {
-    // `feeSponsored` absent (an older API, or sponsorship off) reads wallet-pays.
+  it("keeps the wallet-pays note while the strategy is not sponsored", async () => {
     primeQuote("0.99999");
     render(
       <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
@@ -970,14 +1138,14 @@ describe("slippage-floored providers", () => {
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
-    await user.type(screen.getByLabelText("Amount (USDC)"), "1.000000");
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1.000000" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
 
     await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
     expect(
       screen.getByText("The selected custody wallet signs the vault deposit transaction.")
     ).toBeTruthy();
   });
-
   it("derives the floor from the LIVE quote, not the amount", async () => {
     // A rate the amount-arithmetic would get wrong: 1 USDC quotes 0.99999
     // shares, so a 10 bps floor is 0.99899 — not the 0.999 the amount implies.
@@ -1031,7 +1199,8 @@ describe("slippage-floored providers", () => {
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
-    await user.type(screen.getByLabelText("Amount (USDC)"), "1");
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(
       await screen.findByText(/live share quote is unavailable/, undefined, { timeout: 3000 })
@@ -1050,7 +1219,8 @@ describe("slippage-floored providers", () => {
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
-    await user.type(screen.getByLabelText("Amount (USDC)"), "1");
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(
       await screen.findByText(/The teller is paused/, undefined, { timeout: 3000 })
@@ -1098,10 +1268,12 @@ describe("slippage-floored providers", () => {
     async function armVedaDeposit() {
       screen.getByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
       fireEvent.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
-      fireEvent.change(screen.getByLabelText("Amount (USDC)"), {
+      fireEvent.change(screen.getByLabelText("Amount"), {
         target: { value: "1.000000" },
       });
       await advanceTimers(VAULT_QUOTE_DEBOUNCE_MS);
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      await advanceTimers(250);
       screen.getByText("Minimum shares received");
     }
 
@@ -1276,5 +1448,79 @@ describe("slippage-floored providers", () => {
     await vi.waitFor(() => {
       expect(mocks.fetchEarnVaultDepositPreview.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
+  });
+});
+
+describe("fee sponsorship copy", () => {
+  it("names SDP as the fee payer for a sponsored Kamino deposit that never quotes", async () => {
+    // The regression: Kamino declares no deposit floor, so no quote is ever
+    // fetched, and a flag riding on the quote left the note on wallet-pays for
+    // every sponsored Kamino deposit.
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{ ...strategy, feeSponsored: true }}
+        onClose={vi.fn()}
+      />
+    );
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    const user = userEvent.setup();
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.getByText("SDP covers the network fee.")).toBeTruthy();
+    expect(mocks.fetchEarnVaultDepositPreview).not.toHaveBeenCalled();
+  });
+
+  it("keeps the wallet-pays note for an unsponsored Kamino deposit", async () => {
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    const user = userEvent.setup();
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(
+      screen.getByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeTruthy();
+  });
+
+  it("falls back to wallet-pays for a swap-funded deposit even when the strategy is sponsored", async () => {
+    const USDG_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [
+        fundingWallet([
+          { token: "USDC", mint: USDC_MINT, amount: "2500000", uiAmount: "2.5", decimals: 6 },
+          { token: "USDG", mint: USDG_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
+        ]),
+      ],
+      error: undefined,
+      isLoading: false,
+    });
+    const user = userEvent.setup();
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{ ...strategy, feeSponsored: true }}
+        onClose={vi.fn()}
+      />
+    );
+    await screen.findByRole("dialog");
+
+    // Sponsorship refuses swap routes, so the copy follows the funding choice.
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    await user.click(screen.getByRole("radio", { name: "USDG" }));
+    expect(screen.queryByText("Swap USDG to USDC at 0.02% tolerance.")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText("Swap required before deposit")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Your USDG will be swapped to the vault's underlying USDC through Jupiter, then deposited in the same transaction."
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText("The selected custody wallet signs the vault deposit transaction.")
+    ).toBeTruthy();
+    expect(screen.queryByText("SDP covers the network fee.")).toBeNull();
   });
 });

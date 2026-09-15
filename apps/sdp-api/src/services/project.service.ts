@@ -212,17 +212,6 @@ export class ProjectService {
   }
 
   /**
-   * Archive a project (soft delete)
-   */
-  async archiveProject(projectId: string): Promise<void> {
-    const now = new Date().toISOString();
-    await this.db
-      .prepare("UPDATE projects SET status = 'archived', updated_at = ? WHERE id = ?")
-      .bind(now, projectId)
-      .run();
-  }
-
-  /**
    * Ensure a default project exists for the given environment and that the user
    * is a member. Idempotent — safe to call on every authenticated request.
    *

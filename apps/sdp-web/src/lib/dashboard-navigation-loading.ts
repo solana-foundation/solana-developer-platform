@@ -15,6 +15,7 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
   earnProgram: "/dashboard/markets/embedded-yield",
+  dvp: "/dashboard/markets/dvp",
 } as const;
 
 export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
@@ -53,6 +54,9 @@ export type DashboardLoadingRoute =
   | "embedded-yield-portfolio"
   | "embedded-yield-configure"
   | "embedded-yield-integrate"
+  | "dvp-trades"
+  | "dvp-trade-create"
+  | "dvp-trade-detail"
   | "payments-transactions"
   | "payments-pay"
   | "payments-deposit"
@@ -73,6 +77,7 @@ export type DashboardLoadingRoute =
   | "integrations"
   | "integration-detail"
   | "private-channels-setup"
+  | "helius-rings"
   | "allowlist";
 
 function normalizePathname(pathname: string): string {
@@ -115,6 +120,26 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
   if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`) {
     return "embedded-yield-integrate";
   }
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp) return "dvp-trades";
+  // Before the detail arm: /dvp/create would otherwise match its id pattern.
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`) return "dvp-trade-create";
+  // Detail routes need their own arm: every other markets match is exact, so a
+  // trade id would resolve to no loading key and fall back to the home skeleton.
+  if (new RegExp(`^${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/[^/]+$`).test(pathname)) {
+    return "dvp-trade-detail";
+  }
+  return null;
+}
+
+function resolveOperationsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
+  if (pathname === "/dashboard/api-keys") return "api-keys-list";
+  if (pathname === "/dashboard/api-keys/new") return "api-key-new";
+  if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
+  if (pathname === "/dashboard/policies") return "policies";
+  if (pathname === "/dashboard/approvals") return "approvals-list";
+  if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
+  // Members only redirects into Settings, so it loads as the page it lands on.
+  if (pathname === "/dashboard/settings" || pathname === "/dashboard/members") return "settings";
   return null;
 }
 
@@ -150,13 +175,10 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
     return "recurring-payment-detail";
   }
 
-  if (pathname === "/dashboard/api-keys") return "api-keys-list";
-  if (pathname === "/dashboard/api-keys/new") return "api-key-new";
-  if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
-  if (pathname === "/dashboard/policies") return "policies";
-  if (pathname === "/dashboard/approvals") return "approvals-list";
-  if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
-  if (pathname === "/dashboard/settings") return "settings";
+  const operationsRoute = resolveOperationsLoadingRoute(pathname);
+  if (operationsRoute) return operationsRoute;
+
+  if (pathname === DASHBOARD_SIDE_NAV_HREFS.heliusRings) return "helius-rings";
   if (pathname === "/dashboard/integrations") return "integrations";
   if (pathname === "/dashboard/integrations/private-channels/setup") {
     return "private-channels-setup";

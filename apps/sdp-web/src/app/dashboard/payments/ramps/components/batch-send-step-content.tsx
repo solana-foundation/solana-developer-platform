@@ -154,7 +154,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
           isLoading={walletsLoading}
           trailing={
-            selectedAssetBalance ? (
+            selectedAssetBalance && displayAsset !== null ? (
               <motion.span
                 className="inline-flex"
                 animate={exceedsBalance ? { x: [0, -2, 2, -2, 2, 0] } : { x: 0 }}
@@ -323,7 +323,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 
       <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onImport={bulkImport} />
 
-      {recipients.length > 0 ? (
+      {recipients.length > 0 && displayAsset !== null ? (
         <div className="flex items-center justify-between px-1 text-sm">
           <span
             className={
@@ -353,6 +353,9 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
   const t = useTranslations();
   const { recipients, displayAsset, totalAmount, estimate, estimateError } = wizard;
+  if (displayAsset === null) {
+    return null;
+  }
   const rootLabel = rootLabelOf(wizard, t);
   const fees = estimate?.estimatedFees;
   const totalFeeLamports = fees
@@ -474,7 +477,7 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
     () => new Map(recipients.map((r) => [r.counterpartyAccountId, r.name])),
     [recipients]
   );
-  if (!batchResult) {
+  if (batchResult === null || displayAsset === null) {
     return null;
   }
   const signatureByTransfer = new Map(

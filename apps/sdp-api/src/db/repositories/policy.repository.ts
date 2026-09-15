@@ -168,6 +168,18 @@ export interface ListPolicyControlInventoryResult {
   summary: PolicyControlInventorySummaryRow;
 }
 
+/**
+ * The operation's idempotency key already governs a payout: a concurrent first
+ * attempt won the race and its operation is the one to answer with. Distinct
+ * from a null return, which means the tenant does not own the target.
+ */
+export class WalletOperationIdempotencyConflictError extends Error {
+  constructor(readonly operationType: string) {
+    super(`A wallet operation for this ${operationType} idempotency key already exists`);
+    this.name = WalletOperationIdempotencyConflictError.name;
+  }
+}
+
 export interface WalletOperationRow {
   id: string;
   organization_id: string;

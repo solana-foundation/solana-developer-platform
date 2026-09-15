@@ -157,25 +157,38 @@ export function WalletIdentityBadge({
   className,
 }: {
   identity: WalletIdentity;
-  /** Compact only — the card copies to the clipboard itself, see CardCopyButton. */
+  /** Compact only — card and row variants provide their own copy feedback. */
   onCopy?: (value: string) => void;
-  variant?: "compact" | "card";
+  variant?: "compact" | "card" | "row";
   walletLink?: WalletLinkTarget;
   /** Sizing hook for callers that stack badges in a column and need them to align
    *  — the content is intrinsically ragged (a wallet name vs. "Held externally"),
    *  so a fixed width has to come from the list, not the badge. */
   className?: string;
 }) {
+  const t = useTranslations();
   const workspace = useOptionalDashboardWorkspace();
+  const copyAddress = async (value: string) => {
+    const label = t("DashboardIssuance.wallet.publicKey");
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t("DashboardIssuance.wallet.copied", { label }));
+    } catch {
+      toast.error(t("DashboardIssuance.wallet.unableToCopy", { label }));
+    }
+  };
   const resolvedWalletLink = workspace?.flags.custody === false ? "disabled" : walletLink;
   return variant === "card" ? (
     <IdentityCard identity={identity} walletLink={resolvedWalletLink} className={className} />
   ) : (
     <CompactIdentity
       identity={identity}
-      onCopy={onCopy}
+      onCopy={onCopy ?? (variant === "row" ? copyAddress : undefined)}
       walletLink={resolvedWalletLink}
-      className={className}
+      className={cn(
+        variant === "row" && "rounded-none border-0 bg-transparent px-0 py-1",
+        className
+      )}
     />
   );
 }

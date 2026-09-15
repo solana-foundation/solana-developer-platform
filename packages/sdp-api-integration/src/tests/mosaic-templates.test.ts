@@ -22,6 +22,7 @@ const koraSurfpoolShim = (env as { KORA_SURFPOOL_SHIM?: string }).KORA_SURFPOOL_
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template Deployment", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
+  let custodyWalletId = "";
   const request = requestWithApiKey();
   const deployTimeoutMs = 120_000;
 
@@ -29,6 +30,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
     custodyAddress = init.custodyAddress;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -38,6 +40,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
     custodyAddress = state.custodyAddress;
+    custodyWalletId = state.custodyWallet.id;
   });
 
   it("deploys stablecoin template with sRFC-37", { timeout: 180000 }, async () => {
@@ -50,6 +53,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       body: JSON.stringify({
         name: "Test Stablecoin",
         symbol: "TSTBL",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
         template: "stablecoin",
         isMintable: true,
@@ -66,6 +70,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     // Deploy the token
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
       timeoutMs: deployTimeoutMs,
     });
 
@@ -96,6 +102,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
         body: JSON.stringify({
           name: "Test Arcade Token",
           symbol: "TARC",
+          signingCustodyWalletId: custodyWalletId,
           decimals: 0, // Arcade tokens often use 0 decimals for game points
           template: "arcade",
           isMintable: true,
@@ -113,6 +120,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       // Deploy the token
       const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
         timeoutMs: deployTimeoutMs,
       });
 
@@ -141,6 +150,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
         body: JSON.stringify({
           name: "Test Security Token",
           symbol: "TSEC",
+          signingCustodyWalletId: custodyWalletId,
           decimals: 8,
           template: "tokenized-security",
           isMintable: true,
@@ -157,6 +167,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       // Deploy the token
       const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
         timeoutMs: deployTimeoutMs,
       });
 
@@ -181,6 +193,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       body: JSON.stringify({
         name: "Test Custom Token",
         symbol: "TCUST",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 9,
         template: "custom",
         isMintable: true,
@@ -196,6 +209,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     // Deploy the token
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
       timeoutMs: deployTimeoutMs,
     });
 

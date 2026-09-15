@@ -7,7 +7,7 @@ describe("CoinbaseRampClient", () => {
     const request = new CoinbaseRampClient().createOnrampQuote(
       { env: {}, mode: "sandbox" },
       {
-        cryptoToken: "USDC",
+        assetRail: "usdc.solana",
         fiatCurrency: "USD",
         fiatAmount: "100",
         destinationWalletAddress: "wallet_123",

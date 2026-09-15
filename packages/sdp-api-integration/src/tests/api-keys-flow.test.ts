@@ -47,13 +47,13 @@ const DESTINATION_WALLET = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integration Flow", () => {
   let apiKeyHash: string;
-  let custodyAddress = "";
+  let custodyWalletId = "";
   const adminRequest = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
-    custodyAddress = init.custodyAddress;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -62,7 +62,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
 
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
-    custodyAddress = state.custodyAddress;
+    custodyWalletId = state.custodyWallet.id;
   });
 
   it("onboarded actor creates a key and uses it to issue, mint, and transfer", {
@@ -72,9 +72,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
     expect(walletsRes.status).toBe(200);
     const walletsBody = (await walletsRes.json()) as WalletListResponse;
 
-    const sourceWallet =
-      walletsBody.data.wallets.find((wallet) => wallet.publicKey === custodyAddress) ??
-      walletsBody.data.wallets[0];
+    const sourceWallet = walletsBody.data.wallets.find((wallet) => wallet.id === custodyWalletId);
 
     if (!sourceWallet) {
       throw new Error("Expected at least one active custody wallet for integration flow");
@@ -111,6 +109,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
       body: JSON.stringify({
         name: "API Key Flow Token",
         symbol: "AKFT",
+        signingCustodyWalletId: sourceWallet.id,
         decimals: 6,
         isMintable: true,
       }),
@@ -122,6 +121,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
 
     const deployRes = await scopedRequest(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: sourceWallet.id }),
     });
 
     expect(deployRes.status).toBe(200);
@@ -138,6 +139,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: sourceWallet.id,
         mint: {
           destination: sourceWallet.publicKey,
           amount: "5",

@@ -78,8 +78,8 @@ const POSTGRES_TEST_TABLES = [
   "helius_rings_events",
   "helius_rings_timelocks",
   "helius_rings_operations",
+  "helius_rings_connections",
   "helius_rings_zones",
-  "helius_rings_key_refs",
   "helius_rings_wallets",
   "helius_rings_runtime_health",
   // helius_rings_asset_allowlist is deliberately absent: it is platform

@@ -216,7 +216,13 @@ async function reserveWithdrawal(
       idempotencyFingerprint: fingerprint,
     });
     if (!created) {
-      throw new AppError("INTERNAL_ERROR", "Failed to persist the withdrawal intent.");
+      // The admitting INSERT is guarded on the instance row: no row back means
+      // the instance stopped admitting (draining toward deletion, or
+      // deactivated) between the access check and this statement (HOO-1011).
+      throw new AppError(
+        "CONFLICT",
+        "This Private Channels instance is disconnecting and no longer accepts withdrawals. Nothing was created."
+      );
     }
     return { row: created, replayed: false };
   } catch (error) {

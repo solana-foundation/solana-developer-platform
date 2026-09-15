@@ -26,3 +26,48 @@ export function autoMergeNeedsRearm(armedHeadline, desiredHeadline) {
   }
   return armedHeadline !== desiredHeadline;
 }
+
+/**
+ * Brings the armed auto-merge headline in line with the release version.
+ *
+ * GitHub freezes the squash headline at arming time, and a repeat
+ * `enablePullRequestAutoMerge` on an armed pull request returns success
+ * without touching it, so the only way to change a stale headline is to
+ * disarm and arm again. This is the read-and-branch flow release-flow.mjs
+ * runs on every push to `main`; the GraphQL calls are injected so the flow
+ * can be tested without a token.
+ *
+ * @param {object} deps
+ * @param {string} deps.desiredHeadline Headline the current release version needs.
+ * @param {() => Promise<string | null>} deps.readArmedHeadline Resolves the armed
+ *   headline, or null when auto-merge is not armed.
+ * @param {() => Promise<void>} deps.arm Enables auto-merge with the desired headline.
+ * @param {() => Promise<void>} deps.disarm Disables auto-merge.
+ * @param {(message: string) => void} [deps.log] Progress logger.
+ * @returns {Promise<"armed" | "unchanged" | "rearmed">} What the flow did.
+ */
+export async function reconcileReleaseAutoMerge({
+  desiredHeadline,
+  readArmedHeadline,
+  arm,
+  disarm,
+  log = () => {},
+}) {
+  if (!desiredHeadline) {
+    throw new Error("desiredHeadline is required to reconcile auto-merge");
+  }
+  const armedHeadline = await readArmedHeadline();
+  if (!armedHeadline) {
+    await arm();
+    return "armed";
+  }
+  if (!autoMergeNeedsRearm(armedHeadline, desiredHeadline)) {
+    return "unchanged";
+  }
+  log(
+    `Re-arming auto-merge: headline was ${JSON.stringify(armedHeadline)}, expected ${JSON.stringify(desiredHeadline)}`
+  );
+  await disarm();
+  await arm();
+  return "rearmed";
+}

@@ -17,7 +17,8 @@ export const TEST_WALLETS = {
 export async function createStablecoin(
   request: IntegrationRequest,
   name: string,
-  symbol: string
+  symbol: string,
+  signingCustodyWalletId: string
 ): Promise<string> {
   const createRes = await request("/v1/issuance/tokens", {
     method: "POST",
@@ -27,6 +28,7 @@ export async function createStablecoin(
     body: JSON.stringify({
       name,
       symbol,
+      signingCustodyWalletId,
       template: "stablecoin",
       decimals: 6,
       isMintable: true,
@@ -45,11 +47,16 @@ export async function createStablecoin(
 export async function createAndDeployStablecoin(
   request: IntegrationRequest,
   name: string,
-  symbol: string
+  symbol: string,
+  signingCustodyWalletId: string
 ): Promise<string> {
-  const tokenId = await createStablecoin(request, name, symbol);
+  const tokenId = await createStablecoin(request, name, symbol, signingCustodyWalletId);
   const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ signingCustodyWalletId }),
   });
   expect(deployRes.status).toBe(200);
 
@@ -64,7 +71,8 @@ export async function mintToWallet(
   request: IntegrationRequest,
   tokenId: string,
   destination: string,
-  amount: string
+  amount: string,
+  signingCustodyWalletId: string
 ): Promise<string> {
   const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint`, {
     method: "POST",
@@ -72,6 +80,7 @@ export async function mintToWallet(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
+      signingCustodyWalletId,
       mint: {
         destination,
         amount,

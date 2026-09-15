@@ -1,10 +1,34 @@
 import type { PolicyCandidate, Token, WalletOperationType } from "@sdp/types";
+import type { Context } from "hono";
 import type { ApiKeyContext } from "@/lib/auth";
+import { conflict } from "@/lib/errors";
+import { getPolicyGateContext } from "@/middleware/policy-gate";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
+import type { Env } from "@/types/env";
+
+/**
+ * Refuse a custody wallet the gate did not judge. A handler that resolves its
+ * signer a second time can land on a different wallet if the authority mapping
+ * moved in between, which would execute under a policy nobody evaluated.
+ */
+export function assertJudgedCustodyWallet(
+  c: Context<{ Bindings: Env }>,
+  custodyWalletId: string
+): void {
+  const judged = getPolicyGateContext<unknown, { judgedCustodyWalletId?: string }>(c).resolved
+    ?.judgedCustodyWalletId;
+  if (judged !== undefined && judged !== custodyWalletId) {
+    throw conflict("Signing wallet changed after the operation was evaluated by policy");
+  }
+}
 
 type IssuancePolicyOperationType = Extract<
   WalletOperationType,
-  "issuance_mint_execute" | "issuance_update_authority_execute"
+  | "issuance_burn_execute"
+  | "issuance_force_burn_execute"
+  | "issuance_mint_execute"
+  | "issuance_seize_execute"
+  | "issuance_update_authority_execute"
 >;
 
 /**

@@ -25,9 +25,16 @@ const mocks = vi.hoisted(() => ({
   providerClients: {} as Record<string, EarnVaultProvider>,
   upsertStrategy: vi.fn(),
   deleteUnlistedStrategies: vi.fn(),
+  listStrategyFigures: vi.fn(),
+  logEvent: vi.fn(),
   get: vi.fn(),
   compareAndSet: vi.fn(),
   compareAndDelete: vi.fn(),
+}));
+
+vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
+  logEvent: mocks.logEvent,
 }));
 
 vi.mock("@sdp/earn", async (importOriginal) => {
@@ -42,6 +49,7 @@ vi.mock("@/db/repositories", () => ({
   createEarnRepository: vi.fn(() => ({
     upsertStrategy: mocks.upsertStrategy,
     deleteUnlistedStrategies: mocks.deleteUnlistedStrategies,
+    listStrategyFigures: mocks.listStrategyFigures,
   })),
 }));
 
@@ -109,6 +117,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
   beforeEach(() => {
     mocks.upsertStrategy.mockReset().mockResolvedValue(undefined);
     mocks.deleteUnlistedStrategies.mockReset().mockResolvedValue([]);
+    mocks.listStrategyFigures.mockReset().mockResolvedValue([]);
+    mocks.logEvent.mockReset();
     // Default slot state: empty and claimable.
     mocks.get.mockReset().mockResolvedValue(null);
     mocks.compareAndSet.mockReset().mockResolvedValue(true);
@@ -120,6 +130,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
           ({
             upsertStrategy: mocks.upsertStrategy,
             deleteUnlistedStrategies: mocks.deleteUnlistedStrategies,
+            listStrategyFigures: mocks.listStrategyFigures,
           }) as never
       );
     installProviders({});
@@ -127,7 +138,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
   it("claims an empty slot with a single null-to-token transition and syncs", async () => {
     const listStrategies = vi.fn(async (_ctx: EarnRuntimeContext) => [makeSnapshot("vault-a")]);
-    installProviders({ ground: makeProvider("ground", listStrategies) });
+    installProviders({ upshift: makeProvider("upshift", listStrategies) });
 
     const outcome = await runEarnCatalogueSyncIfDue(env);
 
@@ -152,7 +163,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
   it("skips without syncing or checking in while a live claim holds the slot", async () => {
     const listStrategies = vi.fn(async () => [makeSnapshot("vault-a")]);
-    installProviders({ ground: makeProvider("ground", listStrategies) });
+    installProviders({ upshift: makeProvider("upshift", listStrategies) });
     mocks.get.mockResolvedValue(`${Date.now() + 60_000}:11111111-2222-3333-4444-555555555555`);
     const observability = makeObservability();
 
@@ -172,8 +183,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
     const stale = `${Date.now() - 1_000}:11111111-2222-3333-4444-555555555555`;
     mocks.get.mockResolvedValue(stale);
     installProviders({
-      ground: makeProvider(
-        "ground",
+      upshift: makeProvider(
+        "upshift",
         vi.fn(async () => [])
       ),
     });
@@ -193,8 +204,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
     // the slot.
     mocks.get.mockResolvedValue("1");
     installProviders({
-      ground: makeProvider(
-        "ground",
+      upshift: makeProvider(
+        "upshift",
         vi.fn(async () => [])
       ),
     });
@@ -211,7 +222,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
   it("skips when a racing tick wins the same claim transition", async () => {
     const listStrategies = vi.fn(async () => [makeSnapshot("vault-a")]);
-    installProviders({ ground: makeProvider("ground", listStrategies) });
+    installProviders({ upshift: makeProvider("upshift", listStrategies) });
     mocks.compareAndSet.mockResolvedValue(false);
 
     const outcome = await runEarnCatalogueSyncIfDue(env);
@@ -223,8 +234,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
   it("runs under its own monitor with the hourly crontab schedule", async () => {
     installProviders({
-      ground: makeProvider(
-        "ground",
+      upshift: makeProvider(
+        "upshift",
         vi.fn(async () => [])
       ),
     });
@@ -241,7 +252,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
   it("keeps the hourly monitor healthy without running providers while Earn is disabled", async () => {
     const listStrategies = vi.fn(async () => [makeSnapshot("vault-a")]);
-    installProviders({ ground: makeProvider("ground", listStrategies) });
+    installProviders({ upshift: makeProvider("upshift", listStrategies) });
     const observability = makeObservability();
 
     const outcome = await runEarnCatalogueSyncIfDue(env, observability, {
@@ -265,8 +276,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
   it("releases only its own claim token when the sync fails, and rethrows", async () => {
     installProviders({
-      ground: makeProvider(
-        "ground",
+      upshift: makeProvider(
+        "upshift",
         vi.fn(async () => [])
       ),
     });
@@ -292,8 +303,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
       // claim expiry (the lease-validity invariant).
       const never = new Promise<ProviderStrategySnapshot[]>(() => {});
       installProviders({
-        ground: makeProvider(
-          "ground",
+        upshift: makeProvider(
+          "upshift",
           vi.fn(() => never)
         ),
       });
@@ -316,8 +327,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
   it("never lets a slot-release failure mask the sync error", async () => {
     installProviders({
-      ground: makeProvider(
-        "ground",
+      upshift: makeProvider(
+        "upshift",
         vi.fn(async () => [])
       ),
     });
@@ -339,7 +350,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
     const healthy = vi.fn(async () => [makeSnapshot("vault-b")]);
     installProviders({
       veda: makeProvider("veda", failing),
-      ground: makeProvider("ground", healthy),
+      upshift: makeProvider("upshift", healthy),
     });
 
     const outcome = await runEarnCatalogueSyncIfDue(env);
@@ -348,7 +359,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(failing).toHaveBeenCalledTimes(2);
     expect(healthy).toHaveBeenCalledTimes(2);
     expect(mocks.upsertStrategy).toHaveBeenCalledTimes(2);
-    expect(mocks.upsertStrategy.mock.calls.every(([row]) => row.provider === "ground")).toBe(true);
+    expect(mocks.upsertStrategy.mock.calls.every(([row]) => row.provider === "upshift")).toBe(true);
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
@@ -361,7 +372,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
     });
     installProviders({
       upshift: makeProvider("upshift", notImplemented),
-      ground: makeProvider("ground", notConfigured),
+      perena: makeProvider("perena", notConfigured),
     });
 
     const outcome = await runEarnCatalogueSyncIfDue(env);
@@ -372,7 +383,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
     // the mirror sub-shelf converges to empty (an authorized empty keep set),
     // while the own lanes write and delete nothing.
     expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(2);
-    for (const provider of ["upshift", "ground"]) {
+    for (const provider of ["perena", "upshift"]) {
       expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
         provider,
         environment: "sandbox",
@@ -391,8 +402,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
     // own fetch is the total truth there); a non-production own lane is scoped
     // to the environment's cluster so it can never reach the mirrored shelf.
     installProviders({
-      ground: makeProvider(
-        "ground",
+      upshift: makeProvider(
+        "upshift",
         vi.fn(async () => [
           makeSnapshot("kamino-allez-usdc"),
           makeSnapshot("kamino-steakhouse-usdc"),
@@ -409,19 +420,19 @@ describe("runEarnCatalogueSyncIfDue", () => {
     // rows this pass: a reliable answer, so the empty keep set is authorized).
     expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(3);
     expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
-      provider: "ground",
+      provider: "upshift",
       environment: "production",
       hostCluster: undefined,
       listedProviderReferences: ["kamino-allez-usdc", "kamino-steakhouse-usdc"],
     });
     expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
-      provider: "ground",
+      provider: "upshift",
       environment: "sandbox",
       hostCluster: "devnet",
       listedProviderReferences: ["kamino-allez-usdc", "kamino-steakhouse-usdc"],
     });
     expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
-      provider: "ground",
+      provider: "upshift",
       environment: "sandbox",
       hostCluster: "mainnet-beta",
       listedProviderReferences: [],
@@ -438,8 +449,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
         "mainnet-beta" && (call[0] as { allowEmptyKeepSet?: true }).allowEmptyKeepSet === true;
 
     installProviders({
-      ground: makeProvider(
-        "ground",
+      upshift: makeProvider(
+        "upshift",
         vi.fn(async () => [])
       ),
     });
@@ -451,8 +462,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
     mocks.compareAndSet.mockResolvedValue(true);
     mocks.upsertStrategy.mockRejectedValue(new Error("write conflict"));
     installProviders({
-      ground: makeProvider(
-        "ground",
+      upshift: makeProvider(
+        "upshift",
         vi.fn(async () => [makeSnapshot("kamino-allez-usdc")])
       ),
     });
@@ -465,8 +476,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
     // Same degradation contract as upsert: the catalogue stays stale for an
     // hour, the tick still counts as run, and the slot is not released.
     installProviders({
-      ground: makeProvider(
-        "ground",
+      upshift: makeProvider(
+        "upshift",
         vi.fn(async () => [makeSnapshot("kamino-allez-usdc")])
       ),
     });
@@ -582,7 +593,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
         }
         return [makeSnapshot("devnet-vault", "devnet")];
       });
-      installProviders({ ground: makeProvider("ground", listStrategies) });
+      installProviders({ upshift: makeProvider("upshift", listStrategies) });
 
       expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
       expect(mocks.upsertStrategy).toHaveBeenCalledExactlyOnceWith(
@@ -590,7 +601,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
       );
       expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(2);
       expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
         listedProviderReferences: [],
@@ -691,7 +702,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
             ]
           : [makeSnapshot("shared-ref", "devnet")]
       );
-      installProviders({ ground: makeProvider("ground", listStrategies) });
+      installProviders({ upshift: makeProvider("upshift", listStrategies) });
 
       expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
 
@@ -703,7 +714,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
         })
       );
       expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
         listedProviderReferences: ["shared-ref", "mainnet-only"],
@@ -724,7 +735,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
           ? [makeSnapshot("shared-ref", "mainnet-beta")]
           : [makeSnapshot("shared-ref", "devnet")]
       );
-      installProviders({ ground: makeProvider("ground", listStrategies) });
+      installProviders({ upshift: makeProvider("upshift", listStrategies) });
       mocks.upsertStrategy.mockImplementation(async (input: { hostCluster: string }) => {
         if (input.hostCluster === "devnet") {
           throw new Error("write conflict");
@@ -738,7 +749,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
       // delist ran with the collided reference protected in its keep set.
       expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(2);
       expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
-        provider: "ground",
+        provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
         listedProviderReferences: ["shared-ref"],
@@ -757,7 +768,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
           ? []
           : [makeSnapshot("rogue-mainnet", "mainnet-beta"), makeSnapshot("devnet-vault", "devnet")]
       );
-      installProviders({ ground: makeProvider("ground", listStrategies) });
+      installProviders({ upshift: makeProvider("upshift", listStrategies) });
 
       expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
 
@@ -767,6 +778,141 @@ describe("runEarnCatalogueSyncIfDue", () => {
       expect(mocks.upsertStrategy).not.toHaveBeenCalledWith(
         expect.objectContaining({ providerReference: "rogue-mainnet" })
       );
+    });
+  });
+
+  describe("figure anomalies (PRO-1867, EARN-010)", () => {
+    const storedFigure = (
+      provider_reference: string,
+      current_apy: string | null,
+      host_cluster: "devnet" | "mainnet-beta" = "devnet",
+      tvl_usd: number | null = null
+    ) => ({ provider_reference, host_cluster, status: "active", current_apy, tvl_usd });
+
+    it("emits a figure anomaly on a 10x APY jump against the stored row, and still writes it", async () => {
+      // The sync is a mirror of the provider, not a judge of it: the write
+      // lands, and the event is what gets a human to look at it. Only sandbox
+      // holds a stored row, so production's empty read is a new shelf, not a
+      // vanished one.
+      mocks.listStrategyFigures.mockImplementation(async ({ environment }) =>
+        environment === "sandbox" ? [storedFigure("vault-a", "0.05")] : []
+      );
+      installProviders({
+        upshift: makeProvider("upshift", async (ctx: EarnRuntimeContext) =>
+          ctx.environment === "production"
+            ? []
+            : [{ ...makeSnapshot("vault-a"), currentApy: "0.5" }]
+        ),
+      });
+
+      expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+
+      expect(mocks.logEvent).toHaveBeenCalledExactlyOnceWith("warn", {
+        event: "sdp_api_earn_catalogue_figure_anomaly",
+        source: "catalogue_sync",
+        provider: "upshift",
+        environment: "sandbox",
+        provider_reference: "vault-a",
+        host_cluster: "devnet",
+        metric: "apy",
+        reason: "jump",
+        previous: 0.05,
+        current: 0.5,
+        ratio: 10,
+      });
+      expect(mocks.upsertStrategy).toHaveBeenCalledWith(
+        expect.objectContaining({ providerReference: "vault-a", currentApy: "0.5" })
+      );
+    });
+
+    it("diffs each lane against its own sub-shelf, so the mirror never judges devnet rows", async () => {
+      // Sandbox stores a devnet row and a mirrored mainnet row under different
+      // references; production stores nothing yet. Only the mirror lane's
+      // incoming figure moves.
+      mocks.listStrategyFigures.mockImplementation(async ({ environment }) =>
+        environment === "sandbox"
+          ? [
+              storedFigure("devnet-vault", "0.05", "devnet"),
+              storedFigure("mainnet-vault", "0.04", "mainnet-beta"),
+            ]
+          : []
+      );
+      installProviders({
+        upshift: makeProvider("upshift", async (ctx: EarnRuntimeContext) =>
+          ctx.environment === "production"
+            ? [{ ...makeSnapshot("mainnet-vault", "mainnet-beta"), currentApy: "0.4" }]
+            : [{ ...makeSnapshot("devnet-vault"), currentApy: "0.05" }]
+        ),
+      });
+
+      await runEarnCatalogueSyncIfDue(env);
+
+      // Production has no stored rows in this fixture (new row, exempt); the
+      // sandbox mirror lane does, and reports the jump there once.
+      const anomalies = mocks.logEvent.mock.calls.filter(
+        ([, payload]) => payload.event === "sdp_api_earn_catalogue_figure_anomaly"
+      );
+      expect(anomalies).toHaveLength(1);
+      expect(anomalies[0]?.[1]).toMatchObject({
+        environment: "sandbox",
+        provider_reference: "mainnet-vault",
+        host_cluster: "mainnet-beta",
+        ratio: 10,
+      });
+    });
+
+    it("reports a fundable shelf the provider reliably stopped listing, and does not delist it", async () => {
+      mocks.listStrategyFigures.mockResolvedValue([
+        storedFigure("vault-a", "0.05"),
+        storedFigure("vault-b", "0.06"),
+      ]);
+      installProviders({
+        upshift: makeProvider(
+          "upshift",
+          vi.fn(async () => [])
+        ),
+      });
+
+      await runEarnCatalogueSyncIfDue(env);
+
+      // Production's own lane (environment-wide) and sandbox's own devnet lane
+      // both held rows and both received an empty list.
+      expect(mocks.logEvent).toHaveBeenCalledWith("error", {
+        event: "sdp_api_earn_catalogue_shelf_disappeared",
+        source: "catalogue_sync",
+        provider: "upshift",
+        environment: "production",
+        delist_scope: "environment",
+        previous_count: 2,
+        will_delist: false,
+      });
+      expect(mocks.logEvent).toHaveBeenCalledWith(
+        "error",
+        expect.objectContaining({
+          environment: "sandbox",
+          delist_scope: "devnet",
+          will_delist: false,
+        })
+      );
+      // The own-shelf refusal to delist on an empty read is untouched.
+      expect(mocks.deleteUnlistedStrategies).not.toHaveBeenCalledWith(
+        expect.objectContaining({ hostCluster: "devnet" })
+      );
+    });
+
+    it("stays quiet on an empty stored shelf and never lets a figure read failure sink the pass", async () => {
+      mocks.listStrategyFigures.mockRejectedValue(new Error("figures table unreadable"));
+      installProviders({
+        upshift: makeProvider(
+          "upshift",
+          vi.fn(async () => [makeSnapshot("v")])
+        ),
+      });
+
+      expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+
+      expect(mocks.logEvent).not.toHaveBeenCalled();
+      expect(mocks.upsertStrategy).toHaveBeenCalled();
     });
   });
 });

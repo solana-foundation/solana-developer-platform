@@ -4,6 +4,13 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useDashboardWorkspace: () => ({
+    dashboardCacheScope: { userId: "user_test", orgId: "org_test" },
+    selectedProjectId: "project_test",
+  }),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: vi.fn(),

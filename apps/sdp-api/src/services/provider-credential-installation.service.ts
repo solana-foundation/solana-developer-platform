@@ -13,7 +13,6 @@ import {
   providerUnavailable,
 } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
-import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import {
@@ -23,12 +22,13 @@ import {
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
 import {
+  checkPrivyCredential,
   getPrivyProviderAccountFingerprint,
   PRIVY_RUNTIME_ENV_FIELDS,
+  type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
 import {
   findPrivyWalletByExternalId,
-  type PrivyCredentialAuthentication,
   type ProvisionPrivyResult,
   provisionPrivyWallet,
 } from "@/services/custody/provisioning";
@@ -40,6 +40,7 @@ import {
   installationFactsFromConnection,
 } from "@/services/provider-credential-installation";
 import type { SafeProviderCredential } from "@/services/provider-credential-submission.service";
+import { destroySecretVersion, queueOrphanedSecretVersion } from "@/services/secret-retirement";
 import {
   getPendingWalletLabel,
   type InstallationConnectionState,
@@ -48,7 +49,6 @@ import {
 import type { Env } from "@/types/env";
 
 const INSTALLATION_UNAVAILABLE_MESSAGE = "Provider credential installation is unavailable";
-const PRIVY_CHECK_TIMEOUT_MS = 10_000;
 
 type CompletionStatus = "running" | "success" | "failed" | "retry_unknown";
 type CompletionFailureCode =
@@ -113,6 +113,115 @@ export async function getProviderCredentialInstallation(
   const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
   return { connection: projectConnection(c.env, loaded) };
+}
+
+export async function deactivateCustodyConnection(
+  c: Context<{ Bindings: Env }>,
+  connectionId: string
+): Promise<{ custodyConnection: SafeInstallationConnection }> {
+  const context = createInstallationContext(c);
+  const loaded = await loadInstallation(context, connectionId);
+  if (loaded.target.status === "deactivated") {
+    return { custodyConnection: projectConnection(c.env, loaded) };
+  }
+  if (loaded.target.status !== "failed" && loaded.target.status !== "active") {
+    throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+  }
+  if (
+    await context.store.hasActiveInstallationWallet(
+      context.organizationId,
+      context.projectId,
+      connectionId
+    )
+  ) {
+    throw conflict("Connection cannot be deactivated while it has active wallets");
+  }
+  const intent = await context.audit.beginCritical(c, {
+    organizationId: context.organizationId,
+    userId: context.userId,
+    action: "deactivate",
+    resourceType: "custody_connection",
+    resourceId: connectionId,
+    metadata: { event: "custody_connection_deactivation_started", provider: "privy" },
+  });
+  let changed = false;
+  let result: SafeInstallationConnection;
+  try {
+    result = await context.db.transaction(async (tx) => {
+      const store = new ProviderCredentialStore(tx);
+      if (
+        !(await store.lockAuthorizedProjects(context.organizationId, context.userId, [
+          context.projectId,
+        ]))
+      ) {
+        throw forbidden("Requested project is not accessible");
+      }
+      const target = await store.findInstallationConnection(
+        context.organizationId,
+        context.projectId,
+        connectionId,
+        { lock: true }
+      );
+      if (!target) throw notFound("Custody Connection");
+      if (target.status !== "deactivated") {
+        if (target.status !== "failed" && target.status !== "active") {
+          throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+        }
+        if (
+          await store.hasActiveInstallationWallet(
+            context.organizationId,
+            context.projectId,
+            connectionId
+          )
+        ) {
+          throw conflict("Connection cannot be deactivated while it has active wallets");
+        }
+        if (
+          !(await store.deactivateInstallationConnection({
+            organizationId: context.organizationId,
+            projectId: context.projectId,
+            connectionId,
+            credentialId: target.provider_credential_id,
+            credentialStatus: target.credential_status,
+            observedStatus: target.status,
+          }))
+        ) {
+          throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+        }
+        changed = true;
+      }
+      const deactivated = { ...target, status: "deactivated" as const };
+      return projectConnection(c.env, {
+        target: deactivated,
+        decisions: decideInstallation(
+          installationFactsFromConnection(deactivated, await store.getDatabaseNowMs(), false)
+        ),
+      });
+    });
+  } catch (error) {
+    if (changed) {
+      // Preserve the durable intent when the commit outcome cannot be established.
+      throw providerUnavailable("Connection deactivation outcome is temporarily unknown");
+    }
+    await completeInstallationCriticalNoop(
+      context,
+      intent,
+      "custody_connection_deactivation_not_committed"
+    );
+    throw error;
+  }
+  if (changed) {
+    await context.audit.completeCritical(c, intent, {
+      metadata: { event: "custody_connection_deactivated", provider: "privy" },
+    });
+  } else {
+    await completeInstallationCriticalNoop(
+      context,
+      intent,
+      "custody_connection_deactivation_replayed"
+    );
+  }
+  return { custodyConnection: result };
 }
 
 export async function completeProviderCredentialInstallation(
@@ -193,7 +302,7 @@ export async function completeProviderCredentialInstallation(
         ? await persistSuccess(context, loaded.target, leaseToken, outcome.wallet)
         : outcome.kind === "retry_unknown"
           ? await persistRetryUnknown(context, loaded.target, leaseToken)
-          : await persistFailure(context, loaded.target, leaseToken, outcome.code, secretStore);
+          : await persistFailure(context, loaded.target, leaseToken, outcome.code);
     if (replay) {
       canRecordFailureOutcome = false;
       if (replay.target.last_check_at === leaseToken) {
@@ -528,7 +637,7 @@ async function executeCompletionMode(
     return lookupProviderWallet(context.c.env, externalId, credential);
   }
 
-  const validation = await validatePrivyCredential(context.c.env, credential);
+  const validation = await checkPrivyCredential(context.c.env, credential);
   if (validation !== "success") {
     return validation === "failed"
       ? { kind: "failed", code: "invalid_credentials" }
@@ -640,38 +749,6 @@ async function acquireCompletionLease(
   });
 }
 
-async function validatePrivyCredential(
-  env: Env,
-  credential: PrivyCredentialAuthentication
-): Promise<"success" | "failed" | "retry_unknown"> {
-  const baseUrl = (env.PRIVY_API_BASE_URL ?? "https://api.privy.io/v1").replace(/\/+$/, "");
-  try {
-    const response = await fetch(`${baseUrl}/wallets?limit=1&chain_type=solana`, {
-      method: "GET",
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${credential.appId}:${credential.appSecret}`).toString("base64")}`,
-        "privy-app-id": credential.appId,
-      },
-      signal: AbortSignal.timeout(PRIVY_CHECK_TIMEOUT_MS),
-    });
-    if (response.status === 401) return "failed";
-    if (response.status !== 200) return "retry_unknown";
-    const body = await response.json().catch(() => null);
-    return isWalletListResponse(body) ? "success" : "retry_unknown";
-  } catch {
-    return "retry_unknown";
-  }
-}
-
-function isWalletListResponse(value: unknown): value is { data: unknown[] } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "data" in value &&
-    Array.isArray((value as { data?: unknown }).data)
-  );
-}
-
 async function persistSuccess(
   context: InstallationContext,
   target: InstallationConnectionState,
@@ -725,23 +802,39 @@ async function persistFailure(
   context: InstallationContext,
   target: InstallationConnectionState,
   leaseToken: string,
-  failureCode: "invalid_credentials" | "provider_account_already_connected" | "wallet_conflict",
-  secretStore: CredentialSecretStore
+  failureCode: "invalid_credentials" | "provider_account_already_connected" | "wallet_conflict"
 ): Promise<LoadedInstallation | null> {
-  const updated = await context.db.transaction(async (tx) =>
-    new ProviderCredentialStore(tx).recordInstallationFailure({
+  const updated = await context.db.transaction(async (tx) => {
+    const row = await new ProviderCredentialStore(tx).recordInstallationFailure({
       providerCredentialId: target.provider_credential_id,
       connectionId: target.id,
       leaseToken,
       failureCode,
-    })
-  );
+    });
+    if (!row) {
+      return row;
+    }
+    // Recorded WITH the failure, not after it: this commit is what makes the
+    // stored version garbage, so the obligation to destroy it has to become
+    // true at the same instant. Queuing after the commit leaves a window in
+    // which a lost worker takes the only knowledge that the version needs
+    // destroying with it, and the tenant's credential stays readable in the
+    // backend with nothing that would ever retry. Same ordering as rotation
+    // and deactivation. The destroy below clears this row on success.
+    await queueOrphanedSecretVersion(
+      tx,
+      retirementContext(target),
+      storedSecretRef(target),
+      "orphaned by a rejected Privy installation"
+    );
+    return row;
+  });
   if (!updated) {
     const current = await loadInstallation(context, target.id);
     if (current.decisions.complete.kind === "replay") return current;
     throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
   }
-  await destroyRejectedGcpVersionBestEffort(context.c, secretStore, target);
+  await destroyGcpVersionBestEffort(context.c, target);
   return null;
 }
 
@@ -791,60 +884,31 @@ async function completeInstallationCriticalNoop(
   });
 }
 
+// Destroys the rejected installation's stored credential version durably: a
+// destroy (or store construction) failure is recorded on the retirement queue
+// for the sweeper instead of only logged — a log line alone left the tenant's
+// credential readable in Secret Manager with nothing that would ever retry.
 async function destroyGcpVersionBestEffort(
   c: Context<{ Bindings: Env }>,
   credential: InstallationConnectionState
 ): Promise<void> {
-  if (
-    credential.credential_storage_backend !== "gcp_secret_manager" ||
-    !credential.credential_secret_version_ref
-  ) {
-    return;
-  }
-  let store: CredentialSecretStore;
-  try {
-    store = createPersistedSecretStore(c.env, credential.credential_storage_backend);
-  } catch {
-    logSecretCleanupFailure(c, credential);
-    return;
-  }
-  await destroyRejectedGcpVersionBestEffort(c, store, credential);
+  await destroySecretVersion(c.env, storedSecretRef(credential), retirementContext(credential));
 }
 
-async function destroyRejectedGcpVersionBestEffort(
-  c: Context<{ Bindings: Env }>,
-  store: CredentialSecretStore,
-  credential: InstallationConnectionState
-): Promise<void> {
-  if (
-    credential.credential_storage_backend !== "gcp_secret_manager" ||
-    !credential.credential_secret_version_ref
-  ) {
-    return;
-  }
-  try {
-    await store.destroyVersion({ secretVersionRef: credential.credential_secret_version_ref });
-  } catch {
-    logSecretCleanupFailure(c, credential);
-  }
+/** The stored version this connection points at, in retirement-store shape. */
+function storedSecretRef(credential: InstallationConnectionState) {
+  return {
+    storageBackend: credential.credential_storage_backend,
+    secretRef: credential.credential_secret_ref ?? undefined,
+    secretVersionRef: credential.credential_secret_version_ref ?? undefined,
+  };
 }
 
-function logSecretCleanupFailure(
-  c: Context<{ Bindings: Env }>,
-  credential: InstallationConnectionState
-): void {
-  const version = credential.credential_secret_version_ref?.split("/").at(-1);
-  getLogger().error(
-    {
-      providerCredentialId: credential.provider_credential_id,
-      provider: "privy",
-      storageBackend: credential.credential_storage_backend,
-      ...(version && /^[1-9][0-9]*$/.test(version)
-        ? { providerResourceVersion: Number(version) }
-        : {}),
-      requestId: c.get("requestId"),
-      reason: "secret_cleanup_failed",
-    },
-    "provider_credential_orphan_risk"
-  );
+/** Who the retirement belongs to, for the queue row and the orphan-risk log. */
+function retirementContext(credential: InstallationConnectionState) {
+  return {
+    provider: "privy" as const,
+    orgId: credential.organization_id,
+    sourceId: credential.provider_credential_id,
+  };
 }

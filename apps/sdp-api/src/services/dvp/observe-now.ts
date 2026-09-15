@@ -1,0 +1,227 @@
+/**
+ * Reading a single trade's chain state on demand, outside the sweep.
+ *
+ * The reconciler runs once a minute, which is the right cadence for noticing a
+ * counterparty's deposit — nobody tells us when that lands. It is the wrong
+ * cadence for an action SDP just performed itself: funding a leg returned 200,
+ * the tokens moved, and the page went on showing "Waiting on funds" for up to
+ * a minute afterwards. The honest reading of that is that nothing happened.
+ *
+ * So an action that changes chain state observes its own result rather than
+ * waiting to be told about it by a job. Page reads also revisit closed trades
+ * at a slower cadence because a closed escrow can be re-created and paid into,
+ * making a late deposit recoverable.
+ */
+
+import { confirmTransaction, createRpc } from "@sdp/rpc/solana";
+import type { Signature } from "@solana/kit";
+import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
+import { getLogger } from "@/runtime/logger";
+import type { Env } from "@/types/env";
+import { resolveDvpClose } from "./closing-transaction";
+import { closeIsKnown, deriveDvpTradeState } from "./observe";
+import { readDvpTradeObservation } from "./read-chain";
+
+/**
+ * Observes one trade now and records what it finds.
+ *
+ * Never throws. The caller has already done the thing that mattered — the
+ * transfer is broadcast, the money has moved — and failing their request
+ * because a follow-up read timed out would report a failure that did not
+ * happen. A missed observation costs at most one sweep of latency, which is
+ * exactly where this started.
+ *
+ * @param env - API process environment.
+ * @param trade - The trade to re-read.
+ * @param awaitSignature - A transaction to confirm first, so the read happens
+ *   after the effect it is meant to see rather than racing it.
+ * @returns The updated row, or null when nothing was written — an unreadable
+ *   chain, or the sweep having moved the row first, in which case the caller's
+ *   own copy is the stale one and it should re-read rather than trust this.
+ */
+export async function observeDvpTradeNow(
+  env: Env,
+  trade: DvpTradeRow,
+  awaitSignature?: Signature
+): Promise<DvpTradeRow | null> {
+  try {
+    const rpc = createRpc(env);
+
+    if (awaitSignature) {
+      // Reading before the transfer confirms would record the balance it had
+      // beforehand and leave the row saying the opposite of what just happened.
+      await confirmTransaction(rpc, awaitSignature, { timeoutMs: 15_000 });
+    }
+
+    const blockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
+    const observation = await readDvpTradeObservation(
+      rpc,
+      trade.swapDvp,
+      {
+        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
+      },
+      blockHeight
+    );
+    if (!observation.tradeAccountExists && !closeIsKnown(trade)) {
+      const lookup = await resolveDvpClose(
+        rpc,
+        trade.swapDvp,
+        trade.createSignature,
+        trade.createdAt
+      );
+      observation.closeResolution = lookup.kind === "resolved" ? lookup : null;
+    }
+
+    const derived = deriveDvpTradeState(observation, trade, Date.now());
+
+    return await createDvpTradeRepository(env).recordObservation({
+      id: trade.id,
+      // Same compare-and-swap the sweep uses: if the reconciler moved the row
+      // in between, its view is the fresher one and this write matches nothing.
+      expectedStatus: trade.status,
+      status: derived.status,
+      escrowAAmount: observation.legA.exists ? observation.legA.amount.toString() : null,
+      escrowBAmount: observation.legB.exists ? observation.legB.amount.toString() : null,
+      escrowAFrozen: observation.legA.exists ? observation.legA.frozen : null,
+      escrowBFrozen: observation.legB.exists ? observation.legB.frozen : null,
+      observedAt: new Date().toISOString(),
+      closeSignature:
+        observation.closeResolution === null ? null : observation.closeResolution.signature,
+    });
+  } catch (error) {
+    getLogger().warn(
+      { error, tradeId: trade.id },
+      "dvp: could not observe the trade immediately; the sweep will pick it up"
+    );
+    return null;
+  }
+}
+
+/**
+ * The same reading, returned instead of recorded.
+ *
+ * For a party looking at a trade another organization created. They need the
+ * live escrow balances more than anyone — "has my transfer landed" is the only
+ * question they have — and they cannot be given them by the recording path:
+ * writing the observation is an UPDATE on somebody else's row, which the 0089
+ * policy refuses because it grants SELECT and nothing more.
+ *
+ * Reading without writing sidesteps that entirely rather than widening the
+ * policy or borrowing the system identity to write across a tenant boundary.
+ * The row still gets its recorded observation from the reconciler, on behalf of
+ * the organization that owns it.
+ *
+ * Returns the trade unchanged when the chain cannot be read, which is the same
+ * answer the recording path gives: a reading that failed is not a balance of
+ * zero, and must not be shown as one.
+ *
+ * @param env - API process environment.
+ * @param trade - The trade to read without recording.
+ * @returns The live derived trade, or the stored trade when it is ineligible or
+ *   the chain cannot be read.
+ */
+export async function observeDvpTradeWithoutRecording(
+  env: Env,
+  trade: DvpTradeRow
+): Promise<DvpTradeRow> {
+  if (OBSERVATION_MAX_AGE_BY_STATUS[trade.status] === null) {
+    return trade;
+  }
+  try {
+    const rpc = createRpc(env);
+    const blockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
+    const observation = await readDvpTradeObservation(
+      rpc,
+      trade.swapDvp,
+      {
+        a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+        b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
+      },
+      blockHeight
+    );
+    if (!observation.tradeAccountExists && !closeIsKnown(trade)) {
+      const lookup = await resolveDvpClose(
+        rpc,
+        trade.swapDvp,
+        trade.createSignature,
+        trade.createdAt
+      );
+      observation.closeResolution = lookup.kind === "resolved" ? lookup : null;
+    }
+    const derived = deriveDvpTradeState(observation, trade, Date.now());
+
+    return {
+      ...trade,
+      status: derived.status,
+      escrowAAmount: observation.legA.exists ? observation.legA.amount.toString() : null,
+      escrowBAmount: observation.legB.exists ? observation.legB.amount.toString() : null,
+      escrowAFrozen: observation.legA.exists ? observation.legA.frozen : null,
+      escrowBFrozen: observation.legB.exists ? observation.legB.frozen : null,
+      observedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    getLogger().warn(
+      { error, tradeId: trade.id },
+      "dvp: could not read the trade for a party; showing the stored reading"
+    );
+    return trade;
+  }
+}
+
+/**
+ * How stale each status may be before a page asking for the trade pays for a
+ * fresh reading.
+ *
+ * The sweep's once-a-minute cadence is right for a background job and wrong for
+ * somebody sitting on the page: a counterparty's deposit is the one event this
+ * product exists to show, and waiting up to a minute to show it is what makes
+ * a working trade look broken. Short enough to feel live, long enough that a
+ * polling page costs one chain read every few seconds rather than one per
+ * request.
+ */
+const OBSERVATION_MAX_AGE_MS = 10_000;
+const CLOSED_OBSERVATION_MAX_AGE_MS = 60_000;
+const OBSERVATION_MAX_AGE_BY_STATUS = {
+  creating: OBSERVATION_MAX_AGE_MS,
+  created: OBSERVATION_MAX_AGE_MS,
+  partially_funded: OBSERVATION_MAX_AGE_MS,
+  funded: OBSERVATION_MAX_AGE_MS,
+  expired: null,
+  create_failed: null,
+  settled: CLOSED_OBSERVATION_MAX_AGE_MS,
+  cancelled: CLOSED_OBSERVATION_MAX_AGE_MS,
+  rejected: CLOSED_OBSERVATION_MAX_AGE_MS,
+  closed_unknown: CLOSED_OBSERVATION_MAX_AGE_MS,
+} as const satisfies Record<DvpTradeStatus, number | null>;
+
+/**
+ * Re-reads a trade if the last observation is too old to answer with.
+ *
+ * Open trades use a short freshness window so deposits appear promptly. Closed
+ * trades use a slower cadence because their escrow can be re-created and paid
+ * into after close, making the late deposit recoverable. Expired and failed
+ * creates are never re-read here.
+ *
+ * @param env - API process environment.
+ * @param trade - The trade as it was last stored.
+ * @param now - Current time, injectable for tests.
+ * @returns A fresher row when one was written, otherwise the row given.
+ */
+export async function observeDvpTradeIfStale(
+  env: Env,
+  trade: DvpTradeRow,
+  now: number = Date.now()
+): Promise<DvpTradeRow> {
+  const maxAge = OBSERVATION_MAX_AGE_BY_STATUS[trade.status];
+  if (maxAge === null) {
+    return trade;
+  }
+  const observedAt = trade.observedAt ? Date.parse(trade.observedAt) : Number.NaN;
+  // A trade never observed is the strongest case for reading it, not the
+  // weakest: NaN must not fall through to "recent enough".
+  if (Number.isFinite(observedAt) && now - observedAt < maxAge) {
+    return trade;
+  }
+  return (await observeDvpTradeNow(env, trade)) ?? trade;
+}

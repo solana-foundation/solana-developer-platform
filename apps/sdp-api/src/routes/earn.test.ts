@@ -1,6 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import { type CachedApiKey, type SolanaCluster, wellKnownMint } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
+import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -33,6 +34,7 @@ import {
 } from "@/db/repositories";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -98,20 +100,14 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -147,28 +143,6 @@ async function seedSessionAuth(): Promise<void> {
          VALUES (?, ?, ?, 'member', 'active')`
       )
       .bind("om_earn_routes_session", TEST_ORG.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, 'production', 'active', ?)`
-      )
-      .bind(
-        TEST_PRODUCTION_PROJECT.id,
-        TEST_ORG.id,
-        "Production Project",
-        TEST_PRODUCTION_PROJECT.slug,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_routes_sandbox", TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'admin')`
-      )
-      .bind("pm_earn_routes_production", TEST_PRODUCTION_PROJECT.id, TEST_USER.id),
     getDb(env)
       .prepare(
         `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
@@ -211,17 +185,17 @@ async function seedStrategy(
 
 /**
  * A real `earn_provider_wallets` row, so the `:programId` probes below ride an
- * id the handler actually resolves. Provider "ground" on purpose: it is NOT the
- * entitled provider here (seedAuth entitles only "veda") and this file sets no
- * GROUND credentials, which is exactly why the probe uses the one per-program
- * route that takes no provider gate at all.
+ * id the handler actually resolves. Provider "upshift" on purpose: it is NOT
+ * the entitled provider here (seedAuth entitles only "veda") and this file sets
+ * no UPSHIFT credentials, which is exactly why the probe uses the one
+ * per-program route that takes no provider gate at all.
  */
 async function seedProgram(): Promise<EarnProviderWalletRow> {
   const row = await createPostgresEarnRepository(getDb(env)).insertProviderWallet({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
     environment: "sandbox",
-    provider: "ground",
+    provider: "upshift",
     providerWalletRef: crypto.randomUUID(),
     label: null,
     createdBy: TEST_USER.id,
@@ -383,7 +357,7 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
   // Both tests PAIR the 404s with a live probe of the replacement, because a 404
   // for a URL that was never registered passes even if the replacement is
   // broken — the same trap the /nav case above avoids by riding a real strategy
-  // id. This file's seedAuth entitles only "veda" and sets no GROUND
+  // id. This file's seedAuth entitles only "veda" and sets no UPSHIFT
   // credentials, so the probes are deliberately the two program routes that
   // answer without any provider call: the UNFILTERED collection (no provider
   // named ⇒ no credential gate) and the withdrawal LEDGER list (no provider gate
@@ -395,7 +369,7 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
 
     for (const path of [
       "/v1/earn/program",
-      "/v1/earn/program?provider=ground",
+      "/v1/earn/program?provider=upshift",
       "/v1/earn/program/deposits",
       "/v1/earn/program/withdrawals",
       "/v1/earn/program/withdrawals/wd_x",
@@ -574,6 +548,9 @@ describe("Earn routes — strategy catalogue", () => {
     expect(defaultBody.data.strategies[0]).toMatchObject({
       hostCluster: "devnet",
       fundable: true,
+      // Sponsorship is unset in this harness, so a fundable row still reads
+      // wallet-pays. The flag is a fact about the deployment, not the row.
+      feeSponsored: false,
     });
     // The filter runs in SQL: the total describes the default view, not the
     // store, so pagination never walks a reader into hidden rows.
@@ -592,8 +569,50 @@ describe("Earn routes — strategy catalogue", () => {
     expect(optInBody.data.strategies[0]).toMatchObject({
       hostCluster: "mainnet-beta",
       fundable: false,
+      feeSponsored: false,
     });
     expect(optInBody.data.total).toBe(1);
+  });
+
+  /**
+   * `feeSponsored` rides on the catalogue row, not on the deposit quote, so a
+   * provider that never quotes (Kamino has no deposit floor) still gets honest
+   * fee copy. It answers the execution gate (`isEarnVaultSponsorshipEnabled`
+   * against the row's cluster), and a row that cannot be funded is never
+   * sponsored, whatever the flag says.
+   */
+  it("derives feeSponsored per request from the sponsorship gate and the row's cluster", async () => {
+    await seedAuth();
+    const local = await seedStrategy({ provider: "kamino", hostCluster: "devnet" });
+    const mirrored = await seedStrategy({ provider: "kamino", hostCluster: "mainnet-beta" });
+    const original = env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED;
+    env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = "true";
+    try {
+      const list = await getEarn("/v1/earn/strategies");
+      expect(list.status).toBe(200);
+      const listBody = (await list.json()) as {
+        data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
+      };
+      expect(listBody.data.strategies).toEqual([
+        expect.objectContaining({ id: local.id, fundable: true, feeSponsored: true }),
+      ]);
+
+      const detail = await getEarn(`/v1/earn/strategies/${local.id}`);
+      expect(detail.status).toBe(200);
+      const detailBody = (await detail.json()) as { data: { strategy: { feeSponsored: boolean } } };
+      expect(detailBody.data.strategy.feeSponsored).toBe(true);
+
+      // Sponsorship is devnet-only and the mirrored row is not fundable here.
+      const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+      const optInBody = (await optIn.json()) as {
+        data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
+      };
+      expect(optInBody.data.strategies).toEqual([
+        expect.objectContaining({ id: mirrored.id, fundable: false, feeSponsored: false }),
+      ]);
+    } finally {
+      env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = original;
+    }
   });
 
   it("rejects a cluster value outside the Solana cluster vocabulary", async () => {
@@ -673,16 +692,16 @@ describe("Earn routes — strategy catalogue", () => {
    * Asserted against the stored row so the two halves stay honest: the sync
    * keeps writing an un-surfaced provider's catalogue — which is what makes
    * re-surfacing a deploy rather than an hour's wait — and only the read hides
-   * it. Ground is the un-surfaced provider today; if that flips, this test
+   * it. Upshift is an un-surfaced provider today; if that flips, this test
    * should move to whichever provider is off rather than be deleted.
    */
   it("stores an un-surfaced provider's rows but never returns them from strategy reads", async () => {
     await seedAuth();
     const surfaced = await seedStrategy({ providerReference: "kamino-visible-usdc" });
     const unsurfaced = await seedStrategy({
-      provider: "ground",
-      providerReference: "ground-hidden-usdc",
-      name: "Ground Institutional USDC",
+      provider: "upshift",
+      providerReference: "upshift-hidden-usdc",
+      name: "Upshift Institutional USDC",
       underlyingSource: "centrifuge",
     });
 
@@ -764,6 +783,79 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     expect(body.data.total).toBe(1);
   });
 
+  it("keeps the hidden Ethena PYUSD vaults off every strategy read", async () => {
+    await seedAuth();
+    // Addresses read from the shipped HIDDEN_VAULTS so a re-pick of the hidden
+    // set moves this test with it instead of breaking it on a literal — the
+    // same rule the curated-shelf tests above follow. Every configured entry
+    // gets a seeded row and its own list and detail assertions, so a rule that
+    // only hid the FIRST vault — or lost a later one — fails here rather than
+    // shipping untested. Each configured cluster must also still carry at
+    // least one entry: an emptied cluster would seed no rows and pass its
+    // list assertions trivially, silently un-hiding that environment's shelf.
+    const actual = await vi.importActual<typeof import("@/routes/earn/handlers/curation")>(
+      "@/routes/earn/handlers/curation"
+    );
+    const hiddenClusters = Object.entries(actual.HIDDEN_VAULTS).map(([cluster, keys]) => ({
+      cluster: cluster as SolanaCluster,
+      keys: keys ?? [],
+    }));
+    if (hiddenClusters.some(({ keys }) => keys.length === 0)) {
+      throw new Error("Expected shipped HIDDEN_VAULTS entries in every configured cluster");
+    }
+
+    const hidden: EarnStrategyRow[] = [];
+    for (const { cluster, keys } of hiddenClusters) {
+      for (const key of keys) {
+        const reference = key.split(":")[1];
+        if (!reference) {
+          throw new Error(`Expected a provider-reference key in HIDDEN_VAULTS, got ${key}`);
+        }
+        hidden.push(await seedStrategy({ providerReference: reference, hostCluster: cluster }));
+      }
+    }
+
+    const assertAllHidden = async () => {
+      for (const { cluster } of hiddenClusters) {
+        // The seeded rows are the only ones on their cluster shelf, and all
+        // are hidden — so the list is empty and `total` must agree at zero
+        // rather than count rows the page then drops. Devnet rides the
+        // sandbox default view; the mirrored mainnet shelf is the explicit
+        // `?cluster=` opt-in.
+        const path =
+          cluster === "devnet" ? "/v1/earn/strategies" : `/v1/earn/strategies?cluster=${cluster}`;
+        const list = await getEarn(path);
+        expect(list.status).toBe(200);
+        const body = (await list.json()) as {
+          data: { strategies: Array<{ id: string }>; total: number };
+        };
+        expect(body.data.strategies).toEqual([]);
+        expect(body.data.total).toBe(0);
+      }
+      for (const strategy of hidden) {
+        expect((await getEarn(`/v1/earn/strategies/${strategy.id}`)).status).toBe(404);
+      }
+    };
+
+    // Direct denylist coverage first: the shipped HIDDEN_VAULTS must hide
+    // every configured entry ON ITS OWN, with the curated allowlist bypassed —
+    // otherwise a denylist regression for any one vault hides behind the shelf
+    // and neither list nor detail would notice.
+    curation.bypassCuratedVaults = true;
+    await assertAllHidden();
+
+    // The full shipped policy agrees: the real curated shelf plus the
+    // denylist, as production serves it.
+    curation.bypassCuratedVaults = false;
+    await assertAllHidden();
+
+    // Still stored — hiding is a read-time policy, never a refusal to persist.
+    const repository = createPostgresEarnRepository(getDb(env));
+    for (const strategy of hidden) {
+      expect(await repository.getStrategyById(strategy.id)).not.toBeNull();
+    }
+  });
+
   it("shows the supported Jupiter Lend provider independently of Kamino's allowlist", async () => {
     curation.bypassCuratedVaults = false;
     await seedAuth();
@@ -794,5 +886,84 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
     });
     expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`)).status).toBe(200);
+  });
+
+  /**
+   * Ondo (PRO-1832): surfaced, uncurated (no `CURATED_VAULTS` pin, so the
+   * provider's whole shelf — one USDY row — passes), and mainnet-only. From a
+   * sandbox project the row is the PRO-1742 mirror: listed on the explicit
+   * `?cluster=` opt-in, `fundable: false`, and honest about having no rate.
+   * Both slippage policies are the swap builder's 50 bps, not Veda's 10.
+   */
+  it("shows the Ondo USDY row uncurated, with the swap builder's 50 bps floors", async () => {
+    curation.bypassCuratedVaults = false;
+    await seedAuth();
+    const usdyMint = ONDO_DEPLOYMENTS["mainnet-beta"]?.usdyMint;
+    if (!usdyMint) throw new Error("test premise: Ondo's mainnet deployment is filled in");
+    const ondo = await seedStrategy({
+      provider: "ondo",
+      providerReference: usdyMint,
+      name: "Ondo USDY",
+      sourceKind: "rwa",
+      underlyingSource: "ondo-usdy",
+      depositMints: [wellKnownMint("USDC", "mainnet-beta") as string],
+      shareMint: usdyMint,
+      currentApy: null,
+      // The compliance disclosure the catalogue client writes (PRO-1832); the
+      // assertions below pin that it reaches the public list AND detail reads.
+      riskMetadata: {
+        curator: "ondo",
+        eligibility: "Reg S: non-US persons only; not enforced on-chain",
+        issuerControls: "Ondo holds the USDY mint and freeze authority",
+      },
+      hostCluster: "mainnet-beta",
+    });
+
+    // Not on the sandbox default view: that shelf is devnet.
+    const own = await getEarn("/v1/earn/strategies");
+    expect(own.status).toBe(200);
+    expect(
+      ((await own.json()) as { data: { strategies: Array<{ id: string }> } }).data.strategies
+    ).toEqual([]);
+
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      data: {
+        strategies: Array<{
+          id: string;
+          provider: string;
+          sourceKind: string;
+          fundable: boolean;
+          currentApy?: string;
+          riskMetadata: Record<string, unknown>;
+          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+        }>;
+      };
+    };
+    const disclosure = {
+      curator: "ondo",
+      eligibility: "Reg S: non-US persons only; not enforced on-chain",
+      issuerControls: "Ondo holds the USDY mint and freeze authority",
+    };
+    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([ondo.id]);
+    expect(body.data.strategies[0]).toMatchObject({
+      provider: "ondo",
+      sourceKind: "rwa",
+      fundable: false,
+      riskMetadata: disclosure,
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
+      withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
+    });
+    // No rate source yet (PRO-1833): the field is absent, never a derived figure.
+    expect(body.data.strategies[0]?.currentApy).toBeUndefined();
+
+    const detail = await getEarn(`/v1/earn/strategies/${ondo.id}`);
+    expect(detail.status).toBe(200);
+    const detailBody = (await detail.json()) as {
+      data: { strategy: { riskMetadata: Record<string, unknown> } };
+    };
+    expect(detailBody.data.strategy.riskMetadata).toEqual(disclosure);
   });
 });

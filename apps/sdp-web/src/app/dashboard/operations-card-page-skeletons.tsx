@@ -23,9 +23,22 @@ export function CompactOperationsCardSkeleton({ route }: { route: "allowlist" })
 export function SettingsPageSkeleton() {
   return (
     <div className="flex w-full flex-col gap-6" data-loading-layout="settings" aria-busy="true">
-      {/* The organization/RPC card moved to Integrations (HOO-787); the page
-          opens on members now, so reserving a first card here would leave a
-          gap that never fills. */}
+      <section
+        className="flex flex-col gap-6 rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default"
+        data-loading-settings-onboarding
+      >
+        <header className="space-y-2 px-6">
+          <SkeletonBlock className="h-6 w-32" />
+          <SkeletonBlock className="h-4 w-full max-w-md" />
+        </header>
+        <div className="flex flex-col gap-4 px-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-2">
+            <SkeletonBlock className="h-4 w-28" />
+            <SkeletonBlock className="h-4 w-56 max-w-full" />
+          </div>
+          <SkeletonBlock className="h-10 w-40 rounded-lg" />
+        </div>
+      </section>
       <section
         className="flex flex-col gap-6 rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default"
         data-loading-settings-members

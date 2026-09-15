@@ -118,10 +118,10 @@ describe("healthReason", () => {
   it("reads the API's <component>.reason key", () => {
     const observed = health({
       rpc: "red",
-      detail: { "rpc.reason": "HELIUS_RINGS_RPC_URL is not configured" },
+      detail: { "rpc.reason": "Helius Rings setup is required" },
     });
 
-    expect(healthReason(observed, "rpc")).toBe("HELIUS_RINGS_RPC_URL is not configured");
+    expect(healthReason(observed, "rpc")).toBe("Helius Rings setup is required");
     expect(healthReason(observed, "photon")).toBeNull();
     expect(healthReason(null, "rpc")).toBeNull();
   });
@@ -129,7 +129,7 @@ describe("healthReason", () => {
 
 describe("healthAlerts", () => {
   it("collapses one shared reason into a single entry naming every component", () => {
-    const reason = 'Rings adapter "ts" is selected but HELIUS_RINGS_RPC_URL is not configured';
+    const reason = "Helius Rings setup is required";
 
     expect(
       healthAlerts(

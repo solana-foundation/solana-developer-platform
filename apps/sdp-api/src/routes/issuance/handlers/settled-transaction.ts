@@ -138,6 +138,16 @@ export async function persistSettledTransactionThenOutcome(options: {
   return settled.transaction;
 }
 
+export function isSettledIssuanceTransaction(transaction: {
+  status: string;
+  signature: string | null;
+}): boolean {
+  return (
+    (transaction.status === "confirmed" || transaction.status === "finalized") &&
+    transaction.signature !== null
+  );
+}
+
 export async function recoverSettledTransactionReplay(options: {
   auditService: AuditService;
   tokenService: TokenService;

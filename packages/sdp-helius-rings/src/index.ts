@@ -15,10 +15,18 @@ export {
   WALLET_STATUSES,
   ZONE_KINDS,
 } from "./constants";
-export { HeliusRingsError, type HeliusRingsErrorCode } from "./errors";
+export {
+  HeliusRingsError,
+  type HeliusRingsErrorCode,
+  isRingsIdentityMismatch,
+  RINGS_IDENTITY_MISMATCH,
+  type RingsErrorCause,
+} from "./errors";
 export type {
   BuildOperationInput,
   BuildOperationResult,
+  EnsureMergingEnabledInput,
+  EnsureMergingEnabledResult,
   KnownAsset,
   ProvisionIdentityInput,
   ProvisionIdentityResult,
@@ -26,6 +34,7 @@ export type {
   ProvisionRingResult,
   ReadIdentityInput,
   ReadIdentityResult,
+  RekeyIdentityInput,
   RingsGatewayPort,
   RingsIdentityMismatch,
   RingsIdentityStatus,
@@ -47,7 +56,6 @@ export type {
   AssetBalance,
   FailureCode,
   KeyKind,
-  KeyRef,
   MaterialTag,
   OperationEvent,
   OperationFailure,

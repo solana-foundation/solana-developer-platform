@@ -60,7 +60,7 @@ interface RawToken {
   requiresAllowlist?: boolean;
   description?: string | null;
   uri?: string | null;
-  signingWalletId?: string | null;
+  signingCustodyWalletId?: string | null;
   mintAuthority?: string | null;
   metadataAuthority?: string | null;
   freezeAuthority?: string | null;
@@ -95,7 +95,7 @@ function mapToken(token: RawToken, fallbackName: string): IssuanceTokenListItem 
     requiresAllowlist: token.requiresAllowlist ?? false,
     description: token.description ?? null,
     uri: token.uri ?? null,
-    signingWalletId: token.signingWalletId ?? null,
+    signingCustodyWalletId: token.signingCustodyWalletId ?? null,
     mintAuthority: token.mintAuthority ?? null,
     metadataAuthority: token.metadataAuthority ?? null,
     freezeAuthority: token.freezeAuthority ?? null,

@@ -99,6 +99,10 @@ export const walletIdParamSchema = idSchema(
   "Provider wallet ID — the `walletId` field returned by GET /v1/wallets.",
   "privy_wallet_123"
 );
+export const custodyWalletIdParamSchema = idSchema(
+  "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets.",
+  "cwlt_example"
+);
 export const transferIdParamSchema = idSchema(
   "Transfer identifier (SDP record ID, not the on-chain signature).",
   "xfr_example"
@@ -197,6 +201,7 @@ export const errorCodeSchema = z
     "CUSTODY_ERROR",
     "TRANSACTION_FAILED",
     "SIGNING_FAILED",
+    "SIGNING_REJECTED",
     "SIGNING_PENDING",
     "PROVIDER_NOT_CONFIGURED",
     "PROVIDER_UNAVAILABLE",

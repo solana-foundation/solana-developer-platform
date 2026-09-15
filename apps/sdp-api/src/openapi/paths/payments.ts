@@ -236,9 +236,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer executed",
         content: jsonContent(transferResponse),
       },
-      // 503 also covers the retired `privateTransfer` field: the capability is
-      // gone, and PROVIDER_UNAVAILABLE is the outcome its callers already had.
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
 
@@ -331,7 +329,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer batch created",
         content: jsonContent(transferBatchResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -472,7 +470,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment activated",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -494,7 +492,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment canceled",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -516,7 +514,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment collection result",
         content: jsonContent(paymentRecurringPaymentCollectionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -538,7 +536,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment resumed",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 

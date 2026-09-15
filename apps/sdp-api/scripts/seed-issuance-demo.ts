@@ -772,8 +772,10 @@ interface SeedRow {
     uri: string;
     imageUrl: string;
     template: string;
-    /** Chosen signer for the eventual deploy; a real custody wallet id or none. */
+    /** Provider wallet ID mirror for the exact deploy choice, or none. */
     signingWalletId: string | null;
+    /** Exact SDP wallet selected for eventual direct deployment, or none. */
+    signingCustodyWalletId: string | null;
     maxSupply: string | null;
     isMintable: boolean;
     isFreezable: boolean;
@@ -917,6 +919,7 @@ function buildCustomerNamespace(random: Random): Record<string, string> {
 }
 
 interface SignerWallet {
+  id: string;
   walletId: string;
   publicKey: string;
 }
@@ -979,6 +982,7 @@ function buildRow(
     imageUrl: `${ICON_BASE}/${pick(random, kind.icons)}.svg`,
     template: kind.template,
     signingWalletId: signer?.walletId ?? null,
+    signingCustodyWalletId: signer?.id ?? null,
     // Base units, as the column stores them; the API formats them back with
     // `decimals`. Circulating supply is absent because nothing has been minted.
     maxSupply: maxSupplyWhole ? toBaseUnits(maxSupplyWhole, decimals) : null,
@@ -1085,8 +1089,8 @@ async function resolveScope(
  * actually exists. Empty is fine — a draft without a chosen signer is normal.
  */
 async function loadSignerWallets(client: pg.Client, scope: ProjectScope): Promise<SignerWallet[]> {
-  const { rows } = await client.query<{ wallet_id: string; public_key: string }>(
-    `SELECT w.wallet_id, w.public_key
+  const { rows } = await client.query<{ id: string; wallet_id: string; public_key: string }>(
+    `SELECT w.id, w.wallet_id, w.public_key
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
       WHERE w.status = 'active'
@@ -1095,7 +1099,7 @@ async function loadSignerWallets(client: pg.Client, scope: ProjectScope): Promis
       ORDER BY w.created_at ASC`,
     [scope.organizationId, scope.projectId]
   );
-  return rows.map((row) => ({ walletId: row.wallet_id, publicKey: row.public_key }));
+  return rows.map((row) => ({ id: row.id, walletId: row.wallet_id, publicKey: row.public_key }));
 }
 
 async function deleteSeeded(client: pg.Client, projectId: string): Promise<number> {
@@ -1120,12 +1124,13 @@ async function insertRow(
   await client.query(
     `INSERT INTO issued_tokens (
        id, project_id, organization_id, name, symbol, decimals, description, uri, image_url,
-       template, signing_wallet_id, total_supply_cached, total_supply_updated_at, max_supply,
+       template, signing_custody_wallet_id, signing_wallet_id, total_supply_cached,
+       total_supply_updated_at, max_supply,
        is_mintable, freeze_authority_enabled, allowlist_enabled, status, created_by,
        created_at, updated_at
      ) VALUES (
-       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, '0', $12, $13, $14, $15, $16,
-       'pending', $17, $18, $19
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, '0', $13, $14, $15, $16,
+       $17, 'pending', $18, $19, $20
      )`,
     [
       token.id,
@@ -1138,6 +1143,7 @@ async function insertRow(
       token.uri,
       token.imageUrl,
       token.template,
+      token.signingCustodyWalletId,
       token.signingWalletId,
       token.createdAt,
       token.maxSupply,

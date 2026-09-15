@@ -270,8 +270,8 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
     : null;
 
   return (
-    <Card className="gap-4">
-      <CardHeader>
+    <Card className="gap-4 border-0 bg-transparent shadow-none">
+      <CardHeader className="px-0 pt-0">
         <CardTitle>{t("DashboardIssuance.transactions.title")}</CardTitle>
         <CardDescription>{t("DashboardIssuance.transactions.description")}</CardDescription>
         <TransactionFilters
@@ -289,7 +289,7 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
           }}
         />
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-0 pb-0">
         <TransactionsResults
           t={t}
           locale={locale}

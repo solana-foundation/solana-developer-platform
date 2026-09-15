@@ -744,14 +744,16 @@ describe("createChannelTransfer", () => {
     expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
   });
 
-  it("fails the request without sending when the pending row cannot be stored", async () => {
+  it("refuses without sending when the instance stopped admitting transfers", async () => {
+    // The admitting INSERT is guarded on the instance row: no row back means
+    // the instance is draining toward deletion (or deactivated) — a 409, and
+    // nothing was broadcast.
     vi.mocked(repo.createTransfer).mockResolvedValueOnce(null);
 
     await expect(createChannelTransfer(TEST_ENV, makeInput())).rejects.toMatchObject({
-      code: "INTERNAL_ERROR",
+      code: "CONFLICT",
     });
 
-    // Nothing was broadcast, so there is no funds movement to reconcile.
     expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
   });
 

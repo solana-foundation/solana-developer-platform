@@ -20,6 +20,7 @@ import {
   type TransactionSigner,
 } from "@solana/signers";
 import { getDb } from "@/db";
+import type { SigningProviderType } from "@/services/adapters/signing";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -39,6 +40,50 @@ const NON_RETRYABLE_SIGNING_CODES = new Set([
   "NOT_FOUND",
   "INVALID_REQUEST",
   "APPROVAL_REJECTED",
+]);
+
+/**
+ * Providers that sign raw message bytes as-is, and reproducibly.
+ *
+ * Rings needs more than raw-byte signing: the shielded keys derive from the
+ * owner's signature over Zolana's derivation message, re-derived on every use,
+ * so the provider must return the exact same 64 bytes for that message forever.
+ * A provider that fails either requirement cannot hold a Rings wallet at all.
+ *
+ * The omissions are deliberate, and none is a passing structural check.
+ *
+ * Cannot sign the bytes:
+ *  - `coinbase_cdp` UTF-8-decodes the payload, and the derivation envelope opens
+ *    with `0xff`, which is not valid UTF-8.
+ *  - `utila` has a `signMessages` that throws, so `isMessagePartialSigner` says
+ *    yes and the call fails afterwards — as a *retryable* signer failure, which
+ *    would retry forever. Refusing up front is the difference.
+ *  - `anchorage` does no transaction signing in SDP.
+ *
+ * Sign the bytes, but not reproducibly:
+ *  - `fireblocks`, `para` and `dfns` are MPC custodians. No party holds the
+ *    whole key, so none can compute the RFC 8032 deterministic nonce, and
+ *    threshold EdDSA must randomize it anyway — deterministic nonces enable
+ *    key recovery across signing ceremonies (RFC 9591 §"nonces MUST be
+ *    sampled uniformly at random"; Fireblocks' SECURITY-MODEL.md documents
+ *    CSPRNG nonces as deliberate). Same message, different signature, every
+ *    call: the wallet derives a fresh identity per read and pauses on the
+ *    first sync that misses the one it published. Re-keying cannot converge.
+ *  - `ibm_haven` is unverified either way; refused until its signing is
+ *    proven reproducible.
+ *
+ * `privy` and `turnkey` were verified reproducible against their live APIs
+ * (identical signatures for repeated signs, 2026-09-11); `local` signs with
+ * `@solana/kit`, which is RFC 8032 deterministic.
+ *
+ * Signing the bare `"TSPP/derive/v1"` payload instead would get CDP past this,
+ * and is why it is not done: the bare payload yields a different seed, so those
+ * wallets would fork onto identities no other provider can reproduce.
+ */
+const RAW_MESSAGE_SIGNING_PROVIDERS: ReadonlySet<SigningProviderType> = new Set([
+  "local",
+  "privy",
+  "turnkey",
 ]);
 
 export interface SignRingsOuterTransactionInput {
@@ -250,6 +295,18 @@ async function resolveOwnerSigner(
   ).findActiveWalletByPublicKey(input.organizationId, input.projectId, input.owner);
   if (!wallet) {
     throw new SigningError(`custody does not control ${input.owner}`, "WALLET_NOT_FOUND");
+  }
+  if (!RAW_MESSAGE_SIGNING_PROVIDERS.has(wallet.provider)) {
+    // Raised as its own failure code rather than as a signer failure: nothing
+    // signed and nothing broke, so "custody could not sign" would send an
+    // operator looking for an outage. Names the provider, the requirement it
+    // does not meet, and the providers that do — the only fix is moving the
+    // wallet, and the message has to be able to say so on its own.
+    throw new RingsAdapterError(
+      "provider_unsupported",
+      `custody provider ${wallet.provider} cannot back a Rings private wallet: its shielded keys are re-derived from an owner custody signature on every use, which needs a provider that signs raw messages and returns the same signature every time. Providers that do: ${[...RAW_MESSAGE_SIGNING_PROVIDERS].join(", ")}.`,
+      { retryable: false }
+    );
   }
 
   const signer = await createOrgSignerForCustodyWallet(

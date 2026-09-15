@@ -8,6 +8,7 @@ import {
   CHECK_VIOLATION,
   expectSqlstate as expectSqlstateOn,
   FK_VIOLATION,
+  seedHeliusRingsConnection,
   seedOrgProject,
   UNIQUE_VIOLATION,
 } from "@/test/helpers/migration-db";
@@ -25,7 +26,6 @@ const migrationSql = readFileSync(migrationPath, "utf8");
 
 const TABLES = [
   "helius_rings_wallets",
-  "helius_rings_key_refs",
   "helius_rings_zones",
   "helius_rings_operations",
   "helius_rings_timelocks",
@@ -45,7 +45,8 @@ async function seedWallet(tag: string): Promise<{
   projectId: string;
   walletId: string;
 }> {
-  const { organizationId, projectId } = await seedOrgProject(client, tag);
+  const { organizationId, projectId, userId } = await seedOrgProject(client, tag);
+  await seedHeliusRingsConnection(client, { organizationId, projectId, userId, tag });
   const walletId = `hrw_${tag}`;
   await client.query(
     `INSERT INTO helius_rings_wallets (id, organization_id, project_id, sdp_wallet_id, name)
@@ -65,7 +66,16 @@ async function insertOperation(
     intent_key: string;
   }
 ): Promise<void> {
-  const row: Record<string, string | boolean | null> = { op_type: "shield", ...overrides };
+  const connection = await client.query<{ id: string }>(
+    `SELECT id FROM helius_rings_connections
+      WHERE organization_id = $1 AND project_id = $2 AND is_default = TRUE`,
+    [overrides.organization_id, overrides.project_id]
+  );
+  const row: Record<string, string | boolean | null> = {
+    op_type: "shield",
+    rings_connection_id: connection.rows[0]?.id ?? null,
+    ...overrides,
+  };
   const columns = Object.keys(row);
   const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
   await client.query(
@@ -109,11 +119,11 @@ describe("0057_helius_rings schema", () => {
     expect(names).toEqual(
       expect.arrayContaining([
         "idx_helius_rings_wallets_project_sdp",
-        "idx_helius_rings_key_refs_wallet_kind",
         "helius_rings_zones_wallet_name_key",
         "idx_helius_rings_operations_intent_key",
         "idx_helius_rings_operations_wallet_created",
         "idx_helius_rings_operations_in_flight",
+        "idx_helius_rings_operations_connection",
         "idx_helius_rings_timelocks_pending",
         "idx_helius_rings_events_operation_created",
       ])
@@ -285,7 +295,7 @@ describe("0057_helius_rings tenant isolation", () => {
     expect(rows[0]).toEqual({ wallet_id: walletId, zone_id: null });
   });
 
-  it("cascades wallets, key refs, operations and events when the project goes", async () => {
+  it("cascades wallets, operations and events when the project goes", async () => {
     const { organizationId, projectId, walletId } = await seedWallet("cascade");
     await insertOperation({
       id: "hro_cascade",
@@ -294,11 +304,6 @@ describe("0057_helius_rings tenant isolation", () => {
       wallet_id: walletId,
       intent_key: "intent_cascade",
     });
-    await client.query(
-      `INSERT INTO helius_rings_key_refs (id, wallet_id, kind, ciphertext, key_version, material_tag)
-       VALUES ('hrk_cascade', $1, 'viewing', 'ct', 'v1', 'simulated')`,
-      [walletId]
-    );
     await client.query(
       `INSERT INTO helius_rings_events (id, operation_id, kind, payload)
        VALUES ('hre_cascade', 'hro_cascade', 'created', '{"note":"ok"}'::jsonb)`
@@ -313,12 +318,10 @@ describe("0057_helius_rings tenant isolation", () => {
       );
       expect(rows.rows[0]?.count).toBe("0");
     }
-    for (const table of ["helius_rings_key_refs", "helius_rings_events"]) {
-      const rows = await client.query<{ count: string }>(
-        `SELECT count(*)::text AS count FROM ${table}`
-      );
-      expect(rows.rows[0]?.count).toBe("0");
-    }
+    const events = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM helius_rings_events`
+    );
+    expect(events.rows[0]?.count).toBe("0");
   });
 
   it("holds one Rings wallet per SDP custody wallet per project", async () => {
@@ -332,20 +335,6 @@ describe("0057_helius_rings tenant isolation", () => {
         ),
       UNIQUE_VIOLATION
     );
-  });
-
-  it("holds one viewing key and one nullifier key per wallet", async () => {
-    const { walletId } = await seedWallet("keyrefs");
-    const insert = (id: string, kind: string) =>
-      client.query(
-        `INSERT INTO helius_rings_key_refs (id, wallet_id, kind, ciphertext, key_version, material_tag)
-         VALUES ($1, $2, $3, 'ct', 'v1', 'simulated')`,
-        [id, walletId, kind]
-      );
-
-    await insert("hrk_viewing", "viewing");
-    await insert("hrk_nullifier", "nullifier");
-    await expectSqlstate(() => insert("hrk_viewing_dupe", "viewing"), UNIQUE_VIOLATION);
   });
 });
 

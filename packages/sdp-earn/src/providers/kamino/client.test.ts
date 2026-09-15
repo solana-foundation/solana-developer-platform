@@ -69,7 +69,10 @@ const vault = (
 
 const metrics = (overrides: Partial<KaminoVaultMetrics> = {}): KaminoVaultMetrics => ({
   kvault: "VaULt1111111111111111111111111111111111111",
-  apy: "0.04",
+  // Spot above trailing on purpose: every assertion on `currentApy` below
+  // proves the shelf quotes the 7d figure, never the instantaneous one.
+  apy: "0.05",
+  apy7d: "0.04",
   tokensAvailableUsd: "1000000",
   tokensInvestedUsd: "9000000",
   numberOfHolders: 42,
@@ -184,10 +187,39 @@ describe("distillKaminoVault", () => {
     // key here is a figure Kamino itself reports.
     assert.deepEqual(result.outcome === "catalogued" ? result.snapshot.riskMetadata : undefined, {
       tvlUsd: 10_000_000,
+      spotApy: "0.05",
       holders: 42,
       managementFeeBps: 25,
       performanceFeeBps: 0,
     });
+  });
+
+  it("quotes the trailing 7d rate even when the spot rate is 10x it (PRO-1922)", () => {
+    // 2026-09-10: the Main Market USDC reserve hit ~97% utilization and `apy`
+    // read 18-23% on vaults whose `apy7d` sat at 3-7%. The shelf must not
+    // follow that spike; the spot figure rides along as metadata instead.
+    const result = distillKaminoVault(vault(), metrics({ apy: "0.227338", apy7d: "0.035914" }));
+    assert.equal(result.outcome, "catalogued");
+    const snapshot = result.outcome === "catalogued" ? result.snapshot : undefined;
+    assert.equal(snapshot?.currentApy, "0.035914");
+    assert.equal(snapshot?.riskMetadata?.spotApy, "0.227338");
+  });
+
+  it("reports no rate, not the spot rate, when the trailing figure is missing", () => {
+    const result = distillKaminoVault(vault(), metrics({ apy7d: null }));
+    assert.equal(result.outcome, "catalogued");
+    const snapshot = result.outcome === "catalogued" ? result.snapshot : undefined;
+    assert.equal(snapshot?.currentApy, undefined);
+    assert.equal(snapshot?.riskMetadata?.spotApy, "0.05");
+  });
+
+  it("carries no spotApy key when Kamino reports no spot rate", () => {
+    // An absent key, not a null: the refresh MERGES risk metadata, so a null
+    // here would overwrite a figure the sync stored.
+    const result = distillKaminoVault(vault(), metrics({ apy: null }));
+    assert.equal(result.outcome, "catalogued");
+    const meta = result.outcome === "catalogued" ? result.snapshot.riskMetadata : undefined;
+    assert.equal(Object.hasOwn(meta ?? {}, "spotApy"), false);
   });
 
   it("never reports a redemption delay — a K-Vault withdrawal is atomic", () => {
@@ -467,7 +499,14 @@ describe("KaminoEarnClient.listStrategyMetrics", () => {
     // for the 348KB list on every five-minute tick.
     const fetchMock = stubKaminoFetch({
       body: {
-        result: [metrics({ kvault: "vault-a", apy: "0.0512345678", numberOfHolders: 7 })],
+        result: [
+          metrics({
+            kvault: "vault-a",
+            apy: "0.2273387040956072",
+            apy7d: "0.0512345678",
+            numberOfHolders: 7,
+          }),
+        ],
         paginationToken: null,
       },
     });
@@ -480,7 +519,7 @@ describe("KaminoEarnClient.listStrategyMetrics", () => {
       {
         providerReference: "vault-a",
         currentApy: "0.051234",
-        riskMetadata: { tvlUsd: 10_000_000, holders: 7 },
+        riskMetadata: { tvlUsd: 10_000_000, spotApy: "0.227338", holders: 7 },
       },
     ]);
   });
@@ -507,14 +546,16 @@ describe("KaminoEarnClient.listStrategyMetrics", () => {
     );
   });
 
-  it("omits the rate rather than inventing one when the provider reports none", async () => {
+  it("omits the rate rather than inventing one when the provider reports no trailing figure", async () => {
+    // `apy` is still present: the spot rate is NOT a fallback for the shelf figure.
     stubKaminoFetch({
-      body: { result: [metrics({ apy: null })], paginationToken: null },
+      body: { result: [metrics({ apy7d: null })], paginationToken: null },
     });
 
     const [entry] = await client.listStrategyMetrics(productionCtx);
 
     assert.equal(entry.currentApy, undefined);
+    assert.equal(entry.riskMetadata?.spotApy, "0.05");
   });
 
   it("carries no field that could change what a strategy IS", async () => {

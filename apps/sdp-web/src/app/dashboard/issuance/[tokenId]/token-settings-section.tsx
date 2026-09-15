@@ -32,6 +32,8 @@ import type {
 } from "./token-management-workspace.types";
 
 interface TokenSettingsSectionProps {
+  variant?: "card" | "flat";
+  showEditActions?: boolean;
   mode: "permissions" | "extensions";
   permissionRows: PermissionRow[];
   extensionRows: ExtensionRow[];
@@ -115,6 +117,8 @@ function ExtensionItem({ row }: { row: ExtensionRow }) {
 }
 
 export function TokenSettingsSection({
+  variant = "card",
+  showEditActions = true,
   mode,
   permissionRows,
   extensionRows,
@@ -144,18 +148,36 @@ export function TokenSettingsSection({
       ) : null}
 
       {mode === "permissions" ? (
-        <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
+        <div
+          className={
+            variant === "flat"
+              ? "divide-y divide-border-subtle"
+              : "overflow-hidden rounded-2xl border border-border-default bg-surface-raised"
+          }
+        >
           {permissionRows.map((row) => {
             return (
               <div
                 key={row.id}
                 data-testid={`permission-row-${row.id}`}
-                className="flex flex-wrap items-center gap-x-3 gap-y-3 border-b border-border-subtle px-4 py-3.5 last:border-b-0"
+                className={cn(
+                  "flex flex-wrap items-center gap-x-3 gap-y-3",
+                  variant === "flat"
+                    ? "max-sm:flex-col max-sm:items-start py-4 sm:py-5"
+                    : "border-b border-border-subtle px-4 py-3.5 last:border-b-0"
+                )}
               >
                 <IconTile icon={PERMISSION_ROW_ICONS[row.id]} />
                 <div className="min-w-0 flex-1">
                   <p className="text-[15px] font-medium text-primary">{row.title}</p>
-                  <p className="text-[13px] text-tertiary">{row.helper}</p>
+                  <p
+                    className={cn(
+                      "text-[13px] text-tertiary",
+                      variant === "flat" && "hidden sm:block"
+                    )}
+                  >
+                    {row.helper}
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
                   {/* Names the holder rather than showing a bare address, and carries
@@ -176,24 +198,26 @@ export function TokenSettingsSection({
                     // the badge takes the width it needs.
                     className="sm:w-[13.5rem] sm:shrink-0"
                   />
-                  <TokenDisabledActionTooltip
-                    reason={
-                      !canEditAuthorities
-                        ? "Token must be deployed before editing authorities."
-                        : (row.editDisabledReason ?? null)
-                    }
-                  >
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      iconLeft={<SquarePen />}
-                      onClick={() => onEditAuthority(row)}
-                      disabled={!canEditAuthorities || Boolean(row.editDisabledReason)}
+                  {showEditActions ? (
+                    <TokenDisabledActionTooltip
+                      reason={
+                        !canEditAuthorities
+                          ? "Token must be deployed before editing authorities."
+                          : (row.editDisabledReason ?? null)
+                      }
                     >
-                      {t("DashboardIssuance.management.edit")}
-                    </Button>
-                  </TokenDisabledActionTooltip>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        iconLeft={<SquarePen />}
+                        onClick={() => onEditAuthority(row)}
+                        disabled={!canEditAuthorities || Boolean(row.editDisabledReason)}
+                      >
+                        {t("DashboardIssuance.management.edit")}
+                      </Button>
+                    </TokenDisabledActionTooltip>
+                  ) : null}
                 </div>
               </div>
             );

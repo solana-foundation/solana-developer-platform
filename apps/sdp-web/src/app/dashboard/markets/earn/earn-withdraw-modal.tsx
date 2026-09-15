@@ -75,7 +75,7 @@ const WITHDRAWAL_STATUS_BADGES = {
 
 const WITHDRAWAL_STATUS_DESCRIPTIONS = {
   processing: "DashboardEarn.withdraw.createdDescription",
-  // SDP does not expose Ground's customer-approval actions yet. Say where the
+  // SDP does not expose a provider's customer-approval actions yet. Say where the
   // withdrawal is parked and prevent an unsafe duplicate submission.
   pending_approval: "DashboardEarn.withdraw.pendingApprovalDescription",
   completed: "DashboardEarn.overview.withdrawalCompleted",
@@ -129,8 +129,8 @@ export function liquidityWriteWins(seq: number, lastWrittenSeq: number): boolean
 /**
  * The reported ceiling floored to whole cents, as an exact decimal string.
  *
- * `withdrawableUsd` is a BALANCE, not a fillable amount — verified against
- * Ground sandbox 2026-08-13, where a lane reporting `20.001241` answers 200 for
+ * `withdrawableUsd` is a BALANCE, not a fillable amount — verified against a
+ * live provider (2026-08-13), where a lane reporting `20.001241` answers 200 for
  * `20.00` and 409 for `20.001241` itself. Filling Max with the raw figure
  * therefore recreates the very "Max that the provider refuses" this ticket set
  * out to remove, just one layer deeper.
@@ -152,8 +152,8 @@ export function floorUsdToCents(decimal: string): string {
 /**
  * The lane ceiling a provider names when it refuses an over-request.
  *
- * Ground answers `409 insufficient_funds` with the destination lane's balance
- * breakdown, which the provider client normalizes onto `error.details.balance`
+ * A provider answers `409 insufficient_funds` with the destination lane's
+ * balance breakdown, which the provider client normalizes onto `error.details.balance`
  * (PRO-1675). Reading it lets SDP say how short the request was instead of
  * echoing wire text. Defensive throughout: this is an error path, and copy that
  * names no number is still better than a crash while a reader is trying to
@@ -523,7 +523,8 @@ export function EarnWithdrawModal({
    * BOTH previews report the lane's `withdrawableUsd`, and they race: the
    * on-open liquidity read is undebounced while the amount-specific one waits
    * out `PREVIEW_DEBOUNCE_MS`. A reader who types immediately can therefore have
-   * the FIRST request land second — and Ground takes ~500ms on this endpoint, so
+   * the FIRST request land second — and a provider takes ~500ms on this
+   * endpoint, so
    * that ordering is real, not theoretical. Left alone, a stale response
    * overwrites a fresh ceiling and `Max` goes back to offering an amount the
    * provider refuses, or validation rejects an amount that is currently fine.
@@ -575,8 +576,8 @@ export function EarnWithdrawModal({
         });
         return;
       }
-      // A REFUSAL can still answer the question. Verified against Ground
-      // sandbox 2026-08-13: the amount-less preview may come back 409 while
+      // A REFUSAL can still answer the question. Verified against a live
+      // provider 2026-08-13: the amount-less preview may come back 409 while
       // carrying the lane's balance breakdown — so the number we asked for
       // arrives on the error path. Treating that as "unknown" would discard
       // the very payload PRO-1675 exists to stop discarding.

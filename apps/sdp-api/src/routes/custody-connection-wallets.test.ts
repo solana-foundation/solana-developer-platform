@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
+import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -47,6 +49,7 @@ const originalEnv = {
   byok: env.PRIVY_BYOK_ENABLED,
   appId: env.PRIVY_APP_ID,
   appSecret: env.PRIVY_APP_SECRET,
+  encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
 };
 
 async function seedFixture(): Promise<void> {
@@ -62,13 +65,14 @@ async function seedFixture(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER_ID, "connection-wallets@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (
-           id, organization_id, name, slug, environment, status, created_by
-         ) VALUES (?, ?, 'Connection wallets', 'connection-wallets', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, USER_ID),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys (
@@ -166,6 +170,7 @@ describe("Connection-owned wallet control plane", () => {
     env.PRIVY_BYOK_ENABLED = originalEnv.byok;
     env.PRIVY_APP_ID = originalEnv.appId;
     env.PRIVY_APP_SECRET = originalEnv.appSecret;
+    env.CUSTODY_ENCRYPTION_KEY = originalEnv.encryptionKey;
     await clearKVStores(env);
   });
 
@@ -238,6 +243,116 @@ describe("Connection-owned wallet control plane", () => {
         .bind(CONNECTION_ID)
         .first()
     ).toEqual({ default_custody_wallet_id: body.data.wallet.id });
+  });
+
+  it("persists a wallet when its Connection moves to a replacement Credential during Provider creation", async () => {
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 19).toString("base64");
+    const secretStore = createCredentialSecretStore(env, "encrypted_db");
+    const predecessorSecret = await secretStore.write({
+      orgId: ORGANIZATION_ID,
+      provider: "privy",
+      providerCredentialId: CREDENTIAL_ID,
+      payload: {
+        appId: env.PRIVY_APP_ID as string,
+        appSecret: env.PRIVY_APP_SECRET as string,
+      },
+    });
+    await getDb(env).execute(
+      `UPDATE provider_credentials
+       SET source = 'stored', storage_backend = 'encrypted_db',
+           encrypted_secret_payload = ?, credential_version = 1
+       WHERE id = ?`,
+      [predecessorSecret.encryptedSecretPayload, CREDENTIAL_ID]
+    );
+
+    let markProviderCreationStarted!: () => void;
+    const providerCreationStarted = new Promise<void>((resolve) => {
+      markProviderCreationStarted = resolve;
+    });
+    let releaseProviderCreation!: () => void;
+    const providerCreationReleased = new Promise<void>((resolve) => {
+      releaseProviderCreation = resolve;
+    });
+    provisionPrivyWalletMock.mockImplementationOnce(async () => {
+      markProviderCreationStarted();
+      await providerCreationReleased;
+      return {
+        walletId: "rotated_credential",
+        address: "Vote111111111111111111111111111111111111111",
+      };
+    });
+
+    const creation = request("", "POST", { connectionId: CONNECTION_ID });
+    await providerCreationStarted;
+    const rotatedCredentialId = "pcred_connection_wallets_rotated";
+    const replacementSecret = await secretStore.write({
+      orgId: ORGANIZATION_ID,
+      provider: "privy",
+      providerCredentialId: rotatedCredentialId,
+      payload: {
+        appId: env.PRIVY_APP_ID as string,
+        appSecret: env.PRIVY_APP_SECRET as string,
+      },
+    });
+    try {
+      await getDb(env).transaction(async (tx) => {
+        await tx.execute(
+          `INSERT INTO provider_credentials (
+             id, organization_id, project_id, provider, label, scope, source,
+             storage_backend, encrypted_secret_payload, status, credential_version,
+             rotated_from_provider_credential_id, created_by
+           ) VALUES (?, ?, ?, 'privy', 'Rotated Privy', 'project', 'stored',
+                     'encrypted_db', ?, 'active', 2, ?, ?)`,
+          [
+            rotatedCredentialId,
+            ORGANIZATION_ID,
+            PROJECT_ID,
+            replacementSecret.encryptedSecretPayload,
+            CREDENTIAL_ID,
+            USER_ID,
+          ]
+        );
+        await tx.execute(
+          `UPDATE custody_connections
+           SET provider_credential_id = ?, updated_at = sdp_iso_now()
+           WHERE id = ?`,
+          [rotatedCredentialId, CONNECTION_ID]
+        );
+        await tx.execute(
+          `UPDATE provider_credentials
+           SET status = 'retired', secret_retention_expires_at = '2099-01-01T00:00:00.000Z',
+               updated_at = sdp_iso_now()
+           WHERE id = ?`,
+          [CREDENTIAL_ID]
+        );
+      });
+    } finally {
+      releaseProviderCreation();
+    }
+
+    const response = await creation;
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      data: {
+        wallet: {
+          custodyConnectionId: CONNECTION_ID,
+          walletId: "privy_rotated_credential",
+        },
+      },
+    });
+  });
+
+  it("rejects Connection wallet creation before Provider access when entitlement is revoked", async () => {
+    await setPrivyEntitlement(false);
+    const before = await walletCount();
+
+    const response = await request("", "POST", { connectionId: CONNECTION_ID });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(await walletCount()).toBe(before);
   });
 
   it("fails exact create before Provider access on assertion or runtime errors", async () => {
@@ -362,6 +477,23 @@ describe("Connection-owned wallet control plane", () => {
       walletId: DEFAULT_WALLET_ID,
     });
     expect(disabled.status).toBe(403);
+  });
+
+  it("keeps the Connection default wallet unchanged when entitlement is revoked", async () => {
+    await setPrivyEntitlement(false);
+
+    const response = await request("/default-wallet", "POST", {
+      walletId: SECOND_WALLET_ID,
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(
+      await getDb(env)
+        .prepare("SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?")
+        .bind(CONNECTION_ID)
+        .first()
+    ).toEqual({ default_custody_wallet_id: DEFAULT_WALLET_RECORD_ID });
   });
 
   it("rejects default changes while the owning Connection is unusable", async () => {
@@ -557,4 +689,11 @@ async function walletCount(): Promise<number> {
         .first<{ count: number }>()
     )?.count ?? 0
   );
+}
+
+async function setPrivyEntitlement(entitled: boolean): Promise<void> {
+  await getDb(env)
+    .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+    .bind(JSON.stringify({ providerOverrides: { custody: { privy: entitled } } }), ORGANIZATION_ID)
+    .run();
 }

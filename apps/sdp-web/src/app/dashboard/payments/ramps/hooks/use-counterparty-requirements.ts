@@ -1,6 +1,6 @@
 "use client";
 
-import { COUNTRIES, isCountryCode, type RampProviderId } from "@sdp/types";
+import { COUNTRIES, type CryptoRailId, isCountryCode, type RampProviderId } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type {
   CollectedFieldData,
@@ -13,7 +13,14 @@ import type {
 } from "@sdp/types/ramp-requirements";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
+import {
+  buildCounterpartyRequirementsKey,
+  type CounterpartyRequirementsParams,
+  paymentsQueryKeys,
+} from "@/app/dashboard/payments/payments-query-key";
+
+export type { CounterpartyRequirementsParams };
+
 import { getApiError } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -138,11 +145,11 @@ async function fetchCounterpartyRequirements(
   const params = new URLSearchParams({
     provider,
     direction,
-    cryptoToken: corridor.cryptoToken,
+    assetRail: corridor.assetRail,
     fiatCurrency: corridor.fiatCurrency,
   });
   if (direction === "onramp") {
-    params.set("destinationWallet", corridor.destinationWallet);
+    params.set("destinationCustodyWalletId", corridor.destinationCustodyWalletId);
   }
   const response = await fetch(
     `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/requirements?${params.toString()}`
@@ -165,8 +172,8 @@ async function fetchCounterpartyRequirements(
 }
 
 export interface AdvanceRequirementsPayload {
-  cryptoToken: string;
-  destinationWallet: string;
+  assetRail: CryptoRailId;
+  destinationCustodyWalletId: string;
   fiatCurrency: RampFiatCurrency;
 }
 
@@ -276,16 +283,6 @@ function isOnboardingPending(status: CounterpartyRequirements["status"]): boolea
   );
 }
 
-/**
- * The corridor fields mirror {@link AdvanceRequirementsPayload}; `destinationWallet`
- * only participates for onramp, where the fetch waits until the user has picked one.
- */
-export interface CounterpartyRequirementsParams extends AdvanceRequirementsPayload {
-  counterpartyId: string;
-  provider: RampProviderId | null;
-  direction: RampDirection;
-}
-
 export interface CounterpartyRequirementsState {
   /** Fields the client must collect; empty unless the provider returned `collect`. */
   fields: RequirementField[];
@@ -364,7 +361,7 @@ export function useCounterpartyRequirements(
   const subjectKey =
     params === null
       ? ""
-      : `${params.counterpartyId}:${params.provider}:${params.direction}:${params.cryptoToken}:${params.fiatCurrency}:${params.destinationWallet}`;
+      : `${params.counterpartyId}:${params.provider}:${params.direction}:${params.assetRail}:${params.fiatCurrency}:${params.destinationCustodyWalletId}`;
   const [trackedSubject, setTrackedSubject] = useState(subjectKey);
   // The completed advance, tagged with the corridor it answered for. Responses
   // are data addressed by their corridor, never commands: a write from a
@@ -392,19 +389,7 @@ export function useCounterpartyRequirements(
   const advance =
     advanceRecord !== null && advanceRecord.corridor === corridorIdentity ? advanceRecord : null;
 
-  const key =
-    params?.provider &&
-    params.counterpartyId &&
-    (params.direction === "offramp" || params.destinationWallet)
-      ? paymentsQueryKeys.counterpartyRequirements({
-          counterpartyId: params.counterpartyId,
-          provider: params.provider,
-          direction: params.direction,
-          cryptoToken: params.cryptoToken,
-          fiatCurrency: params.fiatCurrency,
-          destinationWallet: params.direction === "onramp" ? params.destinationWallet : "",
-        })
-      : null;
+  const key = buildCounterpartyRequirementsKey(params);
   // Requirements never revalidate on their own — `needsCollection` (and thus the
   // wizard's step list) can't flip out from under the user mid-flow.
   const {
@@ -413,12 +398,20 @@ export function useCounterpartyRequirements(
     mutate: revalidateRequirements,
   } = useSWR(
     key,
-    ([, counterpartyId, provider, direction, cryptoToken, fiatCurrency, destinationWallet]) =>
+    ([
+      ,
+      counterpartyId,
+      provider,
+      direction,
+      assetRail,
+      fiatCurrency,
+      destinationCustodyWalletId,
+    ]) =>
       fetchCounterpartyRequirements(
         counterpartyId,
         provider,
         direction,
-        { cryptoToken, fiatCurrency, destinationWallet },
+        { assetRail, fiatCurrency, destinationCustodyWalletId },
         t
       ),
     {

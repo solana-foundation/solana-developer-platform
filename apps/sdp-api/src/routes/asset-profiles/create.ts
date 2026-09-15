@@ -1,6 +1,6 @@
 import { resolveSettingsToExtensions } from "@sdp/issuance/capabilities";
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
-import { getAssetTypeRegistryEntry, type TokenWithAssetProfileResponse } from "@sdp/types";
+import { getAssetTypeRegistryEntry } from "@sdp/types";
 import { asTransactionalClient, getDb } from "@/db";
 import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -16,10 +16,10 @@ import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { created } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import { createOrgSigner } from "@/services/solana";
 import { TokenService } from "@/services/token.service";
+import { resolveIssuanceWallet } from "../issuance/handlers/authority-resolution";
+import { toPublicToken } from "../issuance/handlers/public-response";
 import type { createTokenWithAssetProfileSchema } from "../issuance/schemas";
 import { mapToAssetProfile } from "./handlers";
 
@@ -47,18 +47,19 @@ export const createTokenWithAssetProfile = async (
     throw badRequest("Invalid advanced settings", { errors: settingErrors });
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(auth, tokenInput.signingWalletId, [
-    "tokens:write",
-  ]);
-
-  // Custody signer outside transaction (external provider can't roll back).
-  // Signer address is the controlled wallet for authority-valued extensions.
-  const signer = signingWalletId
-    ? await createOrgSigner(c.env, orgId, projectId, signingWalletId)
+  const signingWallet = tokenInput.signingCustodyWalletId
+    ? await resolveIssuanceWallet({
+        env: c.env,
+        auth,
+        custodyWalletId: tokenInput.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:write"],
+      })
     : null;
 
   // Authority-valued settings need real wallet; reject if missing to avoid bricking.
-  const authoritySettings = signer ? [] : selectedAuthorityValuedSettings(issuanceMetadata ?? {});
+  const authoritySettings = signingWallet
+    ? []
+    : selectedAuthorityValuedSettings(issuanceMetadata ?? {});
   if (authoritySettings.length > 0) {
     throw badRequest("A signing wallet is required for the selected advanced settings", {
       errors: authoritySettings.map((settingKey) => ({
@@ -85,7 +86,7 @@ export const createTokenWithAssetProfile = async (
 
   const resolved = usingSettings
     ? resolveSettingsToExtensions(assetCategory, assetType, selectedSettings, {
-        authorities: signer ? { permanentDelegate: signer.address } : undefined,
+        authorities: signingWallet ? { permanentDelegate: signingWallet.publicKey } : undefined,
         decimals: tokenInput.decimals,
         requiresAllowlist: tokenInput.requiresAllowlist,
       })
@@ -116,7 +117,8 @@ export const createTokenWithAssetProfile = async (
       projectId,
       organizationId: orgId,
       createdBy: auth.id,
-      signingWalletId,
+      signingCustodyWalletId: signingWallet?.custodyWalletId,
+      signingWalletId: signingWallet?.providerWalletId,
       name: tokenInput.name,
       symbol: tokenInput.symbol,
       decimals: resolved.decimals,
@@ -175,6 +177,5 @@ export const createTokenWithAssetProfile = async (
     metadata: { tokenId: token.id, assetCategory, assetType },
   });
 
-  const response: TokenWithAssetProfileResponse = { token, assetProfile };
-  return created(c, response);
+  return created(c, { token: toPublicToken(token), assetProfile });
 };

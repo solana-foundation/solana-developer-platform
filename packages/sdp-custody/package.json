@@ -34,6 +34,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/"
   },
+  "devDependencies": {
+    "@types/node": "26.1.2"
+  },
   "dependencies": {
     "@sdp/redaction": "workspace:*",
     "@sdp/types": "workspace:*",

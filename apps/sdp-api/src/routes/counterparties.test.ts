@@ -7,13 +7,23 @@ import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import {
+  TEST_API_KEY,
+  TEST_CACHED_API_KEY,
+  TEST_PRODUCTION_API_KEY,
+} from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_PROJECT_ID = "prj_counterparties_test";
 const BVNK_WEBHOOK_SECRET = "bvnk_counterparties_webhook_secret";
+const TEST_CP_CUSTODY_WALLET_ID = "cwlt_counterparties_test";
+const TEST_CP_CUSTODY_CONFIG_ID = "ccfg_counterparties_test";
+const TEST_CP_WALLET_PUBLIC_KEY = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
 
 describe("Counterparties Routes", () => {
   let apiKeyHash: string;
@@ -73,21 +83,20 @@ describe("Counterparties Routes", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', 'test-project', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_USER.id)
-      .run();
-
-    await db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_test_counterparty', ?, ?, 'admin')`
-      )
-      .bind(TEST_PROJECT_ID, TEST_USER.id)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [TEST_USER.id],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
+    await seedProjectApiKey(db, env, {
+      key: TEST_PRODUCTION_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: `${TEST_PROJECT_ID}_production`,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["*"],
+    });
 
     await db
       .prepare(
@@ -108,6 +117,33 @@ describe("Counterparties Routes", () => {
     await kv.apiKeys.put(
       `key:${apiKeyHash}`,
       JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT_ID })
+    );
+
+    const seededAt = new Date().toISOString();
+    await seedTestCustodySetup(
+      env,
+      {
+        id: TEST_CP_CUSTODY_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        provider: "local",
+        config: "test-config",
+        encryptionVersion: "sdp-custody-encryption-v1",
+        defaultWalletId: null,
+        status: "active",
+        createdAt: seededAt,
+        updatedAt: seededAt,
+      },
+      {
+        id: TEST_CP_CUSTODY_WALLET_ID,
+        custodyConfigId: TEST_CP_CUSTODY_CONFIG_ID,
+        walletId: TEST_CP_WALLET_PUBLIC_KEY,
+        publicKey: TEST_CP_WALLET_PUBLIC_KEY,
+        label: "Counterparties test wallet",
+        purpose: "transfer",
+        status: "active",
+        createdAt: seededAt,
+      }
     );
   });
 
@@ -357,32 +393,12 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 404 when the counterparty belongs to a different project in the same org", async () => {
-      const db = getDb(env);
-      const otherProjectId = "prj_counterparties_cross_project";
-      const otherCounterpartyId = "cpty_cross_project_iso";
-
-      await db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Other Project', 'other-project', 'sandbox', 'active', ?)`
-        )
-        .bind(otherProjectId, TEST_ORG.id, TEST_USER.id)
-        .run();
-
-      await db
-        .prepare(
-          `INSERT INTO counterparties (
-             id, organization_id, project_id, external_id, entity_type,
-             display_name, provider_data, status, created_by
-           ) VALUES (?, ?, ?, ?, 'individual', 'Other Project Alice', '{}', 'active', ?)`
-        )
-        .bind(otherCounterpartyId, TEST_ORG.id, otherProjectId, "ext_cross_project", TEST_USER.id)
-        .run();
-
+    it("returns 404 for another project's counterparty", async () => {
+      const created = await createCounterparty({ externalId: "cross_project" });
+      const counterparty = (await created.json()).data.counterparty;
       const res = await app.request(
-        `/v1/counterparties/${otherCounterpartyId}`,
-        { headers: { Authorization: authHeader } },
+        `/v1/counterparties/${counterparty.id}`,
+        { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
         env
       );
       expect(res.status).toBe(404);
@@ -406,7 +422,7 @@ describe("Counterparties Routes", () => {
       const cp = (await created.json()).data.counterparty;
 
       const res = await app.request(
-        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&cryptoToken=USDC&fiatCurrency=USD`,
+        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -414,12 +430,14 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.code).toBe("BAD_REQUEST");
-      expect(body.error.message).toContain("destinationWallet is required for onramp requirements");
+      expect(body.error.message).toContain(
+        "destinationCustodyWalletId is required for onramp requirements"
+      );
       expect(body.error.details.errors).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            path: ["destinationWallet"],
-            message: "destinationWallet is required for onramp requirements",
+            path: ["destinationCustodyWalletId"],
+            message: "destinationCustodyWalletId is required for onramp requirements",
           }),
         ])
       );
@@ -506,7 +524,7 @@ describe("Counterparties Routes", () => {
       );
 
       const response = await app.request(
-        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD`,
+        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -589,7 +607,7 @@ describe("Counterparties Routes", () => {
       );
 
       const response = await app.request(
-        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=US`,
+        `/v1/counterparties/${counterparty.id}/requirements?provider=lightspark&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCountry=US`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -619,7 +637,7 @@ describe("Counterparties Routes", () => {
 
     it("rejects an invalid Lightspark off-ramp destination country", async () => {
       const response = await app.request(
-        "/v1/counterparties/cp_invalid_country/requirements?provider=lightspark&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=USA",
+        "/v1/counterparties/cp_invalid_country/requirements?provider=lightspark&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCountry=USA",
         { headers: { Authorization: authHeader } },
         env
       );
@@ -629,7 +647,7 @@ describe("Counterparties Routes", () => {
 
     it("rejects destinationCountry for non-Lightspark off-ramp requirements", async () => {
       const response = await app.request(
-        "/v1/counterparties/cp_bvnk_country/requirements?provider=bvnk&direction=offramp&cryptoToken=USDC&fiatCurrency=USD&destinationCountry=US",
+        "/v1/counterparties/cp_bvnk_country/requirements?provider=bvnk&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCountry=US",
         { headers: { Authorization: authHeader } },
         env
       );
@@ -690,7 +708,7 @@ describe("Counterparties Routes", () => {
           body: JSON.stringify({
             provider: "lightspark",
             direction: "offramp",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             collectedData: { destinationCountry: "US", purposeOfPayment: "SELF" },
           }),
@@ -743,7 +761,7 @@ describe("Counterparties Routes", () => {
           body: JSON.stringify({
             provider: "lightspark",
             direction: "offramp",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             collectedData: {
               destinationCountry: "US",
@@ -806,7 +824,7 @@ describe("Counterparties Routes", () => {
           body: JSON.stringify({
             provider: "lightspark",
             direction: "offramp",
-            cryptoToken: "USDC",
+            assetRail: "usdc.solana",
             fiatCurrency: "USD",
             providerAccountId: "provider_account_foreign_owned",
             collectedData: { destinationCountry: "US", purposeOfPayment: "SELF" },
@@ -939,7 +957,7 @@ describe("Counterparties Routes", () => {
       const counterparty = (await created.json()).data.counterparty;
 
       const res = await app.request(
-        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&cryptoToken=USDC_SOLANA&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
         {
           headers: { "Content-Type": "application/json", Authorization: authHeader },
         },
@@ -954,6 +972,41 @@ describe("Counterparties Routes", () => {
         status: "collect_counterparty",
         fields: bvnkOnrampFields(),
       });
+    });
+
+    it("rejects an onramp requirements destination wallet outside the API key's bindings", async () => {
+      const created = await createCounterparty({ externalId: "requirements_wallet_scope" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+
+      const kv = createKVStoreSet(env);
+      await kv.apiKeys.put(
+        `key:${apiKeyHash}`,
+        JSON.stringify({
+          ...TEST_CACHED_API_KEY,
+          projectId: TEST_PROJECT_ID,
+          walletScope: "selected",
+          walletBindings: [
+            {
+              walletId: "wallet_counterparties_other",
+              custodyWalletId: "cwlt_counterparties_other",
+              permissions: ["*"],
+            },
+          ],
+        })
+      );
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`,
+        {
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.message).toBe("API key is not authorized for the requested wallet");
     });
 
     it("returns JIT agreement content without creating or persisting a customer", async () => {
@@ -1020,8 +1073,8 @@ describe("Counterparties Routes", () => {
             body: JSON.stringify({
               provider: "bvnk",
               direction: "onramp",
-              cryptoToken: "USDC_SOLANA",
-              destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+              assetRail: "usdc.solana",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
               fiatCurrency: "USD",
               collectedData,
             }),
@@ -1144,8 +1197,8 @@ describe("Counterparties Routes", () => {
             body: JSON.stringify({
               provider: "bvnk",
               direction: "onramp",
-              cryptoToken: "USDC_SOLANA",
-              destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+              assetRail: "usdc.solana",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
               fiatCurrency: "USD",
               collectedData,
               agreementConsent: true,
@@ -1302,7 +1355,7 @@ describe("Counterparties Routes", () => {
         ).toBe(200);
 
         const requirements = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&cryptoToken=USDC_SOLANA&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
           { headers: { "Content-Type": "application/json", Authorization: authHeader } },
           env
         );
@@ -1318,8 +1371,8 @@ describe("Counterparties Routes", () => {
             body: JSON.stringify({
               provider: "bvnk",
               direction: "onramp",
-              cryptoToken: "USDC_SOLANA",
-              destinationWallet: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+              assetRail: "usdc.solana",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
               fiatCurrency: "USD",
               collectedData,
             }),
@@ -1407,7 +1460,7 @@ describe("Counterparties Routes", () => {
           ).status
         ).toBe(200);
         const response = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&cryptoToken=USDC_SOLANA&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
           { headers: { "Content-Type": "application/json", Authorization: authHeader } },
           env
         );
@@ -1428,7 +1481,7 @@ describe("Counterparties Routes", () => {
           ).status
         ).toBe(200);
         const rejected = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&cryptoToken=USDC_SOLANA&fiatCurrency=USD&destinationWallet=8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ`,
+          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
           { headers: { "Content-Type": "application/json", Authorization: authHeader } },
           env
         );

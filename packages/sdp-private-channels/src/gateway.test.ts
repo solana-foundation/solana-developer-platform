@@ -6,19 +6,37 @@ import { getChannelTokenBalance } from "./gateway";
 const USDC = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 const OWNER = address("7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz");
 
-/** Minimal fake of the Kit RPC surface the gateway helper touches. */
+/** A `@solana/kit` HTTP-transport error carries the status on `error.context`. */
+function httpError(statusCode: number) {
+  return { context: { statusCode }, message: `HTTP error (${statusCode})` };
+}
+
+/** Minimal fake of the Kit RPC surface the gateway helper touches. Either call can
+ *  be made to reject, to exercise the gateway's HTTP-status handling. */
 function fakeRpc(overrides: {
-  accountInfo: unknown;
+  accountInfo?: unknown;
+  accountInfoError?: unknown;
   tokenBalance?: {
     amount: string;
     decimals: number;
     uiAmount: number | null;
     uiAmountString: string;
   };
+  tokenBalanceError?: unknown;
 }) {
   return {
-    getAccountInfo: () => ({ send: async () => ({ value: overrides.accountInfo }) }),
-    getTokenAccountBalance: () => ({ send: async () => ({ value: overrides.tokenBalance }) }),
+    getAccountInfo: () => ({
+      send: async () => {
+        if (overrides.accountInfoError) throw overrides.accountInfoError;
+        return { value: overrides.accountInfo ?? null };
+      },
+    }),
+    getTokenAccountBalance: () => ({
+      send: async () => {
+        if (overrides.tokenBalanceError) throw overrides.tokenBalanceError;
+        return { value: overrides.tokenBalance };
+      },
+    }),
     // biome-ignore lint/suspicious/noExplicitAny: hand-rolled test double for the Kit RPC.
   } as any;
 }
@@ -46,5 +64,43 @@ describe("getChannelTokenBalance", () => {
       USDC
     );
     expect(result.balance).toEqual({ amount: "1500000", decimals: 6, uiAmountString: "1.5" });
+  });
+
+  it("treats a 403 on the existence probe as an absent (zero) account", async () => {
+    // The SPC gateway answers a never-credited / not-owned account with HTTP 403
+    // ("account not owned by caller") instead of a null result — read as zero.
+    const result = await getChannelTokenBalance(
+      fakeRpc({ accountInfoError: httpError(403) }),
+      OWNER,
+      USDC
+    );
+    expect(result.balance).toBeNull();
+  });
+
+  it("propagates a 401 from the existence probe (auth refresh is handled upstream)", async () => {
+    const err = httpError(401);
+    await expect(
+      getChannelTokenBalance(fakeRpc({ accountInfoError: err }), OWNER, USDC)
+    ).rejects.toBe(err);
+  });
+
+  it("propagates a 5xx from the existence probe rather than masking it as zero", async () => {
+    const err = httpError(503);
+    await expect(
+      getChannelTokenBalance(fakeRpc({ accountInfoError: err }), OWNER, USDC)
+    ).rejects.toBe(err);
+  });
+
+  it("does NOT mask a 403 from the balance read once the account is known to exist", async () => {
+    // The probe confirmed the account exists and is the caller's; a forbidden
+    // balance read afterward is anomalous and must surface, not read as zero.
+    const err = httpError(403);
+    await expect(
+      getChannelTokenBalance(
+        fakeRpc({ accountInfo: { lamports: 2039280n }, tokenBalanceError: err }),
+        OWNER,
+        USDC
+      )
+    ).rejects.toBe(err);
   });
 });

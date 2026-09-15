@@ -35,7 +35,7 @@ async function deriveAssociatedTokenAccountAddress(owner: string, mint: string):
 
 async function gotoIssuanceDashboard(page: Page): Promise<void> {
   await page.goto("/dashboard/issuance", { waitUntil: "domcontentloaded" });
-  const createDraftButton = page.getByRole("button", { name: "Create draft", exact: true });
+  const createDraftButton = page.getByRole("link", { name: "New", exact: true });
   await expect(createDraftButton)
     .toBeVisible({ timeout: 30_000 })
     .catch(async () => {
@@ -208,105 +208,46 @@ interface CreateDraftOptions {
   name: string;
   symbol: string;
   decimals: string;
-  treasuryWalletId: string;
+  treasuryCustodyWalletId: string;
   custodySignerWalletCount: number;
 }
 
-// Creating a draft goes through one of two UIs depending on the
-// `asset-profiles` Vercel flag: the full-page wizard (flag on) or the
-// legacy modal (flag off). Detect which one the "Create draft" button opened —
-// the wizard navigates to its own route, the modal stays on the overview — and
-// drive whichever renders, so this passes under either flag value.
+// The single draft flow persists to SDP, then returns to the issuance list.
 async function createTokenDraft(page: Page, options: CreateDraftOptions): Promise<void> {
-  await page.getByRole("button", { name: "Create draft" }).click();
-
-  await page.waitForURL("**/dashboard/issuance/create", { timeout: 10_000 }).catch(() => {
-    // Modal path: the URL stays on the overview, so the wait times out.
-  });
-
-  if (page.url().includes("/dashboard/issuance/create")) {
-    await createDraftViaWizard(page, options);
-  } else {
-    await createDraftViaModal(page, options);
-  }
-}
-
-// The Asset Profiles wizard: classification (name + category + the revealed asset
-// type) → asset details → public info → review → confirm. Crypto-backed has no
-// deploy-required fields, so symbol/decimals/description are all that gate it.
-async function createDraftViaWizard(page: Page, options: CreateDraftOptions): Promise<void> {
-  await page.getByLabel("Name", { exact: true }).fill(options.name);
+  await page.getByRole("link", { name: "New", exact: true }).click();
+  await page.waitForURL("**/dashboard/issuance/create");
   await page
     .getByRole("button", { name: /Stablecoin/i })
     .first()
     .click();
-  await page.getByRole("button", { name: /Crypto-backed/i }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
-  // The details form's TextField labels aren't associated with their inputs, so
-  // target by placeholder instead of getByLabel.
-  await page.getByPlaceholder("e.g., vUSD").fill(options.symbol);
-  await page.getByPlaceholder("e.g., 6").fill(options.decimals);
-  await page
-    .getByPlaceholder("Describe what this asset represents.")
-    .fill("Created by Playwright issuance e2e.");
-  await page.getByRole("tab", { name: "Operational", exact: true }).click();
-  // The signing-wallet field locks to the only wallet when the project has
-  // exactly one custody signer wallet (an identity card, no combobox) and
-  // renders a select otherwise. Assert the branch the fixtures dictate.
-  if (options.custodySignerWalletCount === 1) {
-    await expect(page.getByTestId("wallet-identity-card")).toContainText(options.treasuryWalletId);
-  } else {
-    await page.getByRole("combobox").click();
-    await page.getByRole("option").filter({ hasText: options.treasuryWalletId }).click();
+  // Invalid fields must not advance the wizard.
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  // Role locators use the accessible name, excluding the decorative aria-hidden asterisk.
+  const tokenName = page.getByRole("textbox", { name: "Token name (required)", exact: true });
+  await expect(tokenName).toBeVisible();
+  await expect(tokenName).toHaveAttribute("required", "");
+  await tokenName.fill(options.name);
+  await page.getByRole("textbox", { name: "Symbol (required)", exact: true }).fill(options.symbol);
+  await page.getByLabel(/^Description/).fill("Created by Playwright issuance e2e.");
+  await expect(page.getByLabel(/^Decimals/)).toHaveValue("6");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  for (const permission of [
+    "Who can mint tokens?",
+    "Who can freeze balances?",
+    "Who can update token information?",
+    "Who can recover or destroy balances?",
+  ]) {
+    await page.getByLabel(permission).selectOption(options.treasuryCustodyWalletId);
   }
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-
-  // Public information — defaults are fine.
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-
-  // Review — open the confirmation, then confirm. The dialog ignores activations
-  // within ~350ms of opening (a stray-Enter guard), so wait that out first.
-  await page.getByRole("button", { name: "Create draft", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Create asset draft" });
-  await expect(dialog).toBeVisible();
-  await page.waitForTimeout(400);
-  // Confirmation starts an async server action, then routes to the new token.
-  // Wait for that navigation so the caller cannot abort the create request by
-  // immediately navigating back to the overview.
   await Promise.all([
-    page.waitForURL(
-      (url) =>
-        url.pathname.startsWith("/dashboard/issuance") &&
-        url.pathname !== "/dashboard/issuance/create",
-      { timeout: 120_000 }
-    ),
-    dialog.getByRole("button", { name: "Create draft", exact: true }).click(),
+    page.waitForURL("**/dashboard/issuance", { timeout: 120_000 }),
+    page.getByRole("button", { name: "Save draft", exact: true }).click(),
   ]);
-}
-
-// The legacy create-token modal: template → identity → features → create.
-async function createDraftViaModal(page: Page, options: CreateDraftOptions): Promise<void> {
-  await page
-    .getByRole("button", { name: /Stablecoin/i })
-    .first()
-    .click();
-
-  // Leave the metadata URI blank: SDP hosts the metadata JSON by default, so the
-  // URI field is optional and tucked under the Advanced section.
-  await page.getByLabel("Token Name").fill(options.name);
-  await page.getByLabel("Symbol").fill(options.symbol);
-  await page.getByLabel("Decimals").fill(options.decimals);
-  await page.getByRole("button", { name: "Continue" }).click();
-
-  await page
-    .locator("button", { hasText: "Denylist" })
-    .filter({
-      hasText: "Listed destinations are blocked before they can receive controlled actions.",
-    })
-    .click();
-  await page.getByLabel("Main Signer").selectOption(options.treasuryWalletId);
-  await page.getByRole("button", { name: "Create Stablecoin Draft" }).click();
 }
 
 test.describe
@@ -341,14 +282,14 @@ test.describe
     test("2. user can create a new pending token draft from the UI", async ({ page }) => {
       const draftSuffix = String(Date.now()).slice(-4);
       const draftName = `E2E UI Draft ${draftSuffix}`;
-      const draftSymbol = `UsD${draftSuffix}`;
+      const draftSymbol = `USD${draftSuffix}`;
 
       await gotoIssuanceDashboard(page);
       await createTokenDraft(page, {
         name: draftName,
         symbol: draftSymbol,
         decimals: "7",
-        treasuryWalletId: fixtures.wallets.treasury.walletId,
+        treasuryCustodyWalletId: fixtures.wallets.treasury.id,
         custodySignerWalletCount: fixtures.wallets.custodySignerWalletCount,
       });
 
@@ -375,7 +316,9 @@ test.describe
       await openTab(page, "Extensions");
 
       await expect(page.getByTestId("extension-row-template")).toContainText("Stablecoin");
-      await expect(page.getByTestId("extension-row-control-list")).toContainText("Allowlist");
+      await expect(page.getByTestId("extension-row-control-list")).toContainText(
+        "Approved recipients"
+      );
       await expect(page.getByTestId("extension-row-mintable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-freezable")).toContainText("Enabled");
       await expect(page.getByTestId("extension-row-default-account-state")).toContainText("Frozen");
@@ -441,7 +384,7 @@ test.describe
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.allowlisted.id);
-      await selectComplianceAction(page, "Allowlist");
+      await selectComplianceAction(page, "Approved recipients");
 
       await page
         .getByRole("textbox", { name: "Address", exact: true })
@@ -454,7 +397,7 @@ test.describe
           pathIncludes: `/api/dashboard/issuance/tokens/${fixtures.tokens.allowlisted.id}/allowlist`,
         },
         async () => {
-          await page.getByRole("button", { name: "Add allowlist entry" }).click();
+          await page.getByRole("button", { name: "Approve recipient" }).click();
         }
       );
       await waitForAllowlistCount(page, 1, { reload: true });
@@ -537,9 +480,11 @@ test.describe
 
     test("8. user sees denylist controls on the open stablecoin token", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
-      await selectComplianceAction(page, "Denylist");
+      await selectComplianceAction(page, "Blocked recipients");
 
-      await expect(page.getByRole("button", { name: "Denylist", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Blocked recipients", exact: true })
+      ).toBeVisible();
       await expect(
         page.getByText("Manage the blocked destination addresses for this token.")
       ).toBeVisible();
@@ -549,7 +494,7 @@ test.describe
           "Need to restrict a wallet before it has a token account? Add it to the denylist first."
         )
       ).toBeVisible();
-      await expect(page.getByTestId("allowlist-summary-card")).toContainText("Denylist Entries");
+      await expect(page.getByTestId("allowlist-summary-card")).toContainText("Blocked recipients");
     });
 
     test("9. user can mint and burn tokens with supply and transactions updating", async ({
@@ -608,7 +553,7 @@ test.describe
       await selectComplianceAction(page, "Freeze");
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
       await page.getByLabel("Reason (freeze only)").fill("Playwright freeze validation");
-      await page.getByRole("button", { name: "Freeze account", exact: true }).click();
+      await page.getByRole("button", { name: "Freeze balance", exact: true }).click();
       successCount = await page.getByText("Freeze transaction finalized.").count();
       await confirmAction(page, "Freeze now");
       await waitForToast(page, "Freeze transaction finalized.", successCount);
@@ -616,7 +561,7 @@ test.describe
 
       await selectComplianceAction(page, "Freeze");
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
-      await page.getByRole("button", { name: "Unfreeze account", exact: true }).click();
+      await page.getByRole("button", { name: "Unfreeze balance", exact: true }).click();
       successCount = await page.getByText("Unfreeze transaction finalized.").count();
       await confirmAction(page, "Unfreeze now");
       await waitForToast(page, "Unfreeze transaction finalized.", successCount);
@@ -672,14 +617,24 @@ test.describe
       await selectComplianceAction(page, "Pause");
       await page.getByRole("button", { name: "Pause token", exact: true }).click();
       let successCount = await page.getByText("Pause transaction finalized.").count();
-      await confirmAction(page, "Pause now");
+      await expect(
+        page.getByRole("heading", { name: "Pause transfers for all holders?" })
+      ).toBeVisible();
+      await expect(page.getByText(/This affects every holder:/)).toBeVisible();
+      await confirmAction(page, "Pause all transfers");
       await waitForToast(page, "Pause transaction finalized.", successCount);
       await expect(page.getByText("Token is paused")).toBeVisible();
 
       await selectComplianceAction(page, "Pause");
       await page.getByRole("button", { name: "Unpause token", exact: true }).first().click();
       successCount = await page.getByText("Unpause transaction finalized.").count();
-      await confirmAction(page, "Unpause now");
+      await expect(
+        page.getByRole("heading", { name: "Resume transfers for all holders?" })
+      ).toBeVisible();
+      await expect(
+        page.getByText(/Make sure the reason for pausing has been resolved/)
+      ).toBeVisible();
+      await confirmAction(page, "Resume transfers");
       await waitForToast(page, "Unpause transaction finalized.", successCount);
       await expect(page.getByText("Token is paused")).toHaveCount(0);
     });

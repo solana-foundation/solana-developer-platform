@@ -203,3 +203,48 @@ export function findIncompatibleExtensionPair(
   }
   return null;
 }
+
+/**
+ * Extensions the DvP swap program refuses outright.
+ *
+ * Not a preference of ours — the program returns `BlockedMintExtension` for any
+ * mint carrying one of these, at both `CreateDvp` and `SettleDvp`
+ * (`program/src/processor/shared/token_utils.rs:340-346`). Two different
+ * reasons, worth keeping straight:
+ *
+ * - `transferFee`, `interestBearing` and `scaledUiAmount` mutate amounts, so the
+ *   credited amount drifts from the debited one and the program would settle
+ *   "successfully" while a leg comes up short.
+ * - `nonTransferable` permanently blocks transfers OUT of the escrow, so any
+ *   balance that reaches it is stranded with no settle, refund or reclaim.
+ *
+ * Deliberately NOT the same thing as {@link INCOMPATIBLE_EXTENSION_PAIRS}: that
+ * is about two extensions that cannot coexist on one mint. This is a property of
+ * each extension on its own, and it is permanent — the extension set is fixed at
+ * mint time, so choosing one of these forecloses atomic settlement for the life
+ * of the asset.
+ */
+export const DVP_BLOCKED_EXTENSIONS = {
+  transferFee: "amountMutating",
+  interestBearing: "amountMutating",
+  scaledUiAmount: "amountMutating",
+  nonTransferable: "escrowLocked",
+} as const satisfies Partial<Record<TokenExtensionName, string>>;
+
+/** Why the program refuses an extension. The two reasons are not interchangeable. */
+export type DvpBlockReason = (typeof DVP_BLOCKED_EXTENSIONS)[keyof typeof DVP_BLOCKED_EXTENSIONS];
+
+/**
+ * Why choosing this setting rules the asset out of DvP settlement, or null.
+ *
+ * @param key - Catalog setting key.
+ * @returns The reason for the first deny-listed extension the setting declares.
+ */
+export function dvpBlockReason(key: SettingKey): DvpBlockReason | null {
+  for (const extension of ADVANCED_SETTINGS[key].extensions as readonly TokenExtensionName[]) {
+    if (extension in DVP_BLOCKED_EXTENSIONS) {
+      return DVP_BLOCKED_EXTENSIONS[extension as keyof typeof DVP_BLOCKED_EXTENSIONS];
+    }
+  }
+  return null;
+}

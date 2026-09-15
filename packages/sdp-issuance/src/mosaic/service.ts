@@ -60,12 +60,11 @@ import {
   // Token ACL freeze/thaw (object input pattern)
   getFreezeTransaction,
   getListConfigPda,
-  getRemoveAuthorityTransaction,
   getRemoveWalletTransaction,
   getThawPermissionlessTransaction,
   getThawTransaction,
   getTokenMetadata,
-  getUpdateAuthorityTransaction,
+  type getUpdateAuthorityTransaction,
   resolveTokenAccount,
 } from "@solana/mosaic-sdk";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
@@ -77,6 +76,7 @@ import {
   getUpdateTokenMetadataFieldInstruction,
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
+import { buildAuthorityTransaction } from "./authority";
 import {
   type AblWalletOptions,
   type CreateTokenOptions,
@@ -122,6 +122,7 @@ export interface MosaicServiceOptions {
    * their TRANSACTION_FAILED HTTP mapping; defaults to a plain `Error`.
    */
   transactionFailedError?: (message: string) => Error;
+  invalidArgumentError?: (message: string) => Error;
 }
 
 /**
@@ -161,6 +162,7 @@ export class MosaicService {
   private feePayment?: FeePaymentPort;
   private rpc: Rpc<SolanaRpcApi> & MosaicSdkRpc;
   private transactionFailedError: (message: string) => Error;
+  private invalidArgumentError: (message: string) => Error;
 
   constructor(
     env: MosaicIssuanceEnv,
@@ -174,6 +176,7 @@ export class MosaicService {
     this.rpc = createRpcForSdk<MosaicSdkRpc>(env) as unknown as Rpc<SolanaRpcApi> & MosaicSdkRpc;
     this.transactionFailedError =
       options?.transactionFailedError ?? ((message: string) => new Error(message));
+    this.invalidArgumentError = options?.invalidArgumentError ?? ((message) => new Error(message));
   }
 
   private isRetryableRpcError(error: unknown): boolean {
@@ -862,22 +865,17 @@ export class MosaicService {
     const currentAuthority = createNoopSigner(options.currentAuthority);
 
     const fullTx = await this.withRpcRetry(() =>
-      options.newAuthority === null
-        ? getRemoveAuthorityTransaction({
-            rpc: this.rpc,
-            payer,
-            mint: options.mint,
-            role: options.role,
-            currentAuthority,
-          })
-        : getUpdateAuthorityTransaction({
-            rpc: this.rpc,
-            payer,
-            mint: options.mint,
-            role: options.role,
-            currentAuthority,
-            newAuthority: options.newAuthority,
-          })
+      buildAuthorityTransaction(
+        {
+          rpc: this.rpc,
+          payer,
+          mint: options.mint,
+          role: options.role,
+          currentAuthority,
+          newAuthority: options.newAuthority,
+        },
+        this.invalidArgumentError
+      )
     );
 
     return this.toMosaicTransaction(fullTx);
@@ -893,22 +891,17 @@ export class MosaicService {
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
 
     const fullTx = await this.withRpcRetry(() =>
-      options.newAuthority === null
-        ? getRemoveAuthorityTransaction({
-            rpc: this.rpc,
-            payer: feePayer,
-            mint: options.mint,
-            role: options.role,
-            currentAuthority: options.currentAuthority,
-          })
-        : getUpdateAuthorityTransaction({
-            rpc: this.rpc,
-            payer: feePayer,
-            mint: options.mint,
-            role: options.role,
-            currentAuthority: options.currentAuthority,
-            newAuthority: options.newAuthority,
-          })
+      buildAuthorityTransaction(
+        {
+          rpc: this.rpc,
+          payer: feePayer,
+          mint: options.mint,
+          role: options.role,
+          currentAuthority: options.currentAuthority,
+          newAuthority: options.newAuthority,
+        },
+        this.invalidArgumentError
+      )
     );
 
     return this.signAndSubmit(fullTx);

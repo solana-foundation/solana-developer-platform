@@ -12,6 +12,7 @@ const pendingTransaction: TokenTransaction = {
   id: "ttx_settled_replay",
   tokenId: "tok_settled_replay",
   organizationId: "org_settled_replay",
+  custodyWalletId: null,
   type: "burn",
   status: "pending",
   idempotencyKey: "settled-replay",

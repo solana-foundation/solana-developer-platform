@@ -1,5 +1,5 @@
 import type { CustodyWalletSummary } from "@sdp/types";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -67,24 +67,72 @@ const wallets: CustodyWalletSummary[] = [
   },
 ];
 
-function renderOverview(query: string): string {
+function renderOverview(
+  query: string,
+  overrides: Partial<ComponentProps<typeof WalletsOverview>> = {}
+): string {
   urlState.query = query;
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <WalletsOverview
         canManageCustody
+        connectedProviders={[]}
         enabledProviders={["privy", "coinbase_cdp"]}
         configsError={null}
         showConnectionsLink={false}
         wallets={wallets}
         walletsError={null}
         onCreateWallet={() => undefined}
+        {...overrides}
       />
     </I18nProvider>
   );
 }
 
 describe("wallets overview search", () => {
+  it("shows the full provider catalog when no wallets or enabled providers exist", () => {
+    const html = renderOverview("", { wallets: [], enabledProviders: [] });
+    for (const provider of [
+      "Privy",
+      "Coinbase CDP",
+      "Para",
+      "Turnkey",
+      "Fireblocks",
+      "DFNS",
+      "IBM Digital Asset Haven",
+      "Anchorage",
+      "Utila",
+    ]) {
+      expect(html).toContain(provider);
+    }
+    expect(html).toContain("Not configured");
+    expect(html).toContain("Request access");
+    expect(html).not.toContain("<h3");
+    expect(html.match(/<section /g)).toHaveLength(1);
+    expect(html).not.toContain('data-provider-selectable="true"');
+  });
+
+  it("shows unavailable providers alongside selectable providers in the empty state", () => {
+    const html = renderOverview("", { wallets: [] });
+    expect(html.match(/data-provider-selectable="true"/g)).toHaveLength(2);
+    expect(html).toContain("Fireblocks");
+    expect(html).toContain("Not configured");
+  });
+
+  it("keeps the provider catalog out of the existing wallet list", () => {
+    const html = renderOverview("");
+    expect(html).not.toContain("data-provider-selection-card");
+    expect(html).toContain('data-wallet-card="wallet-treasury"');
+  });
+
+  it("shows the catalog without creation actions for read-only members", () => {
+    const html = renderOverview("", { wallets: [], canManageCustody: false });
+    expect(html).toContain("Privy");
+    expect(html).toContain("Fireblocks");
+    expect(html).not.toContain('data-provider-selectable="true"');
+    expect(html).not.toContain('target="_blank"');
+  });
+
   it("renders one responsive toolbar and only matching wallet cards", () => {
     const html = renderOverview("treasury");
 

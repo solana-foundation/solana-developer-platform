@@ -26,6 +26,7 @@ const liveStrategy: EarnStrategy = {
   withdrawalSlippage: null,
   hostCluster: "devnet",
   fundable: true,
+  feeSponsored: false,
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
@@ -273,7 +274,7 @@ describe("EarnIntegrationGuide", () => {
     );
 
     await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
-    await user.click(screen.getByRole("option", { name: /Kamino Growth Vault.*8\.1%/ }));
+    await user.click(await screen.findByRole("option", { name: /Kamino Growth Vault.*8\.1%/ }));
 
     expect(screen.getByText("earn_strategy_growth")).toBeTruthy();
     expect(screen.getByText(/"id": "earn_strategy_growth"/)).toBeTruthy();

@@ -26,6 +26,8 @@ export const OP_TYPES = [
   "timelock_create",
   "timelock_settle",
   "zone_create",
+  "ring_exit",
+  "ring_entry",
 ] as const;
 
 export const FAILURE_CODES = [
@@ -33,6 +35,11 @@ export const FAILURE_CODES = [
   "approval_rejected",
   "proof_failed",
   "signer_failed",
+  // Distinct from signer_failed: the signer did not fail, it was never asked.
+  // The wallet's custody provider cannot meet what Rings needs from a signature,
+  // so no retry and no upstream recovery changes the outcome — the wallet has to
+  // move providers.
+  "provider_unsupported",
   "submit_failed",
   "indexing_timeout",
   "gateway_unavailable",

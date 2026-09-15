@@ -123,6 +123,7 @@ export function WalletsWorkspace({
             content: (
               <div className="contents" data-wallet-panel="overview">
                 <WalletsOverview
+                  connectedProviders={connectedProviders}
                   enabledProviders={enabledProviders}
                   configsError={configsError}
                   showConnectionsLink={showConnectionsLink}

@@ -34,11 +34,13 @@ const TEST_WALLETS = {
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL", () => {
   let apiKeyHash: string;
+  let custodyWalletId = "";
   const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -46,7 +48,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
   });
 
   beforeEach(async () => {
-    await resetIntegrationState(apiKeyHash);
+    const state = await resetIntegrationState(apiKeyHash);
+    custodyWalletId = state.custodyWallet.id;
   });
 
   /**
@@ -61,6 +64,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       body: JSON.stringify({
         name,
         symbol,
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
         template: "stablecoin", // Stablecoin template supports sRFC-37
         isMintable: true,
@@ -73,6 +77,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
 
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
     const deployed = (await deployRes.json()) as TokenApiResponse;
@@ -101,6 +107,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         mint: {
           destination,
           amount,
@@ -134,6 +141,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       body: JSON.stringify({
         accountAddress: tokenAccount,
         reason: "Integration test freeze",
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
 
@@ -166,6 +174,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       body: JSON.stringify({
         accountAddress: tokenAccount,
         reason: "To be thawed",
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
 
@@ -180,6 +189,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       },
       body: JSON.stringify({
         accountAddress: tokenAccount,
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
 
@@ -199,6 +209,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       },
       body: JSON.stringify({
         accountAddress: tokenAccount,
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
 
@@ -230,6 +241,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       body: JSON.stringify({
         accountAddress: mint1.data.tokenAccount,
         reason: "Test freeze 1",
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
 
@@ -241,6 +253,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       body: JSON.stringify({
         accountAddress: mint2.data.tokenAccount,
         reason: "Test freeze 2",
+        signingCustodyWalletId: custodyWalletId,
       }),
     });
 

@@ -16,7 +16,15 @@ export interface ResolvedSolanaCounterpartyAccount {
   destinationAddress: Address;
 }
 
-function readSolanaCryptoWalletAddress(details: Record<string, unknown>): Address {
+/**
+ * Reads the Solana address out of a `crypto_wallet` counterparty account's
+ * details JSONB, refusing any shape that is not `network = "solana"` plus a
+ * string `address`.
+ *
+ * @param details - The account row's `details` column.
+ * @returns The branded Solana address the account links to.
+ */
+export function readSolanaCryptoWalletAddress(details: Record<string, unknown>): Address {
   if (details.network !== "solana" || typeof details.address !== "string") {
     throw new AppError(
       "BAD_REQUEST",

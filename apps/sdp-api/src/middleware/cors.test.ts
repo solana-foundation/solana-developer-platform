@@ -60,9 +60,51 @@ describe("corsMiddleware", () => {
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
   });
 
-  it("allows any origin in development", async () => {
+  it("allows a localhost dev origin in development", async () => {
+    const app = buildApp("development");
+    const res = await app.request("/x", { headers: { Origin: "http://localhost:3000" } });
+    expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+  });
+
+  it("allows a vercel preview origin in development", async () => {
+    const app = buildApp("development");
+    const res = await app.request("/x", {
+      headers: { Origin: "https://sdp-web-smoky.vercel.app" },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://sdp-web-smoky.vercel.app");
+  });
+
+  it("rejects an unlisted origin in development instead of reflecting it", async () => {
     const app = buildApp("development");
     const res = await app.request("/x", { headers: { Origin: "https://anything.example" } });
-    expect(res.headers.get("access-control-allow-origin")).toBe("https://anything.example");
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("refuses a cross-origin credentialed preflight to a money route in development", async () => {
+    const app = buildApp("development");
+    const res = await app.request("/v1/earn/vault-withdrawals", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://attacker.example",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+      },
+    });
+    // Without Access-Control-Allow-Origin the browser fails the preflight, so
+    // the credentialed cross-origin POST never leaves the preflight stage.
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("passes a credentialed preflight from an allowed origin in development", async () => {
+    const app = buildApp("development");
+    const res = await app.request("/v1/earn/vault-withdrawals", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:3000",
+        "Access-Control-Request-Method": "POST",
+      },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+    expect(res.headers.get("access-control-allow-credentials")).toBe("true");
   });
 });

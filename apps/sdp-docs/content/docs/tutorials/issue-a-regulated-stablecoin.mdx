@@ -175,16 +175,27 @@ Now confirm the setup by listing the wallets bound to your project:
 
 ```javascript title="list-wallets.js"
 const { data } = await sdp.get("/v1/wallets");
+const custodyWallet = data.wallets.find(
+  (wallet) => wallet.status === "active" && wallet.isRuntimeExecutionAllowed
+);
+if (!custodyWallet) throw new Error("No active custody wallet can execute");
+
+const signingCustodyWalletId = custodyWallet.id;
+const custodyAddress = custodyWallet.publicKey;
 console.log(`Custody wallets configured: ${data.wallets.length}`);
+console.log(`Deployment wallet: ${signingCustodyWalletId}`);
 ```
 
 A working setup prints:
 
 ```text title="Output"
 Custody wallets configured: 2
+Deployment wallet: cwlt_123
 ```
 
-If the response shows at least one wallet, your custody is bound and you are ready to deploy a token. If it returns an empty array, your custody provider has not finished provisioning. For the Anchorage pipeline, contact your onboarding lead. For the self-serve sandbox, wait a minute and re-run; Privy's initial wallet provision can lag the SDP organization creation by a few seconds.
+If the response includes an active wallet with `isRuntimeExecutionAllowed: true`, your custody is bound and you are ready to deploy a token. If it returns no wallets, your custody provider has not finished provisioning. For the Anchorage pipeline, contact your onboarding lead. For the self-serve sandbox, wait a minute and re-run; Privy's initial wallet provision can lag the SDP organization creation by a few seconds.
+
+Keep both values. `signingCustodyWalletId` is the exact SDP Wallet record `id` (`cwlt_*`) used by issuance requests. It is not the provider-specific `walletId` or the Solana `publicKey`; `custodyAddress` is that public key and is used only where an on-chain address is required.
 
 ## 3. Design the token
 
@@ -232,6 +243,7 @@ const tokenConfig = {
   name: "Treasury Pilot USD",
   symbol: "TPUSD",
   decimals: 6,
+  signingCustodyWalletId,
   description: "GENIUS-compliant treasury pilot stablecoin.",
   maxSupply: "100000000",
   isFreezable: true,
@@ -304,6 +316,7 @@ A successful response:
       "symbol": "TPUSD",
       "decimals": 6,
       "status": "pending",
+      "signingCustodyWalletId": "cwlt_123",
       "mintAddress": null,
       "isFreezable": true,
       "isMintable": true,
@@ -324,7 +337,7 @@ The deploy call submits a Token-2022 mint creation transaction to Solana via the
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy`,
-  {},
+  { signingCustodyWalletId },
   { idempotencyKey: deployKey }
 );
 const mintAddress = deployed.data.token.mintAddress;
@@ -338,6 +351,7 @@ A successful response carries the deployed token record with `status: "active"` 
     "token": {
       "id": "tok_e152fd38-...",
       "status": "active",
+      "signingCustodyWalletId": "cwlt_123",
       "mintAddress": "6V5bTuMsmXyhdY2Hj6VWQZsuacugACBmPqNtQgGtar8L",
       "mintAuthority": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
       "freezeAuthority": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
@@ -352,7 +366,7 @@ A successful response carries the deployed token record with `status: "active"` 
 }
 ```
 
-The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to the custody wallet address that SDP picked from your configured custody (the project signing wallet, falling back to the org signing wallet). The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority.
+The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to the public key of the exact `signingCustodyWalletId` supplied above. The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority. After deployment, the token's `signingCustodyWalletId` is historical attribution, not a preferred signer or fallback; authority-gated operations are checked against their live on-chain authority, and a standard burn uses its exact source wallet.
 
 <Callout type="warn">
 Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. Fund the custody wallet via the faucet and re-run `/deploy` with the same `Idempotency-Key` to replay, or a fresh key for a new attempt. SDP treats different keys as different requests; the same key with the same params replays the prior result.
@@ -387,6 +401,8 @@ Every other section of this tutorial is engineering. This one is the regulatory 
 
 Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer as a financial institution for purposes of the Bank Secrecy Act. That single sentence is what makes everything below load-bearing. The Act also requires you to have "[the technological capability to comply with all lawful orders to seize, freeze, burn or prevent the transfer of outstanding stablecoins](https://www.skadden.com/insights/publications/2025/07/us-establishes-first-federal-regulatory-framework)." The endpoints in this section map directly onto that statutory phrase, in the order you'll encounter them: screening first, freeze for per-account blocks, seize for compliance recovery, force-burn as the final remedy.
 
+The issuance selectors below reuse the exact `signingCustodyWalletId` from Section 2. SDP verifies that it controls the live freeze or permanent-delegate authority before signing.
+
 ### Screen before you move
 
 Every transfer destination and every allowlist entry gets screened before your application acts on it. One API call, one response.
@@ -418,6 +434,7 @@ const holderFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
   {
+    signingCustodyWalletId,
     accountAddress: holderAddress,
     reason: "Court order #2026-IL-0142",
   },
@@ -440,6 +457,7 @@ const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/seize`,
   {
+    signingCustodyWalletId,
     seize: {
       source: holderAddress,
       destination: custodyAddress,
@@ -462,6 +480,7 @@ const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/force-burn`,
   {
+    signingCustodyWalletId,
     forceBurn: {
       source: holderAddress,
       amount: "12000.00",
@@ -494,6 +513,7 @@ const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
   {
+    signingCustodyWalletId,
     mint: {
       destination: custodyAddress,
       amount: "1000000",
@@ -504,8 +524,9 @@ const minted = await sdp.post(
 );
 ```
 
-Three field rules to keep clear:
+Four field rules to keep clear:
 
+- **`signingCustodyWalletId`** is the exact SDP Wallet `id` from Section 2. SDP verifies that this wallet controls the current mint authority; the historical deployment wallet is not used as a fallback.
 - **`destination`** is a Solana base58 address. For the initial issuer-holds-supply pattern, this is your custody wallet's public key. For subsequent mints to client wallets, it's the recipient's wallet.
 - **`amount`** is a decimal string in UI units (post-decimals). Not a BigInt, not a number. `"1000000"` mints one million TPUSD because the token has 6 decimals.
 - **`memo`** is up to 100 characters. SDP stores it on the transaction record. This is the institutional audit attribution: the reference your compliance officer will use months later when reconciling the mint against the reserve custodian's monthly report.
@@ -573,8 +594,7 @@ Section 5's compliance controls only matter if they enforce. This section moves 
 Transfers run on the `/v1/payments/transfers` endpoint family, separate from the issuance family that Section 4 used. The required permissions are `payments:write` and `wallets:read`, both of which the Developer key (`sdp`) carries:
 
 ```javascript title="transfer-tokens.js"
-const { data } = await sdp.get("/v1/wallets");
-const sourceCustodyWalletId = data.wallets[0].id;
+const sourceCustodyWalletId = signingCustodyWalletId;
 
 const screening = await sdpAdmin.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
@@ -639,6 +659,7 @@ const transferFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
   {
+    signingCustodyWalletId,
     accountAddress: destinationAddress,
     reason: "Compliance hold pending OFAC review 2026-04-019",
   },
@@ -717,6 +738,7 @@ For a production environment, unfreezing happens only after the underlying compl
 
 ```javascript title="unfreeze-account.js"
 await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+  signingCustodyWalletId,
   accountAddress: destinationAddress,
 });
 ```

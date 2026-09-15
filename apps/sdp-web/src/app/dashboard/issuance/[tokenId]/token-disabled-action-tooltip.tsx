@@ -17,7 +17,9 @@ export function TokenDisabledActionTooltip({ reason, children }: TokenDisabledAc
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="inline-flex w-fit">{children}</span>
+          <span className="inline-flex w-fit" role="note" aria-label={reason}>
+            {children}
+          </span>
         </TooltipTrigger>
         <TooltipContent side="top" align="center">
           {reason}
