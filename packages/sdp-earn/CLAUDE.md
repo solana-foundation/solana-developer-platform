@@ -15,7 +15,7 @@ integrator's SDP API key.
 - Strategy catalogue reads, deposit and withdrawal previews, and unsigned
   external-wallet transaction builds accept either a valid SDP credential or
   no credential. The anonymous form has no organization or project context,
-  uses the deployment's `SDP_ENVIRONMENT`, and persists nothing.
+  maps the deployment's validated `ENVIRONMENT`, and persists nothing.
 - Submits, programs, custody vault operations, movements, positions, earnings,
   and aggregate reads require an authenticated tenant and their existing Earn
   permissions.
@@ -63,9 +63,9 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
   by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
   shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
-- **Keyless environment** is selected by `SDP_ENVIRONMENT=sandbox|production`.
-  Authenticated calls continue to derive environment from the selected project.
-  Local development must use `sandbox`.
+- **Keyless environment** maps `ENVIRONMENT=development` to sandbox and
+  `ENVIRONMENT=production` to production. Authenticated calls continue to
+  derive environment from the selected project.
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
   `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program

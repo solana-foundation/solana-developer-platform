@@ -77,7 +77,12 @@ import {
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
-import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
+import {
+  earnRuntime,
+  getEarnRepository,
+  resolveKeylessEarnEnvironment,
+  resolveSdpEnvironment,
+} from "../context";
 import {
   earnVaultDepositParamsSchema,
   type earnVaultDepositPreviewSchema,
@@ -128,7 +133,7 @@ export async function createEarnVaultDepositPreview(
   c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const environment = resolveSdpEnvironment(c);
+  const environment = resolveKeylessEarnEnvironment(c);
   const auth = getOptionalAuth(c);
 
   const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
@@ -175,10 +180,13 @@ export async function createEarnVaultDepositPreview(
 
   let quote: EarnVaultDepositQuote;
   try {
-    quote = await client.quoteVaultDeposit(earnRuntime(c), {
-      providerReference: strategy.provider_reference,
-      amount: body.amount,
-    });
+    quote = await client.quoteVaultDeposit(
+      { env: c.env, environment },
+      {
+        providerReference: strategy.provider_reference,
+        amount: body.amount,
+      }
+    );
   } catch (error) {
     // A refused quote is the CALLER's, in the provider's own words — the SAME
     // code-shape mapping the deposit build applies (vault-refusals.ts), so the

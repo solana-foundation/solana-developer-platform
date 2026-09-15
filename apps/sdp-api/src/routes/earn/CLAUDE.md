@@ -928,8 +928,8 @@ fork a keyed and anonymous route with duplicate behavior.
   vault routes, programs, and the aggregate feed. These retain the existing
   permission and project boundaries.
 - **Environment:** an authenticated project is authoritative. A keyless call
-  uses `SDP_ENVIRONMENT` when configured, then the deployment environment
-  fallback. A request parameter must never select production.
+  maps the deployment's validated `ENVIRONMENT` directly to the Earn product
+  environment. A request parameter must never select production.
 - **Anonymous accounting:** catalogue reads use a generous per-IP tier. Quotes
   and builds use a tighter per-IP tier plus an independently configurable RPC
   budget. Structured logs carry the tier, normalized route, and decision.
@@ -1258,10 +1258,10 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 - Environment resolution is the shared `@/lib/sdp-environment` helper: API-key
   callers use the key's (project-derived) environment; dashboard/session
   callers use the membership-verified `x-project-id` project's environment; a
-  keyless Earn request uses explicit `SDP_ENVIRONMENT`, then the validated
-  deployment mapping. Other protected routes never reach the helper without
-  tenant auth. A production-project dashboard session therefore drives
-  provider production.
+  request with neither fails closed (500), never defaults to sandbox. The
+  keyless-capable Earn handlers are the single exception: only when no tenant
+  has authenticated, they map the validated deployment `ENVIRONMENT`. A
+  production-project dashboard session therefore drives provider production.
 - `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
   Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
   clearing that one flag darkens every Markets API surface. Both default off.

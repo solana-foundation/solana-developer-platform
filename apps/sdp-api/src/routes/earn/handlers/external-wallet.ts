@@ -61,7 +61,11 @@ import {
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
-import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
+import {
+  getEarnRepository,
+  resolveKeylessEarnEnvironment,
+  resolveSdpEnvironment,
+} from "../context";
 import {
   type earnExternalWalletDepositTransactionSchema,
   earnExternalWalletEarningsQuerySchema,
@@ -651,7 +655,7 @@ export async function createEarnExternalWalletDepositTransaction(
   c: ValidatedBodyContext<typeof earnExternalWalletDepositTransactionSchema>
 ) {
   const body: EarnExternalWalletDepositTransactionBody = c.req.valid("json");
-  const environment = resolveSdpEnvironment(c);
+  const environment = resolveKeylessEarnEnvironment(c);
   const authenticated = getAuthenticatedEarnRequest(c);
 
   const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
@@ -825,7 +829,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalTransactionSchema>
 ) {
   const body: EarnExternalWalletWithdrawalTransactionBody = c.req.valid("json");
-  const environment = resolveSdpEnvironment(c);
+  const environment = resolveKeylessEarnEnvironment(c);
   const target = await resolveExternalWalletExit(c, body, environment);
 
   // Same provider-policy exit floor as the custody withdrawal: a non-null
@@ -886,7 +890,7 @@ export async function createEarnExternalWalletWithdrawalPreview(
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalPreviewSchema>
 ) {
   const body: EarnExternalWalletWithdrawalPreviewBody = c.req.valid("json");
-  const environment = resolveSdpEnvironment(c);
+  const environment = resolveKeylessEarnEnvironment(c);
   const target = await resolveExternalWalletExit(c, body, environment);
 
   const deadline = createVaultDeadline();
@@ -897,10 +901,13 @@ export async function createEarnExternalWalletWithdrawalPreview(
 
   let quote: EarnVaultWithdrawQuote;
   try {
-    quote = await client.quoteVaultWithdrawal(earnRuntime(c), {
-      providerReference: target.vaultAddress,
-      shares: body.shares,
-    });
+    quote = await client.quoteVaultWithdrawal(
+      { env: c.env, environment },
+      {
+        providerReference: target.vaultAddress,
+        shares: body.shares,
+      }
+    );
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }

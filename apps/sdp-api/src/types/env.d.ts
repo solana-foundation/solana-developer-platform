@@ -27,10 +27,6 @@ export interface Env {
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
-  // Product environment used by anonymous Earn routes. When omitted, the
-  // runtime environment maps development to sandbox and production to
-  // production.
-  SDP_ENVIRONMENT?: ApiKeyEnvironment;
   /** Anonymous Earn paid-upstream budget, per client IP. */
   EARN_ANONYMOUS_RPC_MAX_REQUESTS?: string;
   EARN_ANONYMOUS_RPC_WINDOW_SECONDS?: string;

@@ -13,7 +13,7 @@ import { type ServerType, serve } from "@hono/node-server";
 import { createApp } from "@/app";
 import { startCron } from "@/cron/runner";
 import { getProcessEnv } from "@/lib/runtime-env";
-import { resolveAnonymousSdpEnvironment } from "@/lib/sdp-environment";
+import { resolveAnonymousEarnEnvironment } from "@/routes/earn/environment";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { createNodeHttpApp } from "@/runtime/http-node";
 import { getLogger } from "@/runtime/logger";
@@ -107,13 +107,13 @@ function assertRequiredEnv(env: Env): void {
 async function main(): Promise<void> {
   const env = getProcessEnv();
   assertRequiredEnv(env);
-  const anonymousEarnEnvironment = resolveAnonymousSdpEnvironment(env);
+  const anonymousEarnEnvironment = resolveAnonymousEarnEnvironment(env.ENVIRONMENT);
 
   getLogger().info(
     {
       event: "sdp_api_earn_environment_resolved",
       environment: anonymousEarnEnvironment,
-      source: env.SDP_ENVIRONMENT?.trim() ? "SDP_ENVIRONMENT" : "ENVIRONMENT",
+      source: "ENVIRONMENT",
     },
     "Anonymous Earn environment resolved"
   );

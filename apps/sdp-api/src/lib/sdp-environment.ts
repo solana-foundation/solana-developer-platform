@@ -14,10 +14,10 @@ import type { Env } from "@/types/env";
  * `projectEnvironment`. A production-project dashboard session therefore
  * resolves to production — the same rails as a production API key.
  *
- * Anonymous routes have no project, so they fall back to deployment-owned
- * configuration: SDP_ENVIRONMENT when explicitly set, otherwise the validated
- * runtime mapping (development -> sandbox, production -> production). Caller
- * input never participates. Unknown deployment values still fail closed.
+ * Fails closed: a request whose environment cannot be resolved must never
+ * default to either side. Defaulting to sandbox would point sandbox provider
+ * credentials at production-project tenant rows; defaulting to production is
+ * worse.
  */
 export function resolveSdpEnvironment(c: Context<{ Bindings: Env }>): SdpEnvironment {
   const apiKey = c.get("apiKey");
@@ -30,31 +30,5 @@ export function resolveSdpEnvironment(c: Context<{ Bindings: Env }>): SdpEnviron
     return projectEnvironment;
   }
 
-  return resolveAnonymousSdpEnvironment(c.env);
-}
-
-/**
- * Resolves the deployment-owned environment used by keyless Earn requests.
- * Kept independent of Hono so startup can validate and report the same value
- * before accepting traffic.
- */
-export function resolveAnonymousSdpEnvironment(
-  env: Pick<Env, "SDP_ENVIRONMENT" | "ENVIRONMENT">
-): SdpEnvironment {
-  const deploymentEnvironment = env.SDP_ENVIRONMENT?.trim();
-  if (deploymentEnvironment) {
-    if (deploymentEnvironment === "sandbox" || deploymentEnvironment === "production") {
-      return deploymentEnvironment;
-    }
-    throw internalError("SDP_ENVIRONMENT must be sandbox or production");
-  }
-
-  if (env.ENVIRONMENT === "development") {
-    return "sandbox";
-  }
-  if (env.ENVIRONMENT === "production") {
-    return "production";
-  }
-
-  throw internalError("Deployment environment could not be resolved");
+  throw internalError("Request environment could not be resolved");
 }
