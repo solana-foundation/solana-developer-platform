@@ -346,17 +346,51 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
         throw new Error("listOpenForReconciliation limit must be an integer from 1 to 256");
       }
-      // Stalest first, never-observed before that, so a busy cluster cannot
-      // starve the trades nothing is known about.
+      // Three lanes, each stalest first, dealt out in rounds of two live trades,
+      // one expired trade still holding something, and one trade kept only for
+      // late deposits. A lane with nothing to offer gives its turn away, so a
+      // quiet tick still fills its limit, and a crowded lane can only ever
+      // slow the others to their share, never shut them out.
+      //
+      // An expired trade with both escrows observed empty and no claim or receipt
+      // left on its legs has nothing for the sweep to advance: it joins the
+      // late-deposit lane for seven days past its expiry, like a closed trade
+      // for seven days past its close. Nothing cancels it; the trade page still
+      // observes it whenever it is opened. The expiry is compared as a number,
+      // not through to_timestamp, which throws on a u64 far-future expiry and
+      // SQL does not promise to skip evaluating it for rows the OR has settled.
       const result = await db
         .prepare(
-          `SELECT ${SELECT_COLUMNS}
-             FROM dvp_trades
-            WHERE status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-               OR (status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
-                   AND closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
-            ORDER BY CASE WHEN status IN ('creating', 'created', 'partially_funded', 'funded', 'expired') THEN 0 ELSE 1 END,
-                     observed_at ASC NULLS FIRST, created_at ASC, id ASC
+          `WITH laned AS (
+             SELECT t.*,
+                    CASE
+                      WHEN t.status IN ('creating', 'created', 'partially_funded', 'funded') THEN 0
+                      WHEN t.status = 'expired'
+                           AND NOT (COALESCE(t.escrow_a_amount, '') = '0'
+                                    AND COALESCE(t.escrow_b_amount, '') = '0'
+                                    AND NOT EXISTS (SELECT 1 FROM dvp_leg_funding_claims c
+                                                     WHERE c.trade_id = t.id)) THEN 1
+                      ELSE 2
+                    END AS lane
+               FROM dvp_trades t
+              WHERE t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+                 OR (t.status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+                     AND t.closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
+           ), ranked AS (
+             SELECT laned.*,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY lane
+                      ORDER BY observed_at ASC NULLS FIRST, created_at ASC, id ASC
+                    ) AS lane_rank
+               FROM laned
+              WHERE lane <> 2
+                 OR status <> 'expired'
+                 OR expiry_timestamp::numeric >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '7 days')
+           )
+           SELECT ${SELECT_COLUMNS}
+             FROM ranked
+            ORDER BY (lane_rank - 1) / CASE WHEN lane = 0 THEN 2 ELSE 1 END ASC,
+                     lane ASC, lane_rank ASC
             LIMIT ?`
         )
         .bind(limit)

@@ -629,6 +629,166 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(listed.map((trade) => trade.id).sort()).toEqual(["dvp_closed_recent", "dvp_open_old"]);
   });
 
+  /**
+   * PRO-1930, PRO-1974. The sweep's limit is shared out between live trades,
+   * expired trades still holding something, and trades kept only for late
+   * deposits, so a crowd in one lane can slow the others but never shut them out.
+   */
+  describe("reconciliation lanes", () => {
+    const swapFor = (index: number) =>
+      address(getBase58Decoder().decode(new Uint8Array(32).fill(index + 1)));
+
+    /** Inserts a trade and forces the row into the state the lane reads. */
+    async function seedLaned(
+      id: string,
+      index: number,
+      state: {
+        status: string;
+        observedAt: string;
+        escrows?: [string | null, string | null];
+        expiryTimestamp?: string;
+        closedDaysAgo?: number;
+      }
+    ) {
+      await repo.create(
+        tradeInsert({
+          id,
+          swapDvp: swapFor(index),
+          ...(state.expiryTimestamp === undefined
+            ? {}
+            : { expiryTimestamp: state.expiryTimestamp }),
+        })
+      );
+      await getDb(env)
+        .prepare(
+          `UPDATE dvp_trades
+              SET status = ?, observed_at = ?, escrow_a_amount = ?, escrow_b_amount = ?,
+                  closed_at = CASE WHEN ?::int IS NULL THEN NULL
+                                   ELSE (CURRENT_TIMESTAMP - make_interval(days => ?::int))::text END
+            WHERE id = ?`
+        )
+        .bind(
+          state.status,
+          state.observedAt,
+          state.escrows?.[0] ?? null,
+          state.escrows?.[1] ?? null,
+          state.closedDaysAgo ?? null,
+          state.closedDaysAgo ?? null,
+          id
+        )
+        .run();
+    }
+
+    /** An expiry an hour ago, in unix seconds. */
+    const RECENT_EXPIRY = String(Math.floor(Date.now() / 1000) - 3_600);
+
+    it("gives expired and late-deposit work their share when live trades fill the limit", async () => {
+      for (let index = 0; index < 6; index += 1) {
+        await seedLaned(`dvp_live_${index}`, index, {
+          status: "created",
+          observedAt: `2026-09-01T00:00:0${index}.000Z`,
+        });
+      }
+      // Observed long after every live trade, so stalest-first alone would
+      // never reach these two.
+      await seedLaned("dvp_expired_funded", 10, {
+        status: "expired",
+        observedAt: "2026-09-10T00:00:00.000Z",
+        escrows: ["1000", "0"],
+        expiryTimestamp: RECENT_EXPIRY,
+      });
+      await seedLaned("dvp_recently_settled", 11, {
+        status: "settled",
+        observedAt: "2026-09-10T00:00:00.000Z",
+        closedDaysAgo: 1,
+      });
+
+      const listed = await repo.listOpenForReconciliation(4);
+
+      expect(listed.map((trade) => trade.id)).toEqual([
+        "dvp_live_0",
+        "dvp_live_1",
+        "dvp_expired_funded",
+        "dvp_recently_settled",
+      ]);
+    });
+
+    it("gives an empty lane's turns to the lanes that have work", async () => {
+      for (let index = 0; index < 5; index += 1) {
+        await seedLaned(`dvp_live_${index}`, index, {
+          status: "funded",
+          observedAt: `2026-09-01T00:00:0${index}.000Z`,
+        });
+      }
+
+      const listed = await repo.listOpenForReconciliation(4);
+
+      expect(listed).toHaveLength(4);
+    });
+
+    // An expired trade with nothing left in it and nothing moving on its legs
+    // has no work, so it stops taking a live trade's turn.
+    it("moves an emptied expired trade out of the live lanes, and a claim keeps it in", async () => {
+      for (let index = 0; index < 4; index += 1) {
+        await seedLaned(`dvp_live_${index}`, index, {
+          status: "created",
+          observedAt: `2026-09-01T00:00:0${index}.000Z`,
+        });
+      }
+      await seedLaned("dvp_expired_empty", 10, {
+        status: "expired",
+        observedAt: "2026-08-01T00:00:00.000Z",
+        escrows: ["0", "0"],
+        expiryTimestamp: RECENT_EXPIRY,
+      });
+      await seedLaned("dvp_expired_claimed", 11, {
+        status: "expired",
+        observedAt: "2026-08-02T00:00:00.000Z",
+        escrows: ["0", "0"],
+        expiryTimestamp: RECENT_EXPIRY,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO dvp_leg_funding_claims
+             (trade_id, side, organization_id, project_id, custody_wallet_id, signature, expiry_height, funding_tx)
+           VALUES ('dvp_expired_claimed', 'a', ?, ?, ?, 'sig_receipt', '100', 'sig_receipt')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT_ID, CUSTODY_WALLET_ID)
+        .run();
+
+      const lanes = await repo.listOpenForReconciliation(8);
+
+      // Round one: two live, the claimed expired trade, then the emptied one in
+      // the late-deposit lane even though it is the stalest row of all.
+      expect(lanes.slice(0, 4).map((trade) => trade.id)).toEqual([
+        "dvp_live_0",
+        "dvp_live_1",
+        "dvp_expired_claimed",
+        "dvp_expired_empty",
+      ]);
+    });
+
+    it("drops an emptied expired trade a week past its expiry, like a closed one", async () => {
+      await seedLaned("dvp_expired_long_ago", 1, {
+        status: "expired",
+        observedAt: "2026-08-01T00:00:00.000Z",
+        escrows: ["0", "0"],
+        expiryTimestamp: String(Math.floor(Date.now() / 1000) - 8 * 86_400),
+      });
+      await seedLaned("dvp_expired_unobserved", 2, {
+        status: "expired",
+        observedAt: "2026-08-01T00:00:00.000Z",
+        escrows: [null, null],
+        expiryTimestamp: String(Math.floor(Date.now() / 1000) - 8 * 86_400),
+      });
+
+      const listed = await repo.listOpenForReconciliation(8);
+
+      // Never observed empty is not known empty: that one keeps its lane.
+      expect(listed.map((trade) => trade.id)).toEqual(["dvp_expired_unobserved"]);
+    });
+  });
+
   // Compare-and-swap: whoever moved the row off `creating` first had better
   // information, and a late caller must not overwrite it.
   it("refuses to resolve a trade that is no longer creating", async () => {

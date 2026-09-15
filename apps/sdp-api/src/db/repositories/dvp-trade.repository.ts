@@ -235,9 +235,13 @@ export interface DvpTradeRepository {
   /** Null when unknown. Lookup by the address a counterparty actually sees. */
   getBySwapDvp(scope: DvpTradeScope, swapDvp: Address): Promise<DvpTradeRow | null>;
   /**
-   * Open trades and recently closed trades across every project, stalest
-   * observation first. Closed trades remain eligible for seven days from the
-   * first time their closed status was recorded.
+   * Trades the reconciler should look at this tick, across every project.
+   *
+   * Three lanes, each stalest observation first, dealt in rounds of two live
+   * trades, one expired trade still holding funds or a claim, and one trade kept
+   * only for late deposits: closed within seven days, or expired with nothing
+   * left in it within seven days of its expiry. An empty lane gives its turn to
+   * the others, so no lane can starve another (PRO-1930, PRO-1974).
    *
    * Deliberately UNSCOPED, unlike every read above. The reconciler is not acting
    * for a caller — it is a background sweep, and scoping it to a project would

@@ -356,6 +356,27 @@ describe("reconcileDvpTrades", () => {
     );
   });
 
+  // PRO-1974. A trade whose account is gone and whose close is not in the
+  // history the RPC returns yet used to rescan that history on every tick.
+  it("backs off a close lookup that found nothing, as it does a capped one", async () => {
+    await seedTrade("dvp_absent", "closed_unknown", { closeResolutionAttempts: 0 });
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET closed_at = sdp_iso_now() WHERE id = ?")
+      .bind("dvp_absent")
+      .run();
+    readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
+    resolveDvpClose.mockResolvedValue({ kind: "absent" });
+    const before = Date.now();
+
+    await reconcileDvpTrades(env);
+    await reconcileDvpTrades(env);
+
+    const row = await statusOf("dvp_absent");
+    expect(row?.close_resolution_attempts).toBe(1);
+    expect(Date.parse(String(row?.close_resolution_after))).toBeGreaterThanOrEqual(before + 60_000);
+    expect(resolveDvpClose).toHaveBeenCalledTimes(1);
+  });
+
   it("does not resolve a close before its deferred instant", async () => {
     await seedTrade("dvp_deferred", "closed_unknown", {
       closeResolutionAttempts: 1,
@@ -536,6 +557,58 @@ describe("reconcileDvpTrades", () => {
       (await trades.getByIdAsParty(id))?.closeClaim?.signature ?? null;
     expect(await read("dvp_close_dead")).toBeNull();
     expect(await read("dvp_close_live")).toBe(signatureOf(8));
+  });
+
+  // PRO-1974. Expired receipts are asked about in chunks of 256, not one call
+  // each. A chunk whose read fails deletes nothing and does not stop the next.
+  it("reads expired receipts in chunks of 256, and a failed chunk deletes nothing", async () => {
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    const receiptSignature = (index: number) => {
+      const bytes = new Uint8Array(64);
+      new DataView(bytes.buffer).setUint32(0, index + 1);
+      bytes[63] = 1;
+      return getBase58Decoder().decode(bytes);
+    };
+    const receipts = 257;
+    for (let index = 0; index < receipts; index += 2) {
+      const tradeId = `dvp_receipts_${index}`;
+      await seedTrade(tradeId, "created");
+      for (const [offset, side] of [
+        [0, "a"],
+        [1, "b"],
+      ] as const) {
+        if (index + offset >= receipts) {
+          continue;
+        }
+        const receipt = receiptSignature(index + offset);
+        await claims.claim({
+          tradeId,
+          side,
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT_ID,
+          custodyWalletId: CUSTODY_WALLET_ID,
+          signature: receipt,
+          expiryHeight: "900",
+        });
+        await claims.recordFundingTx(tradeId, side, receipt);
+      }
+    }
+    getSignatureStatusesMock
+      .mockRejectedValueOnce(new Error("429 Too Many Requests"))
+      .mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+        signatures.map(() => null)
+      );
+
+    await reconcileDvpTrades(env);
+
+    expect(getSignatureStatusesMock.mock.calls.map(([, signatures]) => signatures.length)).toEqual([
+      256, 1,
+    ]);
+    const remaining = await db
+      .prepare("SELECT COUNT(*)::int AS count FROM dvp_leg_funding_claims")
+      .first<{ count: number }>();
+    expect(remaining?.count).toBe(256);
   });
 
   it("releases an expired broadcast claim whose transfer never landed", async () => {
