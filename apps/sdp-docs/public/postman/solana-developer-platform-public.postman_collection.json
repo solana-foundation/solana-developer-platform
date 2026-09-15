@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Solana Developer Platform Public API",
-    "description": "Public Postman collection generated from the SDP OpenAPI contract. Internal-only endpoint families are excluded.",
+    "description": "Public Postman collection generated from the SDP OpenAPI contract. Internal-only endpoint families are excluded, and keyless Earn operations are imported with No Auth.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -2061,7 +2061,10 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/earn/strategies",
-            "description": "Returns the strategy catalogue visible to the caller, ranked by deposit size (TVL descending). By default the list answers the environment's own cluster — the shelf the caller can act on; pass `?cluster=` to browse the other cluster's mirrored shelf (those rows stay `fundable: false`). Catalogued is not the same as fundable: branch on `fundable` and `status` rather than assuming a listed strategy takes deposits."
+            "description": "Returns the strategy catalogue visible to the caller, ranked by deposit size (TVL descending). By default the list answers the environment's own cluster, the shelf the caller can act on; pass `?cluster=` to browse the other cluster's mirrored shelf (those rows stay `fundable: false`). Catalogued is not the same as fundable: branch on `fundable` and `status` rather than assuming a listed strategy takes deposits.",
+            "auth": {
+              "type": "noauth"
+            }
           }
         },
         {
@@ -2070,7 +2073,10 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/earn/strategies/{{strategyId}}",
-            "description": "Returns one catalogue row by id, whatever its cluster; `fundable` still answers whether the instrument exists on the caller's own cluster."
+            "description": "Returns one catalogue row by id, whatever its cluster; `fundable` still answers whether the instrument exists on the caller's own cluster.",
+            "auth": {
+              "type": "noauth"
+            }
           }
         },
         {
@@ -2086,6 +2092,9 @@
             ],
             "url": "{{baseUrl}}/v1/earn/vault-deposit-previews",
             "description": "Quotes how many shares a direct vault deposit would mint from the provider's live accounting. Use it when the strategy's `depositSlippage.quoteRequired` is true, then derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no idempotency key, and 501 when the provider cannot quote deposits. An anonymous request uses the deployment environment and no tenant state. An authenticated request retains its project environment, `earn:read` scope, and provider entitlement.",
+            "auth": {
+              "type": "noauth"
+            },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"amount\": \"25\"\n}",
@@ -2155,6 +2164,9 @@
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/deposit-transactions",
             "description": "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. An anonymous build uses the owner as fee payer, writes no tenant row, and must be signed, broadcast, and tracked by the caller. An authenticated build retains its `earn:write` scope and provider entitlement, persists a submit-capable build, and may name a caller-controlled `feePayer` that signs alongside the owner. The transaction expires with its blockhash, and nothing moves during the build.",
+            "auth": {
+              "type": "noauth"
+            },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\",\n  \"sourceTokenMint\": \"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo\",\n  \"swapSlippageBps\": 2\n}",
@@ -2203,6 +2215,9 @@
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawal-previews",
             "description": "Quotes what redeeming the shares would pay right now, from the vault's live accounting — the read a truthful `minAmountOut` floor is derived from (`assetsOut` minus your chosen tolerance, quantized to `assetDecimals`). Read-only, no idempotency key, and it takes the exit's own gates: a delisted strategy or a provider disabled for new deposits stays quotable. An authenticated request identifies its tenant position; an anonymous request identifies the strategy and signing owner without reading tenant state. POST because the parameters are a body; 501 when the provider cannot quote exits.",
+            "auth": {
+              "type": "noauth"
+            },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\"\n}",
@@ -2227,6 +2242,9 @@
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawal-transactions",
             "description": "Builds one unsigned external-wallet exit. An authenticated request identifies its tenant position, retains its `earn:write` scope, and persists a submit-capable build. An anonymous request identifies the strategy and signing owner, uses the owner as fee payer, and writes no tenant row. Both tiers retain ADR 0002 exit safety, so the exit works while the provider is disabled for new deposits. A strategy with a withdrawal slippage policy still requires `minAmountOut`.",
+            "auth": {
+              "type": "noauth"
+            },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\",\n  \"minAmountOut\": \"24.9\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\"\n}",
