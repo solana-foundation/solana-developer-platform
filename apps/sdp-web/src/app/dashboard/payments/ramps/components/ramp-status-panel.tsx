@@ -96,8 +96,7 @@ function transferStatusCopy(
           : t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
         state: "error",
       };
-    // Cancellation is recorded by SDP, not reported by the provider, so it must not be
-    // rendered as the provider's status — that misattributes the decision.
+    // SDP cancels locally; the provider never reports this status.
     case "canceled":
       return {
         title: t("DashboardPayments.ramps.status.canceled"),

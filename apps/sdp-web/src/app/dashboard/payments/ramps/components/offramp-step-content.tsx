@@ -36,10 +36,7 @@ function OfframpManualQuoteStep({
 }) {
   const { selectedRampPair, fields, transferStatus } = wizard;
 
-  // A cancelled, failed or expired payout can never settle, so the instructions are withdrawn
-  // rather than left on screen — the status panel alone explains where the transfer stands.
-  // Ordered ahead of the missing-instructions guard, which would otherwise report a quote
-  // defect for a transfer whose real problem is that it is already dead.
+  // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
   if (isTerminalTransferStatus(transferStatus?.status)) {
     return <RampStatusPanel direction="offramp" transfer={transferStatus} />;
   }
