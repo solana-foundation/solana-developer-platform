@@ -79,7 +79,10 @@ export function OnchainSendStepContent({
   } = wizard;
 
   const walletOptions = useMemo(
-    () => walletComboboxOptions(liveWallets, t("DashboardPayments.restricted")),
+    () =>
+      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
+        disableRestricted: true,
+      }),
     [liveWallets, t]
   );
   const assetSelectOptions = useMemo(

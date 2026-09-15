@@ -251,12 +251,16 @@ describe("Recurring Payment exact source selection", () => {
       }
       await user.click(edit);
       await user.click(screen.getByRole("button", { name: "Funding wallet" }));
-      await user.click(screen.getByRole("button", { name: /Replacement/ }));
-      const save = screen.getByRole("button", { name: "Save" });
-      expect((save as HTMLButtonElement).disabled).toBe(true);
-      const form = save.closest("form");
-      if (!form) throw new Error("Expected the payment edit form");
-      fireEvent.submit(form);
+      // A restricted replacement is listed and badged, but not on offer: the
+      // click changes nothing and the current wallet stays selected.
+      const replacementOption = screen.getByRole("button", { name: /Replacement/ });
+      expect(replacementOption.getAttribute("aria-disabled")).toBe("true");
+      expect(replacementOption.textContent).toContain("Restricted");
+      fireEvent.click(replacementOption);
+      expect(screen.getByRole("button", { name: /Replacement/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Funding wallet" }).textContent).toContain(
+        "Treasury"
+      );
       await waitFor(() => expect(writes).toEqual([]));
     }
   );

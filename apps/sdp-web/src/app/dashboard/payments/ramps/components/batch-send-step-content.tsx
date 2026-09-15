@@ -141,7 +141,10 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
 
   const [bulkOpen, setBulkOpen] = useState(false);
   const walletOptions = useMemo(
-    () => walletComboboxOptions(liveWallets, t("DashboardPayments.restricted")),
+    () =>
+      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
+        disableRestricted: true,
+      }),
     [liveWallets, t]
   );
 

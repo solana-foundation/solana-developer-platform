@@ -99,7 +99,10 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   } = wizard;
 
   const walletOptions = useMemo(
-    () => walletComboboxOptions(liveWallets, t("DashboardPayments.restricted")),
+    () =>
+      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
+        disableRestricted: true,
+      }),
     [liveWallets, t]
   );
   const destinationCountry =

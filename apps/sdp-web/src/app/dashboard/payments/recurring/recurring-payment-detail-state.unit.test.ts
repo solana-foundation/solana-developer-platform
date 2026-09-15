@@ -37,6 +37,22 @@ describe("getRecurringPaymentDetailState", () => {
     ).toMatchObject({ isEditable: false, signingActionsDisabled: true, cancelDisabled: true });
   });
 
+  it("keeps Save disabled when an active payment points at a restricted replacement", () => {
+    // The picker no longer offers such a wallet; this gate stays as the safety net
+    // for a wallet that was selected before its signing was restricted.
+    expect(
+      getRecurringPaymentDetailState({
+        sourceCustodyWalletId: "cwlt_source",
+        selectedCustodyWalletId: "cwlt_replacement",
+        status: "active",
+        hasPendingAction: false,
+        savingPayment: false,
+        sourceWallet: { isRuntimeExecutionAllowed: true },
+        selectedWallet: { isRuntimeExecutionAllowed: false },
+      })
+    ).toMatchObject({ isEditable: true, editWalletUnavailable: true, saveDisabled: true });
+  });
+
   it("does not report a signing restriction for a wallet it cannot see", () => {
     expect(
       getRecurringPaymentDetailState({

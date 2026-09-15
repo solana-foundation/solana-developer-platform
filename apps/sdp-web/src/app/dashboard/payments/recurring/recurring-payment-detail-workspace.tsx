@@ -864,7 +864,14 @@ export function RecurringPaymentDetailWorkspace({
                 label: walletLabel(entry, entry.walletId),
                 description: shortenAddress(entry.publicKey),
                 ...(entry.isRuntimeExecutionAllowed !== true
-                  ? { badge: t("DashboardPayments.restricted"), badgeVariant: "warning" as const }
+                  ? {
+                      badge: t("DashboardPayments.restricted"),
+                      badgeVariant: "warning" as const,
+                      // A pending draft may still point at it; an active payment
+                      // would have to sign with it, so the picker does not let the
+                      // user select it.
+                      disabled: recurringPayment.status === "active",
+                    }
                   : {}),
               }))}
               placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
