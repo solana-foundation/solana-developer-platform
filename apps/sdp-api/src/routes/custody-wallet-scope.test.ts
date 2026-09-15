@@ -35,10 +35,18 @@ vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   createAuthenticatedSponsorshipFeePayment: signerCheckMocks.createSponsorship,
 }));
 
+/** Seeded wallets' public keys: valid addresses, distinct from the shared fixtures. */
+const SEEDED_PUBLIC_KEYS = {
+  privyA: "HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH",
+  privyB: "CKmTHyQ4xMzL3dYzzaTBV5BKLjGPYVLPA4Q5DMLRRXUm",
+  paraA: "W8En8FoqdjDnMG7kahDRaPT6ZqUY872rkrsR9dReLTg",
+};
+
 const actualCreateSigningService = signingServiceModule.createSigningService;
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const createRpcFromTransportSpy = vi.spyOn(solanaRpc, "createRpcFromTransport");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
+const getMultipleAccountsLamportsMock = vi.spyOn(solanaRpc, "getMultipleAccountsLamports");
 const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
 const createSigningServiceMock = vi.spyOn(signingServiceModule, "createSigningService");
 const resolveRpcTargetMock = vi.spyOn(rpcRelay, "resolveRpcTarget");
@@ -186,7 +194,7 @@ async function seedAuthAndConfigs(): Promise<void> {
         "cwlt_scope_privy_a",
         PRIVY_CONFIG_ID,
         "privy_wallet_a",
-        "privy_pubkey_a",
+        SEEDED_PUBLIC_KEYS.privyA,
         "A",
         "root",
         "active"
@@ -201,7 +209,7 @@ async function seedAuthAndConfigs(): Promise<void> {
         "cwlt_scope_privy_b",
         PRIVY_CONFIG_ID,
         "privy_wallet_b",
-        "privy_pubkey_b",
+        SEEDED_PUBLIC_KEYS.privyB,
         "B",
         "transfer",
         "active"
@@ -216,7 +224,7 @@ async function seedAuthAndConfigs(): Promise<void> {
         "cwlt_scope_para_a",
         PARA_CONFIG_ID,
         "para_wallet_a",
-        "para_pubkey_a",
+        SEEDED_PUBLIC_KEYS.paraA,
         "C",
         "root",
         "active"
@@ -333,6 +341,9 @@ describe("Custody wallet scope routes", () => {
       lamports: 0n,
       owner: "11111111111111111111111111111111",
     } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+    getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+      addresses.map(() => 0n)
+    );
     getSplTokenBalancesMock.mockResolvedValue([
       {
         token: "USDC",
@@ -399,6 +410,7 @@ describe("Custody wallet scope routes", () => {
     await clearKVStores(env);
     createSigningServiceMock.mockReset();
     getAccountInfoMock.mockReset();
+    getMultipleAccountsLamportsMock.mockReset();
     getSplTokenBalancesMock.mockReset();
   });
 
@@ -984,8 +996,23 @@ describe("Custody wallet scope routes", () => {
 
     expect(body.data.wallets).toHaveLength(3);
     expect(body.data.wallets.every((wallet) => wallet.balances === undefined)).toBe(true);
-    expect(getAccountInfoMock).not.toHaveBeenCalled();
+    expect(getMultipleAccountsLamportsMock).not.toHaveBeenCalled();
     expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
+  });
+
+  it("reads SOL for every cache-missed wallet in one call", async () => {
+    clearWalletCaches();
+
+    const response = await app.request(
+      "/v1/wallets?includeAllProviders=true&view=summary&includeBalances=true",
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(getMultipleAccountsLamportsMock).toHaveBeenCalledTimes(1);
+    expect(getMultipleAccountsLamportsMock.mock.calls[0]?.[1]).toHaveLength(3);
+    expect(getAccountInfoMock).not.toHaveBeenCalled();
   });
 
   it("omits and does not cache balances when an RPC leg fails", async () => {
@@ -1105,17 +1132,14 @@ describe("Custody wallet scope routes", () => {
       ]);
     }
     getSplTokenBalancesMock.mockResolvedValue([]);
-    getAccountInfoMock.mockImplementation(
-      async (_rpc, publicKey) =>
-        ({
-          lamports:
-            publicKey === TEST_SOLANA_ADDRESSES.wallet2
-              ? 1_000_000_000n
-              : publicKey === TEST_SOLANA_ADDRESSES.wallet3
-                ? 2_000_000_000n
-                : 0n,
-          owner: "11111111111111111111111111111111",
-        }) as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>
+    getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+      addresses.map((publicKey) =>
+        publicKey === TEST_SOLANA_ADDRESSES.wallet2
+          ? 1_000_000_000n
+          : publicKey === TEST_SOLANA_ADDRESSES.wallet3
+            ? 2_000_000_000n
+            : 0n
+      )
     );
 
     const response = await app.request(
@@ -1233,7 +1257,7 @@ describe("Custody wallet scope routes", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { publicKey: string } };
-    expect(body.data.publicKey).toBe("para_pubkey_a");
+    expect(body.data.publicKey).toBe(SEEDED_PUBLIC_KEYS.paraA);
   });
 
   it("rejects custody record IDs on public command selectors", async () => {
@@ -1525,7 +1549,7 @@ describe("Custody wallet scope routes", () => {
 
     const explicit = await requestPublicKey("privy_wallet_b");
     expect(explicit.status).toBe(200);
-    expect(await explicit.json()).toMatchObject({ data: { publicKey: "privy_pubkey_b" } });
+    expect(await explicit.json()).toMatchObject({ data: { publicKey: SEEDED_PUBLIC_KEYS.privyB } });
   });
 
   it("returns 404 when the requested wallet is outside the API key bindings", async () => {

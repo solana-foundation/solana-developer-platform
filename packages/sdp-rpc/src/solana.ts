@@ -522,6 +522,48 @@ export async function getAccountInfo(
   return response.value;
 }
 
+/** The most addresses one `getMultipleAccounts` call accepts. */
+export const GET_MULTIPLE_ACCOUNTS_LIMIT = 100;
+
+/**
+ * Lamports held by each address, in the order asked, from one `getMultipleAccounts`
+ * call. An address with no account holds 0. Account data is sliced to nothing, since
+ * only the balance is read.
+ *
+ * @throws When asked for more than {@link GET_MULTIPLE_ACCOUNTS_LIMIT} addresses (the
+ *   caller chunks, so it decides what one failed chunk costs), or when the RPC answers
+ *   for a different number of addresses than it was asked about.
+ */
+export async function getMultipleAccountsLamports(
+  rpc: SolanaRpc,
+  addresses: readonly Address[],
+  commitment: Commitment = "confirmed"
+): Promise<bigint[]> {
+  if (addresses.length > GET_MULTIPLE_ACCOUNTS_LIMIT) {
+    throw new RangeError(
+      `getMultipleAccounts accepts at most ${GET_MULTIPLE_ACCOUNTS_LIMIT} addresses, got ${addresses.length}`
+    );
+  }
+  if (addresses.length === 0) {
+    return [];
+  }
+
+  const response = await rpc
+    .getMultipleAccounts(addresses, {
+      encoding: "base64",
+      commitment,
+      dataSlice: { offset: 0, length: 0 },
+    })
+    .send();
+  // A short answer would shift every balance onto the wrong address.
+  if (response.value.length !== addresses.length) {
+    throw new Error(
+      `getMultipleAccounts returned ${response.value.length} accounts for ${addresses.length} addresses`
+    );
+  }
+  return response.value.map((account) => (account === null ? 0n : account.lamports));
+}
+
 /**
  * Check if an account exists
  */

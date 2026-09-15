@@ -320,6 +320,7 @@
     "untitledToken": "Untitled token",
     "unableToLoadIssuanceTokens": "Unable to load issuance tokens",
     "someIssuanceActivityUnavailable": "Some issuance activity could not be loaded.",
+    "somePaymentsActivityUnavailable": "Some payments activity could not be loaded.",
     "paymentsActivityUnavailable": "Payments activity is unavailable right now.",
     "issuanceActivityUnavailable": "Issuance activity is unavailable right now.",
     "failedToLoadActivity": "Failed to load dashboard activity",

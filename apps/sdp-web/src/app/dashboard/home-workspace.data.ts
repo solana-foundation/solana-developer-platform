@@ -5,6 +5,7 @@ import type { HomeActivityRow } from "./home-page.data";
 interface HomeActivityResponseEnvelope {
   data?: {
     todaysVolume?: number | null;
+    todaysVolumeError?: string | null;
     activityRows?: HomeActivityRow[];
     activityError?: string | null;
     activityNotice?: string | null;
@@ -16,6 +17,8 @@ interface HomeActivityResponseEnvelope {
 
 export interface HomeActivitySnapshot {
   todaysVolume: number | null;
+  /** Set when not every wallet's transfers loaded, so the volume would be understated. */
+  todaysVolumeError: string | null;
   activityRows: HomeActivityRow[];
   activityError: string | null;
   activityNotice: string | null;
@@ -45,6 +48,7 @@ export async function fetchHomeActivity(
 
   return {
     todaysVolume: body.data?.todaysVolume ?? null,
+    todaysVolumeError: body.data?.todaysVolumeError ?? null,
     activityRows: body.data?.activityRows ?? [],
     activityError: body.data?.activityError ?? null,
     activityNotice: body.data?.activityNotice ?? null,

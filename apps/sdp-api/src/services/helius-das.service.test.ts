@@ -3,8 +3,10 @@ import { getDb } from "@/db";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
+  clearHeliusDasCachesForTests,
   getTrackedWalletBalancesByOwner,
 } from "@/services/helius-das.service";
+import { clearJupiterPriceCacheForTests } from "@/services/jupiter-price.service";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -63,6 +65,9 @@ describe("helius-das service", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
+    clearHeliusDasCachesForTests();
+    clearJupiterPriceCacheForTests();
     env.SOLANA_RPC_HELIUS_URL = originalHeliusUrl;
     env.SOLANA_RPC_HELIUS_API_KEY = originalHeliusApiKey;
   });
@@ -157,6 +162,31 @@ describe("helius-das service", () => {
       uiAmount: "20",
       decimals: 6,
     });
+  });
+
+  it("looks a symbol up once an hour, and again after a failed lookup", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
+    const balance = { token: mint, mint, amount: "20000000", uiAmount: "20", decimals: 6 };
+    const symbolResponse = {
+      ok: true,
+      json: async () => ({ result: [{ id: mint, token_info: { symbol: "EURC" } }] }),
+    } as Response;
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("helius down"))
+      .mockResolvedValue(symbolResponse);
+
+    // The outage leaves the mint unlabeled and is not remembered.
+    expect((await attachTokenSymbolsToBalances(env, [balance]))[0]?.token).toBe(mint);
+    expect((await attachTokenSymbolsToBalances(env, [balance]))[0]?.token).toBe("EURC");
+    vi.advanceTimersByTime(59 * 60_000);
+    expect((await attachTokenSymbolsToBalances(env, [balance]))[0]?.token).toBe("EURC");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    vi.advanceTimersByTime(60_000);
+    await attachTokenSymbolsToBalances(env, [balance]);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
   it("keeps configured token labels even when they are long", async () => {
