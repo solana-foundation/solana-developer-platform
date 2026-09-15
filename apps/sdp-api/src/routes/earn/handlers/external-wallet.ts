@@ -132,7 +132,7 @@ const EXTERNAL_POSITION_PAGE_SIZE = 100;
  * plausible-looking partial total.
  */
 export async function getEarnExternalWalletPositionSummary(c: AppContext) {
-  const { includeOwnerAddresses = true, includePositions = false } = parseQuery(
+  const { includeOwnerAddresses = false, includePositions = false } = parseQuery(
     c,
     earnExternalWalletPositionSummaryQuerySchema
   );
@@ -1076,7 +1076,7 @@ function summarizeExternalWalletPositions(
   holdings: readonly ExternalWalletHolding[],
   live: ReadonlyMap<string, HydratedVaultPositionValue>,
   options: { includeOwnerAddresses: boolean; includePositions: boolean } = {
-    includeOwnerAddresses: true,
+    includeOwnerAddresses: false,
     includePositions: false,
   }
 ): EarnExternalWalletPositionSummary {
@@ -1123,8 +1123,9 @@ function summarizeExternalWalletPositions(
         providerReference: strategy.providerReference,
         label: strategy.label,
         // The address list is the PII-bearing half of this read (EARN-028):
-        // omitted, not emptied, when the caller asked for totals only, so a
-        // consumer cannot mistake "not requested" for "no owners".
+        // omitted by default and only present on an explicit opt-in. Omitted,
+        // not emptied, so a consumer cannot mistake "not requested" for "no
+        // owners".
         ...(options.includeOwnerAddresses
           ? { ownerAddresses: [...strategy.owners].sort(compareWireStrings) }
           : {}),

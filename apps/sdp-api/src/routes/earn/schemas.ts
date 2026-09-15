@@ -535,11 +535,14 @@ export const earnExternalWalletPositionsQuerySchema = z
   .strict();
 
 /**
- * `includeOwnerAddresses=false` drops every owner-identifying field
- * (PRO-1873, threat model EARN-028). `includePositions=true` adds the already
+ * The summary is address-free by default (PRO-1908, threat model EARN-028):
+ * `ownerAddresses` is the project's end-user address book, so a caller must
+ * opt IN with `includeOwnerAddresses=true` to receive it (PRO-1873 shipped the
+ * opt-out; PRO-1908 flipped it). `includePositions=true` adds the already
  * hydrated positions to each strategy total so an interactive surface can
- * drill down without N more paid chain reads. Position details require owner
- * addresses; totals-only consumers should request neither.
+ * drill down without N more paid chain reads. Position details name their
+ * owners, so they require the explicit opt-in; totals-only consumers should
+ * request neither.
  */
 export const earnExternalWalletPositionSummaryQuerySchema = z
   .object({
@@ -554,10 +557,10 @@ export const earnExternalWalletPositionSummaryQuerySchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (value.includePositions && value.includeOwnerAddresses === false) {
+    if (value.includePositions && value.includeOwnerAddresses !== true) {
       ctx.addIssue({
         code: "custom",
-        message: "includePositions=true requires includeOwnerAddresses=true",
+        message: "includePositions=true requires an explicit includeOwnerAddresses=true",
         path: ["includePositions"],
       });
     }

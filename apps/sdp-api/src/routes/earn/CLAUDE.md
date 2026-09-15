@@ -1038,14 +1038,18 @@ three).
 
 `GET /external-wallet/positions/summary` is the one read on this surface that
 is project-wide rather than per-owner, and its `totalsByStrategy[].ownerAddresses`
-is the project's entire end-user address book (threat model EARN-028): any
-`earn:read` key becomes PII-bearing by calling it. `?includeOwnerAddresses=false`
-omits the list (omitted, never emptied, so "not requested" cannot read as "no
-owners") and keeps `walletCount`. Interactive surfaces can pass
-`includePositions=true` to receive each strategy's already hydrated positions
-in that same request; it requires owner addresses and replaces the
-dashboard's old N-per-owner read fanout. Partner docs steer analytics keys to
-the address-free opt-out shape and detailed surfaces to the explicit opt-in.
+is the project's entire end-user address book (threat model EARN-028). It is
+OMITTED by default (PRO-1908; PRO-1873 shipped the flag as an opt-out and the
+default was flipped in the same Earn V2 line): a plain call gets totals and
+`walletCount` only, and an `earn:read` key becomes PII-bearing only by passing
+`?includeOwnerAddresses=true`. Omitted, never emptied, so "not requested" cannot
+read as "no owners". Interactive surfaces add `includePositions=true` to receive
+each strategy's already hydrated positions in that same request; it requires
+the EXPLICIT `includeOwnerAddresses=true` (400 otherwise, since positions name
+their owners) and replaces the dashboard's old N-per-owner read fanout. The
+dashboard BFF (`sdp-web` `.../positions/summary/route.ts`) is the one caller
+that opts in, pinned by its unit test. Partner docs steer analytics keys to the
+default shape and detailed surfaces to the explicit opt-in.
 
 The owner is a REQUIRED `?ownerAddress=` query filter on EVERY per-owner read
 (movements, positions, earnings) — one addressing style for one concept, no
