@@ -219,7 +219,6 @@ function compactAmount(
 }
 
 function compactType(transfer: PaymentTransferSummary): string {
-  if (transfer.type === "transfer_confidential") return "Confidential";
   if (transfer.type === "transfer_batch") return "Batch";
   if (transfer.type === "onramp") return "Deposit";
   if (transfer.type === "offramp") return "Payout";

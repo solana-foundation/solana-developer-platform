@@ -136,13 +136,6 @@ export interface PaymentTransferFingerprintInput {
   amount: string | null;
   memo: string | null | undefined;
   type: string;
-  /**
-   * Vestigial: no caller passes this since private transfers were removed, but
-   * the key stays in the serialized fingerprint below. Dropping it would rewrite
-   * every fingerprint, so an Idempotency-Key recorded before that deploy would
-   * no longer match its own row and the retry would transfer a second time.
-   */
-  privateTransfer?: unknown;
 }
 
 export interface TransferBatchFingerprintRecipientInput {
@@ -175,7 +168,8 @@ function paymentTransferFingerprint(
       amount: input.amount,
       memo: input.memo ?? null,
       type: input.type,
-      privateTransfer: input.privateTransfer ?? null,
+      // Kept to preserve fingerprints recorded before private transfers were removed.
+      privateTransfer: null,
     })
   );
 }

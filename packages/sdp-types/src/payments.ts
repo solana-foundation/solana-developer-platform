@@ -100,6 +100,27 @@ export interface PaymentWalletPolicyAuditEntry {
   evaluatedAt: string;
 }
 
+export const PAYMENT_TRANSFER_TYPES = ["transfer", "transfer_batch", "onramp", "offramp"] as const;
+
+export type PaymentTransferType = (typeof PAYMENT_TRANSFER_TYPES)[number];
+
+/** Transfer types SDP signs from a custody wallet; ramps settle through a provider instead. */
+export const WALLET_TRANSFER_TYPES = [
+  "transfer",
+  "transfer_batch",
+] as const satisfies readonly PaymentTransferType[];
+
+export const RAMP_TRANSFER_TYPES = [
+  "onramp",
+  "offramp",
+] as const satisfies readonly PaymentTransferType[];
+
+export type RampTransferType = (typeof RAMP_TRANSFER_TYPES)[number];
+
+export function isRampTransferType(type: PaymentTransferType): type is RampTransferType {
+  return RAMP_TRANSFER_TYPES.some((rampType) => rampType === type);
+}
+
 export const PAYMENT_TRANSFER_STATUSES = [
   "pending",
   "processing",
@@ -302,7 +323,7 @@ export interface PaymentTransferSummary {
   status: PaymentTransferStatus;
   signature: string | null;
   error?: string | null;
-  type?: string;
+  type?: PaymentTransferType;
   direction?: string;
   source?: string;
   destination?: string;

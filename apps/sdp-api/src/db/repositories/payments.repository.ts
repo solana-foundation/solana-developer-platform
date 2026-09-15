@@ -1,29 +1,18 @@
-import type { PaymentTransferStatus } from "@sdp/types";
+import {
+  isRampTransferType,
+  type PaymentTransferStatus,
+  type PaymentTransferType,
+  RAMP_TRANSFER_TYPES,
+  type RampTransferType,
+  WALLET_TRANSFER_TYPES,
+} from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { RepositoryDbClient } from "./base";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
-export type PaymentTransferType =
-  | "transfer"
-  | "transfer_confidential"
-  | "transfer_batch"
-  | "onramp"
-  | "offramp";
-export const WALLET_TRANSFER_TYPES = [
-  "transfer",
-  "transfer_confidential",
-  "transfer_batch",
-] as const satisfies readonly PaymentTransferType[];
-export const RAMP_TRANSFER_TYPES = [
-  "onramp",
-  "offramp",
-] as const satisfies readonly PaymentTransferType[];
-export type RampTransferType = (typeof RAMP_TRANSFER_TYPES)[number];
-export function isRampTransferType(type: PaymentTransferType): type is RampTransferType {
-  return type === "onramp" || type === "offramp";
-}
+export { isRampTransferType, RAMP_TRANSFER_TYPES, WALLET_TRANSFER_TYPES };
 export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
-export type { PaymentTransferStatus };
+export type { PaymentTransferStatus, PaymentTransferType, RampTransferType };
 
 export interface PaymentTransferRow {
   id: string;

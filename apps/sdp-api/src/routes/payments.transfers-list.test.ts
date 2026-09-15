@@ -50,7 +50,7 @@ describe("Payments routes — list transfers", () => {
     token?: string;
     amount?: string;
     memo?: string | null;
-    type?: "transfer" | "transfer_confidential" | "transfer_batch" | "onramp" | "offramp";
+    type?: "transfer" | "transfer_batch" | "onramp" | "offramp";
     direction?: "inbound" | "outbound";
     provider?: "moonpay" | "lightspark" | "bvnk" | "moneygram" | "coinbase" | "mural" | "stripe";
     providerReference?: string | null;

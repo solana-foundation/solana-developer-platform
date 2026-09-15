@@ -11,6 +11,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
+  createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   fullySignTestTransaction,
   installPaymentsRouteTestHooks,
@@ -26,6 +27,7 @@ import {
 import {
   countTransferRows,
   listTransferRows,
+  postRawTransfer,
   postTransfer,
   readErrorResponse,
   readTransferResponse,
@@ -35,6 +37,26 @@ import {
 
 describe("Payments routes — on-chain transfers", () => {
   installPaymentsRouteTestHooks();
+  it("rejects the retired privateTransfer field at the request boundary", async () => {
+    const res = await postRawTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+        privateTransfer: {},
+      },
+      {}
+    );
+
+    expect(res.status).toBe(400);
+    const body = await readErrorResponse(res);
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    expect(await countTransferRows()).toBe(0);
+  });
+
   it("blocks create transfer to a destination outside the control-profile allowlist", async () => {
     await seedWalletControlProfile({
       rules: [

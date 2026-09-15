@@ -33,6 +33,13 @@ export async function postTransfer(
   body: z.input<typeof createTransferSchema>,
   options: PostTransferOptions
 ): Promise<Response> {
+  return postRawTransfer(body, options);
+}
+
+export async function postRawTransfer(
+  body: Record<string, unknown>,
+  options: PostTransferOptions
+): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
