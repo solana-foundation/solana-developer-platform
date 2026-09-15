@@ -219,7 +219,7 @@ export function MoneygramRampWidget({
             if (!sourceTokenMint) {
               throw new Error(t("DashboardPayments.ramps.sourceWalletNoUsdc"));
             }
-            const transfer = await createTransfer(
+            const outcome = await createTransfer(
               {
                 sourceCustodyWalletId: sourceWalletId,
                 destination: tx.to,
@@ -227,8 +227,15 @@ export function MoneygramRampWidget({
                 amount: tx.amount,
                 ...(tx.memo ? { memo: tx.memo } : {}),
               },
-              t
+              t,
+              null
             );
+            // MoneyGram needs a signature now; an approval answers later, so the
+            // widget is told plainly that nothing was sent rather than "failed".
+            if (outcome.kind === "approval_pending") {
+              throw new Error(t("DashboardPayments.ramps.transferHeldForApproval"));
+            }
+            const transfer = outcome.transfer;
             if (!transfer.signature) {
               throw new Error(
                 t("DashboardPayments.ramps.transferSignatureMissing", {
