@@ -843,7 +843,7 @@ describe("Payments routes — recurring", () => {
                           FROM payment_recurring_payment_activation_attempts
                          WHERE recurring_payment_id = rp.id
                          ORDER BY created_at DESC LIMIT 1)
-           LEFT JOIN payment_subscriptions ps ON ps.id = a.subscription_id
+           LEFT JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
           WHERE rp.id = ?`
       )
       .bind(created.id)
@@ -3416,17 +3416,27 @@ describe("Payments routes — recurring", () => {
 
   it("journals failed activation attempts and allows activation retry", async () => {
     const signAndSendMock = recurringExecution.signAndSendMock();
-    signAndSendMock.mockReset();
-    signAndSendMock.mockRejectedValueOnce(new Error("plan creation send unavailable"));
-    signAndSendMock.mockResolvedValueOnce(testSignature(1));
-    signAndSendMock.mockResolvedValueOnce(testSignature(2));
     const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const createRepository =
+      paymentSubscriptionsRepositoryPostgres.createPostgresPaymentSubscriptionsRepository;
+    const repositorySpy = vi
+      .spyOn(paymentSubscriptionsRepositoryPostgres, "createPostgresPaymentSubscriptionsRepository")
+      .mockImplementation((db) => {
+        const repository = createRepository(db);
+        return {
+          ...repository,
+          updatePlan: vi.fn(async () => {
+            throw new Error("plan PDA write unavailable");
+          }),
+        };
+      });
 
     const failedRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
       { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
       env
     );
+    repositorySpy.mockRestore();
 
     expect(failedRes.status).toBe(500);
     const getAfterFailureRes = await app.request(
@@ -3462,7 +3472,7 @@ describe("Payments routes — recurring", () => {
     expect(retryRes.status).toBe(200);
     const retryBody = await parseRecurringResponse(retryRes);
     expect(retryBody.data.recurringPayment.status).toBe("active");
-    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
   it("recovers stale activating recurring payments without recreating the plan", async () => {

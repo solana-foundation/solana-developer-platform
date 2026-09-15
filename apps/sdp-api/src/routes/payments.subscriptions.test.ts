@@ -453,7 +453,7 @@ describe("Payments routes — subscriptions", () => {
     });
     expectPreparedSubscriptionTransaction(prepareAuthorizationBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet2,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_SOLANA_ADDRESSES.wallet2,
     ]);
 
     const authorizedAt = new Date().toISOString();
@@ -489,7 +489,7 @@ describe("Payments routes — subscriptions", () => {
     expect(prepareCancelBody.data.subscription.id).toBe(subscriptionId);
     expectPreparedSubscriptionTransaction(prepareCancelBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet2,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_SOLANA_ADDRESSES.wallet2,
     ]);
 
     const prepareResumeRes = await app.request(
@@ -508,7 +508,7 @@ describe("Payments routes — subscriptions", () => {
     expect(prepareResumeBody.data.subscription.id).toBe(subscriptionId);
     expectPreparedSubscriptionTransaction(prepareResumeBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet2,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_SOLANA_ADDRESSES.wallet2,
     ]);
 
     const amountOverrideRes = await app.request(
@@ -543,7 +543,7 @@ describe("Payments routes — subscriptions", () => {
     expect(prepareCollectionBody.data.subscription.id).toBe(subscriptionId);
     expectPreparedSubscriptionTransaction(prepareCollectionBody.data.preparedTransaction, [
       TEST_SOLANA_ADDRESSES.wallet1,
-      "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      TEST_MOCK_FEE_PAYER,
     ]);
   });
 });
