@@ -18,7 +18,7 @@ import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { fetchMaybeMint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { BLOCKED_MINT_EXTENSIONS } from "./mints";
+import { BLOCKED_MINT_EXTENSIONS, UNSUPPORTED_MINT_EXTENSIONS } from "./mints";
 
 export interface DvpMintInspection {
   mint: string;
@@ -28,7 +28,10 @@ export interface DvpMintInspection {
   /** From the Token-2022 metadata extension, when the mint carries one inline. */
   name: string | null;
   symbol: string | null;
-  /** False when DvP settlement would refuse this mint outright. */
+  /**
+   * False when a trade on this mint would be refused: by the program, or by SDP
+   * because it could not settle, cancel or reclaim it. Create refuses the same.
+   */
   eligible: boolean;
   /**
    * The extension that rules it out, when it is not eligible. Named rather than
@@ -80,7 +83,8 @@ export async function inspectDvpMint(
   const blockedBy =
     extensions
       .map((extension) => extension.__kind)
-      .find((kind) => BLOCKED_MINT_EXTENSIONS.has(kind)) ?? null;
+      .find((kind) => BLOCKED_MINT_EXTENSIONS.has(kind) || UNSUPPORTED_MINT_EXTENSIONS.has(kind)) ??
+    null;
 
   const metadata = extensions.find((extension) => extension.__kind === "TokenMetadata");
   const name =

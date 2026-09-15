@@ -8,6 +8,8 @@
  * exist to avoid.
  */
 
+import { type Address, none, some } from "@solana/kit";
+import { extension, getMintEncoder } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 
 /** An RPC whose `getAccountInfo` returns the given wire-format account. */
@@ -62,6 +64,29 @@ describe("inspectDvpMint", () => {
       tokenProgram: TOKEN_2022,
       eligible: true,
       blockedBy: null,
+    });
+  });
+
+  // Create refuses a hook mint, so the form must hear the same answer before
+  // anyone types an amount.
+  it("marks a transfer-hook mint ineligible and names the extension", async () => {
+    const authority = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC" as Address;
+    const data = getMintEncoder().encode({
+      mintAuthority: some(authority),
+      supply: 0n,
+      decimals: 6,
+      isInitialized: true,
+      freezeAuthority: none(),
+      extensions: some([extension("TransferHook", { authority, programId: authority })]),
+    });
+    const rpc = rpcReturning({
+      owner: TOKEN_2022,
+      data: Buffer.from(data).toString("base64"),
+    });
+
+    await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toMatchObject({
+      eligible: false,
+      blockedBy: "TransferHook",
     });
   });
 
