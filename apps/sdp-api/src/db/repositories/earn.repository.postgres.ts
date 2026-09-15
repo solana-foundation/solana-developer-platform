@@ -156,13 +156,15 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              redemption_delay_days = EXCLUDED.redemption_delay_days,
              risk_metadata = EXCLUDED.risk_metadata,
              host_cluster = EXCLUDED.host_cluster,
-             -- A sync-owned delisting may be reactivated when the provider
-             -- lists the same reference again. Operator pauses/deprecations are
-             -- sticky and still outrank the catalogue.
+             -- Migration 0099 clears the tombstone marker when an operator
+             -- updates status. A sync-owned delisting may be reactivated when
+             -- the provider relists it; operator pauses/deprecations stay sticky.
              status = CASE
-               WHEN earn_strategies.catalogue_delisted_at IS NOT NULL
-                 THEN EXCLUDED.status
-               WHEN earn_strategies.status IN ('paused', 'deprecated')
+               WHEN earn_strategies.status = 'paused'
+                 OR (
+                   earn_strategies.status = 'deprecated'
+                   AND earn_strategies.catalogue_delisted_at IS NULL
+                 )
                  THEN earn_strategies.status
                ELSE EXCLUDED.status
              END,

@@ -10,3 +10,26 @@ ALTER TABLE earn_strategies
 
 COMMENT ON COLUMN earn_strategies.catalogue_delisted_at IS
     'Set when catalogue sync deprecates an unlisted strategy; null for operator-owned status changes.';
+
+-- Catalogue sync always changes status and catalogue_delisted_at together.
+-- A status update that leaves the marker untouched is therefore operator-owned,
+-- including deprecated -> deprecated. Clear the marker so a later provider
+-- relist cannot overwrite that stop.
+CREATE OR REPLACE FUNCTION sdp_preserve_earn_strategy_operator_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.catalogue_delisted_at IS NOT DISTINCT FROM OLD.catalogue_delisted_at THEN
+        NEW.catalogue_delisted_at := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS earn_strategy_operator_status_is_sticky ON earn_strategies;
+CREATE TRIGGER earn_strategy_operator_status_is_sticky
+    BEFORE UPDATE OF status ON earn_strategies
+    FOR EACH ROW
+    WHEN (OLD.catalogue_delisted_at IS NOT NULL)
+    EXECUTE FUNCTION sdp_preserve_earn_strategy_operator_status();

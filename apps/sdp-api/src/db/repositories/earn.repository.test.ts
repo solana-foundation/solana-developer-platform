@@ -483,6 +483,39 @@ describe("EarnRepository (postgres)", () => {
       });
     });
 
+    it.each(["paused", "deprecated"] as const)(
+      "keeps an operator %s applied to a tombstone sticky across a relist",
+      async (status) => {
+        const stale = await seedStrategy({ providerReference: `operator-${status}` });
+        await repo.deprecateUnlistedStrategies({
+          provider: "upshift",
+          environment: "sandbox",
+          listedProviderReferences: ["another-vault"],
+        });
+
+        // Operators update status directly. The trigger must distinguish this
+        // from sync-owned deprecation even when deprecated -> deprecated.
+        await getDb(env)
+          .prepare("UPDATE earn_strategies SET status = ?, updated_at = sdp_iso_now() WHERE id = ?")
+          .bind(status, stale.id)
+          .run();
+
+        expect(await repo.getStrategyById(stale.id)).toMatchObject({
+          status,
+          catalogue_delisted_at: null,
+        });
+
+        const relisted = await repo.upsertStrategy(
+          strategyInput({ providerReference: `operator-${status}`, status: "active" })
+        );
+        expect(relisted).toMatchObject({
+          id: stale.id,
+          status,
+          catalogue_delisted_at: null,
+        });
+      }
+    );
+
     it("is idempotent and leaves operator-paused rows alone", async () => {
       const paused = await seedStrategy({
         providerReference: "morpho-smokehouse-usdc",
