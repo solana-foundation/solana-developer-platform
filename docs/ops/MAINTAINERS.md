@@ -22,9 +22,12 @@ Read this when setting up local development, configuring CI, rotating secrets, o
 
 ### Deploy a change to dev
 
-1. Merge the change to `main`.
-2. Follow the `Deploy sdp-api to Cloud Run (dev)` workflow.
-3. Verify `https://api-dev.solana.com/health` and the affected API behavior.
+Merging to `main` deploys stage, not dev. Two paths reach dev:
+
+1. **From a pull request:** add the `deploy-dev` label. `deploy-dev-on-label.yml` deploys the PR head and redeploys on every later push while the label stays on; remove the label when you are done so the next PR can take dev.
+2. **From `main`:** run the `Deploy sdp-api to Cloud Run (dev)` workflow by hand (`gh workflow run deploy-sdp-api-gcp.yml --ref main`).
+
+Then verify `https://api-dev.solana.com/health` and the affected API behavior. Dev holds one deployment at a time, so say in the PR or channel that you have it.
 
 ### Publish a production release
 

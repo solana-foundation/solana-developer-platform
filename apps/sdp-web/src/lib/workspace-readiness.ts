@@ -1,5 +1,6 @@
 import type { ListProjectsResponse } from "@sdp/types";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
+import { resolveProjectFromList } from "./dashboard-project-selection";
 
 export type WorkspaceReadiness =
   | { state: "ready"; projectId: string }
@@ -17,10 +18,9 @@ export async function resolveWorkspaceReadiness(
     if (!status.linked) return { state: "pending", reason: "sync" };
     // A linked org alone does not prove the membership and default projects are ready.
     const { projects } = await client.fetch<ListProjectsResponse>("/v1/projects", { signal });
-    const project =
-      projects.find((item) => item.id === currentProject) ??
-      projects.find((item) => item.slug === "default-sandbox") ??
-      projects[0];
+    const project = resolveProjectFromList(projects, currentProject, {
+      fallbackToFirstProject: true,
+    });
     return project
       ? { state: "ready", projectId: project.id }
       : { state: "pending", reason: "sync" };

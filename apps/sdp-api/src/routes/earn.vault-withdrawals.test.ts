@@ -1,4 +1,5 @@
 import { SdpEarnError } from "@sdp/earn";
+import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +16,8 @@ import app from "@/index";
 import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
+import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
@@ -45,8 +48,9 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
  * Per-test override for the withdraw-capable client, delegating to the REAL
  * registry when unset — same pattern as `earn.vault.test.ts`. The preview
  * route reaches the client directly, and the real Veda client would quote
- * against a live RPC; Kamino cases stay on the real registry, whose client
- * genuinely lacks `quoteVaultWithdrawal`, so the 501 is measured, not staged.
+ * against a live RPC. The 501 case stays on the real registry, which has no
+ * executing client for upshift, so the refusal is measured, not staged
+ * (Kamino held that role until it learned to quote).
  */
 const vaultWithdrawClientOverride = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -260,6 +264,7 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     amount_requested: "10",
     amount_settled: null,
     fee_amount: null,
+    token_amount_settled: null,
     min_shares_out: null,
     shares_out: null,
     payout_token: null,
@@ -1069,15 +1074,22 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
     });
   });
 
-  it("answers 501 for a provider that cannot quote, measured against the real client", async () => {
+  it("answers 501 for a provider that cannot quote, measured against the real registry", async () => {
     await seedAuth();
-    const positionId = await seedPosition({ provider: "kamino" });
+    const positionId = await seedPosition({ provider: "upshift" });
 
     const res = await postVaultWithdrawalPreview({ positionId, shares: "5" });
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  /** The real Kamino client, as the registry builds it, now clears the exit-quote guard. */
+  it("measures the real Kamino client as withdrawal-quote capable", () => {
+    const client = resolveEarnExecutionClient(env, "kamino", createVaultDeadline());
+    if (!client) throw new Error("the registry must build a Kamino client");
+    expect(supportsVaultWithdrawQuote(client)).toBe(true);
   });
 
   it("answers 404 for a position this workspace cannot see", async () => {

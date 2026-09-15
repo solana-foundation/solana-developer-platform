@@ -175,6 +175,46 @@ function WorkSection({
   );
 }
 
+function permissionCountLabel(
+  permissions: readonly string[],
+  t: ReturnType<typeof useTranslations>
+): string {
+  return permissions.includes("*")
+    ? t("DashboardCustody.apiKeyFullEndpointAccess")
+    : t("DashboardCustody.apiKeyPermissionCount", { count: permissions.length });
+}
+
+/**
+ * The endpoint permissions a role grants, spelled out. A bare count left a
+ * partner guessing whether "Developer" covered Earn, which is the exact thing
+ * the Embedded Yield guide sends them here to check. Callers skip it for the
+ * `*` admin sentinel, where "Full endpoint access" is the whole list.
+ */
+function PermissionChipList({
+  className,
+  permissions,
+}: {
+  className?: string;
+  permissions: readonly string[];
+}) {
+  const t = useTranslations();
+  return (
+    <ul
+      aria-label={t("DashboardCustody.endpointPermissions")}
+      className={cn("flex flex-wrap gap-1.5", className)}
+    >
+      {permissions.map((permission) => (
+        <li
+          key={permission}
+          className="rounded-md border border-border-default bg-surface-raised px-2 py-0.5 text-xs font-medium text-secondary"
+        >
+          {permission}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function WizardProgress({ currentStep }: { currentStep: ApiKeyAuthoringStep }) {
   const t = useTranslations();
   const currentIndex = API_KEY_AUTHORING_STEPS.indexOf(currentStep);
@@ -329,13 +369,14 @@ function PermissionsStep({
           </div>
           <div className="mt-4 flex items-start gap-3 rounded-lg bg-fill-subtle p-3">
             <ShieldCheck className="mt-0.5 size-4 shrink-0 text-tertiary" />
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-primary">
-                {permissions.includes("*")
-                  ? t("DashboardCustody.apiKeyFullEndpointAccess")
-                  : t("DashboardCustody.apiKeyPermissionCount", { count: permissions.length })}
+                {permissionCountLabel(permissions, t)}
               </p>
-              <p className="mt-1 text-xs text-secondary">
+              {permissions.includes("*") ? null : (
+                <PermissionChipList className="mt-2" permissions={permissions} />
+              )}
+              <p className="mt-2 text-xs text-secondary">
                 {t("DashboardCustody.apiKeyPermissionsSeparateFromPolicy")}
               </p>
             </div>
@@ -898,14 +939,14 @@ function ReviewStep({
           <ReviewLine label={t("DashboardCustody.role")} value={roleLabel(draft.role, t)} />
           <ReviewLine
             label={t("DashboardCustody.endpointPermissions")}
-            value={
-              getPermissionsForApiKeyRole(draft.role).includes("*")
-                ? t("DashboardCustody.apiKeyFullEndpointAccess")
-                : t("DashboardCustody.apiKeyPermissionCount", {
-                    count: getPermissionsForApiKeyRole(draft.role).length,
-                  })
-            }
+            value={permissionCountLabel(getPermissionsForApiKeyRole(draft.role), t)}
           />
+          {getPermissionsForApiKeyRole(draft.role).includes("*") ? null : (
+            <PermissionChipList
+              className="pt-2.5"
+              permissions={getPermissionsForApiKeyRole(draft.role)}
+            />
+          )}
         </WorkSection>
         <WorkSection title={t("DashboardCustody.apiKeyReviewWalletAccess")}>
           <ReviewLine

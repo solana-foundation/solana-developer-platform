@@ -485,6 +485,220 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(reopened.activated_at).not.toBeNull();
     });
 
+    it("refuses to close a holding while one of its movements is still unsettled", async () => {
+      // A read can observe zero shares while a deposit is in flight (recorded,
+      // not yet landed). Closing then would hide the position the landing
+      // deposit is about to fill, so the guard waits for settlement.
+      const created = await ledger.createSignedVaultDepositIntent(intent());
+      const [pending] = await positions();
+      expect(
+        await ledger.closeVaultPositionIfEmpty({
+          positionId: created.position.id,
+          organizationId: ORG,
+          observedUpdatedAt: pending.updated_at,
+        })
+      ).toBe(false);
+      expect((await positions())[0].closed_at).toBeNull();
+
+      const settledAt = "2026-08-19T12:30:00.000Z";
+      await ledger.advanceVaultMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: settledAt,
+        settledAt,
+      });
+      const [settled] = await positions();
+      expect(
+        await ledger.closeVaultPositionIfEmpty({
+          positionId: created.position.id,
+          organizationId: ORG,
+          observedUpdatedAt: settled.updated_at,
+        })
+      ).toBe(true);
+    });
+
+    it("refuses a close whose zero-share snapshot predates a deposit that refilled the holding", async () => {
+      const created = await ledger.createSignedVaultDepositIntent(intent());
+      const settledAt = "2026-08-19T12:30:00.000Z";
+      await ledger.advanceVaultMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: settledAt,
+        settledAt,
+      });
+      // The observer read the row (and its live balance) here...
+      const [observed] = await positions();
+      // ...then a second deposit landed before the observer reached the lock.
+      const refill = await ledger.createSignedVaultDepositIntent(intent({ requestedAmount: "5" }));
+      await ledger.advanceVaultMovement({
+        movementId: refill.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: "2026-08-19T12:31:00.000Z",
+        settledAt: "2026-08-19T12:31:00.000Z",
+      });
+      expect(
+        await ledger.closeVaultPositionIfEmpty({
+          positionId: created.position.id,
+          organizationId: ORG,
+          observedUpdatedAt: observed.updated_at,
+        })
+      ).toBe(false);
+      expect((await positions())[0].closed_at).toBeNull();
+    });
+
+    it("closes a holding observed empty and lets a later deposit re-open it", async () => {
+      const created = await ledger.createSignedVaultDepositIntent(intent());
+      const settledAt = "2026-08-19T12:30:00.000Z";
+      await ledger.advanceVaultMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: settledAt,
+        settledAt,
+      });
+      const [observed] = await positions();
+
+      // The settlement hook observed live shares "0" after an exit: the close
+      // is idempotent (second call reports nothing to do) and org-scoped.
+      expect(
+        await ledger.closeVaultPositionIfEmpty({
+          positionId: created.position.id,
+          organizationId: ORG_OTHER,
+          observedUpdatedAt: observed.updated_at,
+        })
+      ).toBe(false);
+      expect(
+        await ledger.closeVaultPositionIfEmpty({
+          positionId: created.position.id,
+          organizationId: ORG,
+          observedUpdatedAt: observed.updated_at,
+        })
+      ).toBe(true);
+      expect(
+        await ledger.closeVaultPositionIfEmpty({
+          positionId: created.position.id,
+          organizationId: ORG,
+          observedUpdatedAt: observed.updated_at,
+        })
+      ).toBe(false);
+      const [closed] = await positions();
+      expect(closed.closed_at).not.toBeNull();
+
+      // Re-entry reuses the row and the deposit transition clears the close.
+      const reentry = await ledger.createSignedVaultDepositIntent(intent({ requestedAmount: "5" }));
+      expect(reentry.position.id).toBe(created.position.id);
+      await ledger.advanceVaultMovement({
+        movementId: reentry.movement.id,
+        organizationId: ORG,
+        toStatus: "confirmed",
+        confirmedAt: "2026-08-20T12:00:00.000Z",
+      });
+      const [reopened] = await positions();
+      expect(reopened.closed_at).toBeNull();
+    });
+
+    it("stamps the deposit-token settlement on finalization (0103)", async () => {
+      const deposit = await ledger.createSignedVaultDepositIntent(intent());
+      const settledAt = "2026-08-19T12:30:00.000Z";
+      // A deposit's token amount is its settled amount; a caller-supplied
+      // value is ignored for that direction.
+      await ledger.advanceVaultMovement({
+        movementId: deposit.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: settledAt,
+        settledAt,
+        tokenAmountSettled: "999",
+      });
+      expect(await onlyMovement()).toMatchObject({
+        amount_settled: "100",
+        token_amount_settled: "100",
+      });
+
+      const withdrawal = await ledger.createSignedVaultWithdrawalIntent({
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "kamino",
+        positionId: deposit.position.id,
+        vaultAddress: VAULT,
+        custodyWalletId: WALLET,
+        shareMint: SHARE_MINT,
+        requestedShares: "40",
+        walletAddress: WALLET_PUBKEY,
+        signature: `sig_${crypto.randomUUID()}`,
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "12345",
+        requestId: crypto.randomUUID(),
+        idempotencyFingerprint: crypto.randomUUID(),
+      });
+      // A withdrawal's token amount is only ever what the caller OBSERVED on
+      // the landed transaction; shares never leak into the token column.
+      await ledger.advanceVaultMovement({
+        movementId: withdrawal.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: settledAt,
+        settledAt,
+        tokenAmountSettled: "41.5",
+      });
+      const rows = await movements();
+      expect(rows.find((row) => row.id === withdrawal.movement.id)).toMatchObject({
+        direction: "withdrawal",
+        amount_settled: "40",
+        token_amount_settled: "41.5",
+      });
+    });
+
+    it("leaves a withdrawal's token amount NULL when no payout was observed", async () => {
+      const deposit = await ledger.createSignedVaultDepositIntent(intent());
+      const withdrawal = await ledger.createSignedVaultWithdrawalIntent({
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "kamino",
+        positionId: deposit.position.id,
+        vaultAddress: VAULT,
+        custodyWalletId: WALLET,
+        shareMint: SHARE_MINT,
+        requestedShares: "40",
+        walletAddress: WALLET_PUBKEY,
+        signature: `sig_${crypto.randomUUID()}`,
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "12345",
+        requestId: crypto.randomUUID(),
+        idempotencyFingerprint: crypto.randomUUID(),
+      });
+      const settledAt = "2026-08-19T12:30:00.000Z";
+      await ledger.advanceVaultMovement({
+        movementId: withdrawal.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: settledAt,
+        settledAt,
+        tokenAmountSettled: null,
+      });
+      const rows = await movements();
+      expect(rows.find((row) => row.id === withdrawal.movement.id)).toMatchObject({
+        status: "finalized",
+        amount_settled: "40",
+        token_amount_settled: null,
+      });
+      // The observation belongs to finalization and nowhere else.
+      await expect(
+        ledger.advanceVaultMovement({
+          movementId: deposit.movement.id,
+          organizationId: ORG,
+          toStatus: "confirmed",
+          confirmedAt: settledAt,
+          tokenAmountSettled: "1",
+        })
+      ).rejects.toThrow(/tokenAmountSettled is only valid when finalizing/);
+    });
+
     it("gives two organizations holding the same vault separate holdings and ledgers", async () => {
       const db = getDb(env);
       // 0059's founding constraint: a public vault is not claimable by whoever

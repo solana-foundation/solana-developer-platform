@@ -9,7 +9,7 @@ import {
 } from "@/db/repositories";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
-import { badRequest } from "@/lib/errors";
+import { badRequest, transactionExpired } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -280,7 +280,8 @@ function builtRow(overrides: Record<string, unknown> = {}) {
 function submitResult(overrides: Record<string, unknown> = {}) {
   const movementId = `earn_movement_${crypto.randomUUID()}`;
   return {
-    position: { id: "earn_position_ext_test" },
+    // The wire's tokenMint/tokenAmount come from the position's deposit token.
+    position: { id: "earn_position_ext_test", token_mint: USDC_MINT },
     movement: {
       id: movementId,
       position_id: "earn_position_ext_test",
@@ -904,6 +905,27 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
     expect(res.status).toBe(400);
   });
 
+  it("answers an expired build as 409 TRANSACTION_EXPIRED", async () => {
+    await seedAuth();
+    submitExternalWalletDeposit.mockRejectedValue(
+      transactionExpired(
+        "This transaction's blockhash expired before it was submitted. " +
+          "Build a new transaction and have the customer sign it again."
+      )
+    );
+
+    const res = await post(
+      "deposits",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("TRANSACTION_EXPIRED");
+    expect(body.error.message).toContain("Build a new transaction");
+  });
+
   it("records the submit and answers the movement in ledger vocabulary", async () => {
     await seedAuth();
     const key = crypto.randomUUID();
@@ -1314,6 +1336,39 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "failure" });
     expect(String(rows[0]?.metadata)).toContain("signature verification failed");
+  });
+
+  it("closes the deposit intent as a failure when the build expired (409)", async () => {
+    await seedAuth();
+    submitExternalWalletDeposit.mockRejectedValue(transactionExpired());
+
+    const res = await post(
+      "deposits",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(409);
+
+    // The expiry refusal is pre-record, so it takes the same 4xx gate as a
+    // verification failure: closed, never paged.
+    const rows = await auditRows("deposit");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "failure" });
+  });
+
+  it("writes no withdrawal audit row when the exit build expired (409)", async () => {
+    await seedAuth();
+    submitExternalWalletWithdrawal.mockRejectedValue(transactionExpired());
+
+    const res = await post(
+      "withdrawals",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("TRANSACTION_EXPIRED");
+    await expect(auditRows("withdraw")).resolves.toHaveLength(0);
   });
 
   it("leaves the deposit intent unresolved on an ambiguous 5xx", async () => {

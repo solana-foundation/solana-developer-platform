@@ -8,8 +8,12 @@ permissions:
   contents: read
   id-token: write
 
+# A different group from the reusable workflow it calls on purpose: sharing
+# `sdp-api-gcp-deploy-dev` with the callee queues the callee behind this run,
+# which GitHub reports as a concurrency deadlock and fails with no jobs. The
+# callee's own group still serialises label deploys against dispatch deploys.
 concurrency:
-  group: sdp-api-gcp-deploy-dev
+  group: sdp-api-gcp-deploy-dev-label
   cancel-in-progress: false
 
 jobs:
