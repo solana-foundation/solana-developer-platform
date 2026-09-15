@@ -39,7 +39,7 @@ const connectionsPageResultSchema = z.object({
   }),
 });
 
-const connectionsPageEnvelopeSchema = z.object({
+export const connectionsPageEnvelopeSchema = z.object({
   data: connectionsPageResultSchema,
 });
 

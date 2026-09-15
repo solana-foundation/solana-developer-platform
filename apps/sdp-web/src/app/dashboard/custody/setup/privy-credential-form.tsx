@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useRef, useState, useTransition } from "react";
+import { type FormEvent, useEffect, useRef, useState, useTransition } from "react";
 import {
   type PrivyByokSubmitResult,
   recheckPrivyCredentialAction,
@@ -53,10 +53,31 @@ const FIELD_INPUT_CLASS =
 export function PrivyCredentialForm({
   formId,
   onRecoveryLockChange,
+  onSuccess,
+  showSubmitButton = true,
+  onPendingChange,
 }: {
   formId: string;
   /** True while leaving this form would strand a stored credential or key. */
   onRecoveryLockChange?: (locked: boolean) => void;
+  /**
+   * Where a completed install goes. Defaults to the wallets list, which is
+   * where the setup wizard belongs afterwards; the provider page's Add
+   * connection modal passes its own handler to land on the new connection.
+   */
+  onSuccess?: (connectionId: string) => void;
+  /**
+   * The form renders its own primary by default. Hosts that own a footer — the
+   * wizard, and the modal — turn it off and submit via `form={formId}` instead,
+   * so the action sits where every other primary on that surface sits.
+   */
+  showSubmitButton?: boolean;
+  /**
+   * Mirrors the in-flight state outward, so a host that owns the primary can
+   * disable it — and, in the modal's case, refuse to close while a submission
+   * that may still commit is in the air.
+   */
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -66,6 +87,10 @@ export function PrivyCredentialForm({
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
   const [appSecret, setAppSecret] = useState("");
   const lastPayloadRef = useRef(new FormData());
+
+  useEffect(() => {
+    onPendingChange?.(isPending);
+  }, [isPending, onPendingChange]);
 
   const privyFields = getCustodyProviderEntry("privy").storedCredentialSetup;
   if (privyFields.mode !== "self_service") {
@@ -80,7 +105,11 @@ export function PrivyCredentialForm({
       onRecoveryLockChange?.(false);
       refreshWalletInventory();
       router.refresh();
-      router.push("/dashboard/wallets");
+      if (onSuccess) {
+        onSuccess(result.connectionId);
+      } else {
+        router.push("/dashboard/wallets");
+      }
       return;
     }
     if (result.status === "retry_unknown") {
@@ -333,11 +362,13 @@ export function PrivyCredentialForm({
         </div>
       ) : null}
 
-      <div>
-        <Button type="submit" disabled={isPending}>
-          {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
-        </Button>
-      </div>
+      {showSubmitButton ? (
+        <div>
+          <Button type="submit" disabled={isPending}>
+            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
+          </Button>
+        </div>
+      ) : null}
     </form>
   );
 }

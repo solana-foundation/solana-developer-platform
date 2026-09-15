@@ -2,9 +2,15 @@ import { auth } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary, OrganizationRpcProvider } from "@sdp/types";
 import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import {
+  type ConnectionsPageResult,
+  fetchWalletsByConnection,
+  parseConnectionsFilters,
+  resolveConnectionsPage,
+} from "@/app/dashboard/custody/connections/connections.data";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
-import { custody, payments, policies } from "@/flags";
+import { custody, payments, policies, privyByok } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -146,10 +152,55 @@ async function getRpcCredentialMode(
   }
 }
 
+/**
+ * The project's custody connections for this provider, plus their wallets.
+ *
+ * Returns `null` when the section does not apply (not a custody provider, or
+ * BYOK is off) and `"restricted"` when the viewer may not read them — the
+ * internal routes are `custody:admin` for reads as well as writes, so asking on
+ * a member's behalf returns 403 every time. Not permitted is its own answer,
+ * not a failed request.
+ *
+ * The wallet read degrades on its own: a connection list without wallet
+ * columns is still worth rendering, and the cells say so.
+ */
+async function getCustodyConnections(
+  request: SdpApiClient["request"],
+  canManage: boolean,
+  searchParams: Record<string, string | string[] | undefined>
+) {
+  if (!canManage) {
+    return "restricted" as const;
+  }
+  try {
+    const filters = parseConnectionsFilters(searchParams);
+    const [page, wallets] = await Promise.all([
+      resolveConnectionsPage(request, filters),
+      fetchWalletsByConnection(request).then(
+        (byConnection) => ({ ok: true as const, byConnection }),
+        () => ({ ok: false as const })
+      ),
+    ]);
+    return {
+      result: page.result satisfies ConnectionsPageResult,
+      filters: page.filters,
+      walletsByConnection: wallets.ok ? Object.fromEntries(wallets.byConnection) : {},
+      walletsUnavailable: !wallets.ok,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default async function IntegrationDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ provider: string }>;
+  // Optional so the page stays callable without it: only the connections
+  // table's `?page=` reads it, and every other caller — the feature-gate tests
+  // included — has no query to pass.
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { provider } = await params;
   if (!isKnownIntegrationProvider(provider)) {
@@ -190,14 +241,28 @@ export default async function IntegrationDetailPage({
   }
   const organizationId = onboarding.organization.id;
 
-  const [availability, connectedProviders, credentialModeState, byokState] = await Promise.all([
-    fetchProviderAvailability(projectClient.request, organizationId),
-    custodyEnabled
-      ? getConnectedCustodyProviders(projectClient.request).catch(() => null)
-      : Promise.resolve([]),
-    getRpcCredentialMode(dashboardAccess.capabilities.canManageOrgSettings),
-    getByokConnections(provider, dashboardAccess.capabilities.canManageOrgSettings),
-  ]);
+  // Custody connections are only a concern on a custody provider whose BYOK
+  // install path is switched on; everywhere else the read is skipped entirely
+  // rather than fetched and discarded.
+  const custodyConnectionsApply =
+    custodyEnabled && isKnownCustodyProvider(provider) && (await privyByok());
+
+  const [availability, connectedProviders, credentialModeState, byokState, custodyConnections] =
+    await Promise.all([
+      fetchProviderAvailability(projectClient.request, organizationId),
+      custodyEnabled
+        ? getConnectedCustodyProviders(projectClient.request).catch(() => null)
+        : Promise.resolve([]),
+      getRpcCredentialMode(dashboardAccess.capabilities.canManageOrgSettings),
+      getByokConnections(provider, dashboardAccess.capabilities.canManageOrgSettings),
+      custodyConnectionsApply
+        ? getCustodyConnections(
+            projectClient.request,
+            dashboardAccess.capabilities.canManageCustody,
+            (await searchParams) ?? {}
+          )
+        : Promise.resolve(null),
+    ]);
 
   // The shell only routes here after onboarding, so a missing setting means
   // the organization runs on SDP's default RPC, not "none".
@@ -233,6 +298,8 @@ export default async function IntegrationDetailPage({
   return (
     <IntegrationDetailView
       detail={detail}
+      custodyConnections={custodyConnections}
+      canManageCustody={dashboardAccess.capabilities.canManageCustody}
       rpc={
         detail.family === "rpc"
           ? {

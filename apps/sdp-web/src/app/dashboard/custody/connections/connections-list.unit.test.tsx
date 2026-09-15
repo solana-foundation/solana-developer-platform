@@ -59,12 +59,14 @@ function renderList({
   walletsByConnection = {},
   walletsUnavailable = false,
   canManageCustody = true,
+  emptyStateAction,
 }: {
   result: ConnectionsPageResult;
   page?: number;
   walletsByConnection?: Record<string, CustodyWalletSummary[]>;
   walletsUnavailable?: boolean;
   canManageCustody?: boolean;
+  emptyStateAction?: React.ReactNode;
 }): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
@@ -74,6 +76,9 @@ function renderList({
         walletsByConnection={walletsByConnection}
         walletsUnavailable={walletsUnavailable}
         canManageCustody={canManageCustody}
+        provider="privy"
+        projectName="Acme Payments"
+        emptyStateAction={emptyStateAction}
       />
     </I18nProvider>
   );
@@ -109,7 +114,11 @@ describe("connections list", () => {
     expect(html.match(/data-connection-id=/g)).toHaveLength(2);
     expect(html).toContain('data-connection-id="conn-active"');
     expect(html).toContain('data-connection-id="conn-second"');
-    expect(html.match(/Shared Privy app/g)).toHaveLength(2);
+    // Two connections can legitimately share a label — it belongs to the
+    // credential, not the connection — so each row has to address its own id
+    // rather than rely on the name to tell them apart.
+    expect(html).toContain("/dashboard/integrations/privy/connections/conn-active");
+    expect(html).toContain("/dashboard/integrations/privy/connections/conn-second");
     expect(html).toContain("Active");
     expect(html).toContain("Pending");
   });
@@ -156,20 +165,25 @@ describe("connections list", () => {
   it("renders the empty state for an empty slice even when a stale total disagrees", () => {
     const html = renderList({ result: makeResult([], 20) });
 
-    expect(html).toContain("No connections yet");
+    expect(html).toContain("No connections in Acme Payments yet");
     expect(html).not.toContain("data-connection-id");
   });
 
-  it("renders the empty state with a setup CTA only for custody admins", () => {
+  it("renders whatever empty-state action it is handed, and nothing when handed none", () => {
     const emptyResult = makeResult([]);
 
-    const adminHtml = renderList({ result: emptyResult });
-    expect(adminHtml).toContain("No connections yet");
-    expect(adminHtml).toContain("/dashboard/wallets/setup?provider=privy");
+    // Gating the action on the custody-admin role is the section's job now —
+    // the list only places what it is given.
+    const withAction = renderList({
+      result: emptyResult,
+      emptyStateAction: <button type="button">Add connection</button>,
+    });
+    expect(withAction).toContain("No connections in Acme Payments yet");
+    expect(withAction).toContain("Add connection");
 
-    const memberHtml = renderList({ result: emptyResult, canManageCustody: false });
-    expect(memberHtml).toContain("No connections yet");
-    expect(memberHtml).not.toContain("/dashboard/wallets/setup");
+    const withoutAction = renderList({ result: emptyResult });
+    expect(withoutAction).toContain("No connections in Acme Payments yet");
+    expect(withoutAction).not.toContain("Add connection");
   });
 
   it("paginates only past one page and marks degraded wallet reads", () => {

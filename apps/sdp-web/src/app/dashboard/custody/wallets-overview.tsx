@@ -352,7 +352,8 @@ export function WalletsOverview({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           {showConnectionsLink ? (
             <Button asChild variant="secondary" className="w-full sm:w-auto">
-              <Link href="/dashboard/wallets/connections">
+              {/* The provider page owns the connections list now. */}
+              <Link href="/dashboard/integrations/privy">
                 {t("Shared.dashboardShell.connections")}
               </Link>
             </Button>

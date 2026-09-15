@@ -1,7 +1,15 @@
-import type { OrganizationRpcProvider, SafeRpcConnection } from "@sdp/types";
+import type {
+  CustodyWalletSummary,
+  OrganizationRpcProvider,
+  SafeRpcConnection,
+} from "@sdp/types";
 import { VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import type {
+  ConnectionsFilters,
+  ConnectionsPageResult,
+} from "@/app/dashboard/custody/connections/connections.data";
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { RpcProviderMark } from "@/app/dashboard/integrations/rpc-provider-mark";
@@ -10,6 +18,10 @@ import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import {
+  CustodyConnectionCount,
+  CustodyConnectionsSection,
+} from "../custody-connections-section";
 import type { IntegrationDetail } from "../integration-detail";
 import { RpcByokSection } from "../rpc-byok-section";
 import { RpcConnectionPanel } from "../rpc-connection-panel";
@@ -156,15 +168,38 @@ function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
   return null;
 }
 
+/**
+ * The project's custody connections, or the reason there are none to show.
+ * `null` means the section does not apply here; `"restricted"` means the
+ * viewer cannot read them.
+ */
+export type CustodyConnectionsContext =
+  | {
+      result: ConnectionsPageResult;
+      filters: ConnectionsFilters;
+      walletsByConnection: Record<string, CustodyWalletSummary[]>;
+      walletsUnavailable: boolean;
+    }
+  | "restricted"
+  | null;
+
 export async function IntegrationDetailView({
   detail,
   rpc,
+  custodyConnections = null,
+  canManageCustody = false,
 }: {
   detail: IntegrationDetail;
   rpc?: RpcConnectionContext;
+  custodyConnections?: CustodyConnectionsContext;
+  canManageCustody?: boolean;
 }) {
   const t = await getTranslations();
   const entry = detail.custodyEntry;
+  const connectionCount =
+    custodyConnections && custodyConnections !== "restricted"
+      ? custodyConnections.result.pagination.total
+      : null;
 
   const primaryAction = resolvePrimaryAction(detail, t);
 
@@ -193,11 +228,39 @@ export async function IntegrationDetailView({
                       : "DashboardCustody.providerCategoryInstitutional"
                   )}`
                 : ""}
+              {connectionCount !== null ? (
+                <>
+                  {" · "}
+                  <CustodyConnectionCount count={connectionCount} />
+                </>
+              ) : null}
             </p>
           </div>
         </div>
         {primaryAction}
       </header>
+
+      {/* Same reasoning as the RPC panel below: on an integration you can act
+          on, what this project has connected outranks what the provider is. */}
+      {custodyConnections === "restricted" ? (
+        <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
+          <h2 className="text-base font-medium text-primary">
+            {t("DashboardCustody.connectionsTitle")}
+          </h2>
+          <p className="mt-3 text-sm text-tertiary">{t("DashboardCustody.readOnlyViewer")}</p>
+        </section>
+      ) : null}
+
+      {custodyConnections && custodyConnections !== "restricted" && detail.custodyEntry ? (
+        <CustodyConnectionsSection
+          result={custodyConnections.result}
+          filters={custodyConnections.filters}
+          walletsByConnection={custodyConnections.walletsByConnection}
+          walletsUnavailable={custodyConnections.walletsUnavailable}
+          canManageCustody={canManageCustody}
+          provider={detail.custodyEntry.id}
+        />
+      ) : null}
 
       {/* Leads the page: on an integration you can actually act on, what the
           organization runs right now outranks what the provider is. */}
