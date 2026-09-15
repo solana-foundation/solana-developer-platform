@@ -50,6 +50,18 @@ function replayAccountAddress(transaction: TokenTransaction): string {
   return accountAddress;
 }
 
+async function fenceApprovedUnsettledReplay(
+  c: AppContext,
+  transaction: TokenTransaction
+): Promise<void> {
+  if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+    await beginApprovedWalletOperationEffect(c);
+    throw conflict(
+      "Approved freeze-state execution is incomplete and requires manual reconciliation"
+    );
+  }
+}
+
 async function recoverFreezeAccountReplay(options: {
   auditService: AuditService;
   tokenService: TokenService;
@@ -277,12 +289,7 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
       actorId: auth.id,
       reason: body.reason,
     });
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(replay.transaction)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict(
-        "Approved freeze-state execution is incomplete and requires manual reconciliation"
-      );
-    }
+    await fenceApprovedUnsettledReplay(c, replay.transaction);
     return created(c, {
       frozenAccount: {
         ...replay.frozenAccount,
@@ -359,12 +366,7 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
       actorId: auth.id,
       reason: body.reason,
     });
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(replay.transaction)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict(
-        "Approved freeze-state execution is incomplete and requires manual reconciliation"
-      );
-    }
+    await fenceApprovedUnsettledReplay(c, replay.transaction);
     return created(c, {
       frozenAccount: {
         ...replay.frozenAccount,
@@ -541,12 +543,7 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
       tokenAccount: replayAccountAddress(earlyReplay),
       actorId: auth.id,
     });
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(replay.transaction)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict(
-        "Approved freeze-state execution is incomplete and requires manual reconciliation"
-      );
-    }
+    await fenceApprovedUnsettledReplay(c, replay.transaction);
     return success(c, {
       frozenAccount: {
         ...replay.frozenAccount,
@@ -618,12 +615,7 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
       tokenAccount,
       actorId: auth.id,
     });
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(replay.transaction)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict(
-        "Approved freeze-state execution is incomplete and requires manual reconciliation"
-      );
-    }
+    await fenceApprovedUnsettledReplay(c, replay.transaction);
     return success(c, {
       frozenAccount: {
         ...replay.frozenAccount,
