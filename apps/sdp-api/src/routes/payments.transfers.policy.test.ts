@@ -6,7 +6,10 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { walletApprovalRequestResponseSchema } from "@/openapi/schemas/custody";
+import {
+  walletApprovalRequestResponseSchema,
+  walletApprovalRequestsResponseSchema,
+} from "@/openapi/schemas/custody";
 import { walletPolicyResponseSchema } from "@/openapi/schemas/payments";
 import { SigningService } from "@/services/domain/signing.service";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
@@ -45,6 +48,7 @@ const TEST_ALIAS_AUTHORIZED_CUSTODY_WALLET_ID = "cwlt_payments_alias_authorized_
 const responseSchema = <T extends z.ZodType>(data: T) => z.object({ data });
 const walletPolicyHttpResponseSchema = responseSchema(walletPolicyResponseSchema);
 const walletApprovalHttpResponseSchema = responseSchema(walletApprovalRequestResponseSchema);
+const walletApprovalListHttpResponseSchema = responseSchema(walletApprovalRequestsResponseSchema);
 const dryRunResponseSchema = responseSchema(
   z.object({
     decision: z.string(),
@@ -1044,6 +1048,27 @@ describe("Payments routes — transfer policy", () => {
       Cookie: `sdp_session=${approverSessionId}`,
       "x-project-id": TEST_PROJECT.id,
     };
+
+    // Reads report the same owner check the decision routes enforce, so the
+    // dashboard can hide a decision the API would refuse. The request came from
+    // an API key the owner created, so the owner's session is its requester.
+    const detailPath = `/v1/wallets/approval-requests/${pendingDetails.approvalRequestId}`;
+    const ownerRead = walletApprovalHttpResponseSchema.parse(
+      await (await app.request(detailPath, { headers: ownerSessionHeaders }, env)).json()
+    );
+    expect(ownerRead.data.approvalRequest.viewerIsRequester).toBe(true);
+    const approverRead = walletApprovalHttpResponseSchema.parse(
+      await (await app.request(detailPath, { headers: approverSessionHeaders }, env)).json()
+    );
+    expect(approverRead.data.approvalRequest.viewerIsRequester).toBe(false);
+    const listed = walletApprovalListHttpResponseSchema.parse(
+      await (
+        await app.request("/v1/wallets/approval-requests", { headers: apiHeaders }, env)
+      ).json()
+    );
+    expect(
+      listed.data.approvalRequests.find((item) => item.id === pendingDetails.approvalRequestId)
+    ).toMatchObject({ viewerIsRequester: true });
 
     const apiKeyDecision = await app.request(
       approvalPath,

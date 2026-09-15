@@ -59,6 +59,9 @@ const ADMISSION_ERROR_COPY = {
   provider_not_entitled: "DashboardApprovals.providerAccessDenied",
 } as const;
 
+/** A refusal's own message, which names the rule the caller did not meet. */
+const forbiddenMessageSchema = z.object({ error: z.object({ message: z.string().min(1) }) });
+
 const runtimeExecutionErrorSchema = z.object({
   error: z.object({
     details: z.object({
@@ -84,6 +87,9 @@ export function ApprovalRequestDetail({
   const [activeAction, setActiveAction] = useState<ApprovalAction | null>(null);
   const isPending = request.status === "pending";
   const controlsDisabled = Boolean(activeAction) || !isPending || !canDecide;
+  // The API refuses a decision from whoever raised the request, so neither
+  // decision is offered to them. Withdrawing it stays theirs.
+  const canApproveOrReject = canDecide && !request.viewerIsRequester;
   const apiKeyLabel = approvalApiKeyLabel(
     request,
     apiKeyNames,
@@ -157,7 +163,12 @@ export function ApprovalRequestDetail({
 
       if (outcome === "forbidden") {
         setConfirmation(null);
-        toast.error(t("DashboardApprovals.forbiddenDecision"));
+        // The API says why (not the requester's to decide, not a group member,
+        // not an admin); the generic role line only covers what it did not say.
+        const reason = forbiddenMessageSchema.safeParse(body);
+        toast.error(
+          reason.success ? reason.data.error.message : t("DashboardApprovals.forbiddenDecision")
+        );
         return;
       }
 
@@ -210,30 +221,36 @@ export function ApprovalRequestDetail({
               >
                 {t("DashboardApprovals.cancel")}
               </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => setConfirmation("reject")}
-                disabled={controlsDisabled}
-                iconLeft={<X className="size-4" />}
-              >
-                {t("DashboardApprovals.reject")}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => setConfirmation("approve")}
-                disabled={controlsDisabled}
-                iconLeft={<Check className="size-4" />}
-              >
-                {t("DashboardApprovals.approve")}
-              </Button>
+              {canApproveOrReject ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => setConfirmation("reject")}
+                    disabled={controlsDisabled}
+                    iconLeft={<X className="size-4" />}
+                  >
+                    {t("DashboardApprovals.reject")}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => setConfirmation("approve")}
+                    disabled={controlsDisabled}
+                    iconLeft={<Check className="size-4" />}
+                  >
+                    {t("DashboardApprovals.approve")}
+                  </Button>
+                </>
+              ) : null}
             </div>
           ) : null}
         </header>
 
-        {isPending && !canDecide ? (
+        {isPending && (!canDecide || request.viewerIsRequester) ? (
           <p className="border-b border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
-            {t("DashboardApprovals.viewOnly")}
+            {t(
+              canDecide ? "DashboardApprovals.requesterCannotDecide" : "DashboardApprovals.viewOnly"
+            )}
           </p>
         ) : null}
 
