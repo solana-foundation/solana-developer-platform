@@ -500,7 +500,7 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     "payments:write",
   ]);
 
-  const result = await closeDvpTrade(c, trade, action);
+  const result = await closeDvpTrade(c, trade, action, settlement);
 
   // We broadcast it, so we know the outcome — not `closed_unknown` from the sweep.
   const closed = await createDvpTradeRepository(c.env).recordClose(

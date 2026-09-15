@@ -10,7 +10,7 @@ import {
 } from "@sdp/types";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, badRequest, conflict } from "@/lib/errors";
+import { AppError, badRequest, conflict, insufficientPermissions } from "@/lib/errors";
 import {
   type ExactApiKeyWalletBinding,
   loadApiKeyWalletAuthorization,
@@ -459,6 +459,107 @@ export function resolveApiKeySigningWalletId(
   }
 
   return null;
+}
+
+/**
+ * The wallet-scope slice of the auth middleware's API key context —
+ * `walletBindings` is genuinely optional there (legacy cached entries carry
+ * only `signingWalletId`), everything else is always present.
+ */
+export type WalletScopeActor = {
+  walletScope?: ApiKeyWalletScope;
+  signingWalletId: string | null;
+  walletBindings?: ApiKeyWalletBinding[];
+};
+
+export type RequestedWalletBinding = {
+  walletId: string | null | undefined;
+  permissions?: Permission[];
+};
+
+/**
+ * A wallet-scoped key granting wallet access it does not itself hold is a
+ * scope escape: the minted key outlives every restriction placed on its
+ * author. Non-key actors and all-wallet keys are unconstrained here.
+ */
+export function isWalletScopedActor(actor: WalletScopeActor): boolean {
+  return (
+    actor.walletScope === "selected" ||
+    (actor.walletScope === undefined &&
+      ((actor.walletBindings?.length ?? 0) > 0 || actor.signingWalletId != null))
+  );
+}
+
+function actorPermissionsForWallet(actor: WalletScopeActor, walletId: string): Permission[] | null {
+  const binding = (actor.walletBindings ?? []).find((entry) => entry.walletId === walletId);
+  if (binding) {
+    return binding.permissions;
+  }
+  // A legacy signing-wallet key carries no binding rows; before per-wallet
+  // permissions existed it held full access to its signing wallet.
+  if (actor.signingWalletId === walletId) {
+    return ["*"];
+  }
+  return null;
+}
+
+function coversRequestedPermissions(actorHeld: Permission[], requested: Permission[]): boolean {
+  if (actorHeld.includes("*")) {
+    return true;
+  }
+  if (requested.includes("*")) {
+    return false;
+  }
+  return requested.every((permission) => actorHeld.includes(permission));
+}
+
+/**
+ * A target key whose signing wallet has no binding row predates per-wallet
+ * permissions and holds full access to that wallet — an actor must hold "*"
+ * on it, not merely have the wallet in scope. A signing wallet that does
+ * have a row is judged by that row instead.
+ */
+export function legacySigningWalletBinding(
+  signingWalletId: string | null,
+  bindings: Array<{ walletId: string }>
+): RequestedWalletBinding[] {
+  if (!signingWalletId || bindings.some((binding) => binding.walletId === signingWalletId)) {
+    return [];
+  }
+  return [{ walletId: signingWalletId, permissions: ["*"] }];
+}
+
+export function assertBindingsWithinActorWalletScope(
+  actor: WalletScopeActor,
+  bindings: RequestedWalletBinding[],
+  requestedWalletScope?: ApiKeyWalletScope
+): void {
+  if (!isWalletScopedActor(actor)) {
+    return;
+  }
+  if (requestedWalletScope === "all") {
+    throw insufficientPermissions(
+      "Cannot grant an API key access to a wallet outside your own wallet scope"
+    );
+  }
+  for (const binding of bindings) {
+    if (!binding.walletId) {
+      continue;
+    }
+    const held = actorPermissionsForWallet(actor, binding.walletId);
+    if (held === null) {
+      throw insufficientPermissions(
+        "Cannot grant an API key access to a wallet outside your own wallet scope"
+      );
+    }
+    // The wallet alone is not the scope: an actor holding [read] on a wallet
+    // must not mint a key holding [*] on it.
+    if (binding.permissions && !coversRequestedPermissions(held, binding.permissions)) {
+      throw insufficientPermissions(
+        "Cannot grant an API key wallet permissions beyond your own on that wallet"
+      );
+    }
+  }
 }
 
 export function getAllowedApiKeyWalletIds(auth: ApiKeyContext): string[] | null {

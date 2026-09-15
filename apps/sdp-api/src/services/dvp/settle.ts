@@ -1,9 +1,8 @@
 /**
  * Settling and cancelling a DvP trade.
  *
- * The same safety order as create: build, sign, record intent, send. Here the
- * "record" step is the approved-operation effect fence, which is what makes a
- * crash mid-broadcast recoverable rather than ambiguous.
+ * The handler authorizes the settlement wallet. Kora sponsors the transaction
+ * fees and ATA rent; closing never selects or provisions another wallet.
  */
 
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -37,7 +36,7 @@ import {
   buildRequiredAtaInstructions,
   buildSettleInstruction,
 } from "./settle-instructions";
-import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
+import type { DvpSettlementWallet } from "./settlement-wallet";
 
 /** Statuses from which a trade can still be acted on. */
 const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
@@ -88,11 +87,12 @@ function assertInsideSettlementWindow(
   }
 }
 
-/** Settles or cancels a trade on chain. `c` carries the approved-operation fence context. */
+/** Settles or cancels a trade using the wallet already authorized by the handler. */
 export async function closeDvpTrade(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
-  action: DvpCloseAction
+  action: DvpCloseAction,
+  settlement: DvpSettlementWallet
 ): Promise<DvpCloseResult> {
   const env = c.env;
 
@@ -118,10 +118,6 @@ export async function closeDvpTrade(
     assertInsideSettlementWindow(trade, await readClusterUnixTimestamp(rpc));
   }
 
-  const settlement = await getOrCreateDvpSettlementWallet(env, {
-    organizationId: trade.organizationId,
-    projectId: trade.projectId,
-  });
   // The authority is a PDA seed, so a project that rotated its settlement
   // wallet cannot settle trades created under the old one. Better to say that
   // than to send a transaction the program will reject.
@@ -137,6 +133,9 @@ export async function closeDvpTrade(
     trade.projectId,
     settlement.custodyWalletId
   );
+  if (signer.address !== trade.settlementAuthority) {
+    throw badRequest("DvP settlement wallet no longer matches the trade's authority");
+  }
   const atas = await deriveDvpSettleAtas({
     userA: trade.userA,
     userB: trade.userB,

@@ -12,6 +12,6 @@ describe("API Earn provider registry", () => {
   });
 
   it("keeps the non-Kamino provider singletons", () => {
-    expect(resolveEarnProviderClient("ground")).toBe(EARN_PROVIDER_CLIENTS.ground);
+    expect(resolveEarnProviderClient("upshift")).toBe(EARN_PROVIDER_CLIENTS.upshift);
   });
 });

@@ -8,7 +8,6 @@ import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-ta
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { LanguagePicker } from "@/components/language-picker";
-import { NotificationBell } from "@/components/notification-bell";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
@@ -33,6 +32,8 @@ type DashboardPageConfig = {
   };
 };
 
+const TRAILING_CONTENT = <LanguagePicker />;
+
 type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
@@ -41,8 +42,6 @@ type DashboardTopBarProps = {
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
-  // Notifications ship with the asset-profiles feature (its only producer today).
-  showNotifications?: boolean;
 };
 
 export function HeaderBackAction({
@@ -182,17 +181,10 @@ export function DashboardTopBar({
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
-  showNotifications = false,
 }: DashboardTopBarProps) {
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
     (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
-  const trailingContent = (
-    <>
-      <LanguagePicker />
-      {showNotifications ? <NotificationBell /> : null}
-    </>
-  );
 
   if (centersPageTitle) {
     return (
@@ -208,7 +200,7 @@ export function DashboardTopBar({
             {topBarLeadingContent}
           </>
         }
-        trailingContent={trailingContent}
+        trailingContent={TRAILING_CONTENT}
       />
     );
   }
@@ -227,7 +219,7 @@ export function DashboardTopBar({
           {topBarLeadingContent}
         </>
       }
-      trailingContent={trailingContent}
+      trailingContent={TRAILING_CONTENT}
     />
   );
 }
@@ -405,8 +397,7 @@ function getCounterpartyRoutePageConfig(
 
 function getMarketsRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>,
-  dvpEnabled: boolean
+  t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/markets") {
     return {
@@ -449,27 +440,7 @@ function getMarketsRoutePageConfig(
   ) {
     return {
       title: t("Shared.dashboardShell.markets"),
-      routeTabs: {
-        ariaLabel: t("Shared.dashboardShell.markets"),
-        tabs: [
-          {
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
-            label: t("Shared.dashboardShell.treasurySolutions"),
-          },
-          {
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
-            label: t("Shared.dashboardShell.earnProgram"),
-          },
-          ...(dvpEnabled
-            ? [
-                {
-                  href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
-                  label: t("DashboardMarkets.dvp.navLabel"),
-                },
-              ]
-            : []),
-        ],
-      },
+      titlePosition: "center",
       contentWidthClass: "max-w-none",
     };
   }
@@ -706,13 +677,7 @@ export function getDashboardPageConfig(
   privateChannelsEnabled: boolean,
   custodyEnabled = true,
   _paymentsEnabled = true,
-  _policiesEnabled = true,
-  /**
-   * Gates the DvP tab. The sidebar already hides DvP behind this flag, and a
-   * header tab that stays visible when the sidebar entry is gone points at a
-   * workspace the flag exists to keep out of reach.
-   */
-  dvpEnabled = false
+  _policiesEnabled = true
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -771,7 +736,7 @@ export function getDashboardPageConfig(
   if (counterpartyRouteConfig) {
     return counterpartyRouteConfig;
   }
-  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t, dvpEnabled);
+  const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
   if (marketsRouteConfig) {
     return marketsRouteConfig;
   }

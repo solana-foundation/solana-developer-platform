@@ -276,6 +276,11 @@ export async function cloneApiKeyWalletBindings(
     .run();
 }
 
+/** Parse an api_key_wallet_permissions.permissions column into a normalized list. */
+export function parseApiKeyWalletPermissionsColumn(raw: unknown): Permission[] {
+  return normalizeApiKeyWalletPermissions(safeParsePermissions(raw));
+}
+
 function safeParsePermissions(raw: unknown): Permission[] | null {
   // Only a genuinely ABSENT value (SQL NULL) may map to null — the
   // historical unrestricted default. A value that exists but cannot be

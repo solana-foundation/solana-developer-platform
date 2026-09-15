@@ -576,7 +576,7 @@ describe("GET /v1/earn/movements", () => {
     const deposit = await seedVaultDeposit();
     // The record of money that already moved must outlive the provider's
     // credentials, its entitlement, and its registry entry.
-    env.GROUND_SANDBOX_API_KEY = undefined;
+    env.UPSHIFT_SANDBOX_API_KEY = undefined;
 
     const body = await movementsJson();
     expect(body.movements.map((m) => m.id)).toContain(deposit.movement.id);

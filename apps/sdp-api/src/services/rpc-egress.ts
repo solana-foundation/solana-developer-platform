@@ -13,7 +13,7 @@
  * and are legitimately private in local development and in the Surfpool suites.
  */
 import type { RpcTransport } from "@solana/kit";
-import { guardedFetch } from "@/services/guarded-egress";
+import { type GuardedFetchInit, guardedFetch } from "@/services/guarded-egress";
 
 /**
  * The relay followed redirects before the guard existed, and a provider
@@ -21,6 +21,17 @@ import { guardedFetch } from "@/services/guarded-egress";
  * through the guard again, so following is bounded rather than trusted.
  */
 const RELAY_MAX_REDIRECTS = 3;
+
+/**
+ * Upper bound on what the relay buffers back from a customer endpoint. Sized
+ * for the largest ordinary answers (`getProgramAccounts`, a full block) with
+ * room to spare; a hostile endpoint cannot stream unbounded bytes into the
+ * process.
+ */
+export const RELAY_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+
+/** How long a customer endpoint gets to answer when the caller sets no signal. */
+export const RELAY_TIMEOUT_MS = 30_000;
 
 export interface RpcEgressTarget {
   endpoint: string;
@@ -46,25 +57,44 @@ export function isCustomerSuppliedTarget(target: RpcEgressTarget): boolean {
  * relay made before, except that a customer-supplied target resolves under the
  * guard on every hop.
  */
+/**
+ * The time bound joins the caller's signal rather than yielding to it: the
+ * Kit transport path always supplies one, and a caller's cancellation must
+ * not disable the ceiling.
+ */
+function boundedSignal(signal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(RELAY_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+/** The guarded init for a customer-supplied relay target, limits applied. */
+export function relayGuardInit(init: RpcEgressInit): GuardedFetchInit {
+  return {
+    method: "POST",
+    headers: init.headers,
+    body: init.body,
+    signal: boundedSignal(init.signal),
+    maxRedirects: RELAY_MAX_REDIRECTS,
+    maxResponseBytes: RELAY_MAX_RESPONSE_BYTES,
+    rejectOversizeResponse: true,
+  };
+}
+
 export async function fetchRpcRelayTarget(
   target: RpcEgressTarget,
   init: RpcEgressInit
 ): Promise<Response> {
   if (isCustomerSuppliedTarget(target)) {
-    return guardedFetch(target.endpoint, {
-      method: "POST",
-      headers: init.headers,
-      body: init.body,
-      signal: init.signal,
-      maxRedirects: RELAY_MAX_REDIRECTS,
-    });
+    return guardedFetch(target.endpoint, relayGuardInit(init));
   }
 
+  // A managed provider is trusted with its response, not with the caller's
+  // time: a stalled upstream must not hold the request open indefinitely.
   return fetch(target.endpoint, {
     method: "POST",
     headers: init.headers,
     body: init.body,
-    signal: init.signal,
+    signal: boundedSignal(init.signal),
   });
 }
 

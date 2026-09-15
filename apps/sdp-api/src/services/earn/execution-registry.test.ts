@@ -172,7 +172,9 @@ describe("resolveVaultDirectClient", () => {
   /**
    * This resolver is the ONE sanctioned provider-id branch in the codebase, and
    * unknown ids must answer null rather than throw: a strategy row written by a
-   * newer deploy would otherwise 500 a read that merely touched it.
+   * newer deploy would otherwise 500 a read that merely touched it. `ground`
+   * stays listed as a RETIRED id — stored rows outlive the registry entry that
+   * wrote them, so it must keep failing closed exactly like a never-known id.
    */
   it("answers null for anything this deployment cannot execute", () => {
     for (const provider of ["ground", "upshift", "perena", "not-a-provider", "__proto__", ""]) {

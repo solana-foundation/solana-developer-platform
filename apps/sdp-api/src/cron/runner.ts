@@ -13,11 +13,7 @@ import { type ScheduledTask, schedule } from "node-cron";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
 import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-split-swaps";
 import { runWithSystemDatabaseIdentity } from "@/db";
-import {
-  isAssetProfilesEnabled,
-  isEarnEnabled,
-  isPrivateChannelsEnabled,
-} from "@/lib/feature-flags";
+import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import { noopObservability, type Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
@@ -64,15 +60,7 @@ import {
 } from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { runWithCronRunEvent } from "./run-event";
-import {
-  runWorkflowExecutions,
-  WORKFLOW_EXECUTIONS_CRON,
-  WORKFLOW_EXECUTIONS_MONITOR,
-} from "./workflow-executions";
-import {
-  runWorkflowSecretRetirements,
-  WORKFLOW_SECRET_RETIREMENTS_CRON,
-} from "./workflow-secret-retirements";
+import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
 
 export interface CronDeps {
   env: Env;
@@ -210,18 +198,6 @@ export function startCron(deps: CronDeps): CronHandle | null {
     )
   );
 
-  if (isAssetProfilesEnabled(deps.env)) {
-    tasks.push(
-      scheduleSystemTask(
-        WORKFLOW_EXECUTIONS_CRON,
-        "cron:workflow-executions",
-        runWorkflowExecutions
-      )
-    );
-  } else {
-    scheduleDisabledTickProofOfLife(WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR);
-  }
-
   if (isPrivateChannelsEnabled(deps.env)) {
     tasks.push(
       scheduleSystemTask(
@@ -266,21 +242,10 @@ export function startCron(deps: CronDeps): CronHandle | null {
     scheduleDisabledTickProofOfLife(EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR);
   }
 
-  // Deliberately outside every feature gate, and in particular outside the asset-profiles
-  // block above. The queue this drains is durable and outlives the feature that filled
-  // it: a rule's signing-secret version is already orphaned by the time a row exists —
-  // the rule is gone, nothing references the version, and it stays readable in the
-  // backend until something destroys it. Riding on the workflow tick meant turning asset
-  // profiles off stranded that cleanup permanently, which is the opposite of what
-  // disabling a feature should do (and disabling it is a plausible incident response,
-  // exactly when the cleanup matters most). The sweep is a no-op on the empty queue every
-  // other deployment has.
+  // Outside every feature gate: the queue this drains holds credentials that are already
+  // orphaned, so cleanup must outlive whichever feature queued them.
   tasks.push(
-    scheduleSystemTask(
-      WORKFLOW_SECRET_RETIREMENTS_CRON,
-      "cron:workflow-secret-retirements",
-      runWorkflowSecretRetirements
-    )
+    scheduleSystemTask(SECRET_RETIREMENTS_CRON, "cron:secret-retirements", runSecretRetirements)
   );
 
   tasks.push(

@@ -44,7 +44,8 @@ of them is a regression:
 - **Solana addresses** — `address`, `walletAddress`, `destinationAddress`, `mintAddress`.
   Public on-chain, pseudonymous, and the primary handle for tracing a payment. This is also
   why the policy is an explicit key denylist rather than an entropy or shape heuristic:
-  every base58 public key would trip a "this looks secret" detector.
+  every base58 public key would trip a "this looks secret" detector. The one exception is
+  `ownerAddress` (see below).
 - **Resource ids** — every `*Id`. The join key between a log line, an audit row, and a
   Sentry issue.
 - **`countryCode`, `subdivisionCode`, `currencyCode`** — needed to tell a provider outage
@@ -57,6 +58,41 @@ of them is a regression:
 - **`name`** — provider names, wallet labels, rule names, token names. The person-shaped
   variants (`firstName`, `fullName`, `accountHolderName`, `displayName`) are matched
   explicitly.
+
+## End-user owner addresses
+
+`ownerAddress` / `owner_address` is PII, and the only `*Address` key that is (threat model
+EARN-025 and EARN-028, PRO-1868). It names an end user on the embedded Earn surface rather
+than a customer treasury: per-owner position reads take `?ownerAddress=`, any `earn:read`
+key can enumerate every owner in its project, and a log line pairing an owner with a partner
+is PII linkage. The key is matched exactly (`ownerAddress`, `owner_address`), the
+`ownerAddress=` assignment and quoted-JSON forms are matched inside strings so a logged URL
+or an echoed request body is covered too, and the rule deliberately does not widen: a base58
+value is not identifying by shape, and `walletAddress`, `destinationAddress`, `mintAddress`,
+`vaultAddress` and `feePayer` must keep surviving.
+
+Consequences to know about:
+
+- The split-swap detector's `sdp_api_earn_split_swap_orphaned` and `_ambiguous` events reach
+  Loki with `owner_address` as `[REDACTED]`. Triage runs on `advisory_id`, which resolves to
+  the owner in `earn_split_swap_advisories`.
+- Earn audit rows store the owner as `[REDACTED]` in `metadata`; the row's `resourceId` is
+  the movement id and `earn_movements.owner_address` holds the value behind tenant scoping,
+  the same arrangement the allowlist audit rows have.
+
+## Provider payload bodies
+
+A provider's response body is unbounded and provider-shaped, so nothing inside it can be
+vouched for by key. Two layers keep raw bodies out of telemetry:
+
+- The earn fetch layer (`packages/sdp-earn/src/fetch.ts`) never attaches a body to an error.
+  `providerFetchJson` lifts only the fields a per-call normalizer names onto
+  `SdpEarnError.details`, plus `provider` and `providerStatus`, and drops the rest. The
+  vendor-call failure event (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs the error's
+  name and code only, pinned by a test that hands it an error carrying a body and an owner.
+- The denylist scrubs a body attached whole under any of its usual names (`providerBody`,
+  `providerPayload`, `providerResponse`, `responseBody`, `rawBody`, `rawResponse`,
+  `upstreamBody`) as the backstop for a caller that logs one anyway.
 
 Postal addresses are defused component by component (`line1`, `city`, `postalCode`) rather
 than by their container key, precisely because that container key is `address`.
@@ -83,6 +119,7 @@ is not done until it appears here with a test.
 | Dashboard Sentry (browser, server, edge) | `sentryScrubbingHooks` spread into all three `Sentry.init` sites |
 | Dashboard Sentry user | `apps/sdp-web/src/components/sentry-user-context.tsx` — Clerk user id only |
 | Ramp provider error messages | `extractProviderErrorMessage` (`packages/sdp-payments/src/ramps/fetch.ts`) |
+| Earn provider error bodies | `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) keeps named fields and status only; `logVendorCallFailure` (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs name and code only |
 | Fireblocks request/response tracing | `scrubTelemetry` in `keychain-fireblocks.adapter.ts` (writes via `console`, bypassing pino) |
 
 Scrubbing failure is a drop, not a pass-through: if the walker throws inside a Sentry hook

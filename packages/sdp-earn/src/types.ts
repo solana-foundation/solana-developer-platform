@@ -26,9 +26,14 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
  * @sdp/payments, but named `environment` to match the rest of Earn.
  */
 export interface EarnRuntimeEnvironment {
-  GROUND_API_KEY?: string;
-  GROUND_SANDBOX_API_KEY?: string;
   SOLANA_RPC_URL?: string;
+  /**
+   * Per-cluster overrides for on-chain catalogue reads, same keys the API's
+   * execution path reads (`resolveClusterRpcUrl`). See `resolveCatalogueRpcUrl`
+   * in ./solana-rpc for why a single process endpoint is not enough.
+   */
+  SOLANA_DEVNET_RPC_URL?: string;
+  SOLANA_MAINNET_RPC_URL?: string;
 }
 
 export interface EarnRuntimeContext {
@@ -69,8 +74,8 @@ export interface ProviderStrategySnapshot {
    * must state it rather than let the sync assume the environment's own
    * cluster, because that assumption is exactly what a single-cluster provider
    * catalogued into the wrong environment would violate silently (see
-   * `EarnStrategy` in @sdp/types). Ground answers with its environment's
-   * cluster. Kamino answers per data source: `mainnet-beta` from the REST shelf
+   * `EarnStrategy` in @sdp/types). Kamino answers per data source:
+   * `mainnet-beta` from the REST shelf
    * in production, `devnet` from the on-chain read elsewhere — and that second
    * one is measured (genesis hash) rather than inferred from the environment,
    * which is the whole point of this field.
@@ -709,8 +714,8 @@ export interface EarnVaultWithdrawQuoteProvider extends EarnVaultWithdrawProvide
 
 /**
  * Optional capability: customer-approval flows for withdrawal payouts. Some
- * providers gate payout legs on a customer-side signature (Ground: Turnkey
- * consensus voting, engaged by an org-level approval policy rather than by
+ * providers gate payout legs on a customer-side signature (Turnkey consensus
+ * voting, engaged by an org-level approval policy rather than by
  * default). SDP relays the provider's signing payload and the customer's
  * stamp; the signing key itself never enters SDP — if no signer is available,
  * this capability surfaces the parked state but cannot advance it. Discovered

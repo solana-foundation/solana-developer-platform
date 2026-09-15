@@ -210,8 +210,7 @@ function kaminoUsd(value: string | null | undefined): number | undefined {
 }
 
 /** APY decimal places kept. Six is a hundredth of a basis point — well past
- * anything a rate display or a yield calculation needs, and it keeps the stored
- * string comparable with Ground's bps-derived values. */
+ * anything a rate display or a yield calculation needs. */
 const APY_DECIMAL_PLACES = 6;
 
 /**
@@ -293,8 +292,7 @@ export function truncateKaminoApy(value: string | null | undefined): string | un
  *
  * Exported for the catalogue-inventory script, which prints the TVL beside each
  * row: the census must report the same number the admission gate judged, so it
- * shares this rather than re-deriving it (same reason Ground exports
- * `classifySourceKind`/`deriveCurator`).
+ * shares this rather than re-deriving it.
  */
 export function kaminoTvlUsd(metrics: KaminoVaultMetrics): number | undefined {
   const parts = [metrics.tokensAvailableUsd, metrics.tokensInvestedUsd].map(kaminoUsd);
@@ -362,9 +360,8 @@ export function distillKaminoVault(
   vault: KaminoVault,
   metrics: KaminoVaultMetrics | undefined
 ): KaminoVaultDistillation {
-  // The mint is read from the vault's own on-chain state, never resolved from a
-  // symbol against a cluster the way Ground's is: Kamino states the exact mint
-  // it accepts, and it is always a mainnet address.
+  // The mint is read from the vault's own on-chain state: Kamino states the
+  // exact mint it accepts, and it is always a mainnet address.
   const token = WELL_KNOWN_TOKEN_BY_MINT.get(vault.state.tokenMint);
   if (token === undefined) {
     return { outcome: "dropped", reason: "unknown_deposit_mint" };
@@ -488,7 +485,7 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
   /**
    * The raw vault registry, unfiltered. Data source for `listStrategies`, and
    * the tooling surface the catalogue-inventory script reads so it can report
-   * what distillation drops (underscore-prefixed like Ground's
+   * what distillation drops (underscore-prefixed methods like
    * `_iterateYieldSources`: a real consumer exists, but this is not part of the
    * provider contract).
    */

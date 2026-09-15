@@ -99,9 +99,8 @@ export function createPostgresKycWalletsRepository(db: AppDb): KycWalletsReposit
 
     async setKycStatus(input: SetKycStatusInput) {
       // `AND kyc_status IS DISTINCT FROM ?` makes a same-status write a no-op instead of
-      // re-stamping the row. Workflow idempotency keys are derived from verified_at /
-      // updated_at, so an unconditional write let a redelivered provider webhook mint a
-      // fresh key and enqueue the same rule twice (see clearance.ts `transition`).
+      // re-stamping the row, so a redelivered provider webhook leaves `status_changed_at`
+      // untouched.
       await db
         .prepare(
           `UPDATE kyc_wallets

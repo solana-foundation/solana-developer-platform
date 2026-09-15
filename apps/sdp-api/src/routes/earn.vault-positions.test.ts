@@ -1,12 +1,13 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
+import { getLogger } from "@/runtime/logger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -211,6 +212,10 @@ beforeEach(async () => {
   );
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("GET /v1/earn/vault-positions", () => {
   it.each([
     ["position list", "/v1/earn/vault-positions", 200],
@@ -402,6 +407,7 @@ describe("GET /v1/earn/vault-positions", () => {
   ] as const)("does not attach live balances under a mismatched %s", async (kind, override) => {
     const providerReference = `vault_${kind}_mismatch`;
     await createPosition({ providerReference });
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
     readVaultPositions.mockResolvedValue([
       {
         vaultAddress: providerReference,
@@ -425,6 +431,13 @@ describe("GET /v1/earn/vault-positions", () => {
     expect(body.data.positions).toHaveLength(1);
     expect(body.data.positions[0]).not.toHaveProperty("shares");
     expect(body.data.positions[0]).not.toHaveProperty("tokenValue");
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: PUBLIC_KEY_A,
+        snapshotOwner: kind === "owner" ? PUBLIC_KEY_B : PUBLIC_KEY_A,
+      }),
+      "vault position: ignored live snapshot with mismatched identity"
+    );
   });
 
   it("rejects an invalid cursor and caps page size", async () => {

@@ -41,15 +41,16 @@ describe("withdrawalRequestSignature", () => {
 
 /**
  * The two helpers that carry PRO-1675's provider-quirk handling. Both exist
- * because Ground's sandbox behaviour diverges from its published contract in
- * ways measured on 2026-08-13 — see `packages/sdp-earn/CLAUDE.md` → Conventions.
+ * because a provider's sandbox behaviour diverged from its published contract
+ * in ways measured on 2026-08-13 — see `packages/sdp-earn/CLAUDE.md` →
+ * Conventions.
  */
 
 describe("floorUsdToCents", () => {
   // The reason this function exists: a lane reporting `20.001241` answers 409
   // for `20.001241` and 200 for `20.00`, so `Max` must offer the floored value
   // or it recreates the refused-max bug the ticket removed.
-  it("floors the measured Ground case to a fillable amount", () => {
+  it("floors the measured provider case to a fillable amount", () => {
     expect(floorUsdToCents("20.001241")).toBe("20.00");
   });
 
@@ -84,8 +85,8 @@ describe("floorUsdToCents", () => {
  *
  * Two previews both report `withdrawableUsd`: the on-open liquidity read is
  * undebounced while the amount-specific one waits out PREVIEW_DEBOUNCE_MS, so a
- * reader who types immediately can have the FIRST request resolve LAST. Ground
- * takes ~500ms on this endpoint, so the window is real.
+ * reader who types immediately can have the FIRST request resolve LAST. A
+ * provider takes ~500ms on this endpoint, so the window is real.
  *
  * Modelled here as a tiny writer over the rule, so the interleavings are
  * explicit. (The rendered behaviour was verified in the browser separately.)
@@ -155,13 +156,13 @@ describe("liquidityWriteWins", () => {
 });
 
 describe("laneCeilingFromErrorBody", () => {
-  // The shape actually observed from Ground sandbox through the SDP API.
-  const groundConflict = {
+  // The shape actually observed from a provider sandbox through the SDP API.
+  const providerConflict = {
     error: {
       code: "CONFLICT",
-      message: "ground request failed with status 409",
+      message: "provider request failed with status 409",
       details: {
-        provider: "ground",
+        provider: "upshift",
         providerStatus: 409,
         balance: { totalUsd: "20.001241", withdrawableUsd: "20.001241", reservedUsd: "0.000000" },
       },
@@ -169,7 +170,7 @@ describe("laneCeilingFromErrorBody", () => {
   };
 
   it("reads the lane ceiling out of a real 409 envelope", () => {
-    expect(laneCeilingFromErrorBody(groundConflict)).toBe("20.001241");
+    expect(laneCeilingFromErrorBody(providerConflict)).toBe("20.001241");
   });
 
   it("returns undefined for a conflict carrying no balance", () => {
@@ -178,7 +179,7 @@ describe("laneCeilingFromErrorBody", () => {
         error: {
           code: "CONFLICT",
           message: "request_id_conflict",
-          details: { provider: "ground" },
+          details: { provider: "upshift" },
         },
       })
     ).toBeUndefined();
