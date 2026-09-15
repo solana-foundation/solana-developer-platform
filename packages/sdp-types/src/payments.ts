@@ -165,6 +165,58 @@ export const CANCELABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filte
   (status) => RAMP_TRANSFER_STATUS_CANCELABLE[status]
 );
 
+/** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */
+export const ONCHAIN_TRANSFER_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "finalized",
+  "failed",
+] as const satisfies readonly PaymentTransferStatus[];
+
+export type OnchainTransferStatus = (typeof ONCHAIN_TRANSFER_STATUSES)[number];
+
+/** Whether each onchain transfer status is final. Confirmed is transitional: the tracker upgrades it to finalized. */
+export const ONCHAIN_TRANSFER_STATUS_TERMINAL = {
+  pending: false,
+  processing: false,
+  confirmed: false,
+  finalized: true,
+  failed: true,
+} as const satisfies Record<OnchainTransferStatus, boolean>;
+
+/** Reports whether an onchain transfer can never leave the given status. */
+export function isTerminalOnchainTransferStatus(status: OnchainTransferStatus): boolean {
+  return ONCHAIN_TRANSFER_STATUS_TERMINAL[status];
+}
+
+/** The statuses a chain lookup can settle a processing transfer into. */
+export const TRANSFER_CHAIN_VERDICT_STATUSES = [
+  "confirmed",
+  "finalized",
+  "failed",
+] as const satisfies readonly OnchainTransferStatus[];
+
+export type TransferChainVerdictStatus = (typeof TRANSFER_CHAIN_VERDICT_STATUSES)[number];
+
+export const PAYMENT_TRANSFER_STATUS_TONES = ["success", "pending", "danger", "neutral"] as const;
+
+export type PaymentTransferStatusTone = (typeof PAYMENT_TRANSFER_STATUS_TONES)[number];
+
+/** How each transfer status reads to a person: settled, still moving, failed, or lapsed without loss. */
+export const PAYMENT_TRANSFER_STATUS_TONE = {
+  pending: "pending",
+  processing: "pending",
+  confirmed: "success",
+  finalized: "success",
+  failed: "danger",
+  awaiting_payment: "pending",
+  settling: "pending",
+  completed: "success",
+  canceled: "neutral",
+  expired: "neutral",
+} as const satisfies Record<PaymentTransferStatus, PaymentTransferStatusTone>;
+
 export interface LightsparkGridAmount {
   amount: number;
   currencyCode: string;
