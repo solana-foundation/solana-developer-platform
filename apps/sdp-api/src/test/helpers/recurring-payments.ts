@@ -1,6 +1,6 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { getBase58Decoder } from "@solana/codecs";
-import { address, generateKeyPairSigner, type Signature, signature } from "@solana/kit";
+import { generateKeyPairSigner, type Signature, signature } from "@solana/kit";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db";
