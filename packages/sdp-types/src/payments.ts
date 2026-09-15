@@ -54,6 +54,9 @@ export interface PaymentsDashboardWallet {
   publicKey: string;
   label: string | null;
   provider?: CustodyProvider;
+  custodyConfigId?: string;
+  custodyConnectionId?: string;
+  isRuntimeExecutionAllowed: boolean;
   balances?: CustodyWalletTokenBalance[];
 }
 

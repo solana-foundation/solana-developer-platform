@@ -5,18 +5,38 @@ import {
   getDisplayedAuthorityAddress,
   getSignerSelectionForAction,
   getSignerWalletOptionLabel,
+  getSignerWalletUnavailableReason,
 } from "./token-management-workspace.utils";
 
 const wallets: PaymentsDashboardWallet[] = [
-  { id: "cwlt_a", walletId: "provider_same", publicKey: "address_a", label: "A" },
-  { id: "cwlt_b", walletId: "provider_same", publicKey: "address_b", label: "B" },
+  {
+    id: "cwlt_a",
+    walletId: "provider_same",
+    isRuntimeExecutionAllowed: true,
+    publicKey: "address_a",
+    label: "A",
+  },
+  {
+    id: "cwlt_b",
+    walletId: "provider_same",
+    isRuntimeExecutionAllowed: true,
+    publicKey: "address_b",
+    label: "B",
+  },
 ];
 
 const duplicateAuthorityWallets: PaymentsDashboardWallet[] = [
-  { id: "cwlt_config", walletId: "provider_same", publicKey: "authority", label: "Config" },
+  {
+    id: "cwlt_config",
+    walletId: "provider_same",
+    isRuntimeExecutionAllowed: true,
+    publicKey: "authority",
+    label: "Config",
+  },
   {
     id: "cwlt_connection",
     walletId: "provider_same",
+    isRuntimeExecutionAllowed: true,
     publicKey: "authority",
     label: "Connection",
   },
@@ -30,6 +50,20 @@ const token = {
 const t = ((key: string) => key) as Parameters<typeof getSignerSelectionForAction>[0]["t"];
 
 describe("issuance exact wallet selection", () => {
+  it("keeps a runtime-unavailable sole authority selected but blocks signing", () => {
+    const wallet = { ...duplicateAuthorityWallets[1], isRuntimeExecutionAllowed: false };
+    const selection = getSignerSelectionForAction({
+      action: "mint",
+      token: { ...token, mintAuthority: "authority" },
+      authorityWallets: [wallet],
+      metadataAuthority: null,
+      t,
+    });
+    expect(selection.wallets).toEqual([wallet]);
+    expect(selection.defaultWalletId).toBe("cwlt_connection");
+    expect(selection.unavailableReason).toBe("DashboardIssuance.management.signingUnavailable");
+  });
+
   it("resolves duplicate Provider IDs by the exact SDP wallet ID", () => {
     expect(findWalletByCustodyWalletId(wallets, "cwlt_b")).toBe(wallets[1]);
   });
@@ -44,6 +78,42 @@ describe("issuance exact wallet selection", () => {
         t,
       }).defaultWalletId
     ).toBe("cwlt_b");
+  });
+
+  it("does not switch a persisted deployment choice to a runtime-enabled wallet", () => {
+    const inventory = wallets.map((wallet) => ({
+      ...wallet,
+      isRuntimeExecutionAllowed: wallet.id !== "cwlt_b",
+    }));
+    const selection = getSignerSelectionForAction({
+      action: "deploy",
+      token,
+      authorityWallets: inventory,
+      metadataAuthority: null,
+      t,
+    });
+    expect(selection.defaultWalletId).toBe("cwlt_b");
+    expect(selection.unavailableReason).toBeNull();
+    expect(getSignerWalletUnavailableReason(selection.wallets, selection.defaultWalletId, t)).toBe(
+      "DashboardIssuance.management.signingUnavailable"
+    );
+  });
+
+  it("keeps duplicate authority choices explicit when only one permits runtime execution", () => {
+    const inventory = duplicateAuthorityWallets.map((wallet) => ({
+      ...wallet,
+      isRuntimeExecutionAllowed: wallet.id === "cwlt_connection",
+    }));
+    const selection = getSignerSelectionForAction({
+      action: "mint",
+      token: { ...token, mintAuthority: "authority" },
+      authorityWallets: inventory,
+      metadataAuthority: null,
+      t,
+    });
+    expect(selection.wallets).toEqual(inventory);
+    expect(selection.defaultWalletId).toBe("");
+    expect(selection.unavailableReason).toBeNull();
   });
 
   it("blocks deploy when the persisted exact wallet is unavailable", () => {

@@ -21,7 +21,7 @@ import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loadi
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
 import { AddressWithCopy } from "./dvp-party-cell";
-import { formatLegAmount } from "./dvp-trade";
+import { type DvpPartyRef, formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -59,6 +59,7 @@ function InboundFundAction({
   side,
   symbol,
   tradeId,
+  party,
 }: {
   frozen: boolean;
   /** The leg the custody lookup made this caller's. */
@@ -66,18 +67,38 @@ function InboundFundAction({
   /** That leg's token symbol, so a refusal names the token. */
   symbol: string | null;
   tradeId: string;
+  party: DvpPartyRef;
 }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
   const { act, pending } = useDvpTradeActions(tradeId, cluster);
+  const wallet = party.actionWallet;
+  const shownWallet = wallet ?? party.wallet;
+  const unavailable = wallet?.isRuntimeExecutionAllowed !== true;
 
   return (
     <span className="relative z-10 flex flex-col items-end gap-1">
+      {shownWallet ? (
+        <Link
+          className="max-w-40 truncate text-secondary text-xs hover:underline"
+          href={`/dashboard/wallets/${encodeURIComponent(shownWallet.id)}`}
+          title={party.address}
+        >
+          {shownWallet.name ?? t("DashboardMarkets.dvp.partySdpWallet")}
+        </Link>
+      ) : null}
+      {unavailable ? (
+        <span className="text-warning text-xs">{t("DashboardCustody.signingDisabledTitle")}</span>
+      ) : null}
       <Button
         // A transfer into a frozen escrow bounces, so offering to send one is
         // offering to waste a signature and a fee.
-        disabled={frozen || pending.has(`fund:${side}`)}
-        onClick={() => act("fund", { side, symbol })}
+        disabled={unavailable || frozen || pending.has(`fund:${side}`)}
+        onClick={() => {
+          if (wallet?.isRuntimeExecutionAllowed === true) {
+            void act("fund", { side, walletId: wallet.id, symbol });
+          }
+        }}
         size="sm"
         type="button"
         variant="secondary"
@@ -149,6 +170,7 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
               side={trade.yourSide}
               symbol={yours.symbol}
               tradeId={trade.id}
+              party={yours.party}
             />
           )}
         </TableCell>

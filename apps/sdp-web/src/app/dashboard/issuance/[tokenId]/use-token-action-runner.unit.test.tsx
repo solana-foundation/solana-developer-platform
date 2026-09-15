@@ -12,8 +12,20 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("sonner", () => ({ toast: { loading: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 
 const wallets: PaymentsDashboardWallet[] = [
-  { id: "cwlt_a", walletId: "provider_same", publicKey: "authority", label: "Config" },
-  { id: "cwlt_b", walletId: "provider_same", publicKey: "authority", label: "Connection" },
+  {
+    id: "cwlt_a",
+    walletId: "provider_same",
+    isRuntimeExecutionAllowed: true,
+    publicKey: "authority",
+    label: "Config",
+  },
+  {
+    id: "cwlt_b",
+    walletId: "provider_same",
+    isRuntimeExecutionAllowed: true,
+    publicKey: "authority",
+    label: "Connection",
+  },
 ];
 const fetchMock = vi.fn<typeof fetch>();
 function wrapper({ children }: { children: ReactNode }) {
@@ -35,6 +47,29 @@ afterEach(() => {
 });
 
 describe("token action signer selection", () => {
+  it("keeps a confirmed exact choice when runtime is disabled and does not submit another wallet", async () => {
+    const { result, rerender } = renderHook(({ inventory }) => useTokenActionRunner(inventory), {
+      wrapper,
+      initialProps: { inventory: wallets },
+    });
+    act(() =>
+      result.current.runAction(
+        { label: "Unpause", method: "POST", path: "/token/unpause", body: {} },
+        { requiresConfirmation: true, signerWallets: wallets }
+      )
+    );
+    act(() => result.current.selectConfirmationWallet("cwlt_b"));
+    rerender({
+      inventory: wallets.map((wallet) => ({
+        ...wallet,
+        isRuntimeExecutionAllowed: wallet.id !== "cwlt_b",
+      })),
+    });
+    expect(result.current.actionConfirmation?.signingCustodyWalletId).toBe("cwlt_b");
+    await act(async () => result.current.confirmAction());
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("sends the only wallet without adding confirmation to an immediate action", async () => {
     const { result } = renderHook(() => useTokenActionRunner(), { wrapper });
     act(() =>

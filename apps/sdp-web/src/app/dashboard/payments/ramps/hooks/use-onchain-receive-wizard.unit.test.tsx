@@ -26,6 +26,8 @@ const wallets: PaymentsDashboardWallet[] = [
   {
     id: "wallet-live",
     walletId: "provider-live",
+    isRuntimeExecutionAllowed: true,
+    custodyConfigId: "cc_test",
     publicKey: "live-wallet-address",
     label: "Treasury",
     balances: [],

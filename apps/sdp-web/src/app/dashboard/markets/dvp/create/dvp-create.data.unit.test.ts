@@ -21,6 +21,8 @@ const WALLET = {
   id: "cwlt_1",
   publicKey: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
   label: "Treasury",
+  custodyConfigId: "cc_config",
+  isRuntimeExecutionAllowed: true,
 };
 const WALLET_WITH_BALANCES = {
   ...WALLET,
@@ -72,6 +74,61 @@ function request(responses: { wallets: unknown; tokens: unknown; counterparties?
 }
 
 describe("fetchDvpCreateContext", () => {
+  it.each([
+    { id: 42 },
+    { publicKey: "" },
+    { label: { name: "Treasury" } },
+    { isRuntimeExecutionAllowed: "true" },
+    { isRuntimeExecutionAllowed: undefined },
+    { custodyConfigId: "" },
+    { custodyConfigId: undefined },
+    { custodyConnectionId: "conn_conflict" },
+  ])("reports invalid wallet fields instead of offering a signing choice: %j", async (fields) => {
+    const load = vi.fn(async (path: string) => {
+      if (path === "/v1/wallets?includeBalances=true&includeAllProviders=true") {
+        return Response.json({
+          data: [
+            { ...WALLET, custodyConfigId: "cc_config", isRuntimeExecutionAllowed: true, ...fields },
+          ],
+        });
+      }
+      if (path === "/v1/issuance/tokens?pageSize=100") return Response.json({ data: [] });
+      if (path === "/v1/counterparties/accounts?pageSize=100")
+        return Response.json({ data: { accounts: [] } });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const context = await fetchDvpCreateContext(load);
+    expect(context.wallets).toEqual([]);
+    expect(context.error).toBe("Invalid custody wallet response");
+  });
+
+  it("includes nondefault Connection parties even when runtime execution is disabled", async () => {
+    const load = request({
+      wallets: ok({
+        data: [
+          {
+            ...WALLET,
+            custodyConfigId: undefined,
+            custodyConnectionId: "conn_external",
+            isRuntimeExecutionAllowed: false,
+          },
+        ],
+      }),
+      tokens: ok({ data: [] }),
+    });
+
+    const context = await fetchDvpCreateContext(load);
+
+    expect(load).toHaveBeenCalledWith("/v1/wallets?includeBalances=true&includeAllProviders=true");
+    expect(context.wallets).toEqual([
+      expect.objectContaining({
+        id: WALLET.id,
+        custodyConnectionId: "conn_external",
+        isRuntimeExecutionAllowed: false,
+      }),
+    ]);
+  });
+
   it("maps wallets and deployed tokens", async () => {
     const context = await fetchDvpCreateContext(
       request({ wallets: ok({ data: [WALLET] }), tokens: ok({ data: [TOKEN] }) })
@@ -79,7 +136,14 @@ describe("fetchDvpCreateContext", () => {
 
     expect(context.error).toBeNull();
     expect(context.wallets).toEqual([
-      { id: "cwlt_1", address: WALLET.publicKey, label: "Treasury", balances: [] },
+      {
+        id: "cwlt_1",
+        address: WALLET.publicKey,
+        label: "Treasury",
+        custodyConfigId: "cc_config",
+        isRuntimeExecutionAllowed: true,
+        balances: [],
+      },
     ]);
     expect(context.tokens[0]).toMatchObject({
       mint: TOKEN.mintAddress,

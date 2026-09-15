@@ -1,6 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, Permission } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getAddressDecoder } from "@solana/kit";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
@@ -907,6 +908,161 @@ describe("DvP routes", () => {
       await seedCustodyWallets();
     });
 
+    it("projects the oldest execution wallet even when runtime is disabled, without changing discovery", async () => {
+      await getDb(env)
+        .prepare(`INSERT INTO custody_wallets
+          (id, custody_config_id, wallet_id, public_key, label, status, created_at)
+          VALUES ('cwlt_oldest', ?, 'provider_oldest', ?, 'Original desk', 'active', '2020-01-01')`)
+        .bind(CUSTODY_CONFIG_ID, PARTY_A_ADDRESS)
+        .run();
+      await seedTradeFor({ tradeId: "dvp_action_wallet" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_action_wallet",
+        { headers: authHeaders() },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        data: {
+          trade: {
+            kind: "principal",
+            legs: {
+              a: {
+                party: {
+                  wallet: { id: BOUND_WALLET.id },
+                  actionWallet: {
+                    id: "cwlt_oldest",
+                    name: "Original desk",
+                    isRuntimeExecutionAllowed: false,
+                  },
+                },
+              },
+              b: { party: { wallet: null, actionWallet: null } },
+            },
+          },
+        },
+      });
+    });
+
+    it("keeps a read-only caller's party visible without offering a funding wallet", async () => {
+      const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+      await seedCachedApiKey(env, keyHash, {
+        ...TEST_CACHED_API_KEY,
+        permissions: ["payments:read", "wallets:read"],
+      });
+      await seedTradeFor({ tradeId: "dvp_read_only" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_read_only",
+        { headers: authHeaders() },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        data: {
+          trade: {
+            kind: "principal",
+            legs: {
+              a: {
+                party: {
+                  wallet: { id: BOUND_WALLET.id },
+                  actionWallet: null,
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    it("does not disclose a write-only execution wallet through a readable same-address wallet", async () => {
+      await getDb(env)
+        .prepare(`INSERT INTO custody_wallets
+        (id, custody_config_id, wallet_id, public_key, label, status, created_at)
+        VALUES ('cwlt_write_only', ?, 'provider_write_only', ?, 'Hidden desk', 'active', '2020-01-01')`)
+        .bind(CUSTODY_CONFIG_ID, PARTY_A_ADDRESS)
+        .run();
+      await seedWalletScopedKey(BOUND_WALLET, ["payments:read", "wallets:read"]);
+      const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+      await seedCachedApiKey(env, keyHash, {
+        ...TEST_CACHED_API_KEY,
+        walletScope: "selected",
+        walletBindings: [
+          {
+            walletId: BOUND_WALLET.walletId,
+            custodyWalletId: BOUND_WALLET.id,
+            permissions: ["payments:read", "wallets:read"],
+          },
+          {
+            walletId: "provider_write_only",
+            custodyWalletId: "cwlt_write_only",
+            permissions: ["payments:write"],
+          },
+        ],
+      });
+      await seedTradeFor({ tradeId: "dvp_hidden_action" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_hidden_action",
+        { headers: authHeaders() },
+        env
+      );
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body).toMatchObject({
+        data: {
+          trade: {
+            legs: {
+              a: {
+                party: {
+                  wallet: { id: BOUND_WALLET.id },
+                  actionWallet: null,
+                },
+              },
+            },
+          },
+        },
+      });
+      expect(JSON.stringify(body)).not.toContain("Hidden desk");
+      expect(JSON.stringify(body)).not.toContain("cwlt_write_only");
+    });
+
+    it("uses the existing write binding to choose among same-address wallets", async () => {
+      await getDb(env)
+        .prepare(`INSERT INTO custody_wallets
+        (id, custody_config_id, wallet_id, public_key, status, created_at)
+        VALUES ('cwlt_older_unbound', ?, 'provider_older', ?, 'active', '2020-01-01')`)
+        .bind(CUSTODY_CONFIG_ID, PARTY_A_ADDRESS)
+        .run();
+      await seedWalletScopedKey(BOUND_WALLET);
+      await seedTradeFor({ tradeId: "dvp_bound_action" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_bound_action",
+        { headers: authHeaders() },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        data: {
+          trade: {
+            legs: {
+              a: {
+                party: {
+                  actionWallet: { id: BOUND_WALLET.id },
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
     it("answers the creator's view: custodied side, counterparty label, funding receipt", async () => {
       const { accountId } = await seedCounterpartyForParty(PARTY_A_ADDRESS);
       // Mint A is this org's issued token WITH artwork; mint B is this org's
@@ -946,6 +1102,7 @@ describe("DvP routes", () => {
               address: PARTY_A_ADDRESS,
               counterparty: { id: accountId, label: "Acme Desk" },
               wallet: { id: BOUND_WALLET.id, name: null },
+              actionWallet: { id: BOUND_WALLET.id, name: null, isRuntimeExecutionAllowed: false },
             },
             mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -970,6 +1127,7 @@ describe("DvP routes", () => {
               address: PARTY_B_EXTERNAL,
               counterparty: null,
               wallet: null,
+              actionWallet: null,
             },
             mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -1041,6 +1199,7 @@ describe("DvP routes", () => {
               address: PARTY_A_ADDRESS,
               counterparty: null,
               wallet: { id: "cwlt_dvp_party", name: null },
+              actionWallet: { id: "cwlt_dvp_party", name: null, isRuntimeExecutionAllowed: false },
             },
             mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -1060,6 +1219,7 @@ describe("DvP routes", () => {
               address: PARTY_B_EXTERNAL,
               counterparty: null,
               wallet: null,
+              actionWallet: null,
             },
             mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -1317,92 +1477,228 @@ describe("DvP routes", () => {
   });
 
   describe("inbound", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
     beforeEach(async () => {
       await seedCustodyWallets();
     });
 
-    it("tells the party which leg is theirs, with derived party objects and no attribution", async () => {
-      await seedTradeFor({ tradeId: "dvp_inbound_seen" });
+    it("keeps database reads constant for 50 trades with 100 distinct party addresses", async () => {
       await seedPartyOrg();
-      // The party org ITSELF issued mint B with artwork: the inbound view
-      // resolves images against the reader's organization, so its own token
-      // shows — while the creator's unissued mint A stays null.
-      await seedIssuedTokenMint({
-        mintAddress: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
-        organizationId: PARTY_ORG.id,
-        projectId: PARTY_PROJECT.id,
-        imageUrl: ISSUED_IMAGE_B,
-      });
+      const db = getDb(env);
+      const reads = vi.spyOn(db, "prepare");
+      const expectedTrades = [];
+      let singleTradeReads = 0;
 
-      const res = await app.request("/v1/dvp/trades/inbound", { headers: partyAuthHeaders() }, env);
-      expect(res.status).toBe(200);
+      for (let index = 0; index < 50; index += 1) {
+        const userA = getAddressDecoder().decode(new Uint8Array(32).fill(index * 2 + 1));
+        const userB = getAddressDecoder().decode(new Uint8Array(32).fill(index * 2 + 2));
+        const walletA = `cwlt_inbound_${index}_a`;
+        const walletB = `cwlt_inbound_${index}_b`;
+        await db.batch(
+          [
+            { id: walletA, publicKey: userA },
+            { id: walletB, publicKey: userB },
+          ].map((wallet) =>
+            db
+              .prepare(`INSERT INTO custody_wallets
+                (id, custody_config_id, wallet_id, public_key, status)
+                VALUES (?, 'cust_dvp_party', ?, ?, 'active')`)
+              .bind(wallet.id, wallet.id, wallet.publicKey)
+          )
+        );
+        const tradeId = `dvp_inbound_${index}`;
+        await seedTradeFor({ tradeId, swapDvp: userA, userA, userB });
+        expectedTrades.push({
+          id: tradeId,
+          legs: {
+            a: { party: { actionWallet: { id: walletA } } },
+            b: { party: { actionWallet: { id: walletB } } },
+          },
+        });
 
-      const body = (await res.json()) as {
-        data: {
-          trades: {
-            id: string;
-            yourSide: string;
-            kind?: unknown;
-            legs: {
-              a: {
-                party: { address: string; counterparty: unknown; wallet: unknown };
-                fundingSignature?: unknown;
-              };
-              b: { party: { address: string; counterparty: unknown; wallet: unknown } };
-            };
-          }[];
-        };
-      };
-      expect(body.data.trades).toHaveLength(1);
-      const trade = body.data.trades[0];
-      if (trade === undefined) {
-        throw new Error("inbound trade missing from the response");
+        if (index === 0) {
+          reads.mockClear();
+          const res = await app.request(
+            "/v1/dvp/trades/inbound",
+            { headers: partyAuthHeaders() },
+            env
+          );
+          singleTradeReads = reads.mock.calls.length;
+          expect(res.status).toBe(200);
+          expect(await res.json()).toMatchObject({ data: { trades: expectedTrades } });
+          expect(singleTradeReads).toBeGreaterThan(0);
+        }
       }
-      expect(trade.id).toBe("dvp_inbound_seen");
-      expect(trade.yourSide).toBe("a");
-      expect(trade.legs.a).toEqual({
-        party: {
-          address: PARTY_A_ADDRESS,
-          counterparty: null,
-          wallet: { id: "cwlt_dvp_party", name: null },
-        },
-        mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
-        tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-        amount: "1000",
-        decimals: null,
-        symbol: null,
-        name: null,
-        imageUrl: null,
-        escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
-        settlementDestination: PARTY_A_ADDRESS,
-        observedAmount: null,
-        frozen: null,
-        outcome: "awaiting",
-      });
-      expect(trade.legs.b).toEqual({
-        party: {
-          address: PARTY_B_EXTERNAL,
-          counterparty: null,
-          wallet: null,
-        },
-        mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
-        tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-        amount: "2000",
-        decimals: null,
-        symbol: null,
-        name: null,
-        imageUrl: ISSUED_IMAGE_B,
-        escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
-        settlementDestination: PARTY_B_EXTERNAL,
-        observedAmount: null,
-        frozen: null,
-        outcome: "awaiting",
-      });
-      // The inbound shape carries neither the creator's derived kind nor the
-      // funding claims — both belong to organizations that can read the row.
-      expect(trade.kind).toBeUndefined();
-      expect(trade.legs.a.fundingSignature).toBeUndefined();
+
+      reads.mockClear();
+      const res = await app.request("/v1/dvp/trades/inbound", { headers: partyAuthHeaders() }, env);
+      const fullPageReads = reads.mock.calls.length;
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.trades).toHaveLength(50);
+      for (const expected of expectedTrades) {
+        expect(
+          body.data.trades.find((trade: { id: string }) => trade.id === expected.id)
+        ).toMatchObject(expected);
+      }
+      // Auth caches can reduce the second request's reads; more trades must not add any.
+      expect(fullPageReads).toBeLessThanOrEqual(singleTradeReads);
     });
+
+    it.each([false, true])(
+      "keeps the Connection action wallet with BYOK=%s",
+      async (byokEnabled) => {
+        const requestEnv = { ...env, PRIVY_BYOK_ENABLED: String(byokEnabled) };
+        const fetch = vi
+          .spyOn(globalThis, "fetch")
+          .mockRejectedValue(new Error("RPC unavailable in the route fixture"));
+        await seedTradeFor({ tradeId: "dvp_inbound_seen" });
+        await seedPartyOrg();
+        // A nondefault Connection holds the same party address. Funding chooses
+        // its older record in both flag states; only runtime admission changes.
+        await getDb(env).batch([
+          getDb(env)
+            .prepare(`INSERT INTO provider_credentials
+          (id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, encrypted_secret_payload, status, credential_version, created_by)
+          VALUES ('pcred_dvp_inbound', ?, ?, 'privy', 'Own Privy', 'project', 'stored',
+                  'encrypted_db', 'test-ciphertext', 'active', 1, ?)`)
+            .bind(PARTY_ORG.id, PARTY_PROJECT.id, TEST_USER.id),
+          getDb(env)
+            .prepare(`INSERT INTO custody_connections
+          (id, organization_id, project_id, provider, scope, provider_credential_id,
+           provider_credential_scope_key, status, created_by)
+          VALUES ('cconn_dvp_inbound', ?, ?, 'privy', 'project', 'pcred_dvp_inbound', ?, 'pending', ?)`)
+            .bind(PARTY_ORG.id, PARTY_PROJECT.id, PARTY_PROJECT.id, TEST_USER.id),
+          getDb(env)
+            .prepare(`INSERT INTO custody_wallets
+          (id, custody_connection_id, wallet_id, public_key, label, status, created_at)
+          VALUES ('cwlt_dvp_connection', 'cconn_dvp_inbound', 'privy_inbound', ?, 'Connection desk', 'active', '2020-01-01')`)
+            .bind(PARTY_A_ADDRESS),
+          getDb(env).prepare(`UPDATE custody_connections
+          SET status = 'active', default_custody_wallet_id = 'cwlt_dvp_connection',
+              last_check_status = 'success', last_check_at = sdp_iso_now(),
+              activated_at = sdp_iso_now(), provider_account_fingerprint = 'sha256:dvp-inbound'
+          WHERE id = 'cconn_dvp_inbound'`),
+        ]);
+        // The party org ITSELF issued mint B with artwork: the inbound view
+        // resolves images against the reader's organization, so its own token
+        // shows — while the creator's unissued mint A stays null.
+        await seedIssuedTokenMint({
+          mintAddress: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+          organizationId: PARTY_ORG.id,
+          projectId: PARTY_PROJECT.id,
+          imageUrl: ISSUED_IMAGE_B,
+        });
+
+        const res = await app.request(
+          "/v1/dvp/trades/inbound",
+          { headers: partyAuthHeaders() },
+          requestEnv
+        );
+        expect(res.status).toBe(200);
+        expect(fetch).not.toHaveBeenCalled();
+
+        const body = (await res.json()) as {
+          data: {
+            trades: {
+              id: string;
+              yourSide: string;
+              kind?: unknown;
+              legs: {
+                a: {
+                  party: { address: string; counterparty: unknown; wallet: unknown };
+                  fundingSignature?: unknown;
+                };
+                b: { party: { address: string; counterparty: unknown; wallet: unknown } };
+              };
+            }[];
+          };
+        };
+        expect(body.data.trades).toHaveLength(1);
+        const trade = body.data.trades[0];
+        if (trade === undefined) {
+          throw new Error("inbound trade missing from the response");
+        }
+        expect(trade.id).toBe("dvp_inbound_seen");
+        expect(trade.yourSide).toBe("a");
+        expect(trade.legs.a).toEqual({
+          party: {
+            address: PARTY_A_ADDRESS,
+            counterparty: null,
+            wallet: { id: "cwlt_dvp_party", name: null },
+            actionWallet: {
+              id: "cwlt_dvp_connection",
+              name: "Connection desk",
+              isRuntimeExecutionAllowed: byokEnabled,
+            },
+          },
+          mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
+          tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+          amount: "1000",
+          decimals: null,
+          symbol: null,
+          name: null,
+          imageUrl: null,
+          escrow: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
+          settlementDestination: PARTY_A_ADDRESS,
+          observedAmount: null,
+          frozen: null,
+          outcome: "awaiting",
+        });
+        expect(trade.legs.b).toEqual({
+          party: {
+            address: PARTY_B_EXTERNAL,
+            counterparty: null,
+            wallet: null,
+            actionWallet: null,
+          },
+          mint: "AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE",
+          tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+          amount: "2000",
+          decimals: null,
+          symbol: null,
+          name: null,
+          imageUrl: ISSUED_IMAGE_B,
+          escrow: "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y",
+          settlementDestination: PARTY_B_EXTERNAL,
+          observedAmount: null,
+          frozen: null,
+          outcome: "awaiting",
+        });
+        // The inbound shape carries neither the creator's derived kind nor the
+        // funding claims — both belong to organizations that can read the row.
+        expect(trade.kind).toBeUndefined();
+        expect(trade.legs.a.fundingSignature).toBeUndefined();
+
+        const detail = await app.request(
+          "/v1/dvp/trades/dvp_inbound_seen",
+          { headers: partyAuthHeaders() },
+          requestEnv
+        );
+        expect(detail.status).toBe(200);
+        expect(await detail.json()).toMatchObject({
+          data: {
+            trade: {
+              legs: {
+                a: {
+                  party: {
+                    actionWallet: {
+                      id: "cwlt_dvp_connection",
+                      name: "Connection desk",
+                      isRuntimeExecutionAllowed: byokEnabled,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+    );
   });
 
   describe("wallet scope", () => {

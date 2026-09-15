@@ -35,7 +35,7 @@ it.each(["cwlt_a", "provider_unresolved"])(
     const form = {
       draft,
       saving: false,
-      errors: assignedId === "cwlt_a" ? {} : { authorityWalletIds: "Select a signer wallet" },
+      errors: assignedId === "cwlt_a" ? {} : { authorityWalletIds: "Select a signing wallet" },
       updateDraft: (patch: Partial<AssetProfileForm["draft"]>) => updateDraft(patch),
     } as AssetProfileForm;
     render(
@@ -46,10 +46,10 @@ it.each(["cwlt_a", "provider_unresolved"])(
 
     const select = screen.getByRole("combobox");
     expect(select.textContent).toContain(
-      assignedId === "cwlt_a" ? "Wallet A" : "Select a signer wallet"
+      assignedId === "cwlt_a" ? "Wallet A" : "Select a signing wallet"
     );
     if (assignedId !== "cwlt_a")
-      expect(screen.getByRole("alert").textContent).toBe("Select a signer wallet");
+      expect(screen.getByRole("alert").textContent).toBe("Select a signing wallet");
     await user.click(select);
     await user.click(await screen.findByRole("option", { name: /Wallet B/ }));
     expect(updateDraft).toHaveBeenCalledWith({

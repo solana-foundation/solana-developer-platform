@@ -1,8 +1,141 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   fetchDashboardPaymentTransfersForWallets,
+  fetchPaymentsWallets,
   fetchPaymentTransfers,
 } from "./payments-page.data";
+
+describe("fetchPaymentsWallets", () => {
+  it("keeps same-address Connection wallets and their execution admission", async () => {
+    const wallets = [
+      {
+        id: "wallet-a",
+        walletId: "provider-wallet",
+        publicKey: "shared-address",
+        label: "Treasury",
+        provider: "privy",
+        custodyConnectionId: "connection-a",
+        isRuntimeExecutionAllowed: true,
+      },
+      {
+        id: "wallet-b",
+        walletId: "provider-wallet",
+        publicKey: "shared-address",
+        label: "Treasury",
+        provider: "privy",
+        custodyConnectionId: "connection-b",
+        isRuntimeExecutionAllowed: false,
+      },
+    ];
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { wallets } }));
+
+    const result = await fetchPaymentsWallets(request, { view: "summary" });
+
+    expect(request).toHaveBeenCalledWith("/v1/wallets?includeAllProviders=true&view=summary");
+    expect(result).toEqual({ ok: true, data: wallets });
+  });
+
+  it("rejects a wallet response without execution admission", async () => {
+    const wallet = {
+      id: "config-wallet",
+      walletId: "provider-wallet",
+      publicKey: "address",
+      label: null,
+      custodyConfigId: "config",
+    };
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { wallets: [wallet] } }));
+
+    expect(await fetchPaymentsWallets(request)).toEqual({
+      ok: false,
+      error: "Invalid custody wallet response",
+    });
+  });
+
+  it.each([true, false])("keeps a Config wallet with execution admission %s", async (allowed) => {
+    const wallet = {
+      id: "config-wallet",
+      walletId: "provider-wallet",
+      publicKey: "address",
+      label: null,
+      provider: "privy",
+      custodyConfigId: "config",
+      isRuntimeExecutionAllowed: allowed,
+      balances: [{ token: "USDC", mint: "mint", amount: "1000000", uiAmount: "1", decimals: 6 }],
+    };
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { wallets: [wallet] } }));
+
+    expect(await fetchPaymentsWallets(request, { includeBalances: true })).toEqual({
+      ok: true,
+      data: [wallet],
+    });
+    expect(request).toHaveBeenCalledWith(
+      "/v1/wallets?includeAllProviders=true&includeBalances=true"
+    );
+  });
+
+  it.each([
+    { name: "no owner", owner: {} },
+    { name: "two owners", owner: { custodyConfigId: "config", custodyConnectionId: "connection" } },
+    { name: "empty owner", owner: { custodyConfigId: "" } },
+  ])("rejects a wallet with $name", async ({ owner }) => {
+    const request = vi.fn().mockResolvedValue(
+      Response.json({
+        data: {
+          wallets: [
+            {
+              id: "wallet",
+              walletId: "provider-wallet",
+              publicKey: "address",
+              isRuntimeExecutionAllowed: true,
+              ...owner,
+            },
+          ],
+        },
+      })
+    );
+
+    expect(await fetchPaymentsWallets(request)).toEqual({
+      ok: false,
+      error: "Invalid custody wallet response",
+    });
+  });
+
+  it.each(["true", null, 1])("rejects non-boolean execution admission %s", async (admission) => {
+    const request = vi.fn().mockResolvedValue(
+      Response.json({
+        data: {
+          wallets: [
+            {
+              id: "wallet",
+              walletId: "provider-wallet",
+              publicKey: "address",
+              custodyConnectionId: "connection",
+              isRuntimeExecutionAllowed: admission,
+            },
+          ],
+        },
+      })
+    );
+
+    expect(await fetchPaymentsWallets(request)).toEqual({
+      ok: false,
+      error: "Invalid custody wallet response",
+    });
+  });
+
+  it("distinguishes an empty wallet list from missing wallet data", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: { wallets: [] } }))
+      .mockResolvedValueOnce(Response.json({ data: {} }));
+
+    expect(await fetchPaymentsWallets(request)).toEqual({ ok: true, data: [] });
+    expect(await fetchPaymentsWallets(request)).toEqual({
+      ok: false,
+      error: "Invalid custody wallet response",
+    });
+  });
+});
 
 describe("fetchDashboardPaymentTransfersForWallets", () => {
   it("keeps exact wallets when persisted history fails and observes each address once", async () => {
@@ -37,9 +170,27 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
       {
         ok: true,
         data: [
-          { id: "wallet-row-1", walletId: "wallet-1", publicKey: "address-1", label: null },
-          { id: "wallet-row-2", walletId: "wallet-1", publicKey: "address-1", label: null },
-          { id: "wallet-row-3", walletId: "wallet-3", publicKey: "address-2", label: null },
+          {
+            id: "wallet-row-1",
+            walletId: "wallet-1",
+            publicKey: "address-1",
+            label: null,
+            isRuntimeExecutionAllowed: true,
+          },
+          {
+            id: "wallet-row-2",
+            walletId: "wallet-1",
+            publicKey: "address-1",
+            label: null,
+            isRuntimeExecutionAllowed: true,
+          },
+          {
+            id: "wallet-row-3",
+            walletId: "wallet-3",
+            publicKey: "address-2",
+            label: null,
+            isRuntimeExecutionAllowed: true,
+          },
         ],
       },
       20
@@ -91,12 +242,14 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
             walletId: "provider-wallet",
             publicKey: "shared-address",
             label: null,
+            isRuntimeExecutionAllowed: true,
           },
           {
             id: "wallet-row-2",
             walletId: "provider-wallet",
             publicKey: "shared-address",
             label: null,
+            isRuntimeExecutionAllowed: true,
           },
         ],
       },
@@ -150,6 +303,7 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
             walletId: "provider-wallet-1",
             publicKey: "address-1",
             label: null,
+            isRuntimeExecutionAllowed: true,
           },
         ],
       },

@@ -22,6 +22,8 @@ vi.mock("next/navigation", () => ({
 const labeledWallet: PaymentsDashboardWallet = {
   id: "cwlt_treasury",
   walletId: "provider_treasury",
+  isRuntimeExecutionAllowed: true,
+  custodyConfigId: "cc_test",
   publicKey: "TreasuryPublicKey111111111111111111111111111",
   label: "Treasury",
 };
@@ -29,6 +31,8 @@ const labeledWallet: PaymentsDashboardWallet = {
 const unlabeledWallet: PaymentsDashboardWallet = {
   id: "cwlt_unlabeled",
   walletId: "provider_unlabeled",
+  isRuntimeExecutionAllowed: true,
+  custodyConfigId: "cc_test",
   publicKey: "UnlabeledPublicKey1111111111111111111111111",
   label: null,
 };
@@ -45,6 +49,7 @@ const baseWizard = {
   liveWallets: [],
   walletsLoading: false,
   liveWalletsError: null,
+  sourceWalletHint: null,
   cryptoAccounts: [],
   accountsLoading: false,
   counterpartyId: "cpty_test",

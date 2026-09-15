@@ -812,6 +812,19 @@ export function findWalletByCustodyWalletId(
   return authorityWallets.find((wallet) => wallet.id === custodyWalletId) ?? null;
 }
 
+export function getSignerWalletUnavailableReason(
+  wallets: PaymentsDashboardWallet[],
+  custodyWalletId: string | null | undefined,
+  t: Translate
+): string | null {
+  if (!custodyWalletId) return null;
+  const wallet = findWalletByCustodyWalletId(wallets, custodyWalletId);
+  if (!wallet) return t("DashboardIssuance.management.requiredSignerNotControlled");
+  return wallet.isRuntimeExecutionAllowed === true
+    ? null
+    : t("DashboardIssuance.management.signingUnavailable");
+}
+
 export function findWalletByPublicKey(
   authorityWallets: PaymentsDashboardWallet[],
   publicKey: string | null | undefined
@@ -888,7 +901,11 @@ export function getSignerSelectionForAction({
     return {
       wallets: availableWallets,
       defaultWalletId: (preferredWallet ?? availableWallets[0]).id,
-      unavailableReason: null,
+      unavailableReason: availableWallets.some(
+        (wallet) => wallet.isRuntimeExecutionAllowed === true
+      )
+        ? null
+        : t("DashboardIssuance.management.signingUnavailable"),
     };
   }
 
@@ -899,7 +916,11 @@ export function getSignerSelectionForAction({
     return {
       wallets: availableWallets,
       defaultWalletId: hasDuplicateAddress ? "" : availableWallets[0].id,
-      unavailableReason: null,
+      unavailableReason: availableWallets.some(
+        (wallet) => wallet.isRuntimeExecutionAllowed === true
+      )
+        ? null
+        : t("DashboardIssuance.management.signingUnavailable"),
     };
   }
 
@@ -973,7 +994,9 @@ export function getSignerSelectionForAction({
   return {
     wallets: matchedWallets,
     defaultWalletId: matchedWallets.length === 1 ? matchedWallets[0].id : "",
-    unavailableReason: null,
+    unavailableReason: matchedWallets.some((wallet) => wallet.isRuntimeExecutionAllowed === true)
+      ? null
+      : t("DashboardIssuance.management.signingUnavailable"),
   };
 }
 

@@ -13,6 +13,7 @@ import {
   type DvpTradeSide,
   type DvpTradeStatus,
 } from "@sdp/types";
+import { z } from "zod";
 
 export { DVP_TRADE_SIDES, type DvpSettlementAvailability, type DvpTradeSide, type DvpTradeStatus };
 
@@ -34,6 +35,14 @@ export interface DvpCallerWallet {
   name: string | null;
 }
 
+export const dvpActionWalletSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().nullable(),
+  isRuntimeExecutionAllowed: z.boolean(),
+});
+
+export type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
+
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
   address: string;
@@ -47,6 +56,8 @@ export interface DvpPartyRef {
    * caller custodies this party; the id is the wallet page's identifier.
    */
   wallet: DvpCallerWallet | null;
+  /** Present on action-bearing reads; null means no readable funding target. */
+  actionWallet?: DvpActionWallet | null;
 }
 
 export interface DvpTradeLeg {
