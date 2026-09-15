@@ -266,10 +266,9 @@ export async function seedRecurringCollectionJournal(
         options.stage === "confirmed" ? "succeeded" : "processing",
         transfer?.signature ?? null,
         JSON.stringify({
+          source: "manual",
           recurringPaymentId: options.recurringPaymentId,
-          subscriptionId: options.subscriptionId,
-          collectionDueAt: options.collectionDueAt,
-          stage: options.stage,
+          initiatedByKeyId: null,
         }),
         options.attemptedAt,
         options.attemptedAt
@@ -331,7 +330,7 @@ export async function seedRecurringDatabaseTenant(options: {
       ),
     db
       .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = ?")
-      .bind(options.custodyWalletId, options.custodyConfigId),
+      .bind(options.providerWalletId, options.custodyConfigId),
   ]);
 }
 

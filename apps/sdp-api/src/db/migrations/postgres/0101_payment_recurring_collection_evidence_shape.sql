@@ -14,7 +14,8 @@ WHERE type = 'transfer'
 ALTER TABLE payment_subscription_collection_attempts
     ADD CONSTRAINT payment_subscription_collection_attempts_metadata_source_check
     CHECK (
-      jsonb_typeof(metadata->'source') = 'string'
+      metadata ? 'source'
+      AND jsonb_typeof(metadata->'source') = 'string'
       AND metadata->>'source' IN ('manual', 'automated', 'retry', 'linked_transfer')
     );
 
