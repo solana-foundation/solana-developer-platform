@@ -617,9 +617,11 @@ export function RecurringPaymentCreateWorkspace({
       walletsError={liveWalletsError}
       onPrimary={handlePrimary}
       onSecondary={handleSecondary}
-      counterpartyDialogOpen={counterpartyDialogOpen}
-      setCounterpartyDialogOpen={setCounterpartyDialogOpen}
-      onCounterpartyCreated={handleCounterpartyCreated}
+      counterpartyDialog={{
+        open: counterpartyDialogOpen,
+        setOpen: setCounterpartyDialogOpen,
+        onCreated: handleCounterpartyCreated,
+      }}
       secondaryDisabled={submitting}
     >
       {formError ? (

@@ -1891,7 +1891,10 @@ describe("payment transfer batches", () => {
       }>();
     expect(stored?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
     if (!stored?.idempotency_fingerprint) throw new Error("missing idempotency fingerprint");
-    expect(JSON.parse(stored.idempotency_fingerprint)).not.toHaveProperty("sourceCustodyWalletId");
+    expect(JSON.parse(stored.idempotency_fingerprint)).toHaveProperty(
+      "sourceCustodyWalletId",
+      TEST_CUSTODY_WALLET_ID
+    );
 
     const count = await getDb(env)
       .prepare(

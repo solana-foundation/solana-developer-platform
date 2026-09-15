@@ -19,6 +19,7 @@ const plainKeys = [
 ];
 
 const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
+  [paymentsQueryKeys.walletAddressQr("wallet-address"), ["wallet-address"]],
   [paymentsQueryKeys.onrampTransferStatus({ transferId: "tr_1" }), ["tr_1"]],
   [paymentsQueryKeys.offrampTransferStatus({ transferId: "tr_2" }), ["tr_2"]],
   [paymentsQueryKeys.requirementsStatusPoll({ subjectKey: "subject_1" }), ["subject_1"]],

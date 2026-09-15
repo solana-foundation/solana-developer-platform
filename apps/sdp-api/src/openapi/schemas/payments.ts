@@ -43,6 +43,7 @@ import {
   transferDirectionSchema as transferDirectionSchemaBase,
   transferIdParamsSchema as transferIdParamsSchemaBase,
   transferStatusSchema as transferStatusSchemaBase,
+  transferTypeSchema as transferTypeSchemaBase,
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
   updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
   updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
@@ -469,12 +470,7 @@ export const walletBalancesSchema = z
       "Balance payload for a custody-managed wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
-// `privateTransfer` stays DOCUMENTED and deprecated rather than deleted. v1
-// published it, so removing the property would retract part of a live contract;
-// the capability behind it is gone, which the field's own description and the
-// documented 503 say plainly.
 export const createTransferRequestSchema = createTransferSchemaBase
-  .omit({ privateTransfer: true })
   .extend({
     projectId: withOpenApi(createTransferSchemaBase.shape.projectId, {
       description: "Project identifier for the transfer context.",
@@ -504,15 +500,10 @@ export const createTransferRequestSchema = createTransferSchemaBase
     memo: withOpenApi(createTransferSchemaBase.shape.memo, {
       description: "Optional memo for the transfer.",
     }),
-    privateTransfer: z.unknown().optional().openapi({
-      deprecated: true,
-      description:
-        "Retired. SDP no longer integrates a private-transfer provider. The field is still accepted by validation so existing v1 requests remain well-formed, but a request that includes it is refused with 503 PROVIDER_UNAVAILABLE and no transfer is created — it is never downgraded to a public transfer. Remove the field to send an ordinary public transfer.",
-    }),
   })
   .openapi({
     description:
-      "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets. Transfers are public on-chain transfers; the deprecated `privateTransfer` field is no longer honoured.",
+      "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.",
     example: {
       projectId: "prj_example",
       sourceCustodyWalletId: "cwlt_example",
@@ -527,9 +518,10 @@ export const priorityFeeSchema = withOpenApi(priorityFeeSchemaBase, {
   example: "auto",
 });
 
-export const transferTypeSchema = z
-  .enum(["transfer", "transfer_confidential", "transfer_batch", "onramp", "offramp"])
-  .openapi({ description: "Transfer type.", example: "transfer" });
+export const transferTypeSchema = withOpenApi(transferTypeSchemaBase, {
+  description: "Transfer type.",
+  example: "transfer",
+});
 
 export const transferDirectionSchema = withOpenApi(transferDirectionSchemaBase, {
   description: "Transfer direction.",

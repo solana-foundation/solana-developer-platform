@@ -87,7 +87,6 @@ const STATUS_LABELS = {
 
 const TYPE_LABELS = {
   transfer: "DashboardPayments.transactions.transfer",
-  transfer_confidential: "DashboardPayments.transactions.confidentialTransfer",
   transfer_batch: "DashboardPayments.transactions.batchTransfer",
   onramp: "DashboardPayments.transactions.onramp",
   offramp: "DashboardPayments.transactions.offramp",

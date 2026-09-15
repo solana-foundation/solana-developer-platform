@@ -135,6 +135,27 @@ export interface PaymentWalletPolicyAuditEntry {
   evaluatedAt: string;
 }
 
+export const PAYMENT_TRANSFER_TYPES = ["transfer", "transfer_batch", "onramp", "offramp"] as const;
+
+export type PaymentTransferType = (typeof PAYMENT_TRANSFER_TYPES)[number];
+
+/** Transfer types SDP signs from a custody wallet; ramps settle through a provider instead. */
+export const WALLET_TRANSFER_TYPES = [
+  "transfer",
+  "transfer_batch",
+] as const satisfies readonly PaymentTransferType[];
+
+export const RAMP_TRANSFER_TYPES = [
+  "onramp",
+  "offramp",
+] as const satisfies readonly PaymentTransferType[];
+
+export type RampTransferType = (typeof RAMP_TRANSFER_TYPES)[number];
+
+export function isRampTransferType(type: PaymentTransferType): type is RampTransferType {
+  return RAMP_TRANSFER_TYPES.some((rampType) => rampType === type);
+}
+
 export const PAYMENT_TRANSFER_STATUSES = [
   "pending",
   "processing",
@@ -198,6 +219,56 @@ export function isCancelableRampTransferStatus(status: PaymentTransferStatus): b
 export const CANCELABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
   (status) => RAMP_TRANSFER_STATUS_CANCELABLE[status]
 );
+
+/** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */
+export const ONCHAIN_TRANSFER_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "finalized",
+  "failed",
+] as const satisfies readonly PaymentTransferStatus[];
+
+export type OnchainTransferStatus = (typeof ONCHAIN_TRANSFER_STATUSES)[number];
+
+/** Onchain transfer statuses that still await a chain verdict. */
+export const ONCHAIN_TRANSFER_IN_FLIGHT_STATUSES = [
+  "pending",
+  "processing",
+] as const satisfies readonly OnchainTransferStatus[];
+
+/** Onchain transfer statuses whose transaction landed; confirmed still awaits finality. */
+export const ONCHAIN_TRANSFER_SETTLED_STATUSES = [
+  "confirmed",
+  "finalized",
+] as const satisfies readonly OnchainTransferStatus[];
+
+/** The statuses a chain lookup can settle a processing transfer into. */
+export const TRANSFER_CHAIN_VERDICT_STATUSES = [
+  "confirmed",
+  "finalized",
+  "failed",
+] as const satisfies readonly OnchainTransferStatus[];
+
+export type TransferChainVerdictStatus = (typeof TRANSFER_CHAIN_VERDICT_STATUSES)[number];
+
+export const PAYMENT_TRANSFER_STATUS_TONES = ["success", "pending", "danger", "neutral"] as const;
+
+export type PaymentTransferStatusTone = (typeof PAYMENT_TRANSFER_STATUS_TONES)[number];
+
+/** How each transfer status reads to a person: settled, still moving, failed, or lapsed without loss. */
+export const PAYMENT_TRANSFER_STATUS_TONE = {
+  pending: "pending",
+  processing: "pending",
+  confirmed: "success",
+  finalized: "success",
+  failed: "danger",
+  awaiting_payment: "pending",
+  settling: "pending",
+  completed: "success",
+  canceled: "neutral",
+  expired: "neutral",
+} as const satisfies Record<PaymentTransferStatus, PaymentTransferStatusTone>;
 
 export interface LightsparkGridAmount {
   amount: number;
@@ -287,7 +358,7 @@ export interface PaymentTransferSummary {
   status: PaymentTransferStatus;
   signature: string | null;
   error?: string | null;
-  type?: string;
+  type?: PaymentTransferType;
   direction?: string;
   source?: string;
   destination?: string;

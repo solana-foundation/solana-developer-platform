@@ -61,9 +61,7 @@ export function BatchSendRail({
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}
-      counterpartyDialogOpen={false}
-      setCounterpartyDialogOpen={() => {}}
-      onCounterpartyCreated={() => {}}
+      counterpartyDialog={null}
       header={
         wizard.stepIndex === 0 ? (
           <SendModeToggle value={sendMode} onChange={onSendModeChange} />

@@ -1,7 +1,13 @@
 "use client";
 
-import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
-import { ArrowLeftRight, Coins, ExternalLink } from "lucide-react";
+import type {
+  CustodyWalletTokenBalance,
+  PaymentsDashboardWallet,
+  PaymentTransferStatus,
+  SolanaCluster,
+  TokenTransactionStatus,
+} from "@sdp/types";
+import { ArrowLeftRightIcon, CoinsIcon, ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
@@ -46,7 +52,6 @@ import { fetchHomeActivity } from "./home-workspace.data";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
-  formatStatus,
   resolveTokenByMint,
   resolveTransferTokenLabel,
   statusMessageKey,
@@ -131,29 +136,24 @@ function ActivityAddress({
       className="flex min-w-0 max-w-full items-center gap-1 text-primary underline underline-offset-2"
     >
       <TruncatedTableText value={row.address} className={`min-w-0 ${className ?? "truncate"}`} />
-      <ExternalLink className="size-3 shrink-0" aria-hidden />
+      <ExternalLinkIcon className="size-3 shrink-0" aria-hidden />
     </a>
   );
 }
 
-/**
- * Exception-only status marker. Success is the norm in this digest, so confirmed
- * rows stay quiet and anything else — failed, pending, processing — gets the same
- * badge variants the payments Transactions table uses. Badging every confirmed
- * row would drown the failed ones this exists to surface.
- */
-function ActivityStatusBadge({ status }: { status: string }) {
+function ActivityStatusBadge({
+  status,
+}: {
+  status: PaymentTransferStatus | TokenTransactionStatus;
+}) {
   const t = useTranslations();
   const variant = statusVariant(status);
-  if (!status || variant === "success") {
+  if (variant === "success") {
     return null;
   }
-  // Known statuses use the transactions catalog keys so the badge localizes;
-  // an unknown one falls back to the raw title-cased status.
-  const messageKey = statusMessageKey(status);
   return (
     <Badge variant={variant} className="shrink-0">
-      {messageKey ? t(messageKey) : formatStatus(status)}
+      {t(statusMessageKey(status))}
     </Badge>
   );
 }
@@ -168,7 +168,7 @@ function ActivityStatusBadge({ status }: { status: string }) {
  */
 function ActivityCategoryMark({ sourceKind }: { sourceKind: HomeActivityRow["sourceKind"] }) {
   const t = useTranslations();
-  const Icon = sourceKind === "issuance" ? Coins : ArrowLeftRight;
+  const Icon = sourceKind === "issuance" ? CoinsIcon : ArrowLeftRightIcon;
   return (
     <>
       <Icon className="size-3.5 shrink-0 text-tertiary" aria-hidden="true" />

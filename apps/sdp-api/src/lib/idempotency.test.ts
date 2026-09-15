@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
   buildEarnVaultDepositFingerprint,
-  buildLegacyPaymentTransferFingerprint,
-  buildLegacyTransferBatchFingerprint,
   buildPaymentTransferFingerprint,
   buildTransferBatchFingerprint,
   normalizeForFingerprint,
@@ -62,14 +60,13 @@ describe("resolveIdempotencyReplay", () => {
 });
 
 describe("resolveIdentityBoundIdempotencyReplay", () => {
-  const row = { id: "row_1", idempotency_fingerprint: "legacy", custody_wallet_id: "cwlt_1" };
+  const row = { id: "row_1", idempotency_fingerprint: "current", custody_wallet_id: "cwlt_1" };
 
-  it("accepts a complete legacy fingerprint only for the requested exact wallet", async () => {
+  it("accepts a matching fingerprint only for the requested exact wallet", async () => {
     expect(
       await resolveIdentityBoundIdempotencyReplay(
         async () => row,
         "current",
-        "legacy",
         (existing) => existing.custody_wallet_id === "cwlt_1"
       )
     ).toBe(row);
@@ -80,7 +77,6 @@ describe("resolveIdentityBoundIdempotencyReplay", () => {
       resolveIdentityBoundIdempotencyReplay(
         async () => row,
         "current",
-        "legacy",
         (existing) => existing.custody_wallet_id === "cwlt_2"
       )
     ).rejects.toSatisfy((error: unknown) => error instanceof AppError && error.code === "CONFLICT");
@@ -123,12 +119,6 @@ describe("buildPaymentTransferFingerprint", () => {
   it("differs when the exact SDP Wallet ID changes", () => {
     expect(buildPaymentTransferFingerprint(base)).not.toBe(
       buildPaymentTransferFingerprint({ ...base, custodyWalletId: "cwlt_source_2" })
-    );
-  });
-
-  it("keeps the pre-K3 fingerprint available for compatible legacy replay", () => {
-    expect(buildLegacyPaymentTransferFingerprint(base)).toBe(
-      '{"amount":"1","destinationAddress":"Dst","memo":null,"privateTransfer":null,"scope":"payment_transfer","sourceAddress":"Src","token":"SOL","type":"transfer"}'
     );
   });
 
@@ -192,20 +182,6 @@ describe("buildTransferBatchFingerprint", () => {
         recipients: [firstRecipient],
         options: undefined,
       })
-    );
-  });
-
-  it("keeps the pre-K3 fingerprint available for compatible legacy replay", () => {
-    expect(
-      buildLegacyTransferBatchFingerprint({
-        sourceCustodyWalletId: "cwlt_source_1",
-        sourceAddress: "Source111",
-        token: "SOL",
-        recipients: [firstRecipient],
-        options: undefined,
-      })
-    ).toBe(
-      '{"options":null,"recipients":[{"amount":"1.5","counterpartyAccountId":"account-1","counterpartyId":"counterparty-1","destinationAddress":"Destination111","externalId":"recipient-1"}],"scope":"payment_transfer_batch","sourceAddress":"Source111","token":"SOL"}'
     );
   });
 
