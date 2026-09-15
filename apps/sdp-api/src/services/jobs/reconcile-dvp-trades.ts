@@ -15,7 +15,10 @@ import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
 import { assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
-import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import {
+  createPostgresDvpLegFundingClaimRepository,
+  type DvpLegFundingClaim,
+} from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { isMarketsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";
@@ -29,6 +32,8 @@ import type { Env } from "@/types/env";
  * vanished trades with unknown closes can additionally scan bounded history.
  */
 const BATCH_SIZE = 64;
+/** `getSignatureStatuses` answers at most this many signatures per call. */
+const SIGNATURE_STATUS_CHUNK = 256;
 const CLOSE_RESOLUTION_MAX_BACKOFF_MINUTES = 360;
 const MILLISECONDS_PER_MINUTE = 60_000;
 
@@ -80,9 +85,22 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
         "dvp reconcile: released funding claims whose transaction can no longer land"
       );
     }
+    // Same reasoning for a close lock: past its height the settle or cancel
+    // either landed, and the sweep below records the close from the chain, or
+    // never will, and the trade can be closed again.
+    const releasedCloses = await repository.releaseExpiredCloseClaims(blockHeight);
+    if (releasedCloses > 0) {
+      getLogger().info(
+        { released: releasedCloses, blockHeight: blockHeight.toString() },
+        "dvp reconcile: released close locks whose transaction can no longer land"
+      );
+    }
   } catch (error) {
     // Never fatal to the sweep. Observing trades is the job; this is repair.
-    getLogger().error({ error }, "dvp reconcile: failed to release expired funding claims");
+    getLogger().error(
+      { error },
+      "dvp reconcile: failed to release expired funding claims or close locks"
+    );
   }
 
   // One row, two meanings: `funding_tx` set turns the claim from a lock into a
@@ -95,54 +113,15 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
   try {
     const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
     const expiredBroadcast = await claims.listExpiredBroadcast(blockHeight);
-    for (const claim of expiredBroadcast) {
-      try {
-        assertIsSignature(claim.signature);
-        const statuses = await getSignatureStatuses(rpc, [claim.signature], {
-          searchTransactionHistory: true,
-        });
-        // One signature asked, one answer owed. A short reply is a failed read,
-        // never "not found", and a failed read never deletes.
-        if (statuses.length !== 1) {
-          throw new Error(
-            `getSignatureStatuses returned ${statuses.length} statuses for 1 signature`
-          );
-        }
-        const status = statuses[0];
-        // Two ways a transfer moved nothing: it never landed (null, and the
-        // query above only lists receipts already past their expiry height),
-        // or it landed and FAILED (`err` set, fees consumed, zero tokens
-        // moved). Both leave the claim neither lock nor receipt. The same
-        // classification decides whether reclaim may take a receipt over.
-        if (classifyDvpFundingReceipt(status, true) === "moved_nothing") {
-          await claims.deleteBroadcastClaim(claim.tradeId, claim.side, claim.signature);
-          getLogger().info(
-            {
-              event: "sdp_dvp_funding_claim_released",
-              reason: status === null ? "never_landed" : "landed_failed",
-              tradeId: claim.tradeId,
-              side: claim.side,
-              signature: claim.signature,
-              err: status === null ? null : status.err,
-            },
-            "dvp reconcile: released broadcast funding claim whose transfer moved nothing"
-          );
-        }
-      } catch (error) {
-        // Never delete on a failed read: only a definitive "not found" from
-        // the chain releases a broadcast claim. It keeps its lock and the
-        // next tick retries.
-        getLogger().error(
-          {
-            event: "sdp_dvp_funding_claim_resolution_failed",
-            tradeId: claim.tradeId,
-            side: claim.side,
-            signature: claim.signature,
-            error,
-          },
-          "dvp reconcile: expired broadcast funding claim could not be resolved"
-        );
-      }
+    // One status call per chunk, not per receipt: a backlog of expired
+    // receipts used to cost one RPC call each on every tick.
+    for (let start = 0; start < expiredBroadcast.length; start += SIGNATURE_STATUS_CHUNK) {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- one chunk at a time paces the RPC endpoint.
+      await resolveExpiredReceipts(
+        claims,
+        rpc,
+        expiredBroadcast.slice(start, start + SIGNATURE_STATUS_CHUNK)
+      );
     }
   } catch (error) {
     // Never fatal to the sweep, for the same reason as the release above.
@@ -165,6 +144,87 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
       getLogger().error(
         { tradeId: trade.id, swapDvp: trade.swapDvp, error },
         "dvp reconcile: trade could not be reconciled"
+      );
+    }
+  }
+}
+
+/**
+ * Asks the chain what one chunk of expired receipts did, and deletes those that
+ * moved nothing.
+ *
+ * A failed or short answer deletes nothing in the chunk: only a definitive
+ * answer for a signature releases its claim, and the next tick asks again.
+ */
+async function resolveExpiredReceipts(
+  claims: ReturnType<typeof createPostgresDvpLegFundingClaimRepository>,
+  rpc: ReturnType<typeof createRpc>,
+  chunk: readonly DvpLegFundingClaim[]
+): Promise<void> {
+  let statuses: Awaited<ReturnType<typeof getSignatureStatuses>>;
+  try {
+    const signatures = chunk.map((claim) => {
+      assertIsSignature(claim.signature);
+      return claim.signature;
+    });
+    statuses = await getSignatureStatuses(rpc, signatures, { searchTransactionHistory: true });
+    // One answer owed per signature asked, in order. A short reply is a failed
+    // read, never "not found", and a failed read never deletes.
+    if (statuses.length !== chunk.length) {
+      throw new Error(
+        `getSignatureStatuses returned ${statuses.length} statuses for ${chunk.length} signatures`
+      );
+    }
+  } catch (error) {
+    getLogger().error(
+      {
+        event: "sdp_dvp_funding_claim_resolution_failed",
+        claims: chunk.map((claim) => ({
+          tradeId: claim.tradeId,
+          side: claim.side,
+          signature: claim.signature,
+        })),
+        error,
+      },
+      "dvp reconcile: expired broadcast funding claims could not be resolved"
+    );
+    return;
+  }
+
+  for (const [index, claim] of chunk.entries()) {
+    const status = statuses[index] ?? null;
+    // Two ways a transfer moved nothing: it never landed (null, and the query
+    // only lists receipts already past their expiry height), or it landed and
+    // FAILED (`err` set, fees consumed, zero tokens moved). Both leave the claim
+    // neither lock nor receipt. The same classification decides whether reclaim
+    // may take a receipt over.
+    if (classifyDvpFundingReceipt(status, true) !== "moved_nothing") {
+      continue;
+    }
+    try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each delete is guarded on its own signature; order does not matter and the count is bounded by the chunk.
+      await claims.deleteBroadcastClaim(claim.tradeId, claim.side, claim.signature);
+      getLogger().info(
+        {
+          event: "sdp_dvp_funding_claim_released",
+          reason: status === null ? "never_landed" : "landed_failed",
+          tradeId: claim.tradeId,
+          side: claim.side,
+          signature: claim.signature,
+          err: status === null ? null : status.err,
+        },
+        "dvp reconcile: released broadcast funding claim whose transfer moved nothing"
+      );
+    } catch (error) {
+      getLogger().error(
+        {
+          event: "sdp_dvp_funding_claim_resolution_failed",
+          tradeId: claim.tradeId,
+          side: claim.side,
+          signature: claim.signature,
+          error,
+        },
+        "dvp reconcile: expired broadcast funding claim could not be released"
       );
     }
   }
@@ -210,7 +270,10 @@ async function reconcileTrade(
     );
     if (lookup.kind === "resolved") {
       observation.closeResolution = lookup;
-    } else if (lookup.kind === "capped") {
+    } else {
+      // Capped or absent, the next lookup scans the same history again. An
+      // absent close is usually history the RPC has not indexed yet, so it gets
+      // the same growing wait rather than a full rescan every tick.
       const attempts = trade.closeResolutionAttempts + 1;
       const delayMinutes = Math.min(
         2 ** trade.closeResolutionAttempts,
@@ -224,8 +287,8 @@ async function reconcileTrade(
         after,
       });
       getLogger().warn(
-        { trade_id: trade.id, attempts, after },
-        "dvp reconcile: deferred capped close resolution"
+        { trade_id: trade.id, attempts, after, lookup: lookup.kind },
+        "dvp reconcile: deferred close resolution"
       );
     }
   }

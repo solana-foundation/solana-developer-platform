@@ -51,6 +51,9 @@ const dvpTradeRowSchema = z.object({
   create_signature: z.string().nullable(),
   create_last_valid_block_height: z.string().nullable(),
   close_signature: z.string().nullable(),
+  close_claim_signature: z.string().nullable(),
+  close_claim_action: z.enum(["settle", "cancel"]).nullable(),
+  close_claim_expiry_height: z.string().nullable(),
   close_resolution_attempts: z.number().int(),
   close_resolution_after: z.string().nullable(),
   escrow_a_amount: z.string().nullable(),
@@ -104,6 +107,16 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     decimalsA: parsed.decimals_a,
     decimalsB: parsed.decimals_b,
     closeSignature: parsed.close_signature === null ? null : signature(parsed.close_signature),
+    closeClaim:
+      parsed.close_claim_signature === null ||
+      parsed.close_claim_action === null ||
+      parsed.close_claim_expiry_height === null
+        ? null
+        : {
+            action: parsed.close_claim_action,
+            signature: signature(parsed.close_claim_signature),
+            expiryHeight: parsed.close_claim_expiry_height,
+          },
     closeResolutionAttempts: parsed.close_resolution_attempts,
     closeResolutionAfter: parsed.close_resolution_after,
     symbolA: parsed.symbol_a,
@@ -155,6 +168,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          status, observed_at, observed_cluster_timestamp, closed_at,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
+         close_claim_signature, close_claim_action, close_claim_expiry_height,
          close_resolution_attempts, close_resolution_after,
          escrow_a_amount, escrow_b_amount, escrow_a_peak_amount, escrow_b_peak_amount,
          escrow_a_frozen, escrow_b_frozen,
@@ -332,17 +346,51 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
         throw new Error("listOpenForReconciliation limit must be an integer from 1 to 256");
       }
-      // Stalest first, never-observed before that, so a busy cluster cannot
-      // starve the trades nothing is known about.
+      // Three lanes, each stalest first, dealt out in rounds of two live trades,
+      // one expired trade still holding something, and one trade kept only for
+      // late deposits. A lane with nothing to offer gives its turn away, so a
+      // quiet tick still fills its limit, and a crowded lane can only ever
+      // slow the others to their share, never shut them out.
+      //
+      // An expired trade with both escrows observed empty and no claim or receipt
+      // left on its legs has nothing for the sweep to advance: it joins the
+      // late-deposit lane for seven days past its expiry, like a closed trade
+      // for seven days past its close. Nothing cancels it; the trade page still
+      // observes it whenever it is opened. The expiry is compared as a number,
+      // not through to_timestamp, which throws on a u64 far-future expiry and
+      // SQL does not promise to skip evaluating it for rows the OR has settled.
       const result = await db
         .prepare(
-          `SELECT ${SELECT_COLUMNS}
-             FROM dvp_trades
-            WHERE status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-               OR (status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
-                   AND closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
-            ORDER BY CASE WHEN status IN ('creating', 'created', 'partially_funded', 'funded', 'expired') THEN 0 ELSE 1 END,
-                     observed_at ASC NULLS FIRST, created_at ASC, id ASC
+          `WITH laned AS (
+             SELECT t.*,
+                    CASE
+                      WHEN t.status IN ('creating', 'created', 'partially_funded', 'funded') THEN 0
+                      WHEN t.status = 'expired'
+                           AND NOT (COALESCE(t.escrow_a_amount, '') = '0'
+                                    AND COALESCE(t.escrow_b_amount, '') = '0'
+                                    AND NOT EXISTS (SELECT 1 FROM dvp_leg_funding_claims c
+                                                     WHERE c.trade_id = t.id)) THEN 1
+                      ELSE 2
+                    END AS lane
+               FROM dvp_trades t
+              WHERE t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+                 OR (t.status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+                     AND t.closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
+           ), ranked AS (
+             SELECT laned.*,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY lane
+                      ORDER BY observed_at ASC NULLS FIRST, created_at ASC, id ASC
+                    ) AS lane_rank
+               FROM laned
+              WHERE lane <> 2
+                 OR status <> 'expired'
+                 OR expiry_timestamp::numeric >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '7 days')
+           )
+           SELECT ${SELECT_COLUMNS}
+             FROM ranked
+            ORDER BY (lane_rank - 1) / CASE WHEN lane = 0 THEN 2 ELSE 1 END ASC,
+                     lane ASC, lane_rank ASC
             LIMIT ?`
         )
         .bind(limit)
@@ -479,6 +527,9 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               SET status = ?,
                   close_signature = ?,
                   closed_at = CASE WHEN closed_at IS NULL THEN sdp_iso_now() ELSE closed_at END,
+                  close_claim_signature = NULL,
+                  close_claim_action = NULL,
+                  close_claim_expiry_height = NULL,
                   updated_at = sdp_iso_now()
             WHERE id = ?
               AND status IN ('created', 'partially_funded', 'funded', 'expired', 'closed_unknown')
@@ -487,6 +538,62 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .bind(status, signature, id)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
+    },
+
+    async claimClose(id, claim) {
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET close_claim_signature = ?, close_claim_action = ?, close_claim_expiry_height = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND status IN ('created', 'partially_funded', 'funded', 'expired')
+              AND close_claim_signature IS NULL
+            RETURNING id`
+        )
+        .bind(claim.signature, claim.action, claim.expiryHeight, id)
+        .first<{ id: string }>();
+      return row !== null;
+    },
+
+    async rebindCloseClaim(id, from, to) {
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET close_claim_signature = ?, updated_at = sdp_iso_now()
+            WHERE id = ? AND close_claim_signature = ?
+            RETURNING id`
+        )
+        .bind(to, id, from)
+        .first<{ id: string }>();
+      return row !== null;
+    },
+
+    async releaseCloseClaim(id, claimSignature) {
+      await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET close_claim_signature = NULL, close_claim_action = NULL,
+                  close_claim_expiry_height = NULL, updated_at = sdp_iso_now()
+            WHERE id = ? AND close_claim_signature = ?`
+        )
+        .bind(id, claimSignature)
+        .run();
+    },
+
+    async releaseExpiredCloseClaims(blockHeight) {
+      const result = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET close_claim_signature = NULL, close_claim_action = NULL,
+                  close_claim_expiry_height = NULL, updated_at = sdp_iso_now()
+            WHERE close_claim_signature IS NOT NULL
+              AND CAST(close_claim_expiry_height AS NUMERIC) < ?
+            RETURNING id`
+        )
+        .bind(blockHeight.toString())
+        .all<{ id: string }>();
+      return result.results.length;
     },
 
     async listByProject(scope: DvpTradeScope, filters: DvpTradeListFilters, limit: number) {
