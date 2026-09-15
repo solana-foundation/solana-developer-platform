@@ -53,6 +53,50 @@ const earnPublicSecurity: EarnSecurityMatrix = {
   required: [{ apiKeyAuth: [] }],
 };
 
+const earnExampleOwnerAddress = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+
+const earnAnonymousRequestExamples = {
+  depositTransaction: {
+    summary: "Anonymous deposit build",
+    value: {
+      strategyId: "earn_strategy_example",
+      ownerAddress: earnExampleOwnerAddress,
+      amount: "25",
+      minSharesOut: "24.9",
+    },
+  },
+  withdrawalPreview: {
+    summary: "Anonymous withdrawal preview",
+    value: {
+      strategyId: "earn_strategy_example",
+      ownerAddress: earnExampleOwnerAddress,
+      shares: "10",
+    },
+  },
+  withdrawalTransaction: {
+    summary: "Anonymous withdrawal build",
+    value: {
+      strategyId: "earn_strategy_example",
+      ownerAddress: earnExampleOwnerAddress,
+      shares: "10",
+      minAmountOut: "24.9",
+    },
+  },
+} as const;
+
+function jsonContentWithAnonymousExample(
+  schema: Parameters<typeof jsonContent>[0],
+  anonymous: (typeof earnAnonymousRequestExamples)[keyof typeof earnAnonymousRequestExamples]
+) {
+  const content = jsonContent(schema);
+  return {
+    "application/json": {
+      ...content["application/json"],
+      examples: { anonymous },
+    },
+  };
+}
+
 export function registerEarnPaths(registry: OpenAPIRegistry) {
   registerEarnStrategyPaths(registry, earnConfigurationSecurity.optional);
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity.optional);
@@ -351,7 +395,10 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletDepositTransactionRequest),
+        content: jsonContentWithAnonymousExample(
+          earnExternalWalletDepositTransactionRequest,
+          earnAnonymousRequestExamples.depositTransaction
+        ),
       },
     },
     responses: {
@@ -412,7 +459,10 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletWithdrawalPreviewRequest),
+        content: jsonContentWithAnonymousExample(
+          earnExternalWalletWithdrawalPreviewRequest,
+          earnAnonymousRequestExamples.withdrawalPreview
+        ),
       },
     },
     responses: {
@@ -442,7 +492,10 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletWithdrawalTransactionRequest),
+        content: jsonContentWithAnonymousExample(
+          earnExternalWalletWithdrawalTransactionRequest,
+          earnAnonymousRequestExamples.withdrawalTransaction
+        ),
       },
     },
     responses: {

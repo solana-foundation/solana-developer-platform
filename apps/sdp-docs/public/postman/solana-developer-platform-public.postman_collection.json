@@ -2169,7 +2169,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\",\n  \"sourceTokenMint\": \"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo\",\n  \"swapSlippageBps\": 2\n}",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"amount\": \"25\",\n  \"minSharesOut\": \"24.9\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2220,7 +2220,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\"\n}",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"shares\": \"10\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2247,7 +2247,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_example\",\n  \"shares\": \"10\",\n  \"minAmountOut\": \"24.9\",\n  \"feePayer\": \"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF\"\n}",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_example\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"shares\": \"10\",\n  \"minAmountOut\": \"24.9\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

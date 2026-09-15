@@ -17,6 +17,14 @@ function getJsonSchema(value: unknown): TestJsonSchema {
   ].schema;
 }
 
+function getJsonExamples(value: unknown) {
+  return (
+    value as {
+      content: Record<string, { examples?: Record<string, { value?: unknown }> }>;
+    }
+  ).content["application/json"].examples;
+}
+
 function getWalletResponseSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallet ?? {};
 }
@@ -209,6 +217,42 @@ describe("OpenAPI spec", () => {
         required: expect.arrayContaining(["strategyId", "ownerAddress", "shares"]),
       }),
     ]);
+
+    const anonymousRequestExamples = [
+      {
+        path: "/v1/earn/external-wallet/deposit-transactions",
+        value: {
+          strategyId: "earn_strategy_example",
+          ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+          amount: "25",
+          minSharesOut: "24.9",
+        },
+      },
+      {
+        path: "/v1/earn/external-wallet/withdrawal-previews",
+        value: {
+          strategyId: "earn_strategy_example",
+          ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+          shares: "10",
+        },
+      },
+      {
+        path: "/v1/earn/external-wallet/withdrawal-transactions",
+        value: {
+          strategyId: "earn_strategy_example",
+          ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+          shares: "10",
+          minAmountOut: "24.9",
+        },
+      },
+    ];
+
+    for (const { path, value } of anonymousRequestExamples) {
+      const examples = getJsonExamples(publicDocument.paths?.[path]?.post?.requestBody);
+      expect(examples?.anonymous?.value).toEqual(value);
+      expect(examples?.anonymous?.value).not.toHaveProperty("feePayer");
+      expect(examples?.anonymous?.value).not.toHaveProperty("positionId");
+    }
 
     for (const path of [
       "/v1/earn/external-wallet/deposit-transactions",
