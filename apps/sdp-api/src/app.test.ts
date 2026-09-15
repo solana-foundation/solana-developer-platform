@@ -22,6 +22,9 @@ const SECRET_UNEXPECTED_ERROR_PATH = "/__secret_unexpected_error_test_throw";
 const FEE_ERROR_PATH = "/__fee_error_test_throw";
 const FEE_REJECTED_PATH = "/__fee_rejected_test_throw";
 const FEE_AMBIGUOUS_PATH = "/__fee_ambiguous_test_throw";
+const FEE_UNAVAILABLE_PATH = "/__fee_unavailable_test_throw";
+const FEE_NETWORK_PATH = "/__fee_network_test_throw";
+const FEE_RATE_LIMITED_PATH = "/__fee_rate_limited_test_throw";
 const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
 
 function makeObservability(): {
@@ -109,6 +112,18 @@ function buildApp(observability: Observability) {
       "Failed to sign transaction as fee payer: Kora Error -32001: Validation error: Mutable transfer-hook authority found on mint account CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM",
       "PROVIDER_REJECTED"
     );
+  });
+  app.all(FEE_UNAVAILABLE_PATH, () => {
+    throw new FeePaymentError("Kora breaker open", "PROVIDER_NOT_AVAILABLE");
+  });
+  app.all(FEE_NETWORK_PATH, () => {
+    throw new FeePaymentError(
+      "Failed to get fee payer address: Unexpected token '<'",
+      "NETWORK_ERROR"
+    );
+  });
+  app.all(FEE_RATE_LIMITED_PATH, () => {
+    throw new FeePaymentError("Kora rate limited", "RATE_LIMITED");
   });
   app.all(FEE_AMBIGUOUS_PATH, () => {
     throw new FeePaymentError("KMS response timed out after signing", "SIGNING_FAILED");
@@ -229,6 +244,41 @@ describe("createApp onError capture", () => {
     expect(body.error.message).not.toContain("temporarily unavailable");
     expect(body.error.message).not.toContain("CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM");
     expect(captureException).not.toHaveBeenCalled();
+  });
+
+  // A sponsor outage is not a custody outage. The copy used to say "signing
+  // provider", which sent whoever read it to check custody.
+  it.each([
+    [FEE_UNAVAILABLE_PATH, "unavailable"],
+    [FEE_NETWORK_PATH, "unreachable"],
+  ])("names the fee sponsor, not the signer, when the sponsor is %s", async (path) => {
+    const { obs } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await app.request(path, {}, baseEnv);
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("PROVIDER_UNAVAILABLE");
+    expect(body.error.message).toBe("Transaction fees can't be sponsored right now. Try again.");
+    expect(body.error.message).not.toContain("signing provider");
+  });
+
+  it("names the fee sponsor when it rate limits or rejects", async () => {
+    const { obs } = makeObservability();
+    const app = buildApp(obs);
+
+    const limited = await app.request(FEE_RATE_LIMITED_PATH, {}, baseEnv);
+    expect(limited.status).toBe(429);
+    const limitedBody = (await limited.json()) as { error: { code: string; message: string } };
+    expect(limitedBody.error).toEqual({
+      code: "RATE_LIMITED",
+      message: "The transaction fee sponsor is busy. Try again.",
+    });
+
+    const rejected = await app.request(FEE_REJECTED_PATH, {}, baseEnv);
+    const rejectedBody = (await rejected.json()) as { error: { message: string } };
+    expect(rejectedBody.error.message).toContain("fee sponsor rejected this transaction");
   });
 
   it("keeps unclassified signing failures on the retryable 502 path", async () => {
