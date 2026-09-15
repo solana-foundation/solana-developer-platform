@@ -9,6 +9,7 @@ import { created, paginated, success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import { assertApprovedWalletOperationCustodyWallet } from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -26,7 +27,7 @@ import {
   resolveFreezeOperationAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { buildIssuancePolicyCandidate } from "./policy";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
@@ -301,6 +302,8 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
+  assertJudgedCustodyWallet(c, custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
   const requestedAddress = assertValidAddress(body.accountAddress, "accountAddress");
   const { tokenAccount } = await resolveFreezeTarget(
     c.env,
@@ -554,6 +557,8 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
+  assertJudgedCustodyWallet(c, custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
 

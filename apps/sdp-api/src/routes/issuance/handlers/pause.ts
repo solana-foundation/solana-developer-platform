@@ -7,6 +7,7 @@ import { success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import { assertApprovedWalletOperationCustodyWallet } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -21,7 +22,7 @@ import {
   resolveDirectIssuanceReplay,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { buildIssuancePolicyCandidate } from "./policy";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
   persistSettledTransactionThenOutcome,
@@ -101,6 +102,8 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     requestedCustodyWalletId: body.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:admin"],
   });
+  assertJudgedCustodyWallet(c, custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
 
@@ -280,6 +283,8 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     requestedCustodyWalletId: body.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:admin"],
   });
+  assertJudgedCustodyWallet(c, custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
 
