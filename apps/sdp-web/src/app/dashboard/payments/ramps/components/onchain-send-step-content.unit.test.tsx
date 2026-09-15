@@ -242,7 +242,8 @@ describe("OnchainSendStepContent", () => {
         },
       });
 
-      expect(screen.queryByText("Transfer submitted")).not.toBeNull();
+      // The outcome heading belongs to the frame; the body never repeats it.
+      expect(screen.queryByText("Transfer submitted")).toBeNull();
       expect(screen.queryByText(expectedCopy)).not.toBeNull();
       expect(screen.queryByRole("button", { name: "View on explorer" }) !== null).toBe(
         explorerVisible
@@ -250,7 +251,7 @@ describe("OnchainSendStepContent", () => {
     }
   );
 
-  it("says a held payment waits for approval and links the request, with no explorer", () => {
+  it("explains a held payment and links the request, with no explorer", () => {
     renderStep({
       ...baseWizard,
       currentStepId: "REVIEW",
@@ -258,7 +259,8 @@ describe("OnchainSendStepContent", () => {
       finished: true,
     });
 
-    expect(screen.queryByText("Waiting for approval")).not.toBeNull();
+    expect(screen.queryByText(/Nothing has moved yet/)).not.toBeNull();
+    expect(screen.queryByText("Waiting for approval")).toBeNull();
     expect(screen.queryByText("Transfer submitted")).toBeNull();
     expect(screen.queryByRole("button", { name: "View on explorer" })).toBeNull();
     expect(screen.getByRole("link", { name: "View approval request" }).getAttribute("href")).toBe(
