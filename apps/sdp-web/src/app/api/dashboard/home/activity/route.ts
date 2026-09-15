@@ -7,6 +7,7 @@ import {
 import {
   fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols,
+  WALLET_TRANSFERS_DEADLINE_MS,
 } from "@/app/dashboard/payments/payments-page.data";
 import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
@@ -23,7 +24,9 @@ export async function GET(request: Request) {
     );
     const [transfersResult, issuanceActivityResult, issuedTokenSymbolsResult] = await Promise.all([
       trace.step("fetch_payment_transfers", () =>
-        fetchDashboardPaymentTransfers(apiClient.request, 20)
+        fetchDashboardPaymentTransfers(apiClient.request, 20, {
+          walletDeadlineMs: WALLET_TRANSFERS_DEADLINE_MS,
+        })
       ),
       issuanceEnabled
         ? trace.step("fetch_issuance_activity", () =>
@@ -38,6 +41,11 @@ export async function GET(request: Request) {
     const transfersError = transfersResult.ok
       ? null
       : t("Shared.homeWorkspace.paymentsActivityUnavailable");
+    // A wallet that did not answer in time is missing from the list, not empty.
+    const transfersPartial =
+      transfersResult.ok && transfersResult.walletsNotLoaded > 0
+        ? t("Shared.homeWorkspace.somePaymentsActivityUnavailable")
+        : null;
     const issuanceActivityError = issuanceActivityResult.ok
       ? null
       : t("Shared.homeWorkspace.issuanceActivityUnavailable");
@@ -52,7 +60,9 @@ export async function GET(request: Request) {
     );
     const activityError =
       activityRows.length === 0 ? (transfersError ?? issuanceActivityError) : null;
-    const activityNotice = [transfersError, issuanceActivityError].filter(Boolean).join(" ");
+    const activityNotice = [transfersError, transfersPartial, issuanceActivityError]
+      .filter(Boolean)
+      .join(" ");
 
     const response = NextResponse.json(
       {
