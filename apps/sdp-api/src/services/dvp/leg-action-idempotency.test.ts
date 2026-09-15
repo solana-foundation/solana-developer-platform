@@ -9,13 +9,21 @@
 
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const readDvpFundingReceipt = vi.hoisted(() => vi.fn());
+vi.mock("./funding-receipt", () => ({ readDvpFundingReceipt }));
+vi.mock("@sdp/rpc/solana", () => ({ createRpc: () => ({}) }));
+
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { conflict } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { type DvpLegActionRequestScope, runDvpLegActionOnce } from "./leg-action-idempotency";
+
+const { runDvpLegActionOnce } = await import("./leg-action-idempotency");
+
+import type { DvpLegActionRequestScope, RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 
 const ORG = "org_leg_action";
 const PROJECT = `prj_${ORG}`;
@@ -80,7 +88,9 @@ async function seed(): Promise<void> {
 /** Runs one keyed request as the caller's tenant, the way the handler does. */
 function once(
   key: string | null,
-  run: () => Promise<{ signature: typeof SIG; leg: "a" | "b"; amount: string }>,
+  run: (
+    recordAttempt: RecordDvpLegActionAttempt
+  ) => Promise<{ signature: typeof SIG; leg: "a" | "b"; amount: string }>,
   scope: DvpLegActionRequestScope = SCOPE
 ) {
   return runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
@@ -88,14 +98,21 @@ function once(
   );
 }
 
+/** What fund and reclaim do: record the signed transaction, then send it. */
+async function sends(recordAttempt: RecordDvpLegActionAttempt) {
+  await recordAttempt({ signature: SIG, amount: "1000", expiryHeight: "500" });
+  return { signature: SIG, leg: "a" as const, amount: "1000" };
+}
+
 describe("runDvpLegActionOnce", () => {
   beforeEach(async () => {
+    vi.clearAllMocks();
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     await seed();
   });
 
   it("runs every request that carries no key", async () => {
-    const run = vi.fn(async () => ({ signature: SIG, leg: "a" as const, amount: "1000" }));
+    const run = vi.fn(sends);
 
     await once(null, run);
     await once(null, run);
@@ -105,7 +122,7 @@ describe("runDvpLegActionOnce", () => {
 
   // The retry after a confirmed reclaim would pass every chain check again.
   it("answers a retry with the same key from the first result, without running again", async () => {
-    const run = vi.fn(async () => ({ signature: SIG, leg: "a" as const, amount: "1000" }));
+    const run = vi.fn(sends);
 
     const first = await once("key-1", run);
     const retry = await once("key-1", run);
@@ -119,7 +136,7 @@ describe("runDvpLegActionOnce", () => {
   });
 
   it("refuses a key reused for a different request", async () => {
-    const run = vi.fn(async () => ({ signature: SIG, leg: "a" as const, amount: "1000" }));
+    const run = vi.fn(sends);
     await once("key-2", run);
 
     await expect(once("key-2", run, { ...SCOPE, action: "fund" })).rejects.toThrow(
@@ -157,39 +174,74 @@ describe("runDvpLegActionOnce", () => {
     });
     await expect(once("key-4", refused)).rejects.toThrow("already being moved");
 
-    const run = vi.fn(async () => ({ signature: SIG, leg: "a" as const, amount: "1000" }));
+    const run = vi.fn(sends);
     await expect(once("key-4", run)).resolves.toMatchObject({ replayed: false });
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  // An ambiguous send may have moved the leg. Freeing the key would let a
-  // retry, after that reclaim confirmed and a new deposit landed, drain it too.
-  it("keeps the key when the request fails in a way that may have sent", async () => {
-    const ambiguous = vi.fn(async () => {
-      throw new Error("socket hang up");
-    });
-    await expect(once("key-5", ambiguous)).rejects.toThrow("socket hang up");
+  /** Signs, records the attempt the way fund and reclaim do, then fails ambiguously. */
+  const sentThenLost = vi.fn(async (recordAttempt: RecordDvpLegActionAttempt) => {
+    await recordAttempt({ signature: SIG, amount: "1000", expiryHeight: "500" });
+    throw new Error("socket hang up");
+  });
 
-    const run = vi.fn(async () => ({ signature: SIG, leg: "a" as const, amount: "1000" }));
+  // The send may have landed. Until the chain says, a retry must not run again.
+  it("refuses a retry while the recorded transaction can still land", async () => {
+    await expect(once("key-5", sentThenLost)).rejects.toThrow("socket hang up");
+    readDvpFundingReceipt.mockResolvedValue("pending");
+
+    const run = vi.fn(sends);
     await expect(once("key-5", run)).rejects.toThrow(/still being processed/);
+    expect(readDvpFundingReceipt).toHaveBeenCalledWith(expect.anything(), {
+      fundingTx: SIG,
+      expiryHeight: "500",
+    });
     expect(run).not.toHaveBeenCalled();
   });
 
-  // Its first request may have moved the leg and failed to record it. Running
-  // again under the same key is how one intent moves money twice.
-  it("never hands a key whose outcome went unrecorded to a new request", async () => {
-    const run = vi.fn(async () => ({ signature: SIG, leg: "a" as const, amount: "1000" }));
+  // The lost-response case the key exists for: the send landed and only the
+  // answer went missing, so the retry gets that answer and moves nothing.
+  it("replays a recorded transaction that landed, without running again", async () => {
+    await expect(once("key-6", sentThenLost)).rejects.toThrow("socket hang up");
+    readDvpFundingReceipt.mockResolvedValue("landed");
+
+    const run = vi.fn(sends);
+    await expect(once("key-6", run)).resolves.toEqual({
+      result: { signature: SIG, leg: "a", amount: "1000" },
+      replayed: true,
+    });
+    expect(run).not.toHaveBeenCalled();
+    // Now recorded as sent: the next retry replays without asking the chain.
+    readDvpFundingReceipt.mockClear();
+    await expect(once("key-6", run)).resolves.toMatchObject({ replayed: true });
+    expect(readDvpFundingReceipt).not.toHaveBeenCalled();
+  });
+
+  it("runs again when the recorded transaction provably moved nothing", async () => {
+    await expect(once("key-7", sentThenLost)).rejects.toThrow("socket hang up");
+    readDvpFundingReceipt.mockResolvedValue("moved_nothing");
+
+    const run = vi.fn(sends);
+    await expect(once("key-7", run)).resolves.toMatchObject({ replayed: false });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  // No attempt recorded means nothing was signed, so nothing was sent; once it
+  // is too old to be a live request, the key is handed on.
+  it("hands on a key whose request died before signing, once it is stale", async () => {
+    const run = vi.fn(sends);
     await getDb(env)
       .prepare(
         `INSERT INTO dvp_leg_action_requests
            (id, organization_id, project_id, idempotency_key, fingerprint, action, trade_id, side, status, updated_at)
-         SELECT 'dvpla_abandoned', ?, ?, 'key-6', fingerprint, 'reclaim', ?, 'a', 'pending', '2026-01-01T00:00:00.000Z'
+         SELECT 'dvpla_abandoned', ?, ?, 'key-8', fingerprint, 'reclaim', ?, 'a', 'pending', '2026-01-01T00:00:00.000Z'
            FROM (SELECT encode(sha256(?::bytea), 'hex') AS fingerprint) AS f`
       )
       .bind(ORG, PROJECT, TRADE_ID, JSON.stringify(["reclaim", TRADE_ID, "a", "cwlt_leg_action"]))
       .run();
 
-    await expect(once("key-6", run)).rejects.toThrow(/did not record its outcome/);
-    expect(run).not.toHaveBeenCalled();
+    await expect(once("key-8", run)).resolves.toMatchObject({ replayed: false });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(readDvpFundingReceipt).not.toHaveBeenCalled();
   });
 });

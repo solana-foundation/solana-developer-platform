@@ -45,6 +45,7 @@ import {
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
 import { readDvpFundingReceipt } from "./funding-receipt";
+import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 import { readDvpAccounts } from "./read-chain";
 import { buildReclaimInstructions } from "./reclaim-instructions";
 
@@ -87,6 +88,8 @@ export async function reclaimDvpTradeLeg(
     custodyWalletId: string;
     organizationId: string;
     projectId: string;
+    /** Writes the signed reclaim to the request's idempotency record before broadcast. */
+    recordAttempt: RecordDvpLegActionAttempt;
   }
 ): Promise<DvpReclaimResult> {
   const env = c.env;
@@ -205,6 +208,11 @@ export async function reclaimDvpTradeLeg(
             );
           }
           heldSignature = sponsored;
+          await params.recordAttempt({
+            signature: sponsored,
+            amount: held.toString(),
+            expiryHeight: lastValidBlockHeight.toString(),
+          });
           getLogger().info({ tradeId: trade.id, side, signature: sponsored }, "DvP reclaim signed");
         },
         markStarted: async () => {},

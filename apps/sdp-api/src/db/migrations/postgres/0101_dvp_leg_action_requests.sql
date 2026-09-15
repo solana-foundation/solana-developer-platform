@@ -6,7 +6,10 @@
 -- overlapping; it cannot tell a retry from a genuinely new request made later,
 -- after a reclaim confirmed and somebody deposited again. A key can.
 --
--- One row per (project, key). `pending` is taken before anything is signed;
+-- One row per (project, key). `pending` is taken before anything is signed. The
+-- transaction's signature, amount and last valid block height are written onto
+-- the pending row BEFORE it is broadcast, so a request that sent and then lost
+-- its answer (a crash, a failed write) can still be resolved from the chain.
 -- `sent` records what the first request returned, and a retry with the same key
 -- and the same request is answered from it without touching the chain.
 
@@ -24,12 +27,15 @@ CREATE TABLE IF NOT EXISTS dvp_leg_action_requests (
     trade_id TEXT NOT NULL REFERENCES dvp_trades(id) ON DELETE CASCADE,
     side TEXT NOT NULL CHECK (side IN ('a', 'b')),
     status TEXT NOT NULL CHECK (status IN ('pending', 'sent')),
-    -- Set together when the action is on the wire; the response a replay returns.
+    -- Set together just before broadcast. On a `sent` row they are the response a
+    -- replay returns; on a `pending` row they are what to ask the chain about.
     signature TEXT,
     amount TEXT,
+    expiry_height TEXT,
     created_at TEXT NOT NULL DEFAULT (sdp_iso_now()),
     updated_at TEXT NOT NULL DEFAULT (sdp_iso_now()),
-    CHECK ((status = 'sent') = (signature IS NOT NULL AND amount IS NOT NULL))
+    CHECK ((signature IS NULL) = (amount IS NULL) AND (signature IS NULL) = (expiry_height IS NULL)),
+    CHECK (status = 'pending' OR signature IS NOT NULL)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS dvp_leg_action_requests_key_idx

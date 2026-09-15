@@ -45,6 +45,7 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 import { readMintDecimals } from "./mints";
 import { readDvpAccounts, readEscrowState } from "./read-chain";
 
@@ -153,6 +154,8 @@ export async function fundDvpTradeLeg(
     custodyWalletId: string;
     organizationId: string;
     projectId: string;
+    /** Writes the signed transfer to the request's idempotency record before broadcast. */
+    recordAttempt: RecordDvpLegActionAttempt;
   }
 ): Promise<DvpFundResult> {
   return executeDvpFunding(
@@ -162,7 +165,8 @@ export async function fundDvpTradeLeg(
       organizationId: params.organizationId,
       projectId: params.projectId,
       custodyWalletId: params.custodyWalletId,
-    })
+    }),
+    params.recordAttempt
   );
 }
 
@@ -174,7 +178,8 @@ export async function fundDvpTradeLeg(
 export async function executeDvpFunding(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
-  plan: DvpFundingPlan
+  plan: DvpFundingPlan,
+  recordAttempt: RecordDvpLegActionAttempt
 ): Promise<DvpFundResult> {
   const env = c.env;
 
@@ -418,6 +423,11 @@ export async function executeDvpFunding(
           });
           await plan.rebindClaim(claimSignature, signature);
           heldSignature = signature;
+          await recordAttempt({
+            signature,
+            amount: outstanding.toString(),
+            expiryHeight: lastValidBlockHeight.toString(),
+          });
         },
         markStarted: async () => {},
         hasStarted: async () => plan.hasClaim(heldSignature),

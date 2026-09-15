@@ -598,7 +598,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
     c.env,
     c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
     { action: "fund", tradeId: trade.id, ...params },
-    () => fundDvpTradeLeg(c, trade, params)
+    (recordAttempt) => fundDvpTradeLeg(c, trade, { ...params, recordAttempt })
   );
 
   // A replay moved nothing now, so there is no new effect to wait for.
@@ -627,7 +627,7 @@ export const reclaimTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSc
     c.env,
     c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
     { action: "reclaim", tradeId: trade.id, ...params },
-    () => reclaimDvpTradeLeg(c, trade, params)
+    (recordAttempt) => reclaimDvpTradeLeg(c, trade, { ...params, recordAttempt })
   );
 
   if (!replayed) {

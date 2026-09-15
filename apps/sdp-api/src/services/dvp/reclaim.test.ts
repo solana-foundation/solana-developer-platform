@@ -113,11 +113,14 @@ function claimRow(fundingTx: string | null) {
 const RECEIPT =
   "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
 
+const recordAttempt = vi.hoisted(() => vi.fn());
+
 const RECLAIMER_A = {
   side: "a" as const,
   custodyWalletId: "cwlt_a",
   organizationId: "org_a",
   projectId: "prj_a",
+  recordAttempt,
 };
 
 const context = { env } as never;
@@ -227,6 +230,19 @@ describe("reclaimDvpTradeLeg", () => {
       releaseClaim.mock.invocationCallOrder[0]
     );
     expect(releaseClaim).toHaveBeenCalledWith("dvp_reclaim_test", "a", result.signature);
+  });
+
+  it("records the signed reclaim for its idempotency key before broadcasting it", async () => {
+    const result = await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+
+    expect(recordAttempt).toHaveBeenCalledWith({
+      signature: result.signature,
+      amount: "1000",
+      expiryHeight: "100",
+    });
+    expect(recordAttempt.mock.invocationCallOrder[0]).toBeLessThan(
+      sendTransaction.mock.invocationCallOrder[0]
+    );
   });
 
   // On the wire is not landed. A second reclaim, or a funding, let in now would

@@ -95,11 +95,14 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
 }
 
 /** The funder: whoever's custody wallet holds the side's party address. */
+const recordAttempt = vi.hoisted(() => vi.fn());
+
 const FUNDER_A = {
   side: "a" as const,
   custodyWalletId: "cwlt_a",
   organizationId: "org_x",
   projectId: "prj_x",
+  recordAttempt,
 };
 
 const context = { env } as never;
@@ -159,12 +162,28 @@ describe("fundDvpTradeLeg", () => {
     expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
 
+  // A retry with the same key has to be able to ask the chain what this send
+  // did, so the transaction is on the idempotency record before it goes out.
+  it("records the signed transfer for its idempotency key before broadcasting it", async () => {
+    const result = await fundDvpTradeLeg(context, trade(), FUNDER_A);
+
+    expect(recordAttempt).toHaveBeenCalledWith({
+      signature: result.signature,
+      amount: "1000",
+      expiryHeight: "100",
+    });
+    expect(recordAttempt.mock.invocationCallOrder[0]).toBeLessThan(
+      sendTransaction.mock.invocationCallOrder[0]
+    );
+  });
+
   it("funds leg B when that is the side named", async () => {
     const result = await fundDvpTradeLeg(context, trade(), {
       side: "b",
       custodyWalletId: "cwlt_b",
       organizationId: "org_x",
       projectId: "prj_x",
+      recordAttempt,
     });
 
     expect(result.leg).toBe("b");
@@ -555,6 +574,7 @@ describe("fundDvpTradeLeg", () => {
         custodyWalletId: "cwlt_b_of_org_b",
         organizationId: "org_b",
         projectId: "prj_b",
+        recordAttempt,
       });
 
       expect(claimFunding).toHaveBeenCalledWith(
@@ -576,12 +596,14 @@ describe("fundDvpTradeLeg", () => {
         custodyWalletId: "cwlt_a",
         organizationId: "org_a",
         projectId: "prj_a",
+        recordAttempt,
       });
       await fundDvpTradeLeg(context, trade(), {
         side: "b",
         custodyWalletId: "cwlt_b",
         organizationId: "org_b",
         projectId: "prj_b",
+        recordAttempt,
       });
 
       expect(claimFunding).toHaveBeenCalledTimes(2);
