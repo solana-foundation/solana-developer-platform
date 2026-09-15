@@ -552,9 +552,13 @@ async function closePositionIfEmpty(
     ) {
       return;
     }
+    // `position` was read before the payout observation and the finalize, so
+    // its `updated_at` bounds this close: a deposit that landed since bumped it
+    // and the repository refuses the stale snapshot.
     await ledger.closeVaultPositionIfEmpty({
       positionId: position.id,
       organizationId: movement.organization_id,
+      observedUpdatedAt: position.updated_at,
     });
   } catch (error) {
     getLogger().warn(
@@ -562,4 +566,84 @@ async function closePositionIfEmpty(
       "earn vault reconciliation: post-exit balance not observed"
     );
   }
+}
+
+/** How far back the payout repair looks: RPC transaction history is finite. */
+export const WITHDRAWAL_PAYOUT_REPAIR_WINDOW_MS = 14 * 24 * 60 * 60 * 1_000;
+/** Minimum spacing between two repair attempts on the same movement. */
+export const WITHDRAWAL_PAYOUT_REPAIR_RETRY_MS = 15 * 60 * 1_000;
+const WITHDRAWAL_PAYOUT_REPAIR_BATCH_SIZE = 25;
+
+export interface WithdrawalPayoutRepairStats {
+  claimed: number;
+  repaired: number;
+  /** Claimed rows whose payout still could not be observed; retried later. */
+  unobserved: number;
+  /** Rows whose repair threw (database or lookup failure), counted as tick failures. */
+  errors: number;
+}
+
+/**
+ * Second chance for a withdrawal payout the settlement could not observe.
+ *
+ * `settleMovement` finalizes a withdrawal even when `getTransaction` fails,
+ * because the chain outcome is known and finalization must not wait on a
+ * flaky history read. Without this pass that one failed read would leave
+ * `token_amount_settled` NULL forever: `totalWithdrawn` understated and
+ * `earned` withheld as `withdrawals_not_valued`. Runs every sweep tick over a
+ * bounded, retry-spaced claim of unvalued finalized withdrawals inside the RPC
+ * history window; a row older than the window stays NULL and keeps reporting
+ * the honest reason. Idempotent by construction: the write refuses a row that
+ * is already valued.
+ */
+export async function repairUnvaluedWithdrawalPayouts(
+  env: Env,
+  {
+    limit = WITHDRAWAL_PAYOUT_REPAIR_BATCH_SIZE,
+    now = Date.now(),
+  }: { limit?: number; now?: number } = {}
+): Promise<WithdrawalPayoutRepairStats> {
+  const ledger = createPostgresEarnMovementsRepository(getDb(env));
+  const movements = await ledger.claimUnvaluedWithdrawalPayouts({
+    limit,
+    settledAfter: new Date(now - WITHDRAWAL_PAYOUT_REPAIR_WINDOW_MS).toISOString(),
+    retryBefore: new Date(now - WITHDRAWAL_PAYOUT_REPAIR_RETRY_MS).toISOString(),
+  });
+  const stats: WithdrawalPayoutRepairStats = {
+    claimed: movements.length,
+    repaired: 0,
+    unobserved: 0,
+    errors: 0,
+  };
+  for (const [environment, rows] of groupByEnvironment(movements)) {
+    const rpc = createRpc(env, { rpcUrl: resolveClusterRpcUrl(env, earnClusterFor(environment)) });
+    for (const movement of rows) {
+      try {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.
+        const position = await ledger.getPositionById({
+          organizationId: movement.organization_id,
+          environment: movement.environment,
+          positionId: movement.position_id,
+        });
+        const payout = position ? await observeWithdrawalPayout(rpc, movement, position) : null;
+        if (payout === null) {
+          stats.unobserved += 1;
+          continue;
+        }
+        const recorded = await ledger.recordWithdrawalPayout({
+          movementId: movement.id,
+          organizationId: movement.organization_id,
+          tokenAmountSettled: payout,
+        });
+        if (recorded) stats.repaired += 1;
+      } catch (error) {
+        stats.errors += 1;
+        getLogger().error(
+          { movementId: movement.id, error: errorMessage(error) },
+          "earn vault reconciliation: withdrawal payout repair failed"
+        );
+      }
+    }
+  }
+  return stats;
 }

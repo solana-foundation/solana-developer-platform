@@ -1155,7 +1155,10 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   (`tokenBalanceDelta` in `@sdp/rpc/solana`), formatted at the mint's
   decimals. A failed read, missing meta, or non-positive delta leaves the
   column NULL (never a guess), which is exactly what `withdrawals_not_valued`
-  now means; rows finalized before 0103 stay NULL and keep reporting it. The
+  now means. The sweep retries unvalued finalized withdrawals
+  (`repairUnvaluedWithdrawalPayouts`: 25 per tick, 15-minute spacing, rows
+  settled within 14 days); older rows and rows finalized before 0103 stay NULL
+  and keep reporting it. The
   same settlement hook reads the holding live for that one vault and owner and
   stamps `closed_at` when shares are "0" (`closeVaultPositionIfEmpty`, fail-soft;
   a later deposit transition re-opens it), for external-wallet AND custody

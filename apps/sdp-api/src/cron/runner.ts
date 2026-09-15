@@ -109,6 +109,27 @@ function withCheckinMargin(observability: Observability): Observability {
   };
 }
 
+/**
+ * One catalogue sync at process start, in EVERY deployment mode.
+ *
+ * Deliberately outside `startCron`: a managed Cloud Run service skips in-process
+ * scheduling (`K_SERVICE`), yet a fresh managed database would otherwise serve
+ * "No strategies available" until the separately scheduled job's first tick.
+ * The slotted entry point keeps this idempotent across replicas and restarts:
+ * whoever boots first inside the hour syncs, everyone else finds the slot held
+ * and skips, and the managed job's own tick skips the same way. No
+ * observability on purpose: the scheduled task and the job own the monitor
+ * slugs, and an off-schedule check-in would only confuse them.
+ */
+export function startEarnCatalogueBootSync(deps: Pick<CronDeps, "env" | "bg">): void {
+  if (!isEarnEnabled(deps.env)) return;
+  deps.bg.run(
+    runWithSystemDatabaseIdentity("boot:earn-catalogue-sync", () =>
+      runEarnCatalogueSyncIfDue(deps.env)
+    )
+  );
+}
+
 export function startCron(deps: CronDeps): CronHandle | null {
   if (isCronDisabled(deps.env)) {
     return null;
@@ -226,17 +247,6 @@ export function startCron(deps: CronDeps): CronHandle | null {
   if (isEarnEnabled(deps.env)) {
     tasks.push(
       scheduleSystemTask(EARN_CATALOGUE_SYNC_CRON, "cron:earn-catalogue-sync", runEarnCatalogueSync)
-    );
-    // One sync at boot, so a fresh database serves a catalogue before the first
-    // top-of-hour tick instead of "No strategies available" for up to an hour.
-    // The slotted entry point makes this idempotent: restarts inside the hour
-    // find the slot held and skip, so a crash loop cannot hammer providers.
-    // No observability on purpose: the scheduled task owns the monitor slug and
-    // an off-schedule check-in would only confuse it.
-    deps.bg.run(
-      runWithSystemDatabaseIdentity("cron:earn-catalogue-sync:boot", () =>
-        runEarnCatalogueSyncIfDue(deps.env)
-      )
     );
     // Separate task, not folded into the sync above: the two have different
     // cadences on purpose (catalogue drift is hourly, rates are not) and

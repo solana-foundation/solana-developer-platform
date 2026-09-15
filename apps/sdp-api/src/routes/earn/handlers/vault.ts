@@ -1038,6 +1038,8 @@ interface VaultHolding {
   shareMint: string;
   createdAt: string;
   closedAt: string | null;
+  /** Snapshot boundary for the read-path close-out; see closeEmptyHydratedPositions. */
+  updatedAt: string;
 }
 
 function toVaultHolding(row: EarnPositionRow): VaultHolding {
@@ -1054,6 +1056,7 @@ function toVaultHolding(row: EarnPositionRow): VaultHolding {
     shareMint: row.share_mint,
     createdAt: row.created_at,
     closedAt: row.closed_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -1127,8 +1130,12 @@ export async function listEarnVaultPositions(c: AppContext) {
     { ownerKind: "custody" }
   );
   await closeEmptyHydratedPositions(
-    (positionId) =>
-      repo.closeVaultPositionIfEmpty({ positionId, organizationId: auth.organizationId }),
+    (positionId, observedUpdatedAt) =>
+      repo.closeVaultPositionIfEmpty({
+        positionId,
+        organizationId: auth.organizationId,
+        observedUpdatedAt,
+      }),
     rows,
     live
   );

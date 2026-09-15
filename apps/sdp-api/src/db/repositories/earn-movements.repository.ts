@@ -386,6 +386,35 @@ export interface EarnMovementsRepository {
   closeVaultPositionIfEmpty(params: {
     positionId: string;
     organizationId: string;
+    /**
+     * The position row's `updated_at` as read BEFORE the balance observation.
+     * Every deposit transition bumps it while re-opening the row, so a stale
+     * zero-share snapshot can never close a holding a deposit refilled in the
+     * meantime: the close is refused and the next observation decides.
+     */
+    observedUpdatedAt: string;
+  }): Promise<boolean>;
+  /**
+   * Finalized withdrawals whose payout was not observed at settlement
+   * (`token_amount_settled IS NULL`), oldest attempt first, bounded to rows
+   * settled after `settledAfter` (RPC transaction history is finite) and not
+   * attempted since `retryBefore`. Stamps `reconciliation_attempted_at` on the
+   * claim so the repair sweep spaces its retries.
+   */
+  claimUnvaluedWithdrawalPayouts(params: {
+    limit: number;
+    settledAfter: string;
+    retryBefore: string;
+  }): Promise<EarnMovementRow[]>;
+  /**
+   * Record a payout observed after settlement. Writes only a finalized
+   * withdrawal that is still unvalued, so a repeated observation never
+   * overwrites the first one. Returns true when this call recorded it.
+   */
+  recordWithdrawalPayout(params: {
+    movementId: string;
+    organizationId: string;
+    tokenAmountSettled: string;
   }): Promise<boolean>;
   /**
    * One external wallet's recorded movements, exact-project scoped, newest
@@ -1189,11 +1218,15 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           .bind(params.positionId, params.organizationId)
           .first<{ id: string }>();
         if (!locked) return false;
+        // `updated_at = ?` is the snapshot boundary: a deposit transition that
+        // landed after the caller observed zero shares bumped it (and cleared
+        // closed_at), so the stale observation cannot close the refilled row.
         const closed = await transaction
           .prepare(
             `UPDATE earn_positions
                 SET closed_at = sdp_iso_now(), updated_at = sdp_iso_now()
               WHERE id = ? AND organization_id = ? AND closed_at IS NULL
+                AND updated_at = ?
                 AND NOT EXISTS (
                   SELECT 1 FROM earn_movements unsettled
                    WHERE unsettled.position_id = earn_positions.id
@@ -1201,10 +1234,56 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 )
               RETURNING id`
           )
-          .bind(params.positionId, params.organizationId)
+          .bind(params.positionId, params.organizationId, params.observedUpdatedAt)
           .first<{ id: string }>();
         return Boolean(closed);
       });
+    },
+
+    async claimUnvaluedWithdrawalPayouts(params) {
+      const result = await db
+        .prepare(
+          `WITH candidates AS MATERIALIZED (
+             SELECT id FROM earn_movements
+              WHERE execution_model = 'vault_direct'
+                AND direction = 'withdrawal'
+                AND status = 'finalized'
+                AND token_amount_settled IS NULL
+                AND signature IS NOT NULL
+                AND settled_at >= ?
+                AND (reconciliation_attempted_at IS NULL OR reconciliation_attempted_at <= ?)
+              ORDER BY COALESCE(reconciliation_attempted_at, settled_at) ASC, id ASC
+              LIMIT ?
+              FOR UPDATE SKIP LOCKED
+           ), touched AS (
+             UPDATE earn_movements movement
+                SET reconciliation_attempted_at = sdp_iso_now()
+               FROM candidates
+              WHERE movement.id = candidates.id
+             RETURNING movement.*
+           )
+           SELECT * FROM touched ORDER BY settled_at ASC, id ASC`
+        )
+        .bind(params.settledAfter, params.retryBefore, params.limit)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async recordWithdrawalPayout(params) {
+      const row = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET token_amount_settled = ?, updated_at = sdp_iso_now()
+            WHERE id = ? AND organization_id = ?
+              AND execution_model = 'vault_direct'
+              AND direction = 'withdrawal'
+              AND status = 'finalized'
+              AND token_amount_settled IS NULL
+            RETURNING id`
+        )
+        .bind(params.tokenAmountSettled, params.movementId, params.organizationId)
+        .first<{ id: string }>();
+      return Boolean(row);
     },
 
     async listExternalWalletDepositsSince(params) {

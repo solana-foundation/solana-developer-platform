@@ -490,14 +490,15 @@ describe("Unified earn movement ledger (postgres)", () => {
       // not yet landed). Closing then would hide the position the landing
       // deposit is about to fill, so the guard waits for settlement.
       const created = await ledger.createSignedVaultDepositIntent(intent());
+      const [pending] = await positions();
       expect(
         await ledger.closeVaultPositionIfEmpty({
           positionId: created.position.id,
           organizationId: ORG,
+          observedUpdatedAt: pending.updated_at,
         })
       ).toBe(false);
-      const [open] = await positions();
-      expect(open.closed_at).toBeNull();
+      expect((await positions())[0].closed_at).toBeNull();
 
       const settledAt = "2026-08-19T12:30:00.000Z";
       await ledger.advanceVaultMovement({
@@ -507,12 +508,45 @@ describe("Unified earn movement ledger (postgres)", () => {
         confirmedAt: settledAt,
         settledAt,
       });
+      const [settled] = await positions();
       expect(
         await ledger.closeVaultPositionIfEmpty({
           positionId: created.position.id,
           organizationId: ORG,
+          observedUpdatedAt: settled.updated_at,
         })
       ).toBe(true);
+    });
+
+    it("refuses a close whose zero-share snapshot predates a deposit that refilled the holding", async () => {
+      const created = await ledger.createSignedVaultDepositIntent(intent());
+      const settledAt = "2026-08-19T12:30:00.000Z";
+      await ledger.advanceVaultMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: settledAt,
+        settledAt,
+      });
+      // The observer read the row (and its live balance) here...
+      const [observed] = await positions();
+      // ...then a second deposit landed before the observer reached the lock.
+      const refill = await ledger.createSignedVaultDepositIntent(intent({ requestedAmount: "5" }));
+      await ledger.advanceVaultMovement({
+        movementId: refill.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: "2026-08-19T12:31:00.000Z",
+        settledAt: "2026-08-19T12:31:00.000Z",
+      });
+      expect(
+        await ledger.closeVaultPositionIfEmpty({
+          positionId: created.position.id,
+          organizationId: ORG,
+          observedUpdatedAt: observed.updated_at,
+        })
+      ).toBe(false);
+      expect((await positions())[0].closed_at).toBeNull();
     });
 
     it("closes a holding observed empty and lets a later deposit re-open it", async () => {
@@ -525,6 +559,7 @@ describe("Unified earn movement ledger (postgres)", () => {
         confirmedAt: settledAt,
         settledAt,
       });
+      const [observed] = await positions();
 
       // The settlement hook observed live shares "0" after an exit: the close
       // is idempotent (second call reports nothing to do) and org-scoped.
@@ -532,18 +567,21 @@ describe("Unified earn movement ledger (postgres)", () => {
         await ledger.closeVaultPositionIfEmpty({
           positionId: created.position.id,
           organizationId: ORG_OTHER,
+          observedUpdatedAt: observed.updated_at,
         })
       ).toBe(false);
       expect(
         await ledger.closeVaultPositionIfEmpty({
           positionId: created.position.id,
           organizationId: ORG,
+          observedUpdatedAt: observed.updated_at,
         })
       ).toBe(true);
       expect(
         await ledger.closeVaultPositionIfEmpty({
           positionId: created.position.id,
           organizationId: ORG,
+          observedUpdatedAt: observed.updated_at,
         })
       ).toBe(false);
       const [closed] = await positions();

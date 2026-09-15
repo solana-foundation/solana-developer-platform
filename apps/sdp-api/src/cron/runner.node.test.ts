@@ -39,7 +39,7 @@ import {
   runRevokedApiKeyCacheReconciliation,
 } from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
-import { startCron } from "./runner";
+import { startCron, startEarnCatalogueBootSync } from "./runner";
 import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
 
 const scheduleMock = vi.fn();
@@ -413,21 +413,9 @@ describe("startCron", () => {
     );
   });
 
-  it("runs one slotted catalogue sync at boot when earn is enabled", async () => {
+  it("does not run the catalogue sync from startCron itself", () => {
     const bg = makeBg();
     startCron({ env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env, bg });
-
-    // Handed to the background runner, never awaited by startCron itself.
-    expect(bg.run).toHaveBeenCalledTimes(1);
-    await vi.mocked(bg.run).mock.calls[0][0];
-    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
-    // The scheduled hourly task is still registered alongside the boot run.
-    expect(scheduleMock.mock.calls[7][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
-  });
-
-  it("does not sync the catalogue at boot when earn is off", () => {
-    const bg = makeBg();
-    startCron({ env: {} as Env, bg });
     expect(bg.run).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
   });
@@ -588,5 +576,44 @@ describe("startCron", () => {
       bg,
       observability: expect.anything(),
     });
+  });
+});
+
+describe("startEarnCatalogueBootSync", () => {
+  beforeEach(() => {
+    vi.mocked(runEarnCatalogueSyncIfDue).mockClear();
+  });
+
+  it("runs one slotted sync at boot when earn is enabled", async () => {
+    const bg = makeBg();
+    startEarnCatalogueBootSync({
+      env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
+      bg,
+    });
+    // Handed to the background runner, never awaited by the caller.
+    expect(bg.run).toHaveBeenCalledTimes(1);
+    await vi.mocked(bg.run).mock.calls[0][0];
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs even where in-process cron is disabled (managed Cloud Run, DISABLE_CRON)", async () => {
+    for (const env of [
+      { MARKETS_ENABLED: "true", EARN_ENABLED: "true", K_SERVICE: "sdp-api" },
+      { MARKETS_ENABLED: "true", EARN_ENABLED: "true", DISABLE_CRON: "true" },
+    ]) {
+      const bg = makeBg();
+      expect(startCron({ env: env as Env, bg })).toBeNull();
+      startEarnCatalogueBootSync({ env: env as Env, bg });
+      expect(bg.run).toHaveBeenCalledTimes(1);
+      await vi.mocked(bg.run).mock.calls[0][0];
+    }
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(2);
+  });
+
+  it("does nothing when earn is off", () => {
+    const bg = makeBg();
+    startEarnCatalogueBootSync({ env: {} as Env, bg });
+    expect(bg.run).not.toHaveBeenCalled();
+    expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
   });
 });

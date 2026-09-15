@@ -33,7 +33,7 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
 const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
-const { reconcileEarnVaultMovementReadThrough } = await import(
+const { reconcileEarnVaultMovementReadThrough, repairUnvaluedWithdrawalPayouts } = await import(
   "../earn/vault-movement-reconciliation.service"
 );
 
@@ -365,6 +365,57 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
       token_amount_settled: null,
     });
     await expect(positionRow(seeded.position.id)).resolves.toMatchObject({ closed_at: null });
+  });
+
+  it("repairs an unvalued payout on a later sweep once the transaction can be read", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockRejectedValue(new Error("rpc unavailable"));
+    readVaultPositions.mockRejectedValue(new Error("provider unavailable"));
+    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "finalized",
+      token_amount_settled: null,
+    });
+
+    // The history read recovers; the sweep's repair pass values the row (the
+    // read-through never stamped an attempt, so the row is due immediately).
+    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1000000"));
+    await expect(repairUnvaluedWithdrawalPayouts(env)).resolves.toEqual({
+      claimed: 1,
+      repaired: 1,
+      unobserved: 0,
+      errors: 0,
+    });
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      token_amount_settled: "1",
+    });
+    // Valued rows leave the claim set, so a second pass has nothing to do.
+    await expect(repairUnvaluedWithdrawalPayouts(env)).resolves.toMatchObject({ claimed: 0 });
+  });
+
+  it("spaces repair retries and keeps a still-unreadable payout NULL", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockRejectedValue(new Error("rpc unavailable"));
+    readVaultPositions.mockRejectedValue(new Error("provider unavailable"));
+    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    await expect(repairUnvaluedWithdrawalPayouts(env)).resolves.toEqual({
+      claimed: 1,
+      repaired: 0,
+      unobserved: 1,
+      errors: 0,
+    });
+    // Attempted just now: not claimable again until the spacing elapses.
+    await expect(repairUnvaluedWithdrawalPayouts(env)).resolves.toMatchObject({ claimed: 0 });
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      token_amount_settled: null,
+    });
   });
 
   it("never guesses: a payout to another owner, another mint, or a non-positive delta is not recorded", async () => {

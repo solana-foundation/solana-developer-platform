@@ -172,8 +172,12 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
     ownerKind: "external-wallet",
   });
   await closeEmptyHydratedPositions(
-    (positionId) =>
-      repo.closeVaultPositionIfEmpty({ positionId, organizationId: auth.organizationId }),
+    (positionId, observedUpdatedAt) =>
+      repo.closeVaultPositionIfEmpty({
+        positionId,
+        organizationId: auth.organizationId,
+        observedUpdatedAt,
+      }),
     holdings,
     live
   );
@@ -237,8 +241,12 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
     ownerKind: "external-wallet",
   });
   await closeEmptyHydratedPositions(
-    (positionId) =>
-      repo.closeVaultPositionIfEmpty({ positionId, organizationId: auth.organizationId }),
+    (positionId, observedUpdatedAt) =>
+      repo.closeVaultPositionIfEmpty({
+        positionId,
+        organizationId: auth.organizationId,
+        observedUpdatedAt,
+      }),
     holdings,
     live
   );
@@ -475,8 +483,12 @@ export async function getEarnExternalWalletEarnings(c: AppContext) {
     ownerKind: "external-wallet",
   });
   await closeEmptyHydratedPositions(
-    (positionId) =>
-      repo.closeVaultPositionIfEmpty({ positionId, organizationId: auth.organizationId }),
+    (positionId, observedUpdatedAt) =>
+      repo.closeVaultPositionIfEmpty({
+        positionId,
+        organizationId: auth.organizationId,
+        observedUpdatedAt,
+      }),
     holdings,
     live
   );
@@ -1149,6 +1161,8 @@ interface ExternalWalletHolding {
   shareAtaRentFunder: string | null;
   createdAt: string;
   closedAt: string | null;
+  /** Snapshot boundary for the read-path close-out; see closeEmptyHydratedPositions. */
+  updatedAt: string;
 }
 
 /**
@@ -1182,6 +1196,7 @@ function toExternalWalletHolding(
     shareAtaRentFunder: row.share_ata_rent_funder,
     createdAt: row.created_at,
     closedAt: row.closed_at,
+    updatedAt: row.updated_at,
   };
 }
 
