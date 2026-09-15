@@ -110,6 +110,12 @@ balance with a live one.
   sign-off named in the PR (who reviewed, and the threat-model row the route
   lands under), and the threat model's revisit trigger fires. Never widen the
   list just to make the test pass.
+  The current contract pins six optional-auth operations: strategy list/detail,
+  vault deposit preview, external-wallet deposit build, withdrawal preview, and
+  withdrawal build. Public OpenAPI represents each as API-key auth or an empty
+  security requirement; the internal document additionally accepts Clerk and
+  session auth. Every tenant read and signed-transaction submit remains
+  authenticated.
 
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh

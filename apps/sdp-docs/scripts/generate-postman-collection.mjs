@@ -199,6 +199,19 @@ function buildRequestUrl(baseUrl, routePath) {
   return `${baseUrl}${routePath.replace(/\{([^}]+)\}/g, "{{$1}}")}`;
 }
 
+function allowsAnonymousAccess(security) {
+  return (
+    Array.isArray(security) &&
+    security.some(
+      (requirement) =>
+        requirement &&
+        typeof requirement === "object" &&
+        !Array.isArray(requirement) &&
+        Object.keys(requirement).length === 0
+    )
+  );
+}
+
 function createRequestItem(spec, baseUrl, routePath, method, operation) {
   const request = {
     method: method.toUpperCase(),
@@ -206,6 +219,13 @@ function createRequestItem(spec, baseUrl, routePath, method, operation) {
     url: buildRequestUrl(baseUrl, routePath),
     description: operation.description || operation.summary || "",
   };
+
+  // Collection auth is inherited by default. Optional-auth operations must
+  // override it so the placeholder API key does not turn a valid anonymous
+  // request into an INVALID_API_KEY response.
+  if (allowsAnonymousAccess(operation.security)) {
+    request.auth = { type: "noauth" };
+  }
 
   const body = getRequestBody(spec, operation);
   if (body) {
@@ -261,7 +281,7 @@ function toPostmanCollection(spec) {
     info: {
       name: "Solana Developer Platform Public API",
       description:
-        "Public Postman collection generated from the SDP OpenAPI contract. Internal-only endpoint families are excluded.",
+        "Public Postman collection generated from the SDP OpenAPI contract. Internal-only endpoint families are excluded, and keyless Earn operations are imported with No Auth.",
       schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     },
     auth: {

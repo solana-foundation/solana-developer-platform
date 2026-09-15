@@ -134,22 +134,51 @@ describe("OpenAPI spec", () => {
       );
     }
 
-    // This remains the conservative authenticated contract until PRO-1943's
-    // named security review approves the keyless subset. The approved change
-    // must replace this with an exact optional-auth vs keyed-only matrix.
-    for (const path of [
-      "/v1/earn/vault-deposit-previews",
-      "/v1/earn/external-wallet/deposit-transactions",
-      "/v1/earn/external-wallet/deposits",
-      "/v1/earn/external-wallet/withdrawal-transactions",
-      "/v1/earn/external-wallet/withdrawals",
-    ]) {
-      const publicOperation = publicDocument.paths?.[path]?.post;
-      expect(publicOperation?.operationId).toBeDefined();
-      expect(publicOperation?.security).toEqual([{ apiKeyAuth: [] }]);
+    // Pin the runtime's exact optional-auth boundary in both documents. An
+    // empty security requirement means the request may be anonymous; the
+    // named alternatives preserve the authenticated behavior of the same
+    // handler. Any route moving between these lists is a threat-model revisit.
+    const optionalAuthOperations = [
+      { method: "get", path: "/v1/earn/strategies" },
+      { method: "get", path: "/v1/earn/strategies/{strategyId}" },
+      { method: "post", path: "/v1/earn/vault-deposit-previews" },
+      { method: "post", path: "/v1/earn/external-wallet/deposit-transactions" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-previews" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-transactions" },
+    ] as const;
+    const keyedOnlyOperations = [
+      { method: "get", path: "/v1/earn/external-wallet/positions/summary" },
+      { method: "get", path: "/v1/earn/external-wallet/positions" },
+      { method: "get", path: "/v1/earn/external-wallet/movements" },
+      { method: "get", path: "/v1/earn/external-wallet/movements/{movementId}" },
+      { method: "get", path: "/v1/earn/external-wallet/earnings" },
+      { method: "post", path: "/v1/earn/external-wallet/deposits" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawals" },
+    ] as const;
 
-      const internalOperation = internal.paths?.[path]?.post;
+    expect(
+      [...optionalAuthOperations, ...keyedOnlyOperations]
+        .map(({ method, path }) => `${method.toUpperCase()} ${path}`)
+        .sort()
+    ).toEqual(publicEarnOperations);
+
+    for (const { method, path } of optionalAuthOperations) {
+      const publicOperation = publicDocument.paths?.[path]?.[method];
+      expect(publicOperation?.operationId).toBeDefined();
+      expect(publicOperation?.security).toEqual([{ apiKeyAuth: [] }, {}]);
+
+      const internalOperation = internal.paths?.[path]?.[method];
       expect(internalOperation?.security).toEqual([
+        { apiKeyAuth: [] },
+        { clerkBearerAuth: [] },
+        { sessionCookie: [] },
+        {},
+      ]);
+    }
+
+    for (const { method, path } of keyedOnlyOperations) {
+      expect(publicDocument.paths?.[path]?.[method]?.security).toEqual([{ apiKeyAuth: [] }]);
+      expect(internal.paths?.[path]?.[method]?.security).toEqual([
         { apiKeyAuth: [] },
         { clerkBearerAuth: [] },
         { sessionCookie: [] },
