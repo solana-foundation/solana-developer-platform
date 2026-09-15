@@ -4,6 +4,7 @@ import {
   type CryptoAssetSymbol,
   type CryptoRailNetwork,
   SOLANA_CRYPTO_RAILS,
+  TOKEN_TRANSACTION_STATUSES,
 } from "@sdp/types";
 import { z } from "zod";
 import { IDEMPOTENCY_KEY_PATTERN } from "../../middleware/idempotency-key";
@@ -159,7 +160,7 @@ export const allowlistStatusQuerySchema = z
   .openapi({ description: "Filter by allowlist entry status.", example: "active" });
 
 export const tokenTransactionStatusQuerySchema = z
-  .enum(["pending", "processing", "confirmed", "finalized", "failed"])
+  .enum(TOKEN_TRANSACTION_STATUSES)
   .openapi({ description: "Filter by token transaction status.", example: "confirmed" });
 
 export const magicLinkTokenQuerySchema = z.string().openapi({

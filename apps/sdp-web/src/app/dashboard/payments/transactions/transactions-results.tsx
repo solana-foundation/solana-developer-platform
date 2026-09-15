@@ -25,11 +25,11 @@ import { cn } from "@/lib/utils";
 import {
   formatDirection,
   formatDisplayAmount,
-  formatStatus,
   formatTimestamp,
   resolveTransferTokenLabel,
   resolveTransferTypeLabel,
   shortenAddress,
+  statusMessageKey,
   statusVariant,
 } from "../payments-overview.utils";
 import { TransactionAmount } from "./transactions-amount";
@@ -117,7 +117,7 @@ function TransactionDetail({
   const counterparty = getTransactionCounterpartyPresentation(transfer);
   const rows = [
     [t("DashboardPayments.transactions.transactionId"), transfer.id],
-    [t("DashboardPayments.transactions.status"), formatStatus(transfer.status)],
+    [t("DashboardPayments.transactions.status"), t(statusMessageKey(transfer.status))],
     [t("DashboardPayments.transactions.type"), resolveTransferTypeLabel(transfer.type, t)],
     [
       t("DashboardPayments.transactions.amount"),
@@ -157,7 +157,9 @@ function TransactionDetail({
           {t("DashboardPayments.transactions.details")}
         </h2>
         <div className="mt-3">
-          <Badge variant={statusVariant(transfer.status)}>{formatStatus(transfer.status)}</Badge>
+          <Badge variant={statusVariant(transfer.status)}>
+            {t(statusMessageKey(transfer.status))}
+          </Badge>
         </div>
       </div>
       <dl className="divide-y divide-border-default px-6">
@@ -307,7 +309,7 @@ function DesktopTable({
                 </TableCell>
                 <TableCell>
                   <Badge variant={statusVariant(transfer.status)}>
-                    {formatStatus(transfer.status)}
+                    {t(statusMessageKey(transfer.status))}
                   </Badge>
                 </TableCell>
                 <TableCell>
@@ -380,7 +382,7 @@ function MobileRows({
             <div className="flex items-start justify-between gap-3">
               <TransactionIdentity transfer={transfer} onSelect={onSelect} />
               <Badge variant={statusVariant(transfer.status)}>
-                {formatStatus(transfer.status)}
+                {t(statusMessageKey(transfer.status))}
               </Badge>
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
