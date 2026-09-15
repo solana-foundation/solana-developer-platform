@@ -11,7 +11,7 @@ import {
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
-import type { Address } from "@solana/kit";
+import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -36,6 +36,7 @@ import {
   createLegacyResolvedAuthoritySigner,
   createResolvedAuthoritySigner,
   getInitialPermanentDelegateAuthority,
+  type ResolvedIssuanceWallet,
   resolveIssuanceWallet,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
@@ -43,6 +44,10 @@ import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
 import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
+type DeployAuthorityWalletIds = Partial<
+  Record<"metadata" | "freeze" | "permanentDelegate", string>
+>;
+const DEPLOY_AUTHORITY_ROLES = ["metadata", "freeze", "permanentDelegate"] as const;
 
 /**
  * Conservative floor (0.01 SOL) a signing wallet must hold for a wallet-paid
@@ -81,26 +86,40 @@ async function persistRecoveredMint(params: {
   tokenId: string;
   token: NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
   custodyAddress: Address;
+  freezeAuthority: Address | null;
+  metadataAuthority: Address;
+  authorityCustodyWalletIds?: DeployAuthorityWalletIds;
   aclMode: ReturnType<typeof getMosaicAclMode>;
   feePayment: MosaicFeePayment;
   result: MintMetadataUpdateError["result"];
 }): Promise<boolean> {
-  const { tokenService, txId, tokenId, token, custodyAddress, aclMode, feePayment, result } =
-    params;
+  const {
+    tokenService,
+    txId,
+    tokenId,
+    token,
+    custodyAddress,
+    freezeAuthority,
+    metadataAuthority,
+    authorityCustodyWalletIds,
+    aclMode,
+    feePayment,
+    result,
+  } = params;
   const { mint, signature, slot, listAddress } = result;
   // The caller only invokes this once it has confirmed the mint landed on-chain;
   // bail defensively (and to narrow the type) if it somehow didn't.
   if (!mint) {
     return false;
   }
-  const freezeAuthority = token.isFreezable ? custodyAddress : null;
   try {
     await tokenService.setTokenDeployed(
       tokenId,
       mint,
       custodyAddress,
       freezeAuthority,
-      listAddress as string | undefined
+      listAddress as string | undefined,
+      metadataAuthority
     );
     // Mirror the success path: stamp the initial permanent delegate into the DB
     // for tokens with that extension. Skipping it would leave `permanentDelegate`
@@ -120,7 +139,9 @@ async function persistRecoveredMint(params: {
         operation: "deploy",
         mintAddress: mint,
         mintAuthority: custodyAddress,
+        metadataAuthority,
         freezeAuthority,
+        authorityCustodyWalletIds,
         ablListAddress: listAddress,
         aclMode,
         feePayment,
@@ -260,6 +281,7 @@ async function resolveCompletedDeployReplay(params: {
   token: NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
   idempotencyKey?: string;
   requestedCustodyWalletId?: string;
+  authorityCustodyWalletIds?: DeployAuthorityWalletIds;
   feePayment: MosaicFeePayment;
 }): Promise<boolean> {
   const { token, idempotencyKey } = params;
@@ -278,7 +300,13 @@ async function resolveCompletedDeployReplay(params: {
     replay.tokenId !== token.id ||
     replay.type !== "deploy" ||
     replay.custodyWalletId !== custodyWalletId ||
-    replay.params.feePayment !== params.feePayment
+    replay.params.feePayment !== params.feePayment ||
+    DEPLOY_AUTHORITY_ROLES.some(
+      (role) =>
+        (replay.params.authorityCustodyWalletIds as DeployAuthorityWalletIds | undefined)?.[
+          role
+        ] !== params.authorityCustodyWalletIds?.[role]
+    )
   ) {
     throw conflict("Idempotency key already used with different request payload");
   }
@@ -292,7 +320,64 @@ async function resolveCompletedDeployReplay(params: {
     custodyWalletId,
     requiredWalletPermissions: ["tokens:write"],
   });
+  for (const id of new Set(Object.values(params.authorityCustodyWalletIds ?? {}))) {
+    await resolveIssuanceWallet({
+      env: params.env,
+      auth: params.auth,
+      custodyWalletId: id,
+      requiredWalletPermissions: ["tokens:write"],
+    });
+  }
   return true;
+}
+
+async function resolveDeployAuthorityWallets(
+  env: Env,
+  auth: ApiKeyContext,
+  token: NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>,
+  mintAuthority: string,
+  authorityCustodyWalletIds?: DeployAuthorityWalletIds
+) {
+  if (authorityCustodyWalletIds?.freeze && !token.isFreezable) {
+    throw badRequest("Token does not support a freeze authority");
+  }
+  if (
+    authorityCustodyWalletIds?.permanentDelegate &&
+    getInitialPermanentDelegateAuthority(token, mintAuthority) === undefined
+  ) {
+    throw badRequest("Token does not support a permanent delegate");
+  }
+  return Promise.all(
+    DEPLOY_AUTHORITY_ROLES.map(async (role) => {
+      const custodyWalletId = authorityCustodyWalletIds?.[role];
+      return custodyWalletId
+        ? resolveIssuanceWallet({
+            env,
+            auth,
+            custodyWalletId,
+            requiredWalletPermissions: ["tokens:write"],
+          })
+        : undefined;
+    })
+  );
+}
+
+async function createDeployMetadataSigner(
+  env: Env,
+  auth: ApiKeyContext,
+  deploymentWallet: ResolvedIssuanceWallet,
+  signer: TransactionSigner,
+  metadataWallet?: ResolvedIssuanceWallet
+): Promise<TransactionSigner> {
+  if (!metadataWallet || metadataWallet.custodyWalletId === deploymentWallet.custodyWalletId)
+    return signer;
+  return createResolvedAuthoritySigner({
+    env,
+    auth,
+    custodyWalletId: metadataWallet.custodyWalletId,
+    currentAuthority: metadataWallet.publicKey,
+    requiredWalletPermissions: ["tokens:write"],
+  });
 }
 
 export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
@@ -321,6 +406,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       token,
       idempotencyKey,
       requestedCustodyWalletId: body.signingCustodyWalletId,
+      authorityCustodyWalletIds: body.authorityCustodyWalletIds,
       feePayment,
     })
   ) {
@@ -351,6 +437,14 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     requiredWalletPermissions: ["tokens:write"],
   });
 
+  const [metadataWallet, freezeWallet, delegateWallet] = await resolveDeployAuthorityWallets(
+    c.env,
+    auth,
+    token,
+    deploymentWallet.publicKey,
+    body.authorityCustodyWalletIds
+  );
+
   const idempotencyMetadata = buildIdempotencyMetadata(idempotencyKey, {
     tokenId,
     operation: "deploy",
@@ -364,6 +458,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       status: token.status,
       feePayment,
       custodyWalletId: deploymentWallet.custodyWalletId,
+      authorityCustodyWalletIds: body.authorityCustodyWalletIds,
     },
   });
 
@@ -374,6 +469,15 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     tokenService,
     idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
+  if (metadataWallet && metadataWallet.custodyWalletId !== deploymentWallet.custodyWalletId) {
+    await admitIssuanceRuntimeExecution({
+      env: c.env,
+      auth,
+      custodyWalletId: metadataWallet.custodyWalletId,
+      tokenService,
+      idempotencyKey: idempotencyMetadata.idempotencyKey,
+    });
+  }
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
@@ -387,6 +491,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       name: token.name,
       symbol: token.symbol,
       feePayment,
+      authorityCustodyWalletIds: body.authorityCustodyWalletIds,
     },
     initiatedByKeyId: auth.id,
     idempotencyKey: idempotencyMetadata.idempotencyKey,
@@ -432,6 +537,8 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   // Hoisted so the catch block can persist the mint authority if createToken
   // fails after the mint is already live on-chain (see MintMetadataUpdateError).
   let custodyAddress: Address | undefined;
+  let metadataAuthority: Address | undefined;
+  let freezeAuthority: Address | null = null;
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
   let onChainEffectCompleted = false;
@@ -447,6 +554,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
         feePayment,
         mode: "execute",
         custodyWalletId: deploymentWallet.custodyWalletId,
+        authorityCustodyWalletIds: body.authorityCustodyWalletIds,
       },
     });
 
@@ -462,6 +570,23 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       requiredWalletPermissions: ["tokens:write"],
     });
     custodyAddress = signer.address;
+    const metadataSigner = await createDeployMetadataSigner(
+      c.env,
+      auth,
+      deploymentWallet,
+      signer,
+      metadataWallet
+    );
+    metadataAuthority = metadataSigner.address;
+    freezeAuthority = token.isFreezable
+      ? ((freezeWallet?.publicKey as Address | undefined) ?? custodyAddress)
+      : null;
+    if (delegateWallet) {
+      token = {
+        ...token,
+        extensions: { ...token.extensions, permanentDelegate: delegateWallet.publicKey },
+      };
+    }
 
     if (feePayment === "wallet") {
       await assertWalletCanPayDeployFees(c.env, signer.address);
@@ -483,7 +608,8 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       },
       decimals: token.decimals,
       mintAuthority: signer,
-      freezeAuthority: token.isFreezable ? custodyAddress : null,
+      metadataAuthority: metadataSigner,
+      freezeAuthority,
       feePayer: signer,
       extensions: token.extensions ?? undefined,
       enableAbl,
@@ -491,15 +617,14 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     });
     onChainEffectCompleted = true;
 
-    const freezeAuthority = token.isFreezable ? custodyAddress : null;
-
     // Update token with deployment info (including ABL list if created)
     const deployedToken = await tokenService.setTokenDeployed(
       tokenId,
       result.mint as Address,
       custodyAddress,
       freezeAuthority,
-      result.listAddress as Address | undefined
+      result.listAddress as Address | undefined,
+      metadataAuthority
     );
 
     const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
@@ -518,7 +643,9 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
         operation: "deploy",
         mintAddress: result.mint,
         mintAuthority: custodyAddress,
-        freezeAuthority: token.isFreezable ? custodyAddress : null,
+        metadataAuthority,
+        freezeAuthority,
+        authorityCustodyWalletIds: body.authorityCustodyWalletIds,
         ablListAddress: result.listAddress,
         aclMode,
         feePayment,
@@ -541,13 +668,21 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     // before surfacing the error — otherwise a retry generates a new keypair
     // and mints a second, orphaned token. The hosted-URI pointer is left unset;
     // it can be fixed later via a metadata update.
-    if (error instanceof MintMetadataUpdateError && custodyAddress && error.result.mint) {
+    if (
+      error instanceof MintMetadataUpdateError &&
+      custodyAddress &&
+      metadataAuthority &&
+      error.result.mint
+    ) {
       const recovered = await persistRecoveredMint({
         tokenService,
         txId: tx.id,
         tokenId,
         token,
         custodyAddress,
+        freezeAuthority,
+        metadataAuthority,
+        authorityCustodyWalletIds: body.authorityCustodyWalletIds,
         aclMode,
         feePayment,
         result: error.result,

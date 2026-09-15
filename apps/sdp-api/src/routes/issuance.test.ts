@@ -7714,6 +7714,182 @@ describe("Issuance Routes", () => {
     };
 
     describe("POST /v1/issuance/tokens/:tokenId/deploy", () => {
+      it.each([false, true])(
+        "persists distinct draft authorities (metadata follow-up fails: %s)",
+        async (metadataFails) => {
+          const mintWallet = await seedIssuanceActivityWallet(
+            "wal_draft_mint",
+            TEST_SOLANA_ADDRESSES.wallet1
+          );
+          const metadataWallet = await seedIssuanceActivityWallet(
+            "wal_draft_metadata",
+            TEST_SOLANA_ADDRESSES.wallet2
+          );
+          const freezeWallet = await seedIssuanceActivityWallet(
+            "wal_draft_freeze",
+            TEST_SOLANA_ADDRESSES.wallet3
+          );
+          const delegateWallet = await seedIssuanceActivityWallet(
+            "wal_draft_delegate",
+            TEST_SOLANA_ADDRESSES.mint
+          );
+          const token = await seedIssuedToken({
+            id: "tok_distinct_draft_authorities",
+            mintAddress: null,
+            status: "pending",
+            signingCustodyWalletId: mintWallet.custodyWalletId,
+            signingWalletId: mintWallet.walletId,
+            isFreezable: true,
+            template: "stablecoin",
+            requiresAllowlist: false,
+          });
+          const authorities = {
+            metadata: metadataWallet.custodyWalletId,
+            freeze: freezeWallet.custodyWalletId,
+            permanentDelegate: delegateWallet.custodyWalletId,
+          };
+          const createToken = vi.spyOn(MosaicService.prototype, "createToken");
+          if (metadataFails)
+            createToken.mockRejectedValueOnce(
+              new Mosaic.MintMetadataUpdateError(mockDeployResult as never)
+            );
+          else createToken.mockResolvedValueOnce(mockDeployResult as never);
+          const request = {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Idempotency-Key": "deploy-distinct-authorities",
+            },
+            body: JSON.stringify({ authorityCustodyWalletIds: authorities }),
+          };
+          try {
+            const first = await app.request(`/v1/issuance/tokens/${token.id}/deploy`, request, env);
+            expect(first.status).toBe(metadataFails ? 400 : 200);
+            expect(createToken).toHaveBeenCalledWith(
+              expect.objectContaining({
+                mintAuthority: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+                metadataAuthority: expect.objectContaining({
+                  address: TEST_SOLANA_ADDRESSES.wallet2,
+                }),
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet3,
+                extensions: expect.objectContaining({
+                  permanentDelegate: TEST_SOLANA_ADDRESSES.mint,
+                }),
+              })
+            );
+            const stored = await new TokenService(getDb(env)).getToken({
+              tokenId: token.id,
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT.id,
+            });
+            expect(stored).toMatchObject({
+              status: "active",
+              mintAddress: mockDeployResult.mint,
+              mintAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+              metadataAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              freezeAuthority: TEST_SOLANA_ADDRESSES.wallet3,
+              extensions: expect.objectContaining({
+                permanentDelegate: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            });
+            const replay = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy`,
+              request,
+              env
+            );
+            expect(replay.status).toBe(200);
+            const changed = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy`,
+              {
+                ...request,
+                body: JSON.stringify({
+                  authorityCustodyWalletIds: {
+                    ...authorities,
+                    metadata: mintWallet.custodyWalletId,
+                  },
+                }),
+              },
+              env
+            );
+            expect(changed.status).toBe(409);
+            expect(createToken).toHaveBeenCalledTimes(1);
+          } finally {
+            createToken.mockRestore();
+          }
+        }
+      );
+
+      it.each(["metadata", "freeze", "permanentDelegate"])(
+        "rejects an inaccessible %s wallet before deploying",
+        async (role) => {
+          const token = await seedIssuedToken({
+            id: "tok_inaccessible_authority",
+            mintAddress: null,
+            status: "pending",
+            template: "stablecoin",
+            isFreezable: true,
+          });
+          const createToken = vi.spyOn(MosaicService.prototype, "createToken");
+          try {
+            const response = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                },
+                body: JSON.stringify({
+                  authorityCustodyWalletIds: { [role]: "cwlt_inaccessible" },
+                }),
+              },
+              env
+            );
+            expect(response.status).toBe(404);
+            expect(createToken).not.toHaveBeenCalled();
+            expect(
+              await new TokenService(getDb(env)).getToken({
+                tokenId: token.id,
+                organizationId: TEST_ORG.id,
+                projectId: TEST_PROJECT.id,
+              })
+            ).toMatchObject({ status: "pending", mintAddress: null });
+          } finally {
+            createToken.mockRestore();
+          }
+        }
+      );
+
+      it.each(["freeze", "permanentDelegate"])(
+        "rejects %s assignment when the token lacks that capability",
+        async (role) => {
+          const token = await seedIssuedToken({
+            id: "tok_unsupported_authority",
+            mintAddress: null,
+            status: "pending",
+            template: "custom",
+            isFreezable: false,
+          });
+          const response = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                authorityCustodyWalletIds: { [role]: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID },
+              }),
+            },
+            env
+          );
+          expect(response.status).toBe(400);
+          expect((await response.json()).error.message).toMatch(/does not support/);
+        }
+      );
+
       it("rejects the legacy provider wallet selector on direct deploy", async () => {
         const token = await seedIssuedToken({
           id: "tok_deploy_legacy_wallet_selector",

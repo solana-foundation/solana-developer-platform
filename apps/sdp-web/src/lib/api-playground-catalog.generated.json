@@ -8731,7 +8731,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"feePayment\": \"sponsored\"\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authorityCustodyWalletIds\": {\n    \"metadata\": \"cwlt_metadata\",\n    \"freeze\": \"cwlt_freeze\",\n    \"permanentDelegate\": \"cwlt_recovery\"\n  },\n  \"feePayment\": \"sponsored\"\n}",
             "required": false
           }
         ],

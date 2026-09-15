@@ -833,7 +833,7 @@
             "description": "Deploys the token to Solana using custody signing.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"feePayment\": \"sponsored\"\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authorityCustodyWalletIds\": {\n    \"metadata\": \"cwlt_metadata\",\n    \"freeze\": \"cwlt_freeze\",\n    \"permanentDelegate\": \"cwlt_recovery\"\n  },\n  \"feePayment\": \"sponsored\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
