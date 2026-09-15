@@ -607,6 +607,9 @@ importers:
       '@types/node':
         specifier: 26.1.2
         version: 26.1.2
+      tsx:
+        specifier: 4.23.12
+        version: 4.23.12
 
   packages/sdp-dvp:
     dependencies:
