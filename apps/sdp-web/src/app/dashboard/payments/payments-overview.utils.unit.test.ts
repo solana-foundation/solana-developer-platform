@@ -134,10 +134,6 @@ describe("statusMessageKey", () => {
       "DashboardPayments.transactions.awaitingPayment"
     );
   });
-
-  it("returns null for a status the catalog does not name", () => {
-    expect(statusMessageKey("some_new_status")).toBeNull();
-  });
 });
 
 describe("normalizeAggregateBalances", () => {

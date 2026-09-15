@@ -1,5 +1,6 @@
 "use client";
 
+import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import type {
   CounterpartyAccount,
   PaymentsDashboardWallet,
@@ -12,6 +13,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
+import type { CreateTransferInput } from "@/app/dashboard/payments/payments-workspace.data";
 import {
   createTransfer,
   fetchCounterpartyAccounts,
@@ -20,16 +22,24 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useZodForm } from "@/lib/use-zod-form";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
-import { onchainDestinationSchema, onchainDetailsSchema, onchainSendSchema } from "../schema";
+import {
+  cryptoWalletAccountDetailsSchema,
+  ONCHAIN_AMOUNT_PATTERN,
+  type OnchainSendFields,
+  onchainDestinationSchema,
+  onchainDetailsSchema,
+  onchainSendSchema,
+} from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
 import { optionalDetail, summaryAmount } from "../wizard-summary";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
-export type OnchainSendStepId = "DESTINATION" | "DETAILS" | "REVIEW";
+export const ONCHAIN_SEND_STEP_IDS = ["DESTINATION", "DETAILS", "REVIEW"] as const;
+export type OnchainSendStepId = (typeof ONCHAIN_SEND_STEP_IDS)[number];
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export function getOnchainSendSteps(t: Translate): readonly RampWizardStep[] {
+export function getOnchainSendSteps(t: Translate): readonly RampWizardStep<OnchainSendStepId>[] {
   return [
     {
       id: "DESTINATION",
@@ -49,12 +59,82 @@ export function getOnchainSendSteps(t: Translate): readonly RampWizardStep[] {
   ];
 }
 
-function resolveAccountAddress(account: CounterpartyAccount | null): string {
-  if (!account) {
-    return "";
+export function resolveReadySubmission(
+  fields: OnchainSendFields,
+  destinationAddress: string | null,
+  selectedMint: string | null
+): CreateTransferInput | null {
+  if (fields.walletId === "" || destinationAddress === null || selectedMint === null) {
+    return null;
   }
-  const address = account.details.address;
-  return typeof address === "string" ? address : "";
+  const baseSubmission = {
+    sourceCustodyWalletId: fields.walletId,
+    destination: destinationAddress,
+    token: address(selectedMint),
+    amount: fields.amount,
+  };
+  const memo = fields.memo.trim();
+  return memo === "" ? baseSubmission : { ...baseSubmission, memo };
+}
+
+export function canProceedOnchainSend({
+  stepId,
+  fields,
+  destinationAddress,
+  exceedsBalance,
+  selectedMint,
+  readySubmission,
+}: {
+  stepId: OnchainSendStepId;
+  fields: OnchainSendFields;
+  destinationAddress: string | null;
+  exceedsBalance: boolean;
+  selectedMint: string | null;
+  readySubmission: CreateTransferInput | null;
+}): boolean {
+  switch (stepId) {
+    case "DESTINATION":
+      return onchainDestinationSchema.safeParse(fields).success && destinationAddress !== null;
+    case "DETAILS": {
+      const hasMintForSelectedAsset = fields.walletId === "" || selectedMint !== null;
+      return (
+        onchainDetailsSchema.safeParse(fields).success && !exceedsBalance && hasMintForSelectedAsset
+      );
+    }
+    case "REVIEW":
+      return readySubmission !== null;
+  }
+}
+
+export function nextAssetAfterWalletChange(
+  currentAsset: string,
+  nextAssets: readonly { value: string }[]
+): string {
+  if (nextAssets.some((asset) => asset.value === currentAsset)) {
+    return currentAsset;
+  }
+  const firstAsset = nextAssets[0];
+  return firstAsset === undefined ? "" : firstAsset.value;
+}
+
+export function cryptoWalletAddress(account: CounterpartyAccount): string | null {
+  if (account.accountKind !== "crypto_wallet") {
+    return null;
+  }
+  const result = cryptoWalletAccountDetailsSchema.safeParse(account.details);
+  return result.success ? result.data.address : null;
+}
+
+export function onchainAmountExceedsBalance(
+  amount: string,
+  availableAmount: string | null
+): boolean {
+  return (
+    amount !== "" &&
+    availableAmount !== null &&
+    ONCHAIN_AMOUNT_PATTERN.test(amount) &&
+    compareDecimalAmounts(amount, availableAmount) > 0
+  );
 }
 
 export interface UseOnchainSendWizardProps {
@@ -93,114 +173,107 @@ export function useOnchainSendWizard({
     walletsError
   );
 
-  const {
-    data: accounts,
-    isLoading: accountsLoading,
-    mutate: mutateAccounts,
-  } = useSWR(
+  const { data: accounts, mutate: mutateAccounts } = useSWR(
     counterpartyId ? paymentsQueryKeys.counterpartyAccounts({ counterpartyId }) : null,
     ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
     { revalidateOnFocus: false }
   );
-  const cryptoAccounts = useMemo(
-    () =>
-      (accounts ?? []).filter(
-        (account) =>
-          account.accountKind === "crypto_wallet" &&
-          account.status === "active" &&
-          resolveAccountAddress(account).length > 0
-      ),
-    [accounts]
-  );
+  const accountsLoading = accounts === undefined;
+  const cryptoAccounts = useMemo(() => {
+    if (accounts === undefined) {
+      return [];
+    }
+    return accounts.filter(
+      (account) =>
+        account.accountKind === "crypto_wallet" &&
+        account.status === "active" &&
+        cryptoWalletAddress(account) !== null
+    );
+  }, [accounts]);
 
-  const selectedWallet = useMemo(
-    () => liveWallets.find((wallet) => wallet.id === fields.walletId) ?? null,
-    [liveWallets, fields.walletId]
-  );
-  const selectedAccount = useMemo(
-    () => cryptoAccounts.find((account) => account.id === fields.accountId) ?? null,
-    [cryptoAccounts, fields.accountId]
-  );
-  const destinationAddress = resolveAccountAddress(selectedAccount);
+  const selectedWallet = useMemo(() => {
+    const wallet = liveWallets.find((candidate) => candidate.id === fields.walletId);
+    return wallet === undefined ? null : wallet;
+  }, [liveWallets, fields.walletId]);
+  const selectedAccount = useMemo(() => {
+    const account = cryptoAccounts.find((candidate) => candidate.id === fields.accountId);
+    return account === undefined ? null : account;
+  }, [cryptoAccounts, fields.accountId]);
+  const destinationAddress = selectedAccount === null ? null : cryptoWalletAddress(selectedAccount);
 
   const assetOptions = useMemo(
     () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
     [issuedTokenSymbolsByMint, selectedWallet, t]
   );
-  const selectedAsset = useMemo(
-    () => assetOptions.find((asset) => asset.value === fields.asset) ?? null,
-    [assetOptions, fields.asset]
-  );
+  const selectedAsset = useMemo(() => {
+    const asset = assetOptions.find((candidate) => candidate.value === fields.asset);
+    return asset === undefined ? null : asset;
+  }, [assetOptions, fields.asset]);
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
-    const nextWallet = liveWallets.find((wallet) => wallet.id === walletId) ?? null;
+    const matchingWallet = liveWallets.find((wallet) => wallet.id === walletId);
+    const nextWallet = matchingWallet === undefined ? null : matchingWallet;
     const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint, t);
-    if (!nextAssets.some((asset) => asset.value === fields.asset)) {
-      const firstAsset = nextAssets[0];
-      setField("asset", firstAsset === undefined ? "" : firstAsset.value);
+    const nextAsset = nextAssetAfterWalletChange(fields.asset, nextAssets);
+    if (nextAsset !== fields.asset) {
+      setField("asset", nextAsset);
     }
   };
 
-  const selectedAssetBalance = useMemo(
-    () => selectedWallet?.balances?.find((balance) => balance.mint === fields.asset) ?? null,
-    [selectedWallet, fields.asset]
-  );
+  const selectedAssetBalance = useMemo(() => {
+    if (selectedWallet === null || selectedWallet.balances === undefined) {
+      return null;
+    }
+    const balance = selectedWallet.balances.find((candidate) => candidate.mint === fields.asset);
+    return balance === undefined ? null : balance;
+  }, [selectedWallet, fields.asset]);
 
-  let availableAmount: number | null = null;
-  if (selectedWallet) {
-    availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : 0;
+  let availableAmount: string | null;
+  if (selectedWallet === null) {
+    availableAmount = null;
+  } else if (selectedAssetBalance === null) {
+    availableAmount = "0";
+  } else {
+    availableAmount = selectedAssetBalance.uiAmount;
   }
-  const numericAmount = Number(fields.amount);
-  const exceedsBalance =
-    fields.amount.length > 0 && availableAmount !== null && numericAmount > availableAmount;
+  const exceedsBalance = onchainAmountExceedsBalance(fields.amount, availableAmount);
 
-  const currentStepId = steps[stepIndex].id as OnchainSendStepId;
+  const currentStepId = steps[stepIndex].id;
   const isLastStep = stepIndex === steps.length - 1;
-
-  const canProceed = useMemo(() => {
-    if (currentStepId === "DESTINATION") {
-      return onchainDestinationSchema.safeParse(fields).success && !!destinationAddress;
-    }
-    if (currentStepId === "DETAILS") {
-      const schemaOk = onchainDetailsSchema.safeParse(fields).success;
-      // When a wallet is selected, require a matching balance entry so that
-      // submitTransfer always has a mint address rather than falling back to
-      // the raw asset string (e.g. "USDC"), which the API would reject.
-      const hasMint = !fields.walletId || selectedAssetBalance !== null;
-      return schemaOk && !exceedsBalance && hasMint;
-    }
-    return true;
-  }, [currentStepId, fields, destinationAddress, exceedsBalance, selectedAssetBalance]);
+  const readySubmission = resolveReadySubmission(
+    fields,
+    destinationAddress,
+    selectedAssetBalance === null ? null : selectedAssetBalance.mint
+  );
+  const canProceed = canProceedOnchainSend({
+    stepId: currentStepId,
+    fields,
+    destinationAddress,
+    exceedsBalance,
+    selectedMint: selectedAssetBalance === null ? null : selectedAssetBalance.mint,
+    readySubmission,
+  });
 
   const handleAccountAdded = (account: CounterpartyAccount) => {
     setField("accountId", account.id);
     void mutateAccounts(
-      (prev) => [account, ...(prev ?? []).filter((existing) => existing.id !== account.id)],
+      (prev) => {
+        const existingAccounts = prev === undefined ? [] : prev;
+        return [account, ...existingAccounts.filter((existing) => existing.id !== account.id)];
+      },
       { revalidate: true }
     );
     setAddAccountOpen(false);
   };
 
-  const submitTransfer = async () => {
-    if (!fields.walletId || !destinationAddress || !selectedAssetBalance) {
-      return;
-    }
+  const submitTransfer = async (submission: CreateTransferInput) => {
     setSubmitting(true);
     const toastId = toast.loading(t("DashboardPayments.onchainSend.submittingTransfer"), {
       position: "bottom-right",
     });
     try {
-      const transfer = await createTransfer(
-        {
-          sourceCustodyWalletId: fields.walletId,
-          destination: destinationAddress,
-          token: address(selectedAssetBalance.mint),
-          amount: fields.amount,
-          ...(fields.memo.trim() ? { memo: fields.memo.trim() } : {}),
-        },
-        t
-      );
+      const transfer = await createTransfer(submission, t);
       setTransferResult(transfer);
       toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
         id: toastId,
@@ -232,7 +305,9 @@ export function useOnchainSendWizard({
         router.push("/dashboard/payments");
         return;
       }
-      await submitTransfer();
+      if (readySubmission !== null) {
+        await submitTransfer(readySubmission);
+      }
       return;
     }
     setStepIndex((current) => current + 1);
@@ -273,6 +348,7 @@ export function useOnchainSendWizard({
     currentStepId,
     isLastStep,
     canProceed,
+    readySubmission,
     liveWallets,
     walletsLoading,
     liveWalletsError,

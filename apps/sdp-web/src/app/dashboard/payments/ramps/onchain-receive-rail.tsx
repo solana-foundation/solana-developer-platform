@@ -35,9 +35,7 @@ export function OnchainReceiveRail({
       walletsError={wizard.liveWalletsError}
       onPrimary={wizard.handlePrimary}
       onSecondary={wizard.handleSecondary}
-      counterpartyDialogOpen={false}
-      setCounterpartyDialogOpen={() => {}}
-      onCounterpartyCreated={() => {}}
+      counterpartyDialog={null}
       summary={
         <WizardSummaryList
           details={[
