@@ -88,7 +88,10 @@ test("candidate is revision-specific and Cloud Run-ready before promotion", () =
 });
 
 test("candidate traffic tag is always removed", () => {
-  assert.match(workflow, /- name: Remove candidate traffic tag\n\s+id: remove_tag\n\s+if: \$\{\{ always\(\) \}\}/);
+  assert.match(
+    workflow,
+    /- name: Remove candidate traffic tag\n\s+id: remove_tag\n\s+if: \$\{\{ always\(\) \}\}/
+  );
   assert.match(workflow, /--remove-tags "\$\{CANDIDATE_TAG\}"/);
 
   const promotion = workflow.indexOf("- name: Promote service and cron with rollback");
