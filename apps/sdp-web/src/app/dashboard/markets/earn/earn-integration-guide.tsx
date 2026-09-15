@@ -9,7 +9,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
-import { ArrowLeftIcon, CheckIcon, CopyIcon, InfoIcon, KeyRoundIcon } from "lucide-react";
+import { ArrowLeftIcon, CheckIcon, CopyIcon, InfoIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -27,6 +27,7 @@ import { EarnIntegrationGuideSkeleton } from "../markets-route-skeletons";
 import { earnProviderLabel, earnStrategyLiquidityLabel } from "./earn-format";
 import {
   buildEarnIntegrationSections,
+  buildEarnServerIntegration,
   type EarnIntegrationSections,
 } from "./earn-integration-snippets";
 import { EarnDepositAvailabilityBadge, formatProviderApy } from "./earn-market-presentation";
@@ -187,10 +188,14 @@ export function EarnIntegrationGuide({
 
   return (
     <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto w-full max-w-5xl space-y-8">
+      <div className="mx-auto w-full max-w-5xl space-y-6">
         <Button asChild className="-ml-2" iconLeft={<ArrowLeftIcon />} size="sm" variant="ghost">
           <Link href={earnHref}>{t("DashboardMarkets.earnProgram.back")}</Link>
         </Button>
+
+        <p className="text-sm leading-6 text-secondary italic">
+          {t("DashboardMarkets.earnProgram.guideIntro")}
+        </p>
 
         <CatalogueContent
           activeCluster={activeCluster}
@@ -350,7 +355,7 @@ function StrategyPickerCard({
           </CardAction>
         ) : null}
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-4">
         {previewingMainnet ? (
           <p className="max-w-2xl text-sm leading-6 text-secondary">
             {t("DashboardMarkets.earnProgram.mainnetCatalogueDescription")}
@@ -426,61 +431,34 @@ function StrategySelectionEmptyState({
   );
 }
 
+/**
+ * One plain line under the dropdown ("Kamino · Instant liquidity · 6.2% APY"),
+ * the availability badge, then the strategy ID as a copyable code surface.
+ * Reference, not a dashboard: no field labels, no big numbers, and no APY when
+ * it is unknown.
+ */
 function StrategyDetails({ locale, option }: { locale: string; option: StrategyOption }) {
   const t = useTranslations();
-  const { copied, copy, value: copiedValue } = useCopy(1200);
   const { strategy } = option;
-  const strategyIdCopied = copied && copiedValue === strategy.id;
+  const liquidity = earnStrategyLiquidityLabel(strategy, t);
+  const apy = formatProviderApy(strategy.currentApy, locale);
+  const facts = [
+    earnProviderLabel(strategy.provider),
+    liquidity ? t("DashboardMarkets.earnProgram.liquidityFact", { liquidity }) : undefined,
+    apy === "—" ? undefined : t("DashboardMarkets.earnProgram.apyFact", { apy }),
+  ].filter((fact): fact is string => Boolean(fact));
 
   return (
-    <div className="space-y-5">
-      <dl className="grid grid-cols-2 gap-x-8 gap-y-6 sm:grid-cols-4">
-        <div>
-          <dt className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.apy")}</dt>
-          <dd className="mt-1 text-lg font-medium tracking-tight text-primary tabular-nums">
-            {formatProviderApy(strategy.currentApy, locale)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.liquidity")}</dt>
-          <dd className="mt-1 text-sm text-primary">
-            {earnStrategyLiquidityLabel(strategy, t) ?? "—"}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.provider")}</dt>
-          <dd className="mt-1 text-sm text-primary">{earnProviderLabel(strategy.provider)}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-tertiary">
-            {t("DashboardMarkets.earnProgram.availability")}
-          </dt>
-          <dd className="mt-1">
-            <EarnDepositAvailabilityBadge
-              availability={option.availability}
-              labels={PROGRAM_AVAILABILITY_LABELS}
-              strategy={strategy}
-            />
-          </dd>
-        </div>
-      </dl>
-
-      <div className="flex min-w-0 items-center gap-4 border-t border-border-subtle pt-5">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.strategyId")}</p>
-          <span className="mt-1 block truncate text-sm text-primary">{strategy.id}</span>
-        </div>
-        <Button
-          aria-label={t("DashboardMarkets.earnProgram.copyStrategyId")}
-          iconLeft={strategyIdCopied ? <CheckIcon /> : <CopyIcon />}
-          onClick={() => void copy(strategy.id)}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          {t(strategyIdCopied ? "Shared.SharedComponents.copied" : "Shared.SharedComponents.copy")}
-        </Button>
+    <div className="flex flex-col gap-4 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <p className="text-secondary tabular-nums">{facts.join(" · ")}</p>
+        <EarnDepositAvailabilityBadge
+          availability={option.availability}
+          labels={PROGRAM_AVAILABILITY_LABELS}
+          strategy={strategy}
+        />
       </div>
+      <CodeBlock code={strategy.id} title={t("DashboardMarkets.earnProgram.strategyId")} />
     </div>
   );
 }
@@ -497,12 +475,31 @@ function IntegrationReference({
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
+  const { copied, copy } = useCopy(1600);
   const sections = buildEarnIntegrationSections(strategy, apiBaseUrl ?? undefined);
+  const serverModule = buildEarnServerIntegration(strategy, apiBaseUrl ?? undefined);
   const activeSection =
     GUIDE_SECTIONS.find(({ id }) => id === activeSectionId) ?? GUIDE_SECTIONS[0];
 
   return (
-    <div className="flex flex-col gap-6 pt-1">
+    <section className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h3 className="text-[19px] leading-6 font-medium text-primary">
+          {t("DashboardMarkets.earnProgram.guideTitle")}
+        </h3>
+        <Button
+          iconLeft={copied ? <CheckIcon /> : <CopyIcon />}
+          onClick={() => void copy(serverModule)}
+          type="button"
+        >
+          {t(
+            copied ? "Shared.SharedComponents.copied" : "DashboardMarkets.earnProgram.copyAllCode"
+          )}
+        </Button>
+      </div>
+
+      <Callout variant="warning">{t("DashboardMarkets.earnProgram.secretKeyDisclosure")}</Callout>
+
       <SegmentedControl
         aria-label={t("DashboardMarkets.earnProgram.guideNavigationTitle")}
         items={GUIDE_SECTIONS.map(({ id, navigationKey }) => ({
@@ -513,33 +510,22 @@ function IntegrationReference({
         value={activeSection.id}
       />
 
-      <section
+      <div
         aria-live="polite"
-        className="flex min-w-0 flex-col gap-5"
+        className="flex min-w-0 flex-col gap-3"
         id={`earn-guide-panel-${activeSection.id}`}
       >
-        <div className="flex flex-col gap-2">
-          <h3 className="text-[19px] leading-6 font-medium text-primary">
-            {t(activeSection.titleKey)}
-          </h3>
-          <p className="max-w-3xl text-sm leading-6 text-secondary">
-            {t(activeSection.descriptionKey)}
-          </p>
-          {activeSection.id === "client" ? (
-            <p className="flex items-center gap-2 text-xs text-tertiary">
-              <KeyRoundIcon aria-hidden="true" className="size-4 shrink-0" />
-              {t("DashboardMarkets.earnProgram.secretKeyDisclosure")}
-            </p>
-          ) : null}
-        </div>
-
+        <p className="text-sm leading-6">
+          <span className="font-medium text-primary">{t(activeSection.titleKey)}</span>
+          <span className="text-secondary">{` · ${t(activeSection.descriptionKey)}`}</span>
+        </p>
         <CodeBlock
           code={sections[activeSection.id]}
           language="typescript"
           title={t("DashboardMarkets.earnProgram.serverExample")}
           viewportClassName="max-h-[36rem]"
         />
-      </section>
-    </div>
+      </div>
+    </section>
   );
 }

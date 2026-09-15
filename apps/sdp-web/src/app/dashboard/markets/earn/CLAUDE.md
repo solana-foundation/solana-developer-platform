@@ -124,8 +124,10 @@ program create still sends the body `requestId` form.
   configuration and integration-guide shapes. The shell's navigation-loading
   resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
   same route-specific skeleton used by its `loading.tsx` boundary.
-- The portfolio's zero-position state is the onboarding card. The removed UI
-  builder persisted the only former configuration state, so there is no honest
+- The portfolio's zero-position state is the onboarding card alone: the three
+  metric tiles are hidden at zero positions because all-zero tiles with empty
+  charts read as data rather than "nothing yet". The removed UI builder
+  persisted the only former configuration state, so there is no honest
   "configured but awaiting a deposit" distinction to infer from the live
   position summary.
 
@@ -144,9 +146,13 @@ program create still sends the body `requestId` form.
 - `earn-integration-guide.tsx` — owns strategy selection and re-checks
   availability rather than trusting a deep link. Unavailable strategies stay
   visible but disabled. The selected strategy's ID, APY, liquidity, provider,
-  and availability remain beside four freely navigable reference tabs (client
-  setup, deposits, reads, withdraw). The snippets remain server-only and say so,
-  because the module they document carries a secret API key.
+  and availability sit in one plain line under the dropdown ("Kamino · Instant
+  liquidity · 6.2% APY", APY omitted when unknown) with the ID as its own
+  copyable code block. A short intro paragraph explains the loop, then four
+  freely navigable reference tabs (client setup, deposits, reads, withdraw).
+  "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
+  just the active tab. The snippets remain server-only and the page says so in
+  a warning callout, because the module they document carries a secret API key.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is

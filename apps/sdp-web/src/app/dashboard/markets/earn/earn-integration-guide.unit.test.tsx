@@ -8,7 +8,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { EarnIntegrationGuide } from "./earn-integration-guide";
-import { buildEarnIntegrationSections } from "./earn-integration-snippets";
+import {
+  buildEarnIntegrationSections,
+  buildEarnServerIntegration,
+} from "./earn-integration-snippets";
 
 const liveStrategy: EarnStrategy = {
   id: "earn_strategy_live",
@@ -112,7 +115,8 @@ describe("EarnIntegrationGuide", () => {
       />
     );
 
-    expect(screen.getByText("Set up the server client")).toBeTruthy();
+    expect(screen.getByText("Server code")).toBeTruthy();
+    expect(screen.getByText("Kamino · Instant liquidity · 6.2% APY")).toBeTruthy();
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
 
     // All four concerns stay visible as navigation, while only the active code
@@ -133,8 +137,10 @@ describe("EarnIntegrationGuide", () => {
     const snippets: string[] = [];
     for (const navigationName of navigationNames) {
       await user.click(within(serverFlow).getByRole("button", { name: navigationName }));
-      expect(screen.getAllByRole("figure")).toHaveLength(1);
-      snippets.push(screen.getByRole("figure").textContent ?? "");
+      // Two code surfaces: the strategy ID and the one active code slice.
+      const figures = screen.getAllByRole("figure");
+      expect(figures).toHaveLength(2);
+      snippets.push(figures[1]?.textContent ?? "");
     }
     const code = snippets.join("\n");
     expect(code).toContain("/v1/earn/external-wallet/deposit-transactions");
@@ -180,6 +186,33 @@ describe("EarnIntegrationGuide", () => {
     // loudly on a cursor that does not advance rather than looping.
     expect(code).toContain("if (!data.hasMore) return positions;");
     expect(code).toContain("cursor did not advance");
+  });
+
+  it("copies the whole server module in one action, not just the active tab", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    renderWithEnglish(
+      <EarnIntegrationGuide
+        apiBaseUrl="http://127.0.0.1:8787"
+        earnHref="/dashboard/markets/embedded-yield"
+        providerAccess={providerAccess}
+        strategyId="earn_strategy_live"
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Copy all code" }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copied = writeText.mock.calls[0]?.[0] as string;
+    expect(copied).toBe(buildEarnServerIntegration(liveStrategy, "http://127.0.0.1:8787"));
+    // Every section rides along even though only the Client tab is rendered.
+    expect(copied).toContain('const SDP_API_URL = "http://127.0.0.1:8787"');
+    expect(copied).toContain("/v1/earn/external-wallet/deposit-transactions");
+    expect(copied).toContain("/v1/earn/external-wallet/earnings?");
+    expect(copied).toContain("/v1/earn/external-wallet/withdrawals");
+    expect(copied).not.toContain("custodyWalletId");
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
   });
 
   it("renders a mainnet vault as a sandbox preview with an explicit warning", async () => {
@@ -293,7 +326,7 @@ describe("EarnIntegrationGuide", () => {
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/sandbox-only/)).toBeTruthy();
-    expect(screen.queryByText("Set up the server client")).toBeNull();
+    expect(screen.queryByText("Server code")).toBeNull();
   });
 
   it("names provider setup as the reason an otherwise live strategy cannot be integrated", () => {

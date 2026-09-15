@@ -100,33 +100,31 @@ export function EmbeddedYieldPortfolioSkeleton() {
 export function EarnIntegrationGuideSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel aria-busy="true">
-      <div className="mx-auto w-full max-w-5xl space-y-5" data-embedded-yield-loading="integrate">
-        <SkeletonBlock className="h-8 w-28 rounded-md" />
-        <div className="max-w-3xl">
-          <SkeletonBlock className="h-3 w-32" />
-          <SkeletonBlock className="mt-3 h-7 w-72 max-w-full" />
-          <SkeletonBlock className="mt-3 h-4 w-[38rem] max-w-full" />
-        </div>
+      <div className="mx-auto w-full max-w-5xl space-y-8" data-embedded-yield-loading="integrate">
+        <SkeletonBlock className="h-8 w-20 rounded-md" />
         <section className="rounded-xl border border-border-default bg-surface-raised p-6">
           <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <SkeletonBlock className="h-5 w-36" />
-              <SkeletonBlock className="mt-2 h-4 w-80 max-w-full" />
-            </div>
+            <SkeletonBlock className="h-5 w-32" />
             <SkeletonBlock className="h-8 w-40 rounded-md" />
           </div>
           <SkeletonBlock className="mt-6 h-12 w-full rounded-xl" />
-          <SkeletonBlock className="mt-4 h-28 w-full rounded-xl" />
+          <SkeletonBlock className="mt-4 h-4 w-[28rem] max-w-full" />
+          <SkeletonBlock className="mt-3 h-4 w-72 max-w-full" />
         </section>
-        <div className="grid grid-cols-4 gap-2">
-          {INTEGRATION_SECTION_SKELETON_IDS.map((id) => (
-            <SkeletonBlock className="h-9 w-full rounded-lg" key={id} />
-          ))}
-        </div>
-        <section>
-          <SkeletonBlock className="h-5 w-40" />
-          <SkeletonBlock className="mt-2 h-4 w-[34rem] max-w-full" />
-          <SkeletonBlock className="mt-6 h-56 w-full rounded-xl" />
+        <section className="space-y-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <SkeletonBlock className="h-6 w-40" />
+              <SkeletonBlock className="mt-2 h-4 w-[34rem] max-w-full" />
+            </div>
+            <SkeletonBlock className="h-9 w-32 rounded-md" />
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {INTEGRATION_SECTION_SKELETON_IDS.map((id) => (
+              <SkeletonBlock className="h-9 w-full rounded-lg" key={id} />
+            ))}
+          </div>
+          <SkeletonBlock className="h-56 w-full rounded-xl" />
         </section>
       </div>
     </DashboardWorkspaceOverviewPanel>
