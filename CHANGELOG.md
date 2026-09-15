@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.77.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.76.0...v0.77.0) (2026-09-15)
+
+### Features
+
+* **earn:** show the issuer-published USDY rate on the Ondo strategy row ([#1844](https://github.com/solana-foundation/solana-developer-platform/pull/1844)) ([790eac0](https://github.com/solana-foundation/solana-developer-platform/commit/790eac0b2ca7e50f8825a716ebb41fd558a04442))
+* **earn:** open API to keyless integrations ([#1807](https://github.com/solana-foundation/solana-developer-platform/pull/1807)) ([0c06caa](https://github.com/solana-foundation/solana-developer-platform/commit/0c06caa2a04661c8a6a044686369310462c29bf8))
+* **earn:** omit ownerAddresses from the positions summary by default (PRO-1908) ([#1840](https://github.com/solana-foundation/solana-developer-platform/pull/1840)) ([b97c9f3](https://github.com/solana-foundation/solana-developer-platform/commit/b97c9f3a2d168f879a058b36f8ebdc79dad911e7))
+* **earn:** simplify the Embedded Yield empty state and integration page ([#1831](https://github.com/solana-foundation/solana-developer-platform/pull/1831)) ([531ae5a](https://github.com/solana-foundation/solana-developer-platform/commit/531ae5a5afe7d23ee9fc55b39923194efc431250))
+* **dvp:** settle window, plain refusals, reclaim, and rebuilt trade skeletons ([#1795](https://github.com/solana-foundation/solana-developer-platform/pull/1795)) ([0536766](https://github.com/solana-foundation/solana-developer-platform/commit/053676642a95744a614a444ed5f1bedf3b469a8b))
+* **payments:** remove MagicBlock private transfers ([#1654](https://github.com/solana-foundation/solana-developer-platform/pull/1654)) ([d6a6472](https://github.com/solana-foundation/solana-developer-platform/commit/d6a6472a789d131a86d0db0472e34747337d786d))
+
+### Bug Fixes
+
+* **earn:** bound external-wallet positions pagination with a safety l… ([#1836](https://github.com/solana-foundation/solana-developer-platform/pull/1836)) ([6bc50e7](https://github.com/solana-foundation/solana-developer-platform/commit/6bc50e75da92100e8c19e815d8551b4da1cae1d1))
+* **earn:** fail closed on over-scale slippage quotes ([#1838](https://github.com/solana-foundation/solana-developer-platform/pull/1838)) ([2aa2d58](https://github.com/solana-foundation/solana-developer-platform/commit/2aa2d58e84b2bfcdffdf7b6d3f65829efd107fb6))
+* **security:** pin react-grab dev script to 0.2.0 with SRI ([#1835](https://github.com/solana-foundation/solana-developer-platform/pull/1835)) ([00cdb7d](https://github.com/solana-foundation/solana-developer-platform/commit/00cdb7dd150538551c61cd984242f5b663b77714))
+* **ci:** announce every SDP deploy start and result, tokens-style ([#1832](https://github.com/solana-foundation/solana-developer-platform/pull/1832)) ([5092742](https://github.com/solana-foundation/solana-developer-platform/commit/5092742fad2ddaa673e53d8596f9e6220c73c7a3))
+* **smoke:** assert the activity card renders rows or its empty state ([#1830](https://github.com/solana-foundation/solana-developer-platform/pull/1830)) ([6814642](https://github.com/solana-foundation/solana-developer-platform/commit/6814642f2903be5341e3a47bb9efa67509450010))
+* **api-keys:** refuse self-service edits to control profiles and policy bindings ([#1826](https://github.com/solana-foundation/solana-developer-platform/pull/1826)) ([197d1b7](https://github.com/solana-foundation/solana-developer-platform/commit/197d1b74a501f930dd3e64fe57361e1b17e05e8b))
+* **issuance:** deploy drafts with distinct authority wallets ([#1829](https://github.com/solana-foundation/solana-developer-platform/pull/1829)) ([93c9b4e](https://github.com/solana-foundation/solana-developer-platform/commit/93c9b4ea5c237c2b5a7343b0f025e7bf258bc0ee))
+* **ci:** report a post-promotion canary failure as its own release status ([#1824](https://github.com/solana-foundation/solana-developer-platform/pull/1824)) ([002ec89](https://github.com/solana-foundation/solana-developer-platform/commit/002ec89eee88b28f3375d05a078f2765ab28c7ab))
+* **smoke:** tolerate reseeded stage fixtures in the read-only smoke ([#1825](https://github.com/solana-foundation/solana-developer-platform/pull/1825)) ([d2b5d7f](https://github.com/solana-foundation/solana-developer-platform/commit/d2b5d7fa50cddfb0a856bb2ff19910ddfd1fcc8e))
+* **custody:** require https on provider API base URLs ([#1806](https://github.com/solana-foundation/solana-developer-platform/pull/1806)) ([c271157](https://github.com/solana-foundation/solana-developer-platform/commit/c27115746fb89ffa34f12a842a40d25c40a4cd7b))
+* **payments:** verify sponsor responses at the port seam and audit sponsored grants on /pay ([#1808](https://github.com/solana-foundation/solana-developer-platform/pull/1808)) ([f38621b](https://github.com/solana-foundation/solana-developer-platform/commit/f38621b4929201aea1d0cc71327f393832691a11))
+* **ci:** notify stage deploy failures even while the prod switch is off ([#1819](https://github.com/solana-foundation/solana-developer-platform/pull/1819)) ([928609e](https://github.com/solana-foundation/solana-developer-platform/commit/928609e8c8ffccaef35820060fdef5cc2ae3dd30))
+* **payments:** withdraw funding instructions once a ramp transfer is terminal ([#1816](https://github.com/solana-foundation/solana-developer-platform/pull/1816)) ([8ce7222](https://github.com/solana-foundation/solana-developer-platform/commit/8ce7222475070836a8f0dcd708ec9c97fabcebf6))
+
+### Refactors
+
+* **markets:** dedupe base58 pattern, quote helpers, validators a… ([#1837](https://github.com/solana-foundation/solana-developer-platform/pull/1837)) ([db4fd3a](https://github.com/solana-foundation/solana-developer-platform/commit/db4fd3a2f814e8d364422f2277579a843b191d69))
+* **payments:** canonical recurring statuses, Kit-native collection proofs, transactional money paths ([#1822](https://github.com/solana-foundation/solana-developer-platform/pull/1822)) ([54e79e8](https://github.com/solana-foundation/solana-developer-platform/commit/54e79e895afc9b10f21b550804f778ee2e40bdf0))
+* **payments:** derive onchain transfer statuses once, use Kit over hand-rolled code, and hoist the transfer test fixtures ([#1820](https://github.com/solana-foundation/solana-developer-platform/pull/1820)) ([aaafe14](https://github.com/solana-foundation/solana-developer-platform/commit/aaafe1456ec37a8d03d0655e62b1bbfecf3bc293))
+
 ## [0.76.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.75.0...v0.76.0) (2026-09-15)
 
 ### Features
