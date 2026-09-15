@@ -1681,12 +1681,29 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           };
         }
 
-        // The built-transaction row lock above already serializes same-build
-        // racers (a loser resolved its replay there), so no second replay
-        // check is needed here; the vault lock is for the admission hook, and
-        // is taken AFTER the row lock on purpose: the custody path takes the
-        // vault lock first and never the row lock, so the order cannot cycle.
+        // The built-transaction row lock above serializes same-BUILD racers;
+        // a same-KEY racer for a DIFFERENT build holds a different row lock,
+        // so the request key is asked again under the vault lock, exactly as
+        // the custody path does: a twin that committed while this write
+        // waited is answered as its replay, and a divergent one is the
+        // idempotency conflict, never a cap refusal from the hook below. The
+        // vault lock is taken AFTER the row lock on purpose: the custody path
+        // takes the vault lock first and never the row lock, so no cycle.
         await lockVaultDepositWrites(transaction, input);
+        const twin = await findVaultMovementByRequest(
+          transaction,
+          input.organizationId,
+          input.requestId
+        );
+        if (twin) {
+          assertMovementIsOwnReplay(twin, input);
+          return {
+            position: await requireMovementPosition(transaction, twin),
+            movement: twin,
+            replayed: true,
+          };
+        }
+
         await input.admit?.(executor);
 
         const claimed = await claimExternalWalletVaultPosition(transaction, input);

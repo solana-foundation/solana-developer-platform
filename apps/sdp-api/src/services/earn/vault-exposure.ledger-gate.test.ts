@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { asTransactionalClient, getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
+import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import {
+  type CreateSignedExternalWalletDepositIntentInput,
   type CreateSignedVaultDepositIntentInput,
   createPostgresEarnMovementsRepository,
 } from "@/db/repositories/earn-movements.repository";
@@ -63,7 +65,7 @@ describe("vault exposure cap: the ledger write gate", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
-    for (const table of ["earn_movements", "earn_positions"]) {
+    for (const table of ["earn_external_wallet_transactions", "earn_movements", "earn_positions"]) {
       await db
         .prepare(`DELETE FROM ${table} WHERE organization_id IN (?, ?)`)
         .bind(ORG, ORG_OTHER)
@@ -308,6 +310,93 @@ describe("vault exposure cap: the ledger write gate", () => {
     expect(new Set(results.map((result) => result.movement.id)).size).toBe(1);
     expect(await ledgerRows()).toEqual([{ organization_id: ORG, amount_requested: "100" }]);
     // The cap was decided once: the twin never reached the hook.
+    expect(ledgerWriteEvents()).toHaveLength(1);
+  });
+
+  it("external wallet: a same-key request for a DIFFERENT build is the idempotency conflict, not a cap refusal", async () => {
+    // Two builds for the same owner and vault, each of which would fill the
+    // vault, submitted concurrently under ONE idempotency key. Same-build
+    // racers meet at the built-transaction row lock; these hold different
+    // rows, so they meet at the vault lock instead. The loser must hear the
+    // key conflict the ledger has always answered, never VAULT_EXPOSURE_CAP.
+    const OWNER = "GateOwner1111111111111111111111111111111111";
+    const builds = createPostgresEarnExternalWalletTransactionsRepository(getDb(env));
+    const build = async (id: string) =>
+      builds.create({
+        id,
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "kamino",
+        direction: "deposit",
+        ownerAddress: OWNER,
+        vaultAddress: VAULT,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        label: "Gate Vault",
+        denomination: TOKEN_MINT,
+        amountRequested: "100",
+        minSharesOut: null,
+        createsShareAccount: false,
+        unsignedTransaction: `unsigned-${id}`,
+        lastValidBlockHeight: "123456",
+        createdBy: USER,
+        initiatedByKeyId: null,
+      });
+    const [builtA, builtB] = await Promise.all([build("eewt_gate_a"), build("eewt_gate_b")]);
+
+    const submit = (built: typeof builtA): CreateSignedExternalWalletDepositIntentInput => ({
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      provider: "kamino",
+      vaultAddress: VAULT,
+      ownerAddress: OWNER,
+      shareMint: SHARE_MINT,
+      tokenMint: TOKEN_MINT,
+      label: "Gate Vault",
+      requestedAmount: "100",
+      acceptedMinSharesOut: null,
+      signature: `earn-gate-ext-signature-${built.id}`,
+      signedTransaction: `earn-gate-ext-transaction-${built.id}`,
+      lastValidBlockHeight: "123456",
+      requestId: "earn-gate-ext-shared-key",
+      idempotencyFingerprint: `earn-gate-ext-fingerprint-${built.id}`,
+      externalWalletTransactionId: built.id,
+      createsShareAccount: false,
+      shareAtaRentFunder: null,
+      createdBy: USER,
+      initiatedByKeyId: null,
+      admit: ledgerVaultExposureGate(env, {
+        environment: "sandbox",
+        provider: "kamino",
+        vaultAddress: VAULT,
+        amount: "100",
+      }),
+    });
+
+    const meet = rendezvous(2);
+    const overlapping = (input: CreateSignedExternalWalletDepositIntentInput) =>
+      getDb(env).transaction(async (transaction) => {
+        await meet();
+        return createPostgresEarnMovementsRepository(
+          asTransactionalClient(transaction)
+        ).createSignedExternalWalletDepositIntent(input);
+      });
+    const outcomes = await asTenant(ORG, () =>
+      Promise.allSettled([overlapping(submit(builtA)), overlapping(submit(builtB))])
+    );
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    const refused = outcomes.find((outcome) => outcome.status === "rejected") as
+      | PromiseRejectedResult
+      | undefined;
+    expect(refused?.reason).toMatchObject({
+      code: "CONFLICT",
+      message: "Idempotency key already used with different request payload",
+    });
+    expect(await ledgerRows()).toEqual([{ organization_id: ORG, amount_requested: "100" }]);
+    // The cap was decided once: the conflicting twin never reached the hook.
     expect(ledgerWriteEvents()).toHaveLength(1);
   });
 
