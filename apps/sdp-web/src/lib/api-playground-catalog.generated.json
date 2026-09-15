@@ -1672,16 +1672,6 @@
               },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            },
-            "privateTransfer": {
-              "provider": "magicblock",
-              "magicBlock": {
-                "kind": "transfer",
-                "version": "v0",
-                "instructionCount": 4,
-                "requiredSigners": ["So11111111111111111111111111111111111111112"],
-                "validator": "So11111111111111111111111111111111111111112"
-              }
             }
           },
           "meta": {
@@ -2043,16 +2033,6 @@
               },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            },
-            "privateTransfer": {
-              "provider": "magicblock",
-              "magicBlock": {
-                "kind": "transfer",
-                "version": "v0",
-                "instructionCount": 4,
-                "requiredSigners": ["So11111111111111111111111111111111111111112"],
-                "validator": "So11111111111111111111111111111111111111112"
-              }
             }
           },
           "meta": {

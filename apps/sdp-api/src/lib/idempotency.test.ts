@@ -137,46 +137,6 @@ describe("buildPaymentTransferFingerprint", () => {
       buildPaymentTransferFingerprint({ ...base, amount: "2" })
     );
   });
-
-  it("differs when private transfer options differ", () => {
-    const base = {
-      custodyWalletId: "cwlt_source_1",
-      sourceAddress: "Src",
-      destinationAddress: "Dst",
-      token: "SOL",
-      amount: "1",
-      memo: null,
-      type: "transfer_confidential",
-    };
-    expect(
-      buildPaymentTransferFingerprint({ ...base, privateTransfer: { magicBlock: { split: 2 } } })
-    ).not.toBe(
-      buildPaymentTransferFingerprint({ ...base, privateTransfer: { magicBlock: { split: 3 } } })
-    );
-  });
-
-  it("is stable for identical private transfer options regardless of key order", () => {
-    const base = {
-      custodyWalletId: "cwlt_source_1",
-      sourceAddress: "Src",
-      destinationAddress: "Dst",
-      token: "SOL",
-      amount: "1",
-      memo: null,
-      type: "transfer_confidential",
-    };
-    expect(
-      buildPaymentTransferFingerprint({
-        ...base,
-        privateTransfer: { magicBlock: { split: 2, gasless: true } },
-      })
-    ).toBe(
-      buildPaymentTransferFingerprint({
-        ...base,
-        privateTransfer: { magicBlock: { gasless: true, split: 2 } },
-      })
-    );
-  });
 });
 
 describe("buildTransferBatchFingerprint", () => {
