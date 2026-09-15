@@ -3,6 +3,7 @@ import {
   BVNK_NETWORKS,
   type BvnkOnrampRequestSpec,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { HERCLE_VERIFICATION_STATUSES } from "@sdp/payments/ramps/providers/hercle/provider-data";
 import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
@@ -69,6 +70,17 @@ export const bvnkCustomerProviderAccountMetadataSchema = z.object({
 export type BvnkCustomerProviderAccountMetadata = z.infer<
   typeof bvnkCustomerProviderAccountMetadataSchema
 >;
+
+/**
+ * Hercle `customer_link` metadata. The reference is the counterparty id the sub-account was
+ * registered under; the verification lifecycle is normalised at write time. The hosted verification
+ * link is minted per read and never stored, and nothing about the business itself lands here.
+ */
+export const hercleCustomerLinkMetadataSchema = z.object({
+  externalReference: z.string().min(1),
+  verificationStatus: z.enum(HERCLE_VERIFICATION_STATUSES).optional(),
+});
+export type HercleCustomerLinkMetadata = z.infer<typeof hercleCustomerLinkMetadataSchema>;
 
 export interface UpsertCounterpartyProviderAccountInput {
   organizationId: string;
