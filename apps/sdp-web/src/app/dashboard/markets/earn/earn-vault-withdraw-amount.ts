@@ -1,9 +1,8 @@
 import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import type { EarnVaultPosition } from "@sdp/types";
-import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
+import { compareUnsignedDecimals, MAX_AMOUNT_LENGTH, parseUnsignedDecimal } from "./earn-decimal";
 
 export const VAULT_WITHDRAWAL_AMOUNT_DECIMALS = 6;
-const MAX_AMOUNT_LENGTH = 128;
 const MAX_SOLANA_MINT_DECIMALS = 9;
 
 export type VaultWithdrawalAmountValidation =

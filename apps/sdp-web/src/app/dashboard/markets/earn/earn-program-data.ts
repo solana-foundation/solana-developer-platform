@@ -664,29 +664,36 @@ const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
   }),
 });
 
+/**
+ * The API's 202 approval hold, identical for deposits and withdrawals: the
+ * custody wallet still owes the transaction a signature. One schema for both
+ * outcome unions so the pending arm cannot drift between the two mirrors.
+ */
+const signingPendingOutcomeSchema = z
+  .object({
+    error: z.object({
+      code: z.literal("SIGNING_PENDING"),
+      message: z.string(),
+      details: z
+        .object({
+          approvalRequestId: z.string().optional(),
+          walletOperationId: z.string().optional(),
+        })
+        .optional(),
+    }),
+  })
+  .transform(({ error }) => ({
+    kind: "approval_pending" as const,
+    message: error.message,
+    approvalRequestId: error.details?.approvalRequestId,
+    walletOperationId: error.details?.walletOperationId,
+  }));
+
 const earnVaultDepositOutcomeSchema = z.union([
   z
     .object({ data: earnVaultDepositSchema })
     .transform(({ data }) => ({ kind: "submitted" as const, deposit: data })),
-  z
-    .object({
-      error: z.object({
-        code: z.literal("SIGNING_PENDING"),
-        message: z.string(),
-        details: z
-          .object({
-            approvalRequestId: z.string().optional(),
-            walletOperationId: z.string().optional(),
-          })
-          .optional(),
-      }),
-    })
-    .transform(({ error }) => ({
-      kind: "approval_pending" as const,
-      message: error.message,
-      approvalRequestId: error.details?.approvalRequestId,
-      walletOperationId: error.details?.walletOperationId,
-    })),
+  signingPendingOutcomeSchema,
 ]);
 
 export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
@@ -1204,25 +1211,7 @@ const earnVaultWithdrawalOutcomeSchema = z.union([
   z
     .object({ data: z.object({ withdrawal: earnVaultWithdrawalSchema }) })
     .transform(({ data }) => ({ kind: "submitted" as const, withdrawal: data.withdrawal })),
-  z
-    .object({
-      error: z.object({
-        code: z.literal("SIGNING_PENDING"),
-        message: z.string(),
-        details: z
-          .object({
-            approvalRequestId: z.string().optional(),
-            walletOperationId: z.string().optional(),
-          })
-          .optional(),
-      }),
-    })
-    .transform(({ error }) => ({
-      kind: "approval_pending" as const,
-      message: error.message,
-      approvalRequestId: error.details?.approvalRequestId,
-      walletOperationId: error.details?.walletOperationId,
-    })),
+  signingPendingOutcomeSchema,
 ]);
 
 export type EarnVaultWithdrawalOutcome = z.infer<typeof earnVaultWithdrawalOutcomeSchema>;

@@ -1068,6 +1068,10 @@ describe("slippage tolerance helpers", () => {
     // would silently over-count it — so there is no honest floor either.
     expect(floorForTolerance("1.234", 2, 10)).toBeNull();
     expect(floorForTolerance("0.0000001", 6, 10)).toBeNull();
+    // A trailing-zero-PADDED quote is not finer precision: providers do not
+    // canonicalize, so the padding is stripped and the floor still derives.
+    expect(floorForTolerance("1.200", 2, 10)).toBe("1.19");
+    expect(floorForTolerance("0.100000", 6, 10)).toBe("0.0999");
   });
 
   it("answers fail-closed for an over-scale quote, and keeps valid zero reads exact", () => {
@@ -1083,6 +1087,10 @@ describe("slippage tolerance helpers", () => {
     expect(isZeroQuote("0.00", 2)).toBe(true);
     expect(isZeroQuote("0.01", 2)).toBe(false);
     expect(isZeroQuote("0.000000", 6)).toBe(true);
+    // Padding is not precision: a padded zero read stays provably zero, and a
+    // genuinely finer value stays refused even when it ends in a zero.
+    expect(isZeroQuote("0.0000", 2)).toBe(true);
+    expect(floorForTolerance("1.2340", 2, 10)).toBeNull();
   });
 
   it("recognizes the API's slippage refusal envelope and nothing else", () => {

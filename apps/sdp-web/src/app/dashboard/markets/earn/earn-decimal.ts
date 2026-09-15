@@ -1,5 +1,12 @@
 import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 
+/**
+ * Longest free-text money input any vault surface accepts before parsing. One
+ * cap shared by the deposit and withdrawal validators so neither drifts past
+ * the other's idea of what a typed amount can be.
+ */
+export const MAX_AMOUNT_LENGTH = 128;
+
 export interface ParsedUnsignedDecimal {
   /** Leading-zero and trailing-fraction-zero normalized representation. */
   canonical: string;
