@@ -77,7 +77,7 @@ function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeeP
   };
   return {
     providerId: provider.providerId,
-    getFeePayer: () => provider.getFeePayer(),
+    getFeePayer: () => sponsor(),
     signAsFeePayer: async (transaction) => (await signVerified(transaction)).signedTransaction,
     signAndSend: (transaction) => provider.signAndSend(transaction),
     ...(getSponsorshipConfiguration
