@@ -1,9 +1,19 @@
 import type { WalletApprovalRequestSummary } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { ApprovalInbox } from "./approval-inbox";
+
+const urlTab = vi.hoisted(() => ({ value: null as string | null }));
+vi.mock("@/lib/dashboard-url-state", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/dashboard-url-state")>()),
+  useDashboardTab: () => urlTab.value,
+}));
+
+afterEach(() => {
+  urlTab.value = null;
+});
 
 function renderInbox(overrides: Partial<Parameters<typeof ApprovalInbox>[0]> = {}): string {
   return renderToStaticMarkup(
@@ -125,5 +135,40 @@ describe("ApprovalInbox amount/asset column", () => {
     });
     expect(markup).toContain(`3.00 ${ISSUED_MINT.slice(0, 6)}…${ISSUED_MINT.slice(-4)}`);
     expect(markup).not.toContain(`>${ISSUED_MINT}`);
+  });
+});
+
+describe("ApprovalInbox history status", () => {
+  function approvedRequest(
+    id: string,
+    operation: Partial<WalletApprovalRequestSummary["operation"]>
+  ): WalletApprovalRequestSummary {
+    const base = pendingRequest(operation);
+    return {
+      ...base,
+      id,
+      status: "approved",
+      resolvedAt: "2026-08-14T01:00:00.000Z",
+      operation: { ...base.operation, id: `wop_${id}` },
+    };
+  }
+
+  // An approval whose execution failed did not do what was approved, so its
+  // row must not wear the same green badge as one that ran.
+  it("badges an approved request whose execution failed apart from one that executed", () => {
+    urlTab.value = "history";
+    const markup = renderInbox({
+      initialRequests: [
+        approvedRequest("ran", { status: "completed" }),
+        approvedRequest("broke", {
+          status: "failed",
+          executionError: "Provider quote/session reference has expired; create a new quote.",
+        }),
+      ],
+    });
+
+    // Each request renders once in the mobile list and once in the table.
+    expect(markup.match(/>Execution failed</g)).toHaveLength(2);
+    expect(markup.match(/>Approved</g)).toHaveLength(2);
   });
 });
