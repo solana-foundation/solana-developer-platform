@@ -490,7 +490,9 @@ function IntegrationReference({
         <Button
           iconLeft={copied ? <CheckIcon /> : <CopyIcon />}
           onClick={() => void copy(serverModule)}
+          size="sm"
           type="button"
+          variant="ghost"
         >
           {t(
             copied ? "Shared.SharedComponents.copied" : "DashboardMarkets.earnProgram.copyAllCode"
