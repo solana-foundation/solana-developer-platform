@@ -291,15 +291,16 @@ export default async function WalletDetailPage({
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
+                {/* Restriction first: it is the one status a reader must not miss. */}
+                {wallet.isRuntimeExecutionAllowed ? null : (
+                  <Badge variant="warning">{t("DashboardCustody.restricted")}</Badge>
+                )}
                 {category ? <WalletCategoryBadge category={category} compact /> : null}
                 {purposeLabel ? (
                   <span className="rounded-full bg-fill px-3 py-1.5 text-xs font-medium text-primary">
                     {purposeLabel}
                   </span>
                 ) : null}
-                {wallet.isRuntimeExecutionAllowed ? null : (
-                  <Badge variant="warning">{t("DashboardCustody.restricted")}</Badge>
-                )}
               </div>
             </div>
 
