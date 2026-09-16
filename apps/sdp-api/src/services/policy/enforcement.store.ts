@@ -40,6 +40,8 @@ const VELOCITY_SUM_CONCURRENCY = 8;
  * Run `task` over every item with at most `limit` promises in flight, keeping
  * result order. A plain `Promise.all` would open every aggregate at once and
  * pool-slam the database; the worker count, not the item count, bounds it.
+ * Once a task rejects, the workers stop taking new items: their results could
+ * not be used after the failure anyway, so the remaining keys are not queried.
  *
  * @param items - The items to map over.
  * @param limit - The maximum concurrent tasks.
@@ -53,12 +55,18 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
+  let failed = false;
   await Promise.all(
     Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (next < items.length) {
+      while (!failed && next < items.length) {
         const index = next;
         next += 1;
-        results[index] = await task(items[index]);
+        try {
+          results[index] = await task(items[index]);
+        } catch (error) {
+          failed = true;
+          throw error;
+        }
       }
     })
   );
