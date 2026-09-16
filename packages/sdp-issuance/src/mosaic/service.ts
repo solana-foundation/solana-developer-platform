@@ -110,8 +110,6 @@ type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 export type MosaicIssuanceEnv = RpcEnv & {
   /** When "true", confirmations use processed commitment with a fixed timeout. */
   KORA_SURFPOOL_SHIM?: string;
-  /** Consumed by the legacy Token2022Service fallback (createCustomToken). */
-  SOLANA_MOCK?: string;
 };
 
 /**
@@ -1174,33 +1172,6 @@ export class MosaicService {
     });
 
     return this.signAndSubmit(transactionMessage);
-  }
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // Custom Token Fallback (uses legacy Token2022Service)
-  // ═════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Create a custom token with manual extension configuration.
-   * Falls back to Token2022Service for full control.
-   */
-  async createCustomToken(options: CreateTokenOptions): Promise<MosaicTransactionResult> {
-    const { Token2022Service } = await import("@sdp/solana/token-2022");
-    const legacyService = new Token2022Service(this.env, this.signer, this.feePayment);
-
-    const result = await legacyService.createMint({
-      metadata: options.metadata,
-      decimals: options.decimals,
-      mintAuthority: options.mintAuthority,
-      freezeAuthority: options.freezeAuthority,
-      extensions: options.extensions,
-    });
-
-    return {
-      signature: result.signature,
-      slot: result.slot,
-      mint: result.mint,
-    };
   }
 
   // ═════════════════════════════════════════════════════════════════════════

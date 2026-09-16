@@ -2,7 +2,7 @@ import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
-  createToken2022Service,
+  createMosaicService,
   env,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
@@ -14,7 +14,7 @@ import {
 
 const { createOrgSigner } = apiTestSupport;
 
-describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token2022Service Direct", () => {
+describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom mint", () => {
   let apiKeyHash: string;
 
   beforeAll(async () => {
@@ -32,14 +32,16 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Token2022Service 
 
   it("creates mint using service directly", { timeout: 60000 }, async () => {
     const signer = await createOrgSigner(env as ApiTestEnv, TEST_ORG.id, TEST_PROJECT.id);
-    const token2022 = createToken2022Service(env as ApiTestEnv, signer, {
+    const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
       environment: TEST_PROJECT.environment,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
       actor: { type: "project", id: TEST_PROJECT.id },
     });
 
-    const result = await token2022.createMint({
+    const result = await mosaic.createToken({
+      template: "custom",
+      feePayer: signer,
       metadata: {
         name: "Token2022 Direct",
         symbol: "T2022",

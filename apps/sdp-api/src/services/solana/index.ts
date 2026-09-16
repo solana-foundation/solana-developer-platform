@@ -8,12 +8,6 @@
 export {
   type BurnOptions,
   type BurnResult,
-  type CreateMintOptions,
-  type CreateMintResult,
-  type FreezeOptions,
-  type FreezeResult,
-  type MintToOptions,
-  type MintToResult,
   type PreparedTransaction,
   Token2022Service,
 } from "@sdp/solana/token-2022";

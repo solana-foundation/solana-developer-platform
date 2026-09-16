@@ -183,8 +183,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     }
   );
 
-  it("deploys custom template with legacy Token2022Service", { timeout: 180000 }, async () => {
-    // Create token with custom template (uses legacy Token2022Service)
+  it("deploys custom template with MosaicService", { timeout: 180000 }, async () => {
+    // Create token with the custom Mosaic template
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",
       headers: {

@@ -25,11 +25,12 @@
  */
 
 import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
+import { address } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
-  createToken2022Service,
+  createMosaicService,
   env,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
@@ -115,7 +116,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
     async (side) => {
       const api = requestWithApiKey();
       const signer = await createOrgSigner(env as ApiTestEnv, TEST_ORG.id, TEST_PROJECT.id);
-      const token2022 = createToken2022Service(env as ApiTestEnv, signer, {
+      const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
         environment: TEST_PROJECT.environment,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
@@ -130,13 +131,17 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
       // Two distinct mints: legs sharing one would settle without ever proving
       // the sides cross.
       const [asset, cash] = await Promise.all([
-        token2022.createMint({
+        mosaic.createToken({
+          template: "custom",
+          feePayer: signer,
           metadata: { name: "Settlement Asset", symbol: "SETA", uri: "" },
           decimals: DECIMALS,
           mintAuthority: signer,
           freezeAuthority: null,
         }),
-        token2022.createMint({
+        mosaic.createToken({
+          template: "custom",
+          feePayer: signer,
           metadata: { name: "Settlement Cash", symbol: "SETC", uri: "" },
           decimals: DECIMALS,
           mintAuthority: signer,
@@ -144,14 +149,17 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
         }),
       ]);
 
+      if (!asset.mint || !cash.mint) throw new Error("Settlement fixture mints were not created");
+
       // SDP has to hold whichever leg it delivers, and the counterparty the
       // other. Both are minted to the same custody wallet here: what is under
       // test is the settlement path, not who controls the counterparty key.
-      await token2022.mintTo({
+      await mosaic.mintTo({
         mint: side === "a" ? asset.mint : cash.mint,
-        destination: wallet.publicKey as never,
+        destination: address(wallet.publicKey),
         amount: side === "a" ? ASSET_UNITS : CASH_UNITS,
-        mintAuthority: signer,
+        mintAuthority: signer.address,
+        feePayer: signer.address,
       });
 
       // SDP is a party slot, the counterparty a bare external address. Kora
