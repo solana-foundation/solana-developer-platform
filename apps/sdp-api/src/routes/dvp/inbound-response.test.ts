@@ -160,6 +160,7 @@ describe("toDvpInboundResponse", () => {
       blockTime: "1789000000",
       feePayer: address(USER_B),
       finalized: true,
+      sequence: "1",
     };
 
     const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES, {
@@ -213,6 +214,7 @@ describe("toDvpInboundResponse", () => {
       blockTime: "1789000000",
       feePayer: address(USER_A),
       finalized: true,
+      sequence: "1",
     };
     const reclaim = { ...deposit, direction: "out" as const, amount: "60000000", slot: "421" };
     const shortLeg = { ...entry, trade: { ...entry.trade, escrowAAmount: "40000000" } };

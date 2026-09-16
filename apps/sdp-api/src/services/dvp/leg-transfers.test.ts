@@ -262,6 +262,9 @@ describe("syncDvpLegTransfers", () => {
     record: async (transfer) => {
       const existing = rows.get(transfer.signature);
       rows.set(transfer.signature, {
+        // The ledger assigns the place in the leg's history; here it is the
+        // order the walk recorded them in, which is what the real INSERT does.
+        sequence: String(rows.size + 1),
         ...(existing ?? transfer),
         finalized: (existing?.finalized ?? false) || transfer.finalized,
       });
@@ -303,7 +306,14 @@ describe("syncDvpLegTransfers", () => {
     return answer === null ? { kind: "not_served" } : { kind: "read", transaction: answer };
   });
   const knowsSignatures = vi.fn<DvpEscrowHistoryReader["knowsSignatures"]>();
-  const reader: DvpEscrowHistoryReader = { listSignatures, readTransaction, knowsSignatures };
+  // The node holds the whole of this trade's history unless a test says otherwise.
+  const oldestKnownSlot = vi.fn<DvpEscrowHistoryReader["oldestKnownSlot"]>(async () => 0n);
+  const reader: DvpEscrowHistoryReader = {
+    listSignatures,
+    readTransaction,
+    knowsSignatures,
+    oldestKnownSlot,
+  };
 
   /** History entries, newest first, as the RPC lists them; finalized unless said otherwise. */
   function history(
@@ -322,6 +332,7 @@ describe("syncDvpLegTransfers", () => {
 
   function recordedRow(n: number, finalized: boolean): DvpLegTransfer {
     return {
+      sequence: String(n),
       tradeId: LEG.tradeId,
       side: LEG.side,
       signature: sig(n),
@@ -578,6 +589,22 @@ describe("syncDvpLegTransfers", () => {
     // definitive "not found" deletes, and a failed lookup deletes nothing.
     it.each([
       ["the cluster still knows it", () => knowsSignatures.mockResolvedValueOnce([true])],
+      [
+        // Below the node's own history "not found" is the node's gap, and a
+        // deletion there would drop a transfer nothing later brings back.
+        "the node's history starts after it",
+        () => {
+          knowsSignatures.mockResolvedValueOnce([false]);
+          oldestKnownSlot.mockResolvedValueOnce(1_000_000n);
+        },
+      ],
+      [
+        "how far back the node goes cannot be read",
+        () => {
+          knowsSignatures.mockResolvedValueOnce([false]);
+          oldestKnownSlot.mockRejectedValueOnce(new Error("getFirstAvailableBlock failed"));
+        },
+      ],
       [
         "the lookup fails",
         () => knowsSignatures.mockRejectedValueOnce(new Error("getSignatureStatuses short")),

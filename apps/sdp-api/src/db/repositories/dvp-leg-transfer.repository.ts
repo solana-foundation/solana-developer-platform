@@ -24,11 +24,23 @@ export interface DvpLegTransfer {
   blockTime: string | null;
   feePayer: Address;
   /**
+   * Where this transfer sits in the escrow's history, counted per leg. Assigned
+   * as the reconciler walks that history oldest first, so transfers in one slot
+   * keep the order the cluster listed them in.
+   */
+  sequence: string;
+  /**
    * False while the transaction is confirmed but not finalized. A provisional
    * row is deleted if the cluster drops its transaction.
    */
   finalized: boolean;
 }
+
+/**
+ * A transfer as the reader hands it over. Its place in the leg's history is the
+ * ledger's to assign, from the order the walk reaches it in.
+ */
+export type NewDvpLegTransfer = Omit<DvpLegTransfer, "sequence">;
 
 /** Where a leg's history read stopped, and when it last ran. */
 export interface DvpLegTransferScan {
@@ -61,6 +73,8 @@ const transferRowSchema = z.object({
   block_time: z.string().regex(/^\d+$/).nullable(),
   fee_payer: z.string(),
   finalized: z.boolean(),
+  // BIGINT, carried as text like every other u64-shaped value here.
+  sequence: z.union([z.string().regex(/^\d+$/), z.bigint().transform(String)]),
 });
 
 const scanRowSchema = z.object({
@@ -82,6 +96,7 @@ function toTransfer(row: Record<string, unknown>): DvpLegTransfer {
     blockTime: parsed.block_time,
     feePayer: address(parsed.fee_payer),
     finalized: parsed.finalized,
+    sequence: parsed.sequence,
   };
 }
 
@@ -102,7 +117,7 @@ function toScan(row: Record<string, unknown>): DvpLegTransferScan {
 }
 
 const TRANSFER_COLUMNS =
-  "trade_id, side, signature, direction, amount, slot, block_time, fee_payer, finalized";
+  "trade_id, side, signature, direction, amount, slot, block_time, fee_payer, finalized, sequence";
 
 export interface DvpLegTransferRepository {
   /**
@@ -110,7 +125,7 @@ export interface DvpLegTransferRepository {
    * signature) keeps its reading, which came off the same transaction, and
    * only ever moves from provisional to finalized.
    */
-  record(transfer: DvpLegTransfer): Promise<void>;
+  record(transfer: NewDvpLegTransfer): Promise<void>;
   /** Marks a recorded transfer finalized. Never the other way. */
   markFinalized(tradeId: string, side: "a" | "b", signature: Signature): Promise<void>;
   /**
@@ -143,8 +158,13 @@ export function createPostgresDvpLegTransferRepository(
     async record(transfer) {
       await db
         .prepare(
+          // The order comes from the walk itself: one past this leg's highest so
+          // far, which is the position the cluster's own listing gave it.
           `INSERT INTO dvp_leg_transfers (${TRANSFER_COLUMNS})
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  COALESCE((SELECT MAX(existing.sequence)
+                              FROM dvp_leg_transfers existing
+                             WHERE existing.trade_id = ? AND existing.side = ?), 0) + 1
            ON CONFLICT (trade_id, side, signature)
            DO UPDATE SET finalized = dvp_leg_transfers.finalized OR EXCLUDED.finalized`
         )
@@ -157,7 +177,9 @@ export function createPostgresDvpLegTransferRepository(
           transfer.slot,
           transfer.blockTime,
           transfer.feePayer,
-          transfer.finalized
+          transfer.finalized,
+          transfer.tradeId,
+          transfer.side
         )
         .run();
     },
@@ -188,7 +210,7 @@ export function createPostgresDvpLegTransferRepository(
           `SELECT ${TRANSFER_COLUMNS}
              FROM dvp_leg_transfers
             WHERE trade_id = ? AND side = ?
-            ORDER BY slot::numeric ASC, signature ASC`
+            ORDER BY sequence ASC`
         )
         .bind(tradeId, side)
         .all<Record<string, unknown>>();
@@ -208,7 +230,7 @@ export function createPostgresDvpLegTransferRepository(
           `SELECT ${TRANSFER_COLUMNS}
              FROM dvp_leg_transfers
             WHERE trade_id IN (${placeholders})
-            ORDER BY slot::numeric ASC, signature ASC`
+            ORDER BY sequence ASC`
         )
         .bind(...tradeIds)
         .all<Record<string, unknown>>();

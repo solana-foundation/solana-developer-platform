@@ -39,6 +39,7 @@ import type {
   DvpLegTransfer,
   DvpLegTransferRepository,
   DvpLegTransferScan,
+  NewDvpLegTransfer,
 } from "@/db/repositories/dvp-leg-transfer.repository";
 import { getLogger } from "@/runtime/logger";
 import { CREATE_TIME_SKEW_SECONDS } from "@/services/dvp/closing-transaction";
@@ -77,6 +78,11 @@ export interface DvpEscrowHistoryReader {
   readTransaction(signature: Signature): Promise<DvpLegTransactionRead>;
   /** Whether the cluster still knows each signature, in the order asked. */
   knowsSignatures(signatures: readonly Signature[]): Promise<boolean[]>;
+  /**
+   * The oldest slot this node still holds. Below it the node knows nothing, so
+   * "not found" there is the node's gap, not a transaction that went away.
+   */
+  oldestKnownSlot(): Promise<bigint>;
 }
 
 const transactionErrorSchema = z.union([z.null(), z.string(), z.record(z.string(), z.unknown())]);
@@ -151,6 +157,10 @@ export function createDvpEscrowHistoryReader(rpc: SolanaRpc): DvpEscrowHistoryRe
       }
       return statuses.map((status) => status !== null);
     },
+
+    async oldestKnownSlot() {
+      return await withTransientRpcRetry(() => rpc.getFirstAvailableBlock().send());
+    },
   };
 }
 
@@ -221,7 +231,7 @@ export function parseDvpLegTransaction(response: unknown): DvpLegTransactionRead
 }
 
 export type DvpLegTransferReading =
-  | { kind: "transfer"; transfer: DvpLegTransfer }
+  | { kind: "transfer"; transfer: NewDvpLegTransfer }
   /** The transaction loaded the escrow and moved none of its tokens. */
   | { kind: "none" }
   /** The balances could not be read with confidence; `reason` says why. */
@@ -423,8 +433,12 @@ async function resolveEntry(
  *
  * A provisional row always sits past the read position, so a complete listing
  * that lacks it has either lost it or come from a node that has not caught up.
- * The status lookup tells the two apart; only a definitive "not found" deletes,
- * and a failed lookup deletes nothing.
+ * The status lookup tells the two apart, and only a definitive "not found"
+ * deletes: a failed lookup deletes nothing, and neither does a row older than
+ * the node's own history, where "not found" only means the node cannot see
+ * that far back. Deleting on that answer would drop a transfer that happened,
+ * and nothing later would bring it back, because the read position has moved
+ * past it.
  *
  * @returns How many provisional rows are still unaccounted for.
  */
@@ -452,10 +466,38 @@ async function removeDroppedTransfers(
     );
     return unlisted.length;
   }
+  let oldestKnownSlot: bigint;
+  try {
+    oldestKnownSlot = await reader.oldestKnownSlot();
+  } catch (error) {
+    getLogger().error(
+      { error, tradeId: leg.tradeId, side: leg.side },
+      "dvp transfers: could not read how far back the node's history goes; nothing removed"
+    );
+    return unlisted.length;
+  }
+
   let remaining = unlisted.length - asked.length;
   for (const [index, dropped] of asked.entries()) {
     if (knows[index] === true) {
       remaining += 1;
+      continue;
+    }
+    const row = known.get(dropped);
+    if (row !== undefined && BigInt(row.slot) < oldestKnownSlot) {
+      // The node's history starts after this transfer. Its silence says nothing.
+      remaining += 1;
+      getLogger().warn(
+        {
+          event: "sdp_dvp_leg_transfer_unprovable",
+          tradeId: leg.tradeId,
+          side: leg.side,
+          signature: dropped,
+          slot: row.slot,
+          oldestKnownSlot: oldestKnownSlot.toString(),
+        },
+        "dvp transfers: kept a provisional transfer the node cannot answer for"
+      );
       continue;
     }
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each delete is guarded on its own signature and provisional state; bounded by the status limit.

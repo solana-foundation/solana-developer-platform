@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS dvp_leg_transfers (
     -- Unix seconds, or NULL when the cluster did not record a time for the block.
     block_time TEXT CHECK (block_time IS NULL OR block_time ~ '^[0-9]+$'),
     fee_payer TEXT NOT NULL,
+    -- Where this transfer sits in the escrow's own history, counted per leg as
+    -- the reconciler walks it oldest first. A slot can hold several of them and
+    -- carries no order of its own, so ordering by slot alone can read a deposit
+    -- and the reclaim that emptied it in the wrong order.
+    sequence BIGINT NOT NULL,
     -- False while the transaction is confirmed but not yet finalized. Only a
     -- provisional row can be deleted, and only when the chain no longer knows
     -- its transaction.
@@ -40,6 +45,9 @@ CREATE TABLE IF NOT EXISTS dvp_leg_transfers (
     -- One row per transaction per leg, so re-reading history never duplicates.
     PRIMARY KEY (trade_id, side, signature)
 );
+
+CREATE INDEX IF NOT EXISTS dvp_leg_transfers_leg_sequence_idx
+  ON dvp_leg_transfers (trade_id, side, sequence);
 
 -- How far each leg's history has been read: the newest finalized signature
 -- every older one was resolved behind. The next read stops there, so a

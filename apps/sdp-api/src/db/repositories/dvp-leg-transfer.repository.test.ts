@@ -16,8 +16,8 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   createPostgresDvpLegTransferRepository,
-  type DvpLegTransfer,
   type DvpLegTransferRepository,
+  type NewDvpLegTransfer,
 } from "./dvp-leg-transfer.repository";
 
 const CREATOR_ORG = "org_ledger_creator";
@@ -37,7 +37,7 @@ function sig(n: number): Signature {
   return signature(getBase58Decoder().decode(bytes));
 }
 
-function transfer(overrides: Partial<DvpLegTransfer> = {}): DvpLegTransfer {
+function transfer(overrides: Partial<NewDvpLegTransfer> = {}): NewDvpLegTransfer {
   return {
     tradeId: TRADE_ID,
     side: "a",
@@ -263,9 +263,11 @@ describe("DvpLegTransferRepository", () => {
   });
 
   describe("provisional transfers", () => {
-    it("lists one leg oldest first with each row's finality", async () => {
-      await repo.record(transfer({ signature: sig(2), slot: "500", finalized: false }));
+    // The reconciler walks an escrow's history oldest first, so the order rows
+    // are recorded in IS the chain's order.
+    it("lists one leg in the order its history was walked, with each row's finality", async () => {
       await repo.record(transfer({ signature: sig(1), slot: "400" }));
+      await repo.record(transfer({ signature: sig(2), slot: "500", finalized: false }));
       await repo.record(transfer({ side: "b", signature: sig(3) }));
 
       const listed = await repo.listForLeg(TRADE_ID, "a");
@@ -273,6 +275,21 @@ describe("DvpLegTransferRepository", () => {
       expect(listed.map((row) => [row.signature, row.finalized])).toEqual([
         [sig(1), true],
         [sig(2), false],
+      ]);
+    });
+
+    // A slot can hold both a deposit and the reclaim that emptied it, and it
+    // carries no order of its own. Ordering by slot alone would let the leg
+    // read as funded when the escrow is empty, or the reverse.
+    it("keeps two transfers in one slot in the order they were walked", async () => {
+      await repo.record(transfer({ signature: sig(4), slot: "700", direction: "in" }));
+      await repo.record(transfer({ signature: sig(5), slot: "700", direction: "out" }));
+
+      const listed = await repo.listForLeg(TRADE_ID, "a");
+
+      expect(listed.map((row) => [row.signature, row.direction])).toEqual([
+        [sig(4), "in"],
+        [sig(5), "out"],
       ]);
     });
 
