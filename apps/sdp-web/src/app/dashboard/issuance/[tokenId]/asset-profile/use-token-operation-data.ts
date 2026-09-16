@@ -3,6 +3,7 @@ import type { PaymentsDashboardWallet, Token } from "@sdp/types";
 import { useSWRConfig } from "swr";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
+import { issuanceQueryKeys } from "../../issuance-query-key";
 import {
   fetchTokenAuthorityWallets,
   fetchTokenManagementSupportingData,
@@ -104,7 +105,7 @@ export function useTokenOperationData({
     error: authorityWalletsRequestError,
     mutate: mutateAuthorityWallets,
   } = usePersistedDashboardSWR(
-    shouldLoadAuthorityWallets ? ["token-management-authority-wallets", token.id] : null,
+    shouldLoadAuthorityWallets ? issuanceQueryKeys.authorityWallets({ tokenId: token.id }) : null,
     ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId, t),
     {
       refreshInterval: 60_000,
@@ -121,7 +122,7 @@ export function useTokenOperationData({
     error: supportingDataRequestError,
     mutate: mutateSupportingData,
   } = usePersistedDashboardSWR(
-    shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
+    shouldLoadSupportingData ? issuanceQueryKeys.supportingData({ tokenId: token.id }) : null,
     // Skip the allowlist and transactions here — the control list is owned by
     // ControlListEntries (paged/search), transactions by TokenTransactionsBrowser
     // (paged/filtered), and the allowlist count comes from the labels endpoint below.

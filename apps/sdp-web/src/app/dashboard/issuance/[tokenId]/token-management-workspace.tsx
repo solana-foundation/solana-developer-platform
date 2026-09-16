@@ -11,6 +11,7 @@ import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { getTokenAccessControlMode, hasAccessControlList } from "../access-control.utils";
+import { issuanceQueryKeys } from "../issuance-query-key";
 import { TokenActionConfirmationDialog } from "./token-action-confirmation-dialog";
 import { TokenActionForms } from "./token-action-forms";
 import { TokenAuthorityModal } from "./token-authority-modal";
@@ -116,10 +117,11 @@ function getDefaultActionForActiveTab({
 }
 
 function mergeWalletsPreferBalances(
-  primaryWallets: PaymentsDashboardWallet[],
+  primaryWallets: PaymentsDashboardWallet[] | undefined,
   secondaryWallets: PaymentsDashboardWallet[]
 ): PaymentsDashboardWallet[] {
-  if (primaryWallets.length === 0) {
+  // A successful primary inventory owns membership, including an empty list.
+  if (primaryWallets === undefined) {
     return secondaryWallets;
   }
 
@@ -128,7 +130,7 @@ function mergeWalletsPreferBalances(
   }
 
   const secondaryById = new Map(secondaryWallets.map((wallet) => [wallet.id, wallet]));
-  const merged = primaryWallets.map((wallet) => {
+  return primaryWallets.map((wallet) => {
     const richerWallet = secondaryById.get(wallet.id);
     if (!richerWallet) {
       return wallet;
@@ -138,15 +140,6 @@ function mergeWalletsPreferBalances(
       ? { ...wallet, balances: richerWallet.balances }
       : wallet;
   });
-
-  const primaryIds = new Set(primaryWallets.map((wallet) => wallet.id));
-  for (const wallet of secondaryWallets) {
-    if (!primaryIds.has(wallet.id)) {
-      merged.push(wallet);
-    }
-  }
-
-  return merged;
 }
 
 function LoadingSection({ message }: { message: string }) {
@@ -191,15 +184,6 @@ export function TokenManagementWorkspace({
   const { dashboardAccess } = useDashboardWorkspace();
   const searchParams = useSearchParams();
   const { pushSearchParams, replaceSearchParams } = useDashboardUrlState();
-  const {
-    isPending,
-    actionConfirmation,
-    runAction: runActionBase,
-    runActionImmediately: runActionImmediatelyBase,
-    dismissActionConfirmation,
-    confirmAction,
-    selectConfirmationWallet,
-  } = useTokenActionRunner();
   const [activeAction, setActiveAction] = useState<AdminAction | null>(null);
   const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
   const [authorityModalCurrentAuthority, setAuthorityModalCurrentAuthority] = useState<
@@ -309,7 +293,7 @@ export function TokenManagementWorkspace({
     error: authorityWalletsRequestError,
     mutate: mutateAuthorityWallets,
   } = usePersistedDashboardSWR(
-    shouldLoadAuthorityWallets ? ["token-management-authority-wallets", token.id] : null,
+    shouldLoadAuthorityWallets ? issuanceQueryKeys.authorityWallets({ tokenId: token.id }) : null,
     ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId, t),
     {
       fallbackData:
@@ -333,7 +317,7 @@ export function TokenManagementWorkspace({
     error: supportingDataRequestError,
     mutate: mutateSupportingData,
   } = usePersistedDashboardSWR(
-    shouldLoadSupportingData ? ["token-management-supporting-data", token.id] : null,
+    shouldLoadSupportingData ? issuanceQueryKeys.supportingData({ tokenId: token.id }) : null,
     ([, tokenId]: readonly [string, string]) => fetchTokenManagementSupportingData(tokenId, t),
     {
       fallbackData: hasInitialSupportingData ? initialSupportingData : undefined,
@@ -393,15 +377,31 @@ export function TokenManagementWorkspace({
         await revalidateSupportingDataAfterSuccess();
       },
     });
-  const authorityWallets = mergeWalletsPreferBalances(
-    authorityWalletsData?.authorityWallets ?? [],
-    resolvedSupportingData.authorityWallets
-  );
+  const primaryWallets =
+    authorityWalletsFetchError || authorityWalletsData?.authorityWalletsError
+      ? undefined
+      : authorityWalletsData?.authorityWallets;
+  const supportingWallets =
+    supportingDataError || supportingData?.authorityWalletsError
+      ? undefined
+      : supportingData?.authorityWallets;
+  const authorityWallets = mergeWalletsPreferBalances(primaryWallets, supportingWallets ?? []);
+  const {
+    isPending,
+    actionConfirmation,
+    runAction: runActionBase,
+    runActionImmediately: runActionImmediatelyBase,
+    dismissActionConfirmation,
+    confirmAction,
+    selectConfirmationWallet,
+  } = useTokenActionRunner(authorityWallets);
   const authorityWalletsError =
-    authorityWalletsFetchError ??
-    authorityWalletsData?.authorityWalletsError ??
-    supportingDataError ??
-    resolvedSupportingData.authorityWalletsError;
+    primaryWallets !== undefined || supportingWallets !== undefined
+      ? null
+      : (authorityWalletsFetchError ??
+        authorityWalletsData?.authorityWalletsError ??
+        supportingDataError ??
+        resolvedSupportingData.authorityWalletsError);
   const transactions = resolvedSupportingData.transactions;
   const transactionsError = supportingDataError ?? resolvedSupportingData.transactionsError;
   const transactionsTotal = resolvedSupportingData.transactionsTotal;
@@ -1023,6 +1023,22 @@ export function TokenManagementWorkspace({
   };
 
   const handleAuthorityUpdate = () => {
+    const selection = withWalletLoadError(
+      getSignerSelectionForAction({
+        action: "authority",
+        token,
+        authorityWallets,
+        metadataAuthority,
+        permissionRow: getPermissionRows(token, metadataAuthority, t).find(
+          (row) => row.authorityRole === authorityForm.role
+        ),
+        t,
+      })
+    );
+    if (selection.unavailableReason) {
+      toast.error(selection.unavailableReason);
+      return;
+    }
     runAction(
       {
         label: t("DashboardIssuance.management.updateAuthority"),
@@ -1038,6 +1054,7 @@ export function TokenManagementWorkspace({
       },
       {
         requiresConfirmation: true,
+        signerWallets: selection.wallets,
         confirmationTitle: t("DashboardIssuance.management.authorityConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.authorityConfirmationDescription"),
         confirmButtonLabel: t("DashboardIssuance.management.updateNow"),
@@ -1393,10 +1410,18 @@ export function TokenManagementWorkspace({
           // The confirmation dialog owns pause/unpause signer selection.
           onSignerWalletIdChange: (_value: string) => {},
         };
+      case "allowlist":
+        return {
+          // Database-only lists have no on-chain authority, hence no signer to show.
+          signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : [],
+          defaultSignerWalletId: allowlistSignerSelection.defaultWalletId,
+          signerUnavailableReason: allowlistDisabledReason,
+          onSignerWalletIdChange: (_value: string) => {},
+        };
       default:
         return {
           signerWallets: [],
-          signerUnavailableReason: action === "allowlist" ? allowlistDisabledReason : null,
+          signerUnavailableReason: null,
           onSignerWalletIdChange: (_value: string) => {},
         };
     }

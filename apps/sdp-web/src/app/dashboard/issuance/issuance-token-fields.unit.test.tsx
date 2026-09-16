@@ -47,6 +47,7 @@ function wallet(publicKey: string): PaymentsDashboardWallet {
   return {
     id: `id_${publicKey}`,
     walletId: `wid_${publicKey}`,
+    isRuntimeExecutionAllowed: true,
     publicKey,
     label: "Treasury",
   };
@@ -146,6 +147,7 @@ describe("buildOverviewHeroData", () => {
       provider: null,
       publicKey: MANAGED,
       walletId: `wid_${MANAGED}`,
+      restricted: false,
     });
   });
 
@@ -204,6 +206,7 @@ describe("buildOverviewHeroData", () => {
       provider: null,
       publicKey: MANAGED,
       walletId: `wid_${MANAGED}`,
+      restricted: false,
     });
   });
 
@@ -349,6 +352,20 @@ describe("toWalletIdentity", () => {
       provider: null,
       publicKey: signer.publicKey,
       walletId: signer.walletId,
+      restricted: false,
+    });
+  });
+
+  it("flags a managed wallet whose signing is restricted, and only that one", () => {
+    const signer = wallet("MANAGEDpubkey1111111111111111111111111111111");
+    expect(
+      toWalletIdentity({ ...signer, isRuntimeExecutionAllowed: false }, null, {
+        unresolvedAs: "external",
+        unlabeled,
+      })
+    ).toMatchObject({ state: "managed", restricted: true });
+    expect(toWalletIdentity(signer, null, { unresolvedAs: "external", unlabeled })).toMatchObject({
+      restricted: false,
     });
   });
 

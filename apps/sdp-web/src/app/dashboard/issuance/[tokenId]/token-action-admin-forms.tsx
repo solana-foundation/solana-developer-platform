@@ -48,6 +48,7 @@ import type {
   SeizeValidationErrors,
 } from "./token-management-workspace.types";
 import {
+  getSignerWalletUnavailableReason,
   getTokenAmountFieldDescription,
   NON_WHITESPACE_PATTERN,
   SOLANA_ADDRESS_PATTERN,
@@ -179,6 +180,20 @@ export function TokenActionAdminForms({
         }
       : {};
   const exactSignerChoiceRequired = signerWallets.length > 1;
+  const selectedSignerWalletId =
+    activeAction === "seize"
+      ? seizeForm.signingWalletId
+      : activeAction === "force-burn"
+        ? forceBurnForm.signingWalletId
+        : activeAction === "freeze"
+          ? freezeForm.signingWalletId || defaultSignerWalletId
+          : defaultSignerWalletId;
+  const selectedSignerUnavailableReason = getSignerWalletUnavailableReason(
+    signerWallets,
+    selectedSignerWalletId,
+    t
+  );
+  const controlListMutationsDisabled = isPending || Boolean(signerUnavailableReason);
   return (
     <>
       {activeAction === "seize" ? (
@@ -272,7 +287,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.seize}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !seizeForm.signingWalletId) ||
                   Boolean(seizeValidationReason)
                 }
@@ -358,7 +373,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.forceBurn}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !forceBurnForm.signingWalletId) ||
                   Boolean(forceBurnValidationReason)
                 }
@@ -464,7 +479,9 @@ export function TokenActionAdminForms({
                   iconLeft={icon.pause}
                   onClick={() => onPause(true)}
                   disabled={
-                    isPending || tokenStatus === "paused" || Boolean(signerUnavailableReason)
+                    isPending ||
+                    tokenStatus === "paused" ||
+                    Boolean(signerUnavailableReason || selectedSignerUnavailableReason)
                   }
                 >
                   {t("DashboardIssuance.management.pauseToken")}
@@ -478,7 +495,9 @@ export function TokenActionAdminForms({
                   iconLeft={icon.unpause}
                   onClick={() => onPause(false)}
                   disabled={
-                    isPending || tokenStatus === "active" || Boolean(signerUnavailableReason)
+                    isPending ||
+                    tokenStatus === "active" ||
+                    Boolean(signerUnavailableReason || selectedSignerUnavailableReason)
                   }
                 >
                   {t("DashboardIssuance.management.unpauseToken")}
@@ -506,7 +525,7 @@ export function TokenActionAdminForms({
           >
             <TokenSignerSelect
               signerWallets={signerWallets}
-              signerWalletId={defaultSignerWalletId} // Always single locked wallet
+              signerWalletId={freezeForm.signingWalletId || defaultSignerWalletId}
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
@@ -558,7 +577,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.freeze}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !freezeForm.signingWalletId)
                 }
               >
@@ -570,7 +589,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.unfreeze}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !freezeForm.signingWalletId)
                 }
               >
@@ -591,11 +610,22 @@ export function TokenActionAdminForms({
               : (controlListDescription ?? t("DashboardIssuance.forms.controlListDescription"))
           }
         >
+          {signerWallets.length === 1 ? (
+            // Show a single authority here; multiple signers are selected in confirmation.
+            <TokenSignerSelect
+              signerWallets={signerWallets}
+              signerWalletId={defaultSignerWalletId}
+              signerUnavailableReason={signerUnavailableReason}
+              onSignerWalletIdChange={onSignerWalletIdChange}
+            />
+          ) : (
+            <TokenValidationMessage message={signerUnavailableReason} reserveSpace={false} />
+          )}
           <form
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              onAddAllowlist();
+              if (!controlListMutationsDisabled) onAddAllowlist();
             }}
           >
             <ActionField
@@ -629,7 +659,11 @@ export function TokenActionAdminForms({
                 submitAlignment === "end" ? "justify-end" : "",
               ].join(" ")}
             >
-              <Button type="submit" iconLeft={icon.addEntry} disabled={isPending}>
+              <Button
+                type="submit"
+                iconLeft={icon.addEntry}
+                disabled={controlListMutationsDisabled}
+              >
                 {controlListAddActionLabel}
               </Button>
             </div>
@@ -642,7 +676,7 @@ export function TokenActionAdminForms({
                   label: controlListLabel,
                 })}
                 removeIcon={icon.removeEntry}
-                isPending={isPending}
+                mutationsDisabled={controlListMutationsDisabled}
                 onRemove={onRemoveAllowlist}
               />
             ) : allowlistError ? (
@@ -668,7 +702,7 @@ export function TokenActionAdminForms({
                       size="sm"
                       iconLeft={icon.removeEntry}
                       onClick={() => onRemoveAllowlist(entry.id)}
-                      disabled={isPending}
+                      disabled={controlListMutationsDisabled}
                     >
                       {t("DashboardIssuance.forms.removeEntry")}
                     </Button>
@@ -744,12 +778,12 @@ function ControlListFilters({
 function ControlListEntryRow({
   entry,
   removeIcon,
-  isPending,
+  mutationsDisabled,
   onRemove,
 }: {
   entry: TokenAllowlistEntry;
   removeIcon: ReactNode;
-  isPending: boolean;
+  mutationsDisabled: boolean;
   onRemove: (entryId: string) => void;
 }) {
   const t = useTranslations();
@@ -767,7 +801,7 @@ function ControlListEntryRow({
         size="sm"
         iconLeft={removeIcon}
         onClick={() => onRemove(entry.id)}
-        disabled={isPending}
+        disabled={mutationsDisabled}
       >
         {t("DashboardIssuance.forms.removeEntry")}
       </Button>
@@ -788,7 +822,7 @@ function ControlListResults({
   hasFilter,
   emptyState,
   removeIcon,
-  isPending,
+  mutationsDisabled,
   onRemove,
 }: {
   t: ReturnType<typeof useTranslations>;
@@ -803,7 +837,7 @@ function ControlListResults({
   hasFilter: boolean;
   emptyState: string;
   removeIcon: ReactNode;
-  isPending: boolean;
+  mutationsDisabled: boolean;
   onRemove: (entryId: string) => void;
 }) {
   if (isInitialLoading) {
@@ -843,7 +877,7 @@ function ControlListResults({
           key={entry.id}
           entry={entry}
           removeIcon={removeIcon}
-          isPending={isPending}
+          mutationsDisabled={mutationsDisabled}
           onRemove={onRemove}
         />
       ))}
@@ -867,14 +901,14 @@ function ControlListEntries({
   emptyState,
   searchPlaceholder,
   removeIcon,
-  isPending,
+  mutationsDisabled,
   onRemove,
 }: {
   tokenId: string;
   emptyState: string;
   searchPlaceholder: string;
   removeIcon: ReactNode;
-  isPending: boolean;
+  mutationsDisabled: boolean;
   onRemove: (entryId: string) => void;
 }) {
   const t = useTranslations();
@@ -978,7 +1012,7 @@ function ControlListEntries({
         hasFilter={hasFilter}
         emptyState={emptyState}
         removeIcon={removeIcon}
-        isPending={isPending}
+        mutationsDisabled={mutationsDisabled}
         onRemove={onRemove}
       />
     </div>

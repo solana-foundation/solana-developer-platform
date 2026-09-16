@@ -407,7 +407,7 @@ export class CustodyRuntimeTargets {
   }
 
   /**
-   * Every active custody wallet holding an on-chain address, oldest first —
+   * Every active custody wallet holding an on-chain address, oldest first with ID as a tie-break —
    * an indexed read (`idx_custody_wallets_public_key`) over both ownership
    * paths with the same active/org/project filters as {@link listWallets}.
    * Multiple records can hold one address, so callers pick.
@@ -417,12 +417,29 @@ export class CustodyRuntimeTargets {
     projectId: string;
     publicKey: string;
   }): Promise<string[]> {
-    const rows = await this.db.queryMany<{ id: string }>(
-      `SELECT w.id
+    const wallets = await this.findOperationalWalletIdsByAddresses({
+      organizationId: params.organizationId,
+      projectId: params.projectId,
+      publicKeys: [params.publicKey],
+    });
+    return wallets.get(params.publicKey) ?? [];
+  }
+
+  /** Batch equivalent of {@link findOperationalWalletIdsByAddress}, oldest first per address. */
+  async findOperationalWalletIdsByAddresses(params: {
+    organizationId: string;
+    projectId: string;
+    publicKeys: readonly string[];
+  }): Promise<Map<string, string[]>> {
+    const wallets = new Map<string, string[]>();
+    if (params.publicKeys.length === 0) return wallets;
+
+    const rows = await this.db.queryMany<{ id: string; public_key: string }>(
+      `SELECT w.id, w.public_key
          FROM custody_wallets w
          LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
          LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
-        WHERE w.public_key = ?
+        WHERE w.public_key = ANY(?::text[])
           AND w.status = 'active'
           AND (
             (cfg.id IS NOT NULL AND cfg.organization_id = ? AND cfg.status = 'active'
@@ -431,16 +448,21 @@ export class CustodyRuntimeTargets {
             (conn.id IS NOT NULL AND conn.organization_id = ? AND conn.project_id = ?
                AND conn.status = 'active')
           )
-        ORDER BY w.created_at ASC`,
+        ORDER BY w.created_at ASC, w.id ASC`,
       [
-        params.publicKey,
+        params.publicKeys,
         params.organizationId,
         params.projectId,
         params.organizationId,
         params.projectId,
       ]
     );
-    return rows.map((row) => row.id);
+    for (const row of rows) {
+      const ids = wallets.get(row.public_key);
+      if (ids) ids.push(row.id);
+      else wallets.set(row.public_key, [row.id]);
+    }
+    return wallets;
   }
 
   async findOwnedWalletForMutation(params: {

@@ -33,8 +33,7 @@ export function DashboardLoadingScreen({
     flags?.privateChannels ?? false,
     flags?.custody,
     flags?.payments,
-    flags?.policies,
-    flags?.dvp
+    flags?.policies
   );
 
   return (

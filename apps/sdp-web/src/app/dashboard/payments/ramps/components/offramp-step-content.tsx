@@ -101,9 +101,16 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     retryOnboarding,
     memoRows,
     setMemoRows,
+    sourceWalletHint,
   } = wizard;
 
-  const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const walletOptions = useMemo(
+    () =>
+      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
+        disableRestricted: true,
+      }),
+    [liveWallets, t]
+  );
   const destinationCountry =
     collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry;
   const paymentRails = collectedData.paymentRails === undefined ? "" : collectedData.paymentRails;
@@ -127,6 +134,9 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
           isLoading={walletsLoading}
         />
+        <p hidden={!sourceWalletHint} className="text-sm text-warning">
+          {sourceWalletHint}
+        </p>
         {selectedWallet ? <WalletAssetBreakdown wallet={selectedWallet} /> : null}
       </div>
     );

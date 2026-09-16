@@ -15,6 +15,7 @@ import type { DvpLegOutcome, DvpSettlementAvailability } from "@sdp/types";
 import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
 import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
 import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
+import type { DvpActionWallet } from "./action-wallets";
 
 /** One party of the trade, as a party who is not the author may see it. */
 interface DvpInboundPartyResponse {
@@ -23,6 +24,7 @@ interface DvpInboundPartyResponse {
   counterparty: null;
   /** The caller's custody wallet holding this address, or null. Truthy = the caller custodies this party. */
   wallet: DvpCallerWallet | null;
+  actionWallet?: DvpActionWallet | null;
 }
 
 /** One leg, as a party who is not the author may see it. */
@@ -77,10 +79,16 @@ export interface DvpInboundTradeResponse {
  */
 function inboundParty(
   address: string,
-  callerAddresses: ReadonlyMap<string, DvpCallerWallet>
+  callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
+  actionWallets?: ReadonlyMap<string, DvpActionWallet>
 ): DvpInboundPartyResponse {
   const wallet = callerAddresses.get(address);
-  return { address, counterparty: null, wallet: wallet === undefined ? null : wallet };
+  return {
+    address,
+    counterparty: null,
+    wallet: wallet === undefined ? null : wallet,
+    ...(actionWallets === undefined ? {} : { actionWallet: actionWallets.get(address) ?? null }),
+  };
 }
 
 /**
@@ -95,7 +103,8 @@ function inboundParty(
 export function toDvpInboundResponse(
   inbound: DvpInboundTrade,
   callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
-  mintImages: ReadonlyMap<string, string | null>
+  mintImages: ReadonlyMap<string, string | null>,
+  actionWallets?: ReadonlyMap<string, DvpActionWallet>
 ): DvpInboundTradeResponse {
   const { trade, side, party } = inbound;
   const mintAImage = mintImages.get(trade.mintA);
@@ -110,7 +119,7 @@ export function toDvpInboundResponse(
     yourParty: party,
     legs: {
       a: {
-        party: inboundParty(trade.userA, callerAddresses),
+        party: inboundParty(trade.userA, callerAddresses, actionWallets),
         mint: trade.mintA,
         tokenProgram: trade.tokenProgramA,
         amount: trade.amountA,
@@ -125,7 +134,7 @@ export function toDvpInboundResponse(
         outcome: deriveDvpLegOutcome(trade, "a"),
       },
       b: {
-        party: inboundParty(trade.userB, callerAddresses),
+        party: inboundParty(trade.userB, callerAddresses, actionWallets),
         mint: trade.mintB,
         tokenProgram: trade.tokenProgramB,
         amount: trade.amountB,

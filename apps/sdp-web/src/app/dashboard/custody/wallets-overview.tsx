@@ -17,6 +17,7 @@ import {
 import { WalletCardBalanceValue } from "@/app/dashboard/custody/wallet-card-balance-value";
 import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
@@ -113,6 +114,9 @@ function WalletCard({
                   {purposeLabel}
                 </span>
               ) : null}
+              {wallet.isRuntimeExecutionAllowed ? null : (
+                <Badge variant="warning">{t("DashboardCustody.restricted")}</Badge>
+              )}
             </div>
             <div className="relative mt-0.5 min-w-0 text-2xl leading-tight font-medium tracking-tight text-primary">
               <WalletLabelInlineEditor

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import type { ActionConfirmationState } from "./token-management-workspace.types";
+import { getSignerWalletUnavailableReason } from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";
 
 interface TokenActionConfirmationDialogProps {
@@ -84,6 +85,13 @@ export function TokenActionConfirmationDialog({
           onClick={onConfirm}
           disabled={
             isPending ||
+            Boolean(
+              getSignerWalletUnavailableReason(
+                actionConfirmation.signerWallets ?? [],
+                actionConfirmation.signingCustodyWalletId,
+                t
+              )
+            ) ||
             Boolean(
               actionConfirmation.signerWallets &&
                 !actionConfirmation.signerWallets.some(

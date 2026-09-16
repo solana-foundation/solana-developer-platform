@@ -157,6 +157,7 @@ function offrampWizard(
 ): OfframpWizard {
   return {
     ...sharedWizard<OfframpStepId>("COMPLETE", quote),
+    sourceWalletHint: null,
     summaryDetails: [],
     transferStatus,
     transferStatusLoading: false,

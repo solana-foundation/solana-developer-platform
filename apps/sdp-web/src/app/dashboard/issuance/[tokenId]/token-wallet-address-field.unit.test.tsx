@@ -12,6 +12,7 @@ const address = "3yQfmv9WiotYSDmamiow5Xt2abcvDxTzmFBSYEEGZtqe";
 const wallet: PaymentsDashboardWallet = {
   id: "wallet_test",
   walletId: "wallet_test",
+  isRuntimeExecutionAllowed: true,
   label: "Treasury",
   publicKey: address,
 };

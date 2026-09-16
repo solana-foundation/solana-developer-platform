@@ -44,6 +44,29 @@ export interface ComboboxOption {
   icon?: ReactNode;
   badge?: string;
   badgeVariant?: BadgeVariant;
+  /** Shown but not selectable: click, Enter and only-match auto-select do nothing. */
+  disabled?: boolean;
+}
+
+function ComboboxOptionContent({ option }: { option: ComboboxOption }) {
+  return (
+    <>
+      {option.icon ? <span className="shrink-0">{option.icon}</span> : null}
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-primary">{option.label}</span>
+          {option.badge ? (
+            <Badge variant={option.badgeVariant} className="shrink-0">
+              {option.badge}
+            </Badge>
+          ) : null}
+        </span>
+        {option.description ? (
+          <span className="block truncate text-sm text-tertiary">{option.description}</span>
+        ) : null}
+      </span>
+    </>
+  );
 }
 
 interface ComboboxProps {
@@ -149,28 +172,29 @@ export function Combobox({
     setActiveIndex(-1);
   }
 
-  function selectOption(value: string, submit: boolean) {
-    onChange(value);
+  function selectOption(option: ComboboxOption, submit: boolean) {
+    if (option.disabled) return;
+    onChange(option.value);
     close();
     if (submit) {
-      onEnterSelect?.(value);
+      onEnterSelect?.(option.value);
     }
   }
 
   function selectOnlyMatch(submit = false) {
     if (filtered.length !== 1) return;
-    selectOption(filtered[0].value, submit);
+    selectOption(filtered[0], submit);
   }
 
   function selectActive(submit = false) {
     const active = filtered[activeIndex];
     if (!active) return false;
-    selectOption(active.value, submit);
+    selectOption(active, submit);
     return true;
   }
 
   useEffect(() => {
-    setActiveIndex(filtered.length === 1 ? 0 : -1);
+    setActiveIndex(filtered.length === 1 && !filtered[0].disabled ? 0 : -1);
   }, [filtered]);
 
   const trigger = (
@@ -284,35 +308,22 @@ export function Combobox({
                 key={option.value}
                 id={`${labelId}-option-${index}`}
                 type="button"
+                disabled={option.disabled}
+                aria-disabled={option.disabled || undefined}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-[var(--select-item-radius)] text-left transition-colors",
                   variant === "dialog" ? "px-3.5 py-3" : "px-3 py-2.5",
-                  highlighted
-                    ? "bg-[var(--select-item-highlight-bg)]"
+                  // The arrow keys may land on a disabled option, so it keeps the
+                  // highlight: a keyboard user must see where the cursor is.
+                  highlighted && "bg-[var(--select-item-highlight-bg)]",
+                  option.disabled
+                    ? "cursor-not-allowed opacity-50"
                     : "hover:bg-[var(--select-item-highlight-bg)]"
                 )}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => {
-                  onChange(option.value);
-                  close();
-                }}
+                onMouseEnter={option.disabled ? undefined : () => setActiveIndex(index)}
+                onClick={() => selectOption(option, false)}
               >
-                {option.icon ? <span className="shrink-0">{option.icon}</span> : null}
-                <span className="min-w-0 flex-1">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-primary">{option.label}</span>
-                    {option.badge ? (
-                      <Badge variant={option.badgeVariant} className="shrink-0">
-                        {option.badge}
-                      </Badge>
-                    ) : null}
-                  </span>
-                  {option.description ? (
-                    <span className="block truncate text-sm text-tertiary">
-                      {option.description}
-                    </span>
-                  ) : null}
-                </span>
+                <ComboboxOptionContent option={option} />
                 {active ? <CheckIcon className="size-4 shrink-0 text-primary" /> : null}
               </button>
             );

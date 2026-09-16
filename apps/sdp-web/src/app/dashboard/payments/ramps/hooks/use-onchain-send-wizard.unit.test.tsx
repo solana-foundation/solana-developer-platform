@@ -60,6 +60,8 @@ const wallets: PaymentsDashboardWallet[] = [
   {
     id: "wallet-sol",
     walletId: "provider-sol",
+    isRuntimeExecutionAllowed: true,
+    custodyConfigId: "cc_test",
     publicKey: "sol-wallet",
     label: "SOL Treasury",
     balances: [
@@ -69,6 +71,8 @@ const wallets: PaymentsDashboardWallet[] = [
   {
     id: "wallet-usdc",
     walletId: "provider-usdc",
+    isRuntimeExecutionAllowed: true,
+    custodyConfigId: "cc_test",
     publicKey: "usdc-wallet",
     label: "USDC Treasury",
     balances: [
@@ -94,6 +98,7 @@ function wrapper({ children }: { children: ReactNode }) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
+        scopeRefreshFallback={<div>Loading workspace</div>}
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: false,

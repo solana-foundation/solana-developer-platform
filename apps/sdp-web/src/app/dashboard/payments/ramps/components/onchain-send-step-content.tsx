@@ -129,8 +129,15 @@ function DetailsStep({ wizard }: StepProps) {
     fields,
     setField,
     selectWallet,
+    sourceWalletHint,
   } = wizard;
-  const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const walletOptions = useMemo(
+    () =>
+      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
+        disableRestricted: true,
+      }),
+    [liveWallets, t]
+  );
   const assetSelectOptions = useMemo(
     () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
     [assetOptions]
@@ -147,6 +154,9 @@ function DetailsStep({ wizard }: StepProps) {
         icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
         isLoading={walletsLoading}
       />
+      <p hidden={!sourceWalletHint} className="text-sm text-warning">
+        {sourceWalletHint}
+      </p>
       <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
         <div className="flex flex-col gap-2">
           <Label className="text-tertiary" htmlFor="onchain-send-amount">

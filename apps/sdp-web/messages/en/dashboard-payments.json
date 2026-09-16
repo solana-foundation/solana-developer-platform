@@ -1,5 +1,7 @@
 {
   "DashboardPayments": {
+    "signingUnavailable": "Signing is disabled for this wallet.",
+    "restricted": "Restricted",
     "page": {
       "unavailableStatus": "unavailable",
       "unknownError": "Unknown error",
@@ -867,6 +869,10 @@
       "lifecycleActionUnavailableDescription": "This recurring payment cannot be changed from its current status.",
       "sourceWalletUnresolved": "Source wallet unavailable",
       "sourceWalletUnresolvedDescription": "This recurring payment is not linked to an exact SDP Wallet, so its actions are unavailable.",
+      "signingDisabledDraft": "The draft can be saved; activation requires a signing wallet.",
+      "signingDisabledTitle": "Signing disabled for funding wallet",
+      "signingDisabledBody": "You cannot collect, change, or cancel this payment until signing is enabled for {wallet}.",
+      "signingDisabledPendingBody": "You can activate this payment once signing is enabled for {wallet} or you change the funding wallet.",
       "updatingPayment": "Updating recurring payment.",
       "actionFailed": "Recurring payment action failed.",
       "alreadyFundingWallet": "{wallet} is already the funding wallet.",

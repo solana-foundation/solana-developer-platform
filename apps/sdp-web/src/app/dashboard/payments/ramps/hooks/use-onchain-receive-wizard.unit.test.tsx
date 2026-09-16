@@ -26,6 +26,8 @@ const wallets: PaymentsDashboardWallet[] = [
   {
     id: "wallet-live",
     walletId: "provider-live",
+    isRuntimeExecutionAllowed: true,
+    custodyConfigId: "cc_test",
     publicKey: "live-wallet-address",
     label: "Treasury",
     balances: [],
@@ -38,6 +40,7 @@ function wrapper({ children }: { children: ReactNode }) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
+        scopeRefreshFallback={<div>Loading workspace</div>}
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: false,

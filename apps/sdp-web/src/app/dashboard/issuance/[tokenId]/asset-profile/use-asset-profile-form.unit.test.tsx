@@ -84,6 +84,7 @@ const metadataSignerSelection = {
     {
       id: "cwlt_metadata",
       walletId: "provider_metadata",
+      isRuntimeExecutionAllowed: true,
       publicKey: token.metadataAuthority ?? "",
       label: "Metadata signer",
     },
@@ -113,6 +114,37 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("useAssetProfileForm", () => {
+  it("blocks a runtime-unavailable selected metadata signer without replacing it", async () => {
+    const selection = {
+      ...metadataSignerSelection,
+      wallets: [
+        { ...metadataSignerSelection.wallets[0], isRuntimeExecutionAllowed: false },
+        { ...metadataSignerSelection.wallets[0], id: "cwlt_other" },
+      ],
+    };
+    const { result } = renderHook(
+      () =>
+        useAssetProfileForm({
+          token,
+          assetProfile,
+          metadataSignerSelection: selection,
+          draftWallets: [],
+        }),
+      { wrapper }
+    );
+    act(() => result.current.updateDraft({ description: "Keep this edit" }));
+    expect(result.current.metadataSignerWalletId).toBe("cwlt_metadata");
+    await act(() => result.current.save());
+    expect(mocks.updateAssetProfile).not.toHaveBeenCalled();
+    act(() => result.current.setMetadataSignerWalletId("cwlt_other"));
+    await act(() => result.current.save());
+    expect(mocks.updateAssetProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenPatch: expect.objectContaining({ signingCustodyWalletId: "cwlt_other" }),
+      })
+    );
+  });
+
   it("normalizes a legacy draft after wallets load and persists exact assignments only on Save", async () => {
     const pendingToken = {
       ...token,
@@ -257,6 +289,7 @@ describe("useAssetProfileForm", () => {
     const liveWallet = {
       id: "cwlt_live_b",
       walletId: "provider_b",
+      isRuntimeExecutionAllowed: true,
       publicKey: "live_authority_b",
       label: "B",
     };
@@ -299,9 +332,9 @@ describe("useAssetProfileForm", () => {
           token: pendingToken,
           assetProfile,
           metadataSignerSelection: {
-            wallets: [],
-            defaultWalletId: "",
-            unavailableReason: "RPC unavailable",
+            wallets: [{ ...metadataSignerSelection.wallets[0], isRuntimeExecutionAllowed: false }],
+            defaultWalletId: "cwlt_metadata",
+            unavailableReason: "Signing is disabled for this wallet.",
           },
         }),
       { wrapper }
