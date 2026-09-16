@@ -27,6 +27,17 @@ const sendTransactionStatusPollMs = 250;
 const resubmissionTimeoutMs = 3_000;
 const privateKey = process.env.SIGNER_PRIVATE_KEY;
 
+// Mirrors `allowed_tokens` in infra/kora/kora.toml, in the same order: wrapped
+// SOL first (the fee-payment adapter takes `tokens[0]` as the fee token), then
+// every devnet Earn deposit mint. vault-sponsorship-allowlist.test.ts asserts
+// the two lists are identical, so edit them together (PRO-1962).
+const HARNESS_ALLOWED_TOKENS = [
+  "So11111111111111111111111111111111111111112", // Wrapped SOL (fee token, keep first)
+  "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", // USDC (devnet)
+  "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7", // USDG (devnet, Token-2022)
+  "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM", // PYUSD (devnet, Token-2022)
+];
+
 if (!privateKey) {
   throw new Error("SIGNER_PRIVATE_KEY is required for the Kora Surfpool shim.");
 }
@@ -102,7 +113,7 @@ async function handleRpc(method, params) {
       };
     }
     case "getSupportedTokens":
-      return { tokens: ["So11111111111111111111111111111111111111112"] };
+      return { tokens: [...HARNESS_ALLOWED_TOKENS] };
     case "estimateTransactionFee":
       return {
         fee_in_lamports: 5000,
@@ -254,7 +265,7 @@ function getConfig() {
         "dvp34bdbcEm4f4FCUjGV4mDAkDshaQR4LkK8fdcsyZq",
       ],
       allowed_spl_paid_tokens: [],
-      allowed_tokens: ["So11111111111111111111111111111111111111112"],
+      allowed_tokens: [...HARNESS_ALLOWED_TOKENS],
       disallowed_accounts: [],
       // Mirror Kora's complete fee-payer policy shape. Empty or partial policy
       // objects are intentionally treated as unsafe by managed admission.
