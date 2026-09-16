@@ -425,46 +425,55 @@ export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWa
       ruleCount: body.rules.length,
     },
   });
-  const controlProfile = await getDb(c.env).transaction(async (tx) => {
-    // Serializes per-wallet updates. Locking the profile alone is not enough:
-    // a wallet without one has no row to lock, so concurrent first writes
-    // would each insert their own profile.
-    const lockedWallet = await tx
-      .prepare(`SELECT id FROM custody_wallets WHERE id = ? FOR UPDATE`)
-      .bind(wallet.id)
-      .first<{ id: string }>();
+  let controlProfile: PaymentWalletControlProfileSummary | null;
+  try {
+    controlProfile = await getDb(c.env).transaction(async (tx) => {
+      // Serializes per-wallet updates. Locking the profile alone is not enough:
+      // a wallet without one has no row to lock, so concurrent first writes
+      // would each insert their own profile.
+      const lockedWallet = await tx
+        .prepare(`SELECT id FROM custody_wallets WHERE id = ? FOR UPDATE`)
+        .bind(wallet.id)
+        .first<{ id: string }>();
 
-    if (!lockedWallet) {
-      throw walletNotFound();
-    }
+      if (!lockedWallet) {
+        throw walletNotFound();
+      }
 
-    const activeProfile = await lockActiveWalletControlProfile(tx, wallet.id);
+      const activeProfile = await lockActiveWalletControlProfile(tx, wallet.id);
 
-    if (
-      body.expectedRevisionId !== undefined &&
-      body.expectedRevisionId !== (activeProfile?.revision_id ?? null)
-    ) {
-      throw conflict(
-        "Wallet policy was changed by another update; refresh and retry with the current revision"
-      );
-    }
+      if (
+        body.expectedRevisionId !== undefined &&
+        body.expectedRevisionId !== (activeProfile?.revision_id ?? null)
+      ) {
+        throw conflict(
+          "Wallet policy was changed by another update; refresh and retry with the current revision"
+        );
+      }
 
-    await activateWalletControlProfileRevisionInTransaction({
-      db: tx,
-      existingProfileId: activeProfile?.profile_id ?? null,
-      organizationId: auth.organizationId,
-      projectId: auth.projectId ?? null,
-      custodyWalletId: wallet.id,
-      profileName: `${wallet.label ?? wallet.walletId} controls`,
-      rules: body.rules,
-      defaultAction: body.defaultAction,
-      commitMessage: body.commitMessage,
-      createdBy: auth.userId ?? auth.apiKeyId ?? null,
-      activatedAt: now,
+      await activateWalletControlProfileRevisionInTransaction({
+        db: tx,
+        existingProfileId: activeProfile?.profile_id ?? null,
+        organizationId: auth.organizationId,
+        projectId: auth.projectId ?? null,
+        custodyWalletId: wallet.id,
+        profileName: `${wallet.label ?? wallet.walletId} controls`,
+        rules: body.rules,
+        defaultAction: body.defaultAction,
+        commitMessage: body.commitMessage,
+        createdBy: auth.userId ?? auth.apiKeyId ?? null,
+        activatedAt: now,
+      });
+
+      return await readWalletControlProfileSummaryInTransaction(tx, wallet.id);
     });
-
-    return await readWalletControlProfileSummaryInTransaction(tx, wallet.id);
-  });
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
+    throw error;
+  }
 
   await auditService.completeCritical(c, auditIntent, {
     metadata: {

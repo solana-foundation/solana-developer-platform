@@ -304,6 +304,9 @@ async function persistBvnkOfframpWallet(
 export interface BvnkProvisioningAudit {
   begin(event: { action: string; metadata: Record<string, unknown> }): Promise<AuditIntent>;
   complete(intent: AuditIntent, metadata?: Record<string, unknown>): Promise<void>;
+  /** Resolves the intent with a failure outcome, so a routine provider error
+   * does not strand an unresolved intent that pollutes ledger verification. */
+  fail(intent: AuditIntent, error: unknown): Promise<void>;
 }
 
 export function requestProvisioningAudit(
@@ -322,6 +325,12 @@ export function requestProvisioningAudit(
     },
     async complete(intent, metadata = {}) {
       await service.completeCritical(c, intent, { metadata });
+    },
+    async fail(intent, error) {
+      await service.completeCritical(c, intent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : String(error) },
+      });
     },
   };
 }
@@ -355,15 +364,20 @@ export async function ensureBvnkOfframpWallet(
     action: "bvnk_offramp_wallet_created",
     metadata: { walletName, fiatCurrency },
   });
-  const wallet = await client.createLedgerWalletV2(ctx, {
-    name: walletName,
-    currency: fiatCurrency,
-    profileId: walletProfile.id,
-    idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
-  });
-  await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, wallet);
-  await audit.complete(intent, { walletId: wallet.id });
-  return { id: wallet.id, status: wallet.status };
+  try {
+    const wallet = await client.createLedgerWalletV2(ctx, {
+      name: walletName,
+      currency: fiatCurrency,
+      profileId: walletProfile.id,
+      idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
+    });
+    await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, wallet);
+    await audit.complete(intent, { walletId: wallet.id });
+    return { id: wallet.id, status: wallet.status };
+  } catch (error) {
+    await audit.fail(intent, error);
+    throw error;
+  }
 }
 
 /** Persists an off-ramp payout beneficiary marker to provider_data.bvnk.offramp.beneficiaries. */
@@ -469,8 +483,13 @@ export async function ensureBvnkOfframpBeneficiary(
     action: "bvnk_offramp_beneficiary_registered",
     metadata: { key, fiatCurrency, accountType: beneficiary.accountType },
   });
-  await persistBvnkOfframpBeneficiary(c, input.counterparty, input.projectId, beneficiary);
-  await audit.complete(intent);
+  try {
+    await persistBvnkOfframpBeneficiary(c, input.counterparty, input.projectId, beneficiary);
+    await audit.complete(intent);
+  } catch (error) {
+    await audit.fail(intent, error);
+    throw error;
+  }
   return beneficiary;
 }
 
@@ -705,39 +724,44 @@ async function createBvnkCustomer(
     action: "bvnk_customer_created",
     metadata: { reference: input.reference },
   });
-  const created = await input.client.createCustomerV2(input.ctx, {
-    idempotencyKey: (await hashString(`bvnk-customer:${input.counterparty.id}`)).slice(0, 36),
-    useCase: "FIAT",
-    reference: input.reference,
-    individual: input.individual,
-  });
-  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const existing = await accounts.getProviderAccount({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk",
-  });
-  if (!existing) {
-    throw internalError("BVNK customer-link row is missing after agreement relay.");
+  try {
+    const created = await input.client.createCustomerV2(input.ctx, {
+      idempotencyKey: (await hashString(`bvnk-customer:${input.counterparty.id}`)).slice(0, 36),
+      useCase: "FIAT",
+      reference: input.reference,
+      individual: input.individual,
+    });
+    const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+    const existing = await accounts.getProviderAccount({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "bvnk",
+    });
+    if (!existing) {
+      throw internalError("BVNK customer-link row is missing after agreement relay.");
+    }
+    const updated = await accounts.patchAccountMetadata({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "bvnk",
+      id: existing.id,
+      set: { status: created.status },
+      unset: ["residenceCountryCode"],
+    });
+    if (!updated) {
+      throw internalError("BVNK customer status update escaped its tenant scope.");
+    }
+    await audit.complete(intent, {
+      customerReference: created.id ?? null,
+      status: created.status ?? null,
+    });
+    return { customer: { customerReference: created.id, status: created.status } };
+  } catch (error) {
+    await audit.fail(intent, error);
+    throw error;
   }
-  const updated = await accounts.patchAccountMetadata({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk",
-    id: existing.id,
-    set: { status: created.status },
-    unset: ["residenceCountryCode"],
-  });
-  if (!updated) {
-    throw internalError("BVNK customer status update escaped its tenant scope.");
-  }
-  await audit.complete(intent, {
-    customerReference: created.id ?? null,
-    status: created.status ?? null,
-  });
-  return { customer: { customerReference: created.id, status: created.status } };
 }
 
 /**
@@ -806,57 +830,62 @@ async function acceptBvnkAgreements(
     action: "bvnk_agreements_accepted",
     metadata: { agreementIds: [...input.pendingIds] },
   });
-  const results = await RAMP_PROVIDER_CLIENTS.bvnk.respondAgreementsV2(rampRuntime(c), {
-    idempotencyKey: randomUUID(),
-    reference: buildBvnkCustomerExternalReference(input.counterparty.id),
-    actions: input.pendingIds.map((agreementId) => ({ agreementId, type: "ACCEPT" })),
-  });
-  const entries = { ...agreements.entries };
-  const respondedAt = new Date().toISOString();
-  const respondedIds = new Set<string>();
-  for (const item of results.content) {
-    respondedIds.add(item.agreementId);
-    if (item.error !== undefined) {
-      getLogger().warn(
-        {
-          counterparty_id: input.counterparty.id,
-          agreement_id: item.agreementId,
-          provider_error_code: item.error.code,
-          provider_error_message: item.error.message,
-        },
-        "[bvnk agreements] BVNK rejected an agreement action"
-      );
-      throw providerUnavailable("BVNK rejected an agreement action.");
+  try {
+    const results = await RAMP_PROVIDER_CLIENTS.bvnk.respondAgreementsV2(rampRuntime(c), {
+      idempotencyKey: randomUUID(),
+      reference: buildBvnkCustomerExternalReference(input.counterparty.id),
+      actions: input.pendingIds.map((agreementId) => ({ agreementId, type: "ACCEPT" })),
+    });
+    const entries = { ...agreements.entries };
+    const respondedAt = new Date().toISOString();
+    const respondedIds = new Set<string>();
+    for (const item of results.content) {
+      respondedIds.add(item.agreementId);
+      if (item.error !== undefined) {
+        getLogger().warn(
+          {
+            counterparty_id: input.counterparty.id,
+            agreement_id: item.agreementId,
+            provider_error_code: item.error.code,
+            provider_error_message: item.error.message,
+          },
+          "[bvnk agreements] BVNK rejected an agreement action"
+        );
+        throw providerUnavailable("BVNK rejected an agreement action.");
+      }
+      if (item.status !== "ACCEPTED") {
+        throw internalError("BVNK agreement action response did not confirm acceptance.");
+      }
+      const entry = entries[item.agreementId];
+      if (entry === undefined) {
+        throw internalError(
+          "BVNK agreement action response named an agreement outside the stored working set."
+        );
+      }
+      entries[item.agreementId] = { ...entry, status: "ACCEPTED", respondedAt };
     }
-    if (item.status !== "ACCEPTED") {
-      throw internalError("BVNK agreement action response did not confirm acceptance.");
+    for (const agreementId of input.pendingIds) {
+      if (!respondedIds.has(agreementId)) {
+        throw internalError("BVNK agreement action response omitted a stored pending agreement.");
+      }
     }
-    const entry = entries[item.agreementId];
-    if (entry === undefined) {
-      throw internalError(
-        "BVNK agreement action response named an agreement outside the stored working set."
-      );
+    const updated = await input.accounts.patchAccountMetadata({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "bvnk",
+      id: input.existing.id,
+      set: { agreements: { ...agreements, entries } },
+      unset: [],
+    });
+    if (!updated) {
+      throw internalError("BVNK agreement acceptance escaped its tenant scope.");
     }
-    entries[item.agreementId] = { ...entry, status: "ACCEPTED", respondedAt };
+    await agreementAudit.complete(agreementIntent);
+  } catch (error) {
+    await agreementAudit.fail(agreementIntent, error);
+    throw error;
   }
-  for (const agreementId of input.pendingIds) {
-    if (!respondedIds.has(agreementId)) {
-      throw internalError("BVNK agreement action response omitted a stored pending agreement.");
-    }
-  }
-  const updated = await input.accounts.patchAccountMetadata({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk",
-    id: input.existing.id,
-    set: { agreements: { ...agreements, entries } },
-    unset: [],
-  });
-  if (!updated) {
-    throw internalError("BVNK agreement acceptance escaped its tenant scope.");
-  }
-  await agreementAudit.complete(agreementIntent);
   return {
     requirements: bvnkCollectCounterparty(
       input.direction,
@@ -956,33 +985,38 @@ export async function ensureBvnkCustomer(
     action: "bvnk_agreements_created",
     metadata: { countryCode: residenceCountry },
   });
-  const agreements = await client.createAgreementsV2(ctx, {
-    idempotencyKey: (await hashString(`bvnk-agreements:${counterparty.id}`)).slice(0, 36),
-    reference,
-    useCase: "FIAT",
-    customerType: "INDIVIDUAL",
-    countryCode: residenceCountry,
-  });
-  const entries: BvnkAgreementEntries = Object.fromEntries(
-    agreements.agreements.map((agreement) => [
-      agreement.id,
-      { status: agreement.status, name: agreement.name, description: agreement.description },
-    ])
-  );
-  await persistBvnkAgreementState(
-    c,
-    counterparty,
-    projectId,
-    agreements.id,
-    entries,
-    residenceCountry
-  );
-  await agreementsAudit.complete(agreementsIntent, { agreementSetId: agreements.id });
-  const pending = agreements.agreements.filter((agreement) => agreement.status !== "ACCEPTED");
-  if (pending.length > 0) {
-    return { requirements: await bvnkAgreementDetails(c, direction, agreements) };
+  try {
+    const agreements = await client.createAgreementsV2(ctx, {
+      idempotencyKey: (await hashString(`bvnk-agreements:${counterparty.id}`)).slice(0, 36),
+      reference,
+      useCase: "FIAT",
+      customerType: "INDIVIDUAL",
+      countryCode: residenceCountry,
+    });
+    const entries: BvnkAgreementEntries = Object.fromEntries(
+      agreements.agreements.map((agreement) => [
+        agreement.id,
+        { status: agreement.status, name: agreement.name, description: agreement.description },
+      ])
+    );
+    await persistBvnkAgreementState(
+      c,
+      counterparty,
+      projectId,
+      agreements.id,
+      entries,
+      residenceCountry
+    );
+    await agreementsAudit.complete(agreementsIntent, { agreementSetId: agreements.id });
+    const pending = agreements.agreements.filter((agreement) => agreement.status !== "ACCEPTED");
+    if (pending.length > 0) {
+      return { requirements: await bvnkAgreementDetails(c, direction, agreements) };
+    }
+    return { requirements: bvnkCollectCounterparty(direction, residenceCountry) };
+  } catch (error) {
+    await agreementsAudit.fail(agreementsIntent, error);
+    throw error;
   }
-  return { requirements: bvnkCollectCounterparty(direction, residenceCountry) };
 }
 
 /**
@@ -1046,27 +1080,32 @@ export async function ensureBvnkPaymentRule(
       action: "bvnk_onramp_wallet_created",
       metadata: { walletName, fiatCurrency: params.fiatCurrency },
     });
-    const wallet = await client.createLedgerWalletV2(ctx, {
-      customerId: customer.customerReference,
-      name: walletName,
-      currency: params.fiatCurrency,
-      profileId: walletProfile.id,
-      idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
-    });
-    if (wallet.name !== walletName) {
-      throw internalError(
-        `BVNK returned unexpected on-ramp wallet name: ${wallet.name ?? "<missing>"}`
-      );
+    try {
+      const wallet = await client.createLedgerWalletV2(ctx, {
+        customerId: customer.customerReference,
+        name: walletName,
+        currency: params.fiatCurrency,
+        profileId: walletProfile.id,
+        idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
+      });
+      if (wallet.name !== walletName) {
+        throw internalError(
+          `BVNK returned unexpected on-ramp wallet name: ${wallet.name ?? "<missing>"}`
+        );
+      }
+      entry = {
+        ...entry,
+        walletId: wallet.id,
+        walletName: wallet.name,
+        walletStatus: wallet.status,
+        bankAccount: bvnkWalletBankAccount(wallet),
+      };
+      await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
+      await audit.complete(walletIntent, { walletId: wallet.id });
+    } catch (error) {
+      await audit.fail(walletIntent, error);
+      throw error;
     }
-    entry = {
-      ...entry,
-      walletId: wallet.id,
-      walletName: wallet.name,
-      walletStatus: wallet.status,
-      bankAccount: bvnkWalletBankAccount(wallet),
-    };
-    await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
-    await audit.complete(walletIntent, { walletId: wallet.id });
   }
 
   if (entry.walletId && !isBvnkWalletActive(entry.walletStatus)) {
@@ -1098,21 +1137,26 @@ export async function ensureBvnkPaymentRule(
         destination: params.destinationWalletAddress,
       },
     });
-    const rule = await client.createOnrampRule(ctx, {
-      reference: await bvnkRuleReference(counterparty.id, paymentRuleKey),
-      walletId: entry.walletId,
-      currency: params.currency,
-      network: params.network,
-      beneficiaryAddress: params.destinationWalletAddress,
-      entity: {
-        type: "INDIVIDUAL",
-        relationshipType: "SELF_OWNED",
-        customerIdentifier: customer.customerReference,
-      },
-    });
-    entry = { ...entry, ruleId: rule.id ?? entry.ruleId, ruleStatus: rule.status };
-    await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
-    await audit.complete(ruleIntent, { ruleId: rule.id ?? null });
+    try {
+      const rule = await client.createOnrampRule(ctx, {
+        reference: await bvnkRuleReference(counterparty.id, paymentRuleKey),
+        walletId: entry.walletId,
+        currency: params.currency,
+        network: params.network,
+        beneficiaryAddress: params.destinationWalletAddress,
+        entity: {
+          type: "INDIVIDUAL",
+          relationshipType: "SELF_OWNED",
+          customerIdentifier: customer.customerReference,
+        },
+      });
+      entry = { ...entry, ruleId: rule.id ?? entry.ruleId, ruleStatus: rule.status };
+      await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
+      await audit.complete(ruleIntent, { ruleId: rule.id ?? null });
+    } catch (error) {
+      await audit.fail(ruleIntent, error);
+      throw error;
+    }
   }
 
   return {

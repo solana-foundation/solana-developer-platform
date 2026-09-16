@@ -457,6 +457,15 @@ async function provisionPendingBvnkOnramps(
               { metadata }
             );
           },
+          fail: async (intent, error) => {
+            await new AuditService(getDb(env), createKVStoreSet(env).cache).completeCriticalSystem(
+              intent,
+              {
+                status: "failure",
+                metadata: { error: error instanceof Error ? error.message : String(error) },
+              }
+            );
+          },
         }
       );
     } catch (error) {
