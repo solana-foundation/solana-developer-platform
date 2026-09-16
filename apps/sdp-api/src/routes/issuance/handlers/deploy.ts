@@ -17,11 +17,18 @@ import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { isDryRunRequest } from "@/middleware/dry-run";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import type { MosaicFeePayment } from "@/services/issuance/mosaic";
+import {
+  approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -41,6 +48,7 @@ import {
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -380,6 +388,16 @@ async function createDeployMetadataSigner(
   });
 }
 
+async function fenceApprovedUnsettledDeployReplay(
+  c: Context<{ Bindings: Env }>,
+  status: string
+): Promise<void> {
+  if (approvedWalletOperationId(c) && status !== "confirmed" && status !== "finalized") {
+    await beginApprovedWalletOperationEffect(c);
+    throw conflict("Approved deploy execution is incomplete and requires manual reconciliation");
+  }
+}
+
 export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -436,6 +454,8 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     custodyWalletId: requestedCustodyWalletId,
     requiredWalletPermissions: ["tokens:write"],
   });
+  assertJudgedCustodyWallet(c, deploymentWallet.custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, deploymentWallet.custodyWalletId);
 
   const [metadataWallet, freezeWallet, delegateWallet] = await resolveDeployAuthorityWallets(
     c.env,
@@ -499,6 +519,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   });
 
   if (replayed) {
+    await fenceApprovedUnsettledDeployReplay(c, tx.status);
     return success(c, { token: toPublicToken(token) });
   }
 
@@ -595,6 +616,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     // Create Mosaic service for template-based token deployment
     const mosaic = createIssuanceMosaicService(c, signer, feePayment);
 
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.createToken({
       template: token.template,
       metadata: {
@@ -1187,3 +1209,89 @@ export const prepareDeployMetadata = async (
     simulation,
   });
 };
+
+export async function extractDeployPolicyCandidate(
+  c: ValidatedBodyContext<typeof deployTokenSchema>
+): Promise<PolicyGateExtraction> {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      action: "deploy",
+      template: token.template,
+      feePayment: body.feePayment,
+    },
+    idempotencyKey: null,
+  };
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  const replayed =
+    !isDryRunRequest(c) &&
+    (await resolveCompletedDeployReplay({
+      env: c.env,
+      auth,
+      tokenService,
+      token,
+      idempotencyKey,
+      requestedCustodyWalletId: body.signingCustodyWalletId,
+      authorityCustodyWalletIds: body.authorityCustodyWalletIds,
+      feePayment: body.feePayment,
+    }));
+  if (replayed) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  if (token.status !== "pending") {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Token has already been deployed or is not in pending status"
+    );
+  }
+  if (token.mintAddress) {
+    throw badRequest("Token already has a mint address");
+  }
+
+  const requestedCustodyWalletId = body.signingCustodyWalletId ?? token.signingCustodyWalletId;
+  if (!requestedCustodyWalletId) {
+    throw badRequest("signingCustodyWalletId is required to deploy this token");
+  }
+
+  const wallet = await resolveIssuanceWallet({
+    env: c.env,
+    auth,
+    custodyWalletId: requestedCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: wallet.custodyWalletId,
+    tokenService,
+  });
+
+  return {
+    ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId: wallet.custodyWalletId,
+      walletId: wallet.providerWalletId,
+      operationType: "issuance_deploy_execute",
+      amount: null,
+      destination: null,
+    }),
+  };
+}
