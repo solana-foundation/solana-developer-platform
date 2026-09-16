@@ -407,7 +407,7 @@ export class CustodyRuntimeTargets {
   }
 
   /**
-   * Every active custody wallet holding an on-chain address, oldest first —
+   * Every active custody wallet holding an on-chain address, oldest first with ID as a tie-break —
    * an indexed read (`idx_custody_wallets_public_key`) over both ownership
    * paths with the same active/org/project filters as {@link listWallets}.
    * Multiple records can hold one address, so callers pick.
@@ -448,7 +448,7 @@ export class CustodyRuntimeTargets {
             (conn.id IS NOT NULL AND conn.organization_id = ? AND conn.project_id = ?
                AND conn.status = 'active')
           )
-        ORDER BY w.created_at ASC`,
+        ORDER BY w.created_at ASC, w.id ASC`,
       [
         params.publicKeys,
         params.organizationId,

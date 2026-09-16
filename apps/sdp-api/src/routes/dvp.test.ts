@@ -161,6 +161,49 @@ async function seedPartyOrg(): Promise<void> {
   await seedCachedApiKey(env, keyHash, PARTY_CACHED_API_KEY);
 }
 
+/** Seeds an admitted Connection holding the party address, independent of the Config. */
+async function seedPartyConnectionWallet(id: string, createdAt: string) {
+  const connectionId = `cconn_${id}`;
+  const credentialId = `pcred_${id}`;
+  const wallet = { id: `cwlt_${id}`, walletId: `privy_${id}`, connectionId };
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare(`INSERT INTO provider_credentials
+      (id, organization_id, project_id, provider, label, scope, source,
+       storage_backend, encrypted_secret_payload, status, credential_version, created_by)
+      VALUES (?, ?, ?, 'privy', 'Own Privy', 'project', 'stored',
+              'encrypted_db', 'test-ciphertext', 'active', 1, ?)`)
+      .bind(credentialId, PARTY_ORG.id, PARTY_PROJECT.id, TEST_USER.id),
+    db
+      .prepare(`INSERT INTO custody_connections
+      (id, organization_id, project_id, provider, scope, provider_credential_id,
+       provider_credential_scope_key, status, created_by)
+      VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`)
+      .bind(
+        connectionId,
+        PARTY_ORG.id,
+        PARTY_PROJECT.id,
+        credentialId,
+        PARTY_PROJECT.id,
+        TEST_USER.id
+      ),
+    db
+      .prepare(`INSERT INTO custody_wallets
+      (id, custody_connection_id, wallet_id, public_key, label, status, created_at)
+      VALUES (?, ?, ?, ?, 'Connection desk', 'active', ?)`)
+      .bind(wallet.id, connectionId, wallet.walletId, PARTY_A_ADDRESS, createdAt),
+    db
+      .prepare(`UPDATE custody_connections
+      SET status = 'active', default_custody_wallet_id = ?,
+          last_check_status = 'success', last_check_at = sdp_iso_now(),
+          activated_at = sdp_iso_now(), provider_account_fingerprint = ?
+      WHERE id = ?`)
+      .bind(wallet.id, `sha256:${id}`, connectionId),
+  ]);
+  return wallet;
+}
+
 function partyAuthHeaders() {
   return {
     Authorization: `Bearer ${PARTY_API_KEY.raw}`,
@@ -899,6 +942,140 @@ describe("DvP routes", () => {
     });
   });
 
+  describe("action wallet revoked after viewing", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      { action: "fund", change: "permission" },
+      { action: "reclaim", change: "permission" },
+      { action: "fund", change: "connection" },
+      { action: "reclaim", change: "connection" },
+    ])(
+      "refuses $action after $change revocation without switching wallets",
+      async ({ action, change }) => {
+        const requestEnv = { ...env, PRIVY_BYOK_ENABLED: "true" };
+        const fetch = vi
+          .spyOn(globalThis, "fetch")
+          .mockRejectedValue(new Error("Unexpected external request"));
+        const db = getDb(env);
+        await seedTradeFor({ tradeId: "dvp_stale_action" });
+        await seedPartyOrg();
+        const selected = await seedPartyConnectionWallet("selected", "2020-01-01");
+        const alternative = await seedPartyConnectionWallet("alternative", "2021-01-01");
+        const wallets = [selected, alternative];
+        await db.batch(
+          wallets.map((wallet) =>
+            db
+              .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+          VALUES (?, ?, ?, ?)`)
+              .bind(
+                `binding_${wallet.id}`,
+                PARTY_API_KEY.id,
+                wallet.walletId,
+                JSON.stringify(["*"])
+              )
+          )
+        );
+        const keyHash = await hashString(PARTY_API_KEY.raw, env.API_KEY_PEPPER);
+        await seedCachedApiKey(env, keyHash, {
+          ...PARTY_CACHED_API_KEY,
+          walletScope: "selected",
+          walletBindings: wallets.map((wallet) => ({
+            walletId: wallet.walletId,
+            custodyWalletId: wallet.id,
+            permissions: ["*"],
+          })),
+        });
+
+        const view = await app.request(
+          "/v1/dvp/trades/dvp_stale_action",
+          { headers: partyAuthHeaders() },
+          requestEnv
+        );
+        expect(view.status).toBe(200);
+        const viewBody = await view.json();
+        const actionWallet = viewBody.data.trade.legs.a.party.actionWallet;
+        expect(actionWallet).toEqual({
+          id: selected.id,
+          name: "Connection desk",
+          isRuntimeExecutionAllowed: true,
+        });
+
+        // Keep the cached authorization and the displayed wallet stale on purpose.
+        if (change === "permission") {
+          await db
+            .prepare(
+              "UPDATE api_key_wallet_permissions SET permissions = ? WHERE api_key_id = ? AND wallet_id = ?"
+            )
+            .bind(
+              JSON.stringify(["payments:read", "wallets:read"]),
+              PARTY_API_KEY.id,
+              selected.walletId
+            )
+            .run();
+        } else {
+          await db
+            .prepare(
+              "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?"
+            )
+            .bind(selected.connectionId)
+            .run();
+        }
+
+        // The preceding GET may observe the chain; measure only the signing request.
+        fetch.mockClear();
+        const res = await app.request(
+          `/v1/dvp/trades/dvp_stale_action/${action}`,
+          {
+            method: "POST",
+            headers: partyAuthHeaders(),
+            body: JSON.stringify({ side: "a", walletId: actionWallet.id }),
+          },
+          requestEnv
+        );
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+        // Both wallets have the party address; refusal must precede any RPC or Provider access.
+        expect(fetch).not.toHaveBeenCalled();
+
+        // The other wallet remains admitted and authorized after either change.
+        await seedCachedApiKey(env, keyHash, {
+          ...PARTY_CACHED_API_KEY,
+          walletScope: "selected",
+          walletBindings: wallets.map((wallet) => ({
+            walletId: wallet.walletId,
+            custodyWalletId: wallet.id,
+            permissions:
+              wallet.id === selected.id && change === "permission"
+                ? ["payments:read", "wallets:read"]
+                : ["*"],
+          })),
+        });
+        const refreshed = await app.request(
+          "/v1/dvp/trades/dvp_stale_action",
+          { headers: partyAuthHeaders() },
+          requestEnv
+        );
+        expect(refreshed.status).toBe(200);
+        expect(await refreshed.json()).toMatchObject({
+          data: {
+            trade: {
+              legs: {
+                a: {
+                  party: {
+                    actionWallet: { id: alternative.id, isRuntimeExecutionAllowed: true },
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+    );
+  });
+
   // A response never states ownership — it derives it for the caller. The
   // full-shape assertions below are the field-additions projection sweep:
   // checking spot fields would let an added field pass silently, so the whole
@@ -1559,31 +1736,7 @@ describe("DvP routes", () => {
         await seedPartyOrg();
         // A nondefault Connection holds the same party address. Funding chooses
         // its older record in both flag states; only runtime admission changes.
-        await getDb(env).batch([
-          getDb(env)
-            .prepare(`INSERT INTO provider_credentials
-          (id, organization_id, project_id, provider, label, scope, source,
-           storage_backend, encrypted_secret_payload, status, credential_version, created_by)
-          VALUES ('pcred_dvp_inbound', ?, ?, 'privy', 'Own Privy', 'project', 'stored',
-                  'encrypted_db', 'test-ciphertext', 'active', 1, ?)`)
-            .bind(PARTY_ORG.id, PARTY_PROJECT.id, TEST_USER.id),
-          getDb(env)
-            .prepare(`INSERT INTO custody_connections
-          (id, organization_id, project_id, provider, scope, provider_credential_id,
-           provider_credential_scope_key, status, created_by)
-          VALUES ('cconn_dvp_inbound', ?, ?, 'privy', 'project', 'pcred_dvp_inbound', ?, 'pending', ?)`)
-            .bind(PARTY_ORG.id, PARTY_PROJECT.id, PARTY_PROJECT.id, TEST_USER.id),
-          getDb(env)
-            .prepare(`INSERT INTO custody_wallets
-          (id, custody_connection_id, wallet_id, public_key, label, status, created_at)
-          VALUES ('cwlt_dvp_connection', 'cconn_dvp_inbound', 'privy_inbound', ?, 'Connection desk', 'active', '2020-01-01')`)
-            .bind(PARTY_A_ADDRESS),
-          getDb(env).prepare(`UPDATE custody_connections
-          SET status = 'active', default_custody_wallet_id = 'cwlt_dvp_connection',
-              last_check_status = 'success', last_check_at = sdp_iso_now(),
-              activated_at = sdp_iso_now(), provider_account_fingerprint = 'sha256:dvp-inbound'
-          WHERE id = 'cconn_dvp_inbound'`),
-        ]);
+        await seedPartyConnectionWallet("dvp_inbound", "2020-01-01");
         // The party org ITSELF issued mint B with artwork: the inbound view
         // resolves images against the reader's organization, so its own token
         // shows — while the creator's unissued mint A stays null.
@@ -1631,7 +1784,7 @@ describe("DvP routes", () => {
             counterparty: null,
             wallet: { id: "cwlt_dvp_party", name: null },
             actionWallet: {
-              id: "cwlt_dvp_connection",
+              id: "cwlt_dvp_inbound",
               name: "Connection desk",
               isRuntimeExecutionAllowed: byokEnabled,
             },
@@ -1687,7 +1840,7 @@ describe("DvP routes", () => {
                 a: {
                   party: {
                     actionWallet: {
-                      id: "cwlt_dvp_connection",
+                      id: "cwlt_dvp_inbound",
                       name: "Connection desk",
                       isRuntimeExecutionAllowed: byokEnabled,
                     },
