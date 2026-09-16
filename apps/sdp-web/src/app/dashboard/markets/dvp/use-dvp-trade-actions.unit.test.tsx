@@ -330,7 +330,10 @@ describe("useDvpTradeActions", () => {
       wrapper: withI18n,
     });
 
-    await act(async () => await result.current.act("fund", { side: "a", symbol: "USDC" }));
+    await act(
+      async () =>
+        await result.current.act("fund", { side: "a", walletId: "cwlt_1", symbol: "USDC" })
+    );
 
     expect(toast.error).toHaveBeenCalledWith(
       "This trade is being settled or cancelled, so nothing was sent.",
