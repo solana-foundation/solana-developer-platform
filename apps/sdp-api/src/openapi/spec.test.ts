@@ -122,11 +122,12 @@ describe("OpenAPI spec", () => {
         "POST /v1/earn/external-wallet/withdrawals",
       ].sort()
     );
+    expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
     // Coverage parity across the boundary: every published operation is the
     // same registered route as its internal twin (same operationId), so the
     // app-level request tracing and rate limiting that wrap `/v1/*` apply to
     // both by construction; there is no public-only mount to fall outside them.
-    for (const operation of publicEarnOperations) {
+    for (const operation of [...publicEarnOperations, "GET /v1/transactions"]) {
       const [method, path] = operation.split(" ") as [string, string];
       const key = method.toLowerCase() as "get" | "post";
       expect(internal.paths?.[path]?.[key]?.operationId).toBe(

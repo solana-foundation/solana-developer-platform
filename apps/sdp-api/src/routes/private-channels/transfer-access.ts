@@ -1,20 +1,16 @@
 import type { PrivateChannelInstance, PrivateChannelTransferRecipientDto } from "@sdp/types";
 import { mapPrivateChannelInstanceRow, type PrivateChannelUserRow } from "@/db/repositories";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, forbidden, notFound, providerUnavailable, walletNotFound } from "@/lib/errors";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
-import { createSigningService } from "@/services/domain/signing.service";
-import { createOrgSigner } from "@/services/solana";
+import { badRequest, forbidden, notFound } from "@/lib/errors";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 import {
   getPrivateChannelRepository,
   getPrivateChannelTransferRepository,
   getPrivateChannelUserRepository,
-  getPrivateChannelVerifiedWalletRepository,
 } from "./context";
 import { requireActiveInstance } from "./helpers";
-import { unsafeAddresses } from "./value-movement-access";
+import { resolveVerifiedSourceWallet, unsafeAddresses } from "./value-movement-access";
 
 interface TransferActorContext {
   auth: ApiKeyContext;
@@ -31,12 +27,6 @@ export interface TransferCreateContext extends TransferActorContext {
     verifiedWalletId: string;
     pubkey: string;
   };
-  /**
-   * Resolved here and handed to the service so a transfer derives its signer once.
-   * This is also the stricter check of the two: it holds the signer against BOTH
-   * the custody wallet and the member's verified pubkey.
-   */
-  signer: Awaited<ReturnType<typeof createOrgSigner>>;
 }
 
 async function resolveTransferActor(
@@ -96,31 +86,13 @@ export async function resolveTransferCreateContext(
   }
 ): Promise<TransferCreateContext> {
   const context = await resolveTransferActor(c, input.channelId);
-  const wallets = await createSigningService(c.env).getWalletsWithProviders(
-    context.auth.organizationId,
-    context.projectId,
-    { includeAllProviders: true }
+  const { wallet } = await resolveVerifiedSourceWallet(
+    c,
+    context,
+    input.walletId,
+    undefined,
+    false
   );
-  const wallet = wallets.find((candidate) => candidate.walletId === input.walletId);
-  if (!wallet) {
-    throw walletNotFound();
-  }
-  // Same second line as the deposit/withdrawal seam: enrolment alone would let
-  // an API key bound to one wallet spend any wallet enrolled in the project.
-  assertApiKeyWalletAccess(context.auth, wallet.walletId, ["payments:write"]);
-
-  const verifiedWallets = await getPrivateChannelVerifiedWalletRepository(c).listByUserAndInstance(
-    context.actor.id,
-    context.instance.id
-  );
-  const verifiedSource = verifiedWallets.find(
-    (verified) => verified.wallet_id === wallet.walletId && verified.pubkey === wallet.publicKey
-  );
-  if (!verifiedSource) {
-    throw forbidden(
-      "The source custody wallet must be enrolled under the project's Private Channels principal."
-    );
-  }
 
   const match = context.recipients.find(
     (candidate) => candidate.id === input.recipientVerifiedWalletId
@@ -146,20 +118,5 @@ export async function resolveTransferCreateContext(
     throw badRequest("System, program, and connected instance addresses cannot be used.");
   }
 
-  let signer: Awaited<ReturnType<typeof createOrgSigner>>;
-  try {
-    signer = await createOrgSigner(
-      c.env,
-      context.auth.organizationId,
-      context.projectId,
-      wallet.walletId
-    );
-  } catch {
-    throw providerUnavailable("The source custody wallet is not currently signable.");
-  }
-  if (signer.address !== wallet.publicKey || signer.address !== verifiedSource.pubkey) {
-    throw badRequest("Resolved signer does not match the verified source custody wallet.");
-  }
-
-  return { ...context, wallet, recipient, signer };
+  return { ...context, wallet, recipient };
 }

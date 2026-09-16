@@ -1,4 +1,5 @@
 import { COUNTRY_CODES } from "@sdp/types/countries";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   CollectedFieldData,
@@ -11,6 +12,7 @@ import { z } from "zod";
 import { SdpPaymentsError } from "../errors";
 
 const countryCodeSchema = z.enum(COUNTRY_CODES);
+const fiatCurrencySchema = z.enum(RAMP_FIAT_CURRENCIES);
 
 /**
  * Builds the ready state for a non-Lightspark ramp counterparty.
@@ -71,6 +73,15 @@ export function countryField(args: {
   return { kind: "country", ...args };
 }
 
+/** Creates a currency requirement field validated against the supported ramp fiat currencies. */
+export function currencyField(args: {
+  key: string;
+  label: string;
+  required: boolean;
+}): RequirementField {
+  return { kind: "currency", ...args };
+}
+
 export function dateField(args: {
   key: string;
   label: string;
@@ -107,6 +118,8 @@ export function fieldToZod(field: RequirementField): z.ZodTypeAny {
     }
     case "country":
       return field.required ? countryCodeSchema : countryCodeSchema.optional();
+    case "currency":
+      return field.required ? fiatCurrencySchema : fiatCurrencySchema.optional();
     case "date": {
       const before = field.before;
       const schema =

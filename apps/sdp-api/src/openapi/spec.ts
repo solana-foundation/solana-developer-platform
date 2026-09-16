@@ -21,6 +21,7 @@ import { registerPolicyPaths } from "./paths/policies";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
+import { registerTransactionsPaths } from "./paths/transactions";
 
 const EARN_TAG_DESCRIPTION =
   "Keyless Earn catalogue, quotes, and unsigned external-wallet builds plus authenticated submission and tenant tracking.";
@@ -158,6 +159,7 @@ function registerPublicPaths(registry: OpenAPIRegistry) {
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
+  registerTransactionsPaths(registry);
   registerPolicyPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
@@ -177,6 +179,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
+  registerTransactionsPaths(registry);
   registerPolicyPaths(registry);
   registerPrivateChannelsPaths(registry);
   registerCompliancePaths(registry);

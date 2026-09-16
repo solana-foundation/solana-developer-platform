@@ -4,6 +4,7 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types";
 import type { Address } from "@solana/kit";
+import { observedTransferKind } from "@/db/repositories/payments.kind";
 import type {
   PaymentTransferDirection as TransferDirection,
   PaymentTransferRow as TransferRow,
@@ -423,6 +424,7 @@ function buildObservedTransferRows(
         amount: formatDecimalAmount(lamports, 9),
         memo: null,
         type: "transfer",
+        kind: observedTransferKind(direction),
         direction,
         status,
         provider: null,
@@ -496,6 +498,7 @@ function buildObservedTransferRows(
         continue;
       }
 
+      const direction = "inbound";
       observedRows.set(dedupeKey, {
         id: `xfr_observed_${destinationWalletId}_${signature}_${mint}_mint`,
         organization_id: context.organizationId,
@@ -509,7 +512,8 @@ function buildObservedTransferRows(
         amount: resolvedUiAmount,
         memo: null,
         type: "transfer",
-        direction: "inbound",
+        kind: observedTransferKind(direction),
+        direction,
         status,
         provider: null,
         provider_reference: null,
@@ -604,6 +608,7 @@ function buildObservedTransferRows(
       amount: resolvedUiAmount,
       memo: null,
       type: "transfer",
+      kind: observedTransferKind(direction),
       direction,
       status,
       provider: null,

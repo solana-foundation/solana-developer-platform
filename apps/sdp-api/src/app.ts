@@ -61,6 +61,7 @@ import policies from "@/routes/policies";
 import privateChannels from "@/routes/private-channels";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
+import transactions from "@/routes/transactions";
 import webhooks from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -373,6 +374,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/wallets", wallets);
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
+  v1.route("/transactions", transactions);
   v1.route("/earn", earn);
   v1.route("/dvp", dvp);
   v1.route("/places", places);

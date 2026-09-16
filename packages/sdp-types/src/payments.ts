@@ -13,6 +13,7 @@ import type {
   WalletOperationStatus,
 } from "./policy";
 import type { RampProviderId } from "./provider-access";
+import type { PaymentTransactionKind } from "./unified-transactions";
 
 export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
   batchSize: 25,
@@ -367,6 +368,7 @@ export interface PaymentTransferSummary {
   signature: string | null;
   error?: string | null;
   type?: PaymentTransferType;
+  kind?: PaymentTransactionKind;
   direction?: string;
   source?: string;
   destination?: string;

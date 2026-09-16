@@ -253,10 +253,10 @@ const contracts: ValueMovingContract[] = [
       evidence: "const scope = { organizationId: auth.organizationId, projectId }",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/private-channels/transfer-access.ts",
-      section: "export async function resolveTransferCreateContext",
-      before: "if (!verifiedSource)",
-      after: "signer = await createOrgSigner(",
+      file: "apps/sdp-api/src/routes/private-channels/handlers/transfers.ts",
+      section: "export async function createPrivateChannelTransfer",
+      before: "const context = await resolveTransferCreateContext(",
+      after: "const signer = await createPrivateChannelSigner(",
     },
     replay: [
       {
