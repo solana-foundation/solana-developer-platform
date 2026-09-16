@@ -1,5 +1,7 @@
 import type { SolanaCluster } from "@sdp/types";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
+import { getI64Decoder, getU8Decoder, getU16Decoder, getU64Codec } from "@solana/codecs-numbers";
+import { getBase58Decoder } from "@solana/codecs-strings";
 import { internalError } from "../../errors";
 import {
   assertRpcServesCluster,
@@ -7,11 +9,8 @@ import {
   fromBase64,
   type RpcAccount,
   type RpcProgramAccount,
-  readIntLe,
-  readUintLe,
   solanaRpcCall,
   toBase58,
-  u64ToLeBytes,
 } from "../../solana-rpc";
 
 /**
@@ -19,9 +18,9 @@ import {
  *
  * ── Why this reads bytes rather than calling the SDK ────────────────────────
  * `@vedatech/svm-sdk` can read all of this, and `@sdp/veda` uses it to. But that
- * SDK is built against `@solana/kit` 7 and this package's only dependency is
- * `@sdp/types`, because it runs inside the HOURLY catalogue cron in both
- * environments. Same rule that keeps klend-sdk out of the Kamino catalogue path.
+ * execution SDK stays outside the hourly catalogue cron. Small Kit codecs
+ * decode the fields here without loading a provider client, the same boundary
+ * that keeps klend-sdk out of the Kamino catalogue path.
  *
  * ── Why the layout is a TABLE, not a list of magic offsets ──────────────────
  * Unlike Kamino — whose offsets had to be located by matching live values
@@ -35,6 +34,12 @@ import {
  * Borsh, so there is no padding: each field's offset is the sum of the sizes
  * before it, and the total is the account's exact byte length.
  */
+
+const u8Decoder = getU8Decoder();
+const u16Decoder = getU16Decoder();
+const u64Codec = getU64Codec();
+const i64Decoder = getI64Decoder();
+const base58Decoder = getBase58Decoder();
 
 const PUBKEY = 32;
 const BOOL = 1;
@@ -223,23 +228,23 @@ export function decodeBoringVault(address: string, data: Uint8Array): VedaVaultA
   // reading the wrong offset, and the one case the size check cannot catch.
   if (shareMint === VEDA_UNSET_AUTHORITY || baseAsset === VEDA_UNSET_AUTHORITY) return null;
 
-  const shareDecimals = Number(readUintLe(data, VAULT.offsets["teller.decimals"], U8));
+  const shareDecimals = u8Decoder.decode(data, VAULT.offsets["teller.decimals"]);
   // Token decimals are bounded at 9 on Solana; anything larger means the
   // decode is wrong, not that Veda invented a 200-decimal share.
   if (shareDecimals > 9) return null;
 
   return {
     address,
-    vaultId: readUintLe(data, VAULT.offsets["config.vaultId"], U64),
+    vaultId: u64Codec.decode(data, VAULT.offsets["config.vaultId"]),
     shareMint,
     baseAsset,
     shareDecimals,
     accountingPaused: data[VAULT.offsets["config.accountingPaused"]] === 1,
     tellerPaused: data[VAULT.offsets["config.tellerPaused"]] === 1,
     withdrawAuthority: pubkeyAt(data, VAULT.offsets["teller.withdrawAuthority"]),
-    lockDurationSeconds: readIntLe(data, VAULT.offsets["config.lockDurationSeconds"], I64),
-    platformFeeBps: Number(readUintLe(data, VAULT.offsets["teller.platformFeeBps"], U16)),
-    performanceFeeBps: Number(readUintLe(data, VAULT.offsets["teller.performanceFeeBps"], U16)),
+    lockDurationSeconds: i64Decoder.decode(data, VAULT.offsets["config.lockDurationSeconds"]),
+    platformFeeBps: u16Decoder.decode(data, VAULT.offsets["teller.platformFeeBps"]),
+    performanceFeeBps: u16Decoder.decode(data, VAULT.offsets["teller.performanceFeeBps"]),
     complianceMode: data[VAULT.offsets["config.complianceMode"]] === 1,
   };
 }
@@ -253,7 +258,7 @@ export function decodeAssetData(data: Uint8Array): VedaAssetAccount | null {
   if (assetMint === VEDA_UNSET_AUTHORITY) return null;
 
   return {
-    vaultId: readUintLe(data, ASSET.offsets.vaultId, U64),
+    vaultId: u64Codec.decode(data, ASSET.offsets.vaultId),
     assetMint,
     allowDeposits: data[ASSET.offsets.allowDeposits] === 1,
     allowWithdrawals: data[ASSET.offsets.allowWithdrawals] === 1,
@@ -352,7 +357,12 @@ async function readVedaVaultAssets(
       // discriminator plus the vault id is already an exact match.
       filters: [
         { memcmp: { offset: 0, bytes: toBase58(Uint8Array.from(VEDA_ASSET_DATA_DISCRIMINATOR)) } },
-        { memcmp: { offset: ASSET.offsets.vaultId, bytes: toBase58(u64ToLeBytes(vaultId)) } },
+        {
+          memcmp: {
+            offset: ASSET.offsets.vaultId,
+            bytes: base58Decoder.decode(u64Codec.encode(vaultId)),
+          },
+        },
       ],
     },
   ]);

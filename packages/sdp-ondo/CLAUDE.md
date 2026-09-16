@@ -52,10 +52,11 @@ Credential path: none. An unreachable or malformed read fails the Ondo pass
 (rows keep their last figures, the outage is logged) rather than nulling the
 rate.
 
-## No chain SDK, no Jupiter client — the swap seam is INJECTED
+## The Jupiter swap seam is injected
 
-This package's dependencies are `@sdp/earn`, `@sdp/solana`, `@sdp/types` and
-nothing else. Executable instructions come through `OndoSwapPort`
+This package uses the generated Kit compute-budget builder for its local
+compute limit; it carries no Jupiter execution client. Swap instructions come
+through `OndoSwapPort`
 (`src/types.ts`), implemented by the API over its reviewed Jupiter trust
 boundary (`apps/sdp-api/src/services/earn/jupiter-swap.service.ts`: pinned
 aggregator/ATA programs, no signer but the owner, encoded amounts matching the

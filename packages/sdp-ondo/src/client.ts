@@ -20,6 +20,10 @@ import type {
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
+import {
+  COMPUTE_BUDGET_PROGRAM_ADDRESS,
+  getSetComputeUnitLimitInstruction,
+} from "@solana-program/compute-budget";
 import { SdpOndoError } from "./errors";
 import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner } from "./types";
 
@@ -51,7 +55,7 @@ import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner }
 /** Both sides of the pair carry 6 decimals; the catalogue read enforces USDY's. */
 const TOKEN_DECIMALS = 6;
 
-const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
+const COMPUTE_BUDGET_PROGRAM_ID = COMPUTE_BUDGET_PROGRAM_ADDRESS;
 // biome-ignore lint/security/noSecrets: public on-chain program id, not a secret.
 const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 // biome-ignore lint/security/noSecrets: public on-chain program id, not a secret.
@@ -73,11 +77,9 @@ const JUPITER_AGGREGATOR_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTa
 export const ONDO_SWAP_COMPUTE_UNIT_LIMIT = 800_000;
 
 function computeUnitLimitInstruction(units: number): EarnVaultInstruction {
-  const data = new Uint8Array(5);
-  data[0] = 2; // SetComputeUnitLimit discriminator
-  new DataView(data.buffer).setUint32(1, units, true);
+  const { programAddress, data } = getSetComputeUnitLimitInstruction({ units });
   return {
-    programAddress: COMPUTE_BUDGET_PROGRAM_ID,
+    programAddress,
     accounts: [],
     data: Buffer.from(data).toString("base64"),
   };

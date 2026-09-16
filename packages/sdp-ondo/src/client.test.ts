@@ -154,6 +154,8 @@ describe("buildVaultDeposit", () => {
       "ComputeBudget111111111111111111111111111111"
     );
     const cuData = Buffer.from(plan.instructions[0]?.data ?? "", "base64");
+    expect([...cuData]).toEqual([2, 0, 53, 12, 0]);
+    expect(plan.instructions[0]?.accounts).toEqual([]);
     expect(cuData.readUInt32LE(1)).toBe(ONDO_SWAP_COMPUTE_UNIT_LIMIT);
     expect(plan.instructions).toHaveLength(2);
     expect(plan.lookupTables).toEqual(["9jQqxu5N6bV1qkh1Yv5F6zSMDNFCV2eqRV8HqvcHhk9V"]);

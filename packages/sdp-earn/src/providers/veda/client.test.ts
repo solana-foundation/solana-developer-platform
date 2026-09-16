@@ -293,6 +293,24 @@ describe("the Veda deployment registry", () => {
 });
 
 describe("decodeBoringVault", () => {
+  it("reads full-width unsigned fields and signed lock durations without precision loss", () => {
+    for (const lockDurationSeconds of [-(1n << 63n), -1n, (1n << 63n) - 1n]) {
+      const decoded = decodeBoringVault(
+        VAULT_ADDRESS,
+        encodeBoringVault({
+          vaultId: (1n << 64n) - 1n,
+          lockDurationSeconds,
+          platformFeeBps: 0x1234,
+          performanceFeeBps: 0xffff,
+        })
+      );
+      assert.equal(decoded?.vaultId, (1n << 64n) - 1n);
+      assert.equal(decoded?.lockDurationSeconds, lockDurationSeconds);
+      assert.equal(decoded?.platformFeeBps, 0x1234);
+      assert.equal(decoded?.performanceFeeBps, 0xffff);
+    }
+  });
+
   it("reads the fields the catalogue needs", () => {
     const decoded = decodeBoringVault(VAULT_ADDRESS, encodeBoringVault());
     assert.deepEqual(decoded, {
@@ -370,6 +388,24 @@ describe("decodeAssetData", () => {
 });
 
 describe("VedaEarnClient.listStrategies", () => {
+  it("encodes the full u64 vault id in the RPC asset filter", async () => {
+    const vaultId = (1n << 64n) - 1n;
+    const calls = stubRpc({
+      accounts: [encodeBoringVault({ vaultId })],
+      assets: [{ pubkey: "asset-1", data: encodeAssetData(USDC_DEVNET, { vaultId }) }],
+    });
+    await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT);
+    const assetRead = calls.find((call) => call.method === "getProgramAccounts");
+    assert.ok(assetRead);
+    assert.deepEqual(assetRead.params[1], {
+      encoding: "base64",
+      filters: [
+        { memcmp: { offset: 0, bytes: toBase58(Uint8Array.from(VEDA_ASSET_DATA_DISCRIMINATOR)) } },
+        { memcmp: { offset: VEDA_ASSET_DATA_LAYOUT.offsets.vaultId, bytes: "jpXCZedGfVQ" } },
+      ],
+    });
+  });
+
   it("fails closed for production, where SDP has no confirmed deployment", async () => {
     // Sandbox (devnet) is deployed now, so only production still exercises the
     // no-deployment guard; devnet's read path is covered by the

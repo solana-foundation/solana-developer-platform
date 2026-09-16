@@ -7,6 +7,7 @@ import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import {
+  computeUnitLimitInstruction,
   fetchJupiterSwapLeg,
   fetchJupiterSwapQuote,
   type JupiterSwapRequest,
@@ -36,6 +37,23 @@ let SOURCE_TOKEN_ACCOUNT: string;
 let DESTINATION_TOKEN_ACCOUNT: string;
 
 const fetchMock = vi.fn();
+
+describe("compute-unit limit wire encoding", () => {
+  it.each([
+    [800_000, [2, 0, 53, 12, 0]],
+    [1.1, [2, 2, 0, 0, 0]],
+    [0, [2, 1, 0, 0, 0]],
+    [-Infinity, [2, 1, 0, 0, 0]],
+    [Infinity, [2, 192, 92, 21, 0]],
+    [2_000_000, [2, 192, 92, 21, 0]],
+    [NaN, [2, 0, 0, 0, 0]],
+  ])("preserves rounding and bounds for %s", (units, bytes) => {
+    const instruction = computeUnitLimitInstruction(units);
+    expect(instruction.programAddress).toBe("ComputeBudget111111111111111111111111111111");
+    expect(instruction.accounts).toEqual([]);
+    expect([...Buffer.from(instruction.data, "base64")]).toEqual(bytes);
+  });
+});
 
 function swapEnv(overrides: Partial<Env> = {}): Env {
   return {

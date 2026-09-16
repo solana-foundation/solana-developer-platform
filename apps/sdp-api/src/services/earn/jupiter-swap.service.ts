@@ -8,6 +8,10 @@ import { isAddress } from "@sdp/solana/address";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { address } from "@solana/kit";
+import {
+  COMPUTE_BUDGET_PROGRAM_ADDRESS,
+  getSetComputeUnitLimitInstruction,
+} from "@solana-program/compute-budget";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
@@ -127,7 +131,7 @@ const ROUTE_PLAN_LENGTH_BYTES = 4;
  * The instruction is constructed HERE, never taken from the wire, so it is
  * not part of the upstream trust boundary above.
  */
-export const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
+export const COMPUTE_BUDGET_PROGRAM_ID = COMPUTE_BUDGET_PROGRAM_ADDRESS;
 export const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
 /** 15% headroom over the simulated consumption, the buffer Jupiter suggests. */
 const COMPUTE_UNIT_HEADROOM_PCT = 15;
@@ -135,10 +139,8 @@ const COMPUTE_UNIT_HEADROOM_PCT = 15;
 /** SetComputeUnitLimit (discriminator 2, u32 LE units), built locally. */
 export function computeUnitLimitInstruction(units: number): EarnVaultInstruction {
   const bounded = Math.min(Math.max(Math.ceil(units), 1), MAX_COMPUTE_UNIT_LIMIT);
-  const data = Buffer.alloc(5);
-  data.writeUInt8(2, 0);
-  data.writeUInt32LE(bounded, 1);
-  return { programAddress: COMPUTE_BUDGET_PROGRAM_ID, accounts: [], data: data.toString("base64") };
+  const { programAddress, data } = getSetComputeUnitLimitInstruction({ units: bounded });
+  return { programAddress, accounts: [], data: Buffer.from(data).toString("base64") };
 }
 
 /** The plan with a locally-built compute-unit limit as its first instruction. */

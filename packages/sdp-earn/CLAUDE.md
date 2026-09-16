@@ -266,7 +266,8 @@ A keyed caller may submit those signed bytes through SDP; an anonymous caller
 broadcasts them directly. Nothing changes on the packages' side because the
 builders always took the owner as a parameter. Those packages depend on this
 one, never the reverse: the hourly catalogue cron must not load a chain SDK it
-never calls.
+never calls. Kit codec leaf packages are allowed for account bytes and integer
+fields; they do not introduce an RPC or provider execution client.
 
 Three Kamino facts drive most of its code, all measured against the live API on
 2026-08-13 (Kamino publishes an agent-readable API index at

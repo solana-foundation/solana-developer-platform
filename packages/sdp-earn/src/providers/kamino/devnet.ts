@@ -59,8 +59,8 @@ export { KAMINO_DEVNET_KVAULT_PROGRAM_ID };
  * `VaultState` account size, and the byte offsets of the fields SDP reads.
  *
  * Kamino publishes no IDL through the API and `@sdp/earn` carries no SDK (its
- * only dependency is `@sdp/types`), so these are read positionally. Every value
- * was verified against a live MAINNET account by locating the field values the
+ * chain utilities are limited to Kit codecs), so these are read positionally.
+ * Every value was verified against a live MAINNET account by locating the fields the
  * REST API independently reports for the same vault — the two sources agreeing
  * is what makes the layout a measurement rather than a guess.
  *

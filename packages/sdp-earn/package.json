@@ -76,7 +76,9 @@
     "lint": "biome check src/"
   },
   "dependencies": {
-    "@sdp/types": "workspace:*"
+    "@sdp/types": "workspace:*",
+    "@solana/codecs-numbers": "catalog:",
+    "@solana/codecs-strings": "catalog:"
   },
   "devDependencies": {
     "@types/node": "26.4.0",

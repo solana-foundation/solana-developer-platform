@@ -1,5 +1,6 @@
 import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
+import { getBase58Decoder } from "@solana/codecs-strings";
 import { internalError, providerNotConfigured } from "./errors";
 import { providerFetchJson } from "./fetch";
 import type { EarnRuntimeEnvironment } from "./types";
@@ -8,12 +9,8 @@ import type { EarnRuntimeEnvironment } from "./types";
  * Raw Solana JSON-RPC for CATALOGUE reads, shared by every provider whose shelf
  * lives on chain (Kamino's devnet vaults, Veda's).
  *
- * ── Why this package speaks JSON-RPC at all ─────────────────────────────────
- * `@sdp/earn` runs inside the hourly catalogue cron and its only dependency is
- * `@sdp/types`. A chain SDK here would be loaded on every pass in both
- * environments to read a handful of accounts, which is why the execution
- * packages (`@sdp/kamino`, `@sdp/veda`) exist as separate consumers. The cost of
- * that rule is this file: base58, base64 and one RPC helper, hand-rolled.
+ * Catalogue reads use Kit's small codec packages; provider execution SDKs stay
+ * in their separate adapters so the hourly cron does not load unused clients.
  *
  * Everything goes through `providerFetchJson`, so timeouts and the error
  * taxonomy are the package's rather than bespoke per provider.
@@ -49,75 +46,16 @@ export function resolveCatalogueRpcUrl(
   return env.SOLANA_RPC_URL?.trim() ?? "";
 }
 
-// biome-ignore lint/security/noSecrets: the bitcoin/Solana base58 alphabet
-const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const base58Decoder = getBase58Decoder();
 
-/**
- * Encode bytes as base58 — addresses read out of account data, and the
- * discriminator bytes a `memcmp` filter compares against.
- *
- * Hand-rolled because importing `@solana/*` for one function would give this
- * package its first non-`@sdp` dependency.
- */
+/** Encode account addresses and memcmp discriminators, preserving leading zeros. */
 export function toBase58(bytes: Uint8Array): string {
-  let value = 0n;
-  for (const byte of bytes) {
-    value = (value << 8n) + BigInt(byte);
-  }
-
-  let encoded = "";
-  while (value > 0n) {
-    const remainder = Number(value % 58n);
-    value /= 58n;
-    encoded = BASE58_ALPHABET[remainder] + encoded;
-  }
-
-  // Leading zero bytes are significant and carry no value in the integer above:
-  // each encodes as '1'. Dropping them yields a shorter string that decodes to
-  // a DIFFERENT address, which would silently mis-key a vault.
-  for (const byte of bytes) {
-    if (byte !== 0) break;
-    encoded = `1${encoded}`;
-  }
-
-  return encoded === "" ? "1" : encoded;
+  return base58Decoder.decode(bytes) || "1";
 }
 
-/** `atob` rather than `Buffer`, so this stays runtime-agnostic. */
+/** Keep atob's rejection of malformed RPC data in every runtime. */
 export function fromBase64(data: string): Uint8Array {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-/** Little-endian u64 as raw bytes — the wire form of an Anchor `u64` filter. */
-export function u64ToLeBytes(value: bigint): Uint8Array {
-  const bytes = new Uint8Array(8);
-  let remaining = value;
-  for (let i = 0; i < 8; i += 1) {
-    bytes[i] = Number(remaining & 0xffn);
-    remaining >>= 8n;
-  }
-  return bytes;
-}
-
-/** Read a little-endian unsigned integer of `length` bytes at `offset`. */
-export function readUintLe(data: Uint8Array, offset: number, length: number): bigint {
-  let value = 0n;
-  for (let i = length - 1; i >= 0; i -= 1) {
-    value = (value << 8n) + BigInt(data[offset + i] as number);
-  }
-  return value;
-}
-
-/** Read a little-endian SIGNED integer of `length` bytes at `offset`. */
-export function readIntLe(data: Uint8Array, offset: number, length: number): bigint {
-  const unsigned = readUintLe(data, offset, length);
-  const bound = 1n << BigInt(length * 8);
-  return unsigned >= bound >> 1n ? unsigned - bound : unsigned;
+  return Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0));
 }
 
 /** True when every byte in `[offset, offset + length)` matches `expected`. */
