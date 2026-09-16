@@ -3,7 +3,12 @@ import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "../../../errors";
 import type { RampRuntimeContext } from "../../types";
 import { BvnkRampClient } from "./client";
-import type { CreateBvnkCustomerV2Input } from "./schemas";
+import { bvnkRuleEntityFromCustomer } from "./provider-data";
+import {
+  bvnkCustomerSchema,
+  type CreateBvnkAgreementSessionInput,
+  type CreateBvnkCustomerInput,
+} from "./schemas";
 
 const runtimeContext = {
   env: {
@@ -42,6 +47,29 @@ function queueFetch(...responses: Response[]): { requests: { url: string; init: 
   return { requests };
 }
 
+const sessionResponse = {
+  reference: "c1d91c8b-f4a6-469e-953d-7344fdb6858c",
+  accountReference: "07f1fe9b-c14e-4a1d-a3fa-0768bac98033",
+  status: "PENDING",
+  customerType: "INDIVIDUAL",
+  useCase: "EMBEDDED_FIAT_ACCOUNTS",
+  countryCode: "US",
+  expiresOn: "2027-09-16T13:07:34.439862563Z",
+  agreements: [
+    {
+      status: "PENDING",
+      name: "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
+      displayName: "Embedded US Partner Platform Customers Agreement",
+      description: "Embedded US Partner Platform Customers Agreement",
+      url: "https://help.bvnk.com/hc/en-us/sections/27816998470930-BVNK-US-Partner-Platform-Customers",
+      privacyPolicyName: "End customer Privacy Policy",
+      privacyPolicyDescription:
+        "Privacy Policy describes our data handling practices when you access content we own or operate on the website located at www.bvnk.com or any other associated websites we own or operate",
+      privacyPolicyUrl: "https://help.bvnk.com/hc/en-us/articles/7662076884882-Privacy-Policy",
+    },
+  ],
+};
+
 const individual = {
   address: {
     addressLine1: "1 Main Street",
@@ -55,6 +83,7 @@ const individual = {
   lastName: "Doe",
   birthCountryCode: "US",
   nationality: "US",
+  emailAddress: "probe+178****5742@example.com",
   taxIdentification: { number: "123-45-6789", taxResidenceCountryCode: "US" },
   cdd: {
     employmentStatus: "SALARIED",
@@ -65,189 +94,271 @@ const individual = {
     estimatedYearlyIncome: "INCOME_0_TO_50K",
     employmentIndustrySector: "INVESTMENT",
   },
-} satisfies CreateBvnkCustomerV2Input["individual"];
+} satisfies CreateBvnkCustomerInput["individual"];
 
-const customerSummary = {
-  id: "customer-id",
-  reference: "customer-reference",
+const createdCustomerResponse = {
+  reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
   status: "PENDING",
-  type: "INDIVIDUAL",
-  model: "EMBEDDED",
-  useCase: "STABLECOIN_PAYOUTS",
 };
 
-describe("BvnkRampClient v2 customer surfaces", () => {
-  it("creates a v2 customer and sends the required idempotency key", async () => {
-    const { requests } = queueFetch(respond(customerSummary, 201));
+const customerDetailResponse = {
+  reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+  externalReference: "probe_v1_1789564047204",
+  status: "INFO_REQUIRED",
+  type: "INDIVIDUAL",
+  flowType: "API",
+  individual: {
+    person: {
+      reference: "6273b651-74c1-47c2-84d4-0052238a6232",
+      firstName: "Jane",
+      lastName: "Doe",
+      dateOfBirth: "1984-06-30",
+      address: {
+        addressLine1: "1 Main Street",
+        city: "Austin",
+        postalCode: "78701",
+        stateCode: "TX",
+        state: "Texas",
+        countryCode: "US",
+        country: "United States",
+      },
+    },
+    details: {
+      nationality: "US",
+      birthCountryCode: "US",
+      contactInfo: { emailAddress: "probe+178****5742@example.com" },
+      taxIdentification: { number: "123-45-6789", taxResidenceCountryCode: "US" },
+    },
+    cdd: {
+      intendedUseOfAccount: "TRANSFERS_OWN_WALLET",
+      pepStatus: "NOT_PEP",
+      expectedMonthlyVolume: { amount: 1000, currency: "USD" },
+      employmentStatus: "SALARIED",
+      sourceOfFunds: "SALARY",
+      estimatedYearlyIncome: "INCOME_0_TO_50K",
+      employmentIndustrySector: "INVESTMENT",
+    },
+  },
+  verification: {
+    status: "init",
+    url: "https://in.sumsub.com/websdk/p/sbx_EDHeJPPmWnBSU2Es",
+    expiresAt: "2026-10-16T13:07:54.354482408Z",
+  },
+};
 
-    const result = await new BvnkRampClient().createCustomerV2(runtimeContext, {
+const searchResponse = {
+  totalElements: 1,
+  totalPages: 1,
+  content: [
+    {
+      id: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      reference: "probe_v1_1789564047204",
+      status: "ACTIONS_REQUIRED",
+      type: "INDIVIDUAL",
+      model: "EMBEDDED",
+      name: "Jane Doe",
+      createdAt: "2026-09-16T13:07:50.438748Z",
+    },
+  ],
+  pageable: { pageNumber: 0, pageSize: 64 },
+  hasNext: false,
+};
+
+const duplicateExternalReferenceError = {
+  code: "ACCOUNTS-2000",
+  traceId: "6aaa94d1184d65e454d08a790495961b",
+  status: "Bad Request",
+  message: "Invalid request",
+  details: {
+    errors: {
+      externalReference: [
+        "Customer with external reference: probe_v1_1789564047204 already exists",
+      ],
+      signedAgreementSessionReference: [
+        "Agreement session with reference: c1d91c8b-f4a6-469e-953d-7344fdb6858c is already assigned to the customer",
+      ],
+    },
+  },
+};
+
+describe("BvnkRampClient v1 customer surfaces", () => {
+  it("creates an agreement session for the residence country", async () => {
+    const { requests } = queueFetch(respond(sessionResponse, 201));
+
+    const result = await new BvnkRampClient().createAgreementSession(runtimeContext, {
+      countryCode: "US" as CreateBvnkAgreementSessionInput["countryCode"],
+    });
+
+    assert.deepEqual(result, {
+      reference: sessionResponse.reference,
+      status: "PENDING",
+      agreements: sessionResponse.agreements.map((agreement) => ({
+        status: agreement.status,
+        name: agreement.name,
+        displayName: agreement.displayName,
+        description: agreement.description,
+        url: agreement.url,
+        privacyPolicyUrl: agreement.privacyPolicyUrl,
+      })),
+    });
+    assert.equal(new URL(requests[0].url).pathname, "/platform/v1/customers/agreement/sessions");
+    assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
+      customerType: "INDIVIDUAL",
+      countryCode: "US",
+      useCase: "EMBEDDED_FIAT_ACCOUNTS",
+    });
+  });
+
+  it("signs an agreement session with the consenting IP and accepts the empty 204", async () => {
+    const { requests } = queueFetch(new Response(null, { status: 204 }));
+
+    const result = await new BvnkRampClient().signAgreementSession(runtimeContext, {
+      reference: sessionResponse.reference,
+      ipAddress: "203.0.113.10",
+    });
+
+    assert.equal(result, undefined);
+    assert.equal(
+      new URL(requests[0].url).pathname,
+      `/platform/v1/customers/agreement/sessions/${sessionResponse.reference}`
+    );
+    assert.equal(requests[0].init.method, "PUT");
+    assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
+      status: "SIGNED",
+      ipAddress: "203.0.113.10",
+    });
+  });
+
+  it("creates a v1 customer with the idempotency header and no useCase", async () => {
+    const { requests } = queueFetch(respond(createdCustomerResponse, 201));
+
+    const result = await new BvnkRampClient().createCustomer(runtimeContext, {
       idempotencyKey: "customer-key",
-      useCase: "STABLECOIN_PAYOUTS",
-      reference: "customer-reference",
+      externalReference: "probe_v1_1789564047204",
+      signedAgreementSessionReference: sessionResponse.reference,
       individual,
     });
 
-    assert.deepEqual(result, customerSummary);
-    assert.equal(new URL(requests[0].url).pathname, "/platform/v2/customers");
-    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "customer-key");
-    assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
-      useCase: "STABLECOIN_PAYOUTS",
-      reference: "customer-reference",
+    assert.deepEqual(result, createdCustomerResponse);
+    assert.equal(new URL(requests[0].url).pathname, "/platform/v1/customers");
+    assert.equal(new Headers(requests[0].init.headers).get("X-Idempotency-Key"), "customer-key");
+    const body = JSON.parse(String(requests[0].init.body)) as Record<string, unknown>;
+    assert.equal(body.useCase, undefined);
+    assert.equal(body.description, undefined);
+    assert.deepEqual(body, {
+      type: "individual",
+      externalReference: "probe_v1_1789564047204",
+      signedAgreementSessionReference: sessionResponse.reference,
       individual,
     });
   });
 
-  it("preserves dotted validation errors from v2 customer creation", async () => {
-    queueFetch(
-      respond(
-        {
-          message: "Validation failed",
-          details: { errors: { "individual.birthCountryCode": "Required" } },
+  it("returns the typed v1 customer detail including its verification link", async () => {
+    queueFetch(respond(customerDetailResponse));
+
+    const result = await new BvnkRampClient().getCustomer(runtimeContext, {
+      reference: createdCustomerResponse.reference,
+    });
+
+    assert.deepEqual(result, {
+      reference: customerDetailResponse.reference,
+      status: "INFO_REQUIRED",
+      verification: {
+        status: "init",
+        url: customerDetailResponse.verification.url,
+      },
+      individual: {
+        person: {
+          firstName: "Jane",
+          lastName: "Doe",
+          dateOfBirth: "1984-06-30",
+          address: {
+            addressLine1: "1 Main Street",
+            city: "Austin",
+            postalCode: "78701",
+            stateCode: "TX",
+            countryCode: "US",
+          },
         },
-        400
-      )
+      },
+    });
+  });
+
+  it("resolves a PENDING v1 customer whose verification block has no Sumsub link", async () => {
+    queueFetch(
+      respond({
+        ...customerDetailResponse,
+        status: "PENDING",
+        verification: { status: "pending" },
+      })
     );
+
+    const result = await new BvnkRampClient().getCustomer(runtimeContext, {
+      reference: createdCustomerResponse.reference,
+    });
+
+    assert.deepEqual(result, {
+      reference: customerDetailResponse.reference,
+      status: "PENDING",
+      verification: { status: "pending" },
+      individual: {
+        person: {
+          firstName: "Jane",
+          lastName: "Doe",
+          dateOfBirth: "1984-06-30",
+          address: {
+            addressLine1: "1 Main Street",
+            city: "Austin",
+            postalCode: "78701",
+            stateCode: "TX",
+            countryCode: "US",
+          },
+        },
+      },
+    });
+    const verification = result.verification;
+    assert.equal(verification === undefined ? undefined : verification.url, undefined);
+  });
+
+  it("searches v2 customers by external reference for crash recovery", async () => {
+    const { requests } = queueFetch(respond(searchResponse));
+
+    const result = await new BvnkRampClient().searchCustomersV2ByReference(runtimeContext, {
+      reference: "probe_v1_1789564047204",
+    });
+
+    assert.deepEqual(result, {
+      content: [{ id: searchResponse.content[0].id, status: searchResponse.content[0].status }],
+    });
+    assert.equal(new URL(requests[0].url).pathname, "/platform/v2/customers");
+    assert.equal(new URL(requests[0].url).searchParams.get("reference"), "probe_v1_1789564047204");
+  });
+
+  it("surfaces the typed conflict envelope when the external reference is already taken", async () => {
+    queueFetch(respond(duplicateExternalReferenceError, 400));
 
     await assert.rejects(
       () =>
-        new BvnkRampClient().createCustomerV2(runtimeContext, {
+        new BvnkRampClient().createCustomer(runtimeContext, {
           idempotencyKey: "customer-key",
-          useCase: "STABLECOIN_PAYOUTS",
+          externalReference: "probe_v1_1789564047204",
+          signedAgreementSessionReference: sessionResponse.reference,
           individual,
         }),
       (error: unknown) => {
         assert.equal(error instanceof SdpPaymentsError, true);
         if (!(error instanceof SdpPaymentsError)) return false;
-        assert.equal(error.message, "BVNK request failed with status 400: Validation failed");
+        assert.equal(
+          error.message,
+          "BVNK request failed with status 400: ACCOUNTS-2000 Invalid request"
+        );
         assert.deepEqual(error.details, {
-          errors: { "individual.birthCountryCode": "Required" },
+          code: "ACCOUNTS-2000",
+          errors: duplicateExternalReferenceError.details.errors,
         });
         return true;
       }
     );
-  });
-
-  it("returns the full typed v2 customer detail including its fresh link", async () => {
-    const response = {
-      ...customerSummary,
-      status: "ACTIONS_REQUIRED",
-      authenticatedLink: {
-        link: "https://onboarding.example/customer",
-        expiresAt: "2030-01-01T00:00:00Z",
-      },
-      requiredActions: [{ type: "DATA", code: "TAX_ID", status: "REQUIRED" }],
-    };
-    queueFetch(respond({ ...response, individual }));
-
-    const result = await new BvnkRampClient().getCustomerV2(runtimeContext, {
-      id: customerSummary.id,
-    });
-
-    assert.deepEqual(result, response);
-  });
-
-  it("does not put a v2 customer response body in an error message", async () => {
-    const pii = "123-45-6789";
-    queueFetch(respond({ individual: { taxIdentification: { number: pii } } }, 500));
-
-    await assert.rejects(
-      () => new BvnkRampClient().getCustomerV2(runtimeContext, { id: customerSummary.id }),
-      (error: unknown) => {
-        assert.equal(error instanceof SdpPaymentsError, true);
-        if (!(error instanceof SdpPaymentsError)) return false;
-        assert.equal(error.message.includes(pii), false);
-        return true;
-      }
-    );
-  });
-});
-
-describe("BvnkRampClient v2 agreement surfaces", () => {
-  it("creates agreements", async () => {
-    const response = {
-      id: "working-set-id",
-      reference: "customer-reference",
-      agreements: [
-        {
-          id: "agreement-id",
-          status: "PENDING",
-          declinable: false,
-          name: "Terms",
-          description: "Platform terms and conditions",
-        },
-      ],
-      signingUrl: "https://onboarding.example/sign",
-    };
-    const { requests } = queueFetch(respond(response));
-
-    const result = await new BvnkRampClient().createAgreementsV2(runtimeContext, {
-      idempotencyKey: "agreement-key",
-      reference: "customer-reference",
-      useCase: "STABLECOIN_PAYOUTS",
-      customerType: "INDIVIDUAL",
-      countryCode: "US",
-    });
-
-    assert.deepEqual(result, response);
-    assert.equal(new URL(requests[0].url).pathname, "/platform/v2/agreements");
-    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "agreement-key");
-  });
-
-  it("gets agreement content", async () => {
-    const response = {
-      downloadUrl: "https://files.example/agreement.pdf",
-      expiresAt: null,
-    };
-    queueFetch(respond(response));
-
-    const result = await new BvnkRampClient().getAgreementContentV2(runtimeContext, {
-      id: "agreement-id",
-    });
-
-    assert.deepEqual(result, response);
-  });
-
-  it("responds to agreements and parses per-agreement results", async () => {
-    const response = {
-      content: [{ agreementId: "agreement-id", status: "ACCEPTED" }],
-      totalElements: 1,
-      totalPages: 1,
-      hasNext: false,
-    };
-    const { requests } = queueFetch(respond(response));
-
-    const result = await new BvnkRampClient().respondAgreementsV2(runtimeContext, {
-      idempotencyKey: "response-key",
-      reference: "customer-reference",
-      actions: [{ agreementId: "agreement-id", type: "ACCEPT" }],
-    });
-
-    assert.deepEqual(result, response);
-    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "response-key");
-  });
-
-  it("lists customer agreements", async () => {
-    const response = {
-      totalElements: 1,
-      totalPages: 1,
-      content: [
-        {
-          id: "assigned-agreement-id",
-          agreement: { version: null, title: "Terms", locale: null },
-          status: "ACCEPTED",
-          respondedAt: null,
-          respondedToDocumentChecksum: null,
-        },
-      ],
-      hasNext: false,
-    };
-    queueFetch(respond(response));
-
-    const result = await new BvnkRampClient().listCustomerAgreementsV2(runtimeContext, {
-      customerId: customerSummary.id,
-    });
-
-    assert.deepEqual(result, response);
   });
 });
 
@@ -278,7 +389,7 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
       idempotencyKey: "wallet-key",
       currency: "USD",
       name: "USD Wallet",
-      customerId: customerSummary.id,
+      customerId: "customer-id",
       profileId: "fiat:usd:profile",
     });
 
@@ -311,5 +422,47 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
     const result = await new BvnkRampClient().listLedgerWalletProfilesV2(runtimeContext);
 
     assert.deepEqual(result, response);
+  });
+});
+
+describe("BvnkRampClient on-ramp payment rules", () => {
+  it("sends the individual entity mapped from the v1 customer person", async () => {
+    const ruleResponse = {
+      id: "98c0bb03-567f-11f0-b26e-6b1848874a27",
+      reference: "sdp_rule_1",
+      status: "ACTIVE",
+    };
+    const { requests } = queueFetch(respond(ruleResponse, 201));
+
+    const customer = bvnkCustomerSchema.parse(customerDetailResponse);
+    const result = await new BvnkRampClient().createOnrampRule(runtimeContext, {
+      reference: "sdp_rule_1",
+      walletId: "a:24122329329347:HsdJVhW:1",
+      currency: "USDC",
+      network: "SOLANA",
+      beneficiaryAddress: "dest",
+      entity: bvnkRuleEntityFromCustomer(customer),
+    });
+
+    assert.equal(result.id, ruleResponse.id);
+    assert.equal(new URL(requests[0].url).pathname, "/payment/v1/rules");
+    const body = JSON.parse(String(requests[0].init.body)) as {
+      beneficiary: { entity: unknown };
+    };
+    assert.deepEqual(body.beneficiary.entity, {
+      type: "INDIVIDUAL",
+      relationshipType: "SELF_OWNED",
+      customerIdentifier: customerDetailResponse.reference,
+      firstName: "Jane",
+      lastName: "Doe",
+      dateOfBirth: "1984-06-30",
+      address: {
+        addressLine1: "1 Main Street",
+        city: "Austin",
+        region: "TX",
+        postCode: "78701",
+        country: "US",
+      },
+    });
   });
 });

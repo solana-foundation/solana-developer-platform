@@ -14,11 +14,11 @@ const usCollectedData = {
   lastName: "Lovelace",
   dateOfBirth: "1815-12-10",
   email: "ada@example.com",
-  "address.addressLine1": "1 Main Street",
+  "address.line1": "1 Main Street",
   "address.city": "Austin",
   "address.postalCode": "78701",
   "address.countryCode": "US",
-  "address.stateCode": "MO",
+  "address.subdivisionCode": "MO",
   "taxIdentification.number": "123-45-6789",
   birthCountryCode: "GB",
   nationality: "GB",
@@ -96,11 +96,11 @@ describe("BVNK counterparty builders", () => {
     const usKeys = flatKeys("US");
     const gbKeys = flatKeys("GB");
 
-    assert.equal(usKeys.includes("address.stateCode"), true);
+    assert.equal(usKeys.includes("address.subdivisionCode"), true);
     assert.equal(usKeys.includes("taxIdentification.number"), true);
     assert.equal(usKeys.includes("cdd.estimatedYearlyIncome"), true);
     assert.equal(usKeys.includes("taxIdentification.taxResidenceCountryCode"), false);
-    assert.equal(gbKeys.includes("address.stateCode"), false);
+    assert.equal(gbKeys.includes("address.subdivisionCode"), false);
     assert.equal(gbKeys.includes("taxIdentification.number"), true);
     assert.equal(gbKeys.includes("cdd.estimatedYearlyIncome"), false);
     assert.equal(

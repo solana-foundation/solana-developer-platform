@@ -325,43 +325,13 @@ const BVNK_ONRAMP_US_FIELDS: RequirementField[] = [
 ];
 
 /**
- * Residence countries BVNK publishes an individual onboarding agreement for:
- * the US and the EEA. BVNK exposes no positive list, so this stays the set
- * SDP has verified agreements exist for rather than every non-prohibited country.
+ * Residence countries BVNK onboards under the merchant account's legal entity:
+ * v1 agreement sessions are evaluated against that entity, and the sandbox
+ * entity onboards US residents only — DE/SE map to an ACCOUNTS-2000 "Customer
+ * cannot be onboarded under the assigned legal entity" today. Widen this per
+ * merchant once its legal entity is verified.
  */
-const BVNK_RESIDENCE_COUNTRIES = [
-  "US",
-  "AT",
-  "BE",
-  "BG",
-  "HR",
-  "CY",
-  "CZ",
-  "DK",
-  "EE",
-  "FI",
-  "FR",
-  "DE",
-  "GR",
-  "HU",
-  "IS",
-  "IE",
-  "IT",
-  "LV",
-  "LI",
-  "LT",
-  "LU",
-  "MT",
-  "NL",
-  "NO",
-  "PL",
-  "PT",
-  "RO",
-  "SK",
-  "SI",
-  "ES",
-  "SE",
-] as const satisfies readonly CountryCode[];
+const BVNK_RESIDENCE_COUNTRIES = ["US"] as const satisfies readonly CountryCode[];
 
 /**
  * First BVNK step: collects only the tax-residence country so agreements can
@@ -390,12 +360,12 @@ function bvnkAddressGroup(countryCode: CountryCode): RequirementField {
     label: "Residential address",
     required: true,
     fields: [
-      textField({ key: "address.addressLine1", label: "Address line 1", required: true }),
+      textField({ key: "address.line1", label: "Address line 1", required: true }),
       textField({ key: "address.city", label: "City", required: true }),
       ...(countryCode === "US"
         ? [
             selectField({
-              key: "address.stateCode",
+              key: "address.subdivisionCode",
               label: "State",
               required: true,
               options: BVNK_US_MTL_STATE_OPTIONS,

@@ -1,12 +1,11 @@
-import { createHmac } from "node:crypto";
 import { hashString } from "@sdp/payments/hash";
+import { buildBvnkCustomerRequest } from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import { buildBvnkCustomerExternalReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
   BVNK_RESIDENCE_FIELDS,
   BVNK_US_MTL_STATES,
   bvnkOnrampFields,
 } from "@sdp/payments/ramps/providers/bvnk/requirements";
-import type { ExecutionContext } from "hono";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
@@ -25,10 +24,74 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_PROJECT_ID = "prj_counterparties_test";
-const BVNK_WEBHOOK_SECRET = "bvnk_counterparties_webhook_secret";
 const TEST_CP_CUSTODY_WALLET_ID = "cwlt_counterparties_test";
 const TEST_CP_CUSTODY_CONFIG_ID = "ccfg_counterparties_test";
 const TEST_CP_WALLET_PUBLIC_KEY = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
+
+const BVNK_SESSION_REFERENCE = "c1d91c8b-f4a6-469e-953d-7344fdb6858c";
+const BVNK_CUSTOMER_REFERENCE = "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3";
+const BVNK_SESSION_AGREEMENT = {
+  status: "PENDING",
+  name: "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
+  displayName: "Embedded US Partner Platform Customers Agreement",
+  description: "Embedded US Partner Platform Customers Agreement",
+  url: "https://help.bvnk.com/hc/en-us/sections/27816998470930-BVNK-US-Partner-Platform-Customers",
+  privacyPolicyName: "End customer Privacy Policy",
+  privacyPolicyDescription:
+    "Privacy Policy describes our data handling practices when you access content we own or operate on the website located at www.bvnk.com or any other associated websites we own or operate",
+  privacyPolicyUrl: "https://help.bvnk.com/hc/en-us/articles/7662076884882-Privacy-Policy",
+} as const;
+const BVNK_STORED_AGREEMENT = {
+  name: BVNK_SESSION_AGREEMENT.name,
+  displayName: BVNK_SESSION_AGREEMENT.displayName,
+  description: BVNK_SESSION_AGREEMENT.description,
+  url: BVNK_SESSION_AGREEMENT.url,
+  privacyPolicyUrl: BVNK_SESSION_AGREEMENT.privacyPolicyUrl,
+} as const;
+const BVNK_CUSTOMER_DETAIL = {
+  reference: BVNK_CUSTOMER_REFERENCE,
+  externalReference: "probe_v1_1789564047204",
+  status: "INFO_REQUIRED",
+  type: "INDIVIDUAL",
+  flowType: "API",
+  individual: {
+    person: {
+      reference: "6273b651-74c1-47c2-84d4-0052238a6232",
+      firstName: "Jane",
+      lastName: "Doe",
+      dateOfBirth: "1984-06-30",
+      address: {
+        addressLine1: "1 Main Street",
+        city: "Austin",
+        postalCode: "78701",
+        stateCode: "TX",
+        state: "Texas",
+        countryCode: "US",
+        country: "United States",
+      },
+    },
+    details: {
+      nationality: "US",
+      birthCountryCode: "US",
+      contactInfo: { emailAddress: "probe+178****5742@example.com" },
+      taxIdentification: { number: "123-45-6789", taxResidenceCountryCode: "US" },
+    },
+    cdd: {
+      intendedUseOfAccount: "TRANSFERS_OWN_WALLET",
+      pepStatus: "NOT_PEP",
+      expectedMonthlyVolume: { amount: 1000, currency: "USD" },
+      employmentStatus: "SALARIED",
+      sourceOfFunds: "SALARY",
+      estimatedYearlyIncome: "INCOME_0_TO_50K",
+      employmentIndustrySector: "INVESTMENT",
+    },
+  },
+  verification: {
+    status: "init",
+    url: "https://in.sumsub.com/websdk/p/sbx_EDHeJPPmWnBSU2Es",
+    expiresAt: "2026-10-16T13:07:54.354482408Z",
+  },
+} as const;
 
 describe("Counterparties Routes", () => {
   let apiKeyHash: string;
@@ -168,33 +231,6 @@ describe("Counterparties Routes", () => {
       },
       env
     );
-
-  async function sendBvnkWebhook(payload: Record<string, unknown>) {
-    const body = JSON.stringify({ ...payload, timestamp: new Date().toISOString() });
-    const execution: Promise<unknown>[] = [];
-    const executionContext: ExecutionContext = {
-      waitUntil(promise) {
-        execution.push(promise);
-      },
-      passThroughOnException() {},
-      props: {},
-    };
-    const response = await app.request(
-      "/webhooks/payments/ramps/sandbox/bvnk",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Signature": createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64"),
-        },
-        body,
-      },
-      env,
-      executionContext
-    );
-    await Promise.allSettled(execution);
-    return response;
-  }
 
   /**
    * Inserts one provider-account fixture with explicit timestamps.
@@ -1014,58 +1050,50 @@ describe("Counterparties Routes", () => {
       expect(body.error.message).toBe("API key is not authorized for the requested wallet");
     });
 
-    it("mints agreements for the residence country and persists the link before PII", async () => {
+    it("mints a v1 agreement session for the residence country and persists the link before PII", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_residence" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      const agreementId = "agreement_1";
       const requests: string[] = [];
-      const agreementBodies: unknown[] = [];
+      const sessionBodies: unknown[] = [];
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
         const path = new URL(String(input)).pathname;
         requests.push(path);
         if (init !== undefined && init.body !== undefined) {
-          agreementBodies.push(JSON.parse(String(init.body)));
+          sessionBodies.push(JSON.parse(String(init.body)));
         }
-        if (path === "/platform/v2/agreements") {
+        if (path === "/platform/v1/customers/agreement/sessions") {
           return new Response(
             JSON.stringify({
-              id: "working-set-1",
-              reference: "reference",
-              agreements: [
-                {
-                  id: agreementId,
-                  status: "PENDING",
-                  declinable: false,
-                  name: "EPC Partner Platform Agreement (US)",
-                  description: "Terms and conditions for EPC Partner Platform customers in the US",
-                },
-                {
-                  id: "agreement-2",
-                  status: "ACCEPTED",
-                  declinable: false,
-                  name: "EPC Partner Platform Agreement (US)",
-                  description: "Terms and conditions for EPC Partner Platform customers in the US",
-                },
-              ],
-              signingUrl: "https://example.invalid/sign",
+              reference: BVNK_SESSION_REFERENCE,
+              accountReference: "07f1fe9b-c14e-4a1d-a3fa-0768bac98033",
+              status: "PENDING",
+              customerType: "INDIVIDUAL",
+              useCase: "EMBEDDED_FIAT_ACCOUNTS",
+              countryCode: "US",
+              expiresOn: "2027-09-16T13:07:34.439862563Z",
+              agreements: [BVNK_SESSION_AGREEMENT],
             }),
             { status: 201, headers: { "Content-Type": "application/json" } }
           );
         }
-        return new Response(
-          JSON.stringify({
-            downloadUrl: "https://example.invalid/terms.pdf",
-            filename: null,
-            expiresAt: null,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
+        throw new Error(`unexpected fetch: ${path}`);
       });
       env.BVNK_SANDBOX_WALLET_ID = "wallet";
       env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
       try {
+        await getDb(env)
+          .prepare(
+            `INSERT INTO counterparty_provider_accounts (
+               id, organization_id, project_id, counterparty_id, provider,
+               provider_customer_reference, kind, status, metadata
+             ) VALUES (?, ?, ?, ?, 'bvnk', 'stale-working-set', 'customer_link', 'archived', ?)`
+          )
+          .bind(`cpa_archived_${counterparty.id}`, TEST_ORG.id, TEST_PROJECT_ID, counterparty.id, {
+            residenceCountryCode: "US",
+          })
+          .run();
         const response = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements`,
           {
@@ -1087,47 +1115,37 @@ describe("Counterparties Routes", () => {
           provider: "bvnk",
           direction: "onramp",
           status: "customer_agreement_required",
-          agreements: [
-            {
-              id: agreementId,
-              name: "EPC Partner Platform Agreement (US)",
-              description: "Terms and conditions for EPC Partner Platform customers in the US",
-              downloadUrl: "https://example.invalid/terms.pdf",
-            },
-          ],
+          agreements: [BVNK_STORED_AGREEMENT],
         });
-        expect(agreementBodies[0]).toMatchObject({ countryCode: "US" });
-        expect(requests).toEqual([
-          "/platform/v2/agreements",
-          `/platform/v2/agreements/${agreementId}/content`,
-        ]);
-        expect(requests).not.toContain("/platform/v2/customers");
+        expect(sessionBodies[0]).toEqual({
+          customerType: "INDIVIDUAL",
+          countryCode: "US",
+          useCase: "EMBEDDED_FIAT_ACCOUNTS",
+        });
+        expect(requests).toEqual(["/platform/v1/customers/agreement/sessions"]);
         const row = await getDb(env)
           .prepare(
-            `SELECT provider_customer_reference, metadata FROM counterparty_provider_accounts
+            `SELECT provider_customer_reference, metadata, status FROM counterparty_provider_accounts
              WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
           )
           .bind(counterparty.id)
-          .first<{ provider_customer_reference: string; metadata: Record<string, unknown> }>();
+          .first<{
+            provider_customer_reference: string;
+            metadata: Record<string, unknown>;
+            status: string;
+          }>();
         if (!row) {
           throw new Error("Expected BVNK customer-link row");
         }
-        expect(row.provider_customer_reference).toBe("working-set-1");
-        expect(row.metadata).toMatchObject({
+        expect(row.status).toBe("active");
+        expect(row.provider_customer_reference).toBe(
+          buildBvnkCustomerExternalReference(counterparty.id)
+        );
+        expect(row.metadata).toEqual({
           residenceCountryCode: "US",
-          agreements: {
-            entries: {
-              [agreementId]: {
-                status: "PENDING",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-              "agreement-2": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-            },
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
           },
         });
       } finally {
@@ -1138,7 +1156,7 @@ describe("Counterparties Routes", () => {
       }
     });
 
-    it("accepts the stored agreements on consent and returns the full pack", async () => {
+    it("signs the stored agreement session on consent and forwards the consenting user's IP", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_consent" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
@@ -1148,52 +1166,42 @@ describe("Counterparties Routes", () => {
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
         provider: "bvnk",
-        providerCustomerReference: "working-set-consent",
+        providerCustomerReference: buildBvnkCustomerExternalReference(counterparty.id),
         metadata: {
           residenceCountryCode: "US",
-          agreements: {
-            entries: {
-              "agreement-consent": {
-                status: "PENDING",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-              "agreement-consent-accepted": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-            },
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
           },
         },
       });
       const requests: string[] = [];
-      const actionBodies: unknown[] = [];
+      const signBodies: unknown[] = [];
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
         const path = new URL(String(input)).pathname;
         requests.push(path);
         if (init !== undefined && init.body !== undefined) {
-          actionBodies.push(JSON.parse(String(init.body)));
+          signBodies.push(JSON.parse(String(init.body)));
         }
-        return new Response(
-          JSON.stringify({
-            content: [{ agreementId: "agreement-consent", status: "ACCEPTED" }],
-            totalElements: 1,
-            totalPages: 1,
-            hasNext: false,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
+        if (path === `/platform/v1/customers/agreement/sessions/${BVNK_SESSION_REFERENCE}`) {
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`unexpected fetch: ${path}`);
       });
       env.BVNK_SANDBOX_WALLET_ID = "wallet";
       env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      env.K_SERVICE = "test-service";
       try {
         const response = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: authHeader,
+              "x-forwarded-for": "203.0.113.9, 10.0.0.1",
+            },
             body: JSON.stringify({
               provider: "bvnk",
               direction: "onramp",
@@ -1212,12 +1220,10 @@ describe("Counterparties Routes", () => {
           status: "collect_counterparty",
           fields: bvnkOnrampFields("US"),
         });
-        expect(requests).toEqual(["/platform/v2/agreements/actions"]);
-        expect(requests).not.toContain("/platform/v2/customers");
-        expect(actionBodies[0]).toEqual({
-          reference: buildBvnkCustomerExternalReference(counterparty.id),
-          actions: [{ agreementId: "agreement-consent", type: "ACCEPT" }],
-        });
+        expect(requests).toEqual([
+          `/platform/v1/customers/agreement/sessions/${BVNK_SESSION_REFERENCE}`,
+        ]);
+        expect(signBodies[0]).toEqual({ status: "SIGNED", ipAddress: "203.0.113.9" });
         const row = await getDb(env)
           .prepare(
             `SELECT metadata FROM counterparty_provider_accounts
@@ -1225,38 +1231,12 @@ describe("Counterparties Routes", () => {
           )
           .bind(counterparty.id)
           .first<{ metadata: Record<string, unknown> }>();
-        expect(row?.metadata).toMatchObject({
-          agreements: {
-            entries: {
-              "agreement-consent": {
-                status: "ACCEPTED",
-                respondedAt: expect.any(String),
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-              "agreement-consent-accepted": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-            },
-          },
-        });
-        expect(
-          (row?.metadata as { agreements?: Record<string, unknown> } | undefined)?.agreements
-        ).toEqual({
-          entries: {
-            "agreement-consent": {
-              status: "ACCEPTED",
-              respondedAt: expect.any(String),
-              name: "EPC Partner Platform Agreement (US)",
-              description: "Terms and conditions for EPC Partner Platform customers in the US",
-            },
-            "agreement-consent-accepted": {
-              status: "ACCEPTED",
-              name: "EPC Partner Platform Agreement (US)",
-              description: "Terms and conditions for EPC Partner Platform customers in the US",
-            },
+        expect(row?.metadata).toEqual({
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
+            signedAt: expect.any(String),
           },
         });
       } finally {
@@ -1264,11 +1244,12 @@ describe("Counterparties Routes", () => {
         env.BVNK_SANDBOX_WALLET_ID = undefined;
         env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
         env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+        env.K_SERVICE = undefined;
       }
     });
 
-    it("surfaces a per-agreement action error and leaves the stored entries pending", async () => {
-      const created = await createCounterparty({ externalId: "requirements_bvnk_consent_error" });
+    it("signs the stored agreement from the TCP peer when proxy headers are untrusted", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_consent_peer_ip" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
       const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
@@ -1277,45 +1258,40 @@ describe("Counterparties Routes", () => {
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
         provider: "bvnk",
-        providerCustomerReference: "working-set-consent-error",
+        providerCustomerReference: buildBvnkCustomerExternalReference(counterparty.id),
         metadata: {
           residenceCountryCode: "US",
-          agreements: {
-            entries: {
-              "agreement-consent-error": {
-                status: "PENDING",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-            },
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
           },
         },
       });
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            content: [
-              {
-                agreementId: "agreement-consent-error",
-                error: { code: "not-found", message: "pre-customer agreement not found" },
-              },
-            ],
-            totalElements: 1,
-            totalPages: 1,
-            hasNext: false,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        )
-      );
+      const signBodies: unknown[] = [];
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        if (init !== undefined && init.body !== undefined) {
+          signBodies.push(JSON.parse(String(init.body)));
+        }
+        const path = new URL(String(input)).pathname;
+        if (path === `/platform/v1/customers/agreement/sessions/${BVNK_SESSION_REFERENCE}`) {
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`unexpected fetch: ${path}`);
+      });
       env.BVNK_SANDBOX_WALLET_ID = "wallet";
       env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      env.K_SERVICE = undefined;
+      env.TRUST_PROXY_HEADERS = undefined;
       try {
         const response = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: authHeader,
+            },
             body: JSON.stringify({
               provider: "bvnk",
               direction: "onramp",
@@ -1327,8 +1303,14 @@ describe("Counterparties Routes", () => {
           },
           env
         );
-        expect(response.status).toBe(503);
-        expect((await response.json()).error.message).toBe("BVNK rejected an agreement action.");
+        expect(response.status).toBe(200);
+        expect((await response.json()).data).toEqual({
+          provider: "bvnk",
+          direction: "onramp",
+          status: "collect_counterparty",
+          fields: bvnkOnrampFields("US"),
+        });
+        expect(signBodies[0]).toEqual({ status: "SIGNED", ipAddress: "0.0.0.0" });
         const row = await getDb(env)
           .prepare(
             `SELECT metadata FROM counterparty_provider_accounts
@@ -1336,15 +1318,12 @@ describe("Counterparties Routes", () => {
           )
           .bind(counterparty.id)
           .first<{ metadata: Record<string, unknown> }>();
-        expect(row?.metadata).toMatchObject({
-          agreements: {
-            entries: {
-              "agreement-consent-error": {
-                status: "PENDING",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-            },
+        expect(row?.metadata).toEqual({
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
+            signedAt: expect.any(String),
           },
         });
       } finally {
@@ -1352,10 +1331,11 @@ describe("Counterparties Routes", () => {
         env.BVNK_SANDBOX_WALLET_ID = undefined;
         env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
         env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+        env.TRUST_PROXY_HEADERS = "true";
       }
     });
 
-    it("returns the residence-shaped full pack and creates the customer only after acceptance", async () => {
+    it("creates the v1 customer from the full pack and flips the link reference", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_confirmed" });
       const counterparty = (await created.json()).data.counterparty;
       const collectedData = {
@@ -1363,11 +1343,11 @@ describe("Counterparties Routes", () => {
         lastName: "Lovelace",
         dateOfBirth: "1815-12-10",
         email: "ada@example.com",
-        "address.addressLine1": "1 Main Street",
+        "address.line1": "1 Main Street",
         "address.city": "Austin",
         "address.postalCode": "78701",
         "address.countryCode": "US",
-        "address.stateCode": "MO",
+        "address.subdivisionCode": "MO",
         "taxIdentification.number": "123-45-6789",
         birthCountryCode: "GB",
         nationality: "GB",
@@ -1386,22 +1366,13 @@ describe("Counterparties Routes", () => {
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
         provider: "bvnk",
-        providerCustomerReference: "working-set-confirmed",
+        providerCustomerReference: buildBvnkCustomerExternalReference(counterparty.id),
         metadata: {
           residenceCountryCode: "US",
-          agreements: {
-            entries: {
-              "agreement-confirmed": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-              "agreement-confirmed-2": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-            },
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            signedAt: "2026-09-16T13:07:42.298Z",
+            agreements: [BVNK_STORED_AGREEMENT],
           },
         },
       });
@@ -1413,38 +1384,31 @@ describe("Counterparties Routes", () => {
       });
       if (!before) throw new Error("Expected BVNK customer-link row");
       const requests: string[] = [];
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        const path = new URL(String(input)).pathname;
-        requests.push(path);
-        if (path === "/platform/v2/customers") {
+      const createBodies: unknown[] = [];
+      let createIdempotencyKey: string | null = null;
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const url = new URL(String(input));
+        requests.push(url.pathname);
+        if (init?.body !== undefined) {
+          createBodies.push(JSON.parse(String(init.body)));
+          createIdempotencyKey = new Headers(init.headers).get("X-Idempotency-Key");
+        }
+        if (url.pathname === "/platform/v1/customers") {
           return new Response(
             JSON.stringify({
-              id: "working-set-confirmed",
-              reference: "reference",
+              reference: BVNK_CUSTOMER_REFERENCE,
               status: "PENDING",
-              type: "INDIVIDUAL",
-              model: "EMBEDDED",
-              useCase: "FIAT",
             }),
             { status: 201, headers: { "Content-Type": "application/json" } }
           );
         }
-        return new Response(
-          JSON.stringify({
-            id: "working-set-confirmed",
-            reference: "reference",
-            status: "PENDING",
-            type: "INDIVIDUAL",
-            model: "EMBEDDED",
-            useCase: "FIAT",
-            authenticatedLink: {
-              link: "https://example.invalid/verify",
-              expiresAt: "2030-01-01T00:00:00Z",
-            },
-            requiredActions: [],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
+        if (url.pathname === `/platform/v1/customers/${BVNK_CUSTOMER_REFERENCE}`) {
+          return new Response(JSON.stringify(BVNK_CUSTOMER_DETAIL), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        throw new Error(`unexpected fetch: ${url.pathname}`);
       });
       env.BVNK_SANDBOX_WALLET_ID = "wallet";
       env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
@@ -1485,14 +1449,14 @@ describe("Counterparties Routes", () => {
         const partialBody = await partial.json();
         expect(partialBody.data.status).toBe("collect_counterparty");
         const missingKeys = partialBody.data.fields.map((field: { key: string }) => field.key);
-        expect(missingKeys).toContain("address.stateCode");
+        expect(missingKeys).toContain("address.subdivisionCode");
         expect(missingKeys).toContain("cdd.employmentStatus");
         expect(missingKeys).toContain("dateOfBirth");
         expect(missingKeys).not.toContain("firstName");
         expect(missingKeys).not.toContain("lastName");
         expect(missingKeys).not.toContain("email");
         const stateCodeField = partialBody.data.fields.find(
-          (field: { key: string }) => field.key === "address.stateCode"
+          (field: { key: string }) => field.key === "address.subdivisionCode"
         );
         expect(stateCodeField?.kind).toBe("select");
         const optionValues = (stateCodeField?.kind === "select" ? stateCodeField.options : []).map(
@@ -1520,11 +1484,26 @@ describe("Counterparties Routes", () => {
           env
         );
         expect(response.status).toBe(200);
-        expect((await response.json()).data.status).toBe("customer_verifying");
+        expect((await response.json()).data).toEqual({
+          provider: "bvnk",
+          direction: "onramp",
+          status: "customer_verification_required",
+          verificationUrl: BVNK_CUSTOMER_DETAIL.verification.url,
+        });
         expect(requests).toEqual([
-          "/platform/v2/customers",
-          "/platform/v2/customers/working-set-confirmed",
+          "/platform/v1/customers",
+          `/platform/v1/customers/${BVNK_CUSTOMER_REFERENCE}`,
         ]);
+        expect(createBodies.length).toBe(1);
+        expect(createBodies[0]).toEqual({
+          type: "individual",
+          externalReference: buildBvnkCustomerExternalReference(counterparty.id),
+          signedAgreementSessionReference: BVNK_SESSION_REFERENCE,
+          individual: buildBvnkCustomerRequest(collectedData, "US"),
+        });
+        expect(createIdempotencyKey).toBe(
+          (await hashString(`bvnk-customer:${counterparty.id}`)).slice(0, 36)
+        );
         const after = await repository.getProviderAccount({
           organizationId: TEST_ORG.id,
           projectId: TEST_PROJECT_ID,
@@ -1532,131 +1511,287 @@ describe("Counterparties Routes", () => {
           provider: "bvnk",
         });
         expect(after?.id).toBe(before.id);
-        expect(after?.provider_customer_reference).toBe("working-set-confirmed");
-        expect(after?.metadata).not.toHaveProperty("residenceCountryCode");
-        expect(after?.metadata).toMatchObject({
-          status: "PENDING",
-          agreements: {
-            entries: {
-              "agreement-confirmed": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-              "agreement-confirmed-2": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-            },
-          },
+        expect(after?.provider_customer_reference).toBe(BVNK_CUSTOMER_REFERENCE);
+        expect(after?.metadata).toEqual({
+          status: "INFO_REQUIRED",
+          verificationStatus: "init",
         });
       } finally {
         fetchSpy.mockRestore();
         env.BVNK_SANDBOX_WALLET_ID = undefined;
         env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
         env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
-        env.BVNK_SANDBOX_WEBHOOK_SECRET = undefined;
       }
     });
 
-    it("re-derives agreement requirements when metadata records a revoked agreement", async () => {
-      const created = await createCounterparty({ externalId: "requirements_bvnk_revoked" });
+    it("returns customer_verifying when the fresh customer is PENDING with no Sumsub link", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_pending" });
       const counterparty = (await created.json()).data.counterparty;
+      const collectedData = {
+        firstName: "Ada",
+        lastName: "Lovelace",
+        dateOfBirth: "1815-12-10",
+        email: "ada@example.com",
+        "address.line1": "1 Main Street",
+        "address.city": "Austin",
+        "address.postalCode": "78701",
+        "address.countryCode": "US",
+        "address.subdivisionCode": "MO",
+        "taxIdentification.number": "123-45-6789",
+        birthCountryCode: "GB",
+        nationality: "GB",
+        "cdd.employmentStatus": "SALARIED",
+        "cdd.sourceOfFunds": "SALARY",
+        "cdd.pepStatus": "NOT_PEP",
+        "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
+        "cdd.expectedMonthlyVolume.amount": "1000",
+        "cdd.expectedMonthlyVolume.currency": "USD",
+        "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
+        "cdd.employmentIndustrySector": "INFORMATION",
+      };
       const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
       await repository.upsertProviderAccount({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
         provider: "bvnk",
-        providerCustomerReference: "customer-revoked",
+        providerCustomerReference: buildBvnkCustomerExternalReference(counterparty.id),
         metadata: {
-          status: "VERIFIED",
-          agreements: {
-            entries: {
-              "agreement-revoked": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-            },
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            signedAt: "2026-09-16T13:07:42.298Z",
+            agreements: [BVNK_STORED_AGREEMENT],
           },
         },
       });
-      const paths: string[] = [];
+      const requests: string[] = [];
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        const path = new URL(String(input)).pathname;
-        paths.push(path);
-        return new Response(
-          JSON.stringify({
-            downloadUrl: "https://example.invalid/revoked.pdf",
-            filename: null,
-            expiresAt: null,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
+        const url = new URL(String(input));
+        requests.push(url.pathname);
+        if (url.pathname === "/platform/v1/customers") {
+          return new Response(
+            JSON.stringify({
+              reference: BVNK_CUSTOMER_REFERENCE,
+              status: "PENDING",
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url.pathname === `/platform/v1/customers/${BVNK_CUSTOMER_REFERENCE}`) {
+          return new Response(
+            JSON.stringify({
+              ...BVNK_CUSTOMER_DETAIL,
+              status: "PENDING",
+              verification: { status: "pending" },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        throw new Error(`unexpected fetch: ${url.pathname}`);
       });
-      env.BVNK_SANDBOX_WEBHOOK_SECRET = BVNK_WEBHOOK_SECRET;
+      env.BVNK_SANDBOX_WALLET_ID = "wallet";
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
       try {
-        expect(
-          (
-            await sendBvnkWebhook({
-              event: "bvnk:customers:agreements:status-change",
-              data: {
-                customerId: "customer-revoked",
-                agreementId: "agreement-revoked",
-                status: "PENDING",
-              },
-            })
-          ).status
-        ).toBe(200);
         const response = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
-          { headers: { "Content-Type": "application/json", Authorization: authHeader } },
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "bvnk",
+              direction: "onramp",
+              assetRail: "usdc.solana",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
+              fiatCurrency: "USD",
+              collectedData,
+            }),
+          },
           env
         );
         expect(response.status).toBe(200);
-        expect((await response.json()).data.status).toBe("customer_agreement_required");
-        expect(paths).toEqual(["/platform/v2/agreements/agreement-revoked/content"]);
-
-        expect(
-          (
-            await sendBvnkWebhook({
-              event: "bvnk:customers:agreements:status-change",
-              data: {
-                customerId: "customer-revoked",
-                agreementId: "agreement-revoked",
-                status: "REJECTED",
-              },
-            })
-          ).status
-        ).toBe(200);
-        const rejected = await app.request(
-          `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
-          { headers: { "Content-Type": "application/json", Authorization: authHeader } },
-          env
-        );
-        expect(rejected.status).toBe(200);
-        expect((await rejected.json()).data).toEqual({
+        expect((await response.json()).data).toEqual({
           provider: "bvnk",
           direction: "onramp",
-          status: "customer_agreement_required",
-          agreements: [
-            {
-              id: "agreement-revoked",
-              name: "EPC Partner Platform Agreement (US)",
-              description: "Terms and conditions for EPC Partner Platform customers in the US",
-              downloadUrl: "https://example.invalid/revoked.pdf",
-            },
-          ],
+          status: "customer_verifying",
         });
-        expect(paths).toEqual([
-          "/platform/v2/agreements/agreement-revoked/content",
-          "/platform/v2/agreements/agreement-revoked/content",
+        expect(requests).toEqual([
+          "/platform/v1/customers",
+          `/platform/v1/customers/${BVNK_CUSTOMER_REFERENCE}`,
         ]);
+        const after = await repository.getProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: counterparty.id,
+          provider: "bvnk",
+        });
+        expect(after?.provider_customer_reference).toBe(BVNK_CUSTOMER_REFERENCE);
+        expect(after?.metadata).toEqual({
+          status: "PENDING",
+          verificationStatus: "pending",
+        });
       } finally {
         fetchSpy.mockRestore();
-        env.BVNK_SANDBOX_WEBHOOK_SECRET = undefined;
+        env.BVNK_SANDBOX_WALLET_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+      }
+    });
+
+    it("recovers an ACCOUNTS-2000 externalReference conflict via the v2 search", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_conflict" });
+      const counterparty = (await created.json()).data.counterparty;
+      const collectedData = {
+        firstName: "Ada",
+        lastName: "Lovelace",
+        dateOfBirth: "1815-12-10",
+        email: "ada@example.com",
+        "address.line1": "1 Main Street",
+        "address.city": "Austin",
+        "address.postalCode": "78701",
+        "address.countryCode": "US",
+        "address.subdivisionCode": "MO",
+        "taxIdentification.number": "123-45-6789",
+        birthCountryCode: "GB",
+        nationality: "GB",
+        "cdd.employmentStatus": "SALARIED",
+        "cdd.sourceOfFunds": "SALARY",
+        "cdd.pepStatus": "NOT_PEP",
+        "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
+        "cdd.expectedMonthlyVolume.amount": "1000",
+        "cdd.expectedMonthlyVolume.currency": "USD",
+        "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
+        "cdd.employmentIndustrySector": "INFORMATION",
+      };
+      const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+      await repository.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        providerCustomerReference: buildBvnkCustomerExternalReference(counterparty.id),
+        metadata: {
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            signedAt: "2026-09-16T13:07:42.298Z",
+            agreements: [BVNK_STORED_AGREEMENT],
+          },
+        },
+      });
+      const requests: string[] = [];
+      const searchQueries: string[] = [];
+      let createCalls = 0;
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = new URL(String(input));
+        requests.push(url.pathname);
+        if (url.pathname === "/platform/v1/customers") {
+          createCalls += 1;
+          return new Response(
+            JSON.stringify({
+              code: "ACCOUNTS-2000",
+              traceId: "6aaa94d1184d65e454d08a790495961b",
+              status: "Bad Request",
+              message: "Invalid request",
+              details: {
+                errors: {
+                  externalReference: [
+                    "Customer with external reference: probe_v1_1789564047204 already exists",
+                  ],
+                  signedAgreementSessionReference: [
+                    "Agreement session with reference: c1d91c8b-f4a6-469e-953d-7344fdb6858c is already assigned to the customer",
+                  ],
+                },
+              },
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url.pathname === "/platform/v2/customers") {
+          searchQueries.push(url.searchParams.get("reference") ?? "");
+          return new Response(
+            JSON.stringify({
+              totalElements: 1,
+              totalPages: 1,
+              content: [
+                {
+                  id: BVNK_CUSTOMER_REFERENCE,
+                  reference: "probe_v1_1789564047204",
+                  status: "ACTIONS_REQUIRED",
+                  type: "INDIVIDUAL",
+                  model: "EMBEDDED",
+                  name: "Jane Doe",
+                  createdAt: "2026-09-16T13:07:50.438748Z",
+                },
+              ],
+              pageable: { pageNumber: 0, pageSize: 64 },
+              hasNext: false,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url.pathname === `/platform/v1/customers/${BVNK_CUSTOMER_REFERENCE}`) {
+          return new Response(
+            JSON.stringify({
+              ...BVNK_CUSTOMER_DETAIL,
+              status: "ACTIONS_REQUIRED",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        throw new Error(`unexpected fetch: ${url.pathname}`);
+      });
+      env.BVNK_SANDBOX_WALLET_ID = "wallet";
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      try {
+        const response = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "bvnk",
+              direction: "onramp",
+              assetRail: "usdc.solana",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
+              fiatCurrency: "USD",
+              collectedData,
+            }),
+          },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect((await response.json()).data).toEqual({
+          provider: "bvnk",
+          direction: "onramp",
+          status: "customer_verification_required",
+          verificationUrl: BVNK_CUSTOMER_DETAIL.verification.url,
+        });
+        expect(createCalls).toBe(1);
+        expect(requests).toEqual([
+          "/platform/v1/customers",
+          "/platform/v2/customers",
+          `/platform/v1/customers/${BVNK_CUSTOMER_REFERENCE}`,
+        ]);
+        expect(searchQueries).toEqual([buildBvnkCustomerExternalReference(counterparty.id)]);
+        const after = await repository.getProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: counterparty.id,
+          provider: "bvnk",
+        });
+        expect(after?.provider_customer_reference).toBe(BVNK_CUSTOMER_REFERENCE);
+        expect(after?.metadata).toEqual({
+          status: "ACTIONS_REQUIRED",
+          verificationStatus: "init",
+        });
+      } finally {
+        fetchSpy.mockRestore();
+        env.BVNK_SANDBOX_WALLET_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
       }
     });
   });

@@ -238,6 +238,30 @@ export const CANCELABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filte
   (status) => RAMP_TRANSFER_STATUS_CANCELABLE[status]
 );
 
+/** The statuses that end a ramp transfer's lifecycle, for status-guarded updates. */
+export const TERMINAL_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => RAMP_TRANSFER_STATUS_TERMINAL[status]
+);
+
+/** Whether a ramp transfer in each status may still be completed by a provider settlement webhook. */
+export const RAMP_TRANSFER_STATUS_SETTLEABLE = {
+  pending: true,
+  processing: false,
+  confirmed: false,
+  finalized: false,
+  failed: false,
+  awaiting_payment: true,
+  settling: true,
+  completed: false,
+  canceled: false,
+  expired: false,
+} as const satisfies Record<PaymentTransferStatus, boolean>;
+
+/** Statuses a funded ramp transfer may still be completed from; a provider settlement webhook completes it. */
+export const SETTLEABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => RAMP_TRANSFER_STATUS_SETTLEABLE[status]
+);
+
 /** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */
 export const ONCHAIN_TRANSFER_STATUSES = [
   "pending",

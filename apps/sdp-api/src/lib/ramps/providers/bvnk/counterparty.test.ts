@@ -39,9 +39,9 @@ const US_COLLECTED_DATA = {
   lastName: "Lovelace",
   dateOfBirth: "1815-12-10",
   email: "ada@example.com",
-  "address.addressLine1": "1 Main Street",
+  "address.line1": "1 Main Street",
   "address.city": "Jefferson City",
-  "address.stateCode": "MO",
+  "address.subdivisionCode": "MO",
   "address.postalCode": "65101",
   "address.countryCode": "US",
   "taxIdentification.number": "123-45-6789",
@@ -87,8 +87,8 @@ describe("bvnkOnrampFields", () => {
     const usKeys = flatKeys("US");
     const baseKeys = flatKeys("GB");
 
-    expect(usKeys).toContain("address.stateCode");
-    expect(baseKeys).not.toContain("address.stateCode");
+    expect(usKeys).toContain("address.subdivisionCode");
+    expect(baseKeys).not.toContain("address.subdivisionCode");
     expect(usKeys).toEqual(expect.arrayContaining(baseKeys));
   });
 
@@ -96,7 +96,7 @@ describe("bvnkOnrampFields", () => {
     const usAddressGroup = bvnkOnrampFields("US").find((field) => field.kind === "address");
     expect(usAddressGroup?.kind).toBe("address");
     const stateSelect = (usAddressGroup?.kind === "address" ? usAddressGroup.fields : []).find(
-      (part) => part.key === "address.stateCode"
+      (part) => part.key === "address.subdivisionCode"
     );
     expect(stateSelect?.kind).toBe("select");
     const optionValues = (stateSelect?.kind === "select" ? stateSelect.options : []).map(
@@ -114,12 +114,12 @@ describe("bvnkOnrampFields", () => {
     const partKeys = (deAddressGroup?.kind === "address" ? deAddressGroup.fields : []).map(
       (part) => part.key
     );
-    expect(partKeys).not.toContain("address.stateCode");
+    expect(partKeys).not.toContain("address.subdivisionCode");
   });
 });
 
 describe("buildBvnkCustomerRequest", () => {
-  it("accepts an MTL state code and builds the US v2 individual", () => {
+  it("accepts an MTL state code and builds the US individual", () => {
     expect(buildBvnkCustomerRequest(US_COLLECTED_DATA, "US")).toEqual({
       address: {
         addressLine1: "1 Main Street",
@@ -149,21 +149,21 @@ describe("buildBvnkCustomerRequest", () => {
 
   it("rejects a state code outside the MTL set", () => {
     expect(() =>
-      buildBvnkCustomerRequest({ ...US_COLLECTED_DATA, "address.stateCode": "TX" }, "US")
+      buildBvnkCustomerRequest({ ...US_COLLECTED_DATA, "address.subdivisionCode": "TX" }, "US")
     ).toThrowError(SdpPaymentsError);
     expect(() =>
-      buildBvnkCustomerRequest({ ...US_COLLECTED_DATA, "address.stateCode": "NY" }, "US")
+      buildBvnkCustomerRequest({ ...US_COLLECTED_DATA, "address.subdivisionCode": "NY" }, "US")
     ).toThrowError(SdpPaymentsError);
   });
 
-  it("builds the EU v2 individual without US extras", () => {
+  it("builds the non-US individual without US extras", () => {
     const customer = buildBvnkCustomerRequest(
       {
         firstName: "Ada",
         lastName: "Lovelace",
         dateOfBirth: "1815-12-10",
         email: "ada@example.com",
-        "address.addressLine1": "1 Main Street",
+        "address.line1": "1 Main Street",
         "address.city": "Berlin",
         "address.postalCode": "10115",
         "address.countryCode": "DE",

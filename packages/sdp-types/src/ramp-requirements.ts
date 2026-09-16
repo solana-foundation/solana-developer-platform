@@ -58,7 +58,12 @@ export type RequirementField =
       key: string;
       label: string;
       required: boolean;
-      /** Nested parts collected under dotted keys, e.g. `customer.address.line1`. */
+      /**
+       * Nested parts collected under dotted keys, e.g. `customer.address.line1`.
+       * The final key segment must be a `PlaceAddressFields` name (`line1`, `line2`,
+       * `city`, `postalCode`, `countryCode`, `subdivisionCode`) so Places autofill
+       * can populate it; providers map to their own wire names when submitting.
+       */
       fields: RequirementField[];
     };
 
@@ -158,12 +163,18 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | {
       provider: "bvnk";
       status: "customer_agreement_required";
-      /** Agreement text is an external link; `downloadUrl` is minted JIT per response and never persisted. */
+      /**
+       * Agreements of the minted v1 session. The document links are the
+       * session's static help-centre URLs stored on the customer link; nothing
+       * is minted per response. `name` is the v1 agreement identifier (v1 has
+       * no id).
+       */
       agreements: {
-        id: string;
         name: string;
+        displayName: string;
         description: string;
-        downloadUrl: string;
+        url: string;
+        privacyPolicyUrl: string;
       }[];
     }
   | {

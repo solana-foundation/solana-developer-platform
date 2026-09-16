@@ -229,6 +229,9 @@ function requirementFieldRuns(fields: RequirementField[]): RequirementFieldRun[]
 
 /**
  * Copies resolved address values into matching nested requirement fields.
+ * Option-backed parts are left untouched when the resolved value is not one
+ * the provider offers (e.g. a US state outside its licence list), so the
+ * operator sees an empty select instead of a hidden value the API rejects.
  *
  * @param field - Address requirement containing the nested fields to update.
  * @param place - Place details returned by the Places API.
@@ -244,6 +247,12 @@ function populateAddressFields(
   for (const part of field.fields) {
     const value = addressFields.get(requirementFieldName(part.key));
     if (value === undefined) {
+      continue;
+    }
+    if (
+      (part.kind === "select" || part.kind === "country" || part.kind === "currency") &&
+      !comboboxOptions(part).some((option) => option.value === value)
+    ) {
       continue;
     }
     onChange(part.key, value);

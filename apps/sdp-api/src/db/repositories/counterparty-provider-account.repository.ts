@@ -3,6 +3,7 @@ import {
   BVNK_NETWORKS,
   type BvnkOnrampRequestSpec,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { bvnkVerificationStatusSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
@@ -51,17 +52,19 @@ export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadata
 
 export const bvnkCustomerProviderAccountMetadataSchema = z.object({
   status: z.string().optional(),
-  verificationStatus: z.enum(["init", "pending", "completed", "failed"]).optional(),
+  verificationStatus: bvnkVerificationStatusSchema.optional(),
   residenceCountryCode: z.enum(COUNTRY_CODES).optional(),
-  agreements: z
+  session: z
     .object({
-      entries: z.record(
-        z.string().min(1),
+      reference: z.string().min(1),
+      signedAt: z.string().datetime().optional(),
+      agreements: z.array(
         z.object({
-          status: z.string().min(1),
-          respondedAt: z.string().datetime().optional(),
           name: z.string().min(1),
-          description: z.string().min(1),
+          displayName: z.string(),
+          description: z.string(),
+          url: z.url(),
+          privacyPolicyUrl: z.url(),
         })
       ),
     })
@@ -142,6 +145,16 @@ export interface PatchAccountMetadataInput extends GetCounterpartyProviderAccoun
   set: Record<string, unknown>;
   /** Top-level keys removed after the merge. */
   unset: readonly string[];
+}
+
+export interface AssignCustomerLinkReferenceInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  /** CAS: the customer-link alias the row must still carry for the assignment to land. */
+  fromProviderCustomerReference: string;
+  /** The v1 customer reference replacing the alias. */
+  providerCustomerReference: string;
+  /** Replaces the row's metadata (the caller passes the parsed `{status}` shape). */
+  metadata: Record<string, unknown>;
 }
 
 export interface GetExternalAccountByIdInput extends GetCounterpartyProviderAccountInput {
@@ -234,6 +247,20 @@ export interface CounterpartyProviderAccountsRepository {
    */
   patchAccountMetadata(
     input: PatchAccountMetadataInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Replaces the provider customer reference on a customer-link row via a
+   * compare-and-swap against the stored pre-customer alias, replacing the
+   * metadata with the caller's blob. A concurrent create that already
+   * assigned the reference makes the update match zero rows and return null
+   * instead of overwriting the newer reference.
+   *
+   * @param input - Tenant scope, row id, the alias to swap from, the v1 reference to swap to, and the replacement metadata.
+   * @returns The updated row, or null when the CAS alias is gone.
+   */
+  assignCustomerLinkReference(
+    input: AssignCustomerLinkReferenceInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

@@ -2,6 +2,7 @@ import type { AppDb } from "@/db";
 import { internalError } from "@/lib/errors";
 import type {
   ArchiveExternalAccountInput,
+  AssignCustomerLinkReferenceInput,
   CompleteExternalAccountInput,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
@@ -265,6 +266,38 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         }
         return parseProviderAccountRow(row);
       });
+    },
+
+    async assignCustomerLinkReference(input: AssignCustomerLinkReferenceInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET provider_customer_reference = ?,
+               metadata = ?::jsonb,
+               status = 'active',
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'customer_link'
+             AND provider_customer_reference = ?
+           RETURNING *`
+        )
+        .bind(
+          input.providerCustomerReference,
+          input.metadata,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.fromProviderCustomerReference
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
     },
 
     async listActiveExternalAccounts(input: ListActiveExternalAccountsInput) {

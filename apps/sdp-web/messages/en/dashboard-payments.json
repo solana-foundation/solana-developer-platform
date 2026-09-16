@@ -326,7 +326,8 @@
       "offrampProvisioningDetail": "Provisioning a dedicated BVNK payout wallet for this currency.",
       "simulateDeposit": "Simulate Deposit",
       "simulating": "Simulating...",
-      "depositSimulated": "Deposit Simulated"
+      "depositSimulated": "Deposit Simulated",
+      "viewPrivacyPolicy": "View privacy policy"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verify your identity",

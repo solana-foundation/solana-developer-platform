@@ -14,34 +14,72 @@ import { badRequest, internalError } from "../../../errors";
 import { hashString } from "../../../hash";
 import { readRecord } from "../../../json";
 import { readyCounterparty } from "../../requirements";
+import type { BvnkCustomer } from "./schemas";
 
 export interface BvnkRuleEntityAddress {
   addressLine1: string;
   addressLine2?: string;
-  postalCode?: string;
   city: string;
-  countryCode: string;
+  /** ISO 3166-2 region/state code; BVNK requires it for US beneficiaries. */
+  region?: string;
+  postCode?: string;
   /** ISO 3166-1 alpha-2 country; BVNK rule validation rejects a blank `country`. */
   country: string;
-  /** ISO 3166-2 region/state code; BVNK requires it for US beneficiaries. */
-  stateCode?: string;
 }
 
 export type BvnkEntityType = "INDIVIDUAL" | "COMPANY";
 
 /**
- * Beneficiary entity accepted by a BVNK on-ramp payment rule.
+ * Beneficiary entity accepted by a BVNK on-ramp payment rule. INDIVIDUAL
+ * requires the person fields; COMPANY keeps legalName/registrationNumber.
  */
 export interface BvnkRuleEntity {
   type: BvnkEntityType;
   customerIdentifier: string;
   relationshipType: "SELF_OWNED" | "THIRD_PARTY";
-  firstName?: string;
-  lastName?: string;
-  dateOfBirth?: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
   legalName?: string;
   registrationNumber?: string;
-  address?: BvnkRuleEntityAddress;
+  address: BvnkRuleEntityAddress;
+}
+
+/**
+ * Builds the INDIVIDUAL beneficiary entity for a BVNK on-ramp payment rule from
+ * the v1 customer GET's `individual.person` block. SDP persists no PII, so the
+ * rule create reads it JIT from BVNK and the entity is never stored.
+ *
+ * @param customer - Typed v1 customer response from the v1 customer GET.
+ * @returns The rule entity mapped onto BVNK's accepted address keys.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the customer has no
+ * individual details to build the entity from.
+ */
+export function bvnkRuleEntityFromCustomer(customer: BvnkCustomer): BvnkRuleEntity {
+  const person = customer.individual?.person;
+  if (person === undefined) {
+    throw internalError(
+      `BVNK customer ${customer.reference} has no individual details for the payment rule`
+    );
+  }
+  return {
+    type: "INDIVIDUAL",
+    relationshipType: "SELF_OWNED",
+    customerIdentifier: customer.reference,
+    firstName: person.firstName,
+    lastName: person.lastName,
+    dateOfBirth: person.dateOfBirth,
+    address: {
+      addressLine1: person.address.addressLine1,
+      city: person.address.city,
+      country: person.address.countryCode,
+      ...(person.address.addressLine2 === undefined
+        ? {}
+        : { addressLine2: person.address.addressLine2 }),
+      ...(person.address.stateCode === undefined ? {} : { region: person.address.stateCode }),
+      ...(person.address.postalCode === undefined ? {} : { postCode: person.address.postalCode }),
+    },
+  };
 }
 
 export interface BvnkComplianceInput {
@@ -94,8 +132,6 @@ export function normalizeBvnkCurrencyAndNetwork(value: string): BvnkCurrencyNetw
     `Unsupported BVNK cryptoToken '${value}'. SDP BVNK ramps only support Solana assets (for example: SOL, USDC_SOLANA).`
   );
 }
-
-export type BvnkVerificationStatus = "init" | "pending" | "completed" | "failed";
 
 /**
  * Builds BVNK's `Idempotency-Key` header for fiat wallet creation.
@@ -199,28 +235,27 @@ export function readBvnkOfframpReference(reference: string): string | undefined 
 export interface BvnkCustomerResolution {
   /**
    * BVNK customer `externalReference` value. For SDP-created customers this is
-   * a reversible `cp_<uuid_without_hyphens>` alias for the SDP counterparty id,
-   * sized to fit BVNK's 36-character limit.
+   * the SDP counterparty id without its `cpty_` prefix, sized to fit BVNK's
+   * 36-character limit.
    */
   externalReference?: string;
   customerReference?: string;
   status?: string;
-  verificationStatus?: BvnkVerificationStatus;
+  verificationStatus?: string;
 }
 
 /**
  * Builds the value stored in BVNK's customer `externalReference` field.
  *
  * BVNK limits `externalReference` to 36 characters, while SDP counterparty ids
- * are `cpty_<uuid>` and therefore too long. This function creates a
- * reversible BVNK-facing id in `cp_<uuid_without_hyphens>` format. BVNK returns
- * this caller-provided value in customer/payment webhooks, letting handlers
- * reconstruct the SDP counterparty id and load by primary key.
+ * are `cpty_<uuid>` and therefore too long. This function creates a reversible
+ * BVNK-facing id in `<uuid_with_dashes>` format by dropping the `cpty_` prefix.
+ * BVNK returns this caller-provided value in customer/payment webhooks, letting
+ * handlers reconstruct the SDP counterparty id and load by primary key.
  *
  * @param counterpartyId SDP counterparty primary key in `cpty_<uuid>` format.
- * @returns BVNK customer `externalReference` in `cp_<32_hex_uuid>` format.
- * @throws SdpPaymentsError with `INTERNAL_ERROR` when the counterparty id cannot be
- * represented in BVNK's compact externalReference format.
+ * @returns BVNK customer `externalReference`: the counterparty uuid without the `cpty_` prefix.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the counterparty id is malformed.
  */
 export function buildBvnkCustomerExternalReference(counterpartyId: string): string {
   const match = SDP_COUNTERPARTY_ID_PATTERN.exec(counterpartyId);
@@ -229,20 +264,20 @@ export function buildBvnkCustomerExternalReference(counterpartyId: string): stri
       `Malformed SDP counterparty id for BVNK externalReference: ${counterpartyId}`
     );
   }
-  return `cp_${match.slice(1).join("").toLowerCase()}`;
+  return match.slice(1).join("-").toLowerCase();
 }
 
-const BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN =
-  /^cp_([0-9a-f]{8})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})$/;
+const BVNK_EXTERNAL_REFERENCE_UUID_PATTERN =
+  /^([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/;
 
 /**
  * Recovers the SDP counterparty id from a BVNK customer `externalReference`.
  *
- * @param reference - Candidate `cp_<32_hex_uuid>` external reference.
+ * @param reference - Candidate `<uuid_with_dashes>` external reference.
  * @returns The `cpty_<uuid>` counterparty id, or null when the value is not an SDP external reference.
  */
 export function parseBvnkCustomerExternalReference(reference: string): string | null {
-  const match = BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN.exec(reference);
+  const match = BVNK_EXTERNAL_REFERENCE_UUID_PATTERN.exec(reference);
   if (!match) {
     return null;
   }
@@ -440,6 +475,18 @@ export function parseBvnkOnrampWalletName(
     throw internalError(`Malformed BVNK on-ramp wallet name: ${walletName}`);
   }
   return parsed.data;
+}
+
+/** Parses an SDP-generated BVNK wallet name into its direction-specific shape. */
+export function parseBvnkWalletName(walletName: string): BVNKWallet {
+  const direction = walletName.split(":")[1];
+  if (direction === "offramp") {
+    return parseBvnkOfframpWalletName(walletName);
+  }
+  if (direction === "onramp") {
+    return parseBvnkOnrampWalletName(walletName);
+  }
+  throw internalError(`Malformed BVNK wallet name: ${walletName}`);
 }
 
 export function readBvnkOfframpWallets(

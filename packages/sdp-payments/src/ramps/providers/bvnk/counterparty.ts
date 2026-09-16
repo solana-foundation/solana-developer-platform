@@ -18,7 +18,7 @@ import {
   bvnkOnrampFields,
   isBvnkOfframpCurrency,
 } from "./requirements";
-import { type BvnkCustomerV2Individual, bvnkV2CddSchema } from "./schemas";
+import { type BvnkCustomerIndividual, bvnkCddSchema } from "./schemas";
 
 function collectedString(data: Record<string, unknown>, key: string): string {
   const value = data[key];
@@ -46,7 +46,7 @@ export function parseBvnkResidenceCountry(collectedData: CollectedFieldData): Co
 }
 
 /**
- * Builds the BVNK v2 individual request from transient collected fields.
+ * Builds the BVNK individual request from transient collected fields.
  *
  * @param collectedData - Flattened PII fields supplied for this request.
  * @param residenceCountry - The counterparty's residence country, collected in
@@ -56,13 +56,13 @@ export function parseBvnkResidenceCountry(collectedData: CollectedFieldData): Co
 export function buildBvnkCustomerRequest(
   collectedData: CollectedFieldData,
   residenceCountry: CountryCode
-): BvnkCustomerV2Individual {
+): BvnkCustomerIndividual {
   const data = parseCollectedFields(
     bvnkOnrampFields(residenceCountry),
     collectedData,
     "Missing or invalid BVNK customer details."
   );
-  const cdd = bvnkV2CddSchema.parse({
+  const cdd = bvnkCddSchema.parse({
     employmentStatus: collectedString(data, "cdd.employmentStatus"),
     sourceOfFunds: collectedString(data, "cdd.sourceOfFunds"),
     pepStatus: collectedString(data, "cdd.pepStatus"),
@@ -79,11 +79,13 @@ export function buildBvnkCustomerRequest(
       : {}),
   });
   const address = {
-    addressLine1: collectedString(data, "address.addressLine1"),
+    addressLine1: collectedString(data, "address.line1"),
     city: collectedString(data, "address.city"),
     postalCode: collectedString(data, "address.postalCode"),
     countryCode: collectedString(data, "address.countryCode"),
-    ...(residenceCountry === "US" ? { stateCode: collectedString(data, "address.stateCode") } : {}),
+    ...(residenceCountry === "US"
+      ? { stateCode: collectedString(data, "address.subdivisionCode") }
+      : {}),
   };
   return {
     address,
