@@ -702,6 +702,50 @@ function HomeActivityCard({
   );
 }
 
+function useHomeActivity(
+  balances: CustodyWalletTokenBalance[],
+  issuanceEnabled: boolean,
+  isWalletEmptyState: boolean
+) {
+  const t = useTranslations();
+  const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
+    HOME_ACTIVITY_KEY,
+    () => fetchHomeActivity(),
+    {
+      revalidateOnFocus: true,
+      refreshInterval: 20_000,
+    },
+    {
+      key: "home-activity",
+      ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
+    }
+  );
+  const todaysVolume = activitySnapshot?.todaysVolume ?? null;
+  const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
+    issuance: issuanceEnabled,
+  });
+  const symbolsByMint = buildTokenSymbolsByMint(activityRows, balances);
+  const activityError = activityRequestError
+    ? readApiErrorMessage(activityRequestError) || t("Shared.homeWorkspace.activityUnavailable")
+    : (activitySnapshot?.activityError ?? null);
+  const activityNotice = activitySnapshot?.activityNotice ?? null;
+  const emptyActivityMessage = isWalletEmptyState
+    ? t("Shared.homeWorkspace.createFirstWalletActivity")
+    : activitySnapshot
+      ? t("Shared.homeWorkspace.noRecentActivity")
+      : t("Shared.homeWorkspace.loadingRecentActivity");
+
+  return {
+    todaysVolume,
+    todaysVolumeError: activityError ?? activitySnapshot?.todaysVolumeError ?? null,
+    activityRows,
+    symbolsByMint,
+    activityError,
+    activityNotice,
+    emptyActivityMessage,
+  };
+}
+
 export function HomeWorkspace({
   totalBalance,
   totalBalanceError,
@@ -716,28 +760,8 @@ export function HomeWorkspace({
   const quickStartPending = useHomeQuickStartPending();
   const custodyEnabled = flags.custody;
   const issuanceEnabled = flags.issuance;
-  const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
-    HOME_ACTIVITY_KEY,
-    () => fetchHomeActivity(),
-    {
-      revalidateOnFocus: true,
-      refreshInterval: 20_000,
-    },
-    {
-      key: "home-activity",
-      ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
-    }
-  );
   const isWalletEmptyState = wallets.length === 0;
   const heldTokenCount = countHeldTokens(balances);
-  // Not `wallets.length === 0`: organizations may already have one provisioned
-  // wallet and still need an explicit next step rather than an empty balance hero.
-  // `totalBalanceError` is set only when the aggregate request itself failed
-  // on an organization that has wallets. That is the only failure the response
-  // exposes today: the API converts per-wallet read failures into zero rows on
-  // a 200, so an RPC blip that zeroes an established organization is not
-  // distinguishable here from genuine emptiness. Closing that requires the
-  // aggregate to report partial reads (HOO-1040).
   const heroState = resolveHomeHeroState({
     walletCount,
     balances,
@@ -753,23 +777,18 @@ export function HomeWorkspace({
     : totalBalance === null
       ? t("Shared.homeWorkspace.noTrackedBalances")
       : null;
-  const todaysVolume = activitySnapshot?.todaysVolume ?? null;
-  const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
-    issuance: issuanceEnabled,
-  });
-  const symbolsByMint = buildTokenSymbolsByMint(activityRows, balances);
   const issuedTokensByMint = Object.fromEntries(
     issuedTokens.map((token) => [token.mintAddress, token])
   );
-  const activityError = activityRequestError
-    ? readApiErrorMessage(activityRequestError) || t("Shared.homeWorkspace.activityUnavailable")
-    : (activitySnapshot?.activityError ?? null);
-  const activityNotice = activitySnapshot?.activityNotice ?? null;
-  const emptyActivityMessage = isWalletEmptyState
-    ? t("Shared.homeWorkspace.createFirstWalletActivity")
-    : activitySnapshot
-      ? t("Shared.homeWorkspace.noRecentActivity")
-      : t("Shared.homeWorkspace.loadingRecentActivity");
+  const {
+    todaysVolume,
+    todaysVolumeError,
+    activityRows,
+    symbolsByMint,
+    activityError,
+    activityNotice,
+    emptyActivityMessage,
+  } = useHomeActivity(balances, issuanceEnabled, isWalletEmptyState);
 
   return (
     <div className="w-full space-y-8 py-2">
@@ -780,7 +799,7 @@ export function HomeWorkspace({
             totalBalanceError={totalBalanceError}
             totalBalanceHint={totalBalanceHint}
             todaysVolume={todaysVolume}
-            todaysVolumeError={activityError ?? activitySnapshot?.todaysVolumeError ?? null}
+            todaysVolumeError={todaysVolumeError}
             walletCount={walletCount}
             heldTokenCount={heldTokenCount}
             balances={balances}
