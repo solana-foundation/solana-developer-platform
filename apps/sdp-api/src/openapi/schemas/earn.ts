@@ -586,8 +586,9 @@ const earnExternalWalletMovementSchema = z
     direction: z.enum(["deposit", "withdrawal"]),
     status: z.enum(["requested", "submitted", "confirmed", "finalized", "failed"]).openapi({
       description:
-        "Ledger vocabulary. `confirmed` is optimistic and can still be dropped by a fork; " +
-        "only `finalized` and `failed` are terminal.",
+        "Ledger vocabulary. `requested` means SDP recorded the signed transaction but has not " +
+        "yet confirmed it reached the network. `confirmed` is optimistic and can still be " +
+        "dropped by a fork; only `finalized` and `failed` are terminal.",
     }),
     signature: z.string().openapi({ description: "The transaction signature, for explorers." }),
     ownerAddress: earnOwnerAddressSchema,
@@ -597,6 +598,17 @@ const earnExternalWalletMovementSchema = z
     denomination: z.string().openapi({
       description: "Token mint for a deposit; share mint for a withdrawal.",
       example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    }),
+    tokenMint: z.string().openapi({
+      description:
+        "The position's deposit-token mint. Render `tokenAmount` in these units; " +
+        "`amount`/`denomination` is the on-chain quantity (shares on a withdrawal).",
+      example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    }),
+    tokenAmount: earnDecimalAmountSchema.nullable().openapi({
+      description:
+        "Quantity in `tokenMint` units. A deposit's amount; a withdrawal's observed payout " +
+        "once `finalized`, otherwise null (also null when the payout could not be observed).",
     }),
     failureReason: z.string().nullable(),
     createdAt: isoDateTimeSchema,
@@ -825,11 +837,17 @@ const earnExternalWalletTokenEarningsSchema = z
     totalDeposited: earnLiveDecimalAmountSchema.openapi({
       description: "Sum of finalized SDP deposits — a ledger fact, always present.",
     }),
+    totalWithdrawn: earnLiveDecimalAmountSchema.openapi({
+      description:
+        "Sum of the observed token payouts of finalized withdrawals, a ledger fact, always " +
+        "present. Excludes withdrawals whose payout was not observed (see " +
+        "`withdrawals_not_valued`).",
+    }),
     earned: earnSignedDecimalAmountSchema.optional().openapi({
       description:
-        "`currentValue − totalDeposited`, stated only when exact and never coerced to zero. " +
-        "Live hydration reads the owner's whole vault balance, so shares acquired outside SDP " +
-        "inflate this figure — a documented property of non-custodial reads.",
+        "`currentValue + totalWithdrawn − totalDeposited`, stated only when exact and never " +
+        "coerced to zero. Live hydration reads the owner's whole vault balance, so shares " +
+        "acquired outside SDP inflate this figure (a documented property of non-custodial reads).",
     }),
     earnedUnavailableReason: z
       .enum(["live_value_unavailable", "movements_pending", "withdrawals_not_valued"])
@@ -837,8 +855,8 @@ const earnExternalWalletTokenEarningsSchema = z
       .openapi({
         description:
           "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
-          "or a currently held position has a finalized withdrawal (the ledger records exits in " +
-          "shares, so no exact token-denominated earned figure exists once money has gone out).",
+          "or a currently held position has a finalized withdrawal whose token payout was not " +
+          "observed at settlement, so `totalWithdrawn` is incomplete.",
       }),
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });

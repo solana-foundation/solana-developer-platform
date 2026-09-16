@@ -664,8 +664,8 @@
     "apiKeyRoleFixedOnEdit": "The role remains fixed after creation. Wallet and policy scope can still be updated.",
     "apiKeyRoleDescription": {
       "api_admin": "Full endpoint access, including administrative operations.",
-      "api_developer": "Standard token, payment, counterparty, wallet, compliance, and webhook access.",
-      "api_readonly": "Read-only access to operational resources and audit data."
+      "api_developer": "Token, payment, Earn, counterparty, wallet, compliance, and webhook access.",
+      "api_readonly": "Read-only token, payment, Earn, counterparty, wallet, compliance, webhook, and audit access."
     },
     "apiKeyFullEndpointAccess": "Full endpoint access",
     "apiKeyPermissionCount": "{count} endpoint permissions",

@@ -1155,6 +1155,37 @@ caveat stands unchanged: live value reads the owner's whole vault balance, so
 shares acquired outside SDP inflate `earned`; that stays a documented property
 of non-custodial reads.
 
+### Addendum to the addendum: 2026-09-15 empty reads, settle-time payout, close on empty
+
+Three of the above are now implemented differently, driven by a partner
+integration measured against the live API:
+
+- **No per-owner read 404s an owner.** `positions`, `movements` and `earnings`
+  answer 200 with the empty shape for a wallet with nothing in the project's
+  scope (never deposited, fully exited, or claimed by another organization).
+  A balance screen must render for a new customer, and every query is already
+  org/project/environment scoped, so a foreign claim produces the same empty
+  bytes as no claim: nothing leaks that the content itself would not. The
+  `hasExternalWalletPositionOwner` gate is gone. Only the retired
+  path-addressed shapes and the movement-by-id detail still 404.
+- **`withdrawals_not_valued` is now the exception, not the rule.** The
+  "deliberately follow-up work" above is done: when a withdrawal reaches
+  `finalized`, the reconciler fetches the landed transaction and records the
+  receiving wallet's post-minus-pre balance of the position's deposit token as
+  `earn_movements.token_amount_settled` (migration 0103; deposits get their
+  settled amount). `earned` = `currentValue + totalWithdrawn − totalDeposited`,
+  with `totalWithdrawn` on the wire so the arithmetic is visible, and the
+  reason is reported only for a finalized withdrawal whose payout was not
+  observed (pre-0103 rows, or a settlement whose transaction read failed).
+  Unobserved stays NULL; it is never estimated at the current share price,
+  for the reason given above. Movements carry `tokenMint`/`tokenAmount` next
+  to the unchanged `amount`/`denomination` so a feed renders one unit.
+- **A fully exited holding closes.** The same settlement hook reads the
+  holding live for that one vault and owner and stamps `closed_at` when
+  shares are "0" (fail-soft; a later deposit transition re-opens it), for
+  external-wallet and custody rows alike. Before this nothing ever wrote
+  `closed_at` at runtime, so an exited position stayed "held" forever.
+
 ## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
 
 Supersedes the "Owner pays everything" accepted cost in the 2026-08-26

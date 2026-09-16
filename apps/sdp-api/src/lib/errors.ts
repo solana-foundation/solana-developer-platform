@@ -48,6 +48,7 @@ export type ErrorCode =
   | "CUSTODY_ERROR"
   // Transaction errors
   | "TRANSACTION_FAILED"
+  | "TRANSACTION_EXPIRED"
   | "SIGNING_FAILED"
   | "SIGNING_REJECTED"
   | "SIGNING_PENDING"
@@ -107,6 +108,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   CUSTODY_ERROR: 502,
   // Transaction errors
   TRANSACTION_FAILED: 400,
+  // 409, like an expired quote: the request was well-formed, but the thing it
+  // names can no longer be acted on and must be rebuilt.
+  TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
   SIGNING_PENDING: 202,
@@ -161,6 +165,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   CUSTODY_ERROR: "Custody provider error",
   // Transaction errors
   TRANSACTION_FAILED: "Transaction failed",
+  TRANSACTION_EXPIRED: "The transaction's blockhash expired before it was submitted",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
   SIGNING_PENDING: "Signing request pending approval",
@@ -240,6 +245,11 @@ export function walletNotFound(): AppError {
 
 export function conflict(message?: string, details?: Record<string, unknown>): AppError {
   return new AppError("CONFLICT", message, details);
+}
+
+/** A signed transaction whose blockhash window closed before submission. */
+export function transactionExpired(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("TRANSACTION_EXPIRED", message, details);
 }
 
 export function rateLimited(message?: string): AppError {

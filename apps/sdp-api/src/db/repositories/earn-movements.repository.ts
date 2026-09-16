@@ -143,6 +143,12 @@ export interface EarnMovementRow {
   amount_requested: string;
   amount_settled: string | null;
   fee_amount: string | null;
+  /**
+   * What settled in the position's DEPOSIT token (migration 0103): the deposit
+   * amount, or a withdrawal's observed payout from the finalized transaction.
+   * NULL until finalized, and NULL when a payout could not be observed.
+   */
+  token_amount_settled: string | null;
   /** Share units, never comparable to the amount columns. */
   min_shares_out: string | null;
   shares_out: string | null;
@@ -359,12 +365,56 @@ export interface EarnMovementsRepository {
     limit: number;
     before: EarnMovementCursor | null;
   }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
-  /** Whether this exact partner project has ever claimed a position for the owner. */
-  hasExternalWalletPositionOwner(params: {
+  /**
+   * Deposit-token mint per position id, organization scoped. The movement
+   * wire shape names the token a withdrawal pays out in, and a withdrawal row
+   * only carries its SHARE mint, so the position supplies it.
+   */
+  listPositionTokenMints(params: {
     organizationId: string;
-    projectId: string;
-    environment: SdpEnvironment;
-    ownerAddress: string;
+    positionIds: readonly string[];
+  }): Promise<Map<string, string>>;
+  /**
+   * Stamp `closed_at` on a vault position the caller has just observed EMPTY
+   * on chain (live shares "0" after a finalized withdrawal). Takes the same
+   * position lock `advanceVaultMovement` takes, so it serialises against a
+   * concurrent deposit transition; that transition re-opens (`closed_at =
+   * NULL`) whenever it runs later, and the visibility predicates already show
+   * a closed row while a deposit re-entry is pending. Returns true when this
+   * call closed the row, false when it was already closed or not found.
+   */
+  closeVaultPositionIfEmpty(params: {
+    positionId: string;
+    organizationId: string;
+    /**
+     * The position row's `updated_at` as read BEFORE the balance observation.
+     * Every deposit transition bumps it while re-opening the row, so a stale
+     * zero-share snapshot can never close a holding a deposit refilled in the
+     * meantime: the close is refused and the next observation decides.
+     */
+    observedUpdatedAt: string;
+  }): Promise<boolean>;
+  /**
+   * Finalized withdrawals whose payout was not observed at settlement
+   * (`token_amount_settled IS NULL`), oldest attempt first, bounded to rows
+   * settled after `settledAfter` (RPC transaction history is finite) and not
+   * attempted since `retryBefore`. Stamps `reconciliation_attempted_at` on the
+   * claim so the repair sweep spaces its retries.
+   */
+  claimUnvaluedWithdrawalPayouts(params: {
+    limit: number;
+    settledAfter: string;
+    retryBefore: string;
+  }): Promise<EarnMovementRow[]>;
+  /**
+   * Record a payout observed after settlement. Writes only a finalized
+   * withdrawal that is still unvalued, so a repeated observation never
+   * overwrites the first one. Returns true when this call recorded it.
+   */
+  recordWithdrawalPayout(params: {
+    movementId: string;
+    organizationId: string;
+    tokenAmountSettled: string;
   }): Promise<boolean>;
   /**
    * One external wallet's recorded movements, exact-project scoped, newest
@@ -409,26 +459,18 @@ export interface EarnMovementsRepository {
   }): Promise<EarnMovementRow | null>;
   /**
    * Ledger inputs to the per-owner earnings figure, grouped by position
-   * (PRO-1772): finalized deposit total (deposit-token units — deposits all
-   * share their position's token denomination, so the SUM never crosses
-   * denominations), finalized withdrawal count, and how many movements are
-   * still unsettled. Failed movements are ignored — that money never moved.
+   * (PRO-1772): finalized deposit total and finalized withdrawal payout total
+   * (both in deposit-token units, from `token_amount_settled`, so the SUMs
+   * never cross denominations), how many finalized withdrawals carry NO
+   * observed payout, and how many movements are still unsettled. Failed
+   * movements are ignored: that money never moved.
    */
   aggregateExternalWalletMovements(params: {
     organizationId: string;
     projectId: string;
     environment: SdpEnvironment;
     ownerAddress: string;
-  }): Promise<
-    Map<
-      string,
-      {
-        finalizedDeposits: string;
-        finalizedWithdrawalCount: number;
-        unsettledMovementCount: number;
-      }
-    >
-  >;
+  }): Promise<Map<string, ExternalWalletMovementTotals>>;
   /**
    * The cross-provider movement feed: one chronological history spanning both
    * execution models, which is what neither legacy table could serve alone.
@@ -625,6 +667,18 @@ export interface ShareAccountRentAttribution {
   shareAtaRentFunder?: string | null;
 }
 
+/** Per-position ledger totals behind the external-wallet earnings read. */
+export interface ExternalWalletMovementTotals {
+  /** Σ finalized deposits, deposit-token units. */
+  finalizedDeposits: string;
+  /** Σ observed payouts of finalized withdrawals, deposit-token units. */
+  finalizedWithdrawals: string;
+  finalizedWithdrawalCount: number;
+  /** Finalized withdrawals whose payout was never observed (NULL column). */
+  unvaluedWithdrawalCount: number;
+  unsettledMovementCount: number;
+}
+
 export interface AdvanceVaultMovementInput {
   movementId: string;
   organizationId: string;
@@ -633,6 +687,12 @@ export interface AdvanceVaultMovementInput {
   failureReason?: string | null;
   confirmedAt?: string | null;
   settledAt?: string | null;
+  /**
+   * Finalizing only. A WITHDRAWAL's observed payout in the position's deposit
+   * token; null when it could not be observed. Ignored for deposits, whose
+   * token amount is the settled deposit amount and is stamped by the writer.
+   */
+  tokenAmountSettled?: string | null;
 }
 
 export interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribution {
@@ -812,6 +872,7 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     amount_requested: row.amount_requested as string,
     amount_settled: row.amount_settled as string | null,
     fee_amount: row.fee_amount as string | null,
+    token_amount_settled: row.token_amount_settled as string | null,
     min_shares_out: row.min_shares_out as string | null,
     shares_out: row.shares_out as string | null,
     payout_token: row.payout_token as string | null,
@@ -1123,20 +1184,105 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
     },
 
-    async hasExternalWalletPositionOwner(params) {
-      const row = await db
+    async listPositionTokenMints(params) {
+      const mints = new Map<string, string>();
+      const ids = [...new Set(params.positionIds)];
+      if (ids.length === 0) return mints;
+      const result = await db
         .prepare(
-          `SELECT 1 AS present
+          `SELECT id, token_mint
              FROM earn_positions
             WHERE organization_id = ?
-              AND project_id = ?
-              AND environment = ?
-              AND kind = 'vault_direct'
-              AND owner_address = ?
-            LIMIT 1`
+              AND id = ANY (?::text[])`
         )
-        .bind(params.organizationId, params.projectId, params.environment, params.ownerAddress)
-        .first<{ present: number }>();
+        .bind(params.organizationId, ids)
+        .all<{ id: string; token_mint: string | null }>();
+      for (const row of result.results ?? []) {
+        if (row.token_mint) mints.set(row.id, row.token_mint);
+      }
+      return mints;
+    },
+
+    async closeVaultPositionIfEmpty(params) {
+      return db.transaction(async (executor) => {
+        const transaction = asTransactionalClient(executor);
+        // Same lock advanceVaultMovement takes: a deposit transition for this
+        // holding cannot interleave between the caller's observation and this
+        // write, and one that runs after re-opens the row.
+        const locked = await transaction
+          .prepare(
+            `SELECT id FROM earn_positions
+              WHERE id = ? AND organization_id = ? AND kind = 'vault_direct'
+              FOR UPDATE`
+          )
+          .bind(params.positionId, params.organizationId)
+          .first<{ id: string }>();
+        if (!locked) return false;
+        // `updated_at = ?` is the snapshot boundary: a deposit transition that
+        // landed after the caller observed zero shares bumped it (and cleared
+        // closed_at), so the stale observation cannot close the refilled row.
+        const closed = await transaction
+          .prepare(
+            `UPDATE earn_positions
+                SET closed_at = sdp_iso_now(), updated_at = sdp_iso_now()
+              WHERE id = ? AND organization_id = ? AND closed_at IS NULL
+                AND updated_at = ?
+                AND NOT EXISTS (
+                  SELECT 1 FROM earn_movements unsettled
+                   WHERE unsettled.position_id = earn_positions.id
+                     AND unsettled.status IN ('requested', 'submitted', 'confirmed')
+                )
+              RETURNING id`
+          )
+          .bind(params.positionId, params.organizationId, params.observedUpdatedAt)
+          .first<{ id: string }>();
+        return Boolean(closed);
+      });
+    },
+
+    async claimUnvaluedWithdrawalPayouts(params) {
+      const result = await db
+        .prepare(
+          `WITH candidates AS MATERIALIZED (
+             SELECT id FROM earn_movements
+              WHERE execution_model = 'vault_direct'
+                AND direction = 'withdrawal'
+                AND status = 'finalized'
+                AND token_amount_settled IS NULL
+                AND signature IS NOT NULL
+                AND settled_at >= ?
+                AND (reconciliation_attempted_at IS NULL OR reconciliation_attempted_at <= ?)
+              ORDER BY COALESCE(reconciliation_attempted_at, settled_at) ASC, id ASC
+              LIMIT ?
+              FOR UPDATE SKIP LOCKED
+           ), touched AS (
+             UPDATE earn_movements movement
+                SET reconciliation_attempted_at = sdp_iso_now()
+               FROM candidates
+              WHERE movement.id = candidates.id
+             RETURNING movement.*
+           )
+           SELECT * FROM touched ORDER BY settled_at ASC, id ASC`
+        )
+        .bind(params.settledAfter, params.retryBefore, params.limit)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async recordWithdrawalPayout(params) {
+      const row = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET token_amount_settled = ?, updated_at = sdp_iso_now()
+            WHERE id = ? AND organization_id = ?
+              AND execution_model = 'vault_direct'
+              AND direction = 'withdrawal'
+              AND status = 'finalized'
+              AND token_amount_settled IS NULL
+            RETURNING id`
+        )
+        .bind(params.tokenAmountSettled, params.movementId, params.organizationId)
+        .first<{ id: string }>();
       return Boolean(row);
     },
 
@@ -1225,9 +1371,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
 
     async aggregateExternalWalletMovements(params) {
       // Postgres numeric is exact, and every summed row shares its position's
-      // deposit-token denomination, so the cast loses nothing. `COALESCE` on
+      // deposit-token denomination, so the casts lose nothing. `COALESCE` on
       // amount_settled is belt and braces: the writer stamps it on every
-      // finalized row.
+      // finalized row. Withdrawals sum `token_amount_settled` (0103), the
+      // observed payout; a finalized withdrawal with none is counted so the
+      // read can withhold earned instead of understating it.
       const result = await db
         .prepare(
           `SELECT position_id,
@@ -1236,9 +1384,19 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                          THEN COALESCE(amount_settled, amount_requested)::numeric
                          ELSE 0 END
                   ), 0)::text AS finalized_deposits,
+                  COALESCE(SUM(
+                    CASE WHEN direction = 'withdrawal' AND status = 'finalized'
+                         THEN COALESCE(token_amount_settled, '0')::numeric
+                         ELSE 0 END
+                  ), 0)::text AS finalized_withdrawals,
                   COUNT(*) FILTER (
                     WHERE direction = 'withdrawal' AND status = 'finalized'
                   ) AS finalized_withdrawal_count,
+                  COUNT(*) FILTER (
+                    WHERE direction = 'withdrawal'
+                      AND status = 'finalized'
+                      AND token_amount_settled IS NULL
+                  ) AS unvalued_withdrawal_count,
                   COUNT(*) FILTER (
                     WHERE status IN ('requested', 'submitted', 'confirmed')
                   ) AS unsettled_movement_count
@@ -1253,21 +1411,18 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .all<{
           position_id: string;
           finalized_deposits: string;
+          finalized_withdrawals: string;
           finalized_withdrawal_count: number;
+          unvalued_withdrawal_count: number;
           unsettled_movement_count: number;
         }>();
-      const totals = new Map<
-        string,
-        {
-          finalizedDeposits: string;
-          finalizedWithdrawalCount: number;
-          unsettledMovementCount: number;
-        }
-      >();
+      const totals = new Map<string, ExternalWalletMovementTotals>();
       for (const row of result.results ?? []) {
         totals.set(row.position_id, {
           finalizedDeposits: row.finalized_deposits,
+          finalizedWithdrawals: row.finalized_withdrawals,
           finalizedWithdrawalCount: Number(row.finalized_withdrawal_count),
+          unvaluedWithdrawalCount: Number(row.unvalued_withdrawal_count),
           unsettledMovementCount: Number(row.unsettled_movement_count),
         });
       }
@@ -1688,6 +1843,21 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         // COALESCEd so a backfilled row keeps the projection's spelling.
         assignments.push("amount_settled = COALESCE(amount_settled, amount_requested)");
       }
+      if (input.toStatus === "finalized") {
+        // The deposit-token view of the same settlement (0103). A deposit's
+        // token amount IS its settled amount; a withdrawal's is whatever the
+        // caller observed on the landed transaction, or NULL when it could
+        // not. SET expressions read the pre-update row, so the COALESCE over
+        // amount_settled resolves exactly as the assignment above does.
+        assignments.push(
+          `token_amount_settled = COALESCE(
+             token_amount_settled,
+             CASE WHEN direction = 'deposit' THEN COALESCE(amount_settled, amount_requested)
+                  ELSE ? END
+           )`
+        );
+        values.push(input.tokenAmountSettled ?? null);
+      }
 
       const advance = (target: AppDb) =>
         target
@@ -1946,6 +2116,9 @@ function assertVaultTransitionMetadata(input: AdvanceVaultMovementInput): void {
     !input.confirmedAt?.trim()
   ) {
     throw new Error("confirmedAt is required when confirming an earn vault movement");
+  }
+  if (input.tokenAmountSettled !== undefined && input.toStatus !== "finalized") {
+    throw new Error("tokenAmountSettled is only valid when finalizing an earn vault movement");
   }
   if (input.sharesOut !== undefined && input.toStatus !== "confirmed") {
     throw new Error("sharesOut is only valid when confirming an earn vault movement");

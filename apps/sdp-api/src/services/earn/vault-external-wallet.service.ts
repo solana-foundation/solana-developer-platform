@@ -27,7 +27,7 @@ import {
   createPostgresEarnSplitSwapAdvisoriesRepository,
   generateEarnSplitSwapAdvisoryId,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
-import { badRequest, internalError, notFound } from "@/lib/errors";
+import { badRequest, internalError, notFound, transactionExpired } from "@/lib/errors";
 import {
   buildEarnExternalWalletDepositFingerprint,
   buildEarnExternalWalletWithdrawalFingerprint,
@@ -64,6 +64,7 @@ import {
 import {
   broadcastRecordedVaultMovement,
   isSlippageSimulationFailure,
+  readConfirmedBlockHeight,
 } from "./vault-intent-execution.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
@@ -731,6 +732,18 @@ export async function buildExternalWalletWithdrawalTransaction(
       `Vault builder returned a ${plan.cluster} plan for the configured ${cluster} cluster`
     );
   }
+  // A floor the plan does not encode protects nothing on chain (Kamino's
+  // kvault withdraw takes only a share amount). The custody exit treats the
+  // same gap as an invariant breach; here the caller chose the floor, so it
+  // is the caller's 400. A floor the plan echoes differently stays the
+  // shared internal check below.
+  if (input.minAmountOut !== undefined && plan.accepted?.minAmountOut === undefined) {
+    throw badRequest(
+      `minAmountOut is not supported for ${input.provider} exits: the vault's withdraw ` +
+        "instruction takes only a share amount, so no floor can be enforced on chain. " +
+        "Omit minAmountOut; withdrawalSlippage is null for this strategy."
+    );
+  }
   requireAcceptedWithdrawalPlan(plan, input);
 
   const simulation = await simulateVaultPlan(env, {
@@ -872,6 +885,7 @@ export async function submitExternalWalletDeposit(
     return replayedSubmitResult(ledger, input, prior);
   }
 
+  await refuseExpiredBuild(env, input, built);
   const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
 
   const result = await ledger.createSignedExternalWalletDepositIntent({
@@ -938,6 +952,7 @@ export async function submitExternalWalletWithdrawal(
     return replayedSubmitResult(ledger, input, prior);
   }
 
+  await refuseExpiredBuild(env, input, built);
   const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
 
   const result = await ledger.createSignedExternalWalletWithdrawalIntent({
@@ -991,6 +1006,42 @@ async function requireSubmittableBuiltTransaction(
     throw notFound("Earn external-wallet transaction");
   }
   return built;
+}
+
+const EXPIRED_BUILD_MESSAGE =
+  "This transaction's blockhash expired before it was submitted. " +
+  "Build a new transaction and have the customer sign it again.";
+
+/**
+ * Refuse an expired build BEFORE anything is recorded. Past
+ * `last_valid_block_height` the signed bytes cannot land, so recording them
+ * would only manufacture a `failed` row for the reconciler to expire and a
+ * `requested` answer the caller has to poll to learn that. Ordered after the
+ * replay short-circuit (a replay answers from the ledger, never from a chain
+ * read) and skipped for a consumed build (its second key answers the
+ * consumption conflict, which names the movement). A failed height read
+ * does not refuse: the broadcast and the reconciler stay the safety net.
+ */
+async function refuseExpiredBuild(
+  env: Env,
+  input: ExternalWalletSubmitInput,
+  built: EarnExternalWalletTransactionRow
+): Promise<void> {
+  if (built.movement_id !== null) return;
+  let currentBlockHeight: bigint;
+  try {
+    const rpcUrl = resolveClusterRpcUrl(env, earnClusterFor(input.environment));
+    currentBlockHeight = await readConfirmedBlockHeight(env, rpcUrl);
+  } catch (error) {
+    getLogger().warn(
+      { transactionId: built.id, error },
+      "external-wallet submit: block height unreadable; expiry left to the broadcast and reconciler"
+    );
+    return;
+  }
+  if (currentBlockHeight > BigInt(built.last_valid_block_height)) {
+    throw transactionExpired(EXPIRED_BUILD_MESSAGE);
+  }
 }
 
 async function replayedSubmitResult(

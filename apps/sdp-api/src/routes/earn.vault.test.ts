@@ -1,3 +1,4 @@
+import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
@@ -39,6 +40,8 @@ import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { SigningService } from "@/services/domain/signing.service";
+import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
+import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -56,9 +59,9 @@ vi.mock("@/services/earn/vault-deposit.service", async (importOriginal) => ({
  * Per-test override for the executing vault-direct client, delegating to the
  * REAL registry when unset. The preview route reaches the client directly (no
  * service seam to mock), and the real Veda client would quote against a live
- * RPC. Kamino cases stay on the real registry, which is itself the fixture:
- * its client genuinely lacks `quoteVaultDeposit`, so the 501 is measured, not
- * staged.
+ * RPC. The 501 case stays on the real registry, which is itself the fixture:
+ * upshift has no executing client there, so the refusal is measured, not
+ * staged (Kamino held that role until it learned to quote).
  */
 const vaultDirectClientOverride = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -1701,15 +1704,29 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
   });
 
-  it("answers 501 for a provider that cannot quote, measured against the real client", async () => {
-    await seedAuth();
-    const strategy = await seedStrategy();
+  /**
+   * Measured against the real registry on a provider that genuinely lacks
+   * quoting: upshift is registered and `vault_direct` but has no executing
+   * client, so the registry answers null. Surfacing is forced on to get past
+   * the gate in front of the capability check, and the call is anonymous so
+   * no entitlement row is needed.
+   */
+  it("answers 501 for a provider that cannot quote, measured against the real registry", async () => {
+    surfacing.forceOn = true;
+    const strategy = await seedStrategy({ provider: "upshift" });
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  /** The real Kamino client, as the registry builds it, now clears the quote guard. */
+  it("measures the real Kamino client as deposit-quote capable", () => {
+    const client = resolveEarnExecutionClient(env, "kamino", createVaultDeadline());
+    if (!client) throw new Error("the registry must build a Kamino client");
+    expect(supportsVaultDepositQuote(client)).toBe(true);
   });
 
   it("answers 404 for a strategy this workspace cannot see", async () => {
