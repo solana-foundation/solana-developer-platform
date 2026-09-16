@@ -95,13 +95,6 @@ function actorId(auth: ApiKeyContext): string {
   return auth.userId ?? auth.apiKeyId ?? auth.id;
 }
 
-async function actorOwnerId(
-  repository: ReturnType<typeof createPolicyRepository>,
-  principalId: string
-): Promise<string> {
-  return (await repository.getApiKeyCreatorUserId(principalId)) ?? principalId;
-}
-
 /**
  * Answers "did the caller raise this request?" for one request or many.
  *
@@ -109,24 +102,27 @@ async function actorOwnerId(
  * principal ids would let one person request with a session and approve with
  * their API key (or the reverse). The decision routes refuse on this answer, and
  * reads report it, so the dashboard never offers a decision the API will refuse.
- * Owner lookups are memoized, so a list costs one lookup per distinct requester.
+ *
+ * Every principal on the page is resolved in ONE read: the inbox refreshes on a
+ * timer, and a lookup per requester made a full page cost hundreds of queries.
+ *
+ * @param repository - Policy repository.
+ * @param auth - The caller.
+ * @param requesters - Every `requested_by` on the page; nulls are ignored.
+ * @returns A predicate over `requested_by`.
  */
-function requesterCheck(
+async function requesterCheck(
   repository: ReturnType<typeof createPolicyRepository>,
-  auth: ApiKeyContext
-): (requestedBy: string | null) => Promise<boolean> {
-  const owners = new Map<string, Promise<string>>();
-  const ownerOf = (principalId: string) => {
-    const cached = owners.get(principalId);
-    if (cached !== undefined) {
-      return cached;
-    }
-    const lookup = actorOwnerId(repository, principalId);
-    owners.set(principalId, lookup);
-    return lookup;
-  };
-  return async (requestedBy) =>
-    requestedBy !== null && (await ownerOf(requestedBy)) === (await ownerOf(actorId(auth)));
+  auth: ApiKeyContext,
+  requesters: readonly (string | null)[]
+): Promise<(requestedBy: string | null) => boolean> {
+  const caller = actorId(auth);
+  const principals = [...new Set([caller, ...requesters.filter((id) => id !== null)])];
+  const creators = await repository.getApiKeyCreatorUserIds(principals);
+  // A principal that names no api key is already a user id, and owns itself.
+  const ownerOf = (principalId: string) => creators.get(principalId) ?? principalId;
+  const callerOwner = ownerOf(caller);
+  return (requestedBy) => requestedBy !== null && ownerOf(requestedBy) === callerOwner;
 }
 
 async function readApprovalRequest(c: AppContext, approvalRequestId: string) {
@@ -142,7 +138,8 @@ async function readApprovalRequest(c: AppContext, approvalRequestId: string) {
     throw notFound("Approval request");
   }
 
-  return mapApprovalRequest(row, await requesterCheck(repository, auth)(row.requested_by));
+  const isRequester = await requesterCheck(repository, auth, [row.requested_by]);
+  return mapApprovalRequest(row, isRequester(row.requested_by));
 }
 
 async function assertCanResolveApprovalRequest(
@@ -163,7 +160,8 @@ async function assertCanResolveApprovalRequest(
 
   // Requesters may withdraw their own pending request, but they cannot satisfy
   // or reject the approval gate they created.
-  if (await requesterCheck(repository, auth)(row.requested_by)) {
+  const isRequester = await requesterCheck(repository, auth, [row.requested_by]);
+  if (isRequester(row.requested_by)) {
     if (action === "cancel") {
       return row;
     }
@@ -205,11 +203,13 @@ export const listApprovalRequests = async (c: AppContext) => {
     limit: parsed.data.limit,
   });
 
-  const isRequester = requesterCheck(repository, auth);
+  const isRequester = await requesterCheck(
+    repository,
+    auth,
+    rows.map((row) => row.requested_by)
+  );
   return success(c, {
-    approvalRequests: await Promise.all(
-      rows.map(async (row) => mapApprovalRequest(row, await isRequester(row.requested_by)))
-    ),
+    approvalRequests: rows.map((row) => mapApprovalRequest(row, isRequester(row.requested_by))),
   });
 };
 

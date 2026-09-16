@@ -615,6 +615,11 @@ export interface PolicyRepository {
     input: CompleteWalletOperationExecutionInput
   ): Promise<WalletOperationRow | null>;
   getApiKeyCreatorUserId(apiKeyId: string): Promise<string | null>;
+  /**
+   * The creator of each api key in one read, keyed by api key id. Ids that name
+   * no readable key are absent: a user id is not an api key.
+   */
+  getApiKeyCreatorUserIds(apiKeyIds: readonly string[]): Promise<Map<string, string>>;
   isApprovalGroupMember(approvalGroupId: string, userId: string): Promise<boolean>;
   createPolicyEvaluation(input: CreatePolicyEvaluationInput): Promise<PolicyEvaluationRow | null>;
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;

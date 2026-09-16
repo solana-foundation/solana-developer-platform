@@ -2262,6 +2262,33 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       return row?.created_by ?? null;
     },
 
+    async getApiKeyCreatorUserIds(apiKeyIds: readonly string[]) {
+      const creators = new Map<string, string>();
+      const unique = [...new Set(apiKeyIds)];
+      if (unique.length === 0) {
+        return creators;
+      }
+      // One read for the whole list: the approvals inbox refreshes every few
+      // seconds, and a lookup per requester turned one page into hundreds.
+      const placeholders = unique.map(() => "?").join(", ");
+      const result = await db
+        .prepare(
+          `SELECT id, created_by
+           FROM api_keys
+           WHERE id IN (${placeholders})
+             AND organization_id = ?
+             AND (?::text IS NULL OR project_id IS NOT DISTINCT FROM ?)`
+        )
+        .bind(...unique, scope.organizationId, scope.projectId, scope.projectId)
+        .all<{ id: string; created_by: string | null }>();
+      for (const row of result.results) {
+        if (row.created_by !== null) {
+          creators.set(row.id, row.created_by);
+        }
+      }
+      return creators;
+    },
+
     async createPolicyEvaluation(input: CreatePolicyEvaluationInput) {
       if (!(await tenantOwnsRow(db, scope, "wallet_operations", input.walletOperationId))) {
         return null;
