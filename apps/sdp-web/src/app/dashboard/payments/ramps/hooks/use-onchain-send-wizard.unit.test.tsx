@@ -332,6 +332,9 @@ describe("useOnchainSendWizard", () => {
     expect(mocks.toastError).not.toHaveBeenCalled();
 
     // Done leaves; it never sends the held payment again.
+    // A finished payment no longer depends on valid submission fields.
+    act(() => result.current.setField("walletId", ""));
+    expect(result.current.canProceed).toBe(true);
     await act(async () => result.current.handlePrimary());
     expect(mocks.push).toHaveBeenCalledWith("/dashboard/payments");
     expect(transferPosts()).toHaveLength(1);
