@@ -223,9 +223,11 @@ function registerEarnExternalWalletPaths(
     operationId: "listEarnExternalWalletPositions",
     description:
       "Returns one strict keyset page of live positions for an end-user wallet in the active " +
-      "partner project. `ownerAddress` is required — the same query addressing every per-owner " +
-      "read on this surface uses. A wallet outside the project's scope answers 404. Live " +
-      "fields are absent when provider hydration is unavailable, never replaced with zero.",
+      "partner project. `ownerAddress` is required, the same query addressing every per-owner " +
+      "read on this surface uses. A wallet with no positions in the project's scope (never " +
+      "deposited, fully exited, or held under another organization) answers 200 with an empty " +
+      "`positions` list, never 404. Live fields are absent when provider hydration is " +
+      "unavailable, never replaced with zero.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -236,7 +238,7 @@ function registerEarnExternalWalletPaths(
         description: "External-wallet position page",
         content: jsonContent(earnExternalWalletPositionsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -250,8 +252,11 @@ function registerEarnExternalWalletPaths(
       "Returns one keyset page of the wallet's recorded deposits and withdrawals, newest " +
       "first, in ledger vocabulary (`requested`, `submitted`, `confirmed`, `finalized`, " +
       "`failed`; only `finalized` and `failed` are terminal). `ownerAddress` is required; a " +
-      "wallet outside the active partner project answers 404. Reports on money that already " +
-      "moved, so no provider gate applies.",
+      "wallet with no recorded movements in the active partner project answers 200 with an " +
+      "empty `movements` list, never 404. Each movement carries `tokenAmount` in `tokenMint` " +
+      "units for display (a withdrawal's observed payout once finalized) alongside the " +
+      "on-chain `amount`/`denomination`. Reports on money that already moved, so no provider " +
+      "gate applies.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -262,7 +267,7 @@ function registerEarnExternalWalletPaths(
         description: "External-wallet movement page",
         content: jsonContent(earnExternalWalletMovementsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -301,13 +306,15 @@ function registerEarnExternalWalletPaths(
     operationId: "getEarnExternalWalletEarnings",
     description:
       "Returns live balance and total earned per deposit token for the required " +
-      "`ownerAddress`: `earned` is live value minus " +
-      "finalized SDP deposits, stated only when exact. When it cannot be stated — live value " +
-      "unavailable, movements still settling, or a finalized withdrawal on a held position — " +
-      "the figure is absent with a named reason, never zero. Figures cover currently held " +
-      "positions: a fully exited position's history drops out (it stays on the movements " +
-      "list). Live value reads the owner's whole vault balance, so shares acquired outside " +
-      "SDP inflate it.",
+      "`ownerAddress`: `earned` is live value plus observed withdrawal payouts " +
+      "(`totalWithdrawn`) minus finalized SDP deposits (`totalDeposited`), stated only when " +
+      "exact. When it cannot be stated (live value unavailable, movements still settling, or " +
+      "a finalized withdrawal whose payout was not observed) the figure is absent with a " +
+      "named reason, never zero. A wallet with no positions in the project's scope answers " +
+      "200 with `positionCount: 0` and empty `totalsByToken`, never 404. Figures cover " +
+      "currently held positions: a fully exited position's history drops out (it stays on the " +
+      "movements list). Live value reads the owner's whole vault balance, so shares acquired " +
+      "outside SDP inflate it.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -318,7 +325,7 @@ function registerEarnExternalWalletPaths(
         description: "External-wallet earnings",
         content: jsonContent(earnExternalWalletEarningsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -360,10 +367,11 @@ function registerEarnExternalWalletPaths(
     operationId: "createEarnExternalWalletDeposit",
     description:
       "Verifies the signed bytes are exactly the built transaction and that every required " +
-      "signature is genuine — the owner's, and the fee payer's when the build named one — " +
+      "signature is genuine (the owner's, and the fee payer's when the build named one), " +
       "records the movement, then broadcasts. Requires the Idempotency-Key header: " +
       "a retry with the same key resolves the original movement (`replayed: true`), and each " +
-      "built transaction is consumable exactly once.",
+      "built transaction is consumable exactly once. A build whose blockhash has expired is " +
+      "refused with 409 TRANSACTION_EXPIRED before anything is recorded; build again.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -451,7 +459,8 @@ function registerEarnExternalWalletPaths(
     description:
       "The exit mirror of the deposit submit: signature verified over the exact built message, " +
       "movement recorded before broadcast, Idempotency-Key required, one submission per built " +
-      "transaction.",
+      "transaction. A build whose blockhash has expired is refused with 409 TRANSACTION_EXPIRED " +
+      "before anything is recorded; build again.",
     security,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,

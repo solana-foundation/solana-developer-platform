@@ -11,6 +11,7 @@ import type {
   PolicyEnforcementStore,
   RecordPolicyEvaluationInput,
 } from "./ports";
+import { collectVelocityRules, createVelocityLookup } from "./velocity";
 
 export interface WalletOperationPolicyEnforcement {
   operation: WalletOperationEnvelope;
@@ -43,11 +44,17 @@ export async function enforceWalletOperationPolicy(
 
   try {
     const policies = await store.loadEffectivePolicies(operation);
+    const velocityRules = collectVelocityRules(policies);
+    const observations =
+      velocityRules.length === 0
+        ? []
+        : await store.loadVelocityObservations(operation, velocityRules);
     const result = evaluateWalletOperationPolicies({
       operation,
       legs: input.legs,
       walletPolicy: policies.walletPolicy,
       apiKeyPolicy: policies.apiKeyPolicy,
+      velocity: createVelocityLookup(observations),
     });
     const status = walletOperationStatusForDecision(result.decision);
 

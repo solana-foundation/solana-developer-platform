@@ -691,12 +691,27 @@ export interface ParsedInstruction {
   info: Record<string, unknown> | null;
 }
 
+/** One token-account balance as the RPC reports it before or after a transaction. */
+export interface ParsedTokenBalance {
+  /** Index into the transaction's account keys. */
+  accountIndex: number;
+  mint: string;
+  /** The token account's owner; absent from some RPC responses. */
+  owner: string | null;
+  /** Base units as a decimal integer string, exactly as reported. */
+  amount: string;
+  decimals: number;
+}
+
 export interface ParsedTransaction {
   slot: bigint;
   err: unknown | null;
   fee?: bigint;
   preBalances?: readonly bigint[];
   postBalances?: readonly bigint[];
+  /** SPL token balances touched by the transaction; empty when meta has none. */
+  preTokenBalances?: ParsedTokenBalance[];
+  postTokenBalances?: ParsedTokenBalance[];
   /** Top-level + inner instructions flattened, in no particular order. */
   instructions: ParsedInstruction[];
 }
@@ -708,6 +723,13 @@ interface RawParsedInstruction {
   parsed?: { type?: string; info?: Record<string, unknown> };
 }
 
+interface RawTokenBalance {
+  accountIndex: number;
+  mint: string;
+  owner?: string;
+  uiTokenAmount: { amount: string; decimals: number };
+}
+
 interface RawGetTransactionResponse {
   slot: bigint;
   meta: {
@@ -715,6 +737,8 @@ interface RawGetTransactionResponse {
     fee: bigint;
     preBalances: readonly bigint[];
     postBalances: readonly bigint[];
+    preTokenBalances?: readonly RawTokenBalance[] | null;
+    postTokenBalances?: readonly RawTokenBalance[] | null;
     innerInstructions?: Array<{ instructions?: RawParsedInstruction[] }> | null;
   } | null;
   transaction: {
@@ -729,6 +753,45 @@ const toParsedInstruction = (ix: RawParsedInstruction): ParsedInstruction => ({
   parsedType: ix.parsed?.type ?? null,
   info: ix.parsed?.info ?? null,
 });
+
+const toParsedTokenBalance = (balance: RawTokenBalance): ParsedTokenBalance => ({
+  accountIndex: Number(balance.accountIndex),
+  mint: balance.mint,
+  owner: balance.owner ?? null,
+  amount: String(balance.uiTokenAmount.amount),
+  decimals: Number(balance.uiTokenAmount.decimals),
+});
+
+export interface TokenBalanceDelta {
+  /** Σpost − Σpre in base units; negative when the owner paid out. */
+  baseUnits: bigint;
+  decimals: number;
+}
+
+/**
+ * Net change of one owner's holdings of one mint across a landed transaction,
+ * summed over every token account the RPC attributes to that owner and mint.
+ * A token account the transaction creates has no pre entry and counts from
+ * zero; one it closes has no post entry and counts to zero.
+ *
+ * Returns null when neither side names the pair at all: that is "not
+ * observed", which callers must keep distinct from a zero delta.
+ */
+export function tokenBalanceDelta(
+  transaction: Pick<ParsedTransaction, "preTokenBalances" | "postTokenBalances">,
+  match: { mint: string; owner: string }
+): TokenBalanceDelta | null {
+  const matches = (balance: ParsedTokenBalance) =>
+    balance.mint === match.mint && balance.owner === match.owner;
+  const pre = (transaction.preTokenBalances ?? []).filter(matches);
+  const post = (transaction.postTokenBalances ?? []).filter(matches);
+  if (pre.length === 0 && post.length === 0) return null;
+
+  const decimals = (post[0] ?? pre[0])?.decimals ?? 0;
+  const sum = (balances: ParsedTokenBalance[]) =>
+    balances.reduce((total, balance) => total + BigInt(balance.amount), 0n);
+  return { baseUnits: sum(post) - sum(pre), decimals };
+}
 
 /**
  * Fetch a confirmed transaction with its instructions decoded (`jsonParsed`).
@@ -767,6 +830,8 @@ export async function getTransaction(
     fee: response.meta?.fee ?? 0n,
     preBalances: response.meta?.preBalances ?? [],
     postBalances: response.meta?.postBalances ?? [],
+    preTokenBalances: (response.meta?.preTokenBalances ?? []).map(toParsedTokenBalance),
+    postTokenBalances: (response.meta?.postTokenBalances ?? []).map(toParsedTokenBalance),
     instructions: [...topLevel, ...inner].map(toParsedInstruction),
   };
 }

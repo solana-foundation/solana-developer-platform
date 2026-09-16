@@ -128,14 +128,6 @@ export function hasPrograms(state: EarnProgramsState | undefined): boolean {
   return state?.kind === "ready" && state.programs.length > 0;
 }
 
-export function findProgram(
-  state: EarnProgramsState | undefined,
-  programId: string | undefined
-): EarnProgram | undefined {
-  if (!programId || state?.kind !== "ready") return undefined;
-  return state.programs.find((program) => program.id === programId);
-}
-
 async function requestJson<T>(path: string): Promise<{ status: number; body: T | undefined }> {
   const response = await fetch(path);
   let body: T | undefined;
@@ -159,6 +151,16 @@ function errorMessage(body: unknown, status: number): string {
 function programPath(programId: string, suffix = ""): string {
   return `/api/dashboard/markets/earn/programs/${encodeURIComponent(programId)}${suffix}`;
 }
+
+/**
+ * The two cadences the earn hooks refresh at, named once so a tuning change
+ * cannot miss a surface: the fast one drives feeds derived from live chain
+ * reads (program deposits, vault position values), the slow one the
+ * recorded-movement ledgers, whose DISCOVERY tier is deliberately calmer —
+ * each in-flight movement then runs its own faster watch poll.
+ */
+const LIVE_FEED_REFRESH_MS = 15_000;
+const LEDGER_REFRESH_MS = 30_000;
 
 const PROGRAMS_PAGE_SIZE = 100;
 
@@ -430,7 +432,7 @@ export function useEarnProgramDeposits(programId: string | undefined) {
     programId ? earnQueryKeys.programDeposits({ programId }) : null,
     () => fetchEarnProgramDeposits(programId as string),
     // Deposits land on-chain outside the dashboard, so keep the feed fresh.
-    { refreshInterval: 15_000 }
+    { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
   return { page: data, error, isLoading };
 }
@@ -539,7 +541,7 @@ export function useEarnVaultPositions() {
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultPositions(),
     () => fetchEarnVaultPositions(),
-    { refreshInterval: 15_000 }
+    { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
   return { positions: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -917,13 +919,16 @@ export async function fetchEarnVaultDepositByRequestId(
   return deposit ? { kind: "found", deposit } : { kind: "absent" };
 }
 
+/** Why a quote declines to price a request; both preview envelopes carry it. */
+const vaultPreviewBlockingIssues = z.array(z.object({ code: z.string(), message: z.string() }));
+
 const earnVaultDepositPreviewEnvelopeSchema = z.object({
   data: z.object({
     strategyId: z.string(),
     /** Shares at the provider's live rate, decimal string at share scale. */
     sharesOut: z.string().regex(/^\d+(\.\d+)?$/),
     shareDecimals: z.number().int().min(0).max(38),
-    blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+    blockingIssues: vaultPreviewBlockingIssues,
     /**
      * SDP intends to sponsor this movement's network fee and rent. Optional
      * for deploy skew against an older API; absent renders wallet-pays copy,
@@ -970,7 +975,7 @@ const earnVaultWithdrawalPreviewEnvelopeSchema = z.object({
     /** Deposit-token amount at the provider's live rate, decimal string. */
     assetsOut: z.string().regex(/^\d+(\.\d+)?$/),
     assetDecimals: z.number().int().min(0).max(38),
-    blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+    blockingIssues: vaultPreviewBlockingIssues,
     /** Same sponsorship intent as the deposit preview; exits have no swap. */
     feeSponsored: z.boolean().optional(),
   }),
@@ -1022,7 +1027,7 @@ export function useEarnVaultDeposits() {
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultDepositsInFlight(),
     () => fetchEarnVaultDeposits({ settled: false }),
-    { refreshInterval: 30_000 }
+    { refreshInterval: LEDGER_REFRESH_MS }
   );
   return { deposits: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -1340,7 +1345,7 @@ export function useEarnVaultWithdrawals() {
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultWithdrawalsInFlight(),
     () => fetchEarnVaultWithdrawals({ settled: false }),
-    { refreshInterval: 30_000 }
+    { refreshInterval: LEDGER_REFRESH_MS }
   );
   return { withdrawals: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -1483,7 +1488,7 @@ export function useEarnProgramWithdrawals(programId: string | undefined) {
     // Detect withdrawals created from another session while this dashboard is
     // open; the list is a cheap local-DB read and live outcome polling begins
     // only for provider-accepted nonterminal rows.
-    { refreshInterval: 30_000 }
+    { refreshInterval: LEDGER_REFRESH_MS }
   );
   return { withdrawals: data, error, isLoading, refresh: () => void mutate() };
 }

@@ -104,12 +104,21 @@ SELECT
   em.organization_id,
   em.project_id,
   em.custody_wallet_id,
-  CASE WHEN em.denomination = 'usd' THEN em.payout_token ELSE em.denomination END AS token,
-  CASE WHEN em.status IN ('completed', 'partially_completed', 'confirmed', 'finalized') THEN em.amount_settled ELSE em.amount_requested END AS amount,
+  CASE
+    WHEN em.denomination = 'usd' THEN em.payout_token
+    WHEN em.token_amount_settled IS NOT NULL AND ep.token_mint IS NOT NULL THEN ep.token_mint
+    ELSE em.denomination
+  END AS token,
+  CASE
+    WHEN em.status IN ('completed', 'partially_completed', 'confirmed', 'finalized')
+      THEN COALESCE(em.token_amount_settled, em.amount_settled)
+    ELSE em.amount_requested
+  END AS amount,
   NULL::text AS counterparty_id,
   em.signature,
   em.created_at
 FROM earn_movements em
+LEFT JOIN earn_positions ep ON ep.id = em.position_id
 ) earn
 UNION ALL
 SELECT

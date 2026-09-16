@@ -6,7 +6,7 @@ import {
   earnWithdrawSlippageFloor,
   type SdpEnvironment,
 } from "@sdp/types";
-import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,14 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
 import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd } from "./earn-format";
-import { earnMintAsset, shortenMarketAddress } from "./earn-market-presentation";
+import { earnMintAsset, shortenMarketAddress, TransactionLink } from "./earn-market-presentation";
 import {
   createEarnVaultWithdrawal,
   type EarnVaultWithdrawal,
@@ -31,16 +30,19 @@ import {
   useEarnVaultWithdrawalOutcome,
 } from "./earn-program-data";
 import {
-  floorForTolerance,
+  derivedMinOut,
   isSlippageExceededRefusal,
-  isZeroQuote,
   parseSlippageToleranceBps,
   quoteForKey,
   useDebouncedVaultQuote,
   type VaultQuoteState,
 } from "./earn-vault-slippage";
-import { VaultSlippageSection } from "./earn-vault-slippage-section";
-import { earnVaultPositionStatusDisplay, earnVaultWithdrawalUiState } from "./earn-vault-ui-state";
+import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
+import {
+  earnVaultPositionStatusDisplay,
+  earnVaultWithdrawalUiState,
+  vaultOutcomeTone,
+} from "./earn-vault-ui-state";
 import {
   VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   validateVaultWithdrawalAmount,
@@ -54,59 +56,6 @@ import {
   vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
-
-/** The floor the current quote and tolerance imply, or `undefined` while they cannot. */
-function derivedMinAmountOut(
-  toleranceBps: number | null,
-  quote: VaultQuoteState<EarnVaultWithdrawalPreview>
-): string | undefined {
-  if (toleranceBps === null || quote.kind !== "quoted") return undefined;
-  if (quote.preview.blockingIssues.length > 0) return undefined;
-  // `null` — a zero-asset quote — has no satisfiable floor; blocking the
-  // submission is the only honest answer (see `floorForTolerance`).
-  return (
-    floorForTolerance(quote.preview.assetsOut, quote.preview.assetDecimals, toleranceBps) ??
-    undefined
-  );
-}
-
-/** Quote-state notices under the summary: loading, unavailable, or blocked. */
-function WithdrawalQuoteNotices({ quote }: { quote: VaultQuoteState<EarnVaultWithdrawalPreview> }) {
-  const t = useTranslations();
-  if (quote.kind === "loading") {
-    return (
-      <p className="mt-2 text-xs text-tertiary" role="status">
-        {t("DashboardEarn.vaultWithdraw.quoteLoading")}
-      </p>
-    );
-  }
-  if (quote.kind === "unavailable") {
-    return (
-      <p className="mt-2 text-xs text-error" role="alert">
-        {t("DashboardEarn.vaultWithdraw.quoteUnavailable")}
-      </p>
-    );
-  }
-  const blockingIssue = quote.kind === "quoted" ? quote.preview.blockingIssues[0] : undefined;
-  if (blockingIssue) {
-    return (
-      <p className="mt-2 text-xs text-error" role="alert">
-        {t("DashboardEarn.vaultWithdraw.quoteBlocked", { message: blockingIssue.message })}
-      </p>
-    );
-  }
-  if (
-    quote.kind === "quoted" &&
-    isZeroQuote(quote.preview.assetsOut, quote.preview.assetDecimals)
-  ) {
-    return (
-      <p className="mt-2 text-xs text-error" role="alert">
-        {t("DashboardEarn.vaultWithdraw.quoteZeroAssets")}
-      </p>
-    );
-  }
-  return null;
-}
 
 function amountBalanceHint(
   t: ReturnType<typeof useTranslations>,
@@ -272,28 +221,6 @@ function deriveWithdrawalFormState(
   };
 }
 
-function TransactionLink({
-  signature,
-  environment,
-}: {
-  signature: string;
-  environment: SdpEnvironment;
-}) {
-  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
-
-  return (
-    <a
-      className="inline-flex items-center gap-1 text-secondary underline decoration-border-strong underline-offset-4 transition-colors hover:text-primary"
-      href={explorerTxUrl(signature, cluster)}
-      rel="noreferrer"
-      target="_blank"
-    >
-      {shortenMarketAddress(signature)}
-      <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
-    </a>
-  );
-}
-
 function WithdrawalApprovalResult({
   outcome,
   onClose,
@@ -403,12 +330,6 @@ function withdrawalResultCopy(
   }
 }
 
-function outcomeTone(statusVariant: BadgeVariant): "info" | "success" | "warning" {
-  if (statusVariant === "success") return "success";
-  if (statusVariant === "warning") return "warning";
-  return "info";
-}
-
 function WithdrawalMovementResult({
   outcome,
   environment,
@@ -446,7 +367,7 @@ function WithdrawalMovementResult({
 
   return (
     <>
-      {processing ? null : <EarnOutcomeMark tone={outcomeTone(statusVariant)} />}
+      {processing ? null : <EarnOutcomeMark tone={vaultOutcomeTone(statusVariant)} />}
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -478,7 +399,10 @@ function WithdrawalMovementResult({
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
             <dd className="text-right">
-              <TransactionLink environment={environment} signature={withdrawal.signature} />
+              <TransactionLink
+                cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
+                signature={withdrawal.signature}
+              />
             </dd>
           </div>
         )}
@@ -721,7 +645,17 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
         ) : null}
       </dl>
 
-      <WithdrawalQuoteNotices quote={quote} />
+      <VaultQuoteNotices
+        decimals={(preview) => preview.assetDecimals}
+        keys={{
+          blocked: "DashboardEarn.vaultWithdraw.quoteBlocked",
+          loading: "DashboardEarn.vaultWithdraw.quoteLoading",
+          unavailable: "DashboardEarn.vaultWithdraw.quoteUnavailable",
+          zero: "DashboardEarn.vaultWithdraw.quoteZeroAssets",
+        }}
+        quantity={(preview) => preview.assetsOut}
+        quote={quote}
+      />
 
       {slippagePolicy ? (
         <VaultSlippageSection
@@ -868,7 +802,12 @@ export function EarnVaultWithdrawModal({
     quoteRefreshKey
   );
   const quote = quoteForKey(rawQuote, quoteKey);
-  const minAmountOut = derivedMinAmountOut(slippageBps, quote);
+  const minAmountOut = derivedMinOut(
+    slippageBps,
+    quote,
+    (preview) => preview.assetsOut,
+    (preview) => preview.assetDecimals
+  );
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
   async function submitResolvedIntent(controller: AbortController, shares: string, amount: string) {
