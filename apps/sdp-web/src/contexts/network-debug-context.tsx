@@ -39,6 +39,10 @@ interface NetworkDebugContextValue {
 
 const NetworkDebugContext = createContext<NetworkDebugContextValue | undefined>(undefined);
 
+function roundDurationMs(startedAtMs: number): number {
+  return Math.round((performance.now() - startedAtMs) * 10) / 10;
+}
+
 function useNetworkDebugFetchPatch({
   available,
   enabled,
@@ -73,7 +77,17 @@ function useNetworkDebugFetchPatch({
       const startedAt = Date.now();
       const startedAtMs = performance.now();
       const debugRequestId = createNetworkDebugRequestId(sequenceRef.current++);
-      const requestBodyPromise = readNetworkDebugRequestBody(input, init).catch(() => undefined);
+      const patchEntry = (patch: Partial<NetworkDebugEntry>) =>
+        setEntries((current) =>
+          current.map((entry) =>
+            entry.debug_request_id === debugRequestId ? { ...entry, ...patch } : entry
+          )
+        );
+      void readNetworkDebugRequestBody(input, init).then((requestBody) => {
+        if (requestBody) {
+          patchEntry({ requestBody });
+        }
+      });
       setEntries((current) =>
         [
           {
@@ -90,67 +104,23 @@ function useNetworkDebugFetchPatch({
 
       try {
         const response = await originalFetch(input, init);
-        void requestBodyPromise
-          .then((requestBody) => {
-            if (!requestBody) {
-              return;
-            }
-
-            setEntries((current) =>
-              current.map((entry) =>
-                entry.debug_request_id === debugRequestId ? { ...entry, requestBody } : entry
-              )
-            );
+        void readNetworkDebugResponseBody(response).then((responseBody) =>
+          patchEntry({
+            durationMs: roundDurationMs(startedAtMs),
+            endedAt: Date.now(),
+            state: "success",
+            status: response.status,
+            responseBody,
           })
-          .catch(() => undefined);
-        void readNetworkDebugResponseBody(response)
-          .then((responseBody) => {
-            const bodyReadAt = Date.now();
-            setEntries((current) =>
-              current.map((entry) =>
-                entry.debug_request_id === debugRequestId
-                  ? {
-                      ...entry,
-                      durationMs: Math.round((performance.now() - startedAtMs) * 10) / 10,
-                      endedAt: bodyReadAt,
-                      state: "success",
-                      status: response.status,
-                      responseBody,
-                    }
-                  : entry
-              )
-            );
-          })
-          .catch(() => undefined);
+        );
         return response;
       } catch (error) {
-        const endedAt = Date.now();
-        void requestBodyPromise
-          .then((requestBody) => {
-            if (!requestBody) {
-              return;
-            }
-
-            setEntries((current) =>
-              current.map((entry) =>
-                entry.debug_request_id === debugRequestId ? { ...entry, requestBody } : entry
-              )
-            );
-          })
-          .catch(() => undefined);
-        setEntries((current) =>
-          current.map((entry) =>
-            entry.debug_request_id === debugRequestId
-              ? {
-                  ...entry,
-                  durationMs: Math.round((performance.now() - startedAtMs) * 10) / 10,
-                  endedAt,
-                  error: toNetworkDebugErrorMessage(error),
-                  state: toNetworkDebugRequestState(error),
-                }
-              : entry
-          )
-        );
+        patchEntry({
+          durationMs: roundDurationMs(startedAtMs),
+          endedAt: Date.now(),
+          error: toNetworkDebugErrorMessage(error),
+          state: toNetworkDebugRequestState(error),
+        });
         throw error;
       }
     };
