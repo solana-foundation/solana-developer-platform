@@ -514,7 +514,15 @@ organization's own custody wallets.
     Refuses with a typed **409 `VAULT_EXPOSURE_CAP`** only when
     `EARN_VOLUME_CAPS_ENFORCED` is truthy; otherwise (shadow mode, the
     default) it only emits `sdp_api_earn_volume_cap_evaluated` with
-    `would_block`. An unreadable exposure is a 503 in BOTH modes. Two
+    `would_block`. An unreadable exposure is a 503 in BOTH modes. A readable
+    TVL of 0 is NOT unreadable: it drives the share bound to 0, so at flag
+    flip (PRO-1937) expect `would_block` storms on explicitly zero-TVL rows —
+    expected strictness, not a bug. A vault whose metrics have not landed at
+    all is different: `strategyTvlForExposure` reads null, the verdict falls
+    back to the absolute ceiling with reason `absolute_tvl_unavailable`, and
+    no zero bound applies (Kamino rows carry a TVL from catalogue admission,
+    so a missing figure there is drift, not a warm-up state).
+    Two
     honesty notes: withdrawals are ledgered in SHARES, so the figure is gross
     inflow (never subtracts exits, so it errs toward refusing); and it is
     token units against a USD TVL, which is dollar-for-dollar only because V1
