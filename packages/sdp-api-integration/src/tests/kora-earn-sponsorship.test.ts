@@ -120,7 +120,7 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
     // cannot roll the config itself. Only that EXACT shape skips: a partial or
     // drifted list is asserted in full below and fails.
     ctx.skip(
-      tokens.length === 1,
+      tokens.length === 1 && tokens[0] === SOL_MINT,
       "deployed devnet Kora still serves the pre-PRO-1962 token set (wSOL only); waiting on sdp-infra#180 to roll"
     );
 
