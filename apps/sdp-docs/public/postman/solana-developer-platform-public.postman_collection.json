@@ -406,7 +406,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/aggregate",
-            "description": "Aggregates tracked balances for active wallets under the same owner-aware inclusion rules as the wallet list, without exposing one aggregate-level owner or runtime-admission value."
+            "description": "Aggregates tracked balances for active wallets under the same owner-aware inclusion rules as the wallet list, without exposing one aggregate-level owner or runtime-admission value. Returns 503 if any included wallet balance cannot be read, rather than returning an incomplete total."
           }
         },
         {
