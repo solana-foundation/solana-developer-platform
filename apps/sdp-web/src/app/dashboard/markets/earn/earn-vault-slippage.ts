@@ -79,6 +79,27 @@ export function floorForTolerance(
 }
 
 /**
+ * The floor the current quote and tolerance imply, or `undefined` while they
+ * cannot — shared verbatim by the DEPOSIT (`sharesOut`/`shareDecimals`) and
+ * WITHDRAWAL (`assetsOut`/`assetDecimals`) modals, which name their quote
+ * fields through the accessors.
+ */
+export function derivedMinOut<Preview extends { blockingIssues: readonly unknown[] }>(
+  toleranceBps: number | null,
+  quote: VaultQuoteState<Preview>,
+  quantity: (preview: Preview) => string,
+  decimals: (preview: Preview) => number
+): string | undefined {
+  if (toleranceBps === null || quote.kind !== "quoted") return undefined;
+  if (quote.preview.blockingIssues.length > 0) return undefined;
+  // `null` — a zero-output quote — has no satisfiable floor; blocking the
+  // submission is the only honest answer (see `floorForTolerance`).
+  return (
+    floorForTolerance(quantity(quote.preview), decimals(quote.preview), toleranceBps) ?? undefined
+  );
+}
+
+/**
  * True when the quote expects ZERO atoms out — nothing any floor could protect.
  * An over-scale (malformed) quote is not PROVABLY zero, so it answers `false`;
  * the floor it derives is `null` and blocks the submission instead.

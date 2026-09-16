@@ -3,7 +3,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { AppError, badRequest, notFound, rateLimited, unauthorized } from "./errors";
+import {
+  AppError,
+  badRequest,
+  notFound,
+  rateLimited,
+  transactionExpired,
+  unauthorized,
+} from "./errors";
 
 describe("AppError", () => {
   it("creates error with default message", () => {
@@ -79,5 +86,13 @@ describe("error helper functions", () => {
     const error = rateLimited();
     expect(error.statusCode).toBe(429);
     expect(error.code).toBe("RATE_LIMITED");
+  });
+
+  it("transactionExpired creates a 409 with its own code", () => {
+    const error = transactionExpired();
+    expect(error.statusCode).toBe(409);
+    expect(error.code).toBe("TRANSACTION_EXPIRED");
+    expect(error.message).toContain("blockhash expired");
+    expect(transactionExpired("Build again").message).toBe("Build again");
   });
 });

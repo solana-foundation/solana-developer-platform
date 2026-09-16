@@ -36,6 +36,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
+import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "../../activity-format-utils";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
@@ -49,6 +50,7 @@ import {
   type DvpTrade,
   type DvpTradeKind,
   type DvpTradeLeg,
+  dvpTimestampToIso,
   formatLegAmount,
   frozenLegs,
   isDvpPartyView,
@@ -79,7 +81,9 @@ function CopyableAddress({
   label: string;
   className?: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  // 1500ms to match this page's other transient confirmations; the shared hook
+  // is what the rest of the dashboard copies with.
+  const { copied, copy } = useCopy(1500);
 
   return (
     <button
@@ -87,15 +91,10 @@ function CopyableAddress({
         "inline-flex max-w-full items-start gap-1.5 rounded-md px-1.5 py-1 text-left font-mono text-secondary text-xs transition-colors hover:bg-fill-subtle hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong",
         className
       )}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(address);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        } catch {
-          // A clipboard the browser refuses is not worth an error state; the
-          // address is still selectable in the title attribute.
-        }
+      onClick={() => {
+        // A clipboard the browser refuses is not worth an error state; the
+        // address is still selectable in the title attribute.
+        copy(address).catch(() => {});
       }}
       title={address}
       type="button"
@@ -978,7 +977,7 @@ export function DvpTradeDetailWorkspace({
   const t = useTranslations();
   const { act, pending } = useDvpTradeActions(trade.id, cluster);
   const partyView = isDvpPartyView(trade);
-  const expiry = new Date(Number(trade.expiryTimestamp) * 1000).toISOString();
+  const expiry = dvpTimestampToIso(trade.expiryTimestamp);
 
   // One fund action per custodied side: a bilateral trade funds both legs,
   // each from the wallet that holds its party address, through the unified

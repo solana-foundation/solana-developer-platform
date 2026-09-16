@@ -207,7 +207,7 @@ const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
   "expired",
 ]);
 
-export function isDvpTradeOpen(trade: DvpTrade): boolean {
+function isDvpTradeOpen(trade: DvpTrade): boolean {
   return OPEN.has(trade.status);
 }
 
@@ -270,6 +270,15 @@ export function formatLegAmount(baseUnits: string, decimals: number | null): str
   const fraction = decimals === 0 ? "" : digits.slice(digits.length - decimals).replace(/0+$/, "");
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
+}
+
+/**
+ * A u64-seconds wire timestamp as an ISO instant, for `formatTimestamp`.
+ * One expression, three surfaces: the conversion spelled inline is how an
+ * expiry once rendered in microseconds.
+ */
+export function dvpTimestampToIso(seconds: string): string {
+  return new Date(Number(seconds) * 1000).toISOString();
 }
 
 /**
