@@ -4,18 +4,20 @@ import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, conflict, forbidden } from "@/lib/errors";
+import { AppError, badRequest, conflict, forbidden, notFound } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
+import { getLogger } from "@/runtime/logger";
 import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
-import { AuditService } from "@/services/audit.service";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
 import {
   type CustodyConnectionSelectionResult,
   CustodyRuntimeTargets,
+  type CustodyScopeSelection,
   selectCustodyConnectionTarget,
 } from "@/services/domain/signing/custody-runtime-target";
 import {
@@ -24,6 +26,7 @@ import {
 } from "@/services/domain/signing/provider-config";
 import { createSigningService, type ProviderReuseState } from "@/services/domain/signing.service";
 import {
+  assertCustodyProviderEntitled,
   assertProviderAvailable,
   getEnabledProviders,
   getProviderAvailability,
@@ -42,6 +45,7 @@ type SigningInitializationResult = {
   configId: string;
   publicKey: string;
   walletId: string;
+  defaultSelection?: CustodyScopeSelection;
 };
 
 function hasReusableConfigWallet(
@@ -123,6 +127,8 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
   const projectId = c.get("projectId");
   const requestedProvider = body.provider;
   const providerRequest = "connectionId" in body ? null : body;
+  let intent: AuditIntent | undefined;
+  let initializedConfig: SigningInitializationResult | undefined;
 
   try {
     let connectionId = "connectionId" in body ? body.connectionId : undefined;
@@ -144,20 +150,33 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
     }
 
     if (connectionId) {
-      if (!projectId) {
-        throw badRequest("Project scope is required");
-      }
+      const target = await admitConnectionSelection(
+        c,
+        actor.organizationId,
+        projectId,
+        connectionId,
+        requestedProvider
+      );
+      intent = await auditService.beginCritical(c, {
+        action: "update",
+        resourceType: "custody_connection",
+        resourceId: target.connectionId,
+        metadata: {
+          event: "default_provider_selection_started",
+          provider: target.provider,
+          projectId,
+          ownerKind: "connection",
+        },
+      });
       const result = await selectCustodyConnectionTarget(getDb(c.env), c.env, {
         organizationId: actor.organizationId,
-        projectId,
+        projectId: target.projectId,
         connectionId,
         provider: requestedProvider,
       });
-      await logDefaultProviderChanged(c, auditService, result.connectionId, {
-        projectId,
-        provider: result.provider,
-        resourceType: "custody_connection",
-      });
+      await completeDefaultProviderSelection(c, auditService, intent, result.connectionId, [
+        result.selection,
+      ]);
       clearWalletCaches();
       return created(c, toSwitchSigningResponse(result));
     }
@@ -182,22 +201,20 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
         "custody",
         targetProvider
       );
-      await signingService.setDefaultConfiguration(
-        actor.organizationId,
-        projectId,
-        existingScopeConfig.id
-      );
       result = await getActiveConfigInitializationResult(
         c,
         existingScopeConfig.id,
         existingScopeConfig.default_wallet_id
       );
-
-      await logDefaultProviderChanged(c, auditService, existingScopeConfig.id, {
+      intent = await beginConfigSelection(c, auditService, targetProvider, existingScopeConfig.id);
+      const selection = await signingService.setDefaultConfiguration(
+        actor.organizationId,
         projectId,
-        provider: targetProvider,
-      });
+        existingScopeConfig.id
+      );
+      await completeDefaultProviderSelection(c, auditService, intent, result.configId, [selection]);
     } else {
+      intent = await beginConfigSelection(c, auditService, targetProvider, existingScopeConfig?.id);
       result = await initializeProviderConnection(
         c,
         signingService,
@@ -207,40 +224,94 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
         projectId,
         providerRequest
       );
+      initializedConfig = result;
 
-      await signingService.setDefaultConfiguration(
+      // Initialization may itself persist a scope default. Preserve that confirmed
+      // substep even if the final explicit selection later fails. A preflight
+      // status cannot prove this request created or reactivated the Config.
+      try {
+        await auditService.log(c, {
+          action: "maintenance",
+          resourceType: "audit_ledger",
+          resourceId: intent.id,
+          metadata: {
+            event: "provider_initialization_completed",
+            configId: result.configId,
+            provider: targetProvider,
+            projectId: projectId ?? null,
+            commandAuditIntentId: intent.id,
+            defaultSelection: result.defaultSelection ?? null,
+          },
+        });
+      } catch {
+        getLogger().error({
+          event: "custody_switch_initialization_audit_failed",
+          auditIntentId: intent.id,
+          organizationId: actor.organizationId,
+          projectId: projectId ?? null,
+          configId: result.configId,
+          defaultSelection: result.defaultSelection ?? null,
+          reason: "audit_persistence_failed",
+        });
+      }
+
+      const selection = await signingService.setDefaultConfiguration(
         actor.organizationId,
         projectId,
         result.configId
       );
-
-      const wasReactivated =
-        existingScopeConfig?.status === "inactive" && existingScopeConfig.id === result.configId;
-
-      await auditService.log(c, {
-        action: wasReactivated ? "update" : "create",
-        resourceType: "custody_config",
-        resourceId: result.configId,
-        metadata: {
-          event: wasReactivated ? "provider_reactivated" : "provider_connected",
-          provider: targetProvider,
-          projectId: projectId ?? null,
-        },
-      });
-
-      await logDefaultProviderChanged(c, auditService, result.configId, {
-        projectId,
-        provider: targetProvider,
-      });
+      await completeDefaultProviderSelection(c, auditService, intent, result.configId, [
+        ...(result.defaultSelection ? [result.defaultSelection] : []),
+        selection,
+      ]);
     }
 
     clearWalletCaches();
 
     return created(c, toSwitchSigningResponse(result));
   } catch (error) {
+    if (intent) {
+      // A failed COMMIT response or nested Provider call is not proof of rollback.
+      // Keep the intent unresolved; a reread could observe another request's write.
+      getLogger().error({
+        event: "custody_default_selection_outcome_unknown",
+        auditIntentId: intent.id,
+        organizationId: actor.organizationId,
+        projectId: projectId ?? null,
+        initializedConfigId: initializedConfig?.configId ?? null,
+        initializationDefaultSelection: initializedConfig?.defaultSelection ?? null,
+        reason: "selection_outcome_unconfirmed",
+      });
+    }
     handleSigningInitializationError(error);
   }
 };
+
+async function admitConnectionSelection(
+  c: AppContext,
+  organizationId: string,
+  projectId: string | undefined,
+  connectionId: string,
+  provider: CustodyProvider | undefined
+) {
+  if (!projectId) throw badRequest("Project scope is required");
+  const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
+    kind: "connection",
+    organizationId,
+    projectId,
+    connectionId,
+  });
+  if (target?.kind !== "connection") throw notFound("Custody Connection");
+  if (provider && provider !== target.provider) {
+    throw badRequest("Provider does not match Custody Connection");
+  }
+  if (!isCustodyConnectionRuntimeEnabled(c.env, target.provider)) {
+    throw forbidden("Custody Connection runtime is disabled");
+  }
+  await assertCustodyProviderEntitled(c.env, getDb(c.env), organizationId, target.provider);
+  if (!target.isRuntimeAvailable) throw conflict("Custody Connection is unavailable");
+  return target;
+}
 
 export const getSwitchProviderOptions = async (c: AppContext) => {
   const actor = resolveActor(c);
@@ -591,24 +662,45 @@ async function resolveOrganizationSlug(c: AppContext, organizationId: string): P
   return row?.slug?.trim() || organizationId;
 }
 
-async function logDefaultProviderChanged(
+function beginConfigSelection(
   c: AppContext,
   auditService: AuditService,
-  resourceId: string,
-  params: {
-    projectId: string | undefined;
-    provider: CustodyProvider;
-    resourceType?: "custody_config" | "custody_connection";
-  }
-): Promise<void> {
-  await auditService.log(c, {
+  provider: CustodyProvider,
+  configId: string | undefined
+): Promise<AuditIntent> {
+  return auditService.beginCritical(c, {
     action: "update",
-    resourceType: params.resourceType ?? "custody_config",
-    resourceId,
+    resourceType: "custody_config",
+    resourceId: configId,
     metadata: {
-      event: "default_provider_changed",
-      provider: params.provider,
-      projectId: params.projectId ?? null,
+      event: "default_provider_selection_started",
+      provider,
+      projectId: c.get("projectId") ?? null,
+      ownerKind: "config",
+    },
+  });
+}
+
+async function completeDefaultProviderSelection(
+  c: AppContext,
+  auditService: AuditService,
+  intent: AuditIntent,
+  resourceId: string,
+  selections: CustodyScopeSelection[]
+): Promise<void> {
+  const changed = selections.some(
+    (selection) =>
+      selection.previousConfigId !== selection.selectedConfigId ||
+      selection.previousConnectionId !== selection.selectedConnectionId
+  );
+  await auditService.completeCritical(c, intent, {
+    ...(changed
+      ? { resourceId }
+      : { action: "maintenance", resourceType: "audit_ledger", resourceId: intent.id }),
+    metadata: {
+      event: changed ? "default_provider_changed" : "default_provider_selection_completed",
+      completionStatus: changed ? "success" : "noop",
+      selections,
     },
   });
 }

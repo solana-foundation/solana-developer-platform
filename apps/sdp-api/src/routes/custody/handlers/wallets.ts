@@ -359,6 +359,8 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
     }
     if (target?.kind === "connection") {
       const wallet = await runtimeTargets.createConnectionWallet({
+        auditContext: c,
+        creationReason: "wallet_api",
         organizationId: actor.organizationId,
         projectId: target.projectId,
         connectionId: target.connectionId,
@@ -544,95 +546,120 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
     if (!wallet.isRuntimeExecutionAllowed) {
       throw new AppError("CONFLICT", "Custody Connection is unavailable");
     }
-    const updated = await getDb(c.env)
-      .prepare(
-        `UPDATE custody_connections
-         SET default_custody_wallet_id = ?, updated_at = sdp_iso_now()
-         WHERE id = ?
-           AND organization_id = ?
-           AND project_id = ?
-           AND status = 'active'
-           AND EXISTS (
-             SELECT 1
-             FROM custody_wallets w
-             WHERE w.id = ?
-               AND w.custody_connection_id = custody_connections.id
-               AND w.status = 'active'
-           )`
-      )
-      .bind(wallet.id, wallet.custodyConnectionId, actor.organizationId, projectId, wallet.id)
-      .run();
-    if (updated !== 1) {
-      throw new AppError("CONFLICT", "Custody Connection is unavailable");
+  } else {
+    const signingService = signingServiceModule.createSigningService(
+      c.env,
+      getRequestTenantScope(c)
+    );
+    const config = await signingService.getConfigurationForMutation(
+      actor.organizationId,
+      projectId,
+      wallet.provider
+    );
+    if (!config?.id || config.id !== wallet.custodyConfigId) {
+      throw new AppError("CONFLICT", "Wallet signing is not initialized");
     }
-
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "update",
-      resourceType: "custody_connection",
-      resourceId: wallet.custodyConnectionId,
-      metadata: {
-        event: "default_wallet_changed",
-        provider: wallet.provider,
-        walletId: wallet.walletId,
-        projectId: projectId ?? null,
-      },
-    });
-    clearWalletCaches();
-    return success(c, { defaultWalletId: wallet.walletId });
+    await assertProviderAvailable(
+      c.env,
+      getDb(c.env),
+      actor.organizationId,
+      "custody",
+      config.provider
+    );
   }
 
-  const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
-  const config = await signingService.getConfigurationForMutation(
-    actor.organizationId,
-    projectId,
-    wallet.provider
-  );
-
-  if (!config?.id || config.id !== wallet.custodyConfigId) {
-    throw new AppError("CONFLICT", "Wallet signing is not initialized");
-  }
-
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    actor.organizationId,
-    "custody",
-    config.provider
-  );
-
-  // Membership check and pointer update in one conditional statement so a
-  // concurrent wallet delete/deactivate cannot slip between them.
-  const updated = await getDb(c.env)
-    .prepare(
-      `UPDATE custody_configs
-     SET default_wallet_id = ?, updated_at = datetime('now')
-     WHERE id = ?
-       AND EXISTS (
-         SELECT 1
-         FROM custody_wallets w
-         WHERE w.custody_config_id = custody_configs.id
-           AND w.wallet_id = ?
-           AND w.status = 'active'
-       )`
-    )
-    .bind(wallet.walletId, config.id, wallet.walletId)
-    .run();
-
-  if (updated === 0) {
-    throw badRequest("Unknown walletId for this wallet signing configuration");
-  }
-
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
+  const db = getDb(c.env);
+  const auditService = new AuditService(db);
+  const ownerId = wallet.custodyConnectionId ?? wallet.custodyConfigId;
+  const intent = await auditService.beginCritical(c, {
     action: "update",
-    resourceType: "custody_config",
-    resourceId: config.id,
+    resourceType: wallet.custodyConnectionId ? "custody_connection" : "custody_config",
+    resourceId: ownerId,
     metadata: {
-      event: "default_wallet_changed",
-      provider: config.provider,
+      event: "default_wallet_change_started",
+      ownerKind: wallet.custodyConnectionId ? "connection" : "config",
+      provider: wallet.provider,
+      custodyWalletId: wallet.id,
       walletId: wallet.walletId,
       projectId: projectId ?? null,
+    },
+  });
+
+  let previous: { custody_wallet_id: string | null; wallet_id: string | null };
+  try {
+    previous = await db.transaction(async (tx) => {
+      // Lock the owner before reading its previous default so concurrent
+      // selections cannot be attributed to this request in the audit outcome.
+      const current = await tx.queryOne<typeof previous>(
+        wallet.custodyConnectionId
+          ? `SELECT c.default_custody_wallet_id AS custody_wallet_id, w.wallet_id
+             FROM custody_connections c
+             LEFT JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
+             WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
+             FOR UPDATE OF c`
+          : `SELECT w.id AS custody_wallet_id, c.default_wallet_id AS wallet_id
+             FROM custody_configs c
+             LEFT JOIN custody_wallets w
+               ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
+             WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?
+             FOR UPDATE OF c`,
+        [ownerId, actor.organizationId, projectId ?? null]
+      );
+      if (!current) throw conflict("Wallet signing is not initialized");
+
+      // Keep the membership guard on the UPDATE: a wallet may have become
+      // inactive after the request's authorization lookup.
+      const updated = wallet.custodyConnectionId
+        ? await tx.execute(
+            `UPDATE custody_connections
+             SET default_custody_wallet_id = ?, updated_at = sdp_iso_now()
+             WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
+               AND EXISTS (SELECT 1 FROM custody_wallets w WHERE w.id = ?
+                 AND w.custody_connection_id = custody_connections.id AND w.status = 'active')`,
+            [wallet.id, ownerId, actor.organizationId, projectId, wallet.id]
+          )
+        : await tx.execute(
+            `UPDATE custody_configs
+             SET default_wallet_id = ?, updated_at = datetime('now')
+             WHERE id = ? AND EXISTS (SELECT 1 FROM custody_wallets w
+               WHERE w.custody_config_id = custody_configs.id AND w.wallet_id = ? AND w.status = 'active')`,
+            [wallet.walletId, ownerId, wallet.walletId]
+          );
+      if (updated !== 1) {
+        if (wallet.custodyConnectionId) throw conflict("Custody Connection is unavailable");
+        throw badRequest("Unknown walletId for this wallet signing configuration");
+      }
+      return current;
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      await auditService.completeCritical(c, intent, {
+        status: "failure",
+        metadata: { event: "default_wallet_change_failed", reason: "selection_unavailable" },
+      });
+    } else {
+      // A lost COMMIT acknowledgement cannot be attributed by rereading the
+      // current pointer: another request may already have selected it.
+      getLogger().error({
+        event: "custody_default_wallet_audit_unresolved",
+        auditIntentId: intent.id,
+        organizationId: actor.organizationId,
+        projectId: projectId ?? null,
+        ownerId,
+        reason: "persistence_result_unknown",
+      });
+    }
+    throw error;
+  }
+  const changed = previous.custody_wallet_id !== wallet.id;
+  await auditService.completeCritical(c, intent, {
+    ...(changed
+      ? {}
+      : { action: "maintenance", resourceType: "audit_ledger", resourceId: intent.id }),
+    metadata: {
+      event: changed ? "default_wallet_changed" : "default_wallet_selection_unchanged",
+      previousCustodyWalletId: previous.custody_wallet_id,
+      previousWalletId: previous.wallet_id,
     },
   });
 

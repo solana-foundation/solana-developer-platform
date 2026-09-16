@@ -45,7 +45,10 @@ import {
   custodyProviderCanSign,
   shouldSetCustodyScopeDefault,
 } from "@/services/custody-provider-lifecycle.service";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import {
+  CustodyRuntimeTargets,
+  type CustodyScopeSelection,
+} from "@/services/domain/signing/custody-runtime-target";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import {
   type AnchorageProviderConfig,
@@ -101,7 +104,11 @@ export interface SigningConfigStore {
     provider: SigningConfiguration["provider"]
   ): Promise<SigningConfigRecord | null>;
   getDefaultConfig(orgId: string, projectId?: string): Promise<SigningConfigRecord | null>;
-  setDefaultConfig(orgId: string, projectId: string | undefined, configId: string): Promise<void>;
+  setDefaultConfig(
+    orgId: string,
+    projectId: string | undefined,
+    configId: string
+  ): Promise<CustodyScopeSelection>;
   getById(configId: string): Promise<SigningConfigRecord | null>;
   upsert(
     orgId: string,
@@ -250,6 +257,7 @@ export interface InitSigningResult {
   configId: string;
   publicKey: Address;
   walletId: string;
+  defaultSelection?: CustodyScopeSelection;
 }
 
 type ReusableSigningProvider = "privy" | "coinbase_cdp" | "para" | "turnkey" | "utila";
@@ -344,7 +352,7 @@ export class SigningService {
     projectId: string | undefined,
     configId: string,
     provider: SigningConfiguration["provider"]
-  ): Promise<void> {
+  ): Promise<CustodyScopeSelection | undefined> {
     const scopeDefault = await this.configStore.getDefaultConfig(orgId, projectId);
 
     if (
@@ -356,14 +364,14 @@ export class SigningService {
       return;
     }
 
-    await this.configStore.setDefaultConfig(orgId, projectId, configId);
+    return this.configStore.setDefaultConfig(orgId, projectId, configId);
   }
 
   private async ensureScopeDefaultConfigForExistingRecord(
     orgId: string,
     projectId: string | undefined,
     configId: string
-  ): Promise<void> {
+  ): Promise<CustodyScopeSelection | undefined> {
     const config = await this.configStore.getById(configId);
     if (!config) {
       return;
@@ -376,7 +384,7 @@ export class SigningService {
         currentDefaultProvider: scopeDefault?.provider ?? null,
       })
     ) {
-      await this.configStore.setDefaultConfig(orgId, projectId, configId);
+      return this.configStore.setDefaultConfig(orgId, projectId, configId);
     }
   }
 
@@ -430,15 +438,16 @@ export class SigningService {
     orgId: string,
     projectId: string | undefined,
     configId: string
-  ): Promise<void> {
+  ): Promise<CustodyScopeSelection> {
     const config = await this.configStore.getById(configId);
     if (!config || config.organizationId !== orgId || config.status !== "active") {
       throw new SigningError("Custody configuration not found", "NOT_FOUND");
     }
 
     await this.assertProviderEnabled(orgId, config.provider);
-    await this.configStore.setDefaultConfig(orgId, projectId, configId);
+    const selection = await this.configStore.setDefaultConfig(orgId, projectId, configId);
     this.providerCache.clear();
+    return selection;
   }
 
   async setDefaultProvider(
@@ -537,13 +546,19 @@ export class SigningService {
       },
     });
 
-    await this.ensureScopeDefaultConfig(params.orgId, params.projectId, configId, provider);
+    const defaultSelection = await this.ensureScopeDefaultConfig(
+      params.orgId,
+      params.projectId,
+      configId,
+      provider
+    );
     this.providerCache.delete(configId);
 
     return {
       configId,
       publicKey: params.publicKey,
       walletId: params.walletId,
+      defaultSelection,
     };
   }
 
@@ -565,13 +580,18 @@ export class SigningService {
       defaultWalletId: reusable.wallet.walletId,
     });
 
-    await this.ensureScopeDefaultConfigForExistingRecord(orgId, projectId, reusable.configId);
+    const defaultSelection = await this.ensureScopeDefaultConfigForExistingRecord(
+      orgId,
+      projectId,
+      reusable.configId
+    );
     this.providerCache.delete(reusable.configId);
 
     return {
       configId: reusable.configId,
       publicKey: reusable.wallet.publicKey as Address,
       walletId: reusable.wallet.walletId,
+      defaultSelection,
     };
   }
 

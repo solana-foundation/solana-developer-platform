@@ -1,4 +1,5 @@
 import type { CustodyWalletPurpose } from "@sdp/types";
+import type { Context } from "hono";
 import type { DatabaseClient } from "@/db";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -8,6 +9,8 @@ export async function provisionApiKeyWallet(
   db: DatabaseClient,
   env: Env,
   params: {
+    auditContext: Context<{ Bindings: Env }>;
+    creationReason?: "api_key" | "dvp_settlement_authority";
     organizationId: string;
     projectId: string;
     legacyConfigProjectId?: string;
@@ -31,6 +34,8 @@ export async function provisionApiKeyWallet(
 
   if (connectionId) {
     return targets.createConnectionWallet({
+      auditContext: params.auditContext,
+      creationReason: params.creationReason ?? "api_key",
       organizationId: params.organizationId,
       projectId: params.projectId,
       connectionId,

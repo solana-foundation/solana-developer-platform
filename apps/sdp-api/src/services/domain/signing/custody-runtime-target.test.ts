@@ -669,6 +669,27 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toBeNull();
   });
 
+  it("returns the locked previous and selected defaults for an exact Connection switch", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const connection = await seedConnection();
+    await setProjectDefault(config.id, null);
+
+    const result = await selectCustodyConnectionTarget(getDb(env), env, {
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      connectionId: connection.id,
+    });
+
+    expect(result).toMatchObject({
+      selection: {
+        previousConfigId: config.id,
+        previousConnectionId: null,
+        selectedConfigId: config.id,
+        selectedConnectionId: connection.id,
+      },
+    });
+  });
+
   it("does not select a retained Connection after its provider entitlement is revoked", async () => {
     const config = await seedConfig({ provider: "privy" });
     const connection = await seedConnection();
@@ -1164,7 +1185,17 @@ describe("CustodyRuntimeTargets", () => {
       default_custody_connection_id: connection.id,
     });
 
-    await configStore.setDefaultConfig(ORGANIZATION_ID, PROJECT_ID, turnkeyConfig.id);
+    const selection = await configStore.setDefaultConfig(
+      ORGANIZATION_ID,
+      PROJECT_ID,
+      turnkeyConfig.id
+    );
+    expect(selection).toEqual({
+      previousConfigId: privyConfig.id,
+      previousConnectionId: connection.id,
+      selectedConfigId: turnkeyConfig.id,
+      selectedConnectionId: null,
+    });
     expect(await getProjectDefault()).toEqual({
       default_custody_config_id: turnkeyConfig.id,
       default_custody_connection_id: null,

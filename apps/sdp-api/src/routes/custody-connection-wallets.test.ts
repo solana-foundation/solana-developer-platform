@@ -147,6 +147,7 @@ async function request(path: string, method: "POST" | "DELETE", body: unknown): 
       headers: {
         Authorization: `Bearer ${API_KEY.raw}`,
         "Content-Type": "application/json",
+        "x-request-id": "wallet-creation-audit-request",
       },
       body: JSON.stringify(body),
     },
@@ -202,6 +203,32 @@ describe("Connection-owned wallet control plane", () => {
     });
     expect(body.data.wallet).not.toHaveProperty("custodyConfigId");
     expect(body.data.wallet).not.toHaveProperty("provider");
+    const audit = await getDb(env).queryOne<{
+      api_key_id: string;
+      request_id: string;
+      resource_id: string;
+      metadata: string;
+    }>(
+      "SELECT api_key_id, request_id, resource_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
+    );
+    expect(audit).toMatchObject({
+      api_key_id: API_KEY.id,
+      request_id: "wallet-creation-audit-request",
+      resource_id: body.data.wallet.id,
+    });
+    expect(JSON.parse(audit?.metadata ?? "null")).toMatchObject({
+      event: "custody_wallet_created",
+      auditPhase: "outcome",
+      auditIntentId: expect.any(String),
+      connectionId: CONNECTION_ID,
+      custodyWalletId: body.data.wallet.id,
+      walletId: "privy_created_wallet",
+      creationReason: "wallet_api",
+      previousDefaultWalletId: DEFAULT_WALLET_RECORD_ID,
+      newDefaultWalletId: body.data.wallet.id,
+    });
+    expect(JSON.stringify(audit)).not.toContain("connection-wallets-secret");
+
     expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
     expect(provisionPrivyWalletMock).toHaveBeenCalledWith(
       env,
@@ -243,6 +270,69 @@ describe("Connection-owned wallet control plane", () => {
         .bind(CONNECTION_ID)
         .first()
     ).toEqual({ default_custody_wallet_id: body.data.wallet.id });
+  });
+
+  it("does not call the Provider when the wallet creation intent cannot persist", async () => {
+    const db = getDb(env);
+    const before = await walletCount();
+    await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT fail_wallet_create_intent
+      CHECK (metadata::jsonb->>'auditPhase' IS DISTINCT FROM 'intent') NOT VALID`);
+    try {
+      const response = await request("", "POST", { connectionId: CONNECTION_ID, setDefault: true });
+      expect(response.status).toBe(500);
+      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+      expect(await walletCount()).toBe(before);
+      expect(
+        await db.queryOne(
+          "SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?",
+          [CONNECTION_ID]
+        )
+      ).toEqual({ default_custody_wallet_id: DEFAULT_WALLET_RECORD_ID });
+    } finally {
+      await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT fail_wallet_create_intent");
+    }
+  });
+
+  it("returns the created wallet when outcome persistence fails and retains the audit intent", async () => {
+    const db = getDb(env);
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "outcome_unavailable",
+      address: "Vote111111111111111111111111111111111111111",
+    });
+    await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT fail_wallet_create_outcome
+      CHECK (metadata::jsonb->>'auditPhase' IS DISTINCT FROM 'outcome') NOT VALID`);
+    const failureLog = vi.spyOn(getLogger(), "error").mockImplementation(() => {});
+    try {
+      const response = await request("", "POST", { connectionId: CONNECTION_ID, setDefault: true });
+      expect(response.status).toBe(201);
+      const { data } = (await response.json()) as { data: { wallet: { id: string } } };
+      expect(
+        await db.queryOne(
+          "SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?",
+          [CONNECTION_ID]
+        )
+      ).toEqual({ default_custody_wallet_id: data.wallet.id });
+      expect(
+        await db.queryOne(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'intent'"
+        )
+      ).toEqual({ count: 1 });
+      expect(
+        await db.queryOne(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'outcome'"
+        )
+      ).toEqual({ count: 0 });
+      expect(failureLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "audit_critical_outcome_persistence_failed",
+          auditIntentId: expect.any(String),
+        }),
+        expect.any(String)
+      );
+    } finally {
+      failureLog.mockRestore();
+      await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT fail_wallet_create_outcome");
+    }
   });
 
   it("persists a wallet when its Connection moves to a replacement Credential during Provider creation", async () => {
@@ -402,7 +492,9 @@ describe("Connection-owned wallet control plane", () => {
 
   it("maps an ambiguous Provider result to 503 without a local row", async () => {
     const orphanRiskLog = vi.spyOn(getLogger(), "error").mockImplementation(() => {});
-    provisionPrivyWalletMock.mockRejectedValueOnce(new Error("response lost"));
+    provisionPrivyWalletMock.mockRejectedValueOnce(
+      new Error("raw Provider response with connection-wallets-secret")
+    );
     const before = await walletCount();
 
     const response = await request("", "POST", { connectionId: CONNECTION_ID });
@@ -413,10 +505,21 @@ describe("Connection-owned wallet control plane", () => {
     });
     expect(await walletCount()).toBe(before);
     expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+    expect(
+      await getDb(env).queryOne(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'intent'"
+      )
+    ).toEqual({ count: 1 });
+    expect(
+      await getDb(env).queryOne(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'outcome'"
+      )
+    ).toEqual({ count: 0 });
     expect(orphanRiskLog).toHaveBeenCalledWith(
       expect.objectContaining({ reason: "provider_result_unknown" }),
       "custody_wallet_orphan_risk"
     );
+    expect(JSON.stringify(orphanRiskLog.mock.calls)).not.toContain("connection-wallets-secret");
     orphanRiskLog.mockRestore();
   });
 
@@ -429,6 +532,14 @@ describe("Connection-owned wallet control plane", () => {
     const response = await request("", "POST", { connectionId: CONNECTION_ID });
 
     expect(response.status).toBe(503);
+    const outcome = await getDb(env).queryOne<{ status: string; metadata: string }>(
+      "SELECT status, metadata FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'outcome'"
+    );
+    expect(outcome?.status).toBe("failure");
+    expect(JSON.parse(outcome?.metadata ?? "null")).toMatchObject({
+      result: "failed",
+      reason: "provider_rejected",
+    });
     expect(orphanRiskLog).not.toHaveBeenCalledWith(
       expect.objectContaining({ reason: "provider_result_unknown" }),
       "custody_wallet_orphan_risk"
@@ -448,6 +559,16 @@ describe("Connection-owned wallet control plane", () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
     expect(await walletCount()).toBe(before);
+    expect(
+      await getDb(env).queryOne(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'intent'"
+      )
+    ).toEqual({ count: 1 });
+    expect(
+      await getDb(env).queryOne(
+        "SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'outcome'"
+      )
+    ).toEqual({ count: 0 });
   });
 
   it("changes only the owning Connection default wallet", async () => {

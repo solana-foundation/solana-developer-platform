@@ -170,6 +170,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
 
     try {
       const wallet = await provisionApiKeyWallet(getDb(c.env), c.env, {
+        auditContext: c,
         organizationId: auth.organizationId,
         projectId,
         legacyConfigProjectId: projectId,

@@ -28,16 +28,23 @@ import {
   SolanaError,
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
+import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
+import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
+import * as custodyProvisioning from "@/services/custody/provisioning";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
+
+const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/dvp"), { env });
 
 const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
 const getFeePayer = vi.hoisted(() => vi.fn());
@@ -257,7 +264,7 @@ describe("createDvpTrade", () => {
     env.PRIVY_BYOK_ENABLED = originalByok;
   });
 
-  async function useConnectionAuthority() {
+  async function seedConnectionAuthority() {
     const db = getDb(env);
     await db.execute(
       `INSERT INTO provider_credentials
@@ -279,10 +286,78 @@ describe("createDvpTrade", () => {
       activated_at = sdp_iso_now() WHERE id = 'cconn_dvp'`);
   }
 
-  it("refuses a paused authority before creating a trade, replacement or sponsor request", async () => {
-    await useConnectionAuthority();
+  it("keeps the BYOK wallet creation audit when the later trade creation fails", async () => {
+    const previousAppId = env.PRIVY_APP_ID;
+    const previousAppSecret = env.PRIVY_APP_SECRET;
+    const provider = vi.spyOn(custodyProvisioning, "provisionPrivyWallet").mockResolvedValueOnce({
+      walletId: "new_dvp_authority",
+      address: SETTLEMENT_AUTHORITY,
+    });
+    env.PRIVY_BYOK_ENABLED = "true";
+    env.PRIVY_APP_ID = "dvp-audit-app";
+    env.PRIVY_APP_SECRET = "dvp-audit-secret";
+    auditContext.set("session", {
+      id: "session_dvp_audit",
+      userId: TEST_USER.id,
+      organizationId: TEST_ORG.id,
+      permissions: ["*"],
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+    auditContext.set("requestId", "dvp-create-audit-request");
+    await clearKVStores(env);
+    try {
+      await seedConnectionAuthority();
+      const db = getDb(env);
+      await db.execute("UPDATE organizations SET tier = 'enterprise' WHERE id = ?", [TEST_ORG.id]);
+      await db.execute(
+        "UPDATE custody_connections SET provider_account_fingerprint = ? WHERE id = 'cconn_dvp'",
+        [await getPrivyProviderAccountFingerprint(env.PRIVY_APP_ID)]
+      );
+      await db.execute("DELETE FROM dvp_settlement_wallets WHERE project_id = ?", [
+        TEST_PROJECT_ID,
+      ]);
+      await db.execute(
+        `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_connection_id) VALUES ('csd_dvp_audit', ?, ?, 'cconn_dvp')`,
+        [TEST_ORG.id, TEST_PROJECT_ID]
+      );
+      createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
+      await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(
+        "Sponsor unavailable"
+      );
+      expect(provider).toHaveBeenCalledOnce();
+      const audit = await db.queryOne<{
+        user_id: string;
+        request_id: string;
+        resource_id: string;
+        metadata: string;
+      }>(
+        "SELECT user_id, request_id, resource_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
+      );
+      expect(audit).toMatchObject({
+        user_id: TEST_USER.id,
+        request_id: "dvp-create-audit-request",
+      });
+      expect(JSON.parse(audit?.metadata ?? "null")).toMatchObject({
+        result: "created",
+        creationReason: "dvp_settlement_authority",
+        walletId: "privy_new_dvp_authority",
+      });
+      expect(
+        await db.queryOne("SELECT id FROM custody_wallets WHERE id = ?", [audit?.resource_id])
+      ).toEqual({ id: audit?.resource_id });
+      expect(JSON.stringify(audit)).not.toContain("dvp-audit-secret");
+    } finally {
+      env.PRIVY_APP_ID = previousAppId;
+      env.PRIVY_APP_SECRET = previousAppSecret;
+      provider.mockRestore();
+      await clearKVStores(env);
+    }
+  });
 
-    await expect(createDvpTrade(env, tradeInput())).rejects.toMatchObject({
+  it("refuses a paused authority before creating a trade, replacement or sponsor request", async () => {
+    await seedConnectionAuthority();
+
+    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toMatchObject({
       statusCode: 403,
       details: { reason: "runtime_execution_paused" },
     });
@@ -298,7 +373,7 @@ describe("createDvpTrade", () => {
   it.each(["connection", "credential", "entitlement"] as const)(
     "refuses an authority with unavailable %s before recording or sponsoring a trade",
     async (unavailable) => {
-      await useConnectionAuthority();
+      await seedConnectionAuthority();
       env.PRIVY_BYOK_ENABLED = "true";
       const db = getDb(env);
       if (unavailable === "connection") {
@@ -315,7 +390,7 @@ describe("createDvpTrade", () => {
         ]);
       }
 
-      await expect(createDvpTrade(env, tradeInput())).rejects.toMatchObject({
+      await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toMatchObject({
         statusCode: unavailable === "entitlement" ? 403 : 409,
       });
       expect(await rowsInDb()).toEqual([]);
@@ -328,7 +403,7 @@ describe("createDvpTrade", () => {
   );
 
   it("creates with an admitted nondefault Connection authority", async () => {
-    await useConnectionAuthority();
+    await seedConnectionAuthority();
     env.PRIVY_BYOK_ENABLED = "true";
     await getDb(env).execute(
       `INSERT INTO custody_scope_defaults
@@ -337,7 +412,7 @@ describe("createDvpTrade", () => {
       [TEST_ORG.id, TEST_PROJECT_ID, CUSTODY_CONFIG_ID]
     );
 
-    const trade = await createDvpTrade(env, tradeInput());
+    const trade = await createDvpTrade(env, auditContext, tradeInput());
 
     expect(trade.settlementAuthority).toBe(SETTLEMENT_AUTHORITY);
     expect(sendTransaction).toHaveBeenCalledOnce();
@@ -348,14 +423,16 @@ describe("createDvpTrade", () => {
   });
 
   it("replays the recorded create after BYOK is paused without sponsoring again", async () => {
-    await useConnectionAuthority();
+    await seedConnectionAuthority();
     env.PRIVY_BYOK_ENABLED = "true";
     const input = { ...tradeInput(), idempotencyKey: "byok-replay" };
-    const original = await createDvpTrade(env, input);
+    const original = await createDvpTrade(env, auditContext, input);
     env.PRIVY_BYOK_ENABLED = "false";
 
-    expect((await createDvpTrade(env, input)).id).toBe(original.id);
-    await expect(createDvpTrade(env, { ...input, amountA: 2000n })).rejects.toMatchObject({
+    expect((await createDvpTrade(env, auditContext, input)).id).toBe(original.id);
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, amountA: 2000n })
+    ).rejects.toMatchObject({
       statusCode: 409,
     });
     expect(await rowsInDb()).toHaveLength(1);
@@ -364,14 +441,14 @@ describe("createDvpTrade", () => {
   });
 
   it("admits a new attempt after a failed create instead of replaying through a paused authority", async () => {
-    await useConnectionAuthority();
+    await seedConnectionAuthority();
     env.PRIVY_BYOK_ENABLED = "true";
     const input = { ...tradeInput(), idempotencyKey: "byok-failed-retry" };
     createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
-    await expect(createDvpTrade(env, input)).rejects.toThrow("Sponsor unavailable");
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow("Sponsor unavailable");
     env.PRIVY_BYOK_ENABLED = "false";
 
-    await expect(createDvpTrade(env, input)).rejects.toMatchObject({
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toMatchObject({
       statusCode: 403,
       details: { reason: "runtime_execution_paused" },
     });
@@ -387,7 +464,7 @@ describe("createDvpTrade", () => {
       return getSignatureFromTransaction(getTransactionDecoder().decode(bytes));
     });
 
-    const trade = await createDvpTrade(env, tradeInput());
+    const trade = await createDvpTrade(env, auditContext, tradeInput());
 
     expect(sendTransaction).toHaveBeenCalledTimes(1);
     expect(rowsAtSendTime).toHaveLength(1);
@@ -406,7 +483,7 @@ describe("createDvpTrade", () => {
       mintB: address(WELL_KNOWN_TOKENS.USDG.mints["mainnet-beta"].address),
     };
 
-    const trade = await createDvpTrade(env, input);
+    const trade = await createDvpTrade(env, auditContext, input);
     const rows = await rowsInDb();
 
     expect(trade.nameA).toBe("Circle Reserve Fund");
@@ -417,7 +494,7 @@ describe("createDvpTrade", () => {
   it("leaves the trade creating until chain observation confirms it", async () => {
     acceptSend();
 
-    const trade = await createDvpTrade(env, tradeInput());
+    const trade = await createDvpTrade(env, auditContext, tradeInput());
 
     expect(trade.status).toBe("creating");
     expect(trade.createSignature).toBeTruthy();
@@ -435,7 +512,7 @@ describe("createDvpTrade", () => {
       status: "created" as const,
     }));
 
-    const trade = await createDvpTrade(env, tradeInput());
+    const trade = await createDvpTrade(env, auditContext, tradeInput());
 
     expect(trade.status).toBe("created");
   });
@@ -463,7 +540,7 @@ describe("createDvpTrade", () => {
       })
     );
 
-    await expect(createDvpTrade(env, tradeInput())).rejects.toMatchObject({
+    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toMatchObject({
       code: "TRANSACTION_FAILED",
     } satisfies Partial<AppError>);
 
@@ -479,7 +556,7 @@ describe("createDvpTrade", () => {
   it("leaves an ambiguously failed send at creating rather than guessing", async () => {
     sendTransaction.mockRejectedValue(new Error("socket hang up"));
 
-    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow("socket hang up");
+    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow("socket hang up");
 
     const rows = await rowsInDb();
     expect(rows).toHaveLength(1);
@@ -497,7 +574,9 @@ describe("createDvpTrade", () => {
       "mintA carries the ScaledUiAmountConfig extension, which DvP settlement refuses",
     ]);
 
-    await expect(createDvpTrade(env, tradeInput())).rejects.toThrow(/ScaledUiAmountConfig/);
+    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(
+      /ScaledUiAmountConfig/
+    );
 
     expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
     expect(prepareOwnedSubmission).not.toHaveBeenCalled();
@@ -513,8 +592,8 @@ describe("createDvpTrade", () => {
     acceptSend();
     const input = { ...tradeInput(), idempotencyKey: "key-1" };
 
-    const first = await createDvpTrade(env, input);
-    const retried = await createDvpTrade(env, input);
+    const first = await createDvpTrade(env, auditContext, input);
+    const retried = await createDvpTrade(env, auditContext, input);
 
     expect(retried.id).toBe(first.id);
     expect(retried.swapDvp).toBe(first.swapDvp);
@@ -546,14 +625,19 @@ describe("createDvpTrade", () => {
           unitsConsumed: 0n,
         })
       );
-      await expect(createDvpTrade(env, { ...tradeInput(), idempotencyKey: key })).rejects.toThrow();
+      await expect(
+        createDvpTrade(env, auditContext, { ...tradeInput(), idempotencyKey: key })
+      ).rejects.toThrow();
     }
 
     it("lets the same key create the trade on a retry", async () => {
       await failOnceWith("key-retry");
       acceptSend();
 
-      const retried = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
+      const retried = await createDvpTrade(env, auditContext, {
+        ...tradeInput(),
+        idempotencyKey: "key-retry",
+      });
 
       expect(retried.status).toBe("creating");
     });
@@ -562,7 +646,7 @@ describe("createDvpTrade", () => {
       await failOnceWith("key-retry");
       acceptSend();
 
-      await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
+      await createDvpTrade(env, auditContext, { ...tradeInput(), idempotencyKey: "key-retry" });
 
       const rows = await rowsInDb();
       expect(rows).toHaveLength(2);
@@ -574,9 +658,15 @@ describe("createDvpTrade", () => {
     it("frees the key from the failed row so only the live trade answers to it", async () => {
       await failOnceWith("key-retry");
       acceptSend();
-      const live = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
+      const live = await createDvpTrade(env, auditContext, {
+        ...tradeInput(),
+        idempotencyKey: "key-retry",
+      });
 
-      const replayed = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-retry" });
+      const replayed = await createDvpTrade(env, auditContext, {
+        ...tradeInput(),
+        idempotencyKey: "key-retry",
+      });
 
       expect(replayed.id).toBe(live.id);
       await expect(rowsInDb()).resolves.toHaveLength(2);
@@ -594,11 +684,11 @@ describe("createDvpTrade", () => {
   it("does not free the key of a trade still stuck at creating", async () => {
     sendTransaction.mockRejectedValueOnce(new Error("rpc returned an unreadable response"));
     await expect(
-      createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-ambiguous" })
+      createDvpTrade(env, auditContext, { ...tradeInput(), idempotencyKey: "key-ambiguous" })
     ).rejects.toThrow("rpc returned an unreadable response");
 
     acceptSend();
-    const retried = await createDvpTrade(env, {
+    const retried = await createDvpTrade(env, auditContext, {
       ...tradeInput(),
       idempotencyKey: "key-ambiguous",
     });
@@ -615,8 +705,8 @@ describe("createDvpTrade", () => {
     const input = { ...tradeInput(), idempotencyKey: "key-race" };
 
     const [first, second] = await Promise.all([
-      createDvpTrade(env, input),
-      createDvpTrade(env, input),
+      createDvpTrade(env, auditContext, input),
+      createDvpTrade(env, auditContext, input),
     ]);
 
     expect(second.id).toBe(first.id);
@@ -631,8 +721,14 @@ describe("createDvpTrade", () => {
   it("creates separate trades for different keys", async () => {
     acceptSend();
 
-    const first = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-a" });
-    const second = await createDvpTrade(env, { ...tradeInput(), idempotencyKey: "key-b" });
+    const first = await createDvpTrade(env, auditContext, {
+      ...tradeInput(),
+      idempotencyKey: "key-a",
+    });
+    const second = await createDvpTrade(env, auditContext, {
+      ...tradeInput(),
+      idempotencyKey: "key-b",
+    });
 
     expect(second.id).not.toBe(first.id);
     expect(sendTransaction).toHaveBeenCalledTimes(2);
@@ -643,15 +739,15 @@ describe("createDvpTrade", () => {
   it("creates a new trade every time when no key is sent", async () => {
     acceptSend();
 
-    const first = await createDvpTrade(env, tradeInput());
-    const second = await createDvpTrade(env, tradeInput());
+    const first = await createDvpTrade(env, auditContext, tradeInput());
+    const second = await createDvpTrade(env, auditContext, tradeInput());
 
     expect(second.id).not.toBe(first.id);
   });
 
   it("resolves sponsorship after term validation", async () => {
     await expect(
-      createDvpTrade(env, {
+      createDvpTrade(env, auditContext, {
         ...tradeInput(),
         partyB: { address: address(SETTLEMENT_AUTHORITY) },
       })
@@ -668,7 +764,7 @@ describe("createDvpTrade", () => {
   it("resolves a walletId slot to the wallet's address and stores null attribution", async () => {
     acceptSend();
 
-    const trade = await createDvpTrade(env, tradeInput());
+    const trade = await createDvpTrade(env, auditContext, tradeInput());
 
     expect(trade.userA).toBe(address(custodyWalletAddress));
     const rows = await rowsInDb();
@@ -698,7 +794,7 @@ describe("createDvpTrade", () => {
       .run();
 
     acceptSend();
-    const trade = await createDvpTrade(env, {
+    const trade = await createDvpTrade(env, auditContext, {
       ...tradeInput(),
       partyA: { counterpartyAccountId: "cpa_resolve" },
       partyB: { address: address("GjupWG8a4BXmduuUQt7vP7QxJ5Kq5YhwKZNkFYp5KPr") },
@@ -732,7 +828,7 @@ describe("createDvpTrade", () => {
 
     acceptSend();
     await expect(
-      createDvpTrade(env, {
+      createDvpTrade(env, auditContext, {
         ...tradeInput(),
         partyA: { counterpartyAccountId: "cpa_bank" },
       })
@@ -762,7 +858,7 @@ describe("createDvpTrade", () => {
 
     acceptSend();
     await expect(
-      createDvpTrade(env, {
+      createDvpTrade(env, auditContext, {
         ...tradeInput(),
         partyA: { counterpartyAccountId: "cpa_archived" },
       })
@@ -774,7 +870,7 @@ describe("createDvpTrade", () => {
   it("refuses an unknown walletId", async () => {
     acceptSend();
     await expect(
-      createDvpTrade(env, {
+      createDvpTrade(env, auditContext, {
         ...tradeInput(),
         partyA: { walletId: "cwlt_nonexistent" },
       })
@@ -797,7 +893,7 @@ describe("createDvpTrade", () => {
 
     acceptSend();
     await expect(
-      createDvpTrade(env, {
+      createDvpTrade(env, auditContext, {
         ...tradeInput(),
         partyA: { walletId: "cwlt_archived" },
       })
@@ -807,7 +903,7 @@ describe("createDvpTrade", () => {
 
   it("uses the sponsor as fee payer and instruction payer in one signature slot", async () => {
     acceptSend();
-    const trade = await createDvpTrade(env, tradeInput());
+    const trade = await createDvpTrade(env, auditContext, tradeInput());
 
     const [, bytes] = sendTransaction.mock.calls[0];
     const transaction = getTransactionDecoder().decode(bytes);
@@ -831,7 +927,7 @@ describe("createDvpTrade", () => {
     prepareOwnedSubmission.mockRejectedValueOnce(refusal);
 
     const input = { ...tradeInput(), idempotencyKey: "key-port-integrity" };
-    await expect(createDvpTrade(env, input)).rejects.toBe(refusal);
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toBe(refusal);
     await expect(rowsInDb()).resolves.toMatchObject([
       { status: "create_failed", create_signature: null },
     ]);
@@ -842,10 +938,10 @@ describe("createDvpTrade", () => {
     prepareOwnedSubmission.mockRejectedValueOnce(denial);
 
     const input = { ...tradeInput(), idempotencyKey: "key-kora-denial" };
-    await expect(createDvpTrade(env, input)).rejects.toBe(denial);
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toBe(denial);
     await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
 
-    const retried = await createDvpTrade(env, input);
+    const retried = await createDvpTrade(env, auditContext, input);
     expect(retried.status).toBe("creating");
     await expect(rowsInDb()).resolves.toHaveLength(2);
   });
