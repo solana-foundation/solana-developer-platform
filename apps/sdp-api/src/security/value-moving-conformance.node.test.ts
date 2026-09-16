@@ -277,6 +277,26 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/tokens.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId",',
+      before: "policyGate({ extract: extractTokenUpdatePolicyCandidate })",
+      after: "  updateToken",
+    },
+    replay: [
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "rejects metadata updates while token deployment is in progress",
+      },
+    ],
+  },
+  {
     family: "ramps",
     trustedContext: {
       file: "apps/sdp-api/src/routes/payments/handlers/ramps.ts",
@@ -527,6 +547,7 @@ describe("value-moving authorization and replay conformance", () => {
       "dvp",
       "earn",
       "earn",
+      "issuance",
       "issuance",
       "issuance",
       "issuance",

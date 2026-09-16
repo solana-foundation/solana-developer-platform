@@ -915,6 +915,64 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("stops a denied metadata update before signer and token mutation", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_metadata_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_metadata_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        metadataAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-metadata", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Denied metadata rename" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(403);
+      expect(signerSpy).not.toHaveBeenCalled();
+      const stored = await getDb(env)
+        .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+        .bind(token.id)
+        .first<{ name: string }>();
+      expect(stored?.name).not.toBe("Denied metadata rename");
+      const operationCount = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_metadata_update_execute'"
+        )
+        .first<{ count: number }>();
+      expect(operationCount).toEqual({ count: 1 });
+    });
+
     it("stops a denied unfreeze before signer and issuance side effects", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_unfreeze_denied",
@@ -3898,7 +3956,10 @@ describe("Issuance Routes", () => {
           updateAuthority: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet2 }),
         })
       );
-      expect(mintRead).toHaveBeenCalledTimes(2);
+      // Three mint reads: the policy gate's extractor resolves the live
+      // metadata authority once to judge the signing wallet, and the handler
+      // resolves it again for the GET and the update itself.
+      expect(mintRead).toHaveBeenCalledTimes(3);
     });
 
     it.each(["", "?includeMetadataAuthority=false"])(

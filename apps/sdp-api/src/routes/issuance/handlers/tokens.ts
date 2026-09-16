@@ -9,8 +9,13 @@ import type { ApiKeyContext } from "@/lib/auth";
 import { badRequest, badRequestQuery, conflict, internalError, notFound } from "@/lib/errors";
 import { buildDefaultAssetProfile } from "@/lib/issuance/default-asset-profile";
 import { created, paginated, success } from "@/lib/response";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import {
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -34,6 +39,7 @@ import {
   resolveIssuanceWallet,
   resolveMetadataAuthority,
 } from "./authority-resolution";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -101,6 +107,8 @@ async function resolveMetadataUpdate(params: {
     requestedCustodyWalletId: params.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:write"],
   });
+  assertJudgedCustodyWallet(params.c, authorityWallet.custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(params.c, authorityWallet.custodyWalletId);
   await admitIssuanceRuntimeExecution({
     env: params.c.env,
     auth: params.auth,
@@ -394,6 +402,7 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
       const { signer } = metadataUpdate.authority;
 
       const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+      await beginApprovedWalletOperationEffect(c);
       const result = await mosaic.updateMetadata({
         mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
         ...metadataUpdate.patch,
@@ -441,3 +450,76 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
     throw error;
   }
 };
+
+export async function extractTokenUpdatePolicyCandidate(
+  c: ValidatedBodyContext<typeof updateTokenSchema>
+): Promise<PolicyGateExtraction> {
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const { signingCustodyWalletId, ...body } = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const patch = getOnChainMetadataPatch(body);
+  const emptyExtraction = {
+    legs: [],
+    body: c.req.valid("json") as Record<string, unknown>,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: "update_metadata",
+      patchKeys: Object.keys(patch),
+    },
+    idempotencyKey: null,
+  };
+
+  // A draft-only PATCH mutates database rows and signs nothing: no custody
+  // wallet, no wallet operation to judge. The same predicate the handler's
+  // resolveMetadataUpdate uses decides whether an on-chain update will sign.
+  if (!token.mintAddress || token.status === "pending" || Object.keys(patch).length === 0) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  const currentAuthority = await resolveCurrentAuthorityForRole(
+    c.env,
+    tokenService,
+    token,
+    "metadata"
+  );
+  if (!currentAuthority) {
+    throw badRequest("Metadata authority is not available for this token");
+  }
+
+  const wallet = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    currentAuthority,
+    requestedCustodyWalletId: signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: wallet.custodyWalletId,
+    tokenService,
+  });
+
+  return {
+    ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId: wallet.custodyWalletId,
+      walletId: wallet.providerWalletId,
+      operationType: "issuance_metadata_update_execute",
+      amount: null,
+      destination: null,
+    }),
+  };
+}
