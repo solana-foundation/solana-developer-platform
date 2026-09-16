@@ -482,10 +482,14 @@ organization's own custody wallets.
     re-opens that live family after the earlier vocabulary trim.
   - **Provider/environment capability after strategy resolution.**
     `isVaultDirectDepositEnabled(environment, provider)`
-    (`@sdp/types/provider-access`) opens only the provider's real deployment:
-    Jupiter Lend on production/mainnet; Kamino and Veda on sandbox/devnet. The
-    dashboard reads the same map, so it never advertises an action the API will
-    refuse.
+    (`@sdp/types/provider-access`) opens a provider only where the
+    environment's cluster carries one of its deployments, DERIVED from the
+    provider's own program table (`EARN_PROVIDER_DEPLOYED_CLUSTERS`): today
+    Jupiter Lend and Ondo on production/mainnet, Kamino on both (PRO-1986),
+    Veda on sandbox/devnet until `VEDA_DEPLOYMENTS["mainnet-beta"]` is filled
+    (PRO-1777). One gate, `assertVaultDepositEnvironmentOpen` (admission.ts),
+    inside `assertVaultDepositAdmissible` and the preview. The dashboard reads
+    the same predicate, so it never advertises an action the API will refuse.
   - `minSharesOut` is required for every production deposit. Slippage-capable
     providers quote the live share rate, and their builders encode the caller's
     exact floor in the provider instruction. Jupiter Lend uses

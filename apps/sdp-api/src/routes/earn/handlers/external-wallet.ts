@@ -27,11 +27,7 @@ import type {
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
 } from "@sdp/types";
-import {
-  earnDepositStyle,
-  earnWithdrawSlippageFloor,
-  isVaultDirectDepositEnabled,
-} from "@sdp/types/provider-access";
+import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { getDb } from "@/db";
 import {
@@ -42,7 +38,7 @@ import {
   type ExternalWalletMovementTotals,
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
+import { badRequest, internalError, notFound } from "@/lib/errors";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
@@ -756,13 +752,6 @@ export async function createEarnExternalWalletDepositTransaction(
     );
   }
   const provider = strategy.provider;
-
-  if (!isVaultDirectDepositEnabled(environment, provider)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `Vault deposits for ${provider} are not available from a ${environment} project.`
-    );
-  }
 
   // Every production deposit carries a caller-chosen share floor derived from
   // the provider's live quote and enforced by its on-chain instruction.

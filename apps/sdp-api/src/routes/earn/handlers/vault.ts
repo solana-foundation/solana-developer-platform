@@ -15,7 +15,6 @@ import {
   type EarnProviderId,
   earnDepositStyle,
   earnWithdrawSlippageFloor,
-  isVaultDirectDepositEnabled,
 } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -95,7 +94,11 @@ import {
   type earnVaultWithdrawalSchema,
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
-import { assertStrategyDepositable, assertVaultDepositAdmissible } from "./admission";
+import {
+  assertStrategyDepositable,
+  assertVaultDepositAdmissible,
+  assertVaultDepositEnvironmentOpen,
+} from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
@@ -153,13 +156,7 @@ export async function createEarnVaultDepositPreview(
   }
   const provider = strategy.provider;
 
-  if (!isVaultDirectDepositEnabled(environment, provider)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `Vault deposits for ${provider} are not available from a ${environment} project.`
-    );
-  }
-
+  assertVaultDepositEnvironmentOpen(environment, provider);
   assertEarnProviderSurfaced(provider);
   if (auth) {
     await assertProviderAvailable(
@@ -405,15 +402,6 @@ export async function extractEarnVaultDepositPolicyCandidate(
   if (!isEarnProviderId(strategy.provider)) {
     throw providerNotConfigured(
       `Earn provider ${strategy.provider} is not available in this deployment`
-    );
-  }
-
-  // Jupiter is mainnet-only, while today's Kamino and Veda launch posture
-  // remains sandbox-only. Keep that distinction provider-scoped.
-  if (!isVaultDirectDepositEnabled(environment, strategy.provider)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `Vault deposits for ${strategy.provider} are not available from a ${environment} project.`
     );
   }
 
