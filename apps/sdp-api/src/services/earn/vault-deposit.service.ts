@@ -34,6 +34,7 @@ import {
   simulateVaultPlan,
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
+import { ledgerVaultExposureGate } from "./vault-exposure";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { resolveVaultSponsorship, type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
@@ -353,6 +354,18 @@ export async function depositIntoVault(
           // about what moved on chain.
           requestedAmount: depositAmount,
           acceptedMinSharesOut: accepted.minSharesOut,
+          // ADR 0004 layer 1, the write-side half: re-decide the vault
+          // exposure cap under a per-vault lock, on committed rows, before
+          // this row is recorded. The handler's admission gate ran before the
+          // build; this is what stops two deposits admitted a moment apart
+          // from landing over the cap together. Signed, not yet broadcast, so
+          // a refusal here records and sends nothing.
+          admit: ledgerVaultExposureGate(env, {
+            environment: input.environment,
+            provider: input.provider,
+            vaultAddress: input.providerReference,
+            amount: depositAmount,
+          }),
           sourceAddress: input.wallet.publicKey,
           signature: signed.signature,
           signedTransaction: Buffer.from(signed.bytes).toString("base64"),

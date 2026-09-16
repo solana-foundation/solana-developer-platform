@@ -5,7 +5,7 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types";
-import { type AppDb, asTransactionalClient } from "@/db";
+import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
 import { conflict } from "@/lib/errors";
 
 /**
@@ -472,6 +472,32 @@ export interface EarnMovementsRepository {
     ownerAddress: string;
   }): Promise<Map<string, ExternalWalletMovementTotals>>;
   /**
+   * SDP-wide money INTO one vault, summed across every organization on the
+   * environment (ADR 0004 layer 1, PRO-1934): non-failed vault deposits
+   * (`requested`, `submitted`, `confirmed`, `finalized`) in the vault's
+   * deposit-token units. In-flight deposits count on purpose, so a burst of
+   * concurrent deposits cannot each see the pre-burst figure. Never negative.
+   *
+   * Withdrawals are deliberately NOT subtracted: a vault exit is ledgered in
+   * SHARES (`denomination` = the share mint, and `amount_settled` is stamped
+   * from `amount_requested` on finalization, also shares), so the ledger holds
+   * no token-denominated figure for money OUT, and this table's own rule is
+   * that no read sums across denominations. The result is therefore GROSS
+   * inflow: an over-estimate of exposure that only ever errs toward refusing a
+   * deposit, never toward admitting one, which is the ADR's fail-closed side.
+   * Recording the observed token payout at exit settlement is the follow-up
+   * that turns this into a net figure (the earnings read has the same gap,
+   * `withdrawals_not_valued`).
+   *
+   * Cross-tenant by design; the caller runs it under the system database
+   * identity and folds the answer into one aggregate.
+   */
+  sumVaultDepositExposure(params: {
+    environment: SdpEnvironment;
+    provider: string;
+    vaultAddress: string;
+  }): Promise<string>;
+  /**
    * The cross-provider movement feed: one chronological history spanning both
    * execution models, which is what neither legacy table could serve alone.
    *
@@ -606,7 +632,9 @@ export interface EarnMovementsRepository {
   ): Promise<EarnMovementRow | null>;
 }
 
-export interface CreateSignedVaultDepositIntentInput extends ShareAccountRentAttribution {
+export interface CreateSignedVaultDepositIntentInput
+  extends ShareAccountRentAttribution,
+    LedgerAdmissionHook {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -634,6 +662,54 @@ export interface CreateSignedVaultDepositIntentInput extends ShareAccountRentAtt
   idempotencyFingerprint: string;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
+}
+
+/**
+ * A platform admission re-check that runs INSIDE the ledger transaction that
+ * records a deposit's `requested` row: after the per-vault write lock
+ * (`earnVaultDepositWriteLockKey`) is held and the idempotency replay has been
+ * re-checked under it, before the holding is claimed. It receives the
+ * transaction's own executor, so every statement it issues sees the previous
+ * lock holder's commit, and a throw rolls the whole write back with nothing
+ * recorded.
+ *
+ * The one caller today is the vault exposure cap (ADR 0004 layer 1,
+ * `ledgerVaultExposureGate`): the admission gate before the build reads the
+ * ledger, but two deposits admitted a moment apart can each read the same
+ * headroom, so the ledger write decides again on what is actually committed.
+ * A replay never reaches the hook: a request whose row already exists, or
+ * whose same-key twin committed while this write waited for the lock, is
+ * answered from that row.
+ */
+export interface LedgerAdmissionHook {
+  admit?: (transaction: DatabaseExecutor) => Promise<void>;
+}
+
+/**
+ * The per-vault transaction advisory lock every vault DEPOSIT write takes
+ * before it re-checks replay and runs the admission hook. Serializes writers
+ * to one vault across processes for the life of the transaction; released
+ * with the commit or rollback. Same `hashtext(key)` convention as the session
+ * locks in `db/client.ts`; a hash collision with another key only adds
+ * serialization. Exits never take it (ADR 0002: nothing queues money out).
+ */
+export function earnVaultDepositWriteLockKey(key: {
+  environment: SdpEnvironment;
+  provider: string;
+  vaultAddress: string;
+}): string {
+  return `earn:vault-deposit-write:${key.environment}:${key.provider}:${key.vaultAddress}`;
+}
+
+async function lockVaultDepositWrites(
+  transaction: AppDb,
+  key: { environment: SdpEnvironment; provider: string; vaultAddress: string }
+): Promise<void> {
+  await transaction
+    // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+    .prepare("SELECT pg_advisory_xact_lock(hashtext(?))")
+    .bind(earnVaultDepositWriteLockKey(key))
+    .first();
 }
 
 /**
@@ -723,7 +799,7 @@ export interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRent
   initiatedByKeyId?: string | null;
 }
 
-export interface CreateSignedExternalWalletDepositIntentInput {
+export interface CreateSignedExternalWalletDepositIntentInput extends LedgerAdmissionHook {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -1429,6 +1505,22 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return totals;
     },
 
+    async sumVaultDepositExposure(params) {
+      // One definition of SDP-wide exposure, in SQL (migration 0101): the
+      // function widens its own read to the system isolation identity for the
+      // duration of the aggregate, so the same figure comes back whether the
+      // caller is the admission gate on a pooled connection or the ledger
+      // write inside a tenant-stamped transaction. Postgres numeric is exact
+      // and every summed row shares the vault's deposit-token denomination, so
+      // the text rendering loses nothing. Served by
+      // idx_earn_movements_vault_exposure (migration 0100).
+      const row = await db
+        .prepare(`SELECT earn_vault_deposit_exposure(?, ?, ?)::text AS exposure`)
+        .bind(params.environment, params.provider, params.vaultAddress)
+        .first<{ exposure: string }>();
+      return row?.exposure ?? "0";
+    },
+
     async listMovements(params) {
       const conditions = ["organization_id = ?", "environment = ?"];
       const bindings: unknown[] = [params.organizationId, params.environment];
@@ -1626,6 +1718,30 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           };
         }
 
+        // Serialize writers to this vault, then ask the replay question AGAIN
+        // under the lock: a same-key twin that committed while this write
+        // waited is this deposit already recorded, and must be answered as
+        // the replay it is, never refused by the admission hook below. Nothing
+        // upstream serializes same-key duplicates, so this is where they meet.
+        await lockVaultDepositWrites(transaction, input);
+        const twin = await findVaultMovementByRequest(
+          transaction,
+          input.organizationId,
+          input.requestId
+        );
+        if (twin) {
+          assertMovementIsOwnReplay(twin, input);
+          return {
+            position: await requireMovementPosition(transaction, twin),
+            movement: twin,
+            replayed: true,
+          };
+        }
+
+        // Platform admission, decided on committed rows under the vault lock,
+        // before anything is claimed. See `LedgerAdmissionHook`.
+        await input.admit?.(executor);
+
         const claimed = await claimVaultPosition(transaction, input);
         const inserted = await insertVaultMovement(transaction, input, claimed.id);
         if (!inserted) {
@@ -1719,6 +1835,31 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             replayed: true,
           };
         }
+
+        // The built-transaction row lock above serializes same-BUILD racers;
+        // a same-KEY racer for a DIFFERENT build holds a different row lock,
+        // so the request key is asked again under the vault lock, exactly as
+        // the custody path does: a twin that committed while this write
+        // waited is answered as its replay, and a divergent one is the
+        // idempotency conflict, never a cap refusal from the hook below. The
+        // vault lock is taken AFTER the row lock on purpose: the custody path
+        // takes the vault lock first and never the row lock, so no cycle.
+        await lockVaultDepositWrites(transaction, input);
+        const twin = await findVaultMovementByRequest(
+          transaction,
+          input.organizationId,
+          input.requestId
+        );
+        if (twin) {
+          assertMovementIsOwnReplay(twin, input);
+          return {
+            position: await requireMovementPosition(transaction, twin),
+            movement: twin,
+            replayed: true,
+          };
+        }
+
+        await input.admit?.(executor);
 
         const claimed = await claimExternalWalletVaultPosition(transaction, input);
         const inserted = await insertExternalWalletDepositMovement(transaction, input, claimed.id);

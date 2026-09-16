@@ -154,6 +154,13 @@ balance with a live one.
     curated vault's name. `HIDDEN_STRATEGY_TERMS` is name-based only because it
     can exclusively REMOVE rows; the same trick pointed the other way would be an
     admission hole.
+  - **`VAULT_EXPOSURE_CAPS` sits beside them but is NOT curation** (ADR 0004
+    layer 1, PRO-1934): it is the SDP-wide exposure ceiling per vault, in
+    deposit-token units, enforced at deposit ADMISSION rather than at browse
+    (`services/earn/vault-exposure.ts`). Same cluster-and-address keying as the
+    lists above. An ABSENT entry gets `DEFAULT_VAULT_EXPOSURE_CAP`; an explicit
+    `null` is uncapped and must read as a deliberate, commented exception in
+    review.
   - None of these is entitlement and none is `fundable`. The sync keeps STORING
     everything a provider reports, so the DB stays a truthful inventory and
     un-curating is a deploy rather than an hour's wait. None is an allocation
@@ -492,10 +499,47 @@ organization's own custody wallets.
     a silent replay, and writes nothing.
   - Gate order: schema → strategy resolution → provider/environment capability
     → provider-specific production floor → deposit-style check → surfacing → entitlement →
-    **catalogue admission** → wallet. `assertStrategyDepositable`
-    (`handlers/admission.ts`) is shared with the custodial path and asserts
-    `status = 'active'` plus `isClusterFundableInEnvironment`; without it a
-    `paused` row — an operator's deliberate stop — stayed fundable by id.
+    **catalogue admission** → **vault exposure cap** → wallet.
+    `assertStrategyDepositable` (`handlers/admission.ts`) is shared with the
+    custodial path and asserts `status = 'active'` plus
+    `isClusterFundableInEnvironment`; without it a `paused` row (an
+    operator's deliberate stop) stayed fundable by id. The cap
+    (`assertVaultDepositAdmissible(c, strategy, amount)`, last because it is
+    the one gate that reads the ledger) is ADR 0004 layer 1: SDP-wide money
+    into this vault across every organization, from `earn_movements`
+    (`sumVaultDepositExposure`, non-failed deposits, in-flight included, under
+    the system database identity because the sum is cross-tenant by
+    definition), plus the amount, against
+    `min(maxAbsolute, tvlUsd * bps / 10000)` from `VAULT_EXPOSURE_CAPS`.
+    Refuses with a typed **409 `VAULT_EXPOSURE_CAP`** only when
+    `EARN_VOLUME_CAPS_ENFORCED` is truthy; otherwise (shadow mode, the
+    default) it only emits `sdp_api_earn_volume_cap_evaluated` with
+    `would_block`. An unreadable exposure is a 503 in BOTH modes. Two
+    honesty notes: withdrawals are ledgered in SHARES, so the figure is gross
+    inflow (never subtracts exits, so it errs toward refusing); and it is
+    token units against a USD TVL, which is dollar-for-dollar only because V1
+    vaults are stablecoins. Previews read a 30s in-process cache; the
+    ADMISSION always reads the ledger fresh and folds the admitted amount back
+    into the cache, so an enforced verdict is never decided on a stale figure.
+    **The cap is decided twice for ledgered deposits.** Admission is the early
+    half and cannot see a deposit admitted a moment earlier whose row has not
+    landed, so the ledger write decides again: `ledgerVaultExposureGate`
+    (`services/earn/vault-exposure.ts`) is the `admit` hook both
+    `createSignedVaultDepositIntent` and
+    `createSignedExternalWalletDepositIntent` run inside their transaction.
+    The ledger first takes a per-vault `pg_advisory_xact_lock`
+    (`earnVaultDepositWriteLockKey`) and re-checks the idempotency replay
+    under it (a same-key twin that committed while this write waited is a
+    replay, never a 409), then the hook re-reads the aggregate on the SAME
+    connection (`earn_vault_deposit_exposure`, migration 0101, a SQL function
+    that widens its own read to the system identity and is registered in
+    `tenant-isolation-coverage.test.ts`), and refuses with the same 409; a
+    refusal rolls the write back with nothing recorded or broadcast. Events
+    carry `stage: "preview" | "admission" | "ledger_write"`. Pinned by
+    `services/earn/vault-exposure.ledger-gate.test.ts` (a real two-transaction
+    race on Postgres).
+    An anonymous build has no SDP submit or durable movement row, so it receives
+    only the admission decision and is outside the ledgered exposure figure.
   - Wallet binding takes **`earn:write`**, not `wallets:read`. A read-only
     binding must not be able to spend. Note this is the first `earn:*` scope
     asserted on a BINDING: a selected-scope key provisioned only with
@@ -604,12 +648,19 @@ organization's own custody wallets.
   its `earn:read` scope, then the handler applies the environment fail-close
   (`isVaultDirectDepositEnabled`, 403), catalogue row (404), deposit style
   (400), `assertEarnProviderSurfaced`, authenticated provider availability,
-  admission (`assertStrategyDepositable`), then capability
-  (`supportsVaultDepositQuote`, 501 for a provider that cannot quote). An
-  anonymous preview has no entitlement or tenant lookup. A vault that will not
-  take the deposit answers 200 with
+  admission (`assertStrategyDepositable`), the vault exposure cap evaluated
+  WITHOUT throwing (`checkVaultExposure`; an unreadable exposure still 503s),
+  then capability (`supportsVaultDepositQuote`, 501 for a provider that cannot
+  quote). An anonymous preview has no entitlement or tenant lookup, but still
+  evaluates the platform-wide cap. A vault that will not take the deposit
+  answers 200 with
   `blockingIssues` in the provider's own words; an unusable amount maps through
   the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
+  An ENFORCED cap block is appended to `blockingIssues` as
+  `{ code: "VAULT_EXPOSURE_CAP" }` after the provider's own, so a partner's
+  existing handler covers both; in shadow mode the preview deliberately
+  reports nothing (the deposit would land, and a preview that says otherwise
+  is a lie) and only the evaluated event records `would_block`.
   The response also carries `feeSponsored` — sponsorship INTENT
   (`isEarnVaultSponsorshipEnabled` against the environment's cluster, the same
   gate `resolveVaultSponsorship` applies at execution). The withdrawal preview
@@ -941,13 +992,16 @@ after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
 - `POST /external-wallet/deposit-transactions`: **build + simulate + compile,
   never sign.** Body `{strategyId, ownerAddress, feePayer?, amount,
   minSharesOut?}`. Both tiers enforce environment capability, production
-  floor, surfacing, and catalogue admission. Entitlement runs only when a
-  credential supplied a tenant. The provider plan is built for the OWNER and
-  returned with `{transactionId, transaction, sponsored}`. Authenticated
-  builds persist `earn_external_wallet_transactions` so a later submit can
-  prove byte equality. Anonymous builds write nothing and set
-  `sponsored: false`; the caller broadcasts and tracks the transaction itself.
-  No idempotency key is accepted because a build moves no money and expires.
+  floor, surfacing, catalogue admission, and the vault exposure cap through
+  the same `assertVaultDepositAdmissible` function as the custody path.
+  Entitlement runs only when a credential supplied a tenant. The provider plan
+  is built for the OWNER and returned with
+  `{transactionId, transaction, sponsored}`. Authenticated builds persist
+  `earn_external_wallet_transactions` so a later submit can prove byte
+  equality and repeat the cap decision under the ledger lock. Anonymous builds
+  write nothing and set `sponsored: false`; the caller broadcasts and tracks
+  the transaction itself, so only the build-time cap check is possible. No
+  idempotency key is accepted because a build moves no money and expires.
 - **`feePayer`: the partner pays (keyed builds only).** Optional; committed at
   BUILD time (it lives in the message bytes, so the submit's message equality
   makes a swapped fee payer a refused submit, never a substitution). One
@@ -1282,6 +1336,12 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   live read, so a de-registered or vault-only provider fails the list with a
   clean 503/501 instead of mid-fan-out — and once more up front for a
   `provider` filter so an empty list still 503s (see route map).
+- **The vault exposure cap** (ADR 0004 layer 1) is a money-IN gate and
+  nothing else: it lives inside `assertVaultDepositAdmissible`, which no
+  withdrawal handler calls. A vault over its cap is exit-only, the same
+  posture as `paused`. Pinned by the "AT its exposure cap" case in the
+  exit-safety describe of `../earn.vault-withdrawals.test.ts`; the deposit
+  side is `../earn.vault-exposure-cap.test.ts`.
 - **The vault exit** (`POST /vault-withdrawals`): the strongest form of the
   asymmetry — no provider gate of ANY kind, not even the credential check
   (Kamino is keyless; a credentialed vault provider's own client throws

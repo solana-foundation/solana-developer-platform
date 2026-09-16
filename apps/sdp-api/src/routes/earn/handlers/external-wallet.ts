@@ -62,10 +62,6 @@ import {
 } from "@/services/earn/vault-external-wallet.service";
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
-import {
-  assertEarnProviderSurfaced,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import {
   getEarnRepository,
@@ -83,7 +79,7 @@ import {
   type earnExternalWalletWithdrawalPreviewSchema,
   type earnExternalWalletWithdrawalTransactionSchema,
 } from "../schemas";
-import { assertStrategyDepositable } from "./admission";
+import { assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
@@ -120,11 +116,13 @@ import {
  * for the value-moving conformance inventory to find.
  *
  * WHY THE BUILD IS THE GATE MOMENT: the money-in gates below run when SDP
- * builds, not again at submit. A signed transaction is only valid within its
- * blockhash window (about a minute), so the drift a submit-time re-check could
- * catch is bounded by that window — and a partner already holding signed
- * bytes could broadcast them itself regardless; what SDP controls is what it
- * is willing to BUILD, and what it records when the result comes back.
+ * builds. The vault exposure cap is the exception for a keyed build: its
+ * submit repeats the decision under the ledger lock before recording or
+ * broadcasting. An anonymous build has no SDP submit and no durable row, so
+ * its cap decision can run only here. A signed transaction is valid only
+ * within its blockhash window (about a minute), and a caller already holding
+ * signed bytes can broadcast them without SDP; what SDP controls is what it is
+ * willing to build and, for keyed flows, what it records and broadcasts.
  */
 
 type EarnExternalWalletDepositTransactionBody = z.output<
@@ -774,18 +772,18 @@ export async function createEarnExternalWalletDepositTransaction(
     );
   }
 
-  assertEarnProviderSurfaced(provider);
-  if (authenticated) {
-    await assertProviderAvailable(
-      c.env,
-      getDb(c.env),
-      authenticated.auth.organizationId,
-      "earn",
-      provider,
-      environment === "sandbox"
-    );
-  }
-  assertStrategyDepositable(strategy, environment);
+  // Surfacing, entitlement, catalogue admission and the SDP-wide exposure cap
+  // (ADR 0004 layer 1), in the custody deposit's order and from the same
+  // function, so the two money-in paths cannot drift. Entitlement applies
+  // only when optional auth supplied an organization. The deposit style and
+  // provider registration were already asserted above with this route's own
+  // wording; the shared predicate re-checks them for free. `body.amount` is
+  // the SOURCE stablecoin's units on a swap-funded build, which the cap treats
+  // dollar-for-dollar by design.
+  await assertVaultDepositAdmissible(c, strategy, body.amount, {
+    environment,
+    organizationId: authenticated?.auth.organizationId ?? null,
+  });
 
   const swap = resolveDepositSwapRequest(
     {
