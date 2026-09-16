@@ -192,6 +192,25 @@ async function handleAccountCredited(
   );
 }
 
+const MURAL_TERMINAL_KYC_STATUSES: ReadonlySet<string> = new Set(["approved", "rejected"]);
+
+/** A non-decision status arriving after a recorded decision is a replayed stale event. */
+function isStaleMuralKycStatus(counterparty: CounterpartyRow, incoming: MuralKycStatus): boolean {
+  if (MURAL_TERMINAL_KYC_STATUSES.has(incoming)) {
+    return false;
+  }
+  const mural = counterparty.provider_data.mural;
+  const organization =
+    mural && typeof mural === "object" && !Array.isArray(mural)
+      ? (mural as Record<string, unknown>).organization
+      : undefined;
+  const current =
+    organization && typeof organization === "object" && !Array.isArray(organization)
+      ? (organization as Record<string, unknown>).kycStatus
+      : undefined;
+  return typeof current === "string" && MURAL_TERMINAL_KYC_STATUSES.has(current);
+}
+
 async function handleOrganizationLifecycleEvent(
   env: Env,
   event: Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }>
@@ -200,6 +219,15 @@ async function handleOrganizationLifecycleEvent(
   const counterparty = await repo.findCounterpartyByMuralOrganizationId(event.organizationId);
   if (!counterparty) {
     getLogger().warn(`[mural webhook] no counterparty for organization ${event.organizationId}`);
+    return;
+  }
+  if (event.kind === "kyc_status" && isStaleMuralKycStatus(counterparty, event.kycStatus)) {
+    // A replayed pre-decision event must not undo a delivered compliance
+    // decision: the inbox can re-apply an old `pending` after `approved` or
+    // `rejected` already landed.
+    getLogger().info(
+      `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}`
+    );
     return;
   }
   const organization: Record<string, unknown> =

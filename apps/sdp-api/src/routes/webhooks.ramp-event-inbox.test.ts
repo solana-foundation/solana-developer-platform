@@ -1,9 +1,10 @@
 import { createHmac } from "node:crypto";
 import type { ExecutionContext } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import app from "@/index";
+import * as replayJobs from "@/services/jobs/replay-ramp-webhook-events";
 import {
   applyStoredRampWebhookEvent,
   RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
@@ -165,6 +166,51 @@ describe("Ramp webhook event inbox", () => {
 
     expect(await readTransferStatus()).toBe("completed");
     expect(await readInboxRows()).toHaveLength(0);
+  });
+
+  it("persists the event before acking even when the background apply never runs", async () => {
+    const applySpy = vi
+      .spyOn(replayJobs, "applyStoredRampWebhookEvent")
+      .mockImplementation(async () => false);
+
+    try {
+      const { res } = await sendMoonpayWebhook(completedPayload);
+      expect(res.status).toBe(200);
+
+      const rows = await readInboxRows();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe("pending");
+      expect(await readTransferStatus()).toBe("awaiting_payment");
+    } finally {
+      applySpy.mockRestore();
+    }
+  });
+
+  it("parks a pending row whose final claim crashed before applying", async () => {
+    const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: completedPayload,
+    });
+    await getDb(env)
+      .prepare(
+        "UPDATE ramp_webhook_events SET attempts = ?, created_at = ?, updated_at = ? WHERE id = ?"
+      )
+      .bind(
+        RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+        "2026-06-18T00:00:00.000Z",
+        "2026-06-18T00:00:00.000Z",
+        stored.id
+      )
+      .run();
+
+    const applied = await replayRampWebhookEvents(env);
+
+    expect(applied).toBe(0);
+    const rows = await readInboxRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe("failed");
+    expect(await readTransferStatus()).toBe("awaiting_payment");
   });
 
   it("replays a pending event the background apply never ran for", async () => {

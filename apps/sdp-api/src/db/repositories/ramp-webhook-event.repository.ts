@@ -46,6 +46,13 @@ export interface RecordRampWebhookEventFailureInput {
   maxAttempts: number;
 }
 
+export interface ParkExhaustedRampWebhookEventsInput {
+  /** Lease bound: only rows untouched since this instant are parked, so a
+   * final attempt still running is not swept out from under its worker. */
+  updatedBefore: string;
+  maxAttempts: number;
+}
+
 export interface RampWebhookEventsRepository {
   /** Persists a verified event; runs before the webhook is acked. */
   insertEvent(input: InsertRampWebhookEventInput): Promise<RampWebhookEventRow>;
@@ -63,6 +70,13 @@ export interface RampWebhookEventsRepository {
    * harmless, so the lock only avoids wasted work and double-counted attempts.
    */
   claimReplayable(input: ClaimReplayableRampWebhookEventsInput): Promise<RampWebhookEventRow[]>;
+  /**
+   * Parks pending rows whose attempts are already spent — the state a crash
+   * leaves when the final claim committed but the apply or its failure record
+   * never ran. Without this sweep such rows stay pending forever while every
+   * claim excludes them.
+   */
+  parkExhausted(input: ParkExhaustedRampWebhookEventsInput): Promise<RampWebhookEventRow[]>;
 }
 
 function mapRow(row: Record<string, unknown>): RampWebhookEventRow {
@@ -139,6 +153,19 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
            RETURNING *`
         )
         .bind(input.createdBefore, input.createdBefore, input.maxAttempts, input.limit)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
+    },
+
+    async parkExhausted(input) {
+      const result = await db
+        .prepare(
+          `UPDATE ramp_webhook_events
+             SET status = 'failed', updated_at = sdp_iso_now()
+           WHERE status = 'pending' AND attempts >= ? AND updated_at <= ?
+           RETURNING *`
+        )
+        .bind(input.maxAttempts, input.updatedBefore)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },

@@ -73,6 +73,7 @@ export type BvnkWebhookEvent =
       walletId?: string;
       status?: string;
       amount?: string;
+      paymentId?: string;
     }
   | {
       kind:
@@ -216,6 +217,32 @@ async function handleProviderOnrampSettlementWebhook(
   }
   const paymentAmount = event.amount;
   const payments = createSystemPaymentsRepository(env);
+  // A replayed event that already settled a transfer must not re-match: the
+  // settled row is excluded from the wallet+amount search, so a later
+  // awaiting transfer with the same shape would become the "unique" match and
+  // complete without a payment. The applied payin id on the settled row is
+  // the dedupe marker.
+  if (event.paymentId) {
+    const alreadyApplied = await getDb(env)
+      .prepare(
+        `SELECT id
+         FROM payment_transfers
+         WHERE organization_id = ?
+           AND project_id IS NOT DISTINCT FROM ?
+           AND counterparty_id = ?
+           AND provider = 'bvnk'
+           AND provider_data->'bvnk'->>'appliedPayinId' = ?
+         LIMIT 1`
+      )
+      .bind(counterparty.organization_id, counterparty.project_id, counterparty.id, event.paymentId)
+      .first<{ id: string }>();
+    if (alreadyApplied) {
+      getLogger().info(
+        `[bvnk webhook] pay-in ${event.paymentId} already settled transfer ${alreadyApplied.id}`
+      );
+      return;
+    }
+  }
   const matches = await getDb(env)
     .prepare(
       `SELECT id
@@ -269,6 +296,14 @@ async function handleProviderOnrampSettlementWebhook(
     amount: paymentAmount,
     fiatAmount: paymentAmount,
     updatedAt: new Date().toISOString(),
+    // provider_data merges shallowly, so the bvnk object is rewritten whole.
+    ...(event.paymentId
+      ? {
+          providerData: {
+            bvnk: { ...readRecord(transfer.provider_data.bvnk), appliedPayinId: event.paymentId },
+          },
+        }
+      : {}),
   });
 }
 
@@ -698,6 +733,7 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkWebho
           walletId: readString(readRecord(data.beneficiary)?.walletId),
           status: readString(data.status),
           amount: readBvnkAmount(readRecord(data.amount)?.value),
+          paymentId: readString(data.uuid),
         };
       case "bvnk:payment:channel:transaction-detected":
       case "bvnk:payment:channel:transaction-confirmed": {

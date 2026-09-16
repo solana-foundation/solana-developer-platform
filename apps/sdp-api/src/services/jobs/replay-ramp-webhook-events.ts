@@ -93,24 +93,49 @@ export async function applyStoredRampWebhookEvent(
  */
 export async function replayRampWebhookEvents(env: Env): Promise<number> {
   const events = createPostgresRampWebhookEventsRepository(getDb(env));
-  const claimed = await events.claimReplayable({
-    createdBefore: new Date(Date.now() - RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS).toISOString(),
-    maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
-    limit: RAMP_WEBHOOK_EVENT_REPLAY_BATCH,
-  });
+  const cutoff = new Date(Date.now() - RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS).toISOString();
 
+  // A crash after the final claim leaves a pending row every claim excludes:
+  // park it as failed and page, instead of stranding it silently.
+  for (const row of await events.parkExhausted({
+    updatedBefore: cutoff,
+    maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+  })) {
+    logEvent("error", {
+      event: RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT,
+      flow: "ramp-settlement",
+      webhook_event_id: row.id,
+      provider: row.provider,
+      environment: row.environment,
+      attempts: row.attempts,
+      error: row.last_error,
+    });
+  }
+
+  // One claim per row, taken right before its apply: a batch-wide claim would
+  // start every lease at once and let a slow early row expire the later ones.
   let applied = 0;
-  for (const row of claimed) {
+  let claimed = 0;
+  while (claimed < RAMP_WEBHOOK_EVENT_REPLAY_BATCH) {
+    const [row] = await events.claimReplayable({
+      createdBefore: cutoff,
+      maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      limit: 1,
+    });
+    if (!row) {
+      break;
+    }
+    claimed += 1;
     // `claimReplayable` already spent this attempt.
     if (await applyStoredRampWebhookEvent(env, row, row.attempts)) {
       applied += 1;
     }
   }
-  if (claimed.length > 0) {
+  if (claimed > 0) {
     logEvent("info", {
       event: "sdp_api_ramp_webhook_events_replayed",
       flow: "ramp-settlement",
-      claimed: claimed.length,
+      claimed,
       applied,
     });
   }
