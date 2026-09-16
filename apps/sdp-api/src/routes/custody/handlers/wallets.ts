@@ -6,7 +6,7 @@ import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, conflict } from "@/lib/errors";
+import { AppError, badRequest, conflict, serviceUnavailable } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -661,10 +661,17 @@ export const getWalletAggregate = async (c: AppContext) => {
     walletCount: wallets.length,
   });
 
+  const walletBalances = wallets.map((wallet) => {
+    const balances = balancesByWalletId.get(wallet.id);
+    if (balances === undefined) {
+      throw serviceUnavailable("Wallet balances are temporarily unavailable. Try again.");
+    }
+    return balances;
+  });
   const aggregateStartedAt = performance.now();
   const aggregatedBalances = await attachUsdValuesToBalances(
     c.env,
-    aggregateTrackedWalletBalances(wallets.map((wallet) => balancesByWalletId.get(wallet.id) ?? []))
+    aggregateTrackedWalletBalances(walletBalances)
   );
   logWalletStep("aggregate_wallets", "attach_usd_values", aggregateStartedAt, {
     balanceCount: aggregatedBalances.length,

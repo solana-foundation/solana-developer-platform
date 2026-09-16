@@ -1044,6 +1044,25 @@ describe("Custody wallet scope routes", () => {
     expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(6);
   });
 
+  it("refuses an incomplete aggregate and recovers after the missing wallet can be read", async () => {
+    clearWalletCaches();
+    getSplTokenBalancesMock.mockRejectedValueOnce(new Error("temporary RPC failure"));
+    const request = () =>
+      app.request(
+        "/v1/wallets/aggregate?includeAllProviders=true",
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+    const incomplete = await request();
+    expect(incomplete.status).toBe(503);
+    expect(await incomplete.json()).not.toHaveProperty("data.aggregate");
+    const recovered = await request();
+    expect(recovered.status).toBe(200);
+    expect(await recovered.json()).toMatchObject({ data: { aggregate: { walletCount: 3 } } });
+    // Successful wallet reads remain cached; only the missing one is retried.
+    expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(4);
+  });
+
   it("filters aggregate wallets to the API key bindings", async () => {
     await seedCachedKey({
       walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:read"] }],
