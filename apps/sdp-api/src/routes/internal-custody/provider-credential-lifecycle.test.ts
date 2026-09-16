@@ -639,6 +639,27 @@ describe("provider credential lifecycle", () => {
         message: "Credential cannot be deactivated while it is in use",
       });
       expect(
+        await db.queryMany(
+          `SELECT user_id, resource_id, request_id, status, metadata::jsonb AS metadata
+           FROM audit_logs WHERE action = 'blocked_deactivation'`
+        )
+      ).toEqual([
+        {
+          user_id: USER_ID,
+          resource_id: CREDENTIAL_ID,
+          request_id: "req_provider_credential_lifecycle",
+          status: "failure",
+          metadata: {
+            event: "provider_credential_deactivation_blocked",
+            provider: "privy",
+            scope: "organization",
+            projectId: PROJECT_A_ID,
+            credentialStatus: "active",
+            reasonCode: "credential_in_use",
+          },
+        },
+      ]);
+      expect(
         await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
       ).toEqual(original);
       expect(await db.queryMany("SELECT id FROM audit_logs WHERE action = 'deactivate'")).toEqual(
@@ -647,6 +668,48 @@ describe("provider credential lifecycle", () => {
       expect(providerFetch).not.toHaveBeenCalled();
     }
   );
+
+  it("preserves the Credential refusal and signals when its audit cannot be persisted", async () => {
+    const db = getDb(env);
+    const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
+      CREDENTIAL_ID,
+    ]);
+    const errorLog = vi.spyOn(getLogger(), "error").mockImplementation(() => {});
+    await db.execute(
+      `ALTER TABLE audit_logs ADD CONSTRAINT sdp_test_fail_credential_refusal_audit
+       CHECK (action <> 'blocked_deactivation') NOT VALID`
+    );
+    try {
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toEqual({
+        code: "CONFLICT",
+        message: "Credential cannot be deactivated while it is in use",
+      });
+      expect(
+        await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
+      ).toEqual(original);
+      expect(await db.queryMany("SELECT id FROM audit_logs")).toEqual([]);
+      expect(errorLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "audit_deactivation_refusal_persistence_failed",
+          resourceType: "provider_credential",
+          resourceId: CREDENTIAL_ID,
+          requestId: "req_provider_credential_lifecycle",
+          reasonCode: "credential_in_use",
+        }),
+        "Deactivation refusal was not persisted"
+      );
+      expect(JSON.stringify(errorLog.mock.calls)).not.toContain(APP_SECRET);
+    } finally {
+      await db.execute(
+        "ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_credential_refusal_audit"
+      );
+    }
+  });
 
   it("keeps a pending child visible and cancelable after its eligible parent is deactivated", async () => {
     const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
@@ -739,6 +802,12 @@ describe("provider credential lifecycle", () => {
         []
       );
       expect(gcp.requests).toEqual([]);
+      expect(
+        await db.queryMany(
+          `SELECT metadata::jsonb ->> 'reasonCode' AS reason_code
+           FROM audit_logs WHERE action = 'blocked_deactivation'`
+        )
+      ).toEqual([{ reason_code: "invalid_state" }]);
     });
 
     it.each(["encrypted_db", "runtime_env"])(
@@ -816,7 +885,95 @@ describe("provider credential lifecycle", () => {
         []
       );
       expect(providerFetch).not.toHaveBeenCalled();
+      expect(
+        await db.queryMany(
+          `SELECT metadata::jsonb ->> 'reasonCode' AS reason_code,
+                  metadata::jsonb ->> 'credentialStatus' AS credential_status
+           FROM audit_logs WHERE action = 'blocked_deactivation'`
+        )
+      ).toEqual([{ reason_code: "invalid_state", credential_status: status }]);
     });
+
+    it("audits a Credential deactivation refused by a wallet created after preflight", async () => {
+      const db = getDb(env);
+      const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
+        CREDENTIAL_ID,
+      ]);
+      const transaction = db.transaction.bind(db);
+      vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+        await db.execute("UPDATE custody_wallets SET status = 'active' WHERE id = ?", [
+          "cwlt_provider_credential_lifecycle_a",
+        ]);
+        return transaction(callback);
+      });
+
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toEqual({
+        code: "CONFLICT",
+        message: "Credential cannot be deactivated while it is in use",
+      });
+      expect(
+        await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL_ID])
+      ).toEqual(original);
+      expect(
+        await db.queryMany(
+          `SELECT resource_id, metadata::jsonb ->> 'reasonCode' AS reason_code
+           FROM audit_logs WHERE action = 'blocked_deactivation'`
+        )
+      ).toEqual([{ resource_id: CREDENTIAL_ID, reason_code: "credential_in_use" }]);
+    });
+
+    it.each(["credential", "references"])(
+      "audits the deactivation refusal when %s change after admission",
+      async (changedTarget) => {
+        const db = getDb(env);
+        const transaction = db.transaction.bind(db);
+        vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+          if (changedTarget === "credential") {
+            await db.execute("UPDATE provider_credentials SET status = 'retired' WHERE id = ?", [
+              CREDENTIAL_ID,
+            ]);
+          } else {
+            await db.execute(
+              "UPDATE custody_connections SET status = 'active', deactivated_at = NULL WHERE id = ?",
+              [CONNECTION_A_ID]
+            );
+          }
+          return transaction(callback);
+        });
+
+        const response = await lifecycleRequest(
+          `/provider-credentials/${CREDENTIAL_ID}/deactivate`,
+          { method: "POST" }
+        );
+
+        expect(response.status).toBe(409);
+        expect((await response.json()).error).toEqual({
+          code: "CONFLICT",
+          message: "Credential cannot be deactivated from its current state",
+        });
+        expect(
+          await db.queryMany(
+            `SELECT resource_id, metadata::jsonb ->> 'reasonCode' AS reason_code,
+                    metadata::jsonb ->> 'credentialStatus' AS credential_status
+             FROM audit_logs WHERE action = 'blocked_deactivation'`
+          )
+        ).toEqual([
+          {
+            resource_id: CREDENTIAL_ID,
+            reason_code: "concurrent_change",
+            credential_status: changedTarget === "credential" ? "retired" : "active",
+          },
+        ]);
+        expect(await db.queryMany("SELECT id FROM audit_logs WHERE action = 'deactivate'")).toEqual(
+          []
+        );
+      }
+    );
 
     it("returns success with one audit when two deactivations pass preflight together", async () => {
       let started = 0;
@@ -894,6 +1051,9 @@ describe("provider credential lifecycle", () => {
         )
       ).toEqual({ count: 1 });
       expect(providerFetch).not.toHaveBeenCalled();
+      expect(
+        await db.queryMany("SELECT id FROM audit_logs WHERE action = 'blocked_deactivation'")
+      ).toEqual([]);
     });
 
     it.each(["database failure", "membership loss"])(
@@ -1218,6 +1378,33 @@ describe("provider credential lifecycle", () => {
     });
     expect(body.data.providerCredential.id).not.toBe(CREDENTIAL_ID);
     expect(providerFetch).toHaveBeenCalledTimes(1);
+
+    const auditRows = await getDb(env).queryMany<{ metadata: string; user_id: string }>(
+      "SELECT metadata, user_id FROM audit_logs ORDER BY ledger_sequence"
+    );
+    const metadata = auditRows.map((row) => JSON.parse(row.metadata));
+    expect(
+      metadata.filter((row) => row.event === "provider_credential_rotation_submitted")
+    ).toHaveLength(1);
+    expect(metadata.filter((row) => row.event === "provider_credential_rotated")).toEqual([
+      expect.objectContaining({
+        fromProviderCredentialId: CREDENTIAL_ID,
+        toProviderCredentialId: body.data.providerCredential.id,
+        connectionIds: [CONNECTION_A_ID, CONNECTION_B_ID],
+        projectIds: [PROJECT_A_ID, PROJECT_B_ID],
+        auditIntentId: expect.any(String),
+      }),
+    ]);
+    expect(auditRows.every((row) => row.user_id === USER_ID)).toBe(true);
+    for (const secret of [
+      APP_SECRET,
+      "new-secret",
+      APP_ID,
+      "encryptedSecretPayload",
+      "Authorization",
+    ]) {
+      expect(JSON.stringify(auditRows)).not.toContain(secret);
+    }
 
     const rows = await getDb(env).queryMany<{
       id: string;
@@ -2020,9 +2207,13 @@ describe("provider credential lifecycle", () => {
       )
     ).toEqual({ count: 1 });
     const intent = await db.queryOne<{ resource_id: string }>(
-      `SELECT resource_id FROM audit_logs
-       WHERE metadata::jsonb ->> 'auditPhase' = 'intent'
-         AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`,
+      `SELECT intent.resource_id FROM audit_logs intent
+       WHERE intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+         AND intent.metadata::jsonb -> 'target' ->> 'resourceId' = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM audit_logs outcome
+           WHERE outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id
+         )`,
       [candidateId]
     );
     expect(warning).toHaveBeenCalledWith(
@@ -2150,8 +2341,9 @@ describe("provider credential lifecycle", () => {
     );
   });
 
-  it("keeps rejected credentials pending when their audit intent cannot be persisted", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+  it("refuses candidate submission before storage or Provider work when audit intent is unavailable", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", providerFetch);
     const db = getDb(env);
     await db.execute(
       `ALTER TABLE audit_logs ADD CONSTRAINT sdp_test_fail_rotation_audit
@@ -2170,10 +2362,145 @@ describe("provider credential lifecycle", () => {
           `SELECT status, encrypted_secret_payload IS NOT NULL AS has_secret
            FROM provider_credentials WHERE idempotency_key = 'rotate-audit-unavailable'`
         )
-      ).toEqual({ status: "pending", has_secret: true });
+      ).toBeNull();
+      expect(providerFetch).not.toHaveBeenCalled();
       expect(await rotationFailureEvents()).toEqual([]);
     } finally {
       await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_rotation_audit");
+    }
+  });
+
+  it.each(["complete-rotation", "rollback"] as const)(
+    "blocks %s before secret access when its intent is unavailable",
+    async (operation) => {
+      const providerFetch = vi
+        .fn()
+        .mockResolvedValue(
+          operation === "rollback"
+            ? Response.json({ data: [] })
+            : new Response(null, { status: 503 })
+        );
+      vi.stubGlobal("fetch", providerFetch);
+      const created = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+        method: "POST",
+        key: `before-${operation}-audit-outage`,
+        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      });
+      const candidateId = credentialResponseSchema.parse(await created.json()).data
+        .providerCredential.id;
+      const secretLookup = vi.spyOn(
+        ProviderCredentialStore.prototype,
+        "findLifecycleCredentialWithSecret"
+      );
+      const db = getDb(env);
+      await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT sdp_test_fail_check_audit
+        CHECK (action <> 'maintenance') NOT VALID`);
+      try {
+        await expect(
+          lifecycleRequest(`/provider-credentials/${candidateId}/${operation}`, {
+            method: "POST",
+          })
+        ).rejects.toThrow("Required audit record could not be persisted");
+        expect(secretLookup).not.toHaveBeenCalled();
+        expect(providerFetch).toHaveBeenCalledTimes(1);
+      } finally {
+        await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_check_audit");
+      }
+    }
+  );
+
+  it.each(["submit", "rotate", "rollback"] as const)(
+    "preserves confirmed success when the %s audit outcome cannot be saved",
+    async (action) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockImplementation(() => Response.json({ data: [] }))
+      );
+      const logger = getLogger();
+      const errorLog = vi.spyOn(logger, "error").mockImplementation(() => logger);
+      const request = {
+        method: "POST" as const,
+        key: `outcome-outage-${action}`,
+        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      };
+      let currentId = CREDENTIAL_ID;
+      if (action === "rollback") {
+        const rotated = await lifecycleRequest(
+          `/provider-credentials/${currentId}/rotate`,
+          request
+        );
+        currentId = credentialResponseSchema.parse(await rotated.json()).data.providerCredential.id;
+      }
+      const db = getDb(env);
+      await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT sdp_test_fail_outcome_audit
+        CHECK (action <> '${action}') NOT VALID`);
+      try {
+        const response = await lifecycleRequest(
+          `/provider-credentials/${currentId}/${action === "rollback" ? "rollback" : "rotate"}`,
+          action === "rollback" ? { method: "POST" } : request
+        );
+        expect(response.status).toBe(200);
+        const resultId = credentialResponseSchema.parse(await response.json()).data
+          .providerCredential.id;
+        expect(await activeConnectionCredentialIds()).toEqual([
+          { provider_credential_id: resultId },
+          { provider_credential_id: resultId },
+        ]);
+        expect(errorLog).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: "audit_critical_outcome_persistence_failed",
+            targetAction: action,
+          }),
+          expect.any(String)
+        );
+        expect(
+          await db.queryOne(`SELECT count(*) AS count FROM audit_logs intent
+          WHERE intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+            AND NOT EXISTS (SELECT 1 FROM audit_logs outcome
+              WHERE outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id)`)
+        ).toEqual({ count: 1 });
+      } finally {
+        await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_outcome_audit");
+      }
+    }
+  );
+
+  it("keeps status reads and terminal replays available during audit outage", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+    vi.stubGlobal("fetch", providerFetch);
+    const request = {
+      method: "POST" as const,
+      key: "audit-outage-terminal-replay",
+      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+    };
+    const response = await lifecycleRequest(
+      `/provider-credentials/${CREDENTIAL_ID}/rotate`,
+      request
+    );
+    const candidateId = credentialResponseSchema.parse(await response.json()).data
+      .providerCredential.id;
+    const db = getDb(env);
+    const count = await db.queryOne("SELECT count(*) AS count FROM audit_logs");
+    await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT sdp_test_fail_replay_audit
+      CHECK (action <> 'maintenance') NOT VALID`);
+    try {
+      expect(
+        (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`)).status
+      ).toBe(200);
+      expect(
+        (await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request)).status
+      ).toBe(200);
+      expect(
+        (
+          await lifecycleRequest(`/provider-credentials/${candidateId}/complete-rotation`, {
+            method: "POST",
+          })
+        ).status
+      ).toBe(200);
+      expect(await db.queryOne("SELECT count(*) AS count FROM audit_logs")).toEqual(count);
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_replay_audit");
     }
   });
 
@@ -2214,6 +2541,21 @@ describe("provider credential lifecycle", () => {
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain("invalid-secret-ciphertext");
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain("new-secret");
     expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(
+      await getDb(env).queryMany(
+        `SELECT user_id, request_id, status, metadata::jsonb ->> 'failureCode' AS failure_code
+         FROM audit_logs WHERE resource_id = ?
+           AND metadata::jsonb ->> 'event' = 'provider_credential_rotation_failed'`,
+        [candidateId]
+      )
+    ).toEqual([
+      {
+        user_id: USER_ID,
+        request_id: "req_provider_credential_lifecycle",
+        status: "failure",
+        failure_code: "credential_storage_unavailable",
+      },
+    ]);
   });
 
   it("persists an uncertain candidate and resumes it without another secret submission", async () => {
@@ -2694,6 +3036,12 @@ describe("provider credential lifecycle", () => {
       message: "Credential cannot be deactivated while it is in use",
     });
     expect(
+      await db.queryMany(
+        `SELECT resource_id, metadata::jsonb ->> 'reasonCode' AS reason_code
+         FROM audit_logs WHERE action = 'blocked_deactivation'`
+      )
+    ).toEqual([{ resource_id: candidateId, reason_code: "active_wallets" }]);
+    expect(
       await db.queryOne<{ status: string }>(
         "SELECT status FROM provider_credentials WHERE id = ?",
         [candidateId]
@@ -2904,6 +3252,19 @@ describe("provider credential lifecycle", () => {
     );
 
     expect(response.status).toBe(503);
+    expect(
+      await getDb(env).queryMany(
+        `SELECT status, user_id, metadata::jsonb ->> 'failureCode' AS failure_code
+       FROM audit_logs WHERE action = 'rollback'
+         AND metadata::jsonb ->> 'event' = 'provider_credential_rollback_failed'`
+      )
+    ).toEqual([
+      {
+        status: "failure",
+        user_id: USER_ID,
+        failure_code: "provider_response_unknown",
+      },
+    ]);
     expect(
       await getDb(env).queryMany<{ provider_credential_id: string }>(
         "SELECT provider_credential_id FROM custody_connections ORDER BY id"

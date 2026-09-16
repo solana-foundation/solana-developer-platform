@@ -4,6 +4,8 @@ import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { getLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import { setupTestAuth } from "@/test/helpers/auth";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -80,7 +82,7 @@ async function seedConnection(status: "pending" | "checking" | "failed" = "pendi
 
 async function lifecycleAudits() {
   return getDb(env).queryMany(
-    `SELECT action, status, metadata FROM audit_logs
+    `SELECT action, status, user_id, request_id, metadata::jsonb AS metadata FROM audit_logs
      WHERE organization_id = ? AND resource_type = 'custody_connection' AND resource_id = ?`,
     [ORG, CONNECTION]
   );
@@ -165,6 +167,7 @@ describe("custody Connection deactivation", () => {
 
   afterEach(async () => {
     env.PRIVY_BYOK_ENABLED = ORIGINAL_PRIVY_BYOK_ENABLED;
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     await clearKVStores(env);
   });
@@ -181,7 +184,21 @@ describe("custody Connection deactivation", () => {
       const after = await (await request(`/connections/${CONNECTION}`, { method: "GET" })).json();
       expect(after.data).toEqual(before.data);
       expect(await persistedState()).toEqual(persisted);
-      expect(await lifecycleAudits()).toEqual([]);
+      expect(await lifecycleAudits()).toMatchObject([
+        {
+          action: "blocked_deactivation",
+          status: "failure",
+          user_id: USER,
+          request_id: "req_connection_deactivation",
+          metadata: {
+            event: "custody_connection_deactivation_blocked",
+            reasonCode: "invalid_state",
+            projectId: PROJECT,
+            providerCredentialId: CREDENTIAL,
+            connectionStatus: status,
+          },
+        },
+      ]);
       expect(fetch).not.toHaveBeenCalled();
     }
   );
@@ -200,7 +217,13 @@ describe("custody Connection deactivation", () => {
       message: "Provider credential installation is unavailable",
     });
     expect(await persistedState()).toEqual(before);
-    expect(await lifecycleAudits()).toEqual([]);
+    expect(await lifecycleAudits()).toMatchObject([
+      {
+        action: "blocked_deactivation",
+        status: "failure",
+        metadata: { reasonCode: "invalid_state", connectionStatus: "checking" },
+      },
+    ]);
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -247,7 +270,48 @@ describe("custody Connection deactivation", () => {
       message: "Connection cannot be deactivated while it has active wallets",
     });
     expect(await persistedState()).toEqual(before);
+    expect(await lifecycleAudits()).toMatchObject([
+      {
+        action: "blocked_deactivation",
+        status: "failure",
+        user_id: USER,
+        metadata: { reasonCode: "active_wallets", connectionStatus: "active" },
+      },
+    ]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves the domain refusal and signals safely when refusal audit is unavailable", async () => {
+    await seedActiveConnection("active");
+    const before = await persistedState();
+    const rawError = "secret-bearing audit failure bearer provider-private-token";
+    vi.spyOn(AuditService.prototype, "log").mockRejectedValue(new Error(rawError));
+    const logger = vi.spyOn(getLogger(), "error");
+
+    const response = await request();
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toEqual({
+      code: "CONFLICT",
+      message: "Connection cannot be deactivated while it has active wallets",
+    });
+    expect(await persistedState()).toEqual(before);
     expect(await lifecycleAudits()).toEqual([]);
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "audit_deactivation_refusal_persistence_failed",
+        resourceType: "custody_connection",
+        resourceId: CONNECTION,
+        organizationId: ORG,
+        projectId: PROJECT,
+        userId: USER,
+        requestId: "req_connection_deactivation",
+        reasonCode: "active_wallets",
+      }),
+      expect.any(String)
+    );
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(rawError);
+    expect(JSON.stringify(logger.mock.calls)).not.toContain("provider-private-token");
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -381,7 +445,14 @@ describe("custody Connection deactivation", () => {
       status: "active",
       deactivated_at: null,
     });
-    expect(await lifecycleAudits()).toEqual([]);
+    expect(await lifecycleAudits()).toMatchObject([
+      {
+        action: "blocked_deactivation",
+        status: "failure",
+        user_id: USER,
+        metadata: { reasonCode: "active_wallets" },
+      },
+    ]);
     expect(fetch).not.toHaveBeenCalled();
   });
 
