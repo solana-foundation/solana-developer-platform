@@ -18,6 +18,49 @@ import { useTranslations } from "@/i18n/provider";
 import { custodiedSidesOf, type DvpTrade, isDvpPartyView } from "./dvp-trade";
 
 type Tone = "info" | "waiting" | "attention";
+interface NextStep {
+  tone: Tone;
+  title: string;
+  body: string;
+}
+
+/**
+ * The legs every trade kind answers the same way. The closed/creating states
+ * are not anybody's move to act on differently, so their copy exists exactly
+ * once and each switch below spreads it.
+ */
+function creatingStep(t: ReturnType<typeof useTranslations>): NextStep {
+  return {
+    tone: "waiting",
+    title: t("DashboardMarkets.dvp.nextCreatingTitle"),
+    body: t("DashboardMarkets.dvp.nextCreatingBody"),
+  };
+}
+
+function expiredStep(t: ReturnType<typeof useTranslations>): NextStep {
+  return {
+    tone: "attention",
+    title: t("DashboardMarkets.dvp.nextExpiredTitle"),
+    body: t("DashboardMarkets.dvp.nextExpiredBody"),
+  };
+}
+
+function createFailedStep(t: ReturnType<typeof useTranslations>): NextStep {
+  return {
+    tone: "attention",
+    title: t("DashboardMarkets.dvp.nextCreateFailedTitle"),
+    body: t("DashboardMarkets.dvp.nextCreateFailedBody"),
+  };
+}
+
+/** Both escrows hold their target: the ordinary settle copy applies to every kind. */
+function settleStep(t: ReturnType<typeof useTranslations>): NextStep {
+  return {
+    tone: "info",
+    title: t("DashboardMarkets.dvp.nextSettleTitle"),
+    body: t("DashboardMarkets.dvp.nextSettleBody"),
+  };
+}
 
 /** Whether the caller's every custodied leg already holds its target. */
 function ownLegsFunded(trade: DvpTrade): boolean {
@@ -31,10 +74,7 @@ function ownLegsFunded(trade: DvpTrade): boolean {
  * the organization that set the trade up, so even a fully funded trade asks
  * nothing of them.
  */
-function partyNextStep(
-  trade: DvpTrade,
-  t: ReturnType<typeof useTranslations>
-): { tone: Tone; title: string; body: string } | null {
+function partyNextStep(trade: DvpTrade, t: ReturnType<typeof useTranslations>): NextStep | null {
   const yours = trade.yourSide === "a" ? trade.legs.a : trade.legs.b;
 
   switch (trade.status) {
@@ -58,11 +98,7 @@ function partyNextStep(
         body: t("DashboardMarkets.dvp.nextPartySettleBody"),
       };
     case "expired":
-      return {
-        tone: "attention",
-        title: t("DashboardMarkets.dvp.nextExpiredTitle"),
-        body: t("DashboardMarkets.dvp.nextExpiredBody"),
-      };
+      return expiredStep(t);
     default:
       return null;
   }
@@ -74,17 +110,10 @@ function partyNextStep(
  * Nothing here is ever this operator's move until both escrows are funded: the
  * two parties pay their own, and settling is the only thing an agent does.
  */
-function agentNextStep(
-  trade: DvpTrade,
-  t: ReturnType<typeof useTranslations>
-): { tone: Tone; title: string; body: string } | null {
+function agentNextStep(trade: DvpTrade, t: ReturnType<typeof useTranslations>): NextStep | null {
   switch (trade.status) {
     case "creating":
-      return {
-        tone: "waiting",
-        title: t("DashboardMarkets.dvp.nextCreatingTitle"),
-        body: t("DashboardMarkets.dvp.nextCreatingBody"),
-      };
+      return creatingStep(t);
     case "created":
     case "partially_funded": {
       const paid = [trade.legs.a, trade.legs.b].filter((leg) => leg.funding?.funded).length;
@@ -109,17 +138,9 @@ function agentNextStep(
         body: t("DashboardMarkets.dvp.nextAgentSettleBody"),
       };
     case "expired":
-      return {
-        tone: "attention",
-        title: t("DashboardMarkets.dvp.nextExpiredTitle"),
-        body: t("DashboardMarkets.dvp.nextExpiredBody"),
-      };
+      return expiredStep(t);
     case "create_failed":
-      return {
-        tone: "attention",
-        title: t("DashboardMarkets.dvp.nextCreateFailedTitle"),
-        body: t("DashboardMarkets.dvp.nextCreateFailedBody"),
-      };
+      return createFailedStep(t);
     default:
       return null;
   }
@@ -134,14 +155,10 @@ function agentNextStep(
 function bilateralNextStep(
   trade: DvpTrade,
   t: ReturnType<typeof useTranslations>
-): { tone: Tone; title: string; body: string } | null {
+): NextStep | null {
   switch (trade.status) {
     case "creating":
-      return {
-        tone: "waiting",
-        title: t("DashboardMarkets.dvp.nextCreatingTitle"),
-        body: t("DashboardMarkets.dvp.nextCreatingBody"),
-      };
+      return creatingStep(t);
     case "created":
     case "partially_funded":
       return ownLegsFunded(trade)
@@ -156,23 +173,11 @@ function bilateralNextStep(
             body: t("DashboardMarkets.dvp.nextBilateralFundBody"),
           };
     case "funded":
-      return {
-        tone: "info",
-        title: t("DashboardMarkets.dvp.nextSettleTitle"),
-        body: t("DashboardMarkets.dvp.nextSettleBody"),
-      };
+      return settleStep(t);
     case "expired":
-      return {
-        tone: "attention",
-        title: t("DashboardMarkets.dvp.nextExpiredTitle"),
-        body: t("DashboardMarkets.dvp.nextExpiredBody"),
-      };
+      return expiredStep(t);
     case "create_failed":
-      return {
-        tone: "attention",
-        title: t("DashboardMarkets.dvp.nextCreateFailedTitle"),
-        body: t("DashboardMarkets.dvp.nextCreateFailedBody"),
-      };
+      return createFailedStep(t);
     default:
       return null;
   }
@@ -189,7 +194,7 @@ function bilateralNextStep(
 function principalNextStep(
   trade: DvpTrade,
   t: ReturnType<typeof useTranslations>
-): { tone: Tone; title: string; body: string } | null {
+): NextStep | null {
   // The API derived `kind` from the same custody lookup as `custodied`, so a
   // principal trade has exactly one custodied side. Falling back to leg A is
   // unreachable; the switch below is exhaustive over what the wire promises.
@@ -199,11 +204,7 @@ function principalNextStep(
 
   switch (trade.status) {
     case "creating":
-      return {
-        tone: "waiting",
-        title: t("DashboardMarkets.dvp.nextCreatingTitle"),
-        body: t("DashboardMarkets.dvp.nextCreatingBody"),
-      };
+      return creatingStep(t);
     case "created":
     case "partially_funded": {
       // "Partially funded" is not one situation. Which leg is outstanding
@@ -226,23 +227,11 @@ function principalNextStep(
       };
     }
     case "funded":
-      return {
-        tone: "info",
-        title: t("DashboardMarkets.dvp.nextSettleTitle"),
-        body: t("DashboardMarkets.dvp.nextSettleBody"),
-      };
+      return settleStep(t);
     case "expired":
-      return {
-        tone: "attention",
-        title: t("DashboardMarkets.dvp.nextExpiredTitle"),
-        body: t("DashboardMarkets.dvp.nextExpiredBody"),
-      };
+      return expiredStep(t);
     case "create_failed":
-      return {
-        tone: "attention",
-        title: t("DashboardMarkets.dvp.nextCreateFailedTitle"),
-        body: t("DashboardMarkets.dvp.nextCreateFailedBody"),
-      };
+      return createFailedStep(t);
     // Settled, cancelled, rejected and closed_unknown are over. The status
     // badge already says so, and inventing a "next step" for a closed trade
     // would be worse than saying nothing.
@@ -252,10 +241,7 @@ function principalNextStep(
 }
 
 /** Whose move it is, in one sentence, for the state the trade is actually in. */
-function nextStep(
-  trade: DvpTrade,
-  t: ReturnType<typeof useTranslations>
-): { tone: Tone; title: string; body: string } | null {
+function nextStep(trade: DvpTrade, t: ReturnType<typeof useTranslations>): NextStep | null {
   // A party reading somebody else's trade holds exactly one leg and cannot
   // close the trade. Checked BEFORE the kind branches: the same trade is an
   // agent trade to its author and a leg you owe to the party named on it, and

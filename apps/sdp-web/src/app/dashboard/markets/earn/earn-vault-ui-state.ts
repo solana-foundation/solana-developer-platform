@@ -1,4 +1,5 @@
 import type { EarnVaultDirectMovementStatus, EarnVaultMovementStatus } from "@sdp/types";
+import type { BadgeVariant } from "@/components/ui/badge";
 
 export type EarnVaultPositionUiStatus = "pending" | "active";
 
@@ -47,4 +48,15 @@ export function earnVaultPositionStatusDisplay(
   }
 
   return { label: activeLabel, variant: "success" };
+}
+
+/**
+ * The status badge's variant as an outcome mark's tone. Both vault modals close
+ * on the same three marks, so one mapping — a fourth spelling of it is how two
+ * receipts end up disagreeing about what "info" looks like.
+ */
+export function vaultOutcomeTone(statusVariant: BadgeVariant): "info" | "success" | "warning" {
+  if (statusVariant === "success") return "success";
+  if (statusVariant === "warning") return "warning";
+  return "info";
 }

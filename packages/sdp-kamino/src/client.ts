@@ -3,12 +3,17 @@ import { KaminoEarnClient } from "@sdp/earn/providers/kamino/client";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
+  EarnVaultDepositQuote,
+  EarnVaultDepositQuoteInput,
+  EarnVaultDepositQuoteProvider,
   EarnVaultInstruction,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultTransactionPlan,
   EarnVaultWithdrawInput,
-  EarnVaultWithdrawProvider,
+  EarnVaultWithdrawQuote,
+  EarnVaultWithdrawQuoteInput,
+  EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type Address, address, createNoopSigner } from "@solana/kit";
@@ -19,6 +24,8 @@ import {
   buildKaminoDepositPlan,
   buildKaminoWithdrawPlan,
   discoverKaminoPositionVaults,
+  quoteKaminoDeposit,
+  quoteKaminoWithdraw,
   readKaminoPosition,
 } from "./sdk";
 import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
@@ -98,7 +105,9 @@ export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVau
 
 /**
  * Kamino as an EXECUTING provider: the catalogue client plus the vault-direct
- * capability, money-in AND money-out (`EarnVaultWithdrawProvider`).
+ * capability, money-in AND money-out (`EarnVaultWithdrawProvider`), and the
+ * live quote for each direction (`EarnVaultDepositQuoteProvider`,
+ * `EarnVaultWithdrawQuoteProvider`; the latter extends the withdraw one).
  *
  * Lives here rather than in `@sdp/earn` so that package keeps its single
  * `@sdp/types` dependency — its hourly catalogue cron runs in both environments
@@ -108,9 +117,13 @@ export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVau
  * Registered by the API's execution registry, which prefers this class over the
  * catalogue-only `KaminoEarnClient` when a route needs to move money. Callers
  * still discover each capability with `supportsVaultDirect` /
- * `supportsVaultWithdraw`, never a provider-id check.
+ * `supportsVaultWithdraw` / `supportsVaultDepositQuote` /
+ * `supportsVaultWithdrawQuote`, never a provider-id check.
  */
-export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVaultWithdrawProvider {
+export class KaminoVaultDirectClient
+  extends KaminoEarnClient
+  implements EarnVaultDepositQuoteProvider, EarnVaultWithdrawQuoteProvider
+{
   /**
    * Where a PROVEN RPC endpoint comes from and how its operation is bounded.
    *
@@ -183,6 +196,39 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
     return [...permittedPlanPrograms(cluster)];
   }
 
+  /**
+   * The live quote a deposit floor is derived from (`supportsVaultDepositQuote`).
+   *
+   * A READ through the same proof-then-deadline boundary as every chain call;
+   * it takes no floor and moves nothing. Blocking conditions come back in
+   * `blockingIssues` rather than as a thrown error, because "the vault would
+   * clamp this to its cap" is part of the answer, not a failure to answer.
+   * The slot is read here once, the same rule the exit and position reads apply.
+   */
+  async quoteVaultDeposit(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultDepositQuoteInput
+  ): Promise<EarnVaultDepositQuote> {
+    const quote = await this.withRuntime(
+      ctx,
+      "Quoting the vault deposit",
+      async (runtime, assertActive) => {
+        const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+        assertActive();
+        return quoteKaminoDeposit(
+          runtime,
+          { vault: address(input.providerReference), amount: input.amount, slot },
+          assertActive
+        );
+      }
+    );
+    return {
+      sharesOut: quote.sharesOut,
+      shareDecimals: quote.shareDecimals,
+      blockingIssues: quote.issues,
+    };
+  }
+
   async buildVaultDeposit(
     ctx: EarnRuntimeContext,
     input: EarnVaultDepositInput
@@ -247,6 +293,37 @@ export class KaminoVaultDirectClient extends KaminoEarnClient implements EarnVau
       }
     );
     return toEarnVaultTransactionPlan(plan);
+  }
+
+  /**
+   * The live exit quote (`supportsVaultWithdrawQuote`), the exit twin of
+   * `quoteVaultDeposit` with the same posture: a read, blocking conditions
+   * returned as data. The figure is conservative for an exit split across
+   * reserves (see `quotes.ts`), and nothing enforces it on chain: the kvault
+   * withdraw instruction takes only a share amount.
+   */
+  async quoteVaultWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawQuoteInput
+  ): Promise<EarnVaultWithdrawQuote> {
+    const quote = await this.withRuntime(
+      ctx,
+      "Quoting the vault withdrawal",
+      async (runtime, assertActive) => {
+        const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+        assertActive();
+        return quoteKaminoWithdraw(
+          runtime,
+          { vault: address(input.providerReference), shares: input.shares, slot },
+          assertActive
+        );
+      }
+    );
+    return {
+      assetsOut: quote.assetsOut,
+      assetDecimals: quote.assetDecimals,
+      blockingIssues: quote.issues,
+    };
   }
 
   /**

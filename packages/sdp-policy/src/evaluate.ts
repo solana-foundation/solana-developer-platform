@@ -16,6 +16,7 @@ import type {
 } from "@sdp/types";
 import { DECISION_RANK, isApprovalDecision } from "./decisions";
 import { evaluatePolicyRule, type RuleEvaluation } from "./rules";
+import type { PolicyEvaluationVelocity } from "./velocity";
 
 interface CandidateView {
   candidate: PolicyCandidate;
@@ -37,6 +38,8 @@ export interface EvaluateCandidatePoliciesInput {
   legs: PolicyCandidate[];
   walletPolicy: EffectiveWalletPolicy;
   apiKeyPolicy: EffectiveApiKeyPolicy | null;
+  /** Rolling totals for the velocity rules in play; absent totals review. */
+  velocity?: PolicyEvaluationVelocity;
 }
 
 export interface EvaluateWalletOperationPoliciesInput {
@@ -44,6 +47,8 @@ export interface EvaluateWalletOperationPoliciesInput {
   legs: PolicyCandidate[];
   walletPolicy: EffectiveWalletPolicy;
   apiKeyPolicy: EffectiveApiKeyPolicy | null;
+  /** Rolling totals for the velocity rules in play; absent totals review. */
+  velocity?: PolicyEvaluationVelocity;
 }
 
 /**
@@ -68,6 +73,7 @@ export function evaluateCandidatePolicies(
     scope: "wallet",
     policy: input.walletPolicy,
     views: candidateViews(input.candidate, input.legs),
+    velocity: input.velocity,
   });
   const apiKey = resolveApiKeyScopeEvaluation(input);
   const scopes = apiKey === null ? [wallet] : [wallet, apiKey];
@@ -101,13 +107,15 @@ export function evaluateCandidatePolicies(
  * @param policy - The scope's effective policy.
  * @param candidate - The candidate under evaluation.
  * @param legs - The candidate's legs, empty for single-leg operations.
+ * @param velocity - Rolling totals for the velocity rules in play.
  * @returns One criterion per rule per evaluated view; empty when the scope has no active revision.
  */
 export function describeCandidateRuleCriteria(
   scope: PolicyRuleScope,
   policy: EffectiveWalletPolicy | EffectiveApiKeyPolicy,
   candidate: PolicyCandidate,
-  legs: PolicyCandidate[]
+  legs: PolicyCandidate[],
+  velocity?: PolicyEvaluationVelocity
 ): PolicyDryRunCriterion[] {
   const revision = policy.revision;
   if (revision === null) {
@@ -116,7 +124,7 @@ export function describeCandidateRuleCriteria(
 
   return candidateViews(candidate, legs).flatMap((view) =>
     viewRules(revision.rules, view, legs.length > 0).map((rule) => {
-      const evaluation = evaluatePolicyRule(rule, view.candidate);
+      const evaluation = evaluatePolicyRule(rule, view.candidate, { velocity });
       return {
         scope,
         ruleId: rule.id === undefined ? null : rule.id,
@@ -147,6 +155,7 @@ export function evaluateWalletOperationPolicies(
     legs: input.legs,
     walletPolicy: input.walletPolicy,
     apiKeyPolicy: input.apiKeyPolicy,
+    velocity: input.velocity,
   });
 
   return {
@@ -175,6 +184,7 @@ function resolveApiKeyScopeEvaluation(
       scope: "api_key",
       policy: input.apiKeyPolicy,
       views: candidateViews(input.candidate, input.legs),
+      velocity: input.velocity,
     });
   }
   if (input.candidate.apiKeyId !== null) {
@@ -228,6 +238,7 @@ function evaluatePolicyScope(input: {
   scope: PolicyRuleScope;
   policy: EffectiveWalletPolicy | EffectiveApiKeyPolicy;
   views: CandidateView[];
+  velocity?: PolicyEvaluationVelocity;
 }): PolicyScopeEvaluation {
   const revision = input.policy.revision;
 
@@ -250,7 +261,7 @@ function evaluatePolicyScope(input: {
   const hasLegs = input.views.some((view) => view.leg !== null);
   const ruleEvaluations = input.views.flatMap((view) =>
     viewRules(revision.rules, view, hasLegs).flatMap((rule) => {
-      const evaluation = evaluatePolicyRule(rule, view.candidate);
+      const evaluation = evaluatePolicyRule(rule, view.candidate, { velocity: input.velocity });
       return evaluation === null ? [] : [{ ...evaluation, leg: view.leg }];
     })
   );
