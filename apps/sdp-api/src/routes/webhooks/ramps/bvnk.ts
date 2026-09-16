@@ -30,7 +30,9 @@ import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/cou
 import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { ensureBvnkPaymentRule, readBvnkCustomerLink } from "@/routes/payments/handlers/ramps/bvnk";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./processor";
 
@@ -436,7 +438,17 @@ async function provisionPendingBvnkOnramps(
         reloadedCounterparty,
         reloadedCounterparty.project_id,
         customer,
-        entry.request
+        entry.request,
+        // Webhook-driven provisioning has no request actor; the system entry
+        // still records that the provider-side object was created and why.
+        async ({ action, metadata }) =>
+          new AuditService(getDb(env), createKVStoreSet(env).cache).logSystem({
+            organizationId: reloadedCounterparty.organization_id,
+            action: "update",
+            resourceType: "counterparty",
+            resourceId: reloadedCounterparty.id,
+            metadata: { action, provider: "bvnk", trigger: "bvnk_webhook", ...metadata },
+          })
       );
     } catch (error) {
       await updateBvnkOnrampPaymentRuleState(repo, reloadedCounterparty, key, {

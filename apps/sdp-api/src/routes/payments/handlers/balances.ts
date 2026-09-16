@@ -23,6 +23,7 @@ import { AppError, conflict, walletNotFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
@@ -442,6 +443,25 @@ export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWa
     });
 
     return await readWalletControlProfileSummaryInTransaction(tx, wallet.id);
+  });
+
+  // Wallet policies gate money movement, so rewriting one is itself an
+  // auditable security-control change: fail closed, mirroring the API-key
+  // control-profile writes. The mutable revision row's commitMessage is
+  // caller-authored prose; the ledger entry is what attribution rests on.
+  await new AuditService(getDb(c.env)).log(c, {
+    action: "update",
+    resourceType: "custody_wallet",
+    resourceId: wallet.id,
+    metadata: {
+      action: "update_wallet_policy",
+      walletId: wallet.walletId,
+      profileId: controlProfile?.id ?? null,
+      revisionId: controlProfile?.revisionId ?? null,
+      revisionNumber: controlProfile?.revisionNumber ?? null,
+      defaultAction: body.defaultAction,
+      ruleCount: body.rules.length,
+    },
   });
 
   const audit = await getWalletPolicyAudit(c, {

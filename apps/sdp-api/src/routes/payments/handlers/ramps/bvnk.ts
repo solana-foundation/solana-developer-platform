@@ -86,6 +86,7 @@ import {
 } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 import {
@@ -286,6 +287,32 @@ async function persistBvnkOfframpWallet(
  * still inactive its status is refreshed from BVNK so the requirements flow can
  * keep returning `customer_funding_account_provisioning` until BVNK activates it.
  */
+/**
+ * Records a BVNK provisioning step in the tamper-evident ledger. Provider-side
+ * objects created here (customers, wallets, payout beneficiaries, payment
+ * rules) decide where future settlements land, so their creation must be
+ * attributable; the route path binds the request actor, the webhook path a
+ * system actor. Fail closed: a refused audit write aborts the provisioning
+ * step it would have described.
+ */
+export type BvnkProvisioningAudit = (event: {
+  action: string;
+  metadata: Record<string, unknown>;
+}) => Promise<void>;
+
+function requestProvisioningAudit(
+  c: AppContext,
+  counterparty: CounterpartyRow
+): BvnkProvisioningAudit {
+  return async ({ action, metadata }) =>
+    new AuditService(getDb(c.env)).log(c, {
+      action: "update",
+      resourceType: "counterparty",
+      resourceId: counterparty.id,
+      metadata: { action, provider: "bvnk", ...metadata },
+    });
+}
+
 export async function ensureBvnkOfframpWallet(
   c: AppContext,
   ctx: RampRuntimeContext,
@@ -317,6 +344,13 @@ export async function ensureBvnkOfframpWallet(
     idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
   });
   await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, wallet);
+  await requestProvisioningAudit(
+    c,
+    counterparty
+  )({
+    action: "bvnk_offramp_wallet_created",
+    metadata: { walletId: wallet.id, fiatCurrency },
+  });
   return { id: wallet.id, status: wallet.status };
 }
 
@@ -417,6 +451,15 @@ export async function ensureBvnkOfframpBeneficiary(
     createdAt: new Date().toISOString(),
   };
   await persistBvnkOfframpBeneficiary(c, input.counterparty, input.projectId, beneficiary);
+  // The beneficiary marker binds this counterparty to a real-world payout
+  // destination; who registered it is the fact disputes turn on.
+  await requestProvisioningAudit(
+    c,
+    input.counterparty
+  )({
+    action: "bvnk_offramp_beneficiary_registered",
+    metadata: { key, fiatCurrency, accountType: beneficiary.accountType },
+  });
   return beneficiary;
 }
 
@@ -674,6 +717,13 @@ async function createBvnkCustomer(
   if (!updated) {
     throw internalError("BVNK customer status update escaped its tenant scope.");
   }
+  await requestProvisioningAudit(
+    c,
+    input.counterparty
+  )({
+    action: "bvnk_customer_created",
+    metadata: { customerReference: created.id ?? null, status: created.status ?? null },
+  });
   return { customer: { customerReference: created.id, status: created.status } };
 }
 
@@ -919,7 +969,8 @@ export async function ensureBvnkPaymentRule(
   counterparty: CounterpartyRow,
   projectId: string,
   customer: BvnkCustomerResolution,
-  params: BvnkOnrampRequestSpec
+  params: BvnkOnrampRequestSpec,
+  audit: BvnkProvisioningAudit
 ): Promise<BvnkPaymentRuleResolution> {
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const paymentRuleKey = buildBvnkOnrampPaymentRuleKey(
@@ -984,6 +1035,10 @@ export async function ensureBvnkPaymentRule(
       bankAccount: bvnkWalletBankAccount(wallet),
     };
     await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
+    await audit({
+      action: "bvnk_onramp_wallet_created",
+      metadata: { walletId: wallet.id, fiatCurrency: params.fiatCurrency },
+    });
   }
 
   if (entry.walletId && !isBvnkWalletActive(entry.walletStatus)) {
@@ -1021,6 +1076,15 @@ export async function ensureBvnkPaymentRule(
     });
     entry = { ...entry, ruleId: rule.id ?? entry.ruleId, ruleStatus: rule.status };
     await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
+    await audit({
+      action: "bvnk_onramp_payment_rule_created",
+      metadata: {
+        ruleId: rule.id ?? null,
+        currency: params.currency,
+        network: params.network,
+        destination: params.destinationWalletAddress,
+      },
+    });
   }
 
   return {
