@@ -112,7 +112,21 @@ const BVNK_EMAIL_MAX_LENGTH = 320;
 const BVNK_EMAIL_PATTERN = "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$";
 const BVNK_MONEY_AMOUNT_PATTERN = "^\\d+(\\.\\d{1,2})?$";
 const BVNK_TAX_ID_MAX_LENGTH = 64;
-const BVNK_US_TAX_ID_MASK = "###-##-####";
+/** Residences whose tax id has a fixed national format worth masking in the form. */
+const BVNK_TAX_ID_FORMATS: Partial<
+  Record<CountryCode, { label: string; mask: string; placeholder: string }>
+> = {
+  US: {
+    label: "Tax identification number (SSN / ITIN)",
+    mask: "###-##-####",
+    placeholder: "123-45-6789",
+  },
+  DE: {
+    label: "Tax identification number (Steuer-ID)",
+    mask: "## ### ### ###",
+    placeholder: "12 345 678 901",
+  },
+};
 const BVNK_ACH_ACCOUNT_NUMBER_PATTERN = "^[0-9]{4,17}$";
 const BVNK_ACH_ROUTING_NUMBER_PATTERN = "^[0-9]{9}$";
 const BVNK_IBAN_PATTERN = "^[A-Z]{2}[0-9A-Z]{13,32}$";
@@ -278,28 +292,21 @@ const BVNK_ONRAMP_BASE_FIELDS: RequirementField[] = [
 ];
 
 /**
- * BVNK requires a tax identification number for every residence; only the US
- * variant carries the SSN/ITIN label and mask.
+ * BVNK requires a tax identification number for every residence; residences
+ * with a fixed national format get its label, mask, and placeholder.
  *
  * @param countryCode - The counterparty's residence country.
  * @returns The tax identification number field for that residence.
  */
 function bvnkTaxIdField(countryCode: CountryCode): RequirementField {
-  return countryCode === "US"
-    ? textField({
-        key: "taxIdentification.number",
-        label: "Tax identification number (SSN / ITIN)",
-        required: true,
-        maxLength: BVNK_TAX_ID_MAX_LENGTH,
-        placeholder: "123-45-6789",
-        mask: BVNK_US_TAX_ID_MASK,
-      })
-    : textField({
-        key: "taxIdentification.number",
-        label: "Tax identification number",
-        required: true,
-        maxLength: BVNK_TAX_ID_MAX_LENGTH,
-      });
+  const format = BVNK_TAX_ID_FORMATS[countryCode];
+  return textField({
+    key: "taxIdentification.number",
+    label: format === undefined ? "Tax identification number" : format.label,
+    required: true,
+    maxLength: BVNK_TAX_ID_MAX_LENGTH,
+    ...(format === undefined ? {} : { placeholder: format.placeholder, mask: format.mask }),
+  });
 }
 
 const BVNK_ONRAMP_US_FIELDS: RequirementField[] = [
