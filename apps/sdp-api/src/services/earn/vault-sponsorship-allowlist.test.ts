@@ -122,22 +122,18 @@ describe("Kora harness allowlist covers every executing Earn provider", () => {
   });
 });
 
-describe("Kora harness allowed_tokens covers every devnet Earn deposit mint", () => {
+describe("Kora harness allowed_tokens matches the devnet Earn deposit set", () => {
   const tokens = harnessArray("allowed_tokens");
+  const expectedTokens = [
+    SOL_MINT,
+    ...EARN_DEPOSIT_TOKEN_SYMBOLS.flatMap((symbol) => {
+      const mint = wellKnownMint(symbol, HARNESS_CLUSTER);
+      return mint === undefined ? [] : [mint];
+    }),
+  ];
 
-  it("names wrapped SOL first, because resolveFeeToken takes tokens[0]", () => {
-    expect(tokens[0]).toBe(SOL_MINT);
-  });
-
-  it("lists every deposit symbol that has a devnet mint", () => {
-    const missing = EARN_DEPOSIT_TOKEN_SYMBOLS.map((symbol) => ({
-      symbol,
-      mint: wellKnownMint(symbol, HARNESS_CLUSTER),
-    })).filter(({ mint }) => mint !== undefined && !tokens.includes(mint));
-
-    expect(missing, `add these to ${HARNESS_CONFIG} (and to both configs in sdp-infra)`).toEqual(
-      []
-    );
+  it("matches wrapped SOL followed by every available deposit mint", () => {
+    expect(tokens).toEqual(expectedTokens);
   });
 
   it("is mirrored verbatim by the Surfpool shim", () => {

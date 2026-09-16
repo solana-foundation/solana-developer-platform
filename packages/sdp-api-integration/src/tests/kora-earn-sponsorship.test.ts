@@ -110,11 +110,8 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
    * pricing, a Kora upgrade). Same stale-instance caveat as the allowlist
    * assertion above: the list ships as config, not code.
    */
-  it("declares every devnet Earn deposit mint as a supported token, wSOL first", async (ctx) => {
+  it("declares exactly the devnet Earn deposit mints as supported tokens, wSOL first", async (ctx) => {
     const { tokens } = await client.getSupportedTokens();
-
-    // The fee-payment adapter's `resolveFeeToken` takes `tokens[0]`.
-    expect(tokens[0]).toBe(SOL_MINT);
 
     // The token set ships as CONFIG (sdp-infra#180) and this suite runs against
     // whatever the dev-env Kora currently mounts, so a deployment still serving
@@ -127,11 +124,15 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
       "deployed devnet Kora still serves the pre-PRO-1962 token set (wSOL only); waiting on sdp-infra#180 to roll"
     );
 
-    const missing = EARN_DEPOSIT_TOKEN_SYMBOLS.map((symbol) => ({
-      symbol,
-      mint: wellKnownMint(symbol, CLUSTER),
-    })).filter(({ mint }) => mint !== undefined && !tokens.includes(mint));
-    expect(missing).toEqual([]);
+    const expectedTokens = [
+      SOL_MINT,
+      ...EARN_DEPOSIT_TOKEN_SYMBOLS.flatMap((symbol) => {
+        const mint = wellKnownMint(symbol, CLUSTER);
+        return mint === undefined ? [] : [mint];
+      }),
+    ];
+
+    expect(tokens).toEqual(expectedTokens);
   });
 
   /**
