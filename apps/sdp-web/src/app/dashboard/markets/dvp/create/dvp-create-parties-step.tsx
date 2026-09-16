@@ -9,6 +9,7 @@ import { useTranslations } from "@/i18n/provider";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { AmountField, MintField, PartySlotPicker, PayoutAddressPicker } from "./dvp-create-fields";
 import type { DvpCreateForm, DvpPartySlot } from "./use-dvp-create-form";
+import { CUSTOM } from "./use-dvp-leg";
 
 /** The Token-2022 extension kind the API names when SDP cannot move a mint (`UNSUPPORTED_MINT_EXTENSIONS`). */
 const TRANSFER_HOOK_EXTENSION = "TransferHook";
@@ -20,10 +21,9 @@ const UNREADABLE_MINT_REASON = "unreadable extension data";
  * named for what it costs, an extension the program refuses is named as it is,
  * and a mint SDP could not read says so rather than naming an extension.
  */
-function refusedMintWarning(
-  blockedBy: string | null,
-  t: ReturnType<typeof useTranslations>
-): string {
+type Translate = ReturnType<typeof useTranslations>;
+
+function refusedMintWarning(blockedBy: string | null, t: Translate): string {
   if (blockedBy === null) {
     return t("DashboardMarkets.dvp.mintRefusedUnnamed");
   }
@@ -34,6 +34,22 @@ function refusedMintWarning(
     return t("DashboardMarkets.dvp.mintRefusedUnreadable");
   }
   return t("DashboardMarkets.dvp.mintRefusedExtension", { extension: blockedBy });
+}
+
+/**
+ * The warning under a leg's mint field, or null when there is nothing to say.
+ *
+ * @param leg - The leg's chosen mint state.
+ * @param t - Translator.
+ * @returns The warning, or null.
+ */
+function legMintWarning(leg: DvpCreateForm["asset"], t: Translate): string | null {
+  if (leg.ineligible) {
+    return refusedMintWarning(leg.blockedBy, t);
+  }
+  return leg.pasted.notFound && leg.choice === CUSTOM
+    ? t("DashboardMarkets.dvp.mintNotFound")
+    : null;
 }
 
 /**
@@ -65,12 +81,7 @@ function LegRow({
   // Said at the field, before an amount is typed, rather than as a 400 on
   // submit. A transfer hook is named for what it costs; the extensions the
   // program itself refuses are named as they are.
-  let mintWarning: string | null = null;
-  if (leg.ineligible) {
-    mintWarning = refusedMintWarning(leg.blockedBy, t);
-  } else if (leg.token === null && leg.pasted.notFound) {
-    mintWarning = t("DashboardMarkets.dvp.mintNotFound");
-  }
+  const mintWarning = legMintWarning(leg, t);
   return (
     <div className="grid gap-4">
       <PartySlotPicker
