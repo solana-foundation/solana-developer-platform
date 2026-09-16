@@ -77,7 +77,10 @@ export function createPostgresUnifiedTransactionsRepository(
         values.push(...aliases);
       }
       if (input.search !== undefined) {
-        const pattern = `%${escapeLikePattern(input.search)}%`;
+        // Prefix match, not contains: every searchable column is an
+        // identifier pasted from its start, and a leading wildcard forces a
+        // sequential scan of every module's money table behind the view.
+        const pattern = `${escapeLikePattern(input.search)}%`;
         clauses.push(
           "(id ILIKE ? ESCAPE '\\' OR module_id ILIKE ? ESCAPE '\\' OR signature ILIKE ? ESCAPE '\\')"
         );
