@@ -25,11 +25,11 @@
     "@sdp/earn": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/web3.js": "1.98.4",
-    "bn.js": "5.2.3"
+    "bn.js": "5.2.5"
   },
   "devDependencies": {
     "@types/bn.js": "5.2.0",
-    "@types/node": "26.4.0",
+    "@types/node": "26.5.0",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
   }
