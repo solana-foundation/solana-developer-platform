@@ -24,7 +24,7 @@ const MONITOR_SLOT_KEY = "cron:earn-catalogue-sync:disabled-monitor-slot";
 const mocks = vi.hoisted(() => ({
   providerClients: {} as Record<string, EarnVaultProvider>,
   upsertStrategy: vi.fn(),
-  deleteUnlistedStrategies: vi.fn(),
+  deprecateUnlistedStrategies: vi.fn(),
   listStrategyFigures: vi.fn(),
   logEvent: vi.fn(),
   get: vi.fn(),
@@ -48,7 +48,7 @@ vi.mock("@sdp/earn", async (importOriginal) => {
 vi.mock("@/db/repositories", () => ({
   createEarnRepository: vi.fn(() => ({
     upsertStrategy: mocks.upsertStrategy,
-    deleteUnlistedStrategies: mocks.deleteUnlistedStrategies,
+    deprecateUnlistedStrategies: mocks.deprecateUnlistedStrategies,
     listStrategyFigures: mocks.listStrategyFigures,
   })),
 }));
@@ -116,7 +116,7 @@ function installProviders(providers: Record<string, EarnVaultProvider>): void {
 describe("runEarnCatalogueSyncIfDue", () => {
   beforeEach(() => {
     mocks.upsertStrategy.mockReset().mockResolvedValue(undefined);
-    mocks.deleteUnlistedStrategies.mockReset().mockResolvedValue([]);
+    mocks.deprecateUnlistedStrategies.mockReset().mockResolvedValue([]);
     mocks.listStrategyFigures.mockReset().mockResolvedValue([]);
     mocks.logEvent.mockReset();
     // Default slot state: empty and claimable.
@@ -129,7 +129,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
         () =>
           ({
             upsertStrategy: mocks.upsertStrategy,
-            deleteUnlistedStrategies: mocks.deleteUnlistedStrategies,
+            deprecateUnlistedStrategies: mocks.deprecateUnlistedStrategies,
             listStrategyFigures: mocks.listStrategyFigures,
           }) as never
       );
@@ -381,10 +381,10 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.upsertStrategy).not.toHaveBeenCalled();
     // A steady state is still a reliable ANSWER: with no production catalogue,
     // the mirror sub-shelf converges to empty (an authorized empty keep set),
-    // while the own lanes write and delete nothing.
-    expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(2);
+    // while the own lanes write and deprecate nothing.
+    expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledTimes(2);
     for (const provider of ["perena", "upshift"]) {
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
         provider,
         environment: "sandbox",
         hostCluster: "mainnet-beta",
@@ -395,7 +395,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
-  it("deletes rows the provider no longer lists, per provider, environment and lane", async () => {
+  it("deprecates rows the provider no longer lists, per provider, environment and lane", async () => {
     // The keep set is what the provider still lists; the repository decides
     // what that leaves behind. This is what makes a tightened catalogue gate
     // reach rows ALREADY stored. Production's delist is environment-wide (its
@@ -410,7 +410,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
         ])
       ),
     });
-    mocks.deleteUnlistedStrategies.mockResolvedValue(["morpho-gauntlet-usdc", "aave-v3-usdc"]);
+    mocks.deprecateUnlistedStrategies.mockResolvedValue(["morpho-gauntlet-usdc", "aave-v3-usdc"]);
 
     const outcome = await runEarnCatalogueSyncIfDue(env);
 
@@ -418,20 +418,20 @@ describe("runEarnCatalogueSyncIfDue", () => {
     // Three lanes: production environment-wide, sandbox's own devnet sub-shelf,
     // and the sandbox mirror converging to empty (production listed no mainnet
     // rows this pass: a reliable answer, so the empty keep set is authorized).
-    expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(3);
-    expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+    expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledTimes(3);
+    expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
       provider: "upshift",
       environment: "production",
       hostCluster: undefined,
       listedProviderReferences: ["kamino-allez-usdc", "kamino-steakhouse-usdc"],
     });
-    expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+    expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
       provider: "upshift",
       environment: "sandbox",
       hostCluster: "devnet",
       listedProviderReferences: ["kamino-allez-usdc", "kamino-steakhouse-usdc"],
     });
-    expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+    expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
       provider: "upshift",
       environment: "sandbox",
       hostCluster: "mainnet-beta",
@@ -440,7 +440,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
     });
   });
 
-  it("never deletes an OWN shelf off an empty catalogue or a partial write pass", async () => {
+  it("never deprecates an OWN shelf off an empty catalogue or a partial write pass", async () => {
     // Both are cases where the pass cannot prove what the provider lists, so a
     // fundable shelf must never be torn down on the strength of them. Only the
     // browse-only mirror sub-shelf converges on an authorized empty keep set.
@@ -455,9 +455,9 @@ describe("runEarnCatalogueSyncIfDue", () => {
       ),
     });
     expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
-    expect(mocks.deleteUnlistedStrategies.mock.calls.every(isMirrorConvergence)).toBe(true);
+    expect(mocks.deprecateUnlistedStrategies.mock.calls.every(isMirrorConvergence)).toBe(true);
 
-    mocks.deleteUnlistedStrategies.mockClear();
+    mocks.deprecateUnlistedStrategies.mockClear();
     mocks.get.mockResolvedValue(null);
     mocks.compareAndSet.mockResolvedValue(true);
     mocks.upsertStrategy.mockRejectedValue(new Error("write conflict"));
@@ -469,10 +469,10 @@ describe("runEarnCatalogueSyncIfDue", () => {
     });
 
     expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
-    expect(mocks.deleteUnlistedStrategies.mock.calls.every(isMirrorConvergence)).toBe(true);
+    expect(mocks.deprecateUnlistedStrategies.mock.calls.every(isMirrorConvergence)).toBe(true);
   });
 
-  it("keeps a delete failure inside the provider's pass", async () => {
+  it("keeps a deprecation failure inside the provider's pass", async () => {
     // Same degradation contract as upsert: the catalogue stays stale for an
     // hour, the tick still counts as run, and the slot is not released.
     installProviders({
@@ -481,7 +481,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
         vi.fn(async () => [makeSnapshot("kamino-allez-usdc")])
       ),
     });
-    mocks.deleteUnlistedStrategies.mockRejectedValue(new Error("deadlock detected"));
+    mocks.deprecateUnlistedStrategies.mockRejectedValue(new Error("deadlock detected"));
 
     expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
     expect(mocks.upsertStrategy).toHaveBeenCalledTimes(2);
@@ -533,22 +533,22 @@ describe("runEarnCatalogueSyncIfDue", () => {
       );
 
       // Each lane delists only the sub-shelf it is the truth for, so the next
-      // pass over unchanged catalogues deletes nothing: the devnet keep set
+      // pass over unchanged catalogues deprecates nothing: the devnet keep set
       // cannot reach the mirrored mainnet rows and vice versa.
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(3);
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledTimes(3);
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
         provider: "kamino",
         environment: "production",
         hostCluster: undefined,
         listedProviderReferences: ["mainnet-vault"],
       });
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
         provider: "kamino",
         environment: "sandbox",
         hostCluster: "devnet",
         listedProviderReferences: ["devnet-vault"],
       });
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
         provider: "kamino",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
@@ -572,7 +572,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
       expect(mocks.upsertStrategy).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ providerReference: "devnet-vault", environment: "sandbox" })
       );
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledExactlyOnceWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledExactlyOnceWith({
         provider: "kamino",
         environment: "sandbox",
         hostCluster: "devnet",
@@ -599,8 +599,8 @@ describe("runEarnCatalogueSyncIfDue", () => {
       expect(mocks.upsertStrategy).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ providerReference: "devnet-vault", environment: "sandbox" })
       );
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(2);
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledTimes(2);
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
         provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
@@ -619,7 +619,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
       installProviders({ kamino: makeProvider("kamino", listStrategies) });
 
       expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
         provider: "kamino",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
@@ -649,7 +649,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
           hostCluster: "mainnet-beta",
         })
       );
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
         provider: "veda",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
@@ -660,7 +660,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
       expect(mocks.upsertStrategy).not.toHaveBeenCalledWith(
         expect.objectContaining({ environment: "sandbox", hostCluster: "devnet" })
       );
-      expect(mocks.deleteUnlistedStrategies).not.toHaveBeenCalledWith(
+      expect(mocks.deprecateUnlistedStrategies).not.toHaveBeenCalledWith(
         expect.objectContaining({ hostCluster: "devnet" })
       );
     });
@@ -668,7 +668,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
     it("keeps both sandbox lanes skipped on a TRANSIENT own-fetch failure", async () => {
       // An outage is not an answer: the mirror needs the fresh own reference
       // set (collision rule), so it goes stale alongside the own shelf rather
-      // than risking a wrong write or delete.
+      // than risking a wrong write or deprecation.
       const listStrategies = vi.fn(async (ctx: EarnRuntimeContext) => {
         if (ctx.environment === "production") {
           return [makeSnapshot("mainnet-vault", "mainnet-beta")];
@@ -683,7 +683,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
         expect.objectContaining({ providerReference: "mainnet-vault", environment: "production" })
       );
       // …and nothing touches sandbox at all this pass.
-      expect(mocks.deleteUnlistedStrategies).not.toHaveBeenCalledWith(
+      expect(mocks.deprecateUnlistedStrategies).not.toHaveBeenCalledWith(
         expect.objectContaining({ environment: "sandbox" })
       );
     });
@@ -713,7 +713,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
           hostCluster: "mainnet-beta",
         })
       );
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
         provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
@@ -726,7 +726,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
       // The review-flagged corner: a previously mirrored mainnet row whose
       // reference newly appears on the own shelf, in the same pass where that
       // own upsert transiently FAILS. The stored row is then still
-      // mainnet-beta, so the mirror delist would delete it off a keep set that
+      // mainnet-beta, so the mirror delist would deprecate it off a keep set that
       // dropped the reference as a collision — absent from both shelves until
       // a later pass. The collided reference riding in the mirror keep set is
       // what closes that.
@@ -747,15 +747,15 @@ describe("runEarnCatalogueSyncIfDue", () => {
 
       // The own lane skipped its delist (upsertFailed) as ever, and the mirror
       // delist ran with the collided reference protected in its keep set.
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledTimes(2);
-      expect(mocks.deleteUnlistedStrategies).toHaveBeenCalledWith({
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledTimes(2);
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
         provider: "upshift",
         environment: "sandbox",
         hostCluster: "mainnet-beta",
         listedProviderReferences: ["shared-ref"],
         allowEmptyKeepSet: true,
       });
-      expect(mocks.deleteUnlistedStrategies).not.toHaveBeenCalledWith(
+      expect(mocks.deprecateUnlistedStrategies).not.toHaveBeenCalledWith(
         expect.objectContaining({ hostCluster: "devnet" })
       );
     });
@@ -895,7 +895,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
         })
       );
       // The own-shelf refusal to delist on an empty read is untouched.
-      expect(mocks.deleteUnlistedStrategies).not.toHaveBeenCalledWith(
+      expect(mocks.deprecateUnlistedStrategies).not.toHaveBeenCalledWith(
         expect.objectContaining({ hostCluster: "devnet" })
       );
     });

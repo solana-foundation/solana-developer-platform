@@ -33,6 +33,7 @@ import {
 } from "./dvp.fixtures";
 import type { DvpTrade } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
+import { resolveTradesListState } from "./dvp-trades-list-state";
 import { DvpTradesWorkspace } from "./dvp-trades-workspace";
 
 const replaceMock = vi.fn();
@@ -165,6 +166,36 @@ describe("DvpTradesWorkspace", () => {
 
     expect(html).toContain("No trades yet");
     expect(html).toContain("/dashboard/markets/dvp/create");
+  });
+
+  // A filter that matches nothing is not an empty project. Deciding emptiness
+  // from the filtered rows swapped the whole card for "No trades yet" and took
+  // the filters with it, so there was no way back to the other statuses.
+  it.each(["open", "ready", "closed"] as const)(
+    "keeps the filters on screen when the %s filter matches nothing",
+    (statusFilter) => {
+      const html = renderWorkspace({ trades: [], inbound: [], statusFilter });
+
+      expect(html).toContain("Filter by status");
+      expect(html).toContain("No trades match these filters.");
+      expect(html).not.toContain("No trades yet");
+    }
+  );
+
+  it("keeps the filters on screen when a search matches nothing", () => {
+    const html = renderWorkspace({ trades: [], inbound: [], searchQuery: "nothing-like-this" });
+
+    expect(html).toContain("Search trades");
+    expect(html).toContain("No trades match these filters.");
+  });
+
+  // The one-row rule is about an unfiltered list. Narrowed to one trade, the
+  // bar is the only way to widen the list again.
+  it("keeps the filters on screen when a status filter narrows the list to one trade", () => {
+    const html = renderWorkspace({ trades: [trade()], inbound: [], statusFilter: "ready" });
+
+    expect(html).toContain("Search trades");
+    expect(html).toContain("Filter by status");
   });
 
   // An error and a table of nothing say opposite things. Showing both claims
@@ -537,5 +568,42 @@ describe("DvpTradesWorkspace", () => {
     const html = renderList([trade()]);
 
     expect(html).not.toContain("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU");
+  });
+});
+
+describe("resolveTradesListState", () => {
+  const unfiltered = { status: "all" as const, query: "" };
+  const base = {
+    returned: unfiltered,
+    chosen: unfiltered,
+    queryInput: "",
+    tradeCount: 0,
+    inboundCount: 0,
+    shownCount: 0,
+    showingInbound: false,
+  };
+
+  it("reads a project with no trades and no filters as empty", () => {
+    expect(resolveTradesListState(base)).toMatchObject({
+      listIsEmpty: true,
+      filtersApplied: false,
+    });
+  });
+
+  // Clearing a filter resets the chosen state at once while the rows on screen
+  // are still the filtered, empty answer. Reading those as an empty project
+  // flashed "No trades yet" and dropped the bar until the refetch landed.
+  it("does not read stale filtered rows as an empty project while a clear is loading", () => {
+    const state = resolveTradesListState({ ...base, returned: { status: "ready", query: "" } });
+
+    expect(state).toMatchObject({
+      listIsEmpty: false,
+      filtersApplied: true,
+      filteredToNothing: true,
+    });
+  });
+
+  it("holds the filter bar while a search is still being typed", () => {
+    expect(resolveTradesListState({ ...base, queryInput: "abc" }).filtersApplied).toBe(true);
   });
 });

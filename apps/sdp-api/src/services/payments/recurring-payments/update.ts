@@ -1,12 +1,26 @@
 import {
   decideRecurringPaymentUpdateTransition,
+  generateProgramPlanId,
   getRecurringPaymentOperationStaleBefore,
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { UpdatePaymentRecurringPaymentRequest, WalletOperationActor } from "@sdp/types";
+import {
+  assertNever,
+  COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
+  doesRecurringPaymentStatusRequireReactivation,
+  IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  isActivatingRecurringPaymentStatus,
+  isCanceledRecurringPaymentStatus,
+  isPendingActivationRecurringPaymentStatus,
+  isUpdatingRecurringPaymentStatus,
+  recurringPaymentInFlightLifecycleOperation,
+  recurringPaymentPolicyPayloadSchema,
+  type UpdatePaymentRecurringPaymentRequest,
+  type WalletOperationActor,
+} from "@sdp/types";
 import {
   type Address,
   createNoopSigner,
@@ -15,7 +29,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
@@ -30,7 +44,14 @@ import {
   type PaymentSubscriptionRow,
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
-import { AppError, badRequest } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  conflict,
+  internalError,
+  notFound,
+  transactionFailed,
+} from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -50,12 +71,16 @@ import {
   enforceRecurringPaymentPolicy,
 } from "./policy";
 import {
-  activationErrorMessage,
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
-  generateProgramPlanId,
+  parseNullableStoredSignature,
+  recurringPaymentErrorMessage,
+  requireUpdatedAttempt,
+  requireUpdatedPlan,
+  requireUpdatedSubscription,
   sendSubscriptionInstructions,
+  subscriptionProgramMetadataUri,
 } from "./shared";
 
 type RecurringPaymentUpdateSnapshot = {
@@ -69,6 +94,19 @@ type RecurringPaymentUpdateSnapshot = {
   nextCollectionDueAt: string | null;
   metadataUri: string | null;
 };
+
+const RECURRING_PAYMENT_UPDATE_FIELDS = [
+  "sourceCustodyWalletId",
+  "counterpartyId",
+  "counterpartyAccountId",
+  "token",
+  "amount",
+  "periodHours",
+  "firstCollectionAt",
+  "nextCollectionDueAt",
+  "metadataUri",
+] as const satisfies readonly (keyof RecurringPaymentUpdateSnapshot)[];
+type RecurringPaymentUpdateField = (typeof RECURRING_PAYMENT_UPDATE_FIELDS)[number];
 
 type ResolvedRecurringPaymentUpdate = {
   sourceWallet: CustodyWallet;
@@ -95,11 +133,16 @@ const REPLACEMENT_UPDATE_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>(
   "periodHours",
 ]);
 
-function tenantScope(input: { organizationId: string; projectId: string }) {
-  return createTenantScope({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-  });
+function parsePlanStatus(status: subscriptionsProgram.PlanStatus): subscriptionsProgram.PlanStatus {
+  switch (status) {
+    case subscriptionsProgram.PlanStatus.Sunset:
+    case subscriptionsProgram.PlanStatus.Active:
+      return status;
+    default: {
+      const unsupported: never = status;
+      throw internalError(`Unsupported subscription plan status: ${unsupported}`);
+    }
+  }
 }
 
 function recurringPaymentSnapshot(row: PaymentRecurringPaymentRow): RecurringPaymentUpdateSnapshot {
@@ -120,20 +163,15 @@ function buildUpdateDiff(
   before: RecurringPaymentUpdateSnapshot,
   after: RecurringPaymentUpdateSnapshot
 ): {
-  changedFields: Array<keyof RecurringPaymentUpdateSnapshot>;
-  beforeValues: Record<string, unknown>;
-  afterValues: Record<string, unknown>;
+  changedFields: RecurringPaymentUpdateField[];
+  beforeValues: Partial<RecurringPaymentUpdateSnapshot>;
+  afterValues: Partial<RecurringPaymentUpdateSnapshot>;
 } {
-  const changedFields = (Object.keys(before) as Array<keyof RecurringPaymentUpdateSnapshot>).filter(
+  const changedFields = RECURRING_PAYMENT_UPDATE_FIELDS.filter(
     (field) => before[field] !== after[field]
   );
-  const beforeValues: Record<string, unknown> = {};
-  const afterValues: Record<string, unknown> = {};
-
-  for (const field of changedFields) {
-    beforeValues[field] = before[field];
-    afterValues[field] = after[field];
-  }
+  const beforeValues: Partial<RecurringPaymentUpdateSnapshot> = { ...before };
+  const afterValues: Partial<RecurringPaymentUpdateSnapshot> = { ...after };
 
   return { changedFields, beforeValues, afterValues };
 }
@@ -176,23 +214,32 @@ function assertRecurringPaymentUpdateStatus(row: PaymentRecurringPaymentRow, now
     updatedAt: row.updated_at,
     nowIso,
   });
-  if (transition === "claimable" || transition === "recoverable") {
-    return;
+  switch (transition) {
+    case "claimable":
+    case "recoverable":
+      return;
+    case "processing":
+      throw conflict("Recurring payment update is already processing");
+    case "already_final":
+    case "invalid": {
+      if (isActivatingRecurringPaymentStatus(row.status)) {
+        throw conflict("Recurring payment activation is already processing");
+      }
+      const lifecycleOperation = recurringPaymentInFlightLifecycleOperation(row.status);
+      if (lifecycleOperation) {
+        throw conflict(`Recurring payment ${lifecycleOperation} is already processing`);
+      }
+      if (
+        doesRecurringPaymentStatusRequireReactivation(row.status) ||
+        isCanceledRecurringPaymentStatus(row.status)
+      ) {
+        throw conflict("Recurring payment cannot be updated from this status");
+      }
+      throw internalError(`Inconsistent update transition ${transition} for ${row.status}`);
+    }
+    default:
+      assertNever(transition);
   }
-  if (transition === "processing") {
-    throw new AppError("CONFLICT", "Recurring payment update is already processing");
-  }
-  if (row.status === "activating") {
-    throw new AppError("CONFLICT", "Recurring payment activation is already processing");
-  }
-  if (row.status === "canceling") {
-    throw new AppError("CONFLICT", "Recurring payment cancellation is already processing");
-  }
-  if (row.status === "resuming") {
-    throw new AppError("CONFLICT", "Recurring payment resume is already processing");
-  }
-
-  throw new AppError("CONFLICT", "Recurring payment cannot be updated from this status");
 }
 
 async function resolveRecurringPaymentUpdate(input: {
@@ -206,16 +253,24 @@ async function resolveRecurringPaymentUpdate(input: {
   apiKeyId: string | null;
   actor: WalletOperationActor | null;
 }): Promise<ResolvedRecurringPaymentUpdate> {
-  const finalSourceWallet = input.nextSourceWallet ?? input.sourceWallet;
+  const finalSourceWallet =
+    input.nextSourceWallet === undefined ? input.sourceWallet : input.nextSourceWallet;
   const requestedSourceCustodyWalletId =
-    input.request.sourceCustodyWalletId ?? input.recurringPayment.source_custody_wallet_id;
+    input.request.sourceCustodyWalletId === undefined
+      ? input.recurringPayment.source_custody_wallet_id
+      : input.request.sourceCustodyWalletId;
   if (finalSourceWallet.id !== requestedSourceCustodyWalletId) {
     throw badRequest("Recurring payment source wallet does not match request");
   }
 
-  const counterpartyId = input.request.counterpartyId ?? input.recurringPayment.counterparty_id;
+  const counterpartyId =
+    input.request.counterpartyId === undefined
+      ? input.recurringPayment.counterparty_id
+      : input.request.counterpartyId;
   const counterpartyAccountId =
-    input.request.counterpartyAccountId ?? input.recurringPayment.counterparty_account_id;
+    input.request.counterpartyAccountId === undefined
+      ? input.recurringPayment.counterparty_account_id
+      : input.request.counterpartyAccountId;
   const accountChanged =
     counterpartyId !== input.recurringPayment.counterparty_id ||
     counterpartyAccountId !== input.recurringPayment.counterparty_account_id;
@@ -238,8 +293,12 @@ async function resolveRecurringPaymentUpdate(input: {
         })
       : { destinationAddress: input.recurringPayment.destination_address },
   ]);
-  const amount = input.request.amount ?? input.recurringPayment.amount;
-  const periodHours = input.request.periodHours ?? input.recurringPayment.period_hours;
+  const amount =
+    input.request.amount === undefined ? input.recurringPayment.amount : input.request.amount;
+  const periodHours =
+    input.request.periodHours === undefined
+      ? input.recurringPayment.period_hours
+      : input.request.periodHours;
   const firstCollectionAt =
     input.request.firstCollectionAt !== undefined
       ? input.request.firstCollectionAt
@@ -296,18 +355,18 @@ async function enforceResolvedRecurringPaymentUpdatePolicy(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     sourceWallet: input.resolved.sourceWallet,
-    operationType: "recurring_payment_update",
     token: input.resolved.token,
     amount: input.resolved.amount,
     destination: input.resolved.destinationAddress,
     apiKeyId: input.apiKeyId,
     actor: input.actor,
-    rawPayload: {
+    rawPayload: recurringPaymentPolicyPayloadSchema.parse({
+      operationType: "recurring_payment_update",
       recurringPaymentId: input.recurringPaymentId,
       counterpartyId: input.resolved.counterpartyId,
       counterpartyAccountId: input.resolved.counterpartyAccountId,
       periodHours: input.resolved.periodHours,
-    },
+    }),
   });
 }
 
@@ -337,7 +396,7 @@ async function recordRecurringPaymentUpdateEvent(input: {
   });
 
   if (!event) {
-    throw new AppError("INTERNAL_ERROR", "Failed to journal recurring payment update");
+    throw internalError("Failed to journal recurring payment update");
   }
 }
 
@@ -357,7 +416,10 @@ async function updatePendingRecurringPayment(input: {
     input.resolved.destinationAddress !== input.recurringPayment.destination_address ||
     input.resolved.token !== input.recurringPayment.token;
   const updatedAt = new Date().toISOString();
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
+  const recurringRepo = createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  );
   const updated = await recurringRepo.updateRecurringPayment({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
@@ -380,10 +442,7 @@ async function updatePendingRecurringPayment(input: {
   });
 
   if (!updated) {
-    throw new AppError(
-      "CONFLICT",
-      "Recurring payment changed while updating; retry with the latest payment"
-    );
+    throw conflict("Recurring payment changed while updating; retry with the latest payment");
   }
 
   await recordRecurringPaymentUpdateEvent({
@@ -421,7 +480,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: input.claimed.id,
-      statuses: ["processing"],
+      statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
     });
     if (existing) {
       if (
@@ -433,18 +492,17 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
           afterValues: input.afterValues,
         })
       ) {
-        throw new AppError(
-          "CONFLICT",
-          "Recurring payment update recovery must retry the same update"
-        );
+        throw conflict("Recurring payment update recovery must retry the same update");
       }
-      return input.recurringRepo.updateUpdateAttempt({
-        attemptId: existing.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        error: null,
-        updatedAt: input.nowIso,
-      });
+      return requireUpdatedAttempt(
+        await input.recurringRepo.updateUpdateAttempt({
+          attemptId: existing.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          error: null,
+          updatedAt: input.nowIso,
+        })
+      );
     }
   }
 
@@ -484,7 +542,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
       expectedStatus: "updating",
       updatedAt: new Date().toISOString(),
     });
-    throw new AppError("INTERNAL_ERROR", "Failed to journal recurring payment update");
+    throw internalError("Failed to journal recurring payment update");
   }
 
   return attempt;
@@ -497,7 +555,7 @@ function activeNextCollectionDueAt(input: {
   onChainSubscription?: Awaited<
     ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
   > | null;
-  clampToMinimum?: boolean;
+  clampToMinimum: boolean;
 }): string | null | undefined {
   if (input.requested === undefined) {
     return undefined;
@@ -513,14 +571,16 @@ function activeNextCollectionDueAt(input: {
     : (input.subscription?.current_period_start_at ??
       input.recurringPayment.next_collection_due_at);
   if (!currentPeriodStartAt) {
-    throw new AppError("CONFLICT", "Recurring payment is missing active subscription timing");
+    throw conflict("Recurring payment is missing active subscription timing");
   }
 
   const resolution = resolveRecurringPaymentCollectionSchedule({
-    requested: input.requested,
+    request:
+      input.requested === null
+        ? { kind: "next_period" }
+        : { kind: "requested", dueAt: input.requested, clampToMinimum: input.clampToMinimum },
     periodStartAt: currentPeriodStartAt,
     periodHours,
-    clampToMinimum: input.clampToMinimum,
   });
   if (resolution.kind === "too_early") {
     throw badRequest("nextCollectionDueAt cannot be earlier than the next eligible collection");
@@ -533,13 +593,15 @@ function replacementNextCollectionDueAt(input: {
   requested: string | null | undefined;
   periodStartAt: string;
   periodHours: number;
-  clampToMinimum?: boolean;
+  clampToMinimum: boolean;
 }): string {
   const resolution = resolveRecurringPaymentCollectionSchedule({
-    requested: input.requested ?? null,
+    request:
+      input.requested === undefined || input.requested === null
+        ? { kind: "next_period" }
+        : { kind: "requested", dueAt: input.requested, clampToMinimum: input.clampToMinimum },
     periodStartAt: input.periodStartAt,
     periodHours: input.periodHours,
-    clampToMinimum: input.clampToMinimum,
   });
   if (resolution.kind === "too_early") {
     throw badRequest(
@@ -567,23 +629,27 @@ async function finalizeMetadataScheduleUpdate(input: {
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
 
     if (input.claimed.plan_id && input.resolved.metadataUri !== input.claimed.metadata_uri) {
-      await subscriptionsRepo.updatePlan({
-        planId: input.claimed.plan_id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        metadataUri: input.resolved.metadataUri,
-        updatedAt: finalizedAt,
-      });
+      requireUpdatedPlan(
+        await subscriptionsRepo.updatePlan({
+          planId: input.claimed.plan_id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          metadataUri: input.resolved.metadataUri,
+          updatedAt: finalizedAt,
+        })
+      );
     }
     if (input.subscription && input.nextCollectionDueAt !== undefined) {
-      await subscriptionsRepo.updateSubscription({
-        subscriptionId: input.subscription.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        nextCollectionDueAt: input.nextCollectionDueAt,
-        expectedStatus: "active",
-        updatedAt: finalizedAt,
-      });
+      requireUpdatedSubscription(
+        await subscriptionsRepo.updateSubscription({
+          subscriptionId: input.subscription.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          nextCollectionDueAt: input.nextCollectionDueAt,
+          expectedStatus: "active",
+          updatedAt: finalizedAt,
+        })
+      );
     }
 
     const updated = await recurringRepo.updateRecurringPayment({
@@ -599,18 +665,20 @@ async function finalizeMetadataScheduleUpdate(input: {
       updatedAt: finalizedAt,
     });
     if (!updated) {
-      throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment update");
+      throw internalError("Failed to finalize recurring payment update");
     }
 
-    await recurringRepo.updateUpdateAttempt({
-      attemptId: input.attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      status: "confirmed",
-      stage: "finalize",
-      error: null,
-      updatedAt: finalizedAt,
-    });
+    requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: "confirmed",
+        stage: "finalize",
+        error: null,
+        updatedAt: finalizedAt,
+      })
+    );
     const auditAfterValues =
       input.nextCollectionDueAt !== undefined &&
       input.resolved.changedFields.includes("nextCollectionDueAt")
@@ -645,10 +713,13 @@ async function runMetadataScheduleUpdate(input: {
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
+  const recurringRepo = createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  );
   const rpc = solanaRpc.createRpc(input.env);
   let attempt = input.attempt;
-  let planUpdateSignature = attempt.plan_update_signature as Signature | null;
+  let planUpdateSignature = parseNullableStoredSignature(attempt.plan_update_signature);
 
   let onChainSubscription: Awaited<
     ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
@@ -656,7 +727,7 @@ async function runMetadataScheduleUpdate(input: {
   if (input.request.nextCollectionDueAt !== undefined && input.claimed.subscription_pda) {
     onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
       rpc,
-      assertValidAddress(input.claimed.subscription_pda, "subscriptionPda") as Address,
+      assertValidAddress(input.claimed.subscription_pda, "subscriptionPda"),
       { commitment: "confirmed" }
     );
   }
@@ -670,10 +741,10 @@ async function runMetadataScheduleUpdate(input: {
 
   if (input.resolved.metadataUri !== input.claimed.metadata_uri) {
     if (!input.claimed.plan_pda) {
-      throw new AppError("CONFLICT", "Recurring payment is missing on-chain plan records");
+      throw conflict("Recurring payment is missing on-chain plan records");
     }
 
-    const planPda = assertValidAddress(input.claimed.plan_pda, "planPda") as Address;
+    const planPda = assertValidAddress(input.claimed.plan_pda, "planPda");
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
@@ -689,27 +760,29 @@ async function runMetadataScheduleUpdate(input: {
         commitment: "confirmed",
       });
       if (!onChainPlan.exists) {
-        throw new AppError("TRANSACTION_FAILED", "Subscription plan was not found on-chain");
+        throw transactionFailed("Subscription plan was not found on-chain");
       }
 
-      attempt = await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        stage: "update_plan",
-        updatedAt: new Date().toISOString(),
-      });
+      attempt = requireUpdatedAttempt(
+        await recurringRepo.updateUpdateAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          stage: "update_plan",
+          updatedAt: new Date().toISOString(),
+        })
+      );
       const instruction = await subscriptionsProgram.getUpdatePlanOverlayInstruction({
         endTs: onChainPlan.data.data.endTs,
         expectedCreatedAt: onChainPlan.data.data.terms.createdAt,
         expectedEndTs: onChainPlan.data.data.endTs,
         expectedMetadataUri: onChainPlan.data.data.metadataUri,
         expectedPullers: onChainPlan.data.data.pullers,
-        metadataUri: input.resolved.metadataUri ?? "",
+        metadataUri: subscriptionProgramMetadataUri(input.resolved.metadataUri),
         owner: sourceSigner,
         planPda,
         pullers: onChainPlan.data.data.pullers,
-        status: onChainPlan.data.status as subscriptionsProgram.PlanStatus,
+        status: parsePlanStatus(onChainPlan.data.status),
       });
       planUpdateSignature = await sendSubscriptionInstructions({
         env: input.env,
@@ -719,13 +792,15 @@ async function runMetadataScheduleUpdate(input: {
         sourceSigner,
         instructions: [instruction],
       });
-      attempt = await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        planUpdateSignature,
-        updatedAt: new Date().toISOString(),
-      });
+      attempt = requireUpdatedAttempt(
+        await recurringRepo.updateUpdateAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          planUpdateSignature,
+          updatedAt: new Date().toISOString(),
+        })
+      );
     }
 
     await confirmSubscriptionSignature(
@@ -809,7 +884,11 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
     authorizationSetupSignature: initSignature,
     updatedAt: new Date().toISOString(),
   });
-  await confirmSubscriptionSignature(input.env, initSignature);
+  await confirmSubscriptionSignature(
+    input.env,
+    initSignature,
+    "Recurring payment update failed on-chain"
+  );
 
   if (!initAuthorityInstruction) {
     return input.subscriptionAuthority;
@@ -821,7 +900,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
     { commitment: "confirmed" }
   );
   if (!subscriptionAuthority.exists) {
-    throw new AppError("TRANSACTION_FAILED", "Subscription authority was not found on-chain");
+    throw transactionFailed("Subscription authority was not found on-chain");
   }
   return subscriptionAuthority;
 }
@@ -869,7 +948,7 @@ async function getOrCreateReplacementPlan(input: {
   });
 
   if (!plan) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create replacement subscription plan");
+    throw internalError("Failed to create replacement subscription plan");
   }
 
   return plan;
@@ -916,7 +995,7 @@ async function getOrCreateReplacementSubscription(input: {
   });
 
   if (!subscription) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create replacement subscription");
+    throw internalError("Failed to create replacement subscription");
   }
 
   return subscription;
@@ -948,44 +1027,52 @@ async function finalizeReplacementUpdate(input: {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
 
-    await subscriptionsRepo.updateSubscription({
-      subscriptionId: input.oldSubscription.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      status: "canceled",
-      cancelAt: finalizedAt,
-      canceledAt: finalizedAt,
-      updatedAt: finalizedAt,
-    });
-    if (input.claimed.plan_id) {
-      await subscriptionsRepo.updatePlan({
-        planId: input.claimed.plan_id,
+    requireUpdatedSubscription(
+      await subscriptionsRepo.updateSubscription({
+        subscriptionId: input.oldSubscription.id,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        status: "archived",
+        status: "canceled",
+        cancelAt: finalizedAt,
+        canceledAt: finalizedAt,
         updatedAt: finalizedAt,
-      });
+      })
+    );
+    if (input.claimed.plan_id) {
+      requireUpdatedPlan(
+        await subscriptionsRepo.updatePlan({
+          planId: input.claimed.plan_id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          status: "archived",
+          updatedAt: finalizedAt,
+        })
+      );
     }
-    await subscriptionsRepo.updatePlan({
-      planId: input.plan.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      planPda: input.planPda,
-      status: "active",
-      updatedAt: finalizedAt,
-    });
-    await subscriptionsRepo.updateSubscription({
-      subscriptionId: input.subscription.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      subscriptionPda: input.subscriptionPda,
-      subscriptionAuthorityAddress: input.subscriptionAuthorityAddress,
-      authorizationSignature: input.authorizationSignature,
-      status: "active",
-      currentPeriodStartAt: input.currentPeriodStartAt,
-      nextCollectionDueAt: input.nextCollectionDueAt,
-      updatedAt: finalizedAt,
-    });
+    requireUpdatedPlan(
+      await subscriptionsRepo.updatePlan({
+        planId: input.plan.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        planPda: input.planPda,
+        status: "active",
+        updatedAt: finalizedAt,
+      })
+    );
+    requireUpdatedSubscription(
+      await subscriptionsRepo.updateSubscription({
+        subscriptionId: input.subscription.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        subscriptionPda: input.subscriptionPda,
+        subscriptionAuthorityAddress: input.subscriptionAuthorityAddress,
+        authorizationSignature: input.authorizationSignature,
+        status: "active",
+        currentPeriodStartAt: input.currentPeriodStartAt,
+        nextCollectionDueAt: input.nextCollectionDueAt,
+        updatedAt: finalizedAt,
+      })
+    );
 
     const updated = await recurringRepo.updateRecurringPayment({
       recurringPaymentId: input.claimed.id,
@@ -1017,19 +1104,21 @@ async function finalizeReplacementUpdate(input: {
       updatedAt: finalizedAt,
     });
     if (!updated) {
-      throw new AppError("INTERNAL_ERROR", "Failed to finalize recurring payment update");
+      throw internalError("Failed to finalize recurring payment update");
     }
 
-    await recurringRepo.updateUpdateAttempt({
-      attemptId: input.attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      status: "confirmed",
-      stage: "finalize",
-      oldCancelSignature: input.oldCancelSignature,
-      error: null,
-      updatedAt: finalizedAt,
-    });
+    requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: "confirmed",
+        stage: "finalize",
+        oldCancelSignature: input.oldCancelSignature,
+        error: null,
+        updatedAt: finalizedAt,
+      })
+    );
     const auditChangedFields = input.resolved.changedFields.map(String);
     const auditBeforeValues = { ...input.resolved.beforeValues };
     const auditAfterValues = { ...input.resolved.afterValues };
@@ -1085,26 +1174,35 @@ async function runReplacementUpdate(input: {
     !input.claimed.subscription_id ||
     !input.claimed.subscription_pda
   ) {
-    throw new AppError("CONFLICT", "Recurring payment is missing on-chain subscription records");
+    throw conflict("Recurring payment is missing on-chain subscription records");
   }
   const oldSubscription =
     input.subscription ??
-    (await createPaymentSubscriptionsRepository(input.env, tenantScope(input)).getSubscriptionById({
+    (await createPaymentSubscriptionsRepository(
+      input.env,
+      createTenantScope(input)
+    ).getSubscriptionById({
       subscriptionId: input.claimed.subscription_id,
       organizationId: input.organizationId,
       projectId: input.projectId,
     }));
   if (!oldSubscription) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
+    throw notFound("Subscription");
   }
 
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
+  const recurringRepo = createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  );
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(
+    input.env,
+    createTenantScope(input)
+  );
   const rpc = solanaRpc.createRpc(input.env);
   let attempt = input.attempt;
-  let planCreationSignature = attempt.plan_creation_signature as Signature | null;
-  let authorizationSignature = attempt.authorization_signature as Signature | null;
-  let oldCancelSignature = attempt.old_cancel_signature as Signature | null;
+  let planCreationSignature = parseNullableStoredSignature(attempt.plan_creation_signature);
+  let authorizationSignature = parseNullableStoredSignature(attempt.authorization_signature);
+  let oldCancelSignature = parseNullableStoredSignature(attempt.old_cancel_signature);
   const replacementPeriodStartAt = attempt.created_at;
   const requestedNextDue = replacementNextCollectionDueAt({
     requested: input.request.nextCollectionDueAt,
@@ -1124,7 +1222,7 @@ async function runReplacementUpdate(input: {
   }
   const owner = assertValidAddress(input.resolved.sourceWallet.publicKey, "sourceAddress");
   const destination = assertValidAddress(input.resolved.destinationAddress, "destinationAddress");
-  const mint = assertValidAddress(input.resolved.token, "token") as Address;
+  const mint = assertValidAddress(input.resolved.token, "token");
   const tokenProgram = await resolveMintTokenProgram(rpc, mint);
   const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
   const amountBaseUnits = parseDecimalAmount(input.resolved.amount, sourceTokenAccount.decimals);
@@ -1142,39 +1240,44 @@ async function runReplacementUpdate(input: {
     createdBy: input.createdBy,
   });
   if (attempt.new_plan_id !== plan.id) {
-    attempt = await recurringRepo.updateUpdateAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      newPlanId: plan.id,
-      updatedAt: new Date().toISOString(),
-    });
+    attempt = requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        newPlanId: plan.id,
+        updatedAt: new Date().toISOString(),
+      })
+    );
   }
 
   const programPlanId = parseU64String(plan.program_plan_id, "programPlanId");
   const [planPda] = await subscriptionsProgram.findPlanPda({ owner, planId: programPlanId });
-  plan =
-    (await subscriptionsRepo.updatePlan({
+  plan = requireUpdatedPlan(
+    await subscriptionsRepo.updatePlan({
       planId: plan.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
       planPda,
       updatedAt: new Date().toISOString(),
-    })) ?? plan;
+    })
+  );
 
   if (!planCreationSignature) {
-    attempt = await recurringRepo.updateUpdateAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      stage: "create_plan",
-      updatedAt: new Date().toISOString(),
-    });
+    attempt = requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        stage: "create_plan",
+        updatedAt: new Date().toISOString(),
+      })
+    );
     const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync({
       amount: amountBaseUnits,
       destinations: [destination],
       endTs: 0n,
-      metadataUri: input.resolved.metadataUri ?? "",
+      metadataUri: subscriptionProgramMetadataUri(input.resolved.metadataUri),
       mint,
       owner: sourceSigner,
       periodHours: BigInt(input.resolved.periodHours),
@@ -1190,13 +1293,15 @@ async function runReplacementUpdate(input: {
       sourceSigner,
       instructions: [createPlanInstruction],
     });
-    attempt = await recurringRepo.updateUpdateAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      planCreationSignature,
-      updatedAt: new Date().toISOString(),
-    });
+    attempt = requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        planCreationSignature,
+        updatedAt: new Date().toISOString(),
+      })
+    );
   }
 
   await confirmSubscriptionSignature(
@@ -1208,7 +1313,7 @@ async function runReplacementUpdate(input: {
     commitment: "confirmed",
   });
   if (!onChainPlan.exists) {
-    throw new AppError("TRANSACTION_FAILED", "Subscription plan was not found on-chain");
+    throw transactionFailed("Subscription plan was not found on-chain");
   }
   const planCreatedAt = onChainPlan.data.data.terms.createdAt.toString();
 
@@ -1222,13 +1327,15 @@ async function runReplacementUpdate(input: {
     createdBy: input.createdBy,
   });
   if (attempt.new_subscription_id !== subscription.id) {
-    attempt = await recurringRepo.updateUpdateAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      newSubscriptionId: subscription.id,
-      updatedAt: new Date().toISOString(),
-    });
+    attempt = requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        newSubscriptionId: subscription.id,
+        updatedAt: new Date().toISOString(),
+      })
+    );
   }
 
   const [subscriptionAuthorityAddress] = await subscriptionsProgram.findSubscriptionAuthorityPda({
@@ -1239,8 +1346,8 @@ async function runReplacementUpdate(input: {
     planPda,
     subscriber: owner,
   });
-  subscription =
-    (await subscriptionsRepo.updateSubscription({
+  subscription = requireUpdatedSubscription(
+    await subscriptionsRepo.updateSubscription({
       subscriptionId: subscription.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1248,16 +1355,19 @@ async function runReplacementUpdate(input: {
       subscriptionPda,
       subscriptionAuthorityAddress,
       updatedAt: new Date().toISOString(),
-    })) ?? subscription;
+    })
+  );
 
   if (!authorizationSignature) {
-    attempt = await recurringRepo.updateUpdateAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      stage: "authorize_subscription",
-      updatedAt: new Date().toISOString(),
-    });
+    attempt = requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        stage: "authorize_subscription",
+        updatedAt: new Date().toISOString(),
+      })
+    );
     let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
       rpc,
       subscriptionAuthorityAddress,
@@ -1288,7 +1398,7 @@ async function runReplacementUpdate(input: {
       feePayer,
     });
     if (!subscriptionAuthority.exists) {
-      throw new AppError("TRANSACTION_FAILED", "Subscription authority was not found on-chain");
+      throw transactionFailed("Subscription authority was not found on-chain");
     }
 
     const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({
@@ -1311,13 +1421,15 @@ async function runReplacementUpdate(input: {
       instructions: [subscribeInstruction],
       feePayer,
     });
-    attempt = await recurringRepo.updateUpdateAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      authorizationSignature,
-      updatedAt: new Date().toISOString(),
-    });
+    attempt = requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        authorizationSignature,
+        updatedAt: new Date().toISOString(),
+      })
+    );
   }
 
   await confirmSubscriptionSignature(
@@ -1327,13 +1439,15 @@ async function runReplacementUpdate(input: {
   );
 
   if (!oldCancelSignature) {
-    attempt = await recurringRepo.updateUpdateAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      stage: "cancel_old_subscription",
-      updatedAt: new Date().toISOString(),
-    });
+    attempt = requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        stage: "cancel_old_subscription",
+        updatedAt: new Date().toISOString(),
+      })
+    );
     const oldSourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
@@ -1345,7 +1459,7 @@ async function runReplacementUpdate(input: {
     }
     const cancelInstruction =
       await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
-        planPda: assertValidAddress(input.claimed.plan_pda, "planPda") as Address,
+        planPda: assertValidAddress(input.claimed.plan_pda, "planPda"),
         subscriber: oldSourceSigner,
         subscriptionPda: assertValidAddress(input.claimed.subscription_pda, "subscriptionPda"),
       });
@@ -1357,13 +1471,15 @@ async function runReplacementUpdate(input: {
       sourceSigner: oldSourceSigner,
       instructions: [cancelInstruction],
     });
-    attempt = await recurringRepo.updateUpdateAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      oldCancelSignature,
-      updatedAt: new Date().toISOString(),
-    });
+    attempt = requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        oldCancelSignature,
+        updatedAt: new Date().toISOString(),
+      })
+    );
   }
 
   await confirmSubscriptionSignature(
@@ -1404,38 +1520,45 @@ async function runReplacementUpdate(input: {
 }
 
 async function recordRecurringPaymentUpdateFailure(input: {
-  recurringRepo: PaymentRecurringPaymentsRepository;
+  env: Env;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
   projectId: string;
-  error: unknown;
+  error: Error;
   resetToActive: boolean;
 }): Promise<void> {
   const failedAt = new Date().toISOString();
-  await input.recurringRepo.updateUpdateAttempt({
-    attemptId: input.attempt.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    status: input.resetToActive ? "failed" : "processing",
-    error: activationErrorMessage(input.error),
-    updatedAt: failedAt,
-  });
+  await getDb(input.env).transaction(async (tx) => {
+    const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    requireUpdatedAttempt(
+      await recurringRepo.updateUpdateAttempt({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: input.resetToActive ? "failed" : "processing",
+        error: recurringPaymentErrorMessage(input.error),
+        updatedAt: failedAt,
+      })
+    );
 
-  if (input.resetToActive) {
-    await input.recurringRepo.updateRecurringPayment({
-      recurringPaymentId: input.claimed.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      status: "active",
-      expectedStatus: "updating",
-      updatedAt: failedAt,
-    });
-  }
+    if (input.resetToActive) {
+      const updatedRecurringPayment = await recurringRepo.updateRecurringPayment({
+        recurringPaymentId: input.claimed.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: "active",
+        expectedStatus: "updating",
+        updatedAt: failedAt,
+      });
+      if (updatedRecurringPayment === null)
+        throw conflict("Recurring payment update changed concurrently");
+    }
+  });
 }
 
 async function claimSourceChangingRecurringPaymentUpdate(input: {
-  env: Env;
+  db: DatabaseExecutor;
   organizationId: string;
   projectId: string;
   recurringPayment: PaymentRecurringPaymentRow;
@@ -1443,10 +1566,9 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
   updatedAt: string;
   staleBefore: string;
 }): Promise<PaymentRecurringPaymentRow | null> {
-  return getDb(input.env).transaction(async (tx) => {
-    const locked = await tx
-      .prepare(
-        `SELECT id
+  const locked = await input.db
+    .prepare(
+      `SELECT id
            FROM payment_recurring_payments
           WHERE id = ?
             AND organization_id = ?
@@ -1459,51 +1581,50 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
             AND subscription_id IS NOT DISTINCT FROM ?
             AND next_collection_due_at IS NOT DISTINCT FROM ?
           FOR UPDATE`
-      )
-      .bind(
-        input.recurringPayment.id,
-        input.organizationId,
-        input.projectId,
-        input.recurringPayment.status,
-        input.recurringPayment.updated_at,
-        input.sourceWallet.id,
-        input.sourceWallet.walletId,
-        input.sourceWallet.publicKey,
-        input.recurringPayment.subscription_id,
-        input.recurringPayment.next_collection_due_at
-      )
-      .first<{ id: string }>();
-    if (!locked) return null;
+    )
+    .bind(
+      input.recurringPayment.id,
+      input.organizationId,
+      input.projectId,
+      input.recurringPayment.status,
+      input.recurringPayment.updated_at,
+      input.sourceWallet.id,
+      input.sourceWallet.walletId,
+      input.sourceWallet.publicKey,
+      input.recurringPayment.subscription_id,
+      input.recurringPayment.next_collection_due_at
+    )
+    .first<{ id: string }>();
+  if (!locked) return null;
 
-    if (input.recurringPayment.subscription_id && input.recurringPayment.next_collection_due_at) {
-      const activeAttempt = await createPostgresPaymentSubscriptionsRepository(
-        tx
-      ).getCollectionAttemptByDue({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        subscriptionId: input.recurringPayment.subscription_id,
-        dueAt: input.recurringPayment.next_collection_due_at,
-        statuses: ["pending", "processing", "confirmed"],
-      });
-      if (activeAttempt) return null;
-    }
-
-    await assertNoPendingRecurringCollectionApproval({
-      db: tx,
+  if (input.recurringPayment.subscription_id && input.recurringPayment.next_collection_due_at) {
+    const activeAttempt = await createPostgresPaymentSubscriptionsRepository(
+      input.db
+    ).getCollectionAttemptByDue({
       organizationId: input.organizationId,
       projectId: input.projectId,
-      custodyWalletId: input.sourceWallet.id,
-      recurringPaymentId: input.recurringPayment.id,
-      collectionDueAt: input.recurringPayment.next_collection_due_at,
+      subscriptionId: input.recurringPayment.subscription_id,
+      dueAt: input.recurringPayment.next_collection_due_at,
+      statuses: COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
     });
+    if (activeAttempt) return null;
+  }
 
-    return createPostgresPaymentRecurringPaymentsRepository(tx).claimRecurringPaymentUpdate({
-      recurringPaymentId: input.recurringPayment.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      updatedAt: input.updatedAt,
-      staleBefore: input.staleBefore,
-    });
+  await assertNoPendingRecurringCollectionApproval({
+    db: input.db,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    custodyWalletId: input.sourceWallet.id,
+    recurringPaymentId: input.recurringPayment.id,
+    collectionDueAt: input.recurringPayment.next_collection_due_at,
+  });
+
+  return createPostgresPaymentRecurringPaymentsRepository(input.db).claimRecurringPaymentUpdate({
+    recurringPaymentId: input.recurringPayment.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    updatedAt: input.updatedAt,
+    staleBefore: input.staleBefore,
   });
 }
 
@@ -1524,7 +1645,7 @@ export async function updateRecurringPayment(input: {
   const nowIso = new Date().toISOString();
   assertRecurringPaymentUpdateStatus(input.recurringPayment, nowIso);
 
-  if (input.recurringPayment.status === "pending_activation") {
+  if (isPendingActivationRecurringPaymentStatus(input.recurringPayment.status)) {
     if (input.request.nextCollectionDueAt !== undefined) {
       throw badRequest("nextCollectionDueAt can only be updated after activation");
     }
@@ -1548,9 +1669,15 @@ export async function updateRecurringPayment(input: {
     throw badRequest("firstCollectionAt can only be updated before activation");
   }
 
-  const recurringRepo = createPaymentRecurringPaymentsRepository(input.env, tenantScope(input));
-  const subscriptionsRepo = createPaymentSubscriptionsRepository(input.env, tenantScope(input));
-  const paymentsRepo = createPaymentsRepository(input.env, tenantScope(input));
+  const recurringRepo = createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  );
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(
+    input.env,
+    createTenantScope(input)
+  );
+  const paymentsRepo = createPaymentsRepository(input.env, createTenantScope(input));
   const settled = await recoverOrBlockLifecycleCollection({
     env: input.env,
     recurringRepo,
@@ -1607,44 +1734,49 @@ export async function updateRecurringPayment(input: {
     return settled.recurringPayment;
   }
 
-  const recoveringStaleUpdate = settled.recurringPayment.status === "updating";
+  const recoveringStaleUpdate = isUpdatingRecurringPaymentStatus(settled.recurringPayment.status);
   const claimUpdatedAt = new Date().toISOString();
   const staleBefore = getRecurringPaymentOperationStaleBefore(nowIso);
-  const claimed = sourceChanged
-    ? await claimSourceChangingRecurringPaymentUpdate({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        recurringPayment: settled.recurringPayment,
-        sourceWallet: input.sourceWallet,
-        updatedAt: claimUpdatedAt,
-        staleBefore,
-      })
-    : await recurringRepo.claimRecurringPaymentUpdate({
-        recurringPaymentId: settled.recurringPayment.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        updatedAt: claimUpdatedAt,
-        staleBefore,
-      });
-  if (!claimed) {
-    throw new AppError("CONFLICT", "Recurring payment update is already processing");
-  }
-
-  const attempt = await getOrCreateRecurringPaymentUpdateAttempt({
-    recurringRepo,
-    claimed,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    mode,
-    changedFields: resolved.changedFields.map(String),
-    beforeValues: resolved.beforeValues,
-    afterValues: resolved.afterValues,
-    newSourceCustodyWalletId: sourceChanged ? resolved.sourceWallet.id : null,
-    createdBy: input.createdBy,
-    nowIso,
-    recoveringStaleUpdate,
+  const claimResult = await getDb(input.env).transaction(async (tx) => {
+    const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const claimed = sourceChanged
+      ? await claimSourceChangingRecurringPaymentUpdate({
+          db: tx,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPayment: settled.recurringPayment,
+          sourceWallet: input.sourceWallet,
+          updatedAt: claimUpdatedAt,
+          staleBefore,
+        })
+      : await transactionRepo.claimRecurringPaymentUpdate({
+          recurringPaymentId: settled.recurringPayment.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          updatedAt: claimUpdatedAt,
+          staleBefore,
+        });
+    if (!claimed) return null;
+    const attempt = await getOrCreateRecurringPaymentUpdateAttempt({
+      recurringRepo: transactionRepo,
+      claimed,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      mode,
+      changedFields: resolved.changedFields.map(String),
+      beforeValues: resolved.beforeValues,
+      afterValues: resolved.afterValues,
+      newSourceCustodyWalletId: sourceChanged ? resolved.sourceWallet.id : null,
+      createdBy: input.createdBy,
+      nowIso,
+      recoveringStaleUpdate,
+    });
+    return { claimed, attempt };
   });
+  if (!claimResult) {
+    throw conflict("Recurring payment update is already processing");
+  }
+  const { attempt, claimed } = claimResult;
 
   try {
     if (mode === "metadata_schedule") {
@@ -1675,37 +1807,41 @@ export async function updateRecurringPayment(input: {
       createdBy: input.createdBy,
     });
   } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    getLogger().error(
+      {
+        err: error,
+        organization_id: input.organizationId,
+        project_id: input.projectId,
+        recurring_payment_id: claimed.id,
+        attempt_id: attempt.id,
+      },
+      "Recurring payment update failed"
+    );
     try {
       let currentAttempt = attempt;
       let resetToActive = false;
-      try {
-        const latest = await recurringRepo.getLatestUpdateAttempt({
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          recurringPaymentId: claimed.id,
-          statuses: ["processing"],
-        });
-        currentAttempt = latest ?? attempt;
-        const hasReplacementAuthorization =
-          currentAttempt.mode === "replacement" && Boolean(currentAttempt.authorization_signature);
-        const hasSubmittedMetadataUpdate =
-          currentAttempt.mode === "metadata_schedule" &&
-          Boolean(currentAttempt.plan_update_signature);
-        const transactionFailed = error instanceof AppError && error.code === "TRANSACTION_FAILED";
-        resetToActive =
-          !hasReplacementAuthorization && (!hasSubmittedMetadataUpdate || transactionFailed);
-      } catch (latestAttemptError) {
-        getLogger().error(
-          {
-            error: activationErrorMessage(latestAttemptError),
-            recurring_payment_id: claimed.id,
-          },
-          "Failed to fetch latest recurring payment update attempt after failure"
-        );
+      const latest = await recurringRepo.getLatestUpdateAttempt({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: claimed.id,
+        statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+      });
+      if (latest === null) {
+        throw internalError("Recurring payment update attempt was not found");
       }
+      currentAttempt = latest;
+      const hasReplacementAuthorization =
+        currentAttempt.mode === "replacement" && Boolean(currentAttempt.authorization_signature);
+      const hasSubmittedMetadataUpdate =
+        currentAttempt.mode === "metadata_schedule" &&
+        Boolean(currentAttempt.plan_update_signature);
+      const transactionFailed = error instanceof AppError && error.code === "TRANSACTION_FAILED";
+      resetToActive =
+        !hasReplacementAuthorization && (!hasSubmittedMetadataUpdate || transactionFailed);
 
       await recordRecurringPaymentUpdateFailure({
-        recurringRepo,
+        env: input.env,
         attempt: currentAttempt,
         claimed,
         organizationId: input.organizationId,
@@ -1714,9 +1850,10 @@ export async function updateRecurringPayment(input: {
         resetToActive,
       });
     } catch (journalError) {
+      if (!(journalError instanceof Error)) throw journalError;
       getLogger().error(
         {
-          error: activationErrorMessage(journalError),
+          error: recurringPaymentErrorMessage(journalError),
           recurring_payment_id: claimed.id,
         },
         "Failed to journal/reset recurring payment update after failure"

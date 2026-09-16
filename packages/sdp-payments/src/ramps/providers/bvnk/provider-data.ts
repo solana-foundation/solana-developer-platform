@@ -151,33 +151,6 @@ export function bvnkUnverifiedOnboardingStatus(
 }
 
 /**
- * Normalizes a stored subdivision code to the bare 2-letter form BVNK's
- * `stateCode` field requires. Strips a leading ISO 3166-2 country prefix
- * (e.g. `US-TX` -> `TX`) only when the prefix matches the address's own
- * country code; throws a typed bad-request error when the result is not
- * exactly 2 characters.
- *
- * TODO(zach, 2026-07-02): temporary translation layer. The counterparty
- * location model will be refactored to store both ISO code variants so
- * provider mappers can read the form they need directly — remove this
- * normalization when that lands.
- */
-export function normalizeBvnkStateCode(countryCode: string, subdivisionCode: string): string {
-  const prefixMatch = /^([A-Z]{2})-([A-Z0-9]{2,3})$/.exec(subdivisionCode.toUpperCase());
-  const candidate =
-    prefixMatch && prefixMatch[1] === countryCode.toUpperCase()
-      ? prefixMatch[2]
-      : subdivisionCode.toUpperCase();
-  if (candidate.length !== 2) {
-    throw badRequest("BVNK requires a 2-letter state/subdivision code.", {
-      field: "identity.address.subdivisionCode",
-      value: subdivisionCode,
-    });
-  }
-  return candidate;
-}
-
-/**
  * Builds the caller-defined BVNK off-ramp channel reference.
  *
  * The route pre-generates the SDP payment transfer id before creating the BVNK

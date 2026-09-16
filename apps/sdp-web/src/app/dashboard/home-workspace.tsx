@@ -1,9 +1,15 @@
 "use client";
 
-import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
-import { ArrowLeftRight, Coins, ExternalLink } from "lucide-react";
+import type {
+  CustodyWalletTokenBalance,
+  PaymentsDashboardWallet,
+  PaymentTransferStatus,
+  SolanaCluster,
+  TokenTransactionStatus,
+} from "@sdp/types";
+import { ArrowLeftRightIcon, CoinsIcon, ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/wallets/section-entry";
 import { TokenMark } from "@/components/token-mark";
@@ -22,12 +28,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { readApiErrorMessage } from "@/lib/api-error";
-import {
-  isQuickStartDismissed,
-  quickStartKey,
-  readQuickStart,
-  subscribeQuickStart,
-} from "@/lib/dashboard-quick-start";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -46,7 +46,6 @@ import { fetchHomeActivity } from "./home-workspace.data";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
-  formatStatus,
   resolveTokenByMint,
   resolveTransferTokenLabel,
   statusMessageKey,
@@ -54,6 +53,7 @@ import {
 } from "./payments/payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
 import { tokenActivityHref } from "./tokens/holdings-links";
+import { useHomeQuickStartPending } from "./use-home-quick-start";
 
 interface HomeWorkspaceProps {
   totalBalance: number | null;
@@ -131,29 +131,24 @@ function ActivityAddress({
       className="flex min-w-0 max-w-full items-center gap-1 text-primary underline underline-offset-2"
     >
       <TruncatedTableText value={row.address} className={`min-w-0 ${className ?? "truncate"}`} />
-      <ExternalLink className="size-3 shrink-0" aria-hidden />
+      <ExternalLinkIcon className="size-3 shrink-0" aria-hidden />
     </a>
   );
 }
 
-/**
- * Exception-only status marker. Success is the norm in this digest, so confirmed
- * rows stay quiet and anything else — failed, pending, processing — gets the same
- * badge variants the payments Transactions table uses. Badging every confirmed
- * row would drown the failed ones this exists to surface.
- */
-function ActivityStatusBadge({ status }: { status: string }) {
+function ActivityStatusBadge({
+  status,
+}: {
+  status: PaymentTransferStatus | TokenTransactionStatus;
+}) {
   const t = useTranslations();
   const variant = statusVariant(status);
-  if (!status || variant === "success") {
+  if (variant === "success") {
     return null;
   }
-  // Known statuses use the transactions catalog keys so the badge localizes;
-  // an unknown one falls back to the raw title-cased status.
-  const messageKey = statusMessageKey(status);
   return (
     <Badge variant={variant} className="shrink-0">
-      {messageKey ? t(messageKey) : formatStatus(status)}
+      {t(statusMessageKey(status))}
     </Badge>
   );
 }
@@ -168,7 +163,7 @@ function ActivityStatusBadge({ status }: { status: string }) {
  */
 function ActivityCategoryMark({ sourceKind }: { sourceKind: HomeActivityRow["sourceKind"] }) {
   const t = useTranslations();
-  const Icon = sourceKind === "issuance" ? Coins : ArrowLeftRight;
+  const Icon = sourceKind === "issuance" ? CoinsIcon : ArrowLeftRightIcon;
   return (
     <>
       <Icon className="size-3.5 shrink-0 text-tertiary" aria-hidden="true" />
@@ -557,16 +552,8 @@ export function HomeWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const cluster = useSolanaCluster();
-  const { dashboardAccess, flags, dashboardCacheScope, initialQuickStartStep, sdpEnvironment } =
-    useDashboardWorkspace();
-  const progressKey = quickStartKey(dashboardCacheScope);
-  const quickStartFinished = useSyncExternalStore(
-    subscribeQuickStart,
-    () =>
-      isQuickStartDismissed(progressKey) ||
-      readQuickStart(progressKey, initialQuickStartStep) === "done",
-    () => initialQuickStartStep === "done"
-  );
+  const { dashboardAccess, flags } = useDashboardWorkspace();
+  const quickStartPending = useHomeQuickStartPending();
   const custodyEnabled = flags.custody;
   const issuanceEnabled = flags.issuance;
   const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
@@ -626,12 +613,8 @@ export function HomeWorkspace({
 
   return (
     <div className="w-full space-y-8 py-2">
-      <SectionEntry>
-        {heroState.kind !== "populated" &&
-        sdpEnvironment === "sandbox" &&
-        !quickStartFinished &&
-        initialQuickStartStep === "api-key" &&
-        dashboardAccess.capabilities.canManageApiKeys ? null : (
+      {heroState.kind === "populated" || !quickStartPending ? (
+        <SectionEntry>
           <BalanceHero
             {...balancePresentation}
             totalBalanceError={totalBalanceError}
@@ -646,8 +629,8 @@ export function HomeWorkspace({
             canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
             canManageCustody={custodyEnabled && dashboardAccess.capabilities.canManageCustody}
           />
-        )}
-      </SectionEntry>
+        </SectionEntry>
+      ) : null}
 
       <SectionEntry delay={0.08}>
         <div className="space-y-4">

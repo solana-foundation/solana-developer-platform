@@ -22,8 +22,4 @@ describe("getRampTransferState", () => {
       expect(state.cancelable && state.terminal).toBe(false);
     }
   );
-
-  it("defaults a missing status to non-cancelable and non-terminal", () => {
-    expect(getRampTransferState(undefined)).toEqual({ cancelable: false, terminal: false });
-  });
 });

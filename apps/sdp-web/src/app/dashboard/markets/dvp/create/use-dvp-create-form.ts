@@ -172,7 +172,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   // Both legs start unselected — the trade's whole point is choosing them.
   const asset = useDvpLeg(context.tokens, false);
   const cash = useDvpLeg(cashOptions, false);
-  const { error, submit: send, submitting } = useDvpCreateSubmit();
+  const { error, submit: send, submitting } = useDvpCreateSubmit(cluster);
 
   const { values, setField } = useZodForm(createFormSchema, {
     partyA: { mode: "wallet", walletId: "" },

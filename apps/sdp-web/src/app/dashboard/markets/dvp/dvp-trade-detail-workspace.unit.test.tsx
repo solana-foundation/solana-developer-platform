@@ -8,7 +8,7 @@
  * endpoint with the side, so each card's button names its own leg.
  */
 
-import { fireEvent, render, within } from "@testing-library/react";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -20,6 +20,7 @@ import {
   ownParty,
   THIRD_ADDRESS,
   testLeg,
+  testParty,
   testTrade,
 } from "./dvp.fixtures";
 import type { DvpTrade } from "./dvp-trade";
@@ -38,6 +39,7 @@ vi.stubGlobal(
 );
 afterEach(() => {
   document.body.innerHTML = "";
+  vi.restoreAllMocks();
 });
 
 /** The page with the on-chain details opened, as text. */
@@ -66,6 +68,90 @@ function renderDetail(value: DvpTrade): string {
 }
 
 describe("DvpTradeDetailWorkspace", () => {
+  it.each(["fund", "reclaim"] as const)(
+    "shows and uses the server-selected exact wallet for %s",
+    async (action) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+      const value = trade({
+        status: action === "reclaim" ? "funded" : "created",
+        legs: {
+          a: testLeg({
+            funding: action === "reclaim" ? FUNDED : null,
+            outcome: action === "reclaim" ? "funded" : "awaiting",
+            party: ownParty({
+              wallet: { id: "cwlt_read", name: "Read desk" },
+              actionWallet: {
+                id: "cwlt_execute",
+                name: "Execution desk",
+                isRuntimeExecutionAllowed: true,
+              },
+            }),
+          }),
+          b: testLeg(),
+        },
+      });
+      const { container } = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+        </I18nProvider>
+      );
+
+      expect(
+        within(container).getByRole("link", { name: "Execution desk" }).getAttribute("href")
+      ).toBe("/dashboard/wallets/cwlt_execute");
+      expect(container.textContent).not.toContain("Read desk");
+      fireEvent.click(
+        within(container).getByRole("button", { name: action === "fund" ? "Fund" : "Reclaim" })
+      );
+
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          `/api/dashboard/markets/dvp/trades/dvp_1/${action}`,
+          expect.objectContaining({ body: JSON.stringify({ side: "a", walletId: "cwlt_execute" }) })
+        )
+      );
+    }
+  );
+
+  describe.each(["fund", "reclaim"] as const)("%s admission", (action) => {
+    it.each([
+      null,
+      { id: "cwlt_disabled", name: "Disabled desk", isRuntimeExecutionAllowed: false },
+    ])(
+      "keeps the party readable but prevents signing with an unavailable action wallet: %j",
+      (actionWallet) => {
+        const fetchMock = vi.spyOn(globalThis, "fetch");
+        const value = trade({
+          legs: {
+            a: testLeg({
+              party: ownParty({ actionWallet }),
+              funding: action === "reclaim" ? FUNDED : null,
+              outcome: action === "reclaim" ? "funded" : "awaiting",
+            }),
+            b: testLeg(),
+          },
+        });
+        const { container } = render(
+          <I18nProvider locale="en" messages={getMessages("en")}>
+            <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+          </I18nProvider>
+        );
+
+        const button = within(container).getByRole("button", {
+          name: action === "fund" ? "Fund" : "Reclaim",
+        });
+        expect(button.hasAttribute("disabled")).toBe(true);
+        expect(container.textContent).toContain("Signing is disabled");
+        expect(container.textContent).not.toContain("for this wallet");
+        expect(
+          within(container).getByRole("link", { name: actionWallet?.name ?? "Fixture Desk" })
+        ).toBeTruthy();
+        fireEvent.click(button);
+        expect(fetchMock).not.toHaveBeenCalled();
+      }
+    );
+  });
+
   // The escrow address IS the counterparty's whole integration, so it has to be
   // reachable for both legs: behind the on-chain details, one click away.
   it("publishes an escrow address for each leg in the on-chain details", () => {
@@ -73,6 +159,119 @@ describe("DvpTradeDetailWorkspace", () => {
 
     expect(text).toContain(LEG_ESCROW_A);
     expect(text).toContain(LEG_ESCROW_B);
+  });
+
+  // The settlement authority is an SDP-held key nobody picks or acts on. It
+  // stays on the API response for ops, not on the page.
+  it("does not list the settlement authority in the on-chain details", () => {
+    const value = trade();
+    const text = renderDetailWithOnChainOpen(value);
+
+    expect(text).not.toContain("Settlement authority");
+    expect(text).not.toContain(value.settlementAuthority);
+  });
+
+  // The link is the transfer this organization sent, so it is labelled as that
+  // and not as the leg's funding, which anyone may have paid.
+  it("labels a funded leg's link as the transfer sent from the caller's wallet", () => {
+    const html = renderDetail(
+      trade({
+        status: "funded",
+        legs: {
+          a: testLeg({
+            party: ownParty(),
+            funding: FUNDED,
+            fundingSignature: "sig_funding_receipt",
+            outcome: "funded",
+          }),
+          b: testLeg({ funding: FUNDED, outcome: "funded" }),
+        },
+      })
+    );
+
+    expect(html).toContain("Sent from your wallet");
+    expect(html).toContain("tx/sig_funding_receipt?cluster=devnet");
+  });
+
+  // Only the leg's own party can sign a reclaim, and only a deposit can come back.
+  describe("reclaim", () => {
+    const held = (amount: string) => ({
+      observedAmount: amount,
+      funded: amount === "1000",
+      surplus: null,
+      frozen: false,
+    });
+
+    // Each row is a state the API can produce: the status, and each leg's
+    // funding and outcome as the server derives them for that status.
+    it.each([
+      ["a funded leg the caller holds", "funded", ownParty(), held("1000"), "funded", true],
+      [
+        "a partly funded leg the caller holds",
+        "partially_funded",
+        ownParty(),
+        held("400"),
+        "partial",
+        true,
+      ],
+      // No expiry gate on chain, and an expired trade is where it matters most.
+      [
+        "an expired trade's leg the caller holds",
+        "expired",
+        ownParty(),
+        held("1000"),
+        "expired",
+        true,
+      ],
+      ["the counterparty's leg", "funded", testParty(), held("1000"), "funded", false],
+      ["an empty escrow", "created", ownParty(), held("0"), "awaiting", false],
+      // The escrows are closed: no observed balance, and the leg was delivered.
+      ["a settled trade", "settled", ownParty(), null, "delivered", false],
+    ] as const)("on %s: offered=%s", (_label, status, party, funding, outcome, offered) => {
+      const html = renderDetail(
+        trade({
+          status,
+          legs: {
+            a: testLeg({ party, funding, outcome }),
+            b: testLeg({ funding, outcome }),
+          },
+        })
+      );
+
+      expect(html.includes(">Reclaim<")).toBe(offered);
+    });
+  });
+
+  // A reclaim racing a settle can only make one of them fail, so the quiet
+  // footer action waits while anything is in flight.
+  it("holds Reclaim while a settle is still confirming", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(() => new Promise<Response>(() => {}));
+    try {
+      const { container } = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <DvpTradeDetailWorkspace
+            cluster="devnet"
+            trade={trade({
+              status: "funded",
+              settlementAvailability: "available",
+              legs: {
+                a: testLeg({ party: ownParty(), funding: FUNDED, outcome: "funded" }),
+                b: testLeg({ funding: FUNDED, outcome: "funded" }),
+              },
+            })}
+          />
+        </I18nProvider>
+      );
+      const view = within(container);
+      expect(view.getByRole("button", { name: "Reclaim" })).not.toHaveProperty("disabled", true);
+
+      fireEvent.click(view.getByRole("button", { name: "Settle" }));
+
+      expect(await view.findByRole("button", { name: "Reclaim" })).toHaveProperty("disabled", true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   // Position, not count: what matters is that the control falls inside OUR

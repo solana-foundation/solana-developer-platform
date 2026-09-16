@@ -26,7 +26,7 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
-import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
   badRequest,
@@ -78,7 +78,12 @@ import {
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
-import { earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
+import {
+  earnRuntime,
+  getEarnRepository,
+  resolveKeylessEarnEnvironment,
+  resolveSdpEnvironment,
+} from "../context";
 import {
   earnVaultDepositParamsSchema,
   type earnVaultDepositPreviewSchema,
@@ -120,17 +125,17 @@ import { hydrateVaultPositions } from "./vault-position-hydration";
  * rate instead of assuming one.
  *
  * A READ that takes the deposit's own money-in gates: the quote exists only
- * to open a NEW position, so surfacing, entitlement, admission and the
- * environment capability all apply exactly as they do on the deposit —
- * but no wallet, no policy gate and no idempotency key, because it moves
- * nothing and holds nothing.
+ * to open a NEW position, so surfacing, admission, and environment capability
+ * always apply. Entitlement applies only when a credential supplies an
+ * organization. There is no wallet, policy gate, persistence, or idempotency
+ * key because the preview moves and holds nothing.
  */
 export async function createEarnVaultDepositPreview(
   c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const environment = resolveSdpEnvironment(c);
-  const auth = getAuth(c);
+  const environment = resolveKeylessEarnEnvironment(c);
+  const auth = getOptionalAuth(c);
 
   const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
   if (!strategy || strategy.environment !== environment) {
@@ -156,14 +161,16 @@ export async function createEarnVaultDepositPreview(
   }
 
   assertEarnProviderSurfaced(provider);
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    auth.organizationId,
-    "earn",
-    provider,
-    environment === "sandbox"
-  );
+  if (auth) {
+    await assertProviderAvailable(
+      c.env,
+      getDb(c.env),
+      auth.organizationId,
+      "earn",
+      provider,
+      environment === "sandbox"
+    );
+  }
   assertStrategyDepositable(strategy, environment);
   // The exposure cap, evaluated WITHOUT throwing (the deposit's 409 becomes a
   // blocking issue here, ADR 0004 "previews are the contract"), but only after
@@ -171,7 +178,7 @@ export async function createEarnVaultDepositPreview(
   // caller refused by a cheaper gate hears that reason. In shadow mode the
   // verdict is emitted and NOT reported, so the preview never claims a block
   // the deposit would not apply. An unreadable exposure is a 503 here too.
-  const exposure = await checkVaultExposure(c, strategy, body.amount);
+  const exposure = await checkVaultExposure(c, strategy, body.amount, { environment });
 
   const deadline = createVaultDeadline();
   const client = resolveVaultDirectClient(c.env, provider, deadline);
@@ -181,10 +188,13 @@ export async function createEarnVaultDepositPreview(
 
   let quote: EarnVaultDepositQuote;
   try {
-    quote = await client.quoteVaultDeposit(earnRuntime(c), {
-      providerReference: strategy.provider_reference,
-      amount: body.amount,
-    });
+    quote = await client.quoteVaultDeposit(
+      { env: c.env, environment },
+      {
+        providerReference: strategy.provider_reference,
+        amount: body.amount,
+      }
+    );
   } catch (error) {
     // A refused quote is the CALLER's, in the provider's own words — the SAME
     // code-shape mapping the deposit build applies (vault-refusals.ts), so the

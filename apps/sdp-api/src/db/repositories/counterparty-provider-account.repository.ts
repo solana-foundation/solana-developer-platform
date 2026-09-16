@@ -52,15 +52,16 @@ export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadata
 export const bvnkCustomerProviderAccountMetadataSchema = z.object({
   status: z.string().optional(),
   verificationStatus: z.enum(["init", "pending", "completed", "failed"]).optional(),
-  contactId: z.string().optional(),
+  residenceCountryCode: z.enum(COUNTRY_CODES).optional(),
   agreements: z
     .object({
-      relayedAt: z.string().datetime(),
       entries: z.record(
         z.string().min(1),
         z.object({
           status: z.string().min(1),
           respondedAt: z.string().datetime().optional(),
+          name: z.string().min(1),
+          description: z.string().min(1),
         })
       ),
     })

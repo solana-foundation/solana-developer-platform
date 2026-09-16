@@ -1,6 +1,12 @@
 import { signature } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { type DvpTradeExpectation, type DvpTradeObservation, deriveDvpTradeState } from "./observe";
+import type { DvpTradeRow } from "@/db/repositories";
+import {
+  type DvpTradeExpectation,
+  type DvpTradeObservation,
+  deriveDvpSettlementAvailability,
+  deriveDvpTradeState,
+} from "./observe";
 
 const NOW_MS = 1_800_000_000_000;
 const NOW_SECONDS = Math.floor(NOW_MS / 1000);
@@ -14,6 +20,8 @@ function observation(overrides: Partial<DvpTradeObservation> = {}): DvpTradeObse
     legA: { exists: true, amount: 0n, frozen: false },
     legB: { exists: true, amount: 0n, frozen: false },
     blockHeight: 1_000n,
+    // The cluster's own clock, which expiry is judged by.
+    clusterUnixTimestamp: BigInt(NOW_SECONDS),
     closeResolution: null,
     ...overrides,
   };
@@ -240,9 +248,9 @@ describe("deriveDvpTradeState", () => {
       expect(result.status).toBe("expired");
     });
 
-    // A funded trade past expiry still holds both parties' money and needs
-    // unwinding. Writing it off as expired would hide that.
-    it("keeps a fully funded trade funded past expiry", () => {
+    // The program refuses Settle past expiry, so "funded" would offer an action
+    // that can only fail. The balances stay visible through the leg outcomes.
+    it("expires a fully funded trade past its expiry", () => {
       const result = deriveDvpTradeState(
         observation({
           legA: { exists: true, amount: 1000n, frozen: false },
@@ -251,7 +259,41 @@ describe("deriveDvpTradeState", () => {
         trade({ expiryTimestamp: String(NOW_SECONDS - 1) }),
         NOW_MS
       );
+      expect(result.status).toBe("expired");
+    });
+
+    // `settle_dvp.rs` checks `now <= expiry`, so the expiry second still settles.
+    it("keeps a fully funded trade funded at its exact expiry second", () => {
+      const result = deriveDvpTradeState(
+        observation({
+          legA: { exists: true, amount: 1000n, frozen: false },
+          legB: { exists: true, amount: 2000n, frozen: false },
+        }),
+        trade({ expiryTimestamp: String(NOW_SECONDS) }),
+        NOW_MS + 999
+      );
       expect(result.status).toBe("funded");
+    });
+
+    // A host clock ahead of the cluster must not expire a trade the program
+    // would still settle: the observation's cluster clock decides, not nowMs.
+    it("judges expiry by the cluster clock, not the host clock", () => {
+      const result = deriveDvpTradeState(
+        observation({
+          legA: { exists: true, amount: 1000n, frozen: false },
+          legB: { exists: true, amount: 2000n, frozen: false },
+        }),
+        trade({ expiryTimestamp: String(NOW_SECONDS + 10) }),
+        NOW_MS + 3_600_000
+      );
+      expect(result.status).toBe("funded");
+
+      const behind = deriveDvpTradeState(
+        observation({ clusterUnixTimestamp: BigInt(NOW_SECONDS + 11) }),
+        trade({ expiryTimestamp: String(NOW_SECONDS + 10) }),
+        NOW_MS - 3_600_000
+      );
+      expect(behind.status).toBe("expired");
     });
   });
 
@@ -269,5 +311,62 @@ describe("deriveDvpTradeState", () => {
     // One unit short of a u64 max target. A float comparison would call this equal.
     expect(result.status).toBe("partially_funded");
     expect(result.overFunded).toBe(false);
+  });
+});
+
+describe("deriveDvpSettlementAvailability", () => {
+  function row(
+    overrides: Partial<
+      Pick<DvpTradeRow, "status" | "earliestSettlementTimestamp" | "observedClusterTimestamp">
+    >
+  ) {
+    return {
+      status: "funded" as const,
+      earliestSettlementTimestamp: null,
+      observedClusterTimestamp: String(NOW_SECONDS),
+      ...overrides,
+    };
+  }
+
+  it("is available for a funded trade with no earliest time", () => {
+    expect(deriveDvpSettlementAvailability(row({}))).toBe("available");
+  });
+
+  // `settle_dvp.rs`: `now >= earliest`, so the earliest second itself settles.
+  it("is too early before the earliest time, and available from that second", () => {
+    const earliest = String(NOW_SECONDS + 1);
+    expect(deriveDvpSettlementAvailability(row({ earliestSettlementTimestamp: earliest }))).toBe(
+      "too_early"
+    );
+    expect(
+      deriveDvpSettlementAvailability(
+        row({ earliestSettlementTimestamp: earliest, observedClusterTimestamp: earliest })
+      )
+    ).toBe("available");
+  });
+
+  it.each([
+    ["created", "unfunded"],
+    ["partially_funded", "unfunded"],
+    ["expired", "expired"],
+  ] as const)("reads %s as %s", (status, expected) => {
+    expect(deriveDvpSettlementAvailability(row({ status }))).toBe(expected);
+  });
+
+  it.each([
+    "creating",
+    "create_failed",
+    "settled",
+    "cancelled",
+    "rejected",
+    "closed_unknown",
+  ] as const)("has no availability for a %s trade", (status) => {
+    expect(deriveDvpSettlementAvailability(row({ status }))).toBeNull();
+  });
+
+  // Never guessed from a host clock: until an observation carries the cluster's,
+  // a funded trade's window is unknown.
+  it("is unknown for a funded trade never observed with a cluster clock", () => {
+    expect(deriveDvpSettlementAvailability(row({ observedClusterTimestamp: null }))).toBeNull();
   });
 });

@@ -4,10 +4,7 @@ import {
   type PaymentTransferStatus,
 } from "@sdp/types";
 
-export function getRampTransferState(status: PaymentTransferStatus | undefined) {
-  if (status === undefined) {
-    return { cancelable: false, terminal: false };
-  }
+export function getRampTransferState(status: PaymentTransferStatus) {
   return {
     cancelable: isCancelableRampTransferStatus(status),
     terminal: isTerminalRampTransferStatus(status),

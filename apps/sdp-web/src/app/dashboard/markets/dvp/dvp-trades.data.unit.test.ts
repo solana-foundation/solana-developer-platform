@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DVP_TRADES_PAGE_SIZE,
+  fetchDvpInboundTrades,
   fetchDvpTrade,
   fetchDvpTrades,
   isNotFound,
@@ -60,10 +61,27 @@ describe("fetchDvpTrades", () => {
   it("carries the status and search filters on the query string", async () => {
     const request = ok({ data: { trades: [] } });
 
-    await fetchDvpTrades(request, { statuses: ["created", "funded"], q: "USDC" });
+    await fetchDvpTrades(request, {
+      statuses: ["created", "funded"],
+      settlementAvailability: null,
+      q: "USDC",
+    });
 
     expect(request).toHaveBeenCalledWith(
       `/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}&status=created%2Cfunded&q=USDC`
+    );
+  });
+
+  // "Ready to settle" is what the program will settle now: funded AND inside the
+  // window by the cluster clock, which only the API can judge.
+  it("narrows Ready to settle by the API's settlement availability", async () => {
+    const request = ok({ data: { trades: [] } });
+    const { filters } = parseDvpTradesFilters({ status: "ready" });
+
+    await fetchDvpTrades(request, filters);
+
+    expect(request).toHaveBeenCalledWith(
+      `/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}&status=funded&settlementAvailability=available`
     );
   });
 
@@ -72,7 +90,7 @@ describe("fetchDvpTrades", () => {
   it("omits the filter params when unfiltered", async () => {
     const request = ok({ data: { trades: [] } });
 
-    await fetchDvpTrades(request, { statuses: null, q: null });
+    await fetchDvpTrades(request, { statuses: null, settlementAvailability: null, q: null });
 
     expect(request).toHaveBeenCalledWith(`/v1/dvp/trades?limit=${DVP_TRADES_PAGE_SIZE}`);
   });
@@ -181,6 +199,42 @@ describe("isNotFound", () => {
  * a render exception and a server error page.
  */
 describe("a malformed but successful response", () => {
+  it.each([
+    { id: "", name: "Treasury", isRuntimeExecutionAllowed: true },
+    { id: "cw_1", name: { label: "Treasury" }, isRuntimeExecutionAllowed: true },
+    { id: "cw_1", name: null, isRuntimeExecutionAllowed: "true" },
+    { id: "cw_1", name: null },
+  ])("rejects an invalid action wallet on every trade read: %j", async (actionWallet) => {
+    const trade = tradeFixture({
+      yourSide: "a",
+      legs: { a: { party: { actionWallet } }, b: {} },
+    });
+    const request = vi.fn(async () => Response.json({ data: { trade, trades: [trade] } }));
+    const detail = await fetchDvpTrade(request, "dvp_1");
+    expect(detail.trade).toBeNull();
+    expect(detail.error).toBeTruthy();
+    expect((await fetchDvpTrades(request, UNFILTERED_DVP_TRADES)).trades).toEqual([]);
+    expect(await fetchDvpInboundTrades(request)).toEqual([]);
+  });
+
+  it.each([
+    null,
+    { id: "cw_config", name: "Treasury", isRuntimeExecutionAllowed: true },
+    { id: "cw_connection", name: null, isRuntimeExecutionAllowed: false },
+  ])("preserves a valid or unavailable action wallet: %j", async (actionWallet) => {
+    const trade = tradeFixture({ yourSide: "a", legs: { a: { party: { actionWallet } }, b: {} } });
+    const request = vi.fn(async () => Response.json({ data: { trade, trades: [trade] } }));
+    expect((await fetchDvpTrade(request, "dvp_1")).trade?.legs.a.party.actionWallet).toEqual(
+      actionWallet
+    );
+    expect(
+      (await fetchDvpTrades(request, UNFILTERED_DVP_TRADES)).trades[0].legs.a.party.actionWallet
+    ).toEqual(actionWallet);
+    expect((await fetchDvpInboundTrades(request))[0].legs.a.party.actionWallet).toEqual(
+      actionWallet
+    );
+  });
+
   it.each([
     ["an empty object", {}],
     ["no legs", { id: "dvp_1", status: "created" }],

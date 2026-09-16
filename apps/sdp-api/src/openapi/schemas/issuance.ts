@@ -957,6 +957,15 @@ export const mintRequestSchema = mintSchemaBase
 
 export const deployTokenRequestSchema = deployTokenSchemaBase
   .extend({
+    authorityCustodyWalletIds: withOpenApi(deployTokenSchemaBase.shape.authorityCustodyWalletIds, {
+      description:
+        "Optional exact SDP Wallet IDs for initial metadata, freeze, and permanent-delegate authorities. Omitted roles retain their template defaults. The deployment wallet holds mint authority. Freeze and permanentDelegate require the corresponding token capability. Each selected wallet must be in scope with tokens:write permission; the metadata wallet signs any metadata URI follow-up.",
+      example: {
+        metadata: "cwlt_metadata",
+        freeze: "cwlt_freeze",
+        permanentDelegate: "cwlt_recovery",
+      },
+    }),
     signingCustodyWalletId: withOpenApi(deployTokenSchemaBase.shape.signingCustodyWalletId, {
       description:
         "Optional exact SDP Wallet ID. Overrides the wallet selected on the pending draft for this direct deployment.",

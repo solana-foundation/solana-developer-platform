@@ -60,3 +60,63 @@ export const DVP_LEG_OUTCOMES = [
   "closed",
 ] as const;
 export type DvpLegOutcome = (typeof DVP_LEG_OUTCOMES)[number];
+
+/**
+ * Whether a DvP trade can settle, derived by the API from the cluster clock read
+ * with the trade's last observation. The program judges `earliest <= now <=
+ * expiry` by its own `Clock`, so this is the one answer the status badge, the
+ * list filter and the Settle action all read, never a host or browser clock.
+ */
+export const DVP_SETTLEMENT_AVAILABILITY = [
+  /** Both legs funded and inside the window: Settle will be accepted. */
+  "available",
+  /** At least one leg still short of its target. */
+  "unfunded",
+  /** Both legs funded, but the earliest settlement time is still ahead. */
+  "too_early",
+  /** Past expiry: only Cancel (or a reclaim) can move the money. */
+  "expired",
+] as const;
+export type DvpSettlementAvailability = (typeof DVP_SETTLEMENT_AVAILABILITY)[number];
+
+/**
+ * Why a request to act on one DvP leg (fund it, or reclaim it) was refused, sent
+ * as `error.details.reason`.
+ *
+ * The message carries ids and addresses for logs; a client names the problem in
+ * its own words from this code instead of relaying that message.
+ */
+export const DVP_LEG_REFUSAL = {
+  /** The trade is past the point where funding means anything. */
+  tradeNotFundable: "dvp_trade_not_fundable",
+  tradeNotOnChain: "dvp_trade_not_on_chain",
+  /** The account at the trade's address carries terms the row did not record. */
+  termsMismatch: "dvp_terms_mismatch",
+  escrowMissing: "dvp_escrow_missing",
+  /** The escrow is not the trade's token account (owner, mint or program). */
+  escrowMismatch: "dvp_escrow_mismatch",
+  escrowFrozen: "dvp_escrow_frozen",
+  legAlreadyFunded: "dvp_leg_already_funded",
+  mintUnreadable: "dvp_mint_unreadable",
+  /** The paying wallet has no token account for the leg's mint. */
+  walletHoldsNoToken: "dvp_wallet_holds_no_token",
+  walletBalanceShort: "dvp_wallet_balance_short",
+  /** A deposit landed between the balance read and the send. */
+  escrowBalanceChanged: "dvp_escrow_balance_changed",
+  legFundingInProgress: "dvp_leg_funding_in_progress",
+  /** The trade is closed, so its escrows are gone and there is nothing to pull back. */
+  tradeNotReclaimable: "dvp_trade_not_reclaimable",
+  /** The leg's escrow holds nothing. */
+  nothingToReclaim: "dvp_leg_nothing_to_reclaim",
+  /**
+   * The custody wallet resolved for the side no longer signs as that side's
+   * party address, and the program accepts no other signer.
+   */
+  signerNotParty: "dvp_signer_not_party",
+  /**
+   * The leg's mint carries a transfer hook, whose extra accounts SDP does not
+   * resolve, so the refund transfer would be refused by the token program.
+   */
+  transferHookUnsupported: "dvp_transfer_hook_unsupported",
+} as const;
+export type DvpLegRefusalReason = (typeof DVP_LEG_REFUSAL)[keyof typeof DVP_LEG_REFUSAL];

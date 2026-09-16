@@ -9,7 +9,7 @@ import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { formatRelativeTime } from "../../../activity-format-utils";
-import { resolveTransferFlow, resolveTransferTypeLabel } from "../../payments-overview.utils";
+import { formatPaymentTransferType, resolveTransferFlow } from "../../payments-overview.utils";
 import { fetchTransfers } from "../../payments-workspace.data";
 
 const RECENT_TRANSFERS_MAX_ROWS = 5;
@@ -106,7 +106,7 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
                 </>
               ) : null}
               <span className="min-w-0 flex-1 truncate text-sm text-secondary">
-                {resolveTransferTypeLabel(transfer.type, t)}
+                {formatPaymentTransferType(transfer.type, t)}
               </span>
               {flow.send || flow.receive ? (
                 <span className="flex shrink-0 items-center gap-1.5 text-sm">

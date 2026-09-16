@@ -1,19 +1,6 @@
-import type {
-  FrozenAccount,
-  PaymentsDashboardWallet,
-  Token,
-  TokenAllowlistEntry,
-  TokenTransaction,
-} from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
-export type TokenManagementTab =
-  | "overview"
-  | "permissions"
-  | "extensions"
-  | "compliance"
-  | "metadata"
-  | "fund-management";
 export type AdminAction =
   | "update-metadata"
   | "mint"
@@ -68,25 +55,6 @@ export interface ActionConfirmationState {
     >
   > &
     Pick<RunActionOptions, "onSuccess" | "confirmationDetails" | "confirmationWarning">;
-}
-
-export interface TokenManagementWorkspaceProps {
-  token: Token;
-  tokenError: string | null;
-  authorityWallets: PaymentsDashboardWallet[];
-  authorityWalletsError: string | null;
-  transactions: TokenTransaction[];
-  transactionsError: string | null;
-  transactionsTotal: number | null;
-  transactionsHasMore: boolean;
-  allowlistEntries: TokenAllowlistEntry[];
-  allowlistError: string | null;
-  allowlistTotal: number | null;
-  allowlistHasMore: boolean;
-  frozenAccounts: FrozenAccount[];
-  frozenAccountsError: string | null;
-  frozenAccountsTotal: number | null;
-  frozenAccountsHasMore: boolean;
 }
 
 export interface MetadataFormState {
@@ -165,27 +133,13 @@ export interface AllowlistFormState {
   label: string;
 }
 
-// Row IDs are a closed set: `getPermissionRows` / `getExtensionRows` produce
-// them and the icon maps in token-settings-section consume them. Keeping these
-// as literal unions makes the two sides sync at the type level — adding or
-// renaming a row forces the producer, the union, and the icon map to agree.
+// Row IDs are a closed set shared by the permission producer and presentation.
+// Adding or renaming a row forces both sides to stay in sync.
 export type PermissionRowId =
   | "mint-authority"
   | "freeze-authority"
   | "metadata-authority"
   | "permanent-delegate";
-
-export type ExtensionRowId =
-  | "template"
-  | "control-list"
-  | "mintable"
-  | "freezable"
-  | "default-account-state"
-  | "transfer-fee"
-  | "scaled-ui"
-  | "transfer-hook"
-  | "interest-bearing"
-  | "non-transferable";
 
 /**
  * Whether an authority address is held by an SDP custody wallet (`sdp`), an
@@ -203,11 +157,4 @@ export interface PermissionRow {
   editDisabledReason?: string | null;
   removalDisabledReason?: string | null;
   controlStatus?: PermissionControlStatus;
-}
-
-export interface ExtensionRow {
-  id: ExtensionRowId;
-  title: string;
-  helper: string;
-  value: string;
 }

@@ -88,9 +88,13 @@ export function assertStrategyDepositable(
 export async function assertVaultDepositAdmissible(
   c: AppContext,
   strategy: EarnStrategyRow,
-  amount?: string
+  amount?: string,
+  options: {
+    environment?: SdpEnvironment;
+    organizationId?: string | null;
+  } = {}
 ): Promise<EarnProviderId> {
-  const environment = resolveSdpEnvironment(c);
+  const environment = options.environment ?? resolveSdpEnvironment(c);
 
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {
     throw badRequest(
@@ -105,21 +109,25 @@ export async function assertVaultDepositAdmissible(
   const provider = strategy.provider;
 
   assertEarnProviderSurfaced(provider);
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    getAuth(c).organizationId,
-    "earn",
-    provider,
-    environment === "sandbox"
-  );
+  const organizationId =
+    options.organizationId === undefined ? getAuth(c).organizationId : options.organizationId;
+  if (organizationId !== null) {
+    await assertProviderAvailable(
+      c.env,
+      getDb(c.env),
+      organizationId,
+      "earn",
+      provider,
+      environment === "sandbox"
+    );
+  }
   assertStrategyDepositable(strategy, environment);
 
   if (amount !== undefined) {
     // Deposits only. The withdrawal handlers never call this function, and
     // must not start to: refusing an exit over a platform cap traps funds
     // (ADR 0002), which is the one thing no cap may do.
-    await assertVaultExposureWithinCap(c, strategy, amount);
+    await assertVaultExposureWithinCap(c, strategy, amount, { environment });
   }
 
   return provider;

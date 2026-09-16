@@ -1672,16 +1672,6 @@
               },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            },
-            "privateTransfer": {
-              "provider": "magicblock",
-              "magicBlock": {
-                "kind": "transfer",
-                "version": "v0",
-                "instructionCount": 4,
-                "requiredSigners": ["So11111111111111111111111111111111111111112"],
-                "validator": "So11111111111111111111111111111111111111112"
-              }
             }
           },
           "meta": {
@@ -2043,16 +2033,6 @@
               },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            },
-            "privateTransfer": {
-              "provider": "magicblock",
-              "magicBlock": {
-                "kind": "transfer",
-                "version": "v0",
-                "instructionCount": 4,
-                "requiredSigners": ["So11111111111111111111111111111111111111112"],
-                "validator": "So11111111111111111111111111111111111111112"
-              }
             }
           },
           "meta": {
@@ -2894,7 +2874,11 @@
               "status": "pending",
               "signature": "example",
               "error": "example",
-              "metadata": {},
+              "metadata": {
+                "recurringPaymentId": "recurringpayment_example",
+                "initiatedByKeyId": "initiatedbykey_example",
+                "source": "manual"
+              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
             },
@@ -3703,7 +3687,11 @@
               "status": "pending",
               "signature": "example",
               "error": "example",
-              "metadata": {},
+              "metadata": {
+                "recurringPaymentId": "recurringpayment_example",
+                "initiatedByKeyId": "initiatedbykey_example",
+                "source": "manual"
+              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
             }
@@ -3835,7 +3823,11 @@
                 "status": "pending",
                 "signature": "example",
                 "error": "example",
-                "metadata": {},
+                "metadata": {
+                  "recurringPaymentId": "recurringpayment_example",
+                  "initiatedByKeyId": "initiatedbykey_example",
+                  "source": "manual"
+                },
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               }
@@ -8751,7 +8743,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"feePayment\": \"sponsored\"\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authorityCustodyWalletIds\": {\n    \"metadata\": \"cwlt_metadata\",\n    \"freeze\": \"cwlt_freeze\",\n    \"permanentDelegate\": \"cwlt_recovery\"\n  },\n  \"feePayment\": \"sponsored\"\n}",
             "required": false
           }
         ],

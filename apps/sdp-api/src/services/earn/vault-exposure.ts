@@ -32,7 +32,8 @@ import { earnClusterFor } from "./execution-registry";
  * customers can always leave (EARN-015). The config is curation-as-code beside
  * `CURATED_VAULTS` (`handlers/curation.ts`).
  *
- * The cap is decided TWICE per deposit, on purpose:
+ * The cap is decided TWICE per ledgered deposit, on purpose. Anonymous builds
+ * persist nothing and have no SDP submit, so they receive only step 1:
  *
  * 1. **Admission** (`assertVaultExposureWithinCap`), the LAST step of the single
  *    money-in predicate (`assertVaultDepositAdmissible`), before anything is
@@ -387,11 +388,11 @@ export function checkVaultExposure(
   c: ExposureContext,
   strategy: EarnStrategyRow,
   amount: string,
-  options: { fresh?: boolean } = {}
+  options: { environment?: SdpEnvironment; fresh?: boolean } = {}
 ): Promise<VaultExposureVerdict> {
   return assessVaultExposure({
     env: c.env,
-    environment: resolveSdpEnvironment(c),
+    environment: options.environment ?? resolveSdpEnvironment(c),
     strategy,
     amount,
     stage: options.fresh ? "admission" : "preview",
@@ -437,18 +438,23 @@ function admitOrRefuse(verdict: VaultExposureVerdict, amount: string): VaultExpo
 export async function assertVaultExposureWithinCap(
   c: ExposureContext,
   strategy: EarnStrategyRow,
-  amount: string
+  amount: string,
+  options: { environment?: SdpEnvironment } = {}
 ): Promise<VaultExposureVerdict> {
-  const verdict = await checkVaultExposure(c, strategy, amount, { fresh: true });
+  const verdict = await checkVaultExposure(c, strategy, amount, {
+    ...options,
+    fresh: true,
+  });
   return admitOrRefuse(verdict, amount);
 }
 
 /**
  * The LATE half: the `admit` hook the ledger runs inside the transaction that
  * records a deposit's `requested` row (`LedgerAdmissionHook`,
- * earn-movements.repository.ts). Both deposit paths pass it: the custody
- * deposit from `depositIntoVault`, the external-wallet deposit from
- * `submitExternalWalletDeposit`.
+ * earn-movements.repository.ts). Both ledgered deposit paths pass it: the
+ * custody deposit from `depositIntoVault` and the authenticated
+ * external-wallet deposit from `submitExternalWalletDeposit`. Anonymous
+ * builds have no SDP submit or ledger transaction.
  *
  * Order, and why each step is where it is:
  *

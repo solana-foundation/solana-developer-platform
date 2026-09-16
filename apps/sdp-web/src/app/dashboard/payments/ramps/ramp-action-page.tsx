@@ -14,7 +14,6 @@ import {
   type CounterpartiesResult,
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
-  fetchWallets,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
@@ -88,9 +87,6 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     if (!id) {
       return;
     }
-    void preload(paymentsQueryKeys.actionWallets(), () =>
-      fetchWallets({ includeBalances: true }, t)
-    );
     void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId: id }), () =>
       fetchCounterpartyAccounts(id, t)
     );
@@ -214,9 +210,11 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       walletsError={null}
       onPrimary={onPrimary}
       onSecondary={onSecondary}
-      counterpartyDialogOpen={counterpartyDialogOpen}
-      setCounterpartyDialogOpen={setCounterpartyDialogOpen}
-      onCounterpartyCreated={handleCounterpartyCreated}
+      counterpartyDialog={{
+        open: counterpartyDialogOpen,
+        setOpen: setCounterpartyDialogOpen,
+        onCreated: handleCounterpartyCreated,
+      }}
       header={
         mode === "send" && phase === "counterparty" ? (
           <SendModeToggle value={sendMode} onChange={setSendMode} />

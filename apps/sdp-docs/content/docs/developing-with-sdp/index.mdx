@@ -6,20 +6,20 @@ description: The interfaces, environments, and conventions you build against.
 SDP exposes two interfaces that operate over the same backend and enforce the same permissions, policies, and audit trails:
 
 - **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
-- **REST API** — programmatic access for backend integrations. Authenticate with an API key in the `Authorization` header.
+- **REST API:** programmatic access for backend integrations. Most routes authenticate with an API key in the `Authorization` header. Embedded Yield also has a [keyless catalogue and unsigned-build tier](/docs/guides/embedded-yield#without-an-api-key).
 
 Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
 
 ## Environments
 
-Environments are a property of the **project**, not of individual requests. Every resource — and every API key — belongs to a project, and inherits that project's environment.
+Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment. Keyless Earn requests instead use the API deployment's operator-configured environment.
 
 | Environment  | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
 | `sandbox`    | devnet       | `sk_test_`     |
 | `production` | mainnet-beta | `sk_live_`     |
 
-Both environments expose identical APIs. Develop and test against a sandbox project, then switch to production by swapping your API key.
+Both environments expose identical APIs. Develop and test against a sandbox project, then switch authenticated integrations to production by swapping your API key. Keyless integrations switch only when the API operator changes the deployment environment.
 
 ## Response conventions
 
@@ -44,4 +44,4 @@ Include the `requestId` when reporting an issue — it links your request to our
 
 ## Execution model
 
-SDP executes every operation: it builds the transaction, signs it with the custody wallet's key, and submits it to Solana.
+SDP executes custody operations by building, signing, and submitting with the configured custody wallet. For Embedded Yield, the customer's external wallet signs. A keyless integration broadcasts and tracks that signed transaction itself; an authenticated integration may submit it back to SDP for durable tracking.

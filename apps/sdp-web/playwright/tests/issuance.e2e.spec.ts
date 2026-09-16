@@ -51,8 +51,8 @@ async function gotoIssuanceDashboard(page: Page): Promise<void> {
 
 async function gotoToken(page: Page, tokenId: string): Promise<void> {
   await page.goto(`/dashboard/issuance/${tokenId}`, { waitUntil: "domcontentloaded" });
-  const tokenAddressRow = page.getByTestId("overview-row-token-address");
-  await expect(tokenAddressRow)
+  const operationsSection = page.getByRole("button", { name: "Operations", exact: true });
+  await expect(operationsSection)
     .toBeVisible({ timeout: 30_000 })
     .catch(async () => {
       const retryButton = page.getByRole("button", { name: "Retry", exact: true });
@@ -61,17 +61,15 @@ async function gotoToken(page: Page, tokenId: string): Promise<void> {
       } else {
         await page.reload({ waitUntil: "domcontentloaded" });
       }
-      await expect(tokenAddressRow).toBeVisible({ timeout: 120_000 });
+      await expect(operationsSection).toBeVisible({ timeout: 120_000 });
     });
 }
 
 const tabQueryParamByName = {
   Overview: null,
   Permissions: "permissions",
-  Extensions: "extensions",
-  Compliance: "compliance",
-  Metadata: "metadata",
-  Operations: "fund-management",
+  Settings: "settings",
+  Operations: "operations",
 } as const satisfies Record<string, string | null>;
 
 async function openTab(page: Page, name: string): Promise<void> {
@@ -92,27 +90,27 @@ async function openTab(page: Page, name: string): Promise<void> {
     .toBe(expectedTab);
 
   if (name === "Overview") {
-    await expect(page.getByTestId("overview-row-token-address")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Operations", exact: true })).toBeVisible();
   }
 }
 
 async function expectFrozenAccountsSummary(page: Page, accountCount: number): Promise<void> {
-  await openTab(page, "Compliance");
+  await openTab(page, "Operations");
   await expect(page.getByTestId("frozen-accounts-summary-card")).toContainText(
     `${accountCount} accounts`,
     { timeout: 120_000 }
   );
 }
 
-async function selectComplianceAction(page: Page, name: string): Promise<void> {
-  await openTab(page, "Compliance");
+async function selectOperationsAction(page: Page, name: string): Promise<void> {
+  await openTab(page, "Operations");
 
   const action = page.getByRole("button", { name, exact: true });
   await expect(action)
     .toBeVisible({ timeout: 30_000 })
     .catch(async () => {
       await page.reload({ waitUntil: "domcontentloaded" });
-      await openTab(page, "Compliance");
+      await openTab(page, "Operations");
       await expect(action).toBeVisible({ timeout: 120_000 });
     });
   await action.click();
@@ -155,7 +153,10 @@ async function waitForActionResponse(
 }
 
 async function confirmAction(page: Page, confirmButtonLabel: string): Promise<void> {
-  await page.getByRole("button", { name: confirmButtonLabel, exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: confirmButtonLabel, exact: true })
+    .click();
 }
 
 async function openFundManagementAction(page: Page, action: string): Promise<void> {
@@ -189,10 +190,10 @@ async function waitForAllowlistCount(
   expectedCount: number,
   options: { reload?: boolean } = {}
 ): Promise<void> {
-  const expectedLabel = `${expectedCount} ${expectedCount === 1 ? "entries" : "entries"}`;
+  const expectedLabel = `${expectedCount} entries`;
   if (options.reload) {
     await page.reload();
-    await openTab(page, "Compliance");
+    await selectOperationsAction(page, "Approved recipients");
     await expect(page.getByTestId("allowlist-summary-card")).toContainText(expectedLabel, {
       timeout: 120_000,
     });
@@ -309,38 +310,31 @@ test.describe
       await expect(page.getByText(draftSymbol, { exact: true })).toBeVisible();
     });
 
-    test("3. user only sees configured extension rows on the allowlist-enabled token", async ({
+    test("3. user sees the configured controls on the allowlist-enabled token", async ({
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.allowlisted.id);
-      await openTab(page, "Extensions");
+      await openTab(page, "Operations");
 
-      await expect(page.getByTestId("extension-row-template")).toContainText("Stablecoin");
-      await expect(page.getByTestId("extension-row-control-list")).toContainText(
+      await expect(page.getByTestId("fund-management-row-allowlist")).toContainText(
         "Approved recipients"
       );
-      await expect(page.getByTestId("extension-row-mintable")).toContainText("Enabled");
-      await expect(page.getByTestId("extension-row-freezable")).toContainText("Enabled");
-      await expect(page.getByTestId("extension-row-default-account-state")).toContainText("Frozen");
-
-      await expect(page.getByTestId("extension-row-transfer-fee")).toHaveCount(0);
-      await expect(page.getByTestId("extension-row-scaled-ui")).toHaveCount(0);
-      await expect(page.getByTestId("extension-row-transfer-hook")).toHaveCount(0);
-      await expect(page.getByTestId("extension-row-interest-bearing")).toHaveCount(0);
-      await expect(page.getByTestId("extension-row-non-transferable")).toHaveCount(0);
+      await expect(page.getByTestId("fund-management-row-pause")).toContainText("Pause transfers");
+      await expect(page.getByTestId("fund-management-row-freeze")).toContainText(
+        "Freeze a balance"
+      );
+      await expect(page.getByTestId("fund-management-row-seize")).toContainText("Force transfer");
+      await expect(page.getByTestId("fund-management-row-force-burn")).toContainText("Force burn");
     });
 
     test("4. user can deploy the seeded pending token and see it become active", async ({
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.pending.id);
-      await openTab(page, "Operations");
-
-      const deployRow = page.getByTestId("fund-management-row-deploy");
-      await expect(deployRow.getByRole("button", { name: "Deploy" })).toBeVisible();
+      const deployButton = page.getByRole("button", { name: "Deploy", exact: true });
+      await expect(deployButton).toBeVisible();
       const successCount = await page.getByText("Deploy transaction finalized.").count();
-      // No modal: the row button submits the Kora-sponsored deploy directly.
-      await deployRow.getByRole("button", { name: "Deploy" }).click();
+      await deployButton.click();
       await waitForToast(page, "Deploy transaction finalized.", successCount);
       await expect
         .poll(
@@ -362,29 +356,31 @@ test.describe
       const updatedImageUrl = "https://example.com/assets/e2e-allowlisted-stable-updated.png";
 
       await gotoToken(page, fixtures.tokens.allowlisted.id);
-      await openTab(page, "Metadata");
+      await openTab(page, "Settings");
+      await page.getByRole("button", { name: "Edit settings" }).click();
 
       await page.getByLabel("Name").fill(updatedName);
       await page.getByLabel("Description").fill(updatedDescription);
       await page.getByLabel("URI").fill(updatedUri);
-      await page.getByLabel("Image URL").fill(updatedImageUrl);
-      const successCount = await page.getByText("Transaction finalized successfully.").count();
-      await page.getByRole("button", { name: "Save metadata" }).click();
-      await waitForToast(page, "Transaction finalized successfully.", successCount);
+      await page.getByLabel("Logo image URL").fill(updatedImageUrl);
+      const successCount = await page.getByText("Changes saved.").count();
+      await page.getByRole("button", { name: "Save changes" }).click();
+      await waitForToast(page, "Changes saved.", successCount);
       await page.reload();
 
       await expect(page.getByRole("heading", { name: updatedName })).toBeVisible();
-      await openTab(page, "Metadata");
+      await openTab(page, "Settings");
+      await page.getByRole("button", { name: "Edit settings" }).click();
       await expect(page.getByLabel("Description")).toHaveValue(updatedDescription);
       await expect(page.getByLabel("URI")).toHaveValue(updatedUri);
-      await expect(page.getByLabel("Image URL")).toHaveValue(updatedImageUrl);
+      await expect(page.getByLabel("Logo image URL")).toHaveValue(updatedImageUrl);
     });
 
     test("6. user can add and remove allowlist entries on the allowlist-enabled token", async ({
       page,
     }) => {
       await gotoToken(page, fixtures.tokens.allowlisted.id);
-      await selectComplianceAction(page, "Approved recipients");
+      await selectOperationsAction(page, "Approved recipients");
 
       await page
         .getByRole("textbox", { name: "Address", exact: true })
@@ -435,7 +431,7 @@ test.describe
 
       const row = page.getByTestId(rowTestId);
       if (fixtures.wallets.delegated.publicKey !== fixtures.wallets.treasury.publicKey) {
-        await row.getByRole("button", { name: "Edit" }).click();
+        await row.getByRole("button").click();
         await selectNewAuthority(page, fixtures.wallets.delegated.publicKey);
         await waitForActionResponse(
           page,
@@ -455,7 +451,7 @@ test.describe
       }
 
       const refreshedRow = page.getByTestId(rowTestId);
-      await refreshedRow.getByRole("button", { name: "Edit" }).click();
+      await refreshedRow.getByRole("button").click();
       await page.getByLabel("New authority").selectOption({ label: "None" });
       await page.getByRole("button", { name: "Save authority" }).click();
 
@@ -472,15 +468,12 @@ test.describe
           await page.getByRole("button", { name: "Yes, set to None" }).click();
         }
       );
-      // The action is worded "set to None", but the resulting row is not an
-      // address — it's the badge's unset state, which reads "Not set" under a
-      // warning mark (DashboardIssuance.overview.authorityNotSet).
-      await waitForPermissionRowValue(page, rowTestId, "Not set");
+      await waitForPermissionRowValue(page, rowTestId, "None");
     });
 
     test("8. user sees denylist controls on the open stablecoin token", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
-      await selectComplianceAction(page, "Blocked recipients");
+      await selectOperationsAction(page, "Blocked recipients");
 
       await expect(
         page.getByRole("button", { name: "Blocked recipients", exact: true })
@@ -488,13 +481,14 @@ test.describe
       await expect(
         page.getByText("Manage the blocked destination addresses for this token.")
       ).toBeVisible();
-      await page.getByRole("button", { name: "Freeze", exact: true }).click();
+      await expect(page.getByTestId("allowlist-summary-card")).toContainText("Blocked recipients");
+
+      await selectOperationsAction(page, "Freeze a balance");
       await expect(
         page.getByText(
           "Need to restrict a wallet before it has a token account? Add it to the denylist first."
         )
       ).toBeVisible();
-      await expect(page.getByTestId("allowlist-summary-card")).toContainText("Blocked recipients");
     });
 
     test("9. user can mint and burn tokens with supply and transactions updating", async ({
@@ -505,7 +499,7 @@ test.describe
       await openFundManagementAction(page, "mint");
       await page.getByLabel("Destination").fill(fixtures.wallets.treasury.publicKey);
       await page.getByLabel("Amount").fill("10");
-      await page.getByRole("button", { name: "Mint tokens" }).click();
+      await page.getByRole("dialog").getByRole("button", { name: "Mint tokens" }).click();
       let successCount = await page.getByText("Mint transaction finalized.").count();
       await confirmAction(page, "Mint now");
       await waitForToast(page, "Mint transaction finalized.", successCount);
@@ -525,7 +519,7 @@ test.describe
       );
       await page.getByLabel("Source").fill(treasuryTokenAccount);
       await page.getByLabel("Amount").fill("3");
-      await page.getByRole("button", { name: "Burn tokens" }).click();
+      await page.getByRole("dialog").getByRole("button", { name: "Burn tokens" }).click();
       successCount = await page.getByText("Burn transaction finalized.").count();
       await confirmAction(page, "Burn now");
       await waitForToast(page, "Burn transaction finalized.", successCount);
@@ -545,12 +539,12 @@ test.describe
       await openFundManagementAction(page, "mint");
       await page.getByLabel("Destination").fill(fixtures.addresses.freezeWallet);
       await page.getByLabel("Amount").fill("1");
-      await page.getByRole("button", { name: "Mint tokens" }).click();
+      await page.getByRole("dialog").getByRole("button", { name: "Mint tokens" }).click();
       let successCount = await page.getByText("Mint transaction finalized.").count();
       await confirmAction(page, "Mint now");
       await waitForToast(page, "Mint transaction finalized.", successCount);
 
-      await selectComplianceAction(page, "Freeze");
+      await selectOperationsAction(page, "Freeze a balance");
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
       await page.getByLabel("Reason (freeze only)").fill("Playwright freeze validation");
       await page.getByRole("button", { name: "Freeze balance", exact: true }).click();
@@ -559,7 +553,7 @@ test.describe
       await waitForToast(page, "Freeze transaction finalized.", successCount);
       await expectFrozenAccountsSummary(page, 1);
 
-      await selectComplianceAction(page, "Freeze");
+      await selectOperationsAction(page, "Freeze a balance");
       await page.getByLabel("Wallet Address").fill(fixtures.addresses.freezeWallet);
       await page.getByRole("button", { name: "Unfreeze balance", exact: true }).click();
       successCount = await page.getByText("Unfreeze transaction finalized.").count();
@@ -568,23 +562,23 @@ test.describe
       await expectFrozenAccountsSummary(page, 0);
     });
 
-    test("11. user sees the token ID row on the detail header and can copy it", async ({
+    test("11. user sees the mint address on the detail header and can copy it", async ({
       page,
     }) => {
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
       await gotoToken(page, fixtures.tokens.open.id);
 
-      const tokenIdRow = page.getByTestId("token-id-row");
-      await expect(tokenIdRow).toBeVisible();
-      await expect(tokenIdRow).toContainText("Token ID:");
-      await expect(tokenIdRow).toContainText(fixtures.tokens.open.id);
+      const mintAddress = fixtures.tokens.open.mintAddress;
+      if (!mintAddress) throw new Error("Open issuance fixture is missing a mint address");
+      const tokenAddressRow = page.getByTestId("overview-row-token-address");
+      await expect(tokenAddressRow).toBeVisible();
 
-      const successCount = await page.getByText("Token ID copied").count();
-      await tokenIdRow.getByRole("button", { name: "Copy token ID" }).click();
-      await waitForToast(page, "Token ID copied", successCount);
+      const successCount = await page.getByText("Copied", { exact: true }).count();
+      await tokenAddressRow.getByRole("button", { name: "Copy token address" }).click();
+      await waitForToast(page, "Copied", successCount);
 
       const clipboardValue = await page.evaluate(() => navigator.clipboard.readText());
-      expect(clipboardValue).toBe(fixtures.tokens.open.id);
+      expect(clipboardValue).toBe(mintAddress);
     });
 
     test("12. user sees a populated tokenId dropdown in the API playground", async ({ page }) => {
@@ -611,11 +605,10 @@ test.describe
       await expect(tokenIdSelect).toHaveValue(fixtures.tokens.open.id);
     });
 
-    test("13. user can pause and unpause the token from compliance controls", async ({ page }) => {
+    test("13. user can pause and unpause the token from operations", async ({ page }) => {
       await gotoToken(page, fixtures.tokens.open.id);
 
-      await selectComplianceAction(page, "Pause");
-      await page.getByRole("button", { name: "Pause token", exact: true }).click();
+      await selectOperationsAction(page, "Pause transfers");
       let successCount = await page.getByText("Pause transaction finalized.").count();
       await expect(
         page.getByRole("heading", { name: "Pause transfers for all holders?" })
@@ -623,10 +616,11 @@ test.describe
       await expect(page.getByText(/This affects every holder:/)).toBeVisible();
       await confirmAction(page, "Pause all transfers");
       await waitForToast(page, "Pause transaction finalized.", successCount);
-      await expect(page.getByText("Token is paused")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Resume transfers", exact: true })).toBeVisible(
+        { timeout: 120_000 }
+      );
 
-      await selectComplianceAction(page, "Pause");
-      await page.getByRole("button", { name: "Unpause token", exact: true }).first().click();
+      await selectOperationsAction(page, "Resume transfers");
       successCount = await page.getByText("Unpause transaction finalized.").count();
       await expect(
         page.getByRole("heading", { name: "Resume transfers for all holders?" })
@@ -636,7 +630,9 @@ test.describe
       ).toBeVisible();
       await confirmAction(page, "Resume transfers");
       await waitForToast(page, "Unpause transaction finalized.", successCount);
-      await expect(page.getByText("Token is paused")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Pause transfers", exact: true })).toBeVisible({
+        timeout: 120_000,
+      });
     });
   });
 

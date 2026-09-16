@@ -162,7 +162,7 @@ describe("wallet-scoped route coverage inventory", () => {
 
     // Funding is one route for every funder now: the wallet scoping is the
     // custody lookup itself — the caller's wallet must hold the named side's
-    // party address. `inbound` deliberately takes no party parameter so it
+    // party address. Reclaim resolves its side through the same lookup. `inbound` deliberately takes no party parameter so it
     // cannot be used to enumerate anyone else's.
     expect(extractRoutes(dvpRoutes).filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
       "GET /trades",
@@ -171,6 +171,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /trades",
       "POST /trades/:tradeId/cancel",
       "POST /trades/:tradeId/fund",
+      "POST /trades/:tradeId/reclaim",
       "POST /trades/:tradeId/settle",
     ]);
   });

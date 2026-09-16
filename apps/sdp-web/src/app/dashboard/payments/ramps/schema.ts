@@ -1,6 +1,10 @@
-import { isCountryCode } from "@sdp/types/countries";
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
-import type { RequirementField } from "@sdp/types/ramp-requirements";
+import {
+  offeredCountryCodes,
+  offeredFiatCurrencies,
+  type RequirementField,
+} from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 
 const providerField = z
@@ -78,9 +82,13 @@ export type RampFields = z.input<typeof rampSelectionSchema>;
 const onchainAmount = z
   .string()
   .trim()
-  .refine((value) => ONCHAIN_AMOUNT_PATTERN.test(value), "Enter a valid amount.")
-  .transform(Number)
-  .refine((value) => value > 0, "Enter an amount greater than 0.");
+  .refine((value) => ONCHAIN_AMOUNT_PATTERN.test(value), {
+    abort: true,
+    message: "Enter a valid amount.",
+  })
+  .refine((value) => compareDecimalAmounts(value, "0") > 0, "Enter an amount greater than 0.");
+
+export const cryptoWalletAccountDetailsSchema = z.object({ address: z.string().min(1) });
 
 export const onchainSendSelectionSchema = z.object({
   accountId: z.string().min(1, "Select a destination account."),
@@ -157,7 +165,14 @@ export function requirementFieldError(
       : `Select a valid ${field.label.toLowerCase()}.`;
   }
   if (field.kind === "country") {
-    return isCountryCode(value) ? null : `Select a valid ${field.label.toLowerCase()}.`;
+    return offeredCountryCodes(field).some((code) => code === value)
+      ? null
+      : `Select a valid ${field.label.toLowerCase()}.`;
+  }
+  if (field.kind === "currency") {
+    return offeredFiatCurrencies(field).some((code) => code === value)
+      ? null
+      : `Select a valid ${field.label.toLowerCase()}.`;
   }
   if (field.kind === "date") {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value))) {

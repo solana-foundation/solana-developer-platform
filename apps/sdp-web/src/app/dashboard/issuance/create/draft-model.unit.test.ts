@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { getDraftDeploymentBlocker } from "../draft-permissions";
 import { buildDraftPayload, type DraftState, draftSchema } from "./draft-model";
 
 const draft: DraftState = {
@@ -76,15 +75,5 @@ describe("draft creation contract", () => {
     expect(
       draftSchema.safeParse({ ...draft, assetClass: "digital-asset", decimals: "19" }).success
     ).toBe(false);
-  });
-  it("blocks deployment rather than silently ignoring different authority wallets", () => {
-    expect(getDraftDeploymentBlocker(draft.authorities, "wallet-a")).toBeNull();
-    expect(
-      getDraftDeploymentBlocker(
-        { ...draft.authorities, "freeze-authority": "wallet-b" },
-        "wallet-a"
-      )
-    ).toBe("DashboardIssuance.draftForm.singleSignerRequired");
-    expect(getDraftDeploymentBlocker(undefined, undefined)).toBeNull();
   });
 });

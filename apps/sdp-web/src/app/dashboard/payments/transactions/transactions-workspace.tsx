@@ -1,672 +1,265 @@
 "use client";
 
-import { DownloadIcon, FilterIcon, LoaderCircleIcon, SearchIcon, XIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { UNIFIED_TRANSACTION_MODULE_CONTRACTS, UNIFIED_TRANSACTION_STATUSES } from "@sdp/types";
+import { ReceiptTextIcon, SearchIcon, XIcon } from "lucide-react";
 import {
   createContext,
-  type ReactNode,
+  type KeyboardEvent,
   useCallback,
   useContext,
   useEffect,
-  useRef,
+  useMemo,
   useState,
-  useTransition,
 } from "react";
 import useSWR from "swr";
-import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
-import { Button } from "@/components/ui/button";
+import { EntityLink } from "@/components/entity-link";
 import { DateRangePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Select, SelectItem } from "@/components/ui/select";
-import { ToggleSwitch } from "@/components/ui/toggle-switch";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { downloadResponseBlob } from "@/lib/download";
-import { RAMP_PROVIDER_OPTIONS } from "@/lib/ramps";
-import { useDebounce } from "@/lib/use-debounce";
-import { cn } from "@/lib/utils";
 import {
-  assetFilterOptions,
-  fetchTransactionFilterOptions,
-  type TransactionFilterOptions,
-} from "./transactions-filter-options";
+  readDashboardTabFromUrl,
+  replaceDashboardSearchParams,
+  useDashboardTab,
+} from "@/lib/dashboard-url-state";
+import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
+import { paymentsQueryKeys } from "../payments-query-key";
+import { TransactionsResultsSkeleton } from "../payments-route-skeletons";
+import { counterpartyHref, walletHref } from "./transaction-module-hrefs";
 import {
-  reconcileDeferredFilterInput,
-  resolveReturnedTransactionFilterSync,
-} from "./transactions-filter-state";
+  fetchTransactionsPageFromDashboard,
+  type TransactionsPageResult,
+  transactionsApiQuery,
+} from "./transactions-page.data";
 import {
-  countActiveTransactionFilters,
-  MIN_TRANSACTION_SEARCH_LENGTH,
-  normalizeTransactionSearch,
-  serializeTransactionFilters,
-  TRANSACTION_STATUSES,
-  TRANSACTION_TYPES,
+  parseTransactionModule,
   type TransactionFilters,
-  type TransactionSortField,
-  type TransactionStatusFilter,
-  type TransactionTypeFilter,
+  toTransactionUrlUpdates,
 } from "./transactions-query";
+import { TransactionsResults } from "./transactions-results";
 
-interface TransactionFilterContextValue {
+interface TransactionContextValue {
   filters: TransactionFilters;
-  isPending: boolean;
-  clearFilters: () => void;
-  updateFilters: (
-    changes: Partial<TransactionFilters>,
-    options?: { preserveSnapshot?: boolean }
-  ) => void;
+  pending: boolean;
+  /** Replaces the whole filter set, cursors included; pagination's entry point. */
+  navigate: (next: TransactionFilters) => void;
+  /** Applies filter changes and drops back to the first page. */
+  update: (changes: Partial<TransactionFilters>) => void;
 }
 
-const TransactionFilterContext = createContext<TransactionFilterContextValue | null>(null);
+const TransactionContext = createContext<TransactionContextValue | null>(null);
 
-const INCLUDE_OBSERVED_LABEL_ID = "transactions-include-observed-label";
-
-export function useTransactionFilters(): TransactionFilterContextValue {
-  const value = useContext(TransactionFilterContext);
-  if (!value) throw new Error("Transaction filter context is missing");
+export function useTransactionFilters(): TransactionContextValue {
+  const value = useContext(TransactionContext);
+  if (value === null) throw new Error("Transaction filter context is missing");
   return value;
 }
 
-const STATUS_LABELS = {
-  pending: "DashboardPayments.transactions.pending",
-  processing: "DashboardPayments.transactions.processing",
-  confirmed: "DashboardPayments.transactions.confirmed",
-  finalized: "DashboardPayments.transactions.finalized",
-  failed: "DashboardPayments.transactions.failed",
-  awaiting_payment: "DashboardPayments.transactions.awaitingPayment",
-  settling: "DashboardPayments.transactions.settling",
-  completed: "DashboardPayments.transactions.completed",
-  canceled: "DashboardPayments.transactions.canceled",
-  expired: "DashboardPayments.transactions.expired",
-} as const satisfies Record<TransactionStatusFilter, MessageKey>;
+function selectedValue(value: string | null | undefined): string | undefined {
+  return value === null || value === undefined || value === "all" ? undefined : value;
+}
 
-const TYPE_LABELS = {
-  transfer: "DashboardPayments.transactions.transfer",
-  transfer_confidential: "DashboardPayments.transactions.confidentialTransfer",
-  transfer_batch: "DashboardPayments.transactions.batchTransfer",
-  onramp: "DashboardPayments.transactions.onramp",
-  offramp: "DashboardPayments.transactions.offramp",
-} as const satisfies Record<TransactionTypeFilter, MessageKey>;
-
-/**
- * Held tokens, by symbol.
- *
- * Was a free-text input, which could not work by hand: the filter matches
- * `pt.token` exactly and that column stores a mint, so typing "USDC" never
- * matched anything, and arriving from a holding put a 44-character address on
- * screen. The option value carries the mint; the label carries the symbol.
- */
-function AssetFilter({
-  value,
-  options,
-  onChange,
+function TransactionSearchInput({
+  initialValue,
+  onCommit,
 }: {
-  value: string | undefined;
-  options: Array<{ id: string; label: string }>;
-  onChange: (value: string | undefined) => void;
+  initialValue: string;
+  onCommit: (value: string) => void;
 }) {
   const t = useTranslations();
-  const assets = assetFilterOptions(value, options);
-
+  const [value, setValue] = useState(initialValue);
   return (
-    <SelectFilter
-      label={t("DashboardPayments.transactions.filterAsset")}
+    <Input
       value={value}
-      allLabel={t("DashboardPayments.transactions.allAssets")}
-      ariaLabel={t("DashboardPayments.transactions.filterAsset")}
-      onChange={onChange}
-    >
-      {assets.map((asset) => (
-        <SelectItem key={asset.id} value={asset.id}>
-          {asset.label}
-        </SelectItem>
-      ))}
-    </SelectFilter>
-  );
-}
-
-/**
- * Captions every control in the advanced grid. Labelling only some of them left
- * the labelled ones taller than the rest, so the row no longer lined up.
- * htmlFor is omitted for the design-system Select, which renders no native form
- * control to point at — those carry the same text as an aria-label instead.
- */
-function FieldWithLabel({
-  htmlFor,
-  label,
-  className,
-  children,
-}: {
-  htmlFor?: string;
-  label: string;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className={cn("min-w-0", className)}>
-      {htmlFor ? (
-        <label htmlFor={htmlFor} className="mb-1 block text-tertiary text-xs">
-          {label}
-        </label>
-      ) : (
-        <span className="mb-1 block text-tertiary text-xs">{label}</span>
-      )}
-      {children}
-    </div>
-  );
-}
-
-function buildTransactionsHref(filters: TransactionFilters): string {
-  const query = serializeTransactionFilters(filters).toString();
-  return `/dashboard/payments/transactions${query ? `?${query}` : ""}`;
-}
-
-function buildTransactionsExportHref(filters: TransactionFilters): string {
-  const query = serializeTransactionFilters({ ...filters, page: 1 }).toString();
-  return `/api/dashboard/payments/transactions/export${query ? `?${query}` : ""}`;
-}
-
-function SelectFilter({
-  value,
-  label,
-  allLabel,
-  ariaLabel,
-  onChange,
-  children,
-}: {
-  value?: string;
-  /** Omitted in the compact top bar, where captions would crowd the row. */
-  label?: string;
-  allLabel: string;
-  ariaLabel: string;
-  onChange: (value: string | undefined) => void;
-  children: ReactNode;
-}) {
-  const select = (
-    <Select
-      value={value ?? "all"}
-      ariaLabel={ariaLabel}
-      onValueChange={(next) => onChange(!next || next === "all" ? undefined : next)}
-    >
-      <SelectItem value="all">{allLabel}</SelectItem>
-      {children}
-    </Select>
-  );
-
-  return label ? <FieldWithLabel label={label}>{select}</FieldWithLabel> : select;
-}
-
-function AdvancedFilters({
-  filters,
-  options,
-  optionsLoading,
-  assetValue,
-  onAssetChange,
-  updateFilters,
-}: {
-  filters: TransactionFilters;
-  options: TransactionFilterOptions | undefined;
-  optionsLoading: boolean;
-  assetValue: string;
-  onAssetChange: (value: string) => void;
-  updateFilters: TransactionFilterContextValue["updateFilters"];
-}) {
-  const t = useTranslations();
-  const wallets = [...(options?.wallets ?? [])];
-  const counterparties = [...(options?.counterparties ?? [])];
-  if (filters.custodyWalletId && !wallets.some((option) => option.id === filters.custodyWalletId)) {
-    wallets.unshift({ id: filters.custodyWalletId, label: filters.custodyWalletId });
-  }
-  if (
-    filters.counterpartyId &&
-    !counterparties.some((option) => option.id === filters.counterpartyId)
-  ) {
-    counterparties.unshift({ id: filters.counterpartyId, label: filters.counterpartyId });
-  }
-
-  return (
-    <div
-      className="grid gap-2 bg-fill-subtle p-3 sm:grid-cols-2 xl:grid-cols-4"
-      data-transaction-advanced-filters
-    >
-      <SelectFilter
-        label={t("DashboardPayments.transactions.filterType")}
-        value={filters.type}
-        allLabel={t("DashboardPayments.transactions.allTypes")}
-        ariaLabel={t("DashboardPayments.transactions.allTypes")}
-        onChange={(type) => updateFilters({ type: type as TransactionTypeFilter | undefined })}
-      >
-        {TRANSACTION_TYPES.map((type) => (
-          <SelectItem key={type} value={type}>
-            {t(TYPE_LABELS[type])}
-          </SelectItem>
-        ))}
-      </SelectFilter>
-      <SelectFilter
-        label={t("DashboardPayments.transactions.filterDirection")}
-        value={filters.direction}
-        allLabel={t("DashboardPayments.transactions.allDirections")}
-        ariaLabel={t("DashboardPayments.transactions.allDirections")}
-        onChange={(direction) =>
-          updateFilters({ direction: direction as "inbound" | "outbound" | undefined })
-        }
-      >
-        <SelectItem value="inbound">{t("DashboardPayments.transactions.inbound")}</SelectItem>
-        <SelectItem value="outbound">{t("DashboardPayments.transactions.outbound")}</SelectItem>
-      </SelectFilter>
-      <SelectFilter
-        label={t("DashboardPayments.transactions.filterWallet")}
-        value={filters.custodyWalletId}
-        allLabel={
-          optionsLoading
-            ? t("DashboardPayments.transactions.loadingOptions")
-            : t("DashboardPayments.transactions.allWallets")
-        }
-        ariaLabel={t("DashboardPayments.transactions.allWallets")}
-        onChange={(custodyWalletId) =>
-          updateFilters({
-            custodyWalletId,
-            ...(!custodyWalletId ? { includeObserved: false } : {}),
-          })
-        }
-      >
-        {wallets.map((wallet) => (
-          <SelectItem key={wallet.id} value={wallet.id}>
-            {wallet.label}
-          </SelectItem>
-        ))}
-      </SelectFilter>
-      <SelectFilter
-        label={t("DashboardPayments.transactions.filterCounterparty")}
-        value={filters.counterpartyId}
-        allLabel={
-          optionsLoading
-            ? t("DashboardPayments.transactions.loadingOptions")
-            : t("DashboardPayments.transactions.allCounterparties")
-        }
-        ariaLabel={t("DashboardPayments.transactions.allCounterparties")}
-        onChange={(counterpartyId) => updateFilters({ counterpartyId })}
-      >
-        {counterparties.map((counterparty) => (
-          <SelectItem key={counterparty.id} value={counterparty.id}>
-            {counterparty.label}
-          </SelectItem>
-        ))}
-      </SelectFilter>
-      <SelectFilter
-        label={t("DashboardPayments.transactions.filterProvider")}
-        value={filters.provider}
-        allLabel={t("DashboardPayments.transactions.allProviders")}
-        ariaLabel={t("DashboardPayments.transactions.allProviders")}
-        onChange={(provider) => updateFilters({ provider })}
-      >
-        {RAMP_PROVIDER_OPTIONS.map((provider) => (
-          <SelectItem key={provider.id} value={provider.id}>
-            {provider.title}
-          </SelectItem>
-        ))}
-      </SelectFilter>
-      <AssetFilter
-        value={assetValue || undefined}
-        options={options?.assets ?? []}
-        // Routed through the same setter the text input used, so the debounced
-        // filter plumbing keeps a single path rather than gaining a second one.
-        onChange={(asset) => onAssetChange(asset ?? "")}
-      />
-      {/* The range keeps the API's separate from/to values while presenting one
-          connected selection, so users cannot accidentally invert the dates. */}
-      <FieldWithLabel
-        htmlFor="transactions-date-range"
-        label={t("Shared.SharedComponents.dateRange")}
-        className="xl:col-span-2"
-      >
-        <DateRangePicker
-          id="transactions-date-range"
-          from={filters.from ?? ""}
-          to={filters.to ?? ""}
-          onChange={(from, to) => updateFilters({ from: from || undefined, to: to || undefined })}
-        />
-      </FieldWithLabel>
-      {/* Spans the row so the switch is not mistaken for another dropdown.
-          Not a <label>: ToggleSwitch renders a button[role=switch] rather than
-          a form control, so the caption is associated with aria-labelledby. */}
-      <div className="flex items-center gap-2.5 sm:col-span-2 xl:col-span-4">
-        <ToggleSwitch
-          checked={filters.includeObserved}
-          onChange={(checked) => updateFilters({ includeObserved: checked })}
-          disabled={!filters.custodyWalletId}
-          aria-labelledby={INCLUDE_OBSERVED_LABEL_ID}
-        />
-        <span id={INCLUDE_OBSERVED_LABEL_ID} className="text-secondary text-sm">
-          {t("DashboardPayments.transactions.includeObserved")}
-        </span>
-      </div>
-    </div>
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={() => onCommit(value)}
+      onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        onCommit(value);
+      }}
+      placeholder={t("DashboardPayments.transactions.searchTransactions")}
+      aria-label={t("DashboardPayments.transactions.searchTransactions")}
+      iconLeft={<SearchIcon />}
+    />
   );
 }
 
 export function TransactionsWorkspace({
-  filters,
-  disableCsvExport = false,
-  children,
+  initialFilters,
+  initialResult,
+  issuedTokensByMint,
 }: {
-  filters: TransactionFilters;
-  disableCsvExport?: boolean;
-  children: ReactNode;
+  initialFilters: TransactionFilters;
+  initialResult: TransactionsPageResult;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
 }) {
   const t = useTranslations();
-  const router = useRouter();
-  const { selectedProjectId } = useDashboardWorkspace();
-  const stateRef = useRef(filters);
-  const searchValueRef = useRef(filters.search ?? "");
-  const assetValueRef = useRef(filters.asset ?? "");
-  const dirtyInputsRef = useRef({ search: false, asset: false });
-  const browserNavigationRef = useRef(false);
-  const [displayFilters, setDisplayFilters] = useState(filters);
-  const [searchValue, setSearchValue] = useState(filters.search ?? "");
-  const [assetValue, setAssetValue] = useState(filters.asset ?? "");
-  const [csvDownloading, setCsvDownloading] = useState(false);
-  const [csvError, setCsvError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const advancedFilterCount = countActiveTransactionFilters(displayFilters);
-  const hasAdvancedFilter = Boolean(
-    displayFilters.direction ||
-      displayFilters.type ||
-      displayFilters.custodyWalletId ||
-      displayFilters.counterpartyId ||
-      displayFilters.asset ||
-      displayFilters.provider ||
-      displayFilters.from ||
-      displayFilters.to ||
-      displayFilters.includeObserved
-  );
-  const [filtersOpen, setFiltersOpen] = useState(hasAdvancedFilter);
-  const debouncedSearch = useDebounce(searchValue.trim(), 300);
-  const debouncedAsset = useDebounce(assetValue.trim(), 300);
-  const { data: filterOptions, isLoading: optionsLoading } = useSWR<TransactionFilterOptions>(
-    filtersOpen && selectedProjectId
-      ? paymentsQueryKeys.transactionFilterOptions({ projectId: selectedProjectId })
-      : null,
-    () => fetchTransactionFilterOptions(),
-    { dedupingInterval: 60_000, revalidateOnFocus: false }
-  );
+  const [filters, setFilters] = useState(initialFilters);
+  const [initialQuery] = useState(() => transactionsApiQuery(initialFilters));
+  const activeModule = parseTransactionModule(useDashboardTab());
 
-  // filtersOpen is seeded from hasAdvancedFilter once. Client-side navigation
-  // updates the filter props without remounting, so a URL that activates a
-  // filter would otherwise show the active-filter badge over a panel that is
-  // still collapsed — the badge with no visible cause this PR set out to fix.
-  // Only forced open: collapsing again is the reader's choice.
-  useEffect(() => {
-    if (hasAdvancedFilter) {
-      setFiltersOpen(true);
-    }
-  }, [hasAdvancedFilter]);
-
-  useEffect(() => {
-    const handleBrowserNavigation = () => {
-      browserNavigationRef.current = true;
-    };
-    window.addEventListener("popstate", handleBrowserNavigation);
-    return () => window.removeEventListener("popstate", handleBrowserNavigation);
+  const navigate = useCallback((next: TransactionFilters) => {
+    setFilters(next);
+    replaceDashboardSearchParams(toTransactionUrlUpdates(next));
   }, []);
-
-  useEffect(() => {
-    const browserNavigation = browserNavigationRef.current;
-    const sync = resolveReturnedTransactionFilterSync(filters, stateRef.current, {
-      browserNavigation,
-      currentSearch: window.location.search,
-    });
-    if (!sync.apply) {
-      return;
-    }
-    browserNavigationRef.current = false;
-    stateRef.current = filters;
-    setDisplayFilters(filters);
-    const nextSearch = reconcileDeferredFilterInput(
-      { value: searchValueRef.current, dirty: dirtyInputsRef.current.search },
-      filters.search,
-      sync.forceDeferredInputs
-    );
-    const nextAsset = reconcileDeferredFilterInput(
-      { value: assetValueRef.current, dirty: dirtyInputsRef.current.asset },
-      filters.asset,
-      sync.forceDeferredInputs
-    );
-    searchValueRef.current = nextSearch.value;
-    assetValueRef.current = nextAsset.value;
-    dirtyInputsRef.current = { search: nextSearch.dirty, asset: nextAsset.dirty };
-    setSearchValue(nextSearch.value);
-    setAssetValue(nextAsset.value);
-  }, [filters]);
-
-  const updateFilters = useCallback(
-    (changes: Partial<TransactionFilters>, options: { preserveSnapshot?: boolean } = {}) => {
-      const current = stateRef.current;
-      const onlyPagination = Object.keys(changes).every(
-        (key) => key === "page" || key === "pageSize"
-      );
-      const next: TransactionFilters = {
-        ...current,
-        ...changes,
-        ...(!("page" in changes) && !onlyPagination ? { page: 1 } : {}),
-        ...(!options.preserveSnapshot && !onlyPagination
-          ? { snapshot: new Date().toISOString() }
-          : {}),
-      };
-      stateRef.current = next;
-      setDisplayFilters(next);
-      startTransition(() => router.replace(buildTransactionsHref(next), { scroll: false }));
-    },
-    [router]
+  const update = useCallback(
+    (changes: Partial<TransactionFilters>) =>
+      navigate({ ...filters, ...changes, cursor: undefined, cursors: [] }),
+    [filters, navigate]
   );
 
+  // The header tabs own `?tab=` and write it shallowly, so the module is the one
+  // filter that arrives from outside this component's state. During hydration
+  // the tab store still holds its null server snapshot while the URL already
+  // carries the real tab, so the effect defers to the URL until the two agree.
   useEffect(() => {
-    const normalizedSearch = normalizeTransactionSearch(debouncedSearch);
-    if (normalizedSearch === stateRef.current.search) return;
-    updateFilters({ search: normalizedSearch });
-  }, [debouncedSearch, updateFilters]);
-
-  useEffect(() => {
-    if (debouncedAsset === (stateRef.current.asset ?? "")) return;
-    updateFilters({ asset: debouncedAsset || undefined });
-  }, [debouncedAsset, updateFilters]);
-
-  const updateSearchValue = (value: string) => {
-    searchValueRef.current = value;
-    dirtyInputsRef.current.search = true;
-    setSearchValue(value);
-  };
-
-  const updateAssetValue = (value: string) => {
-    assetValueRef.current = value;
-    dirtyInputsRef.current.asset = true;
-    setAssetValue(value);
-  };
-
-  const clearFilters = () => {
-    searchValueRef.current = "";
-    assetValueRef.current = "";
-    dirtyInputsRef.current = { search: false, asset: false };
-    setSearchValue("");
-    setAssetValue("");
-    setFiltersOpen(false);
-    updateFilters({
-      search: undefined,
-      status: undefined,
-      direction: undefined,
-      type: undefined,
-      custodyWalletId: undefined,
-      counterpartyId: undefined,
-      asset: undefined,
-      provider: undefined,
-      from: undefined,
-      to: undefined,
-      includeObserved: false,
-      sortBy: "createdAt",
-      sortDirection: "desc",
-      page: 1,
-      pageSize: 25,
-    });
-  };
-  const sortValue = `${displayFilters.sortBy}:${displayFilters.sortDirection}`;
-
-  const downloadCsv = async () => {
-    if (csvDownloading || disableCsvExport) return;
-    setCsvDownloading(true);
-    setCsvError(null);
-
-    try {
-      const response = await fetch(buildTransactionsExportHref(displayFilters));
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as {
-          error?: { message?: string };
-        };
-        throw new Error(
-          body.error?.message ?? t("DashboardPayments.transactions.downloadCsvFailed")
-        );
-      }
-
-      await downloadResponseBlob(response, "sdp-transactions.csv");
-    } catch (error) {
-      setCsvError(
-        error instanceof Error
-          ? error.message
-          : t("DashboardPayments.transactions.downloadCsvFailed")
-      );
-    } finally {
-      setCsvDownloading(false);
+    if (parseTransactionModule(readDashboardTabFromUrl()) !== activeModule) return;
+    if (activeModule !== filters.module) {
+      update({ module: activeModule, kind: undefined });
     }
+  }, [activeModule, filters.module, update]);
+
+  const apiQuery = transactionsApiQuery(filters);
+  const { data, error, isValidating } = useSWR<TransactionsPageResult, Error>(
+    paymentsQueryKeys.transactions({ query: apiQuery }),
+    ([, query]: readonly [string, string]) => fetchTransactionsPageFromDashboard(query),
+    {
+      fallbackData: apiQuery === initialQuery ? initialResult : undefined,
+      revalidateOnMount: false,
+      keepPreviousData: true,
+      revalidateOnFocus: false,
+    }
+  );
+
+  const commitSearch = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed.length >= 3) update({ search: trimmed });
+    else if (trimmed.length === 0) update({ search: undefined });
   };
+  const searchValue = filters.search === undefined ? "" : filters.search;
+  const contextValue = useMemo(
+    () => ({ filters, pending: isValidating, navigate, update }),
+    [filters, isValidating, navigate, update]
+  );
+  const linkedFilters = [
+    {
+      key: "counterpartyId",
+      label: t("DashboardPayments.transactions.counterparty"),
+      value: filters.counterpartyId,
+      href: counterpartyHref,
+      clearLabel: t("DashboardPayments.transactions.clearCounterparty"),
+    },
+    {
+      key: "custodyWalletId",
+      label: t("DashboardPayments.transactions.wallet"),
+      value: filters.custodyWalletId,
+      href: walletHref,
+      clearLabel: t("DashboardPayments.transactions.clearWallet"),
+    },
+    {
+      key: "token",
+      label: t("DashboardPayments.transactions.token"),
+      value: filters.token,
+      href: null,
+      clearLabel: t("DashboardPayments.transactions.clearToken"),
+    },
+  ] as const;
 
   return (
-    <TransactionFilterContext.Provider
-      value={{ filters: displayFilters, isPending, clearFilters, updateFilters }}
-    >
-      <DashboardWorkspaceOverviewPanel className="flex flex-col">
+    <TransactionContext.Provider value={contextValue}>
+      <DashboardWorkspaceOverviewPanel className="flex flex-col" aria-busy={isValidating}>
         <DashboardWorkspaceCard>
-          <div className="border-b border-border-default p-3">
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto_auto]">
-              <Input
-                value={searchValue}
-                onChange={(event) => updateSearchValue(event.target.value)}
-                minLength={MIN_TRANSACTION_SEARCH_LENGTH}
-                placeholder={t("DashboardPayments.transactions.searchPlaceholder")}
-                aria-label={t("DashboardPayments.transactions.searchPlaceholder")}
-                iconLeft={<SearchIcon />}
-                iconRight={
-                  searchValue ? (
-                    <button
-                      type="button"
-                      aria-label={t("DashboardPayments.transactions.clearSearch")}
-                      onClick={() => updateSearchValue("")}
-                      className="rounded text-tertiary hover:text-primary"
-                    >
-                      <XIcon />
-                    </button>
-                  ) : undefined
-                }
-              />
-              <SelectFilter
-                value={displayFilters.status}
-                allLabel={t("DashboardPayments.transactions.allStatuses")}
-                ariaLabel={t("DashboardPayments.transactions.allStatuses")}
-                onChange={(status) =>
-                  updateFilters({ status: status as TransactionStatusFilter | undefined })
-                }
+          <div className="grid gap-2 border-b border-border-default p-3 md:grid-cols-2 xl:grid-cols-4">
+            <TransactionSearchInput
+              key={searchValue}
+              initialValue={searchValue}
+              onCommit={commitSearch}
+            />
+            {filters.module === undefined ? null : (
+              <Select
+                value={filters.kind === undefined ? "all" : filters.kind}
+                ariaLabel={t("DashboardPayments.transactions.kindSelectLabel")}
+                onValueChange={(kind) => update({ kind: selectedValue(kind) })}
               >
-                {TRANSACTION_STATUSES.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {t(STATUS_LABELS[status])}
+                <SelectItem value="all">{t("DashboardPayments.transactions.allKinds")}</SelectItem>
+                {UNIFIED_TRANSACTION_MODULE_CONTRACTS[filters.module].kinds.map((kind) => (
+                  <SelectItem key={kind} value={kind}>
+                    {t(
+                      `DashboardPayments.transactions.kinds.${filters.module}.${kind}` as MessageKey
+                    )}
                   </SelectItem>
                 ))}
-              </SelectFilter>
-              <Select
-                value={sortValue}
-                ariaLabel={t("DashboardPayments.transactions.sort")}
-                onValueChange={(value) => {
-                  const [sortBy = "createdAt", sortDirection = "desc"] = (value ?? "").split(":");
-                  updateFilters({
-                    sortBy: sortBy as TransactionSortField,
-                    sortDirection: sortDirection as "asc" | "desc",
-                  });
-                }}
-              >
-                <SelectItem value="createdAt:desc">
-                  {t("DashboardPayments.transactions.newest")}
-                </SelectItem>
-                <SelectItem value="createdAt:asc">
-                  {t("DashboardPayments.transactions.oldest")}
-                </SelectItem>
-                <SelectItem value="amount:desc">
-                  {t("DashboardPayments.transactions.amountHigh")}
-                </SelectItem>
-                <SelectItem value="amount:asc">
-                  {t("DashboardPayments.transactions.amountLow")}
-                </SelectItem>
-                <SelectItem value="status:asc">
-                  {t("DashboardPayments.transactions.statusAscending")}
-                </SelectItem>
               </Select>
-              <Button
-                type="button"
-                variant={filtersOpen ? "secondary" : "outline"}
-                iconLeft={<FilterIcon />}
-                aria-expanded={filtersOpen}
-                aria-controls="payments-transaction-advanced-filters"
-                onClick={() => setFiltersOpen((open) => !open)}
-              >
-                {/* No count badge here: "N active" renders directly below on the
-                    same condition, so the badge repeated it in a less useful form —
-                    a bare number, crowded against the button edge, next to a line
-                    that says what the number actually means and offers to clear it. */}
-                {t("DashboardPayments.transactions.filters")}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={csvDownloading || disableCsvExport}
-                iconLeft={
-                  csvDownloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />
-                }
-                onClick={downloadCsv}
-              >
-                {csvDownloading
-                  ? t("DashboardPayments.transactions.downloadingCsv")
-                  : t("DashboardPayments.transactions.downloadCsv")}
-              </Button>
-            </div>
-            {csvError ? <p className="mt-2 text-xs text-error">{csvError}</p> : null}
-            {advancedFilterCount > 0 ? (
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <span className="text-xs text-secondary">
-                  {t("DashboardPayments.transactions.activeFilters", {
-                    count: advancedFilterCount,
-                  })}
-                </span>
-                <Button type="button" variant="link" size="sm" onClick={clearFilters}>
-                  {t("DashboardPayments.transactions.clearFilters")}
-                </Button>
-              </div>
-            ) : null}
-          </div>
-          <div id="payments-transaction-advanced-filters" className={cn(!filtersOpen && "hidden")}>
-            <AdvancedFilters
-              filters={displayFilters}
-              options={filterOptions}
-              optionsLoading={optionsLoading}
-              assetValue={assetValue}
-              onAssetChange={updateAssetValue}
-              updateFilters={updateFilters}
+            )}
+            <Select
+              value={filters.status === undefined ? "all" : filters.status}
+              ariaLabel={t("DashboardPayments.transactions.statusSelectLabel")}
+              onValueChange={(value) => {
+                const selected = selectedValue(value);
+                update({
+                  status: UNIFIED_TRANSACTION_STATUSES.find((candidate) => candidate === selected),
+                });
+              }}
+            >
+              <SelectItem value="all">{t("DashboardPayments.transactions.allStatuses")}</SelectItem>
+              {UNIFIED_TRANSACTION_STATUSES.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {t(`DashboardPayments.transactions.statuses.${status}` as MessageKey)}
+                </SelectItem>
+              ))}
+            </Select>
+            <DateRangePicker
+              id="transactions-date-range"
+              from={filters.from === undefined ? "" : filters.from}
+              to={filters.to === undefined ? "" : filters.to}
+              onChange={(from, to) =>
+                update({ from: from === "" ? undefined : from, to: to === "" ? undefined : to })
+              }
             />
           </div>
-          {children}
+          {linkedFilters.map((linked) =>
+            linked.value === undefined ? null : (
+              <div
+                key={linked.key}
+                className="flex items-center gap-2 border-b border-border-default px-3 py-2 text-sm"
+              >
+                <span className="text-secondary">{linked.label}:</span>
+                {linked.href === null ? (
+                  <span className="text-primary">{linked.value}</span>
+                ) : (
+                  <EntityLink href={linked.href(linked.value)}>{linked.value}</EntityLink>
+                )}
+                <button
+                  type="button"
+                  className="rounded p-1 text-tertiary hover:bg-surface-secondary hover:text-primary"
+                  aria-label={linked.clearLabel}
+                  onClick={() => update({ [linked.key]: undefined })}
+                >
+                  <XIcon className="size-4" />
+                </button>
+              </div>
+            )
+          )}
+          {error !== undefined ? (
+            <ListEmptyState
+              icon={<ReceiptTextIcon className="size-5" />}
+              message={t("DashboardPayments.transactions.loadFailed")}
+              description={error.message}
+            />
+          ) : data === undefined ? (
+            <TransactionsResultsSkeleton />
+          ) : (
+            <TransactionsResults result={data} issuedTokensByMint={issuedTokensByMint} />
+          )}
         </DashboardWorkspaceCard>
       </DashboardWorkspaceOverviewPanel>
-    </TransactionFilterContext.Provider>
+    </TransactionContext.Provider>
   );
 }

@@ -177,6 +177,7 @@ describe("ApiKeyService.createApiKey permission guard", () => {
         organizationId: "org_1",
         projectId: "prj_1",
         actorPermissions: ["api-keys:write"],
+        actorApiKeyRole: null,
         createdByUserId: "usr_1",
         name: "escalated",
         role: "api_admin",
@@ -203,6 +204,7 @@ describe("ApiKeyService.updateApiKey", () => {
       service.updateApiKey({
         ...base,
         actorPermissions: ["payments:read"],
+        actorApiKeyRole: null,
         permissions: ["*"],
       })
     ).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
@@ -217,6 +219,7 @@ describe("ApiKeyService.updateApiKey", () => {
     await service.updateApiKey({
       ...base,
       actorPermissions: ["org:admin"],
+      actorApiKeyRole: null,
       name: "renamed",
     });
 
@@ -232,6 +235,7 @@ describe("ApiKeyService.updateApiKey", () => {
     await service.updateApiKey({
       ...base,
       actorPermissions: ["payments:read", "payments:write", "api-keys:write"],
+      actorApiKeyRole: null,
       permissions: ["payments:read"],
     });
 
@@ -249,7 +253,7 @@ describe("ApiKeyService.updateApiKey", () => {
     const service = new ApiKeyService(db, TEST_SCOPE);
 
     await expect(
-      service.updateApiKey({ ...base, actorPermissions: ["org:admin"] })
+      service.updateApiKey({ ...base, actorPermissions: ["org:admin"], actorApiKeyRole: null })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     expect(db.runs).toHaveLength(0);

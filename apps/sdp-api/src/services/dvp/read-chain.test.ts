@@ -10,7 +10,9 @@
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { type Address, address } from "@solana/kit";
+import { DVP_LEG_REFUSAL } from "@sdp/types";
+import { type Address, address, unixTimestamp as toUnixTimestamp } from "@solana/kit";
+import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { AccountState, getTokenEncoder } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +83,31 @@ function tradeAccount(address: Address = SWAP) {
   };
 }
 
+const CLUSTER_NOW = 1_800_000_000n;
+
+/** The Clock sysvar as the RPC returns it, encoded with the program's own layout. */
+function clockAccount(seconds: bigint = CLUSTER_NOW) {
+  return {
+    address: SYSVAR_CLOCK_ADDRESS,
+    exists: true as const,
+    data: getSysvarClockEncoder().encode({
+      slot: 284_617_079n,
+      epochStartTimestamp: toUnixTimestamp(seconds - 10_000n),
+      epoch: 4n,
+      leaderScheduleEpoch: 5n,
+      unixTimestamp: toUnixTimestamp(seconds),
+    }),
+    programAddress: "Sysvar1111111111111111111111111111111111111" as Address,
+    executable: false,
+    lamports: 1n,
+  };
+}
+
+/** The trade, both escrows and the clock, in the order one batch returns them. */
+function answerBatch(accounts: unknown[]) {
+  fetchEncodedAccounts.mockResolvedValue([...accounts, clockAccount()]);
+}
+
 describe("readDvpTradeObservation", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -88,7 +115,7 @@ describe("readDvpTradeObservation", () => {
   });
 
   it("reports a live trade and both funded escrows", async () => {
-    fetchEncodedAccounts.mockResolvedValue([
+    answerBatch([
       tradeAccount(),
       tokenAccount(ESCROW_A, { amount: 1000n }),
       tokenAccount(ESCROW_B, { amount: 2000n }),
@@ -100,6 +127,20 @@ describe("readDvpTradeObservation", () => {
     expect(observation.legA).toEqual({ exists: true, amount: 1000n, frozen: false });
     expect(observation.legB).toEqual({ exists: true, amount: 2000n, frozen: false });
     expect(observation.blockHeight).toBe(500n);
+    expect(observation.clusterUnixTimestamp).toBe(CLUSTER_NOW);
+  });
+
+  // The clock rides in the same batch, so an RPC that leaves it out answers
+  // nothing a settlement window can be judged by: a failed read, not a zero.
+  it("fails the read when the cluster returns no Clock sysvar", async () => {
+    fetchEncodedAccounts.mockResolvedValue([
+      tradeAccount(),
+      tokenAccount(ESCROW_A, { amount: 1000n }),
+      tokenAccount(ESCROW_B, { amount: 2000n }),
+      missing(SYSVAR_CLOCK_ADDRESS),
+    ]);
+
+    await expect(readDvpTradeObservation(rpc, SWAP, legs, 500n)).rejects.toThrow();
   });
 
   // THE case this function exists for. A settled or closed trade's account is
@@ -113,7 +154,7 @@ describe("readDvpTradeObservation", () => {
     const { verifySwapDvpAccount: real } =
       await vi.importActual<typeof import("@sdp/dvp")>("@sdp/dvp");
     verifySwapDvpAccount.mockImplementation(real);
-    fetchEncodedAccounts.mockResolvedValue([missing(SWAP), missing(ESCROW_A), missing(ESCROW_B)]);
+    answerBatch([missing(SWAP), missing(ESCROW_A), missing(ESCROW_B)]);
 
     const observation = await readDvpTradeObservation(rpc, SWAP, legs, 500n);
 
@@ -123,7 +164,7 @@ describe("readDvpTradeObservation", () => {
   // Bytes that fail an owner or size check are a settled fact about the chain:
   // whatever is at that address, it is not a trade we would act on.
   it("reports unverifiable bytes as absent", async () => {
-    fetchEncodedAccounts.mockResolvedValue([tradeAccount(), missing(ESCROW_A), missing(ESCROW_B)]);
+    answerBatch([tradeAccount(), missing(ESCROW_A), missing(ESCROW_B)]);
     verifySwapDvpAccount.mockRejectedValue(
       new SwapDvpVerificationError("not owned by the DvP program")
     );
@@ -144,7 +185,7 @@ describe("readDvpTradeObservation", () => {
   // Likewise for a decode that fails for a reason we did not anticipate: it is
   // not evidence of absence, so it must not be laundered into one.
   it("propagates an unexpected decode failure", async () => {
-    fetchEncodedAccounts.mockResolvedValue([tradeAccount(), missing(ESCROW_A), missing(ESCROW_B)]);
+    answerBatch([tradeAccount(), missing(ESCROW_A), missing(ESCROW_B)]);
     verifySwapDvpAccount.mockRejectedValue(new TypeError("unexpected"));
 
     await expect(readDvpTradeObservation(rpc, SWAP, legs, 500n)).rejects.toThrow("unexpected");
@@ -154,16 +195,21 @@ describe("readDvpTradeObservation", () => {
   // different slot than the trade, which is how you observe a half-settled
   // trade that never existed.
   it("reads the trade and both escrows in a single request", async () => {
-    fetchEncodedAccounts.mockResolvedValue([tradeAccount(), missing(ESCROW_A), missing(ESCROW_B)]);
+    answerBatch([tradeAccount(), missing(ESCROW_A), missing(ESCROW_B)]);
 
     await readDvpTradeObservation(rpc, SWAP, legs, 500n);
 
     expect(fetchEncodedAccounts).toHaveBeenCalledTimes(1);
-    expect(fetchEncodedAccounts.mock.calls[0][1]).toEqual([SWAP, ESCROW_A, ESCROW_B]);
+    expect(fetchEncodedAccounts.mock.calls[0][1]).toEqual([
+      SWAP,
+      ESCROW_A,
+      ESCROW_B,
+      SYSVAR_CLOCK_ADDRESS,
+    ]);
   });
 
   it("reports a frozen escrow", async () => {
-    fetchEncodedAccounts.mockResolvedValue([
+    answerBatch([
       tradeAccount(),
       tokenAccount(ESCROW_A, { amount: 1000n, frozen: true }),
       missing(ESCROW_B),
@@ -177,7 +223,7 @@ describe("readDvpTradeObservation", () => {
   // An address alone proves nothing. Reporting the bytes at a wrong-owner
   // address as a balance would be worse than reporting nothing.
   it("refuses to read an escrow owned by another program as a balance", async () => {
-    fetchEncodedAccounts.mockResolvedValue([
+    answerBatch([
       tradeAccount(),
       tokenAccount(ESCROW_A, { amount: 9999n }, address("11111111111111111111111111111111")),
       missing(ESCROW_B),
@@ -189,7 +235,7 @@ describe("readDvpTradeObservation", () => {
   });
 
   it("refuses an escrow token account for the wrong mint", async () => {
-    fetchEncodedAccounts.mockResolvedValue([
+    answerBatch([
       tradeAccount(),
       tokenAccount(ESCROW_A, { amount: 9999n, mint: ESCROW_B }),
       missing(ESCROW_B),
@@ -201,7 +247,7 @@ describe("readDvpTradeObservation", () => {
   });
 
   it("refuses an escrow token account owned by another address", async () => {
-    fetchEncodedAccounts.mockResolvedValue([
+    answerBatch([
       tradeAccount(),
       tokenAccount(ESCROW_A, { amount: 9999n, owner: OTHER_OWNER }),
       missing(ESCROW_B),
@@ -244,6 +290,11 @@ describe("readEscrowState", () => {
 
     await expect(
       readEscrowState(rpc, { escrow: ESCROW_A, tokenProgram: T22, mint: MINT }, SWAP, "dvp_test")
-    ).rejects.toThrow(/owner\/mint\/program mismatch/);
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/owner\/mint\/program mismatch/),
+      // The funding recheck reaches this path too, so the dashboard still
+      // names the refusal instead of relaying the message.
+      details: { reason: DVP_LEG_REFUSAL.escrowMismatch },
+    });
   });
 });

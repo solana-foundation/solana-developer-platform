@@ -48,7 +48,7 @@ COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-issuance ./packages/sdp-issuance
 
 # These are parsed as URLs at build time, so the placeholder defaults are valid
-# URLs whose origin docker/entrypoint.sh swaps for runtime env at container start.
+# URLs whose origin /app/entrypoint.sh swaps for runtime env at container start.
 ARG NEXT_PUBLIC_SDP_WEB_URL=https://__sdp_rt__next_public_sdp_web_url__.invalid
 ARG NEXT_PUBLIC_SDP_DOCS_URL=https://__sdp_rt__next_public_sdp_docs_url__.invalid
 ARG NEXT_PUBLIC_SDP_API_URL=https://__sdp_rt__next_public_sdp_api_url__.invalid
@@ -86,8 +86,8 @@ COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-docs/public ./apps/sdp-
 
 # public/ also holds generated files (llms.txt) that embed these URLs.
 ENV SDP_INJECT_DIRS="/app/apps/sdp-docs/.next /app/apps/sdp-docs/public"
-COPY --chmod=0755 apps/sdp-docs/docker/entrypoint.sh /app/entrypoint.sh
-COPY apps/sdp-docs/docker/inject-public-env.mjs /app/inject-public-env.mjs
+COPY --chmod=0755 scripts/docker/entrypoint.sh /app/entrypoint.sh
+COPY scripts/docker/inject-public-env.mjs /app/inject-public-env.mjs
 
 ARG GIT_SHA=""
 ARG IMAGE_SOURCE="https://github.com/solana-foundation/solana-developer-platform"

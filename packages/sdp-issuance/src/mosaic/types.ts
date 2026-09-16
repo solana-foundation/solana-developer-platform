@@ -120,6 +120,8 @@ export interface CreateTokenOptions {
   decimals: number;
   /** Mint authority address */
   mintAuthority: Address | TransactionSigner;
+  /** Metadata authority; signs the URI follow-up when creation exceeds the packet limit. */
+  metadataAuthority?: TransactionSigner;
   /** Freeze authority (null to disable) */
   freezeAuthority: Address | null;
   /** Fee payer for the deploy transaction */

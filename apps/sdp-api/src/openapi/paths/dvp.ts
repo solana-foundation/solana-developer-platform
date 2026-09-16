@@ -14,6 +14,7 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import {
   createDvpTradeRequestSchema,
+  dvpLegRefusalErrorResponseSchema,
   dvpTradeIdParamSchema,
   errorResponseSchema,
   fundDvpTradeRequestSchema,
@@ -28,6 +29,7 @@ import {
 } from "./helpers";
 import {
   dvpCloseResponse,
+  dvpLegActionResponse,
   dvpTradeResponse,
   listDvpInboundTradesResponse,
   listDvpTradesResponse,
@@ -102,16 +104,38 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     summary: "Fund your leg of a DvP trade",
     operationId: "fundDvpTrade",
     description:
-      "Moves your side of the trade from its custody wallet into that leg's escrow. The counterparty needs nothing from this endpoint — they fund their own leg with an ordinary TransferChecked to the escrow address, which is the whole of their integration. The amount is the trade's, not a parameter: over-funding is a settlement risk, because settlement refunds the surplus and on a transfer-hook mint that refund can revert the whole settlement. Refuses a leg that is already funded, and refuses a frozen escrow with the reason rather than letting the transfer bounce. DvP actions are not wallet-policy gated.",
+      "Moves your side of the trade from its custody wallet into that leg's escrow. The counterparty needs nothing from this endpoint — they fund their own leg with an ordinary TransferChecked to the escrow address, which is the whole of their integration. The amount is the trade's, not a parameter: over-funding is a settlement risk, because settlement refunds the surplus and on a transfer-hook mint that refund can revert the whole settlement. Refuses a leg that is already funded, and refuses a frozen escrow with the reason rather than letting the transfer bounce; each refusal names its reason in error.details.reason. Send an Idempotency-Key: a retry with the same key returns the first request's result instead of funding again. DvP actions are not wallet-policy gated.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithIdempotencyHeaders,
       params: tradeIdPathParams,
       body: { content: jsonContent(fundDvpTradeRequestSchema) },
     },
     responses: {
-      200: { description: "Leg funded", content: jsonContent(dvpCloseResponse) },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      200: { description: "Leg funded", content: jsonContent(dvpLegActionResponse) },
+      ...errorResponses(dvpLegRefusalErrorResponseSchema, [400, 409]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 422, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/dvp/trades/{tradeId}/reclaim",
+    tags: [DVP_TAG],
+    summary: "Reclaim your leg of a DvP trade",
+    operationId: "reclaimDvpTrade",
+    description:
+      "Moves whatever your side's escrow holds back to the custody wallet at that side's party address, creating its token account first if needed. The trade stays open and the leg can be funded again. Works before and after expiry. Only the leg's own party can reclaim, so a counterparty's leg is theirs to pull back. Refuses a closed trade, an empty escrow, a leg whose funding is still in flight, and a transfer-hook mint; each refusal names its reason in error.details.reason. Send an Idempotency-Key: a retry with the same key returns the first request's result instead of reclaiming again. DvP actions are not wallet-policy gated.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeWithIdempotencyHeaders,
+      params: tradeIdPathParams,
+      body: { content: jsonContent(fundDvpTradeRequestSchema) },
+    },
+    responses: {
+      200: { description: "Leg reclaimed", content: jsonContent(dvpLegActionResponse) },
+      ...errorResponses(dvpLegRefusalErrorResponseSchema, [400, 409]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
 

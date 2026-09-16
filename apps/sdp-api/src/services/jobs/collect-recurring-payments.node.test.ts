@@ -2,48 +2,61 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { rootLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env";
+import { env } from "@/test/helpers/env";
 
 type StaleUpdateRow = PaymentRecurringPaymentRow & {
   oldest_updated_at: string;
   stale_count: number;
 };
 
-const mocks = vi.hoisted(() => ({
+interface MockState {
+  activateRecurringPayment: ReturnType<typeof vi.fn>;
+  cancelRecurringPayment: ReturnType<typeof vi.fn>;
+  collectRecurringPayment: ReturnType<typeof vi.fn>;
+  journalAutomatedCollectionFailure: ReturnType<typeof vi.fn>;
+  resumeRecurringPayment: ReturnType<typeof vi.fn>;
+  findOperationalWalletById: ReturnType<typeof vi.fn>;
+  listStaleLifecyclePayments: ReturnType<typeof vi.fn>;
+  listStaleUpdatePayments: ReturnType<typeof vi.fn>;
+  listRecoverableCollectionPayments: ReturnType<typeof vi.fn>;
+  listDueCollectionPayments: ReturnType<typeof vi.fn>;
+  rows: {
+    due: PaymentRecurringPaymentRow[];
+    lifecycle: PaymentRecurringPaymentRow[];
+    staleCollection: PaymentRecurringPaymentRow[];
+    staleUpdate: StaleUpdateRow[];
+  };
+}
+
+const mocks = vi.hoisted<MockState>(() => ({
   activateRecurringPayment: vi.fn(),
   cancelRecurringPayment: vi.fn(),
   collectRecurringPayment: vi.fn(),
   journalAutomatedCollectionFailure: vi.fn(),
   resumeRecurringPayment: vi.fn(),
   findOperationalWalletById: vi.fn(),
-  queryCalls: [] as Array<{ query: string; bindings: Array<string | number> }>,
+  listStaleLifecyclePayments: vi.fn(),
+  listStaleUpdatePayments: vi.fn(),
+  listRecoverableCollectionPayments: vi.fn(),
+  listDueCollectionPayments: vi.fn(),
   rows: {
-    due: [] as PaymentRecurringPaymentRow[],
-    lifecycle: [] as PaymentRecurringPaymentRow[],
-    staleCollection: [] as PaymentRecurringPaymentRow[],
-    staleUpdate: [] as StaleUpdateRow[],
+    due: [],
+    lifecycle: [],
+    staleCollection: [],
+    staleUpdate: [],
   },
 }));
 
 vi.mock("@/db", () => ({
-  getDb: () => ({
-    prepare: (query: string) => ({
-      bind: (...bindings: Array<string | number>) => ({
-        all: () => {
-          mocks.queryCalls.push({ query, bindings });
-          if (query.includes("status IN ('activating', 'canceling', 'resuming')")) {
-            return Promise.resolve({ rows: mocks.rows.lifecycle });
-          }
-          if (query.includes("JOIN payment_subscription_collection_attempts")) {
-            return Promise.resolve({ rows: mocks.rows.staleCollection });
-          }
-          if (query.includes("status = 'updating'")) {
-            return Promise.resolve({ rows: mocks.rows.staleUpdate });
-          }
-          return Promise.resolve({ rows: mocks.rows.due });
-        },
-      }),
-    }),
+  getDb: () => ({}),
+}));
+
+vi.mock("@/db/repositories/payment-recurring-payments.repository.postgres", () => ({
+  createPostgresPaymentRecurringPaymentsRepository: () => ({
+    listStaleLifecyclePayments: mocks.listStaleLifecyclePayments,
+    listStaleUpdatePayments: mocks.listStaleUpdatePayments,
+    listRecoverableCollectionPayments: mocks.listRecoverableCollectionPayments,
+    listDueCollectionPayments: mocks.listDueCollectionPayments,
   }),
 }));
 
@@ -122,11 +135,16 @@ describe("collectDueRecurringPayments", () => {
     mocks.journalAutomatedCollectionFailure.mockReset();
     mocks.resumeRecurringPayment.mockReset();
     mocks.findOperationalWalletById.mockReset();
-    mocks.queryCalls.length = 0;
     mocks.rows.due = [];
     mocks.rows.lifecycle = [];
     mocks.rows.staleCollection = [];
     mocks.rows.staleUpdate = [];
+    mocks.listStaleLifecyclePayments.mockImplementation(async () => mocks.rows.lifecycle);
+    mocks.listStaleUpdatePayments.mockImplementation(async () => mocks.rows.staleUpdate);
+    mocks.listRecoverableCollectionPayments.mockImplementation(
+      async () => mocks.rows.staleCollection
+    );
+    mocks.listDueCollectionPayments.mockImplementation(async () => mocks.rows.due);
     mocks.findOperationalWalletById.mockResolvedValue({
       id: "cwlt_1",
       walletId: "wallet_1",
@@ -146,7 +164,7 @@ describe("collectDueRecurringPayments", () => {
     mocks.rows.staleCollection = [staleCollection];
     mocks.rows.due = [due];
 
-    const result = await collectDueRecurringPayments({} as Env, new Date("2026-07-01T12:30:00Z"));
+    const result = await collectDueRecurringPayments(env, new Date("2026-07-01T12:30:00Z"));
 
     expect(result).toEqual({ recovered: 2, collected: 1, failed: 0, skipped: 0 });
     expect(activateRecurringPayment).toHaveBeenCalledWith(
@@ -175,7 +193,7 @@ describe("collectDueRecurringPayments", () => {
     const resuming = recurringRow("resuming", { id: "prp_resuming" });
     mocks.rows.lifecycle = [canceling, resuming];
 
-    const result = await collectDueRecurringPayments({} as Env);
+    const result = await collectDueRecurringPayments(env, new Date());
 
     expect(result).toEqual({ recovered: 2, collected: 0, failed: 0, skipped: 0 });
     expect(cancelRecurringPayment).toHaveBeenCalledWith(
@@ -190,7 +208,7 @@ describe("collectDueRecurringPayments", () => {
     const canceled = recurringRow("canceled");
     mocks.rows.staleCollection = [canceled];
 
-    const result = await collectDueRecurringPayments({} as Env);
+    const result = await collectDueRecurringPayments(env, new Date());
 
     expect(result).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0 });
     expect(collectRecurringPayment).toHaveBeenCalledWith(
@@ -199,40 +217,21 @@ describe("collectDueRecurringPayments", () => {
     expect(collectRecurringPayment).toHaveBeenCalledTimes(1);
   });
 
-  it("uses batch-size and retry-after controls while excluding active attempts", async () => {
-    await collectDueRecurringPayments(
-      {
-        PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "7",
-        PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES: "45",
-      } as Env,
-      new Date("2026-07-01T12:30:00Z")
-    );
+  it("uses product batch-size and retry-after controls", async () => {
+    await collectDueRecurringPayments(env, new Date("2026-07-01T12:30:00Z"));
 
-    const dueQuery = mocks.queryCalls.find((call) =>
-      call.query.includes("failed_attempt.updated_at > ?")
-    );
-    expect(dueQuery?.bindings).toEqual(["2026-07-01T12:30:00.000Z", "2026-07-01T11:45:00.000Z", 7]);
-    expect(dueQuery?.query).toContain(
-      "active_attempt.status IN ('pending', 'processing', 'confirmed')"
-    );
-    const staleCollectionQuery = mocks.queryCalls.find((call) =>
-      call.query.includes("JOIN payment_subscription_collection_attempts")
-    );
-    expect(staleCollectionQuery?.query).toContain("ROW_NUMBER() OVER");
-    expect(staleCollectionQuery?.query).toContain("PARTITION BY rp.id");
-    expect(staleCollectionQuery?.query).toContain(
-      "rp.status IN ('active', 'canceling', 'canceled')"
-    );
-    expect(staleCollectionQuery?.query).toContain(
-      "rp.status = 'active' AND a.status = 'confirmed'"
-    );
+    expect(mocks.listDueCollectionPayments).toHaveBeenCalledWith({
+      dueBefore: "2026-07-01T12:30:00.000Z",
+      retryBefore: "2026-07-01T12:00:00.000Z",
+      limit: 25,
+    });
   });
 
   it("treats collection conflicts as duplicate-prevention skips", async () => {
     mocks.rows.due = [recurringRow("active")];
     mocks.collectRecurringPayment.mockRejectedValue(new AppError("CONFLICT", "Already claimed"));
 
-    const result = await collectDueRecurringPayments({} as Env);
+    const result = await collectDueRecurringPayments(env, new Date());
 
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
   });
@@ -241,7 +240,7 @@ describe("collectDueRecurringPayments", () => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
     mocks.rows.due = [recurringRow("active", { source_custody_wallet_id: null })];
 
-    const result = await collectDueRecurringPayments({} as Env);
+    const result = await collectDueRecurringPayments(env, new Date());
 
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0 });
     expect(collectRecurringPayment).not.toHaveBeenCalled();
@@ -266,7 +265,7 @@ describe("collectDueRecurringPayments", () => {
     mocks.rows.due = [recurringRow("active")];
     mocks.findOperationalWalletById.mockResolvedValue(wallet);
 
-    const result = await collectDueRecurringPayments({} as Env);
+    const result = await collectDueRecurringPayments(env, new Date());
 
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0 });
     expect(mocks.findOperationalWalletById).toHaveBeenCalledWith({
@@ -307,21 +306,15 @@ describe("collectDueRecurringPayments", () => {
       },
     ];
 
-    const result = await collectDueRecurringPayments(
-      { PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE: "2" } as Env,
-      new Date("2026-07-01T12:30:00Z")
-    );
+    const result = await collectDueRecurringPayments(env, new Date("2026-07-01T12:30:00Z"));
 
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 0 });
     expect(collectRecurringPayment).not.toHaveBeenCalled();
     expect(mocks.journalAutomatedCollectionFailure).not.toHaveBeenCalled();
-    const staleUpdateQuery = mocks.queryCalls.find((call) =>
-      call.query.includes("status = 'updating'")
-    );
-    expect(staleUpdateQuery?.query).toContain("COUNT(*) OVER () AS stale_count");
-    expect(staleUpdateQuery?.query).toContain("MIN(updated_at) OVER () AS oldest_updated_at");
-    expect(staleUpdateQuery?.query).toContain("ORDER BY updated_at DESC, id DESC");
-    expect(staleUpdateQuery?.bindings).toEqual(["2026-07-01T12:15:00.000Z", 2]);
+    expect(mocks.listStaleUpdatePayments).toHaveBeenCalledWith({
+      staleBefore: "2026-07-01T12:15:00.000Z",
+      limit: 25,
+    });
     expect(warn).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       {

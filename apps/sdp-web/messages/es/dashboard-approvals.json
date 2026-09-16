@@ -108,6 +108,9 @@
     "approvalRequiredByPolicy": "Aprobación requerida por política",
     "copyRequestId": "Copiar ID de solicitud",
     "requestIdCopied": "ID de solicitud copiado",
-    "loading": "Cargando aprobaciones..."
+    "loading": "Cargando aprobaciones...",
+    "runtimePaused": "La ejecución de la Wallet está en pausa. Esta solicitud sigue pendiente. Vuelve a aprobarla cuando la ejecución esté disponible.",
+    "runtimeUnavailable": "La Wallet no está disponible. Esta solicitud sigue pendiente. Revisa la Wallet antes de volver a aprobar.",
+    "providerAccessDenied": "Tu organización no tiene acceso a este proveedor de Wallet. Esta solicitud sigue pendiente. Vuelve a aprobarla cuando se restablezca el acceso."
   }
 }

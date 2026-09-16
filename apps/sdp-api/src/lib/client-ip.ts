@@ -19,14 +19,19 @@ function parseForwardedFor(value: string | undefined): string[] {
  * Google External Application Load Balancers append the verified client and
  * load-balancer addresses to any caller-supplied X-Forwarded-For prefix. Cloud
  * Run injects K_SERVICE itself, so in that environment the next-to-last IP is
- * the verified client and untrusted prefixes must be ignored. Self-hosted
- * deployments retain the conventional first-IP behavior and must configure
- * their ingress proxy to replace untrusted X-Forwarded-For values.
+ * the verified client and untrusted prefixes must be ignored. Other
+ * deployments reject forwarding headers by default because a directly
+ * reachable caller can forge them. A self-hosted operator may opt in only
+ * after configuring its ingress to replace untrusted X-Forwarded-For values.
  */
 export function resolveClientIp(
   headers: Pick<Headers, "get">,
-  env: Pick<Env, "K_SERVICE">
+  env: Pick<Env, "K_SERVICE" | "TRUST_PROXY_HEADERS">
 ): string | null {
+  if (!env.K_SERVICE && env.TRUST_PROXY_HEADERS !== "true") {
+    return null;
+  }
+
   const forwarded = parseForwardedFor(headers.get("x-forwarded-for") ?? undefined);
   if (forwarded.length === 0) {
     return null;

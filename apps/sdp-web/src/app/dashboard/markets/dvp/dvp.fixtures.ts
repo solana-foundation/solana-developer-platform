@@ -19,10 +19,13 @@ export const OWN_WALLET_ID = "cwlt_dvp_fixture_own";
 
 /** The caller's custody wallet behind `OWN_ADDRESS`, as the API would resolve it. */
 export function ownParty(overrides: Partial<DvpPartyRef> = {}): DvpPartyRef {
+  const wallet =
+    overrides.wallet === undefined ? { id: OWN_WALLET_ID, name: "Fixture Desk" } : overrides.wallet;
   return {
     address: OWN_ADDRESS,
     counterparty: null,
-    wallet: { id: OWN_WALLET_ID, name: "Fixture Desk" },
+    wallet,
+    actionWallet: wallet === null ? null : { ...wallet, isRuntimeExecutionAllowed: true },
     ...overrides,
   };
 }
@@ -66,6 +69,7 @@ export function testTrade(overrides: Partial<DvpTrade> = {}): DvpTrade {
     nonce: "42",
     expiryTimestamp: "1900000000",
     earliestSettlementTimestamp: null,
+    settlementAvailability: "unfunded",
     refString: null,
     createSignature: null,
     closeSignature: null,

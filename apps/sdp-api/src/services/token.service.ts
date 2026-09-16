@@ -1314,7 +1314,8 @@ export class TokenService {
     mintAddress: string,
     mintAuthority: string,
     freezeAuthority: string | null,
-    ablListAddress?: string | null
+    ablListAddress?: string | null,
+    metadataAuthority: string = mintAuthority
   ): Promise<Token> {
     const now = new Date().toISOString();
     const tenant = this.tenantMutationScope();
@@ -1335,7 +1336,7 @@ export class TokenService {
       .bind(
         mintAddress,
         mintAuthority,
-        mintAuthority,
+        metadataAuthority,
         freezeAuthority,
         ablListAddress ?? null,
         now,

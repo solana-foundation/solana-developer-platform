@@ -40,7 +40,11 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { earnStrategyLiquidityLabel } from "./earn-format";
-import { earnMintAsset, formatProviderAmount } from "./earn-market-presentation";
+import {
+  earnMintAsset,
+  earnStrategyReferenceKey,
+  formatProviderAmount,
+} from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 
 function PortfolioInfoTip({ label }: { label: string }) {
@@ -333,26 +337,26 @@ function PortfolioMetric({
   );
 }
 
+/**
+ * The zero-position portfolio. One quiet statement of what will appear here
+ * once a customer deposits, and the single action that gets there.
+ */
 function PortfolioOnboarding({ configureHref }: { configureHref: string }) {
   const t = useTranslations();
 
   return (
-    <Card className="gap-0 rounded-2xl px-7 py-10 shadow-[0_18px_24px_rgba(0,0,0,0.05)]">
-      <div className="flex flex-col items-center text-center">
-        <span className="flex size-12 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-          <Layers3Icon aria-hidden="true" className="size-6" />
-        </span>
-        <h2 className="mt-4 text-[19px] leading-6 font-medium text-primary">
-          {t("DashboardMarkets.earnProgram.introTitle")}
-        </h2>
-        <p className="mt-2 max-w-[32rem] text-sm leading-5 text-secondary">
-          {t("DashboardMarkets.earnProgram.introDescription")}
-        </p>
-
-        <Button asChild className="mt-8" variant="secondary">
-          <Link href={configureHref}>{t("DashboardMarkets.earnProgram.configureShort")}</Link>
-        </Button>
-      </div>
+    <Card className="rounded-2xl">
+      <ListEmptyState
+        action={
+          <Button asChild>
+            <Link href={configureHref}>{t("DashboardMarkets.earnProgram.configureShort")}</Link>
+          </Button>
+        }
+        className="mx-auto max-w-md"
+        description={t("DashboardMarkets.earnProgram.introDescription")}
+        icon={<Layers3Icon aria-hidden="true" className="size-5" />}
+        message={t("DashboardMarkets.earnProgram.introTitle")}
+      />
     </Card>
   );
 }
@@ -375,10 +379,6 @@ function formatLatestDepositDate(
     dateStyle: "long",
     timeZone: "UTC",
   }).format(latest);
-}
-
-function strategyReferenceKey(provider: string, providerReference: string): string {
-  return JSON.stringify([provider, providerReference]);
 }
 
 function StrategyAvailability({ strategy }: { strategy?: EarnStrategy }) {
@@ -505,7 +505,7 @@ function PortfolioByStrategy({
   const reduceMotion = useReducedMotion();
   const strategiesByReference = new Map(
     (strategies ?? []).map((strategy) => [
-      strategyReferenceKey(strategy.provider, strategy.providerReference),
+      earnStrategyReferenceKey(strategy.provider, strategy.providerReference),
       strategy,
     ])
   );
@@ -542,7 +542,7 @@ function PortfolioByStrategy({
                 const detailsId = safeStrategyId;
                 const isOpen = selectedStrategyId === strategyId;
                 const strategyDefinition = strategiesByReference.get(
-                  strategyReferenceKey(strategy.provider, strategy.providerReference)
+                  earnStrategyReferenceKey(strategy.provider, strategy.providerReference)
                 );
                 return (
                   <Fragment key={strategyId}>
@@ -709,32 +709,36 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
             </Card>
           ) : (
             <>
-              <dl className="grid gap-2 sm:grid-cols-3">
-                <PortfolioMetric
-                  ageLabel={t("DashboardMarkets.earnProgram.customerWalletAgeDistribution")}
-                  agePoints={walletAges}
-                  kind="wallets"
-                  label={t("DashboardMarkets.earnProgram.customerWallets")}
-                  value={summary.walletCount}
-                />
-                <PortfolioMetric
-                  ageLabel={t("DashboardMarkets.earnProgram.livePositionAgeDistribution")}
-                  agePoints={positionAges}
-                  kind="positions"
-                  label={t("DashboardMarkets.earnProgram.livePositions")}
-                  value={summary.positionCount}
-                />
-                <PortfolioMetric
-                  chartValues={summary.totalsByToken.map((total) => ({
-                    id: total.tokenMint,
-                    label: earnMintAsset(total.tokenMint).symbol,
-                    value: total.positionCount,
-                  }))}
-                  kind="assets"
-                  label={t("DashboardMarkets.earnProgram.assetsEarning")}
-                  value={summary.totalsByToken.length}
-                />
-              </dl>
+              {/* Zero recorded positions renders the onboarding card alone: three
+                zero tiles with empty charts read as data, not as "nothing yet". */}
+              {summary.positionCount > 0 ? (
+                <dl className="grid gap-2 sm:grid-cols-3">
+                  <PortfolioMetric
+                    ageLabel={t("DashboardMarkets.earnProgram.customerWalletAgeDistribution")}
+                    agePoints={walletAges}
+                    kind="wallets"
+                    label={t("DashboardMarkets.earnProgram.customerWallets")}
+                    value={summary.walletCount}
+                  />
+                  <PortfolioMetric
+                    ageLabel={t("DashboardMarkets.earnProgram.livePositionAgeDistribution")}
+                    agePoints={positionAges}
+                    kind="positions"
+                    label={t("DashboardMarkets.earnProgram.livePositions")}
+                    value={summary.positionCount}
+                  />
+                  <PortfolioMetric
+                    chartValues={summary.totalsByToken.map((total) => ({
+                      id: total.tokenMint,
+                      label: earnMintAsset(total.tokenMint).symbol,
+                      value: total.positionCount,
+                    }))}
+                    kind="assets"
+                    label={t("DashboardMarkets.earnProgram.assetsEarning")}
+                    value={summary.totalsByToken.length}
+                  />
+                </dl>
+              ) : null}
 
               <div
                 aria-atomic="true"

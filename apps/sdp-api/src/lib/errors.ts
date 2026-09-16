@@ -120,6 +120,8 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   VAULT_EXPOSURE_CAP: 409,
 };
 
+export const PUBLIC_INTERNAL_ERROR_MESSAGE = "An internal error occurred";
+
 const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   BAD_REQUEST: "Invalid request",
   UNAUTHORIZED: "Authentication required",
@@ -129,7 +131,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   RATE_LIMITED: "Too many requests",
   PAYLOAD_TOO_LARGE: "Request body is too large",
   SERVICE_UNAVAILABLE: "Service temporarily unavailable",
-  INTERNAL_ERROR: "An internal error occurred",
+  INTERNAL_ERROR: PUBLIC_INTERNAL_ERROR_MESSAGE,
   NOT_ALLOWLISTED: "Email or domain not on allowlist",
   INVALID_API_KEY: "Invalid API key",
   EXPIRED_API_KEY: "API key has expired",
@@ -228,8 +230,8 @@ export function insufficientPermissions(message?: string): AppError {
   return new AppError("INSUFFICIENT_PERMISSIONS", message);
 }
 
-export function forbidden(message?: string): AppError {
-  return new AppError("FORBIDDEN", message);
+export function forbidden(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("FORBIDDEN", message, details);
 }
 
 export function notFound(resource?: string): AppError {

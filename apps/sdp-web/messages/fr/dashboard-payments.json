@@ -246,7 +246,10 @@
         "preparing": "Préparation du statut du transfert",
         "preparingDescription": "Nous attendons l’enregistrement du transfert lié à ce devis.",
         "waitingForPayment": "En attente de paiement",
-        "waitingForPaymentHostedDescription": "Terminez le paiement dans la fenêtre du fournisseur ci-dessus. Ce dépôt se met à jour automatiquement dès que le fournisseur le confirme."
+        "waitingForPaymentHostedDescription": "Terminez le paiement dans la fenêtre du fournisseur ci-dessus. Ce dépôt se met à jour automatiquement dès que le fournisseur le confirme.",
+        "canceled": "Transfert annulé",
+        "canceledFundingDescription": "Ce transfert a été annulé, les instructions de financement ne sont donc plus valables. Créez un nouveau devis pour continuer.",
+        "canceledPayoutDescription": "Ce paiement a été annulé, les instructions de dépôt ne sont donc plus valables. Créez un nouveau devis pour continuer."
       },
       "untrustedProviderUrl": "Le fournisseur a renvoyé une URL non fiable, elle n'a donc pas été chargée. Créez un nouveau devis ou contactez le support.",
       "destinationCountry": "Pays de destination",
@@ -327,7 +330,11 @@
       "simulating": "Simuler...",
       "depositSimulated": "Dépôt simulé",
       "agreementPendingTitle": "Confirmation de votre accord",
-      "agreementPendingDescription": "Nous enregistrons votre acceptation auprès de BVNK — cela ne prend qu'un instant."
+      "agreementPendingDescription": "Nous enregistrons votre acceptation auprès de BVNK — cela ne prend qu'un instant.",
+      "agreementRequiredTitle": "Examinez et acceptez les accords",
+      "agreementRequiredDescription": "BVNK exige que la contrepartie accepte l'accord de plateforme applicable à sa résidence fiscale avant que ses informations ne soient recueillies.",
+      "viewAgreement": "Voir l'accord",
+      "acceptAgreements": "J'accepte et je continue"
     },
     "lightspark": {
       "verificationRequiredTitle": "Vérifiez votre identité",
@@ -442,7 +449,9 @@
       "import": "Importer",
       "reference": "Référence",
       "referenceOptional": "Facultatif",
-      "unknownToken": "Token inconnu"
+      "unknownToken": "Token inconnu",
+      "resultApprovalPending": "Batch en attente d'approbation",
+      "approvalPendingDescription": "Ce Batch nécessite l'approbation de la politique avant l'envoi. Rien n'a encore été transféré."
     },
     "manualInstructions": {
       "copied": "{label} copié.",
@@ -941,7 +950,11 @@
       "paymentUpdated": "Paiement Recurring mis à jour.",
       "noChangesToSave": "Aucune modification à enregistrer.",
       "sourceWalletUnresolved": "Wallet source indisponible",
-      "sourceWalletUnresolvedDescription": "Ce paiement Recurring n'est lié à aucun Wallet SDP précis, ses actions sont donc indisponibles."
+      "sourceWalletUnresolvedDescription": "Ce paiement Recurring n'est lié à aucun Wallet SDP précis, ses actions sont donc indisponibles.",
+      "signingDisabledDraft": "Le brouillon peut être enregistré ; l'activation requiert un Wallet de signature.",
+      "signingDisabledTitle": "Signature désactivée pour le financement Wallet",
+      "signingDisabledBody": "Vous ne pouvez pas encaisser, modifier ou annuler ce paiement tant que la signature n'est pas activée pour {wallet}.",
+      "signingDisabledPendingBody": "Vous pouvez activer ce paiement dès que la signature est activée pour {wallet} ou si vous changez le financement Wallet."
     },
     "requests": {
       "loadFailed": "Impossible de charger les demandes de paiement",
@@ -1106,7 +1119,89 @@
       "downloadingCsv": "Téléchargement…",
       "downloadCsvFailed": "Le CSV des transactions n'a pas pu être téléchargé.",
       "noAssetMatchesDescription": "Les soldes sont lus depuis la chaîne, tandis que ce tableau répertorie les transferts enregistrés par SDP. Un Token financé en dehors de SDP affiche un solde sans transfert ici.",
-      "allAssets": "Tous les actifs"
-    }
+      "allAssets": "Tous les actifs",
+      "searchTransactions": "Rechercher des transactions",
+      "all": "Tous",
+      "allKinds": "Tous les types",
+      "kindSelectLabel": "Type de transaction",
+      "statusSelectLabel": "Statut de la transaction",
+      "walletId": "ID du Wallet",
+      "tokenPlaceholder": "Mint ou symbole du Token",
+      "token": "Token",
+      "clearCounterparty": "Effacer le filtre de contrepartie",
+      "clearWallet": "Effacer le filtre de Wallet",
+      "clearToken": "Effacer le filtre de Token",
+      "loadFailed": "Impossible de charger les transactions",
+      "module": "Module",
+      "moduleId": "ID du module",
+      "kind": "Type",
+      "noTransactionsFound": "Aucune transaction trouvée",
+      "viewInModule": "Afficher dans {module}",
+      "modules": {
+        "payments": "Payments",
+        "earn": "Earn",
+        "dvp": "Delivery vs Payments",
+        "private_channels": "Private channels",
+        "issuance": "Issuance",
+        "rings": "Rings"
+      },
+      "kinds": {
+        "payments": {
+          "pay": "Payer",
+          "confidential_pay": "Paiement confidentiel",
+          "batch_pay": "Paiement par lots",
+          "recurring_pay": "Paiement Recurring",
+          "deposit": "Dépôt",
+          "request_deposit": "Demande de dépôt",
+          "onramp": "Onramp",
+          "offramp": "Offramp"
+        },
+        "earn": {
+          "deposit": "Dépôt",
+          "withdraw": "Retrait"
+        },
+        "dvp": {
+          "fund": "Financer la jambe",
+          "close": "Clôturer la jambe"
+        },
+        "private_channels": {
+          "transfer": "Transfert",
+          "deposit": "Dépôt",
+          "withdraw": "Retrait"
+        },
+        "issuance": {
+          "mint": "Mint",
+          "burn": "Burn",
+          "freeze": "Geler",
+          "unfreeze": "Dégeler",
+          "seize": "Saisir",
+          "force_burn": "Burn forcé",
+          "update_authority": "Mise à jour de l'autorité",
+          "pause": "Mettre en pause",
+          "unpause": "Reprendre",
+          "deploy": "Déployer"
+        },
+        "rings": {
+          "shield": "Shield",
+          "transfer_registered": "Transfert enregistré",
+          "transfer_anonymous": "Transfert anonyme",
+          "withdraw": "Retrait",
+          "merge": "Fusion",
+          "timelock_create": "Création de timelock",
+          "timelock_settle": "Règlement de timelock",
+          "zone_create": "Création de zone",
+          "ring_exit": "Sortie de Ring",
+          "ring_entry": "Entrée de Ring"
+        }
+      },
+      "statuses": {
+        "pending": "En attente",
+        "succeeded": "Réussi",
+        "failed": "Échoué",
+        "canceled": "Annulé"
+      }
+    },
+    "signingUnavailable": "La signature est désactivée pour ce Wallet.",
+    "restricted": "Restreint"
   }
 }

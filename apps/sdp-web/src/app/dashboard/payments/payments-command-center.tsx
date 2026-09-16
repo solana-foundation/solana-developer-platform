@@ -11,7 +11,7 @@ import {
 import Link from "next/link";
 import { Suspense } from "react";
 import { TokenMark } from "@/components/token-mark";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import {
@@ -21,7 +21,10 @@ import {
 import { createTimedTrace } from "@/lib/request-tracing";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparties } from "./counterparty/counterparty-page.data";
-import { PAYMENT_COMMAND_ACTION_DESTINATIONS } from "./payments-command-center.constants";
+import {
+  PAYMENT_COMMAND_ACTION_DESTINATIONS,
+  PAYMENT_COMMAND_ACTIVITY_DESTINATIONS,
+} from "./payments-command-center.constants";
 import { resolveCommandCenterCounterparty } from "./payments-command-center.utils";
 import {
   PaymentsActivitySkeleton,
@@ -32,15 +35,17 @@ import {
 import {
   formatCurrencyAmount,
   formatDirection,
+  formatPaymentTransferType,
   formatTimestamp,
   normalizeAggregateBalances,
   resolveTokenByMint,
   resolveTotalBalance,
   resolveTransferTokenLabel,
-  resolveTransferTypeLabel,
   resolveUsdBalanceValue,
   selectTopAggregateBalanceRows,
   shortenAddress,
+  statusMessageKey,
+  statusVariant,
 } from "./payments-overview.utils";
 import {
   fetchIssuedTokensByMint,
@@ -201,22 +206,6 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
   );
 }
 
-function statusVariant(status: string): BadgeVariant {
-  if (["completed", "confirmed", "finalized"].includes(status)) return "success";
-  if (["pending", "processing", "awaiting_payment", "settling"].includes(status)) {
-    return "warning";
-  }
-  if (status === "failed") return "danger";
-  return "default";
-}
-
-function formatStatus(status: string): string {
-  return status
-    .split("_")
-    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
-    .join(" ");
-}
-
 function compactAmount(
   transfer: PaymentTransferSummary,
   issuedTokenSymbolsByMint?: Readonly<Record<string, string>>
@@ -233,7 +222,6 @@ function compactAmount(
 }
 
 function compactType(transfer: PaymentTransferSummary): string {
-  if (transfer.type === "transfer_confidential") return "Confidential";
   if (transfer.type === "transfer_batch") return "Batch";
   if (transfer.type === "onramp") return "Deposit";
   if (transfer.type === "offramp") return "Payout";
@@ -271,13 +259,13 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
       <SectionHeading title={t("DashboardPayments.commandCenter.activity")} />
       <div className="mt-3 flex items-end gap-5 border-b border-border-default text-sm">
         <Link
-          href="/dashboard/payments/transactions?type=transfer"
+          href={PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.transfers}
           className="border-b-2 border-primary px-0.5 pb-2 font-medium text-primary"
         >
           {t("DashboardPayments.commandCenter.transfers")}
         </Link>
         <Link
-          href="/dashboard/payments/transactions?type=transfer_batch"
+          href={PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.batches}
           className="px-0.5 pb-2 text-secondary hover:text-primary"
         >
           {t("DashboardPayments.commandCenter.batches")}
@@ -313,12 +301,12 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                   >
                     <span>
                       <Badge variant={statusVariant(transfer.status)}>
-                        {formatStatus(transfer.status)}
+                        {t(statusMessageKey(transfer.status))}
                       </Badge>
                     </span>
                     <span
                       className="min-w-0 truncate text-primary"
-                      title={`${formatDirection(transfer.direction, t)} · ${resolveTransferTypeLabel(transfer.type, t)}`}
+                      title={`${formatDirection(transfer.direction, t)} · ${formatPaymentTransferType(transfer.type, t)}`}
                     >
                       {formatDirection(transfer.direction, t)} · {compactType(transfer)}
                     </span>
@@ -351,11 +339,11 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                 >
                   <span className="flex items-center justify-between gap-2">
                     <span className="font-medium text-primary">
-                      {resolveTransferTypeLabel(transfer.type, t)} ·{" "}
+                      {formatPaymentTransferType(transfer.type, t)} ·{" "}
                       {formatDirection(transfer.direction, t)}
                     </span>
                     <Badge variant={statusVariant(transfer.status)}>
-                      {formatStatus(transfer.status)}
+                      {t(statusMessageKey(transfer.status))}
                     </Badge>
                   </span>
                   <span className="flex min-w-0 items-center justify-between gap-3">
@@ -399,7 +387,7 @@ async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientP
     {
       href: "/dashboard/payments/recurring",
       icon: CalendarClockIcon,
-      count: recurring.ok ? recurring.total : null,
+      count: recurring.ok ? recurring.data.total : null,
       label: t("DashboardPayments.commandCenter.activeSchedules"),
     },
     {

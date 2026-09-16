@@ -16,11 +16,17 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
 }));
 vi.mock("../use-token-action-runner", () => ({
-  useTokenActionRunner: () => ({ runAction: mocks.runAction, isPending: false }),
+  useTokenActionRunner: () => ({
+    runAction: mocks.runAction,
+    runActionImmediately: mocks.runAction,
+    isPending: false,
+  }),
 }));
 vi.mock("./use-token-operation-data", () => ({
   useTokenOperationData: () => ({
-    authorityWallets: [{ id: "cwlt_test", walletId: "wal_test", publicKey: source }],
+    authorityWallets: [
+      { id: "cwlt_test", walletId: "wal_test", isRuntimeExecutionAllowed: true, publicKey: source },
+    ],
     authorityWalletsLoading: false,
     authorityWalletsError: null,
     allowlistEntries: [],
@@ -69,12 +75,11 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderOperations() {
+function renderOperations(overrides: Partial<Token> = {}) {
   return renderHook(
     () =>
       useTokenOperations({
-        token,
-        shouldLoadSupportingData: true,
+        token: { ...token, ...overrides },
         shouldLoadAuthorityWallets: true,
         canManageTokenAdmin: true,
       }),
@@ -157,6 +162,58 @@ describe("token operation confirmations", () => {
           { label: "Network", value: "Mainnet" },
         ]),
       })
+    );
+  });
+});
+
+describe("draft deployment authorities", () => {
+  it("deploys with the saved distinct permission wallets and updated mint wallet", () => {
+    const { result } = renderOperations({ mintAddress: null, status: "pending" });
+    act(() =>
+      result.current.deployToken({
+        "mint-authority": "cwlt_new_mint",
+        "metadata-authority": "cwlt_metadata",
+        "freeze-authority": "cwlt_freeze",
+        "permanent-delegate": "cwlt_recovery",
+      })
+    );
+    expect(mocks.runAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/dashboard/issuance/tokens/tok_test/deploy",
+        body: {
+          feePayment: "sponsored",
+          signingCustodyWalletId: "cwlt_new_mint",
+          authorityCustodyWalletIds: {
+            metadata: "cwlt_metadata",
+            freeze: "cwlt_freeze",
+            permanentDelegate: "cwlt_recovery",
+          },
+        },
+      }),
+      expect.anything()
+    );
+  });
+
+  it("preserves metadata selection through the deployment wallet dialog and omits blank roles", () => {
+    const { result } = renderOperations({
+      mintAddress: null,
+      status: "pending",
+      signingCustodyWalletId: null,
+    });
+    act(() =>
+      result.current.deployToken({ "metadata-authority": "cwlt_metadata", "freeze-authority": "" })
+    );
+    expect(result.current.deployWalletDialogOpen).toBe(true);
+    act(() => result.current.confirmDeployWallet());
+    expect(mocks.runAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: {
+          feePayment: "sponsored",
+          signingCustodyWalletId: "cwlt_test",
+          authorityCustodyWalletIds: { metadata: "cwlt_metadata" },
+        },
+      }),
+      expect.anything()
     );
   });
 });

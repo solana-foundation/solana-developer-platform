@@ -246,8 +246,11 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   ];
 
   const hasCryptoDepositInstruction = depositTarget !== null;
+  const signingUnavailable =
+    !!wizard.fields.walletId && wizard.selectedWallet?.isRuntimeExecutionAllowed !== true;
   const canSendOnchain =
     hasCryptoDepositInstruction &&
+    !signingUnavailable &&
     sourceTokenMint !== null &&
     wizard.fields.walletId.length > 0 &&
     wizard.quoteTransferId !== null;
@@ -259,6 +262,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       !sourceTokenMint ||
       !wizard.fields.walletId ||
       !wizard.selectedWallet ||
+      signingUnavailable ||
       !transferId
     ) {
       return;
@@ -310,6 +314,8 @@ export function useOfframpWizard(props: UseRampWizardProps) {
 
   return {
     ...wizard,
+    sourceWalletHint:
+      signingUnavailable && !onchainSendResult ? t("DashboardPayments.signingUnavailable") : null,
     summaryDetails,
     transferStatus,
     transferStatusLoading,

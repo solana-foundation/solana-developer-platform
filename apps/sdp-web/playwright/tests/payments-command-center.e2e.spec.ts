@@ -57,13 +57,11 @@ test.describe("payments command center and transaction ledger", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/dashboard/payments/transactions", { waitUntil: "domcontentloaded" });
 
-    const search = page.getByRole("textbox", { name: /search id, signature/i });
+    const search = page.getByRole("textbox", { name: /search transactions/i });
     await expect(search).toBeVisible();
     await search.fill("invoice-42");
+    await search.press("Enter");
     await expect(page).toHaveURL(/search=invoice-42/, { timeout: 5_000 });
-
-    await page.getByRole("button", { name: "Filters", exact: true }).click();
-    await expect(page.locator("[data-transaction-advanced-filters]")).toBeVisible();
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);

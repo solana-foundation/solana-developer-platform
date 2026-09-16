@@ -40,6 +40,8 @@ const context: DvpCreateContext = {
       id: "cwlt_1",
       address: WALLET_ADDRESS,
       label: "Treasury",
+      custodyConfigId: "cc_config",
+      isRuntimeExecutionAllowed: true,
       balances: [],
     },
   ],

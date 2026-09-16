@@ -1,6 +1,12 @@
-import type { DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+import type { DvpSettlementAvailability, DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import type { DvpPartyRef, DvpTrade } from "./dvp-trade";
+import { type DvpPartyRef, type DvpTrade, dvpActionWalletSchema } from "./dvp-trade";
+
+// Action metadata is optional on non-action reads, but must be valid when present.
+const legActionWalletSchema = z.object({
+  party: z.object({ actionWallet: dvpActionWalletSchema.nullish() }).optional(),
+});
 
 /**
  * The upstream list is capped at 100 and has no cursor. Asking for a bounded
@@ -11,16 +17,22 @@ export const DVP_TRADES_PAGE_SIZE = 50;
 
 /**
  * The list filters the API narrows SERVER-SIDE. `statuses` maps the UI's status
- * group to the real statuses behind it; `q` is the search text. `null` means
+ * group to the real statuses behind it; `settlementAvailability` narrows a
+ * group that means "can settle now"; `q` is the search text. `null` means
  * unfiltered on that axis, explicit because the house has no default params.
  */
 export interface DvpTradesFilters {
   statuses: DvpTradeStatus[] | null;
+  settlementAvailability: DvpSettlementAvailability[] | null;
   q: string | null;
 }
 
 /** The explicit no-filter filters: unfiltered is a choice, never a default. */
-export const UNFILTERED_DVP_TRADES: DvpTradesFilters = { statuses: null, q: null };
+export const UNFILTERED_DVP_TRADES: DvpTradesFilters = {
+  statuses: null,
+  settlementAvailability: null,
+  q: null,
+};
 
 export interface DvpTradesResult {
   trades: DvpTrade[];
@@ -52,10 +64,8 @@ function isRenderableTrade(value: unknown): value is DvpTrade {
     typeof trade.status === "string" &&
     typeof trade.legs === "object" &&
     trade.legs !== null &&
-    typeof trade.legs.a === "object" &&
-    trade.legs.a !== null &&
-    typeof trade.legs.b === "object" &&
-    trade.legs.b !== null
+    legActionWalletSchema.safeParse(trade.legs.a).success &&
+    legActionWalletSchema.safeParse(trade.legs.b).success
   );
 }
 
@@ -81,6 +91,9 @@ export async function fetchDvpTrades(
     // no statuses of its own) parses to one.
     if (filters.statuses !== null && filters.statuses.length > 0) {
       query.set("status", filters.statuses.join(","));
+    }
+    if (filters.settlementAvailability !== null && filters.settlementAvailability.length > 0) {
+      query.set("settlementAvailability", filters.settlementAvailability.join(","));
     }
     if (filters.q !== null) {
       query.set("q", filters.q);
@@ -159,8 +172,8 @@ function isRenderableInbound(value: unknown): value is DvpInboundTrade {
     (trade.yourSide === "a" || trade.yourSide === "b") &&
     typeof trade.legs === "object" &&
     trade.legs !== null &&
-    typeof trade.legs.a === "object" &&
-    typeof trade.legs.b === "object"
+    legActionWalletSchema.safeParse(trade.legs.a).success &&
+    legActionWalletSchema.safeParse(trade.legs.b).success
   );
 }
 

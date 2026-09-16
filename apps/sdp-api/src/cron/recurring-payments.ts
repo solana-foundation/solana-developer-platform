@@ -13,7 +13,7 @@ export interface RecurringPaymentsCollectionDeps {
 }
 
 export function runRecurringPaymentsCollection(deps: RecurringPaymentsCollectionDeps): void {
-  const work = () => collectDueRecurringPayments(deps.env);
+  const work = () => collectDueRecurringPayments(deps.env, new Date());
   const promise = deps.observability
     ? deps.observability.withMonitor(RECURRING_PAYMENTS_COLLECTION_MONITOR, work, {
         schedule: { type: "crontab", value: RECURRING_PAYMENTS_COLLECTION_CRON },

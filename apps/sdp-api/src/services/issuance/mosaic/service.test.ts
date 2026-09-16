@@ -17,13 +17,14 @@ import type { Address, Signature, TransactionSigner } from "@solana/kit";
 import * as Kit from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as Signers from "@solana/signers";
+import { findMintConfigPda, parseSetAuthorityInstruction } from "@solana/token-acl-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError, transactionFailed } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 
 // Sentinels — the SDK template builder is stubbed, so its concrete return value
 // is irrelevant; we only care which arguments the service hands it.
-const FAKE_FULL_TX = { __sentinel: "full-tx" } as const;
+const FAKE_FULL_TX = { __sentinel: "full-tx", instructions: [] } as const;
 const FAKE_LIST_ADDRESS = "List1111111111111111111111111111111111111" as Address;
 // Structurally-valid placeholder addresses for helper defaults, so callers that
 // don't override these still get a well-formed CreateTokenOptions.
@@ -152,6 +153,106 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       enableTokenAcl: true,
     });
   }
+
+  it.each(["stablecoin", "arcade", "tokenized-security", "custom"] as const)(
+    "initializes the selected metadata authority for %s",
+    async (template) => {
+      const metadataSigner = await Kit.generateKeyPairSigner();
+      const arcade = vi
+        .spyOn(MosaicSdk, "createArcadeTokenInitTransaction")
+        .mockResolvedValue(FAKE_FULL_TX as never);
+      const security = vi
+        .spyOn(MosaicSdk, "createTokenizedSecurityInitTransaction")
+        .mockResolvedValue(FAKE_FULL_TX as never);
+      const custom = vi
+        .spyOn(MosaicSdk, "createCustomTokenInitTransaction")
+        .mockResolvedValue(FAKE_FULL_TX as never);
+      vi.spyOn(
+        MosaicService.prototype as unknown as SubmitProto,
+        "signAndSubmitWithMintKeypair"
+      ).mockResolvedValue({ signature: "sig", slot: 1n });
+      await service.createToken(
+        stablecoinOptions({
+          template,
+          mintAuthority: signer,
+          feePayer: signer,
+          metadataAuthority: metadataSigner,
+        })
+      );
+      if (template === "stablecoin")
+        expect(builderSpy.mock.calls[0][9]).toBe(metadataSigner.address);
+      if (template === "arcade") expect(arcade.mock.calls[0][8]).toBe(metadataSigner.address);
+      if (template === "tokenized-security")
+        expect(security.mock.calls[0][9]).toMatchObject({
+          metadataAuthority: metadataSigner.address,
+        });
+      if (template === "custom")
+        expect(custom.mock.calls[0][8]).toMatchObject({
+          metadataAuthority: metadataSigner.address,
+        });
+    }
+  );
+
+  it("uses the selected metadata signer for the URI follow-up after an oversized create", async () => {
+    const metadataSigner = await Kit.generateKeyPairSigner();
+    vi.mocked(
+      MosaicService.prototype as unknown as PacketSizeProto
+    ).exceedsPacketSize.mockResolvedValue(true);
+    vi.spyOn(
+      MosaicService.prototype as unknown as SubmitProto,
+      "signAndSubmitWithMintKeypair"
+    ).mockResolvedValue({ signature: "sig", slot: 1n });
+    const update = vi
+      .spyOn(service, "updateMetadata")
+      .mockResolvedValue({ signature: "metadata-sig" as Signature, slot: 2n });
+    await service.createToken(
+      stablecoinOptions({
+        mintAuthority: signer,
+        feePayer: signer,
+        metadataAuthority: metadataSigner,
+      })
+    );
+    expect(builderSpy).toHaveBeenCalledTimes(2);
+    expect(builderSpy.mock.calls[1][4]).toBe("");
+    expect(builderSpy.mock.calls[1][9]).toBe(metadataSigner.address);
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        updateAuthority: metadataSigner,
+        feePayer: signer,
+        uri: "https://example.com/t.json",
+      })
+    );
+  });
+
+  it("assigns a distinct Token ACL freeze controller atomically after template setup", async () => {
+    const freezeAuthority = (await Kit.generateKeyPairSigner()).address;
+    const setupInstruction = { programAddress: signer.address };
+    builderSpy.mockResolvedValueOnce({ ...FAKE_FULL_TX, instructions: [setupInstruction] });
+    const submit = vi
+      .spyOn(MosaicService.prototype as unknown as SubmitProto, "signAndSubmitWithMintKeypair")
+      .mockResolvedValue({ signature: "sig", slot: 1n });
+    const result = await service.createToken({ ...srfc37Options(), freezeAuthority });
+    const transaction = submit.mock.calls[0][0] as MosaicSdk.FullTransaction;
+    expect(transaction.instructions).toHaveLength(2);
+    expect(transaction.instructions[0]).toBe(setupInstruction);
+    const instruction = transaction.instructions[1];
+    if (!instruction.accounts || !instruction.data)
+      throw new Error("Missing authority instruction");
+    const parsed = parseSetAuthorityInstruction({
+      ...instruction,
+      accounts: instruction.accounts,
+      data: instruction.data,
+    });
+    expect(parsed.programAddress).toBe(MosaicSdk.TOKEN_ACL_PROGRAM_ID);
+    expect(parsed.accounts.authority.address).toBe(signer.address);
+    expect(parsed.data.newAuthority).toBe(freezeAuthority);
+    if (!result.mint) throw new Error("Missing mint");
+    const [config] = await findMintConfigPda(
+      { mint: result.mint },
+      { programAddress: MosaicSdk.TOKEN_ACL_PROGRAM_ID }
+    );
+    expect(parsed.accounts.mintConfig.address).toBe(config);
+  });
 
   describe("fee-payer resolution", () => {
     it("passes the Kora address (not custody) as fee payer for an sRFC-37 deploy", async () => {

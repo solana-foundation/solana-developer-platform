@@ -11,13 +11,7 @@ export {
 export {
   type BurnOptions,
   type BurnResult,
-  type CreateMintOptions,
-  type CreateMintResult,
   type FeePaymentPort,
-  type FreezeOptions,
-  type FreezeResult,
-  type MintToOptions,
-  type MintToResult,
   type PreparedTransaction,
   type Token2022Env,
   Token2022Service,

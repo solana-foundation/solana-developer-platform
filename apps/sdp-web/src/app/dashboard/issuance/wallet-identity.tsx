@@ -79,7 +79,11 @@ function nameAddress(address: string): string {
 
 // `managed` is the only state that resolves to an org custody wallet, and the
 // provider mark IS the custody proof — no "SDP managed" pill is needed alongside
-// it. The rest differ by surface:
+// it. A managed wallet whose Runtime Execution Admission is false is `restricted`:
+// still ours, still active, but SDP cannot sign with it. The warning mark then
+// takes the provider mark's place and the status leads the detail line, while
+// the name keeps its colour, so the row does not read as someone else's wallet.
+// The rest differ by surface:
 //   · authorities can be `external` (on-chain state, anyone can hold it — the
 //     Permissions warning covers this), `none` (unset), or `unknown` (custody
 //     wallets not loaded yet, so we can't classify);
@@ -101,6 +105,8 @@ export type WalletIdentity =
       publicKey: string;
       /** Custody walletId — the badge links its name to that wallet's page. */
       walletId: string;
+      /** Runtime Execution Admission is false: the wallet is ours and active, but cannot sign. */
+      restricted?: boolean;
     }
   | { state: "external"; publicKey: string }
   | { state: "custom"; publicKey: string }
@@ -128,6 +134,7 @@ export function toWalletIdentity(
       provider: wallet.provider ?? null,
       publicKey: wallet.publicKey,
       walletId: wallet.walletId,
+      restricted: wallet.isRuntimeExecutionAllowed !== true,
     };
   }
 
@@ -310,10 +317,19 @@ function CompactIdentity({
   switch (identity.state) {
     case "managed": {
       const providerName = identity.provider ? formatCustodyProviderName(identity.provider) : null;
+      // A restricted wallet is still ours and active, so the name keeps its colour.
+      // The mark and the detail line carry the status, as for `external`.
+      const restricted = identity.restricted;
       return (
         <CompactShell
           className={className}
-          mark={<WalletProviderMark provider={identity.provider} size="xs" />}
+          mark={
+            restricted ? (
+              WARNING_MARK
+            ) : (
+              <WalletProviderMark provider={identity.provider} size="xs" />
+            )
+          }
         >
           {/* Only the name navigates. Keeping the badge itself inert leaves copy and
               open as two separate, unmistakable targets — and the badge renders in
@@ -329,6 +345,12 @@ function CompactIdentity({
           </WalletNameLink>
           <CompactDetail>
             <span className="truncate">
+              {restricted ? (
+                <>
+                  <span className="text-warning">{t("DashboardCustody.signingDisabledTitle")}</span>
+                  {" · "}
+                </>
+              ) : null}
               {providerName ? `${providerName} · ` : ""}
               {shortenAddress(identity.publicKey)}
             </span>
@@ -521,9 +543,10 @@ function IdentityCard({
   const t = useTranslations();
 
   if (identity.state === "managed") {
+    const restricted = identity.restricted;
     return (
       <CardShell className={className} testId="wallet-identity-card">
-        <WalletProviderMark provider={identity.provider} />
+        {restricted ? <CardWarningMark /> : <WalletProviderMark provider={identity.provider} />}
         <div className="min-w-0 flex-1">
           {identity.provider ? (
             <CardEyebrow>{formatCustodyProviderName(identity.provider)}</CardEyebrow>
@@ -536,6 +559,11 @@ function IdentityCard({
           >
             {identity.name}
           </WalletNameLink>
+          {restricted ? (
+            <p className="mt-1 text-sm leading-[1.45] text-warning">
+              {t("DashboardCustody.signingDisabledTitle")}
+            </p>
+          ) : null}
           <div className={cn(CARD_KEY_BLOCK_CLASS, "space-y-1.5")}>
             <CardKeyRow
               icon={Wallet}

@@ -1700,13 +1700,13 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
  * and the quote capability's fail-closed answers.
  */
 describe("POST /v1/earn/vault-deposit-previews", () => {
-  function postVaultDepositPreview(body: Record<string, unknown>) {
+  function postVaultDepositPreview(body: Record<string, unknown>, authenticated = true) {
     return app.request(
       "/v1/earn/vault-deposit-previews",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          ...(authenticated ? { Authorization: `Bearer ${TEST_API_KEY.raw}` } : {}),
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
@@ -1725,6 +1725,23 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
       quoteVaultDeposit: vi.fn().mockResolvedValue(quote),
     };
   }
+
+  it("quotes anonymously without resolving tenant entitlement", async () => {
+    const strategy = await seedStrategy({ provider: "veda" });
+    const client = quoteCapableClient({
+      sharesOut: "9.99999",
+      shareDecimals: 6,
+      blockingIssues: [],
+    });
+    vaultDirectClientOverride.current = client;
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: { strategyId: strategy.id, sharesOut: "9.99999" },
+    });
+  });
 
   it("answers the provider's own quote for a surfaced, quotable strategy", async () => {
     await seedAuth();

@@ -24,7 +24,14 @@ const OTHER = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const THIRD = "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh";
 
 const wallets: DvpCreateWallet[] = [
-  { id: "cwlt_1", address: WALLET_ADDRESS, label: "Treasury", balances: [] },
+  {
+    id: "cwlt_1",
+    address: WALLET_ADDRESS,
+    label: "Treasury",
+    custodyConfigId: "cc_config",
+    isRuntimeExecutionAllowed: true,
+    balances: [],
+  },
 ];
 
 const counterpartyAccounts: DvpCreateCounterpartyAccount[] = [

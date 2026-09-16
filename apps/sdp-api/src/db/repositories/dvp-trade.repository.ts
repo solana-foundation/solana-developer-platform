@@ -6,7 +6,7 @@
 // derives a different SwapDvp address than the one a counterparty was told to
 // fund. Callers convert to bigint at the edge, never number.
 
-import type { DvpTradeStatus } from "@sdp/types";
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { RepositoryDbClient } from "./base";
 
@@ -65,6 +65,12 @@ export interface DvpTradeRow {
   status: DvpTradeStatus;
   observedAt: string | null;
   /**
+   * The cluster's `Clock.unix_timestamp` at `observedAt`, read with the
+   * accounts. Settlement availability is judged by this, never a host clock.
+   * Null until an observation carried one.
+   */
+  observedClusterTimestamp: string | null;
+  /**
    * When the row first reached a closed status, by whichever writer got there.
    * An observation older than this predates the close and says nothing about
    * the escrows after it.
@@ -110,6 +116,7 @@ export type DvpTradeInsert = Omit<
   | "closeResolutionAfter"
   | "status"
   | "observedAt"
+  | "observedClusterTimestamp"
   | "closedAt"
   | "createdAt"
   | "updatedAt"
@@ -141,11 +148,13 @@ export interface DvpTradeScope {
  *
  * `statuses` narrows to the given lifecycle states; `q` is a case-insensitive
  * substring over id, swap_dvp, both parties, both escrows, both mints and both
- * leg symbols. `null` means no filtering on that axis — explicit, never a
- * defaulted parameter.
+ * leg symbols. `settlementAvailability` narrows to trades whose derived
+ * availability is one of the given values. `null` means no filtering on that
+ * axis — explicit, never a defaulted parameter.
  */
 export interface DvpTradeListFilters {
   statuses: DvpTradeStatus[] | null;
+  settlementAvailability: DvpSettlementAvailability[] | null;
   q: string | null;
 }
 
@@ -160,6 +169,8 @@ export interface DvpTradeObservationUpdate {
   escrowBFrozen: boolean | null;
   closeSignature: Signature | null;
   observedAt: string;
+  /** The cluster clock read with this observation, Unix seconds. */
+  observedClusterTimestamp: string;
 }
 
 export interface DvpTradeRepositoryContext {

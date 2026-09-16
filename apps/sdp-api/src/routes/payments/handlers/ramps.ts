@@ -1,9 +1,5 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import {
-  bvnkOfframpFields,
-  isBvnkOfframpCurrency,
-} from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import type {
   BvnkCustomerResolution,
   BvnkPaymentRuleResolution,
@@ -20,6 +16,10 @@ import {
   readBvnkOfframpWallet,
   readBvnkOnrampPaymentRuleState,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  bvnkOfframpFields,
+  isBvnkOfframpCurrency,
+} from "@sdp/payments/ramps/providers/bvnk/requirements";
 import {
   lightsparkCollectAccountRequirements,
   lightsparkOfframpReady,
@@ -812,8 +812,8 @@ export async function advanceCounterpartyRequirements(
         getCryptoRailAssetLabel(input.assetRail)
       );
       const resolution = await ensureBvnkPaymentRule(
-        c,
         rampRuntime(c),
+        getCounterpartiesRepository(c),
         input.counterparty,
         input.projectId,
         customer,
@@ -1046,7 +1046,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(
         getCryptoRailAssetLabel(input.assetRail)
       );
-      const bvnkCustomer = await readBvnkCustomerLink(c, counterparty);
+      const bvnkCustomer = await readBvnkCustomerLink(c.env, counterparty);
       if (!bvnkCustomer) {
         throw counterpartyNotProvisioned("bvnk", "onramp", { customerStatus: undefined });
       }

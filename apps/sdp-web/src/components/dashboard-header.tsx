@@ -1,5 +1,6 @@
 "use client";
 
+import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -8,6 +9,7 @@ import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-ta
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { LanguagePicker } from "@/components/language-picker";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
@@ -750,6 +752,16 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/payments/transactions") {
     return {
       title: t("Shared.dashboardShell.transactions"),
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("DashboardPayments.transactions.all") },
+          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
+            id: module,
+            label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
+          })),
+        ],
+        hideOnMobile: false,
+      },
       contentWidthClass: "max-w-none",
     };
   }

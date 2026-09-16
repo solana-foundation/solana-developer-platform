@@ -1271,6 +1271,7 @@ describe("PolicyRepository (postgres)", () => {
       TEST_PROJECT.id,
       24,
       ["*"],
+      null,
       "pepper"
     );
     expect(rotation).not.toBeNull();

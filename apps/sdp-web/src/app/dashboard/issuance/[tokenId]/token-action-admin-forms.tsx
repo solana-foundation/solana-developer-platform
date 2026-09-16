@@ -48,6 +48,7 @@ import type {
   SeizeValidationErrors,
 } from "./token-management-workspace.types";
 import {
+  getSignerWalletUnavailableReason,
   getTokenAmountFieldDescription,
   NON_WHITESPACE_PATTERN,
   SOLANA_ADDRESS_PATTERN,
@@ -70,12 +71,6 @@ interface TokenActionAdminFormsProps {
   allowlistForm: AllowlistFormState;
   setAllowlistForm: Dispatch<SetStateAction<AllowlistFormState>>;
   tokenId: string;
-  // Server-driven search + label filter + paging (asset-profile compliance tab).
-  // When false, the control list renders as a static, unsearchable list from
-  // `allowlistEntries` — the legacy workspace's original behavior.
-  enableControlListSearch?: boolean;
-  allowlistEntries: TokenAllowlistEntry[];
-  allowlistError: string | null;
   controlListLabel: string | null;
   controlListDescription: string | null;
   controlListAddActionLabel: string;
@@ -119,9 +114,6 @@ export function TokenActionAdminForms({
   allowlistForm,
   setAllowlistForm,
   tokenId,
-  enableControlListSearch = false,
-  allowlistEntries,
-  allowlistError,
   controlListLabel,
   controlListDescription,
   controlListAddActionLabel,
@@ -179,6 +171,20 @@ export function TokenActionAdminForms({
         }
       : {};
   const exactSignerChoiceRequired = signerWallets.length > 1;
+  const selectedSignerWalletId =
+    activeAction === "seize"
+      ? seizeForm.signingWalletId
+      : activeAction === "force-burn"
+        ? forceBurnForm.signingWalletId
+        : activeAction === "freeze"
+          ? freezeForm.signingWalletId || defaultSignerWalletId
+          : defaultSignerWalletId;
+  const selectedSignerUnavailableReason = getSignerWalletUnavailableReason(
+    signerWallets,
+    selectedSignerWalletId,
+    t
+  );
+  const controlListMutationsDisabled = isPending || Boolean(signerUnavailableReason);
   return (
     <>
       {activeAction === "seize" ? (
@@ -272,7 +278,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.seize}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !seizeForm.signingWalletId) ||
                   Boolean(seizeValidationReason)
                 }
@@ -358,7 +364,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.forceBurn}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !forceBurnForm.signingWalletId) ||
                   Boolean(forceBurnValidationReason)
                 }
@@ -464,7 +470,9 @@ export function TokenActionAdminForms({
                   iconLeft={icon.pause}
                   onClick={() => onPause(true)}
                   disabled={
-                    isPending || tokenStatus === "paused" || Boolean(signerUnavailableReason)
+                    isPending ||
+                    tokenStatus === "paused" ||
+                    Boolean(signerUnavailableReason || selectedSignerUnavailableReason)
                   }
                 >
                   {t("DashboardIssuance.management.pauseToken")}
@@ -478,7 +486,9 @@ export function TokenActionAdminForms({
                   iconLeft={icon.unpause}
                   onClick={() => onPause(false)}
                   disabled={
-                    isPending || tokenStatus === "active" || Boolean(signerUnavailableReason)
+                    isPending ||
+                    tokenStatus === "active" ||
+                    Boolean(signerUnavailableReason || selectedSignerUnavailableReason)
                   }
                 >
                   {t("DashboardIssuance.management.unpauseToken")}
@@ -506,7 +516,7 @@ export function TokenActionAdminForms({
           >
             <TokenSignerSelect
               signerWallets={signerWallets}
-              signerWalletId={defaultSignerWalletId} // Always single locked wallet
+              signerWalletId={freezeForm.signingWalletId || defaultSignerWalletId}
               signerUnavailableReason={signerUnavailableReason}
               onSignerWalletIdChange={onSignerWalletIdChange}
             />
@@ -558,7 +568,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.freeze}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !freezeForm.signingWalletId)
                 }
               >
@@ -570,7 +580,7 @@ export function TokenActionAdminForms({
                 iconLeft={icon.unfreeze}
                 disabled={
                   isPending ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(signerUnavailableReason || selectedSignerUnavailableReason) ||
                   (exactSignerChoiceRequired && !freezeForm.signingWalletId)
                 }
               >
@@ -591,11 +601,22 @@ export function TokenActionAdminForms({
               : (controlListDescription ?? t("DashboardIssuance.forms.controlListDescription"))
           }
         >
+          {signerWallets.length === 1 ? (
+            // Show a single authority here; multiple signers are selected in confirmation.
+            <TokenSignerSelect
+              signerWallets={signerWallets}
+              signerWalletId={defaultSignerWalletId}
+              signerUnavailableReason={signerUnavailableReason}
+              onSignerWalletIdChange={onSignerWalletIdChange}
+            />
+          ) : (
+            <TokenValidationMessage message={signerUnavailableReason} reserveSpace={false} />
+          )}
           <form
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              onAddAllowlist();
+              if (!controlListMutationsDisabled) onAddAllowlist();
             }}
           >
             <ActionField
@@ -629,53 +650,26 @@ export function TokenActionAdminForms({
                 submitAlignment === "end" ? "justify-end" : "",
               ].join(" ")}
             >
-              <Button type="submit" iconLeft={icon.addEntry} disabled={isPending}>
+              <Button
+                type="submit"
+                iconLeft={icon.addEntry}
+                disabled={controlListMutationsDisabled}
+              >
                 {controlListAddActionLabel}
               </Button>
             </div>
 
-            {enableControlListSearch ? (
-              <ControlListEntries
-                tokenId={tokenId}
-                emptyState={controlListEmptyState}
-                searchPlaceholder={t("DashboardIssuance.controlLists.searchPlaceholder", {
-                  label: controlListLabel,
-                })}
-                removeIcon={icon.removeEntry}
-                isPending={isPending}
-                onRemove={onRemoveAllowlist}
-              />
-            ) : allowlistError ? (
-              <TokenValidationMessage message={allowlistError} reserveSpace={false} />
-            ) : allowlistEntries.length === 0 ? (
-              <p className="text-sm text-secondary">{controlListEmptyState}</p>
-            ) : (
-              <div className="space-y-2">
-                {allowlistEntries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-border-default px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate font-mono text-xs text-primary">{entry.address}</p>
-                      <p className="text-xs text-secondary">
-                        {entry.label ?? t("DashboardIssuance.forms.noLabel")}
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      iconLeft={icon.removeEntry}
-                      onClick={() => onRemoveAllowlist(entry.id)}
-                      disabled={isPending}
-                    >
-                      {t("DashboardIssuance.forms.removeEntry")}
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
+            <ControlListEntries
+              tokenId={tokenId}
+              label={controlListLabel}
+              emptyState={controlListEmptyState}
+              searchPlaceholder={t("DashboardIssuance.controlLists.searchPlaceholder", {
+                label: controlListLabel,
+              })}
+              removeIcon={icon.removeEntry}
+              mutationsDisabled={controlListMutationsDisabled}
+              onRemove={onRemoveAllowlist}
+            />
           </form>
         </TokenActionCard>
       ) : null}
@@ -744,12 +738,12 @@ function ControlListFilters({
 function ControlListEntryRow({
   entry,
   removeIcon,
-  isPending,
+  mutationsDisabled,
   onRemove,
 }: {
   entry: TokenAllowlistEntry;
   removeIcon: ReactNode;
-  isPending: boolean;
+  mutationsDisabled: boolean;
   onRemove: (entryId: string) => void;
 }) {
   const t = useTranslations();
@@ -767,7 +761,7 @@ function ControlListEntryRow({
         size="sm"
         iconLeft={removeIcon}
         onClick={() => onRemove(entry.id)}
-        disabled={isPending}
+        disabled={mutationsDisabled}
       >
         {t("DashboardIssuance.forms.removeEntry")}
       </Button>
@@ -788,7 +782,7 @@ function ControlListResults({
   hasFilter,
   emptyState,
   removeIcon,
-  isPending,
+  mutationsDisabled,
   onRemove,
 }: {
   t: ReturnType<typeof useTranslations>;
@@ -803,7 +797,7 @@ function ControlListResults({
   hasFilter: boolean;
   emptyState: string;
   removeIcon: ReactNode;
-  isPending: boolean;
+  mutationsDisabled: boolean;
   onRemove: (entryId: string) => void;
 }) {
   if (isInitialLoading) {
@@ -843,7 +837,7 @@ function ControlListResults({
           key={entry.id}
           entry={entry}
           removeIcon={removeIcon}
-          isPending={isPending}
+          mutationsDisabled={mutationsDisabled}
           onRemove={onRemove}
         />
       ))}
@@ -864,17 +858,19 @@ function ControlListResults({
 // the API, so results aren't capped by what's loaded in the browser.
 function ControlListEntries({
   tokenId,
+  label,
   emptyState,
   searchPlaceholder,
   removeIcon,
-  isPending,
+  mutationsDisabled,
   onRemove,
 }: {
   tokenId: string;
+  label: string | null;
   emptyState: string;
   searchPlaceholder: string;
   removeIcon: ReactNode;
-  isPending: boolean;
+  mutationsDisabled: boolean;
   onRemove: (entryId: string) => void;
 }) {
   const t = useTranslations();
@@ -884,15 +880,21 @@ function ControlListEntries({
   const debouncedQuery = useDebounce(query.trim(), 300);
 
   // Distinct labels for the whole control list, fetched server-side so the
-  // filter covers every entry rather than just the loaded page. Same SWR key
-  // use-token-operations uses for the summary count, so the fetch is deduped.
-  const { data: labelsData } = usePersistedDashboardSWR(
+  // filter covers every entry rather than just the loaded page. The response
+  // also provides the unfiltered count rendered above the list.
+  const { data: labelsData, error: labelsError } = usePersistedDashboardSWR(
     [TOKEN_ALLOWLIST_LABELS_KEY, tokenId] as const,
     ([, id]: readonly [string, string]) => fetchTokenAllowlistLabels(id),
     { revalidateOnFocus: true, revalidateIfStale: true },
     { key: `token.${tokenId}.allowlist-labels`, ttlMs: 30_000 }
   );
   const labels = labelsData?.labels ?? [];
+  const totalEntries = labelsData?.total ?? 0;
+  const countErrorMessage = labelsError
+    ? labelsError instanceof Error
+      ? labelsError.message
+      : t("DashboardIssuance.controlLists.loadError")
+    : null;
 
   // Fall back to "all" if the selected label vanished (its last entry removed).
   const activeLabel =
@@ -947,7 +949,19 @@ function ControlListEntries({
     : null;
 
   return (
-    <div className="space-y-3 border-t border-border-subtle pt-4">
+    <div
+      data-testid="allowlist-summary-card"
+      className="space-y-3 border-t border-border-subtle pt-4"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-sm font-medium text-primary">{label}</p>
+        <p className={countErrorMessage ? "text-sm text-error" : "text-sm text-secondary"}>
+          {countErrorMessage ??
+            t("DashboardIssuance.controlLists.entriesCount", {
+              count: totalEntries.toLocaleString(),
+            })}
+        </p>
+      </div>
       <ControlListFilters
         t={t}
         query={query}
@@ -978,7 +992,7 @@ function ControlListEntries({
         hasFilter={hasFilter}
         emptyState={emptyState}
         removeIcon={removeIcon}
-        isPending={isPending}
+        mutationsDisabled={mutationsDisabled}
         onRemove={onRemove}
       />
     </div>
