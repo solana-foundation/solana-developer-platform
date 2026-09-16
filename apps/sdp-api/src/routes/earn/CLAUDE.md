@@ -1261,8 +1261,8 @@ produces a movement, so nothing on this surface reports it. That outcome is
 observable via `GET /v1/wallets/approval-requests/:approvalRequestId`, whose
 `status` plus nested `operation.status` distinguish rejected/canceled from
 approved-and-executed. Wiring the dashboard to it is deliberately not done
-here. `EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` scopes new deposits to
-each provider's supported deployment; withdrawals remain open independently.
+here. `EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
+each provider is deployed on; withdrawals remain open independently.
 
 **Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
 `SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
@@ -1362,8 +1362,8 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   `PROVIDER_NOT_CONFIGURED` from inside its build). Capability (501) is the
   only provider-shaped refusal, and wallet policy is the org's own custody
   control, not a provider gate. It also ignores
-  `EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`: the environment fail-close
-  guards the way IN only.
+  `assertVaultDepositEnvironmentOpen`: the environment fail-close guards the
+  way IN only.
 - **The vault deposit preview** (`POST /vault-deposit-previews`) is the one
   deliberate EXCEPTION among previews: a live read shaped like MONEY-IN,
   because a deposit quote exists only to open a new position. It takes the
