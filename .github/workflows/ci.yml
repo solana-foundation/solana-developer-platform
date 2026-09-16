@@ -693,7 +693,7 @@ jobs:
             custody_provider: privy
           - name: Surfpool / Issuance Core
             provider: surfpool
-            test_files: src/tests/issuance-crud.test.ts src/tests/token2022.test.ts
+            test_files: src/tests/issuance-crud.test.ts src/tests/mosaic-custom-mint.test.ts src/tests/dvp-settlement.test.ts
             rpc_provider: quicknode
             custody_provider: local
           - name: Surfpool / Issuance Prepare
