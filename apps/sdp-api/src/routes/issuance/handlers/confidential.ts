@@ -163,17 +163,69 @@ const TOKEN_2022_CONFIDENTIAL_ACCOUNT_HAS_BALANCE = 23;
 /** ConfidentialTransferAccountNotApproved — whitelist policy, approve first. */
 const TOKEN_2022_CONFIDENTIAL_ACCOUNT_NOT_APPROVED = 24;
 
+/** `SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM` — stable across @solana/errors 6 and 7. */
+const SOLANA_ERROR_INSTRUCTION_ERROR_CUSTOM = 4615026;
+
+/** Every error in a `cause` chain, outermost first. */
+function causeChain(error: unknown): unknown[] {
+  const chain: unknown[] = [];
+  let current = error;
+  // `cause` chains here are a handful deep; the bound only guards a cycle.
+  for (let depth = 0; current !== null && current !== undefined && depth < 16; depth += 1) {
+    chain.push(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return chain;
+}
+
 /**
- * The custom program error out of a failed confirmation. The SDK stringifies
- * the RPC's `InstructionError` into the message, so there is no structured
- * error to read — `freeze.ts` matches on messages for the same reason.
+ * The Token-2022 program error behind a failed confidential operation.
+ *
+ * Three wire forms reach us, and all three must parse or the 22/23/24 mapping
+ * below is dead code on whichever path is missed:
+ *   - **direct RPC simulation** (the path every confidential op takes, since
+ *     they are holder-paid and bypass Kora): a `SolanaError` whose message is
+ *     only "Transaction simulation failed". The code is *structured*, nested in
+ *     the `cause` chain as `context.code` under `context.__code ===
+ *     SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM`, with the rendered hex form in
+ *     `context.logs`. Read the structure rather than the message.
+ *   - **Kora's pre-sign simulation** — the runtime's rendered string, hex:
+ *     `... failed: custom program error: 0x16`
+ *   - **a stringified `InstructionError`**, decimal: `{"Custom":22}`
  */
 function readCustomProgramError(error: unknown): number | null {
-  if (!(error instanceof Error)) {
-    return null;
+  for (const link of causeChain(error)) {
+    const context = (link as { context?: Record<string, unknown> }).context;
+    if (!context) {
+      continue;
+    }
+
+    if (
+      context.__code === SOLANA_ERROR_INSTRUCTION_ERROR_CUSTOM &&
+      typeof context.code === "number"
+    ) {
+      return context.code;
+    }
+
+    // Some shapes carry no structured code but do carry the program's logs.
+    if (Array.isArray(context.logs)) {
+      for (const line of context.logs) {
+        const logged =
+          typeof line === "string" && line.match(/custom program error:\s*0x([0-9a-f]+)/i);
+        if (logged) {
+          return Number.parseInt(logged[1], 16);
+        }
+      }
+    }
   }
-  const match = error.message.match(/"Custom":\s*"?(\d+)"?/);
-  return match ? Number(match[1]) : null;
+
+  const message = error instanceof Error ? error.message : "";
+  const json = message.match(/"Custom":\s*"?(\d+)"?/);
+  if (json) {
+    return Number(json[1]);
+  }
+  const hex = message.match(/custom program error:\s*0x([0-9a-f]+)/i);
+  return hex ? Number.parseInt(hex[1], 16) : null;
 }
 
 function toConfidentialAppError(error: unknown): AppError | null {
