@@ -382,6 +382,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               WHERE lane <> 2
                  OR status <> 'expired'
                  OR expiry_timestamp::numeric >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '7 days')
+                 -- A close that went out but never confirmed still needs the
+                 -- sweep to read what landed and release its lock, however long
+                 -- ago the trade expired.
+                 OR close_claim_signature IS NOT NULL
            )
            SELECT ${SELECT_COLUMNS}
              FROM ranked

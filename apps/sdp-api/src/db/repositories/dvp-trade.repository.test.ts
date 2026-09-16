@@ -787,6 +787,27 @@ describe("DvpTradeRepository (postgres)", () => {
       // Never observed empty is not known empty: that one keeps its lane.
       expect(listed.map((trade) => trade.id)).toEqual(["dvp_expired_unobserved"]);
     });
+
+    // A settle or cancel that went out and never confirmed still needs the
+    // sweep: it reads what landed and releases the lock. Dropping the trade
+    // would leave it open with a lock nothing clears.
+    it("keeps an expired trade whose close is still in flight, however old", async () => {
+      await seedLaned("dvp_expired_closing", 1, {
+        status: "expired",
+        observedAt: "2026-08-01T00:00:00.000Z",
+        escrows: ["0", "0"],
+        expiryTimestamp: String(Math.floor(Date.now() / 1000) - 8 * 86_400),
+      });
+      await repo.claimClose("dvp_expired_closing", {
+        action: "settle",
+        signature: signatureOf(9),
+        expiryHeight: "100",
+      });
+
+      const listed = await repo.listOpenForReconciliation(8);
+
+      expect(listed.map((trade) => trade.id)).toEqual(["dvp_expired_closing"]);
+    });
   });
 
   // Compare-and-swap: whoever moved the row off `creating` first had better
