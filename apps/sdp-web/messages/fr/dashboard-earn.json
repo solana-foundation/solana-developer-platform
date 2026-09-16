@@ -115,7 +115,8 @@
       "devnetStrategiesLoading": "Chargement des stratégies Devnet. Les stratégies Mainnet restent disponibles.",
       "devnetStrategiesUnavailable": "Les stratégies Devnet n'ont pas pu être chargées. Les stratégies Mainnet restent disponibles.",
       "mainnetStrategiesLoading": "Chargement des stratégies Mainnet. Les stratégies Devnet restent disponibles.",
-      "mainnetStrategiesUnavailable": "Les stratégies Mainnet n'ont pas pu être chargées. Les stratégies Devnet restent disponibles."
+      "mainnetStrategiesUnavailable": "Les stratégies Mainnet n'ont pas pu être chargées. Les stratégies Devnet restent disponibles.",
+      "sandboxUnavailable": "Production uniquement"
     },
     "earnProgram": {
       "eyebrow": "Yield intégré",
@@ -294,7 +295,16 @@
       "ageUnderWeek": "0–7 jours",
       "ageUnderMonth": "8–30 jours",
       "ageUnderQuarter": "31–90 jours",
-      "ageOlder": "90 jours et plus"
+      "ageOlder": "90 jours et plus",
+      "sandboxUnavailable": "Production uniquement",
+      "stepChooseStrategy": "1. Choisissez une stratégie",
+      "stepServerCode": "2. Configurez le code serveur",
+      "copyAllCode": "Copier tout le code",
+      "guideIntro": "Vos clients génèrent du rendement dans votre produit tout en conservant leurs fonds. Choisissez une stratégie, puis ajoutez embedded-yield.ts à votre serveur. Votre serveur construit chaque dépôt ou retrait, le Wallet du client le signe, et SDP suit le solde et les gains.",
+      "liquidityFact": "{liquidity} de liquidité",
+      "apyFact": "{apy} APY",
+      "unavailableClusterDescription": "Cette stratégie fonctionne sur un réseau différent de celui de ce projet. Passez à un projet de ce réseau pour l'intégrer.",
+      "unavailableEnvironmentProductionDescription": "Ce fournisseur n'accepte les nouveaux dépôts dans les vaults que pour les projets Production. Passez à un projet Production pour l'intégrer."
     },
     "landing": {
       "eyebrow": "Choisissez une option",
@@ -526,7 +536,34 @@
       "youDeliver": "Vous livrevez",
       "youDelivered": "Vous avez livré",
       "youReceive": "Vous recevez",
-      "youReceived": "Vous avez reçu"
+      "youReceived": "Vous avez reçu",
+      "actionCancelling": "Annulation…",
+      "actionFailed": "La demande a échoué ({status}).",
+      "actionUnconfirmed": "SDP a envoyé la demande, mais n'a pas pu lire la réponse. Vérifiez l'opération avant de réessayer.",
+      "actionFunding": "Financement…",
+      "actionReclaim": "Récupérer",
+      "actionReclaiming": "Récupération…",
+      "actionSettling": "Règlement…",
+      "fundRefusedAlreadyFunded": "Cette jambe détient déjà son montant complet.",
+      "fundRefusedBalanceChanged": "Un dépôt est arrivé pendant la préparation. Rien n'a été envoyé : refinancez donc ce qui reste dû.",
+      "fundRefusedBalanceShort": "Ce Wallet ne détient pas assez de {symbol} pour financer cette jambe. Rien n'a été envoyé.",
+      "fundRefusedBalanceShortUnnamed": "Ce Wallet ne détient pas assez de ce Token pour financer cette jambe. Rien n'a été envoyé.",
+      "fundRefusedFrozen": "L'escrow de cette jambe est gelé : un transfert vers celui-ci serait rejeté. L'émetteur du Token doit d'abord le dégeler.",
+      "fundRefusedInProgress": "Cette jambe est déjà en cours de traitement. Revenez dans un instant.",
+      "fundRefusedNoToken": "Ce Wallet ne détient pas encore de {symbol}. Envoyez-lui-en, puis financez la jambe.",
+      "fundRefusedNoTokenUnnamed": "Ce Wallet ne détient pas encore ce Token. Envoyez-lui-en, puis financez la jambe.",
+      "fundRefusedNotFundable": "Cette opération ne peut plus être financée.",
+      "fundRefusedUnverified": "SDP n'a pas pu vérifier cette opération on-chain, rien n'a donc été envoyé.",
+      "reclaimRefusedClosed": "Cette opération est clôturée, il n'y a donc plus rien à récupérer.",
+      "reclaimRefusedEmpty": "L'escrow de cette jambe est déjà vide.",
+      "reclaimRefusedSignerChanged": "Le Wallet de cette partie ne signe plus pour elle, rien n'a donc été envoyé.",
+      "reclaimRefusedTransferHook": "La récupération ne prend pas encore en charge les Tokens dotés d'un transfer hook. Rien n'a été envoyé.",
+      "createUnconfirmed": "L'opération a peut-être été créée, mais SDP n'a pas pu lire la réponse. Appuyez à nouveau sur Créer pour l'ouvrir ; elle ne sera pas créée en double.",
+      "settleTooEarly": "Cette opération peut être réglée à partir de {when}.",
+      "statusFundedTooEarly": "Financé",
+      "toastReclaimed": "Votre dépôt est en cours de retour.",
+      "txFundingSent": "Envoyé depuis votre Wallet",
+      "viewTransaction": "Voir la transaction"
     }
   },
   "DashboardEarn": {

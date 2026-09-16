@@ -566,7 +566,8 @@
       "recipientApprovalAutomatic": "Adicionada automaticamente se necessário",
       "pauseImpactWarning": "Isso afeta todos os detentores: eles não poderão enviar este Token nem fazer pagamentos com ele. A criação de novos Tokens também será bloqueada assim que a pausa for confirmada.",
       "unpauseImpactWarning": "Uma vez confirmada, esta ação encerra a pausa de todo o Token. Os detentores elegíveis poderão enviar este Token e fazer pagamentos novamente, e Wallets autorizadas poderão criar novos Tokens. Verifique se o motivo da pausa foi resolvido.",
-      "requiredSignerAmbiguous": "Mais de uma Wallet controlada corresponde ao signatário exigido. Resolva o conflito de Wallet antes de tentar novamente."
+      "requiredSignerAmbiguous": "Mais de uma Wallet controlada corresponde ao signatário exigido. Resolva o conflito de Wallet antes de tentar novamente.",
+      "signingUnavailable": "A assinatura está desativada para esta Wallet."
     },
     "forms": {
       "saveMetadata": "Salvar metadados",
