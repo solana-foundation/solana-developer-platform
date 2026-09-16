@@ -1,4 +1,5 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 /**
@@ -29,14 +30,11 @@ export interface DvpCreateOption {
   tokenProgram: string;
 }
 
-export interface DvpCreateWallet {
-  /** `custody_wallets.id` — the record id the API takes as a party or payer walletId. */
-  id: string;
+/** Wallet choices are derived from the validated custody response. */
+export type DvpCreateWallet = Omit<z.infer<typeof walletRowSchema>, "publicKey" | "balances"> & {
   address: string;
-  label: string | null;
-  /** What this wallet holds, so a leg can show the balance it spends from. */
   balances: DvpWalletBalance[];
-}
+};
 
 /** One token balance, as much of it as the amount field needs. */
 export interface DvpWalletBalance {
@@ -86,19 +84,34 @@ interface TokenRow {
   decimals?: number;
 }
 
-interface WalletBalanceRow {
-  mint?: string | null;
-  amount?: string | null;
-  decimals?: number | null;
-  token?: string | null;
-}
+const walletBalanceRowSchema = z.object({
+  mint: z.string().nullish(),
+  amount: z.string().nullish(),
+  decimals: z.number().nullish(),
+  token: z.string().nullish(),
+});
 
-interface WalletRow {
-  id?: string;
-  publicKey?: string;
-  label?: string | null;
-  balances?: WalletBalanceRow[] | null;
-}
+type WalletBalanceRow = z.infer<typeof walletBalanceRowSchema>;
+
+const walletRowSchema = z
+  .object({
+    id: z.string().min(1),
+    publicKey: z.string().min(1),
+    label: z.string().nullable().default(null),
+    custodyConfigId: z.string().min(1).optional(),
+    custodyConnectionId: z.string().min(1).optional(),
+    isRuntimeExecutionAllowed: z.boolean(),
+    balances: z.array(walletBalanceRowSchema).nullish(),
+  })
+  .refine(
+    (wallet) =>
+      (wallet.custodyConfigId !== undefined) !== (wallet.custodyConnectionId !== undefined),
+    { message: "Wallet must have exactly one custody owner" }
+  );
+
+const walletsResponseSchema = z.object({
+  data: z.union([z.array(walletRowSchema), z.object({ wallets: z.array(walletRowSchema) })]),
+});
 
 function mapBalances(rows: WalletBalanceRow[] | null | undefined): DvpWalletBalance[] {
   return (rows ?? []).flatMap((balance) =>
@@ -118,19 +131,16 @@ function mapBalances(rows: WalletBalanceRow[] | null | undefined): DvpWalletBala
   );
 }
 
-function mapWallets(rows: WalletRow[]): DvpCreateWallet[] {
-  return rows.flatMap((wallet) =>
-    wallet.id && wallet.publicKey
-      ? [
-          {
-            id: wallet.id,
-            address: wallet.publicKey,
-            label: wallet.label ?? null,
-            balances: mapBalances(wallet.balances),
-          },
-        ]
-      : []
-  );
+function mapWallets(rows: z.infer<typeof walletRowSchema>[]): DvpCreateWallet[] {
+  return rows.map((wallet) => ({
+    id: wallet.id,
+    address: wallet.publicKey,
+    label: wallet.label,
+    custodyConfigId: wallet.custodyConfigId,
+    custodyConnectionId: wallet.custodyConnectionId,
+    isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
+    balances: mapBalances(wallet.balances),
+  }));
 }
 
 interface CounterpartyAccountRow {
@@ -166,17 +176,14 @@ export async function fetchDvpCreateContext(
       // a quantity of an asset, and it was doing so without ever showing how
       // much of it they hold — so an over-commitment only surfaced later, as a
       // funding transfer that failed for insufficient funds.
-      request("/v1/wallets?includeBalances=true"),
+      request("/v1/wallets?includeBalances=true&includeAllProviders=true"),
       request("/v1/issuance/tokens?pageSize=100"),
       // The registered crypto-wallet accounts a slot can name, address resolved
       // server-side the same way create will resolve `counterpartyAccountId`.
       request("/v1/counterparties/accounts?pageSize=100"),
     ]);
 
-    const walletsBody = (await walletsResponse.json().catch(() => ({}))) as {
-      data?: WalletRow[] | { wallets?: WalletRow[] };
-      error?: { message?: string };
-    };
+    const walletsBody: unknown = await walletsResponse.json().catch(() => ({}));
     const tokensBody = (await tokensResponse.json().catch(() => ({}))) as {
       data?: TokenRow[];
       error?: { message?: string };
@@ -191,13 +198,24 @@ export async function fetchDvpCreateContext(
         wallets: [],
         tokens: [],
         counterpartyAccounts: [],
-        error: walletsBody.error?.message ?? `Wallet list failed (${walletsResponse.status}).`,
+        error:
+          z.object({ error: z.object({ message: z.string() }) }).safeParse(walletsBody).data?.error
+            .message ?? `Wallet list failed (${walletsResponse.status}).`,
       };
     }
 
-    const walletRows = Array.isArray(walletsBody.data)
-      ? walletsBody.data
-      : (walletsBody.data?.wallets ?? []);
+    const parsedWallets = walletsResponseSchema.safeParse(walletsBody);
+    if (!parsedWallets.success) {
+      return {
+        wallets: [],
+        tokens: [],
+        counterpartyAccounts: [],
+        error: "Invalid custody wallet response",
+      };
+    }
+    const walletRows = Array.isArray(parsedWallets.data.data)
+      ? parsedWallets.data.data
+      : parsedWallets.data.data.wallets;
     // A failed token request must not read as "you have no tokens". Silently
     // returning an empty list would send someone hunting for assets they can
     // see in Issuance.

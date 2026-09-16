@@ -29,6 +29,29 @@ provider keyless. Ondo's credentialed GM API (`api.gm.ondo.finance`, staging
 mints) remains available for a later live-metrics capability or a large-size
 redemption backstop; both need Ondo onboarding (API key + KYC + allowlisting).
 
+## The rate comes from Ondo's public assets API, keyless (PRO-1833)
+
+Decided 2026-09-15 with Ondo. `@sdp/earn` (`providers/ondo/usdy-rate.ts`)
+reads `GET https://ondo.finance/api/v1/assets` — the endpoint Ondo pointed SDP
+at for the current USDY APY (`/assets/history` has the daily series) — and
+writes the `usdy` entry's `apy` (a percent) as a six-place decimal fraction,
+truncated, plus its Solana `tvlUsd`, in the HOURLY catalogue sync. Ondo sets
+the rate monthly, so the five-minute metrics pass would buy nothing.
+
+Two things that look like the source and are not:
+
+- **The credentialed GM API** (`api.gm.ondo.finance`, `x-api-key`) is the Ondo
+  STOCKS API: 452 tokenized equities/ETFs, no USDY, no yield field (verified
+  with a key 2026-09-15). The `ONDO_API_KEY` in Doppler `dev_personal` is for
+  that API and nothing here reads it. No `ONDO_API_KEY` env plumbing exists.
+- **Ondo's `RWADynamicOracle` on Ethereum** publishes the same rate as a daily
+  multiplier. Ondo offered to deploy a Solana equivalent once there are users;
+  that would make the read on-chain, but nothing here depends on it.
+
+Credential path: none. An unreachable or malformed read fails the Ondo pass
+(rows keep their last figures, the outage is logged) rather than nulling the
+rate.
+
 ## No chain SDK, no Jupiter client — the swap seam is INJECTED
 
 This package's dependencies are `@sdp/earn`, `@sdp/solana`, `@sdp/types` and

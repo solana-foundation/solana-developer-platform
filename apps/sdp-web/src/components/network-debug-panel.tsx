@@ -6,7 +6,6 @@ import { useState } from "react";
 import { type NetworkDebugEntry, useNetworkDebug } from "@/contexts/network-debug-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
-  formatNetworkDebugMetaSummary,
   formatNetworkDebugPayloadValue,
   getNetworkDebugStatusClassName,
 } from "@/lib/network-debug";
@@ -71,36 +70,32 @@ function NetworkDebugPayloadBlock({
   return (
     <div className={cn("gap-1", fill ? "flex min-h-0 min-w-0 flex-1 flex-col" : "grid min-w-0")}>
       <p className="text-[11px] font-medium text-secondary">{label}</p>
-      <div className={cn("min-w-0", fill && "flex min-h-0 flex-1 flex-col")}>
-        <div
+      <div
+        className={cn(
+          "relative min-w-0 overflow-hidden rounded-lg bg-fill-subtle",
+          fill && "flex min-h-0 flex-1 flex-col"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => void copy(formattedValue)}
+          className={NETWORK_DEBUG_PAYLOAD_COPY_BUTTON_CLASS}
+        >
+          {copied ? (
+            <CheckIcon className="size-3 shrink-0" />
+          ) : (
+            <CopyIcon className="size-3 shrink-0" />
+          )}
+          {copied ? t("Shared.SharedComponents.copied") : t("Shared.SharedComponents.copy")}
+        </button>
+        <pre
           className={cn(
-            "relative min-w-0 overflow-hidden rounded-lg bg-fill-subtle",
-            fill && "flex min-h-0 flex-1 flex-col"
+            "max-w-full min-h-0 wrap-break-word overflow-y-auto overscroll-contain p-3 pr-14 font-mono text-xs whitespace-pre-wrap text-primary",
+            fill ? "flex-1" : "max-h-40 shrink-0"
           )}
         >
-          <button
-            type="button"
-            onClick={() => void copy(formattedValue)}
-            className={NETWORK_DEBUG_PAYLOAD_COPY_BUTTON_CLASS}
-          >
-            {copied ? (
-              <CheckIcon className="size-3 shrink-0" />
-            ) : (
-              <CopyIcon className="size-3 shrink-0" />
-            )}
-            {copied ? t("Shared.SharedComponents.copied") : t("Shared.SharedComponents.copy")}
-          </button>
-          <pre
-            className={cn(
-              "max-w-full min-h-0 wrap-break-word p-3 pr-14 font-mono text-[11px] whitespace-pre-wrap text-primary",
-              fill
-                ? "min-h-0 flex-1 overflow-y-auto overscroll-contain"
-                : "max-h-40 shrink-0 overflow-y-auto overscroll-contain"
-            )}
-          >
-            {formattedValue}
-          </pre>
-        </div>
+          {formattedValue}
+        </pre>
       </div>
     </div>
   );
@@ -282,12 +277,11 @@ function NetworkDebugEntryDetails({
   onClose: () => void;
 }) {
   const t = useTranslations();
-  const { copied: copiedMeta, copy: copyMeta } = useCopy(1200);
-  const metaSummary = formatNetworkDebugMetaSummary(entry);
+  const { copied: copiedPath, copy: copyPath } = useCopy(1200);
   const durationPart = entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`;
 
   return (
-    <aside className="flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-hidden border-l border-border-default p-3">
+    <aside className="flex h-full min-h-0 w-[30rem] shrink-0 flex-col overflow-hidden border-l border-border-default p-3">
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div className="flex shrink-0 min-w-0 items-start gap-2">
           <div className="relative min-w-0 flex-1">
@@ -302,10 +296,10 @@ function NetworkDebugEntryDetails({
               <NetworkDebugMetaInterpunct />
               <button
                 type="button"
-                onClick={() => void copyMeta(metaSummary)}
+                onClick={() => void copyPath(entry.path)}
                 className={NETWORK_DEBUG_META_COPY_CLASS}
               >
-                {copiedMeta
+                {copiedPath
                   ? t("Shared.SharedComponents.copied")
                   : t("Shared.SharedComponents.copy")}
               </button>
@@ -393,8 +387,8 @@ export function NetworkDebugPanel() {
   return (
     <div
       className={cn(
-        "pointer-events-none fixed right-4 bottom-4 z-50 h-[min(calc(100vh-2rem),460px)] transition-[width]",
-        selectedEntry ? "w-[min(calc(100vw-2rem),742px)]" : "w-[min(calc(100vw-2rem),422px)]"
+        "pointer-events-none fixed right-4 bottom-4 z-50 h-[min(calc(100vh-2rem),40rem)] transition-[width]",
+        selectedEntry ? "w-[min(calc(100vw-2rem),56.5rem)]" : "w-[min(calc(100vw-2rem),26.5rem)]"
       )}
     >
       <AnimatePresence>

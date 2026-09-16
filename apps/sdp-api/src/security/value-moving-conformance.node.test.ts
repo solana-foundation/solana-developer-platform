@@ -113,6 +113,87 @@ const contracts: ValueMovingContract[] = [
   {
     family: "issuance",
     trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/freeze.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/freeze",',
+      before: "policyGate({ extract: extractFreezePolicyCandidate })",
+      after: "freezeAccount",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence:
+          "replays freeze from its persisted account without live target or authority lookup",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/freeze.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/unfreeze",',
+      before: "policyGate({ extract: extractUnfreezePolicyCandidate })",
+      after: "unfreezeAccount",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "replays unfreeze from its persisted account",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/pause.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/pause",',
+      before: "policyGate({ extract: extractPausePolicyCandidate })",
+      after: "  pauseToken",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "replays %s only for the original exact wallet",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/pause.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/unpause",',
+      before: "policyGate({ extract: extractUnpausePolicyCandidate })",
+      after: "unpauseToken",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "replays %s only for the original exact wallet",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
       file: "apps/sdp-api/src/routes/issuance/handlers/seize.ts",
       evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
     },
@@ -253,10 +334,10 @@ const contracts: ValueMovingContract[] = [
       evidence: "const scope = { organizationId: auth.organizationId, projectId }",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/private-channels/transfer-access.ts",
-      section: "export async function resolveTransferCreateContext",
-      before: "if (!verifiedSource)",
-      after: "signer = await createOrgSigner(",
+      file: "apps/sdp-api/src/routes/private-channels/handlers/transfers.ts",
+      section: "export async function createPrivateChannelTransfer",
+      before: "const context = await resolveTransferCreateContext(",
+      after: "const signer = await createPrivateChannelSigner(",
     },
     replay: [
       {
@@ -438,13 +519,18 @@ describe("value-moving authorization and replay conformance", () => {
     // withdrawals) are separately gated routes, and each carries its own
     // authorization boundary and replay evidence. `issuance` appears four
     // times for the same reason: authority updates, seize, force-burn, and
-    // burn are separately gated execute routes.
+    // burn are separately gated execute routes, and freeze, unfreeze, pause,
+    // and unpause each carry the same per-route gate.
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
       "dvp",
       "earn",
       "earn",
+      "issuance",
+      "issuance",
+      "issuance",
+      "issuance",
       "issuance",
       "issuance",
       "issuance",

@@ -125,6 +125,7 @@ function sharedWizard<TId extends string>(
     onboarding: null,
     isAdvancing: false,
     retryOnboarding: noop,
+    pendingAgreements: null,
     hostedQuoteLoading: false,
     counterpartyDialogOpen: false,
     setCounterpartyDialogOpen: noop,
@@ -157,6 +158,7 @@ function offrampWizard(
 ): OfframpWizard {
   return {
     ...sharedWizard<OfframpStepId>("COMPLETE", quote),
+    sourceWalletHint: null,
     summaryDetails: [],
     transferStatus,
     transferStatusLoading: false,

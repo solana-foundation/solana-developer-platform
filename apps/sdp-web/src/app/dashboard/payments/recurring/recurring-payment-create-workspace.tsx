@@ -35,7 +35,6 @@ import {
   type CounterpartiesResult,
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
-  fetchWallets,
 } from "../payments-workspace.data";
 import { AmountBalanceReadout } from "../ramps/components/amount-balance-readout";
 import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
@@ -177,10 +176,15 @@ function ReviewSummaryCard({ rows }: { rows: Array<{ label: string; value: React
   );
 }
 
-function FieldHint({ children, tone }: { children: ReactNode; tone: "neutral" | "error" }) {
-  return (
-    <p className={tone === "error" ? "text-sm text-error" : "text-sm text-tertiary"}>{children}</p>
-  );
+function FieldHint({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  tone: "neutral" | "error" | "warning";
+}) {
+  const toneClassName = { neutral: "text-tertiary", error: "text-error", warning: "text-warning" };
+  return <p className={`text-sm ${toneClassName[tone]}`}>{children}</p>;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This wizard intentionally keeps shared form state in one place while each step remains simple.
@@ -409,9 +413,6 @@ export function RecurringPaymentCreateWorkspace({
     }));
     setFormError(null);
     if (counterpartyId) {
-      void preload(paymentsQueryKeys.actionWallets(), () =>
-        fetchWallets({ includeBalances: true }, t)
-      );
       void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId }), () =>
         fetchCounterpartyAccounts(counterpartyId, t)
       );
@@ -714,12 +715,21 @@ export function RecurringPaymentCreateWorkspace({
               value: wallet.id,
               label: wallet.label ?? wallet.walletId,
               description: shortenAddress(wallet.publicKey),
+              ...(wallet.isRuntimeExecutionAllowed !== true
+                ? { badge: t("DashboardPayments.restricted"), badgeVariant: "warning" as const }
+                : {}),
             }))}
             placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
             searchPlaceholder={t("DashboardPayments.recurring.searchWallets")}
             icon={<WalletIcon />}
             disabled={availableWallets.length === 0}
           />
+          {selectedWallet && selectedWallet.isRuntimeExecutionAllowed !== true ? (
+            <FieldHint tone="warning">
+              {t("DashboardPayments.signingUnavailable")}{" "}
+              {t("DashboardPayments.recurring.signingDisabledDraft")}
+            </FieldHint>
+          ) : null}
 
           <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
             <div className="flex flex-col gap-2">

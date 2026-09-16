@@ -68,7 +68,7 @@ COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-private-channels ./packages/sdp-private-channels
 
 # Public env (each var is also exposed via ENV so Next picks it up at build).
-# __SDP_RT_*__ defaults are placeholders swapped at container start by docker/entrypoint.sh.
+# __SDP_RT_*__ defaults are placeholders swapped at container start by /app/entrypoint.sh.
 ARG NEXT_PUBLIC_API_BASE_URL
 ARG NEXT_PUBLIC_SDP_API_BASE_URL=__SDP_RT_NEXT_PUBLIC_SDP_API_BASE_URL__
 ARG NEXT_PUBLIC_SDP_DOCS_URL=__SDP_RT_NEXT_PUBLIC_SDP_DOCS_URL__
@@ -158,8 +158,8 @@ COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-web/.next/static ./apps
 COPY --from=builder --chown=nextjs:nodejs /repo/apps/sdp-web/public ./apps/sdp-web/public
 
 ENV SDP_INJECT_DIRS=/app/apps/sdp-web/.next
-COPY --chmod=0755 apps/sdp-web/docker/entrypoint.sh /app/entrypoint.sh
-COPY apps/sdp-web/docker/inject-public-env.mjs /app/inject-public-env.mjs
+COPY --chmod=0755 scripts/docker/entrypoint.sh /app/entrypoint.sh
+COPY scripts/docker/inject-public-env.mjs /app/inject-public-env.mjs
 
 # Provenance metadata for image registries / `docker image inspect`. Pass
 # GIT_SHA at build time (e.g. --build-arg GIT_SHA=$(git rev-parse HEAD)) so

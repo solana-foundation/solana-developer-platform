@@ -9,12 +9,6 @@ export function getBvnkOnboardingCopy(
   t: Translate
 ): Record<BvnkOnboardingPanelStatus, OnboardingCopy> {
   return {
-    customer_pending_agreement_acceptance: {
-      title: t("DashboardPayments.bvnk.agreementPendingTitle"),
-      description: t("DashboardPayments.bvnk.agreementPendingDescription"),
-      icon: Loader2Icon,
-      iconClassName: "animate-spin text-secondary",
-    },
     customer_verification_required: {
       title: t("DashboardPayments.bvnk.verificationRequiredTitle"),
       description: t("DashboardPayments.bvnk.verificationRequiredDescription"),

@@ -14,7 +14,17 @@ beforeEach(() => {
   const request = vi.fn<SdpApi.SdpApiClient["request"]>().mockImplementation(async (path) => {
     if (path.startsWith("/v1/wallets?")) {
       return Response.json({
-        data: { wallets: [{ id: "cwlt_b", walletId: "provider_b", publicKey: "authority_b" }] },
+        data: {
+          wallets: [
+            {
+              id: "cwlt_b",
+              walletId: "provider_b",
+              publicKey: "authority_b",
+              custodyConfigId: "config_b",
+              isRuntimeExecutionAllowed: true,
+            },
+          ],
+        },
       });
     }
     if (path === "/v1/issuance/tokens/tok_1?includeMetadataAuthority=true") {

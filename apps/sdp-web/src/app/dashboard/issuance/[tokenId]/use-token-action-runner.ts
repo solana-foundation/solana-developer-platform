@@ -1,5 +1,6 @@
 "use client";
 
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -10,7 +11,10 @@ import type {
   ActionExecutionResult,
   RunActionOptions,
 } from "./token-management-workspace.types";
-import { executeActionRequest } from "./token-management-workspace.utils";
+import {
+  executeActionRequest,
+  getSignerWalletUnavailableReason,
+} from "./token-management-workspace.utils";
 
 function withActionSigner(
   input: ActionExecutionInput,
@@ -25,7 +29,7 @@ function withActionSigner(
   return { ...input, body: { ...input.body, signingCustodyWalletId } };
 }
 
-export function useTokenActionRunner() {
+export function useTokenActionRunner(authorityWallets?: PaymentsDashboardWallet[]) {
   const t = useTranslations();
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
@@ -37,6 +41,19 @@ export function useTokenActionRunner() {
     input: ActionExecutionInput,
     options: RunActionOptions = {}
   ): Promise<ActionExecutionResult> => {
+    const signerId =
+      input.method === "DELETE"
+        ? new URLSearchParams(input.path.split("?")[1]).get("signingCustodyWalletId")
+        : input.body?.signingCustodyWalletId;
+    const unavailableReason = getSignerWalletUnavailableReason(
+      authorityWallets ?? options.signerWallets ?? [],
+      typeof signerId === "string" ? signerId : null,
+      t
+    );
+    if (unavailableReason) {
+      toast.error(unavailableReason);
+      return { ok: false, message: unavailableReason, status: null, body: null };
+    }
     const submitToast =
       options.submitToast ??
       t("DashboardIssuance.management.submittingAction", { action: input.label.toLowerCase() });
@@ -135,12 +152,21 @@ export function useTokenActionRunner() {
     if (signerWallets && !signerWallets.some((wallet) => wallet.id === signingCustodyWalletId)) {
       return;
     }
+    const unavailableReason = getSignerWalletUnavailableReason(
+      authorityWallets ?? signerWallets ?? [],
+      signingCustodyWalletId,
+      t
+    );
+    if (unavailableReason) {
+      toast.error(unavailableReason);
+      return;
+    }
     setActionConfirmation(null);
     void executeAction(
       signingCustodyWalletId
         ? withActionSigner(pendingConfirmation.input, signingCustodyWalletId)
         : pendingConfirmation.input,
-      pendingConfirmation.options
+      { ...pendingConfirmation.options, signerWallets }
     );
   };
 
@@ -150,7 +176,15 @@ export function useTokenActionRunner() {
 
   return {
     isPending,
-    actionConfirmation,
+    actionConfirmation:
+      actionConfirmation?.signerWallets && authorityWallets
+        ? {
+            ...actionConfirmation,
+            signerWallets: actionConfirmation.signerWallets.flatMap(
+              (wallet) => authorityWallets.find((current) => current.id === wallet.id) ?? []
+            ),
+          }
+        : actionConfirmation,
     runAction,
     runActionImmediately: executeAction,
     dismissActionConfirmation,

@@ -1,7 +1,10 @@
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import { isCountryCode } from "@sdp/types/countries";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
-import type { RequirementField } from "@sdp/types/ramp-requirements";
+import {
+  offeredCountryCodes,
+  offeredFiatCurrencies,
+  type RequirementField,
+} from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 
 const providerField = z
@@ -162,7 +165,14 @@ export function requirementFieldError(
       : `Select a valid ${field.label.toLowerCase()}.`;
   }
   if (field.kind === "country") {
-    return isCountryCode(value) ? null : `Select a valid ${field.label.toLowerCase()}.`;
+    return offeredCountryCodes(field).some((code) => code === value)
+      ? null
+      : `Select a valid ${field.label.toLowerCase()}.`;
+  }
+  if (field.kind === "currency") {
+    return offeredFiatCurrencies(field).some((code) => code === value)
+      ? null
+      : `Select a valid ${field.label.toLowerCase()}.`;
   }
   if (field.kind === "date") {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value))) {

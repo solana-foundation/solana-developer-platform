@@ -53,7 +53,7 @@ export interface UpsertBvnkCustomerProviderDataInput {
   customer: Partial<
     Pick<BvnkCustomerResolution, "customerReference" | "status" | "verificationStatus">
   > & {
-    contactId?: string;
+    residenceCountryCode?: BvnkCustomerProviderAccountMetadata["residenceCountryCode"];
     agreements?: BvnkCustomerProviderAccountMetadata["agreements"];
   };
 }

@@ -1363,10 +1363,32 @@ describe("Payments routes — list transfers", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        data: { transfer: { id: string; status: string } };
+        data: { transfer: Record<string, unknown> };
       };
-      expect(body.data.transfer.id).toBe("xfr_single_1");
-      expect(body.data.transfer.status).toBe("confirmed");
+      expect(body.data.transfer).toEqual({
+        id: "xfr_single_1",
+        organizationId: TEST_ORG.id,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        providerWalletId: TEST_WALLET_ID,
+        projectId: TEST_PROJECT.id,
+        type: "transfer",
+        kind: "pay",
+        direction: "outbound",
+        status: "confirmed",
+        signature: null,
+        serializedTx: null,
+        slot: null,
+        blockTime: null,
+        fee: null,
+        error: null,
+        source: TEST_SOLANA_ADDRESSES.wallet1,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        rampsMemo: {},
+        token: "SOL",
+        amount: "1",
+        createdAt: expect.any(String),
+        updatedAt: expect.any(String),
+      });
     });
 
     it("enforces payments:read when getting a transfer by ID", async () => {

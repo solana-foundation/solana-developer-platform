@@ -1,7 +1,7 @@
 "use client";
 
 import type { PaymentsDashboardWallet, Token } from "@sdp/types";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -28,12 +28,12 @@ import {
   getBurnValidationReason,
   getControlListCopy,
   getExplorerHref,
-  getExtensionRows,
   getForceBurnValidationErrors,
   getForceBurnValidationReason,
   getLockSupplyDisabledReason,
   getMintValidationErrors,
   getMintValidationReason,
+  getPermissionRows,
   getRemainingMintableSupply,
   getSeizeValidationErrors,
   getSeizeValidationReason,
@@ -48,32 +48,19 @@ import { useTokenOperationData } from "./use-token-operation-data";
 /**
  * The operational core of token management (deploy, mint, burn, seize,
  * force-burn, authorities, pause, freeze, allowlist, supply refresh) for the
- * asset-profile workspace. Mirrors the handler wiring of the legacy
- * TokenManagementWorkspace against the same API endpoints and shared utils —
- * the monolith itself is intentionally untouched.
+ * asset-profile workspace, using the issuance API endpoints and shared utils.
  */
 export function useTokenOperations({
   token,
-  shouldLoadSupportingData,
   shouldLoadAuthorityWallets,
   canManageTokenAdmin,
 }: {
   token: Token;
-  shouldLoadSupportingData: boolean;
   shouldLoadAuthorityWallets: boolean;
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const {
-    isPending,
-    actionConfirmation,
-    runAction: runActionBase,
-    runActionImmediately: runActionImmediatelyBase,
-    dismissActionConfirmation,
-    confirmAction,
-    selectConfirmationWallet,
-  } = useTokenActionRunner();
   const { isPending: isRefreshingSupply, runAction: refreshSupply } = useTokenActionRunner();
 
   const [authorityModalRow, setAuthorityModalRow] = useState<PermissionRow | null>(null);
@@ -96,9 +83,7 @@ export function useTokenOperations({
   const [allowlistForm, setAllowlistForm] = useState(createInitialAllowlistForm);
   // Lock-supply has its own modal state rather than joining FundManagementModalAction:
   // it composes two endpoint calls instead of mapping to one, it must keep the modal
-  // open across submission to offer a retry, and it exists only on this workspace —
-  // widening the shared union would force dead entries into the legacy workspace and
-  // the playground deep-links.
+  // open across submission to offer a retry, and it exists only on this workspace.
   const [lockSupplyModalOpen, setLockSupplyModalOpen] = useState(false);
   const [lockSupplyForm, setLockSupplyForm] = useState({
     destination: "",
@@ -119,26 +104,24 @@ export function useTokenOperations({
     authorityWalletsFetchError,
     authorityWalletsError,
     authorityWalletsLoading,
-    supportingDataLoading,
-    transactions,
-    transactionsError,
-    transactionsTotal,
-    transactionsHasMore,
     allowlistEntries,
-    allowlistError,
-    allowlistTotal,
-    allowlistHasMore,
-    frozenAccounts,
     frozenAccountsError,
+    frozenAccountsLoading,
     frozenAccountsTotal,
-    frozenAccountsHasMore,
     revalidateAfterSuccess,
   } = useTokenOperationData({
     token,
     shouldLoadAuthorityWallets,
-    shouldLoadSupportingData,
-    showControlList,
   });
+  const {
+    isPending,
+    actionConfirmation,
+    runAction: runActionBase,
+    runActionImmediately: runActionImmediatelyBase,
+    dismissActionConfirmation,
+    confirmAction,
+    selectConfirmationWallet,
+  } = useTokenActionRunner(authorityWallets);
   const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) =>
     runActionBase(input, {
       ...options,
@@ -188,7 +171,6 @@ export function useTokenOperations({
     canManageTokenAdmin,
     t,
   });
-  const extensionRows = useMemo(() => getExtensionRows(token, t), [token, t]);
   const metadataSignerSelection = withWalletLoadError(
     getSignerSelectionForAction({
       action: "metadata",
@@ -619,6 +601,22 @@ export function useTokenOperations({
   };
 
   const handleAuthorityUpdate = () => {
+    const selection = withWalletLoadError(
+      getSignerSelectionForAction({
+        action: "authority",
+        token,
+        authorityWallets,
+        metadataAuthority,
+        permissionRow: getPermissionRows(token, metadataAuthority, t).find(
+          (row) => row.authorityRole === authorityForm.role
+        ),
+        t,
+      })
+    );
+    if (selection.unavailableReason) {
+      toast.error(selection.unavailableReason);
+      return;
+    }
     runAction(
       {
         label: t("DashboardIssuance.management.updateAuthority"),
@@ -634,6 +632,7 @@ export function useTokenOperations({
       },
       {
         requiresConfirmation: true,
+        signerWallets: selection.wallets,
         confirmationTitle: t("DashboardIssuance.management.authorityConfirmationTitle"),
         confirmationDescription: t("DashboardIssuance.management.authorityConfirmationDescription"),
         confirmButtonLabel: t("DashboardIssuance.management.updateNow"),
@@ -1110,7 +1109,9 @@ export function useTokenOperations({
         };
       case "allowlist":
         return {
-          signerWallets: [] as PaymentsDashboardWallet[],
+          // Database-only lists have no on-chain authority, hence no signer to show.
+          signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : [],
+          defaultSignerWalletId: allowlistSignerSelection.defaultWalletId,
           signerUnavailableReason: allowlistDisabledReason,
           onSignerWalletIdChange: (_value: string) => {},
         };
@@ -1155,23 +1156,13 @@ export function useTokenOperations({
     authorityWallets,
     authorityWalletsError,
     authorityWalletsLoading,
-    supportingDataLoading,
-    transactions,
-    transactionsError,
-    transactionsTotal,
-    transactionsHasMore,
     allowlistEntries,
-    allowlistError,
-    allowlistTotal,
-    allowlistHasMore,
-    frozenAccounts,
     frozenAccountsError,
+    frozenAccountsLoading,
     frozenAccountsTotal,
-    frozenAccountsHasMore,
     // rows
     permissionRows,
     authoritySummary,
-    extensionRows,
     displayedMintAuthority,
     // form state
     mintForm,

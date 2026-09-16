@@ -10,6 +10,7 @@ import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
+import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
@@ -67,6 +68,7 @@ function OfframpManualQuoteStep({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: step dispatch keeps every offramp stage in one component while each branch stays simple.
 export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
   const {
@@ -99,11 +101,19 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     onboarding,
     isAdvancing,
     retryOnboarding,
+    pendingAgreements,
     memoRows,
     setMemoRows,
+    sourceWalletHint,
   } = wizard;
 
-  const walletOptions = useMemo(() => walletComboboxOptions(liveWallets), [liveWallets]);
+  const walletOptions = useMemo(
+    () =>
+      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
+        disableRestricted: true,
+      }),
+    [liveWallets, t]
+  );
   const destinationCountry =
     collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry;
   const paymentRails = collectedData.paymentRails === undefined ? "" : collectedData.paymentRails;
@@ -127,6 +137,9 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
           isLoading={walletsLoading}
         />
+        <p hidden={!sourceWalletHint} className="text-sm text-warning">
+          {sourceWalletHint}
+        </p>
         {selectedWallet ? <WalletAssetBreakdown wallet={selectedWallet} /> : null}
       </div>
     );
@@ -180,7 +193,13 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     // edits can't desync the form from what the provider was sent. A corridor
     // blocker renders above STILL-ENABLED fields: the country select is the only
     // way out of a blocked corridor, so it must stay interactive.
-    return (
+    return pendingAgreements !== null ? (
+      <BvnkAgreementConsent agreements={pendingAgreements} />
+    ) : onboarding !== null &&
+      hasOnboardingLifecycle(onboarding.provider) &&
+      isOnboardingPanelStatus(onboarding) ? (
+      <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />
+    ) : (
       <div className="space-y-4">
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">

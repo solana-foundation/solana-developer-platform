@@ -370,22 +370,43 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
 }
 
 /**
- * Require specific permissions
+ * Wallet policies are the control plane that constrains API keys, so an API
+ * key may author them only with the api_admin role — a lesser key must not
+ * rewrite the profile that governs itself. Dashboard actors are unaffected.
  */
-export function requirePermissions(...required: Permission[]) {
+export function requireAdminApiKeyRole() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const apiKey = c.get("apiKey");
-    const clerk = c.get("clerk");
-    const session = c.get("session");
-
-    const permissions = apiKey?.permissions ?? clerk?.permissions ?? session?.permissions ?? null;
-
-    if (!permissions) {
-      throw new AppError("UNAUTHORIZED");
+    if (apiKey && apiKey.role !== "api_admin") {
+      throw new AppError("FORBIDDEN", "This operation requires an api_admin API key");
     }
+    await next();
+  };
+}
+
+/**
+ * Require specific permissions
+ */
+export function grantedPermissions(c: Context<{ Bindings: Env }>): readonly Permission[] | "*" {
+  const permissions =
+    c.get("apiKey")?.permissions ??
+    c.get("clerk")?.permissions ??
+    c.get("session")?.permissions ??
+    null;
+
+  if (!permissions) {
+    throw new AppError("UNAUTHORIZED");
+  }
+
+  return permissions.includes("*") ? "*" : permissions;
+}
+
+export function requirePermissions(...required: Permission[]) {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    const permissions = grantedPermissions(c);
 
     // Check for wildcard
-    if (permissions.includes("*")) {
+    if (permissions === "*") {
       await next();
       return;
     }
@@ -404,20 +425,39 @@ export function requirePermissions(...required: Permission[]) {
 }
 
 /**
- * Optional auth - doesn't fail if no key provided
+ * Enforce the existing permission contract when optional auth resolved a
+ * caller, while leaving a truly anonymous request untouched. This lets one
+ * route serve both tiers without weakening scoped API keys or duplicating the
+ * endpoint.
  */
-export function optionalAuth() {
+export function requirePermissionsWhenAuthenticated(...required: Permission[]) {
+  const enforce = requirePermissions(...required);
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    if (!c.get("apiKey") && !c.get("clerk") && !c.get("session")) {
+      await next();
+      return;
+    }
+    await enforce(c, next);
+  };
+}
+
+/**
+ * Authenticates an API key when one is present and always admits a request
+ * with no API key. Surfaces that change behavior when authenticated should
+ * reject invalid keys so an expired credential cannot silently downgrade.
+ */
+export function optionalAuth(options: { rejectInvalid?: boolean } = {}) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const apiKey = extractApiKey(c);
 
     if (apiKey && looksLikeApiKey(apiKey)) {
-      // Reuse the main auth logic; swallow auth failures (the key is optional)
-      // but never rate limiting — a limited key must not proceed as anonymous.
+      // Reuse the main auth logic. Rate limiting and strict optional-auth
+      // failures must never proceed as anonymous.
       try {
         const authMw = authMiddleware();
         await authMw(c, async () => {});
       } catch (error) {
-        if (error instanceof AppError && error.code === "RATE_LIMITED") {
+        if (options.rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
           throw error;
         }
       }

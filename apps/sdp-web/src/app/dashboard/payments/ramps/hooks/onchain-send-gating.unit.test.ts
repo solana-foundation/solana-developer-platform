@@ -19,6 +19,8 @@ const completeFields = {
 const wallet: PaymentsDashboardWallet = {
   id: "wallet-1",
   walletId: "custody-wallet-1",
+  isRuntimeExecutionAllowed: true,
+  custodyConfigId: "cc_test",
   publicKey: "wallet-address",
   label: "Treasury",
 };

@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { optionalClerkAuth } from "@/middleware/clerk-auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, skipRateLimitPaths } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
@@ -123,6 +124,45 @@ describe("Clerk auth request cache", () => {
 
     return { app, token };
   }
+
+  function createStrictOptionalApp(payload: ClerkJwtPayload) {
+    const token = createJwt(payload);
+    const app = new Hono<{ Bindings: Env }>();
+
+    app.use("*", async (c, next) => {
+      c.set("verifiedClerkJwt", { token, payload });
+      await next();
+    });
+    app.use("*", optionalClerkAuth({ rejectInvalid: true }));
+    app.get("/optional", (c) => c.json({ authenticated: Boolean(c.get("clerk")) }));
+    app.onError((error, c) => {
+      if (error instanceof AppError) {
+        return c.json(error.toResponse(), error.statusCode as 401);
+      }
+      throw error;
+    });
+
+    return { app, token };
+  }
+
+  it("strict optional auth rejects a verified Clerk token without an organization", async () => {
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_without_org",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createStrictOptionalApp(payload);
+
+    const res = await app.request(
+      "/optional",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({
+      error: { code: "UNAUTHORIZED", message: "Clerk token missing organization" },
+    });
+  });
 
   it("reuses a cached Clerk JWT across rate limiting and auth in one request", async () => {
     const payload: ClerkJwtPayload = {

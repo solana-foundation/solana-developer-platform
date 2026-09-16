@@ -27,6 +27,23 @@ api/dashboard/markets/earn/
                                      treasury-solutions/. Auth comes from the
                                      proxy middleware; failures answer 502 so
                                      the cell degrades to its placeholder.
+                                     Kamino's allocations source is
+                                     mainnet-only, so the handler refuses any
+                                     other cluster with a 400 before reading
+                                     anything else. Everything else about the
+                                     request is policed by the store module —
+                                     the server boundary: Kamino would answer
+                                     any well-formed mainnet vault, so the
+                                     store admits a vault only if it is a
+                                     public key AND the strategy catalogue
+                                     fronts it. The allowlist is resolved
+                                     from `/v1/earn/strategies` (provider
+                                     kamino, mainnet-beta) through
+                                     `createSdpApiClient`, cached beside the
+                                     allocations cache, and a failed catalogue
+                                     read fails closed into the same generic
+                                     502 — a refused vault is
+                                     indistinguishable from an outage.
                                      Answers the BARE parsed payload, never an
                                      envelope: `dashboardFetch` hands the body
                                      straight to the SWR hook, which re-parses
@@ -96,7 +113,8 @@ program create still sends the body `requestId` form.
   the same posture as the Treasury table. There is no mainnet "preview" mode
   in the guide any more: a mainnet deep link in sandbox is refused as a
   network mismatch.
-  The guide covers the sectioned **server-side** EXTERNAL-WALLET flow —
+  The guide covers the sectioned **server-side, authenticated**
+  EXTERNAL-WALLET flow:
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
   signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
@@ -110,8 +128,10 @@ program create still sends the body `requestId` form.
   snippets — a B2B2C partner cannot name a custody wallet. The optional
   partner `feePayer` (the implementor sponsoring its customers' fees) is
   documented in the public docs guide
-  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`), which mirrors
-  these snippets — update both together. The guide is
+  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`). That public guide
+  also owns the keyless quickstart; these dashboard snippets intentionally stay
+  keyed because they include submit and tenant read routes. Keep the shared
+  authenticated flow aligned across both. The guide is
   entirely derived from the strategy catalogue: nothing is persisted, there is
   no styling to save, and no public handoff token exists. (The UI builder that
   used to hold those — styled previews, saved per-project configuration, the
@@ -162,6 +182,8 @@ program create still sends the body `requestId` form.
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
   a warning callout, because the module they document carries a secret API key.
+  Do not imply that catalogue, preview, or unsigned build access always needs
+  that key; the public guide documents their keyless tier.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is

@@ -1,42 +1,60 @@
 # Solana Earn consumption
 
-Solana Earn is an independent repository and the future single source of truth for portable provider
-reads and self-custodial transaction plans. SDP remains the application and control-plane consumer: it
-owns authentication, tenancy, policy, custody, sponsorship, persistence, signing, submission,
-confirmation, and reconciliation.
+Solana Earn is consumed through SDP's hosted HTTP API. SDP owns the public
+contract, authentication, environment selection, tenancy, quotas, provider
+orchestration, transaction construction, persistence, submission, and
+reconciliation. Provider packages remain implementation details and are not a
+client integration boundary.
 
-## Package boundary
+## Hosted API tiers
 
-Committed SDP dependencies must use exact immutable package versions, either directly or through the
-exact-version pnpm catalog. Do not commit `workspace:`, `link:`, `file:`, Git, or URL references into a
-Solana Earn checkout. Those references couple CI and the lockfile to checkout layout and can bypass the
-packed-artifact checks external consumers rely on.
+The `/v1/earn` surface has two access tiers implemented by one route and one
+handler per operation:
 
-Before registry publishing is authorized, CI-produced tarballs may be used for explicit local shadow
-and packaging tests without committing them as dependencies. Cross-repository links are an uncommitted
-local development convenience only.
+| Capability | Without an API key | With an API key |
+| --- | --- | --- |
+| List and inspect strategies | Yes | Yes |
+| Quote deposits and withdrawals | Yes | Yes |
+| Build unsigned external-wallet transactions | Yes, owner pays | Yes, owner or caller-provided fee payer |
+| Submit signed transactions | No | Yes |
+| Record movements and positions | No | Yes |
+| Read positions, activity, and earnings | No | Yes |
 
-SDP's Turborepo graph continues to orchestrate SDP. Solana Earn's recursive pnpm scripts orchestrate
-its own repository and do not become part of SDP's build graph when packages are installed.
+Anonymous requests have no organization or project identity. They read only
+the deployment's global catalogue and write no build, advisory, movement, or
+position rows. The caller signs, broadcasts, and tracks an anonymous build.
 
-## Kit conversion
+Authenticated requests preserve the established project boundary. A keyed
+build is durable and may be submitted through SDP, which verifies signatures,
+records the movement before broadcast, and reconciles its final state.
 
-The portable `EarnTransactionPlan` remains JSON-safe. Once `@solana/earn-kit` is available from the
-approved registry, SDP should use its validated conversion instead of maintaining its own mapping from
-string addresses, signer/writable flags, base64 instruction data, and lookup-table addresses to
-`@solana/kit` values.
+## Environment selection
 
-That adapter does not produce a complete transaction message. SDP still chooses the fee payer and
-transaction lifetime, resolves lookup tables, simulates, signs, submits, confirms, and reconciles the
-transaction. The replacement should therefore occur at the narrow conversion seam immediately before
-SDP assembles its Kit transaction message.
+An authenticated project determines its own environment. A keyless request
+uses the deployment's configured `SDP_ENVIRONMENT`, falling back to the
+deployment mode. Request input never selects production. This keeps catalogue
+curation and transaction construction on one operator-controlled network.
 
-## Controlled cutover
+## Contract ownership
 
-1. Install exact prerelease versions from the approved registry.
-2. Compare provider outputs and compiled instruction bytes against the pinned SDP golden fixtures.
-3. Shadow reads before writes; retain the existing implementation for rollback during the evidence
-   window.
-4. Switch one provider path at a time behind the existing rollout controls.
-5. Remove the duplicate provider and conversion implementation only after parity and production
-   evidence satisfy the Solana Earn migration gates.
+The public source of truth is `apps/sdp-api/src/openapi/**`. The Embedded Yield
+guide describes the supported integration flow. Generated API reference and AI
+discovery resources must be regenerated from those sources rather than edited
+by hand.
+
+Changing which Earn routes are public or keyless is a security-boundary change.
+It requires the PRO-1872 security review gate and a named security sign-off.
+Provider-specific code, credentials, and operational details stay outside the
+public contract.
+
+## Implementation boundary
+
+SDP may reuse provider libraries internally, but committed dependencies must
+still use exact immutable package versions or the exact-version pnpm catalog.
+Do not commit `workspace:`, `link:`, `file:`, Git, or URL dependencies that
+couple CI to another checkout.
+
+Internal provider refactors must preserve the hosted API's request, response,
+authorization, tenant isolation, slippage floors, signer rules, and
+record-before-broadcast guarantees. Consumers should not need a provider SDK or
+repository checkout to integrate Earn.

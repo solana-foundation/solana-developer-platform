@@ -27,6 +27,8 @@ function onrampPrimaryLabel(
       return t("DashboardPayments.verificationPending");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
+    case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
+      return t("DashboardPayments.bvnk.acceptAgreements");
     default:
       return t("DashboardPayments.counterparty.next");
   }
@@ -71,14 +73,16 @@ export function OnrampRail({
     onExit,
   });
 
+  const onOnboardingStep =
+    wizard.currentStepId === "PROVIDER" || wizard.currentStepId === "REQUIREMENTS";
+
   const verificationUrl =
-    wizard.currentStepId === "PROVIDER" &&
-    wizard.onboarding?.status === "customer_verification_required"
+    onOnboardingStep && wizard.onboarding?.status === "customer_verification_required"
       ? wizard.onboarding.verificationUrl
       : undefined;
 
   const verificationPending =
-    wizard.currentStepId === "PROVIDER" &&
+    onOnboardingStep &&
     (wizard.onboarding?.status === "customer_verifying" ||
       wizard.onboarding?.status === "customer_funding_account_provisioning" ||
       wizard.onboarding?.status === "funding_account_provisioning");
