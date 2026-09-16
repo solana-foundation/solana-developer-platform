@@ -305,7 +305,11 @@ export interface BvnkProvisioningAudit {
   begin(event: { action: string; metadata: Record<string, unknown> }): Promise<AuditIntent>;
   complete(intent: AuditIntent, metadata?: Record<string, unknown>): Promise<void>;
   /** Resolves the intent with a failure outcome, so a routine provider error
-   * does not strand an unresolved intent that pollutes ledger verification. */
+   * does not strand an unresolved intent that pollutes ledger verification.
+   * The outcome records that the ATTEMPT failed, never that the provider-side
+   * object does not exist: an ambiguous error (a timeout after the provider
+   * accepted the call) may have created it, so the entry carries
+   * providerOutcome: "unverified" instead of asserting a definite state. */
   fail(intent: AuditIntent, error: unknown): Promise<void>;
 }
 
@@ -329,7 +333,10 @@ export function requestProvisioningAudit(
     async fail(intent, error) {
       await service.completeCritical(c, intent, {
         status: "failure",
-        metadata: { error: error instanceof Error ? error.message : String(error) },
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+          providerOutcome: "unverified",
+        },
       });
     },
   };
