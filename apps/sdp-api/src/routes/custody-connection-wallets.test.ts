@@ -1,9 +1,11 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
+import { custodyWalletResponse } from "@/openapi/paths/responses";
 import { getLogger } from "@/runtime/logger";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
@@ -211,12 +213,13 @@ describe("Connection-owned wallet control plane", () => {
     }>(
       "SELECT api_key_id, request_id, resource_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
     );
+    assert(audit, "Wallet creation outcome must exist");
     expect(audit).toMatchObject({
       api_key_id: API_KEY.id,
       request_id: "wallet-creation-audit-request",
       resource_id: body.data.wallet.id,
     });
-    expect(JSON.parse(audit?.metadata ?? "null")).toMatchObject({
+    expect(z.record(z.string(), z.json()).parse(JSON.parse(audit.metadata))).toMatchObject({
       event: "custody_wallet_created",
       auditPhase: "outcome",
       auditIntentId: expect.any(String),
@@ -305,7 +308,7 @@ describe("Connection-owned wallet control plane", () => {
     try {
       const response = await request("", "POST", { connectionId: CONNECTION_ID, setDefault: true });
       expect(response.status).toBe(201);
-      const { data } = (await response.json()) as { data: { wallet: { id: string } } };
+      const { data } = custodyWalletResponse.parse(await response.json());
       expect(
         await db.queryOne(
           "SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?",
@@ -535,8 +538,9 @@ describe("Connection-owned wallet control plane", () => {
     const outcome = await getDb(env).queryOne<{ status: string; metadata: string }>(
       "SELECT status, metadata FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'outcome'"
     );
-    expect(outcome?.status).toBe("failure");
-    expect(JSON.parse(outcome?.metadata ?? "null")).toMatchObject({
+    assert(outcome, "Provider rejection outcome must exist");
+    expect(outcome.status).toBe("failure");
+    expect(z.record(z.string(), z.json()).parse(JSON.parse(outcome.metadata))).toMatchObject({
       result: "failed",
       reason: "provider_rejected",
     });
@@ -569,6 +573,51 @@ describe("Connection-owned wallet control plane", () => {
         "SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'outcome'"
       )
     ).toEqual({ count: 0 });
+  });
+
+  it("rolls back the created wallet when updating the Connection default fails", async () => {
+    const db = getDb(env);
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "default_update_failure",
+      address: "Vote111111111111111111111111111111111111111",
+    });
+    const before = await walletCount();
+    await db.execute(`ALTER TABLE custody_connections ADD CONSTRAINT fail_wallet_create_default
+      CHECK (id <> '${CONNECTION_ID}' OR default_custody_wallet_id = '${DEFAULT_WALLET_RECORD_ID}')`);
+    try {
+      const response = await request("", "POST", { connectionId: CONNECTION_ID, setDefault: true });
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+      expect(await walletCount()).toBe(before);
+      expect(
+        await db.queryOne(
+          "SELECT id FROM custody_wallets WHERE custody_connection_id = ? AND wallet_id = ?",
+          [CONNECTION_ID, "privy_default_update_failure"]
+        )
+      ).toBeNull();
+      expect(
+        await db.queryOne(
+          "SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?",
+          [CONNECTION_ID]
+        )
+      ).toEqual({ default_custody_wallet_id: DEFAULT_WALLET_RECORD_ID });
+      expect(
+        await db.queryOne(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'intent'"
+        )
+      ).toEqual({ count: 1 });
+      expect(
+        await db.queryOne(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'outcome'"
+        )
+      ).toEqual({ count: 0 });
+    } finally {
+      await db.execute(
+        "ALTER TABLE custody_connections DROP CONSTRAINT fail_wallet_create_default"
+      );
+    }
   });
 
   it("changes only the owning Connection default wallet", async () => {

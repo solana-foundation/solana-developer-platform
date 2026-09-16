@@ -1,8 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type CachedApiKey, CUSTODY_CONFIG_STATUSES, type CustodyConfigStatus } from "@sdp/types";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
+import { initializeSigningResponseSchema } from "@/openapi/schemas/custody";
+import type { SwitchSigningRequest } from "@/routes/custody/schemas";
 import { getLogger } from "@/runtime/logger";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -56,7 +59,7 @@ let originalPrivyAppId: string | undefined;
 let originalPrivyAppSecret: string | undefined;
 let originalCustodyEncryptionKey: string | undefined;
 
-async function switchProvider(body: Record<string, unknown>): Promise<Response> {
+async function switchProvider(body: SwitchSigningRequest): Promise<Response> {
   return app.request(
     "/v1/wallets/switch",
     {
@@ -82,7 +85,7 @@ async function readScopeDefault() {
   );
 }
 
-async function prepareParaConfig(status: "active" | "inactive" | "absent") {
+async function prepareParaConfig(status: CustodyConfigStatus | "absent") {
   const db = getDb(env);
   if (status === "absent") {
     await db.batch([
@@ -120,7 +123,10 @@ async function readSwitchAudit() {
     "SELECT action, resource_type, resource_id, api_key_id, request_id, metadata FROM audit_logs WHERE organization_id = ? ORDER BY ledger_sequence",
     [TEST_ORG.id]
   );
-  return rows.map((row) => ({ ...row, metadata: JSON.parse(row.metadata) }));
+  return rows.map((row) => ({
+    ...row,
+    metadata: z.record(z.string(), z.json()).parse(JSON.parse(row.metadata)),
+  }));
 }
 
 async function seedAuthAndConfigs(): Promise<void> {
@@ -239,7 +245,7 @@ async function seedAuthAndConfigs(): Promise<void> {
         "cwlt_para_a",
         PARA_CONFIG_ID,
         "para_wallet_a",
-        "para_pubkey_a",
+        "11111111111111111111111111111111",
         "Para Root A",
         "root",
         "active"
@@ -333,7 +339,42 @@ describe("Custody multi-provider routes", () => {
     await clearKVStores(env);
   });
 
-  it.each(["active", "inactive", "absent"] as const)(
+  it.each([...CUSTODY_CONFIG_STATUSES, "absent"] as const)(
+    "rejects unavailable provider for an %s Config before opening an audit intent",
+    async (status) => {
+      const providerFetch = await prepareParaConfig(status);
+      const before = await readScopeDefault();
+      env.PARA_API_KEY = undefined;
+
+      const response = await switchProvider({ provider: "para" });
+
+      expect(response.status).toBe(403);
+      expect(providerFetch).not.toHaveBeenCalled();
+      expect(await readScopeDefault()).toEqual(before);
+      expect(await readSwitchAudit()).toHaveLength(0);
+    }
+  );
+
+  it("rejects fresh legacy Privy setup before opening an audit intent", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    env.PRIVY_APP_ID = "legacy-privy-app";
+    env.PRIVY_APP_SECRET = "legacy-privy-secret";
+    await getDb(env).execute("UPDATE custody_configs SET status = 'inactive' WHERE id = ?", [
+      PRIVY_CONFIG_ID,
+    ]);
+    const before = await readScopeDefault();
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+
+    const response = await switchProvider({ provider: "privy" });
+
+    expect(response.status).toBe(403);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await readScopeDefault()).toEqual(before);
+    expect(await readSwitchAudit()).toHaveLength(0);
+  });
+
+  it.each([...CUSTODY_CONFIG_STATUSES, "absent"] as const)(
     "does not change an %s Config when the audit intent cannot persist",
     async (status) => {
       const db = getDb(env);
@@ -359,7 +400,7 @@ describe("Custody multi-provider routes", () => {
     }
   );
 
-  it.each(["active", "inactive", "absent"] as const)(
+  it.each([...CUSTODY_CONFIG_STATUSES, "absent"] as const)(
     "keeps an %s Config switch successful when later audit writes fail",
     async (status) => {
       const db = getDb(env);
@@ -371,8 +412,9 @@ describe("Custody multi-provider routes", () => {
       try {
         const response = await switchProvider({ provider: "para" });
         expect(response.status).toBe(201);
-        const body = (await response.json()) as { data: { configId: string } };
-        expect(Object.keys(body.data).sort()).toEqual(["configId", "publicKey", "walletId"]);
+        const body = z
+          .object({ data: initializeSigningResponseSchema.strict() })
+          .parse(await response.json());
         expect(await readScopeDefault()).toEqual({
           default_custody_config_id: body.data.configId,
           default_custody_connection_id: null,
@@ -470,12 +512,16 @@ describe("Custody multi-provider routes", () => {
     const response = await switchProvider({ provider: "para" });
     expect(response.status).toBe(500);
     const audit = await readSwitchAudit();
-    expect(audit.map((row) => row.metadata.event ?? row.metadata.auditPhase)).toEqual([
-      "intent",
-      "provider_initialization_completed",
+    expect(audit).toMatchObject([
+      { metadata: { auditPhase: "intent" } },
+      { metadata: { event: "provider_initialization_completed" } },
     ]);
-    expect(audit[1]?.metadata.commandAuditIntentId).toBe(audit[0]?.resource_id);
-    expect(audit[1]?.metadata.defaultSelection).toEqual({
+    expect(audit).toHaveLength(2);
+    const [intent, initialization] = audit;
+    assert(intent);
+    assert(initialization);
+    expect(initialization.metadata.commandAuditIntentId).toBe(intent.resource_id);
+    expect(initialization.metadata.defaultSelection).toEqual({
       previousConfigId: null,
       previousConnectionId: null,
       selectedConfigId: PARA_CONFIG_ID,
@@ -534,8 +580,10 @@ describe("Custody multi-provider routes", () => {
       expect(entry.resource_id).toBe(entry.metadata.commandAuditIntentId);
     }
     expect(
-      audit.filter((row) =>
-        ["provider_reactivated", "provider_connected"].includes(row.metadata.event)
+      audit.filter(
+        (row) =>
+          row.metadata.event === "provider_reactivated" ||
+          row.metadata.event === "provider_connected"
       )
     ).toEqual([]);
     expect(audit.filter((row) => row.metadata.event === "default_provider_changed")).toHaveLength(

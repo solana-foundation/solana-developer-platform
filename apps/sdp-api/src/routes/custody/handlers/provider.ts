@@ -83,6 +83,7 @@ export const initializeSigning = async (
   const signingService = createSigningService(c.env, getRequestTenantScope(c));
 
   try {
+    await assertProviderInitializationAllowed(c, actor.organizationId, projectId, body.provider);
     const result = await initializeProviderConnection(
       c,
       signingService,
@@ -214,13 +215,15 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
       );
       await completeDefaultProviderSelection(c, auditService, intent, result.configId, [selection]);
     } else {
+      await assertProviderInitializationAllowed(c, actor.organizationId, projectId, targetProvider);
+      const organizationSlug = await resolveOrganizationSlug(c, actor.organizationId);
       intent = await beginConfigSelection(c, auditService, targetProvider, existingScopeConfig?.id);
       result = await initializeProviderConnection(
         c,
         signingService,
         c.env,
         actor.organizationId,
-        await resolveOrganizationSlug(c, actor.organizationId),
+        organizationSlug,
         projectId,
         providerRequest
       );
@@ -389,6 +392,18 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
   return success(c, response);
 };
 
+async function assertProviderInitializationAllowed(
+  c: AppContext,
+  organizationId: string,
+  projectId: string | undefined,
+  provider: CustodyProvider
+): Promise<void> {
+  if (provider === "privy") {
+    await assertFreshPrivyLegacySetupAllowed(c, organizationId, projectId);
+  }
+  await assertProviderAvailable(c.env, getDb(c.env), organizationId, "custody", provider);
+}
+
 async function initializeProviderConnection(
   c: AppContext,
   signingService: ReturnType<typeof createSigningService>,
@@ -398,11 +413,6 @@ async function initializeProviderConnection(
   projectId: string | undefined,
   request: InitializeSigningRequest
 ): Promise<SigningInitializationResult> {
-  if (request.provider === "privy") {
-    await assertFreshPrivyLegacySetupAllowed(c, organizationId, projectId);
-  }
-  await assertProviderAvailable(env, getDb(c.env), organizationId, "custody", request.provider);
-
   switch (request.provider) {
     case "local":
       return signingService.initializeLocalSigning(organizationId, projectId, {

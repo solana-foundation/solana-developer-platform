@@ -13,6 +13,7 @@
  * deposit that nobody can ever rescue (EXO-216/217).
  */
 
+import assert from "node:assert/strict";
 import { FeePaymentError } from "@sdp/payments/fee-payment";
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
@@ -30,6 +31,7 @@ import {
 import { generateKeyPairSigner } from "@solana/signers";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
@@ -333,18 +335,26 @@ describe("createDvpTrade", () => {
       }>(
         "SELECT user_id, request_id, resource_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
       );
+      assert(audit, "Expected wallet creation audit");
       expect(audit).toMatchObject({
         user_id: TEST_USER.id,
         request_id: "dvp-create-audit-request",
       });
-      expect(JSON.parse(audit?.metadata ?? "null")).toMatchObject({
+      const metadata = z
+        .object({
+          result: z.string(),
+          creationReason: z.string(),
+          walletId: z.string(),
+        })
+        .parse(JSON.parse(audit.metadata));
+      expect(metadata).toMatchObject({
         result: "created",
         creationReason: "dvp_settlement_authority",
         walletId: "privy_new_dvp_authority",
       });
       expect(
-        await db.queryOne("SELECT id FROM custody_wallets WHERE id = ?", [audit?.resource_id])
-      ).toEqual({ id: audit?.resource_id });
+        await db.queryOne("SELECT id FROM custody_wallets WHERE id = ?", [audit.resource_id])
+      ).toEqual({ id: audit.resource_id });
       expect(JSON.stringify(audit)).not.toContain("dvp-audit-secret");
     } finally {
       env.PRIVY_APP_ID = previousAppId;

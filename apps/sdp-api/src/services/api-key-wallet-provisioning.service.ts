@@ -10,7 +10,7 @@ export async function provisionApiKeyWallet(
   env: Env,
   params: {
     auditContext: Context<{ Bindings: Env }>;
-    creationReason?: "api_key" | "dvp_settlement_authority";
+    creationReason: "api_key" | "dvp_settlement_authority";
     organizationId: string;
     projectId: string;
     legacyConfigProjectId?: string;
@@ -35,7 +35,7 @@ export async function provisionApiKeyWallet(
   if (connectionId) {
     return targets.createConnectionWallet({
       auditContext: params.auditContext,
-      creationReason: params.creationReason ?? "api_key",
+      creationReason: params.creationReason,
       organizationId: params.organizationId,
       projectId: params.projectId,
       connectionId,

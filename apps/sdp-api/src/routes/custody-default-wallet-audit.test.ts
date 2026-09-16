@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
@@ -166,13 +167,17 @@ describe("default wallet audit admission", () => {
       expect(await response.json()).toMatchObject({
         data: { defaultWalletId: `privy_${owner}_b` },
       });
-      const rows = await getDb(env).queryMany<{
+      const records = await getDb(env).queryMany<{
         api_key_id: string;
-        metadata: Record<string, unknown>;
+        metadata: string;
       }>(
-        "SELECT api_key_id, metadata::jsonb AS metadata FROM audit_logs WHERE organization_id = ? ORDER BY ledger_sequence",
+        "SELECT api_key_id, metadata FROM audit_logs WHERE organization_id = ? ORDER BY ledger_sequence",
         [org]
       );
+      const rows = records.map((row) => ({
+        ...row,
+        metadata: z.record(z.string(), z.json()).parse(JSON.parse(row.metadata)),
+      }));
       expect(rows).toHaveLength(2);
       expect(rows[0]).toMatchObject({ api_key_id: apiKey, metadata: { auditPhase: "intent" } });
       expect(rows[1]).toMatchObject({

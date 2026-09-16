@@ -607,7 +607,7 @@ export class CustodyRuntimeTargets {
     } catch (error) {
       if (!(error instanceof SigningError) || error.code === "NETWORK_ERROR") {
         // Keep the intent unresolved: the Provider may have created the wallet.
-        this.logWalletOrphanRisk(target, "provider_result_unknown", undefined, intent.id);
+        this.logWalletOrphanRisk(target, "provider_result_unknown", intent.id);
       } else {
         await audit.completeCritical(params.auditContext, intent, {
           status: "failure",
@@ -630,7 +630,7 @@ export class CustodyRuntimeTargets {
       });
     } catch (error) {
       // A failed/ambiguous commit cannot prove the Provider wallet was persisted.
-      this.logWalletOrphanRisk(target, "persistence_failed", providerWalletId, intent.id);
+      this.logWalletOrphanRisk(target, "persistence_failed", intent.id, providerWalletId);
       if (error instanceof AppError && error.code === "CONFLICT") {
         throw error;
       }
@@ -1185,8 +1185,8 @@ export class CustodyRuntimeTargets {
   private logWalletOrphanRisk(
     target: ConnectionRuntimeTarget,
     reason: "provider_result_unknown" | "persistence_failed",
-    walletId?: string,
-    auditIntentId?: string
+    auditIntentId: string,
+    walletId?: string
   ): void {
     getLogger().error(
       {
@@ -1195,8 +1195,8 @@ export class CustodyRuntimeTargets {
         connectionId: target.connectionId,
         provider: target.provider,
         reason,
-        ...(auditIntentId ? { auditIntentId } : {}),
-        ...(walletId ? { walletId } : {}),
+        auditIntentId,
+        walletId,
       },
       "custody_wallet_orphan_risk"
     );

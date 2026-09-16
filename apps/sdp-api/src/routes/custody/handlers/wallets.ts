@@ -653,9 +653,9 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
   }
   const changed = previous.custody_wallet_id !== wallet.id;
   await auditService.completeCritical(c, intent, {
-    ...(changed
-      ? {}
-      : { action: "maintenance", resourceType: "audit_ledger", resourceId: intent.id }),
+    action: changed ? "update" : "maintenance",
+    resourceType: changed ? intent.entry.resourceType : "audit_ledger",
+    resourceId: changed ? ownerId : intent.id,
     metadata: {
       event: changed ? "default_wallet_changed" : "default_wallet_selection_unchanged",
       previousCustodyWalletId: previous.custody_wallet_id,

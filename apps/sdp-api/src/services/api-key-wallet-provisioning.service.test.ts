@@ -1,7 +1,9 @@
+import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
@@ -87,6 +89,7 @@ describe("provisionApiKeyWallet", () => {
 
       const wallet = await provisionApiKeyWallet(getDb(env), env, {
         auditContext,
+        creationReason: "api_key",
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
         connectionId,
@@ -144,12 +147,20 @@ describe("provisionApiKeyWallet", () => {
     );
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({ api_key_id: API_KEY.id, resource_id: first.custodyWalletId });
-    expect(JSON.parse(audits[0].metadata)).toMatchObject({
+    const metadata = z
+      .object({
+        result: z.string(),
+        creationReason: z.string(),
+        connectionId: z.string(),
+      })
+      .passthrough()
+      .parse(JSON.parse(audits[0].metadata));
+    expect(metadata).toMatchObject({
       result: "created",
       creationReason: "dvp_settlement_authority",
       connectionId: CONNECTION_ID,
     });
-    expect(JSON.parse(audits[0].metadata)).not.toHaveProperty("assignedSettlementAuthority");
+    expect(metadata).not.toHaveProperty("assignedSettlementAuthority");
   });
 
   it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
@@ -181,13 +192,17 @@ describe("provisionApiKeyWallet", () => {
         const audit = await db.queryOne<{ resource_id: string; metadata: string }>(
           "SELECT resource_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
         );
-        expect(JSON.parse(audit?.metadata ?? "null")).toMatchObject({
+        assert(audit, "Expected wallet creation audit");
+        const metadata = z
+          .object({ result: z.string(), walletId: z.string() })
+          .parse(JSON.parse(audit.metadata));
+        expect(metadata).toMatchObject({
           result: "created",
           walletId: "privy_partial_success",
         });
         expect(
-          await db.queryOne("SELECT id FROM custody_wallets WHERE id = ?", [audit?.resource_id])
-        ).toEqual({ id: audit?.resource_id });
+          await db.queryOne("SELECT id FROM custody_wallets WHERE id = ?", [audit.resource_id])
+        ).toEqual({ id: audit.resource_id });
         expect(await db.queryOne("SELECT id FROM api_keys WHERE name = 'Rejected key'")).toBeNull();
       } finally {
         await db.execute("ALTER TABLE api_keys DROP CONSTRAINT reject_created_key");
@@ -232,8 +247,18 @@ describe("provisionApiKeyWallet", () => {
       const walletAudit = await getDb(env).queryOne<{ api_key_id: string; metadata: string }>(
         "SELECT api_key_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
       );
-      expect(walletAudit?.api_key_id).toBe(API_KEY.id);
-      expect(JSON.parse(walletAudit?.metadata ?? "null")).toMatchObject({
+      assert(walletAudit, "Expected wallet creation audit");
+      expect(walletAudit.api_key_id).toBe(API_KEY.id);
+      const metadata = z
+        .object({
+          event: z.string(),
+          creationReason: z.string(),
+          connectionId: z.string(),
+          walletId: z.string(),
+          result: z.string(),
+        })
+        .parse(JSON.parse(walletAudit.metadata));
+      expect(metadata).toMatchObject({
         event: "custody_wallet_created",
         creationReason: "api_key",
         connectionId: CONNECTION_ID,
