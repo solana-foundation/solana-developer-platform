@@ -843,6 +843,9 @@
     "integrationRpcNoditDescription": "Sử dụng Nodit cho lưu lượng RPC Solana.",
     "integrationRpcQuickNodeDescription": "Sử dụng endpoint QuickNode đã cấu hình cho RPC Solana.",
     "integrationRpcTritonDescription": "Định tuyến các yêu cầu Solana qua cơ sở hạ tầng của Triton.",
-    "integrationRpcValidationCloudDescription": "Sử dụng Validation Cloud cho lưu lượng RPC Solana."
+    "integrationRpcValidationCloudDescription": "Sử dụng Validation Cloud cho lưu lượng RPC Solana.",
+    "restricted": "Bị hạn chế",
+    "signingDisabledTitle": "Ký đang bị tắt",
+    "signingDisabledBody": "Wallet này có thể nhận tiền nhưng không thể ký giao dịch cho đến khi tính năng ký được bật lại."
   }
 }

@@ -42,8 +42,10 @@ function emitUrlStateChange() {
 
 /**
  * Applies search-param updates to the current URL via the native History API,
- * so the change stays shallow (no RSC refetch). Next.js patches pushState and
- * replaceState, so `useSearchParams` consumers stay in sync too.
+ * so the change stays shallow (no RSC refetch). Next.js patches pushState, so
+ * "push" keeps `useSearchParams` in sync; "replace" hands Next its own history
+ * state, which its patch treats as internal, so only the store behind
+ * `useDashboardUrlState` / `useDashboardTab` observes a replace.
  *
  * @param updates - Param values to set; null or blank values delete the param.
  * @param mode - "push" adds a history entry, "replace" rewrites the current one.

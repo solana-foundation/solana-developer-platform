@@ -163,6 +163,27 @@ describe("custodyWalletForParty", () => {
       expect(result).toBe("cwlt_party");
     });
 
+    it("breaks equal creation timestamps by wallet id, regardless of insertion order", async () => {
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET created_at = '2020-01-01' WHERE id = 'cwlt_party'")
+        .run();
+      await getDb(env)
+        .prepare(`INSERT INTO custody_wallets
+          (id, custody_config_id, wallet_id, public_key, status, created_at)
+          VALUES ('cwlt_a_tied', ?, 'w_tied', ?, 'active', '2020-01-01')`)
+        .bind(CUSTODY_CONFIG_ID, PARTY_ADDRESS)
+        .run();
+
+      expect(
+        await custodyWalletForParty(
+          env,
+          { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
+          address(PARTY_ADDRESS),
+          null
+        )
+      ).toBe("cwlt_a_tied");
+    });
+
     it("returns null for a key whose allowlist admits neither", async () => {
       const result = await custodyWalletForParty(
         env,

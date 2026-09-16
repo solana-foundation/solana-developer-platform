@@ -13,7 +13,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { env, RUN_INTEGRATION_TESTS } from "../helpers/integration";
 
-const { KoraAdapter } = apiTestSupport;
+const { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS, KoraAdapter, KoraClient } = apiTestSupport;
 
 const koraSurfpoolShim = (env as { KORA_SURFPOOL_SHIM?: string }).KORA_SURFPOOL_SHIM;
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
@@ -25,6 +25,8 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
     }
 
     const adapter = new KoraAdapter({ rpcUrl: env.KORA_RPC_URL });
+    const config = await new KoraClient({ rpcUrl: env.KORA_RPC_URL }).getConfig();
+    expect(config.validation_config.allowed_programs).toContain(DVP_SWAP_PROGRAM_PROGRAM_ADDRESS);
     const rpc = createRpc(env);
     const feePayer = await adapter.getFeePayer();
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");

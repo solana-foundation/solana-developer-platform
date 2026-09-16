@@ -6,7 +6,7 @@
  * Pulled out of the detail page so the page reads as layout. All four
  * operations go through one request shape and share success and failure handling.
  *
- * Funding and reclaiming name a leg: both endpoints take `{ side: "a" | "b" }`,
+ * Funding and reclaiming name a leg: both endpoints take `{ side, walletId }`,
  * authorizing by the caller holding custody of that side's party address,
  * whoever holds it, on whichever org's trade. Each press of either carries its
  * own Idempotency-Key, so a request the proxy or network retries is answered
@@ -37,7 +37,10 @@ export type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
  */
 export type DvpTradeActionCall =
   | [action: "settle" | "cancel"]
-  | [action: "fund" | "reclaim", options: { side: DvpTradeSide; symbol: string | null }];
+  | [
+      action: "fund" | "reclaim",
+      options: { side: DvpTradeSide; walletId: string; symbol: string | null },
+    ];
 
 /**
  * One in-flight request. Funding is keyed by side, since a bilateral trade
@@ -140,13 +143,16 @@ function pendingKey(call: DvpTradeActionCall): DvpPendingAction {
  * Fund and reclaim name the leg they move and carry their own Idempotency-Key;
  * settle and cancel carry neither.
  */
-function requestInit(action: DvpTradeActionName, leg: { side: DvpTradeSide } | null): RequestInit {
+function requestInit(
+  action: DvpTradeActionName,
+  leg: { side: DvpTradeSide; walletId: string } | null
+): RequestInit {
   if (leg === null) {
     return { method: "POST" };
   }
   return {
     method: "POST",
-    body: JSON.stringify({ side: leg.side }),
+    body: JSON.stringify({ side: leg.side, walletId: leg.walletId }),
     headers: { [IDEMPOTENCY_KEY_HEADER]: freshDvpIdempotencyKey(`dvp-${action}`) },
   };
 }
@@ -176,6 +182,14 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
     const leg = call.length === 1 ? null : call[1];
     setPending((current) => new Set(current).add(key));
     try {
+      // An absent ID would ask the API to choose a different wallet by address.
+      if (
+        (call[0] === "fund" || call[0] === "reclaim") &&
+        (typeof call[1].walletId !== "string" || !call[1].walletId.trim())
+      ) {
+        toast.error(t("DashboardCustody.unavailable"), { position: "bottom-right" });
+        return;
+      }
       const response = await fetch(
         `/api/dashboard/markets/dvp/trades/${encodeURIComponent(tradeId)}/${action}`,
         requestInit(action, leg)

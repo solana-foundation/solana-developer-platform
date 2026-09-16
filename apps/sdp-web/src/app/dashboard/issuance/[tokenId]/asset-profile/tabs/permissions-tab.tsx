@@ -1,6 +1,14 @@
 "use client";
 
-import { ChevronDown, TriangleAlert } from "lucide-react";
+import {
+  ChevronDown,
+  Coins,
+  FileText,
+  type LucideIcon,
+  Snowflake,
+  TriangleAlert,
+  UserCog,
+} from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -9,10 +17,17 @@ import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-co
 import { useTranslations } from "@/i18n/provider";
 import { shortenAddress, toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
 import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
+import type { PermissionRowId } from "../../token-management-workspace.types";
 import { getSignerWalletOptionLabel } from "../../token-management-workspace.utils";
-import { PERMISSION_ROW_ICONS } from "../../token-settings-section";
 import type { AssetProfileForm } from "../use-asset-profile-form";
 import type { TokenOperations } from "../use-token-operations";
+
+const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
+  "mint-authority": Coins,
+  "freeze-authority": Snowflake,
+  "metadata-authority": FileText,
+  "permanent-delegate": UserCog,
+};
 
 export function PermissionsTab({
   ops,

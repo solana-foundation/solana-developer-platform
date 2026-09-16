@@ -246,7 +246,10 @@
         "preparing": "Preparando el estado de la transferencia",
         "preparingDescription": "Estamos esperando el registro de la transferencia asociado a esta cotización.",
         "waitingForPayment": "Esperando el pago",
-        "waitingForPaymentHostedDescription": "Completa el pago en la ventana del proveedor que aparece arriba. Este depósito se actualiza automáticamente cuando el proveedor lo confirma."
+        "waitingForPaymentHostedDescription": "Completa el pago en la ventana del proveedor que aparece arriba. Este depósito se actualiza automáticamente cuando el proveedor lo confirma.",
+        "canceled": "Transferencia cancelada",
+        "canceledFundingDescription": "Esta transferencia se canceló, así que las instrucciones de fondeo ya no aplican. Crea una nueva cotización para continuar.",
+        "canceledPayoutDescription": "Este pago saliente se canceló, así que las instrucciones de depósito ya no aplican. Crea una nueva cotización para continuar."
       },
       "untrustedProviderUrl": "El proveedor devolvió una URL no confiable, por lo que no se cargó. Crea una nueva cotización o contacta a soporte.",
       "destinationCountry": "País de destino",
@@ -327,7 +330,11 @@
       "simulating": "Simulando...",
       "depositSimulated": "Depósito simulado",
       "agreementPendingTitle": "Confirmando tu aceptación",
-      "agreementPendingDescription": "Estamos registrando tu aceptación con BVNK — solo toma un momento."
+      "agreementPendingDescription": "Estamos registrando tu aceptación con BVNK — solo toma un momento.",
+      "agreementRequiredTitle": "Revisa y acepta los acuerdos",
+      "agreementRequiredDescription": "BVNK requiere que la contraparte acepte el acuerdo de la plataforma para su residencia fiscal antes de que se recopilen sus datos.",
+      "viewAgreement": "Ver acuerdo",
+      "acceptAgreements": "Acepto y continuar"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verifica tu identidad",
@@ -978,7 +985,11 @@
       "paymentUpdated": "Pago recurrente actualizado.",
       "noChangesToSave": "No hay cambios para guardar.",
       "sourceWalletUnresolved": "Wallet de origen no disponible",
-      "sourceWalletUnresolvedDescription": "Este pago recurrente no está vinculado a una Wallet de SDP exacta, por lo que sus acciones no están disponibles."
+      "sourceWalletUnresolvedDescription": "Este pago recurrente no está vinculado a una Wallet de SDP exacta, por lo que sus acciones no están disponibles.",
+      "signingDisabledDraft": "El borrador se puede guardar; la activación requiere una Wallet con firma habilitada.",
+      "signingDisabledTitle": "Firma deshabilitada para la Wallet de fondeo",
+      "signingDisabledBody": "No puedes cobrar, modificar ni cancelar este pago hasta que la firma esté habilitada para {wallet}.",
+      "signingDisabledPendingBody": "Puedes activar este pago una vez que la firma esté habilitada para {wallet} o cambies la Wallet de fondeo."
     },
     "transactions": {
       "searchPlaceholder": "Busca ID, firma, dirección, referencia o contraparte (3 o más caracteres)",
@@ -1058,7 +1069,87 @@
       "filterProvider": "Proveedor",
       "filterAsset": "Activo",
       "noAssetMatchesDescription": "Los saldos se leen de la cadena, mientras que esta tabla lista las transferencias que SDP registró. Un Token fondeado fuera de SDP muestra un saldo sin transferencias aquí.",
-      "allAssets": "Todos los activos"
+      "allAssets": "Todos los activos",
+      "searchTransactions": "Buscar transacciones",
+      "all": "Todos",
+      "allKinds": "Todos los tipos",
+      "kindSelectLabel": "Tipo de transacción",
+      "statusSelectLabel": "Estado de la transacción",
+      "walletId": "ID de Wallet",
+      "tokenPlaceholder": "Mint o símbolo del Token",
+      "token": "Token",
+      "clearCounterparty": "Borrar filtro de contraparte",
+      "clearWallet": "Borrar filtro de Wallet",
+      "clearToken": "Borrar filtro de Token",
+      "loadFailed": "No se pudieron cargar las transacciones",
+      "module": "Módulo",
+      "moduleId": "ID de módulo",
+      "kind": "Tipo",
+      "noTransactionsFound": "No se encontraron transacciones",
+      "viewInModule": "Ver en {module}",
+      "modules": {
+        "payments": "Pagos",
+        "earn": "Earn",
+        "dvp": "Delivery vs Payments",
+        "private_channels": "Canales privados",
+        "issuance": "Emisión",
+        "rings": "Rings"
+      },
+      "kinds": {
+        "payments": {
+          "pay": "Pago",
+          "confidential_pay": "Pago confidencial",
+          "batch_pay": "Pago por lotes",
+          "recurring_pay": "Pago recurrente",
+          "deposit": "Depósito",
+          "request_deposit": "Solicitar depósito",
+          "onramp": "Onramp",
+          "offramp": "Offramp"
+        },
+        "earn": {
+          "deposit": "Depósito",
+          "withdraw": "Retiro"
+        },
+        "dvp": {
+          "fund": "Fondear tramo",
+          "close": "Cerrar tramo"
+        },
+        "private_channels": {
+          "transfer": "Transferencia",
+          "deposit": "Depósito",
+          "withdraw": "Retiro"
+        },
+        "issuance": {
+          "mint": "Mint",
+          "burn": "Burn",
+          "freeze": "Congelar",
+          "unfreeze": "Descongelar",
+          "seize": "Incautar",
+          "force_burn": "Force burn",
+          "update_authority": "Actualizar autoridad",
+          "pause": "Pausar",
+          "unpause": "Reanudar",
+          "deploy": "Desplegar"
+        },
+        "rings": {
+          "shield": "Blindar",
+          "transfer_registered": "Transferencia registrada",
+          "transfer_anonymous": "Transferencia anónima",
+          "withdraw": "Retirar",
+          "merge": "Fusionar",
+          "timelock_create": "Crear Timelock",
+          "timelock_settle": "Liquidar Timelock",
+          "zone_create": "Crear zona",
+          "ring_exit": "Salida del Ring",
+          "ring_entry": "Entrada al Ring"
+        }
+      },
+      "statuses": {
+        "pending": "Pendiente",
+        "succeeded": "Completada",
+        "failed": "Fallida",
+        "canceled": "Cancelada"
+      }
     },
     "requests": {
       "loadFailed": "No se pudieron cargar las solicitudes de pago",
@@ -1109,6 +1200,8 @@
       "listRequests": "Listar solicitudes de pago",
       "createRequest": "Crear solicitud de pago",
       "playgroundProductName": "Solicitudes de pago"
-    }
+    },
+    "signingUnavailable": "La firma está deshabilitada para esta Wallet.",
+    "restricted": "Restringido"
   }
 }

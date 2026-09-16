@@ -2,6 +2,7 @@ import type { Project } from "@sdp/types";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
+import { DashboardScopeLoadingScreen } from "@/components/dashboard-loading-screen";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { SelectExistingOrganizationPanel } from "@/components/select-existing-organization-panel";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
@@ -57,6 +58,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   return (
     <DashboardWorkspaceProvider
       key={getDashboardCacheScopeKey(dashboardCacheScope)}
+      scopeRefreshFallback={<DashboardScopeLoadingScreen />}
       dashboardAccess={dashboardAccess}
       initialQuickStartStep={initialQuickStartStep}
       flags={flags}

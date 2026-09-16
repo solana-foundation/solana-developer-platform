@@ -18,6 +18,7 @@ export const paymentsQueryKeys = {
   actionWallets: () => "payments-action-wallets",
   walletAddressQr: (address: string) => ["payments-wallet-address-qr", address] as const,
   createTransfer: () => "payments-create-transfer",
+  transactions: ({ query }: { query: string }) => ["payments-transactions", query] as const,
   onrampTransferStatus: ({ transferId }: { transferId: string }) =>
     ["onramp-transfer-status", transferId] as const,
   offrampTransferStatus: ({ transferId }: { transferId: string }) =>

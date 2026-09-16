@@ -22,6 +22,7 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
+import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   generatePaymentTransferId,
@@ -65,6 +66,7 @@ import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletAuthorizationForPermissions,
 } from "@/services/api-key-scope.service";
+import { AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
   isNativePaymentToken,
@@ -595,7 +597,8 @@ async function settleTransferExecutionFailure(
   transfer: TransferRow,
   recorder: { submittedRow(): Promise<TransferRow | null> },
   error: unknown,
-  toPayload: (row: TransferRow) => Record<string, unknown>
+  toPayload: (row: TransferRow) => Record<string, unknown>,
+  onConcurrentChainVerdict?: (settled: TransferRow) => Promise<void>
 ): Promise<Response> {
   const submitted = await recorder.submittedRow();
   if (submitted && !isDefiniteExecutionFailure(error)) {
@@ -612,6 +615,7 @@ async function settleTransferExecutionFailure(
     })
   );
   if (settled.status !== "failed") {
+    await onConcurrentChainVerdict?.(settled);
     return success(c, toPayload(settled));
   }
   throw mapTransferExecutionError(error);
@@ -844,6 +848,37 @@ export async function createTransfer(c: AppContext) {
   }
 
   const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
+  // The tamper-evident ledger admits the movement before any bytes can reach
+  // the chain; a submission whose confirmation never lands leaves the intent
+  // unresolved, which is exactly the state reconciliation pages on.
+  const auditService = new AuditService(getDb(c.env));
+  let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>>;
+  try {
+    auditIntent = await auditService.beginCritical(c, {
+      action: "transfer",
+      resourceType: "payment_transfer",
+      resourceId: transfer.id,
+      metadata: {
+        custodyWalletId: operation.sourceWallet.id,
+        walletId: operation.sourceWallet.walletId,
+        sourceAddress: operation.sourceWallet.publicKey,
+        destination: body.destination,
+        // Named tokenMint: a bare "token" key is scrubbed as a credential by
+        // the audit redaction policy, and a mint address is not a secret.
+        tokenMint: operation.token,
+        amount: operation.amount,
+      },
+    });
+  } catch (error) {
+    // Nothing was broadcast, but the processing row is already durable and an
+    // idempotent retry would replay it as if it had executed. Settle it failed
+    // so the ledger refusal cannot mint an unaudited, replayable transfer.
+    await updateTransferRecord(c, transfer, {
+      status: "failed",
+      error: "Audit ledger admission failed before execution",
+    });
+    throw error;
+  }
   try {
     if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(
@@ -862,6 +897,9 @@ export async function createTransfer(c: AppContext) {
           error: null,
         })
       );
+      await auditService.completeCritical(c, auditIntent, {
+        metadata: { signature: solResult.signature, slot: solResult.slot?.toString() ?? null },
+      });
       return success(c, { transfer: mapTransferRow(updated) });
     }
 
@@ -884,12 +922,37 @@ export async function createTransfer(c: AppContext) {
         error: null,
       })
     );
+    await auditService.completeCritical(c, auditIntent, {
+      metadata: { signature: result.signature, slot: result.slot?.toString() ?? null },
+    });
 
     return success(c, { transfer: mapTransferRow(updated) });
   } catch (error) {
-    return settleTransferExecutionFailure(c, transfer, submissionStore, error, (row) => ({
-      transfer: mapTransferRow(row),
-    }));
+    try {
+      return await settleTransferExecutionFailure(
+        c,
+        transfer,
+        submissionStore,
+        error,
+        (row) => ({ transfer: mapTransferRow(row) }),
+        async (settled) => {
+          // A concurrent writer (reconciliation, a replayed submission) already
+          // proved the chain outcome; the intent resolves with that verdict
+          // instead of dangling on an operation whose result is known.
+          if (isSuccessfulPaymentTransferStatus(settled.status)) {
+            await auditService.completeCritical(c, auditIntent, {
+              metadata: { signature: settled.signature, slot: settled.slot?.toString() ?? null },
+            });
+          }
+        }
+      );
+    } catch (settledError) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown transfer error" },
+      });
+      throw settledError;
+    }
   }
 }
 

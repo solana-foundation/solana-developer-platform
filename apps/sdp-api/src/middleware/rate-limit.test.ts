@@ -2,11 +2,17 @@ import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { currentDatabaseIdentity } from "@/db/identity";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { optionalAuth } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { enforceRateLimit, KEYED_IP_BACKSTOP_MAX_REQUESTS } from "@/middleware/rate-limit";
+import {
+  ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
+  ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS,
+  enforceRateLimit,
+  KEYED_IP_BACKSTOP_MAX_REQUESTS,
+} from "@/middleware/rate-limit";
 import type { KVStoreSet } from "@/runtime/kv";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
@@ -140,6 +146,67 @@ describe("Rate limiting", () => {
   });
 
   describe("anonymous IP limit", () => {
+    it("gives anonymous Earn catalogue traffic its own generous tier", async () => {
+      const identifier = `anonymous:earn:catalogue:ip:${CLIENT_IP}`;
+      await seedRateLimit(env, identifier, 20);
+
+      const res = await app.request(
+        "/v1/earn/strategies",
+        { headers: { "x-forwarded-for": CLIENT_IP } },
+        env
+      );
+
+      expect(res.status).not.toBe(429);
+      expect(res.headers.get("X-RateLimit-Limit")).toBe(
+        ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS.toString()
+      );
+    });
+
+    it("caps anonymous Earn builds in a separate per-IP tier", async () => {
+      const identifier = `anonymous:earn:build:ip:${CLIENT_IP}`;
+      await seedRateLimit(env, identifier, ANONYMOUS_EARN_BUILD_MAX_REQUESTS);
+
+      const res = await app.request(
+        "/v1/earn/external-wallet/deposit-transactions",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-forwarded-for": CLIENT_IP },
+          body: "{}",
+        },
+        env
+      );
+
+      expect(res.status).toBe(429);
+      expect(res.headers.get("X-RateLimit-Limit")).toBe(
+        ANONYMOUS_EARN_BUILD_MAX_REQUESTS.toString()
+      );
+    });
+
+    it("does not let an anonymous Earn rejection consume a keyed caller's tier", async () => {
+      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedRateLimit(
+        env,
+        `anonymous:earn:build:ip:${CLIENT_IP}`,
+        ANONYMOUS_EARN_BUILD_MAX_REQUESTS
+      );
+
+      const res = await app.request(
+        "/v1/earn/external-wallet/deposit-transactions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+            "x-forwarded-for": CLIENT_IP,
+          },
+          body: "{}",
+        },
+        env
+      );
+
+      expect(res.status).not.toBe(429);
+    });
+
     it("returns 429 for unauthenticated traffic over the anonymous limit", async () => {
       await seedRateLimit(env, CLIENT_IP, 20);
 
@@ -192,7 +259,7 @@ describe("Rate limiting", () => {
       });
       mini.use("*", kvStoreMiddleware());
       mini.use("*", optionalAuth());
-      mini.get("/resource", (c) => c.text("ok"));
+      mini.get("/resource", (c) => c.json({ identity: currentDatabaseIdentity() }));
       return mini;
     }
 
@@ -206,6 +273,29 @@ describe("Rate limiting", () => {
       expect(res.status).toBe(200);
     });
 
+    it("can reject an invalid key without requiring a key", async () => {
+      const mini = new Hono<{ Bindings: Env }>();
+      mini.onError((err, c) => {
+        if (err instanceof AppError) {
+          return c.json(err.toResponse(), 401);
+        }
+        throw err;
+      });
+      mini.use("*", kvStoreMiddleware());
+      mini.use("*", optionalAuth({ rejectInvalid: true }));
+      mini.get("/resource", (c) => c.json({ ok: true }));
+
+      const anonymous = await mini.request("/resource", {}, env);
+      const invalid = await mini.request(
+        "/resource",
+        { headers: { Authorization: "Bearer sk_test_unknown_key" } },
+        env
+      );
+
+      expect(anonymous.status).toBe(200);
+      expect(invalid.status).toBe(401);
+    });
+
     it("rethrows RATE_LIMITED instead of degrading to anonymous", async () => {
       await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
       await seedRateLimit(env, TEST_CACHED_API_KEY.id, 100);
@@ -217,6 +307,24 @@ describe("Rate limiting", () => {
       );
 
       expect(res.status).toBe(429);
+    });
+
+    it("runs a keyless route under the presented key's tenant identity", async () => {
+      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+
+      const res = await optionalAuthApp().request(
+        "/resource",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        identity: {
+          kind: "tenant",
+          organizationId: TEST_CACHED_API_KEY.organizationId,
+        },
+      });
     });
   });
 

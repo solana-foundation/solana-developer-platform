@@ -39,6 +39,7 @@ import {
   type Signature,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
+  type TransactionSigner,
 } from "@solana/kit";
 import { signTransactionMessageWithSigners } from "@solana/signers";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -49,9 +50,8 @@ import {
   type PrivateChannelDepositRow,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
-import { buildPrivateChannelDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
+import { buildPrivateChannelDepositFingerprint } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
-import * as solanaServices from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./auth/gateway-auth";
@@ -80,6 +80,9 @@ export interface CreateChannelDepositInput {
   userId: string | null;
   /** Custody wallet the deposit is signed from (the escrow `user`). */
   wallet: CustodyWallet;
+  signer: TransactionSigner;
+  /** Authorize and match the winning operation again after an idempotency race. */
+  onReplay: (row: PrivateChannelDepositRow) => Promise<PrivateChannelDeposit>;
   /** UI decimal amount (e.g. "1.5"). */
   amount: string;
   /** Mint to deposit; must be on the instance's allowlist. Defaults to its first entry. */
@@ -104,34 +107,27 @@ export interface CreateChannelDepositInput {
  * Build, sign, broadcast, and confirm a deposit on the instance chain. Returns
  * the built transaction signature.
  */
-async function broadcastDeposit(
-  env: Env,
-  input: {
-    instance: DepositInstance;
-    organizationId: string;
-    projectId: string;
-    wallet: CustodyWallet;
-    mint: Address;
-    /** Program owning the mint; seeds the escrow's `userAta`/`instanceAta` derivation. */
-    tokenProgram: Address;
-    recipient: Address;
-    amountBaseUnits: bigint;
-    projectRpc: PrivateChannelProjectRpcClient;
-    /**
-     * Called with the transaction's signature after signing and before the
-     * send, so the outcome of a request that dies mid-send stays resolvable:
-     * a persisted signature is what lets the reconciler ask the chain what
-     * happened instead of failing the row as never-broadcast.
-     */
-    onSigned: (signature: Signature) => Promise<void>;
-  }
-): Promise<Signature> {
-  const signer = await solanaServices.createOrgSigner(
-    env,
-    input.organizationId,
-    input.projectId,
-    input.wallet.walletId
-  );
+async function broadcastDeposit(input: {
+  instance: DepositInstance;
+  organizationId: string;
+  projectId: string;
+  wallet: CustodyWallet;
+  signer: TransactionSigner;
+  mint: Address;
+  /** Program owning the mint; seeds the escrow's `userAta`/`instanceAta` derivation. */
+  tokenProgram: Address;
+  recipient: Address;
+  amountBaseUnits: bigint;
+  projectRpc: PrivateChannelProjectRpcClient;
+  /**
+   * Called with the transaction's signature after signing and before the
+   * send, so the outcome of a request that dies mid-send stays resolvable:
+   * a persisted signature is what lets the reconciler ask the chain what
+   * happened instead of failing the row as never-broadcast.
+   */
+  onSigned: (signature: Signature) => Promise<void>;
+}): Promise<Signature> {
+  const signer = input.signer;
   if (signer.address !== input.wallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match the deposit wallet");
   }
@@ -177,8 +173,7 @@ async function broadcastDeposit(
  * fail: a concurrent duplicate loses it and reads the winner's row instead of
  * broadcasting a second escrow transfer. The pre-insert lookup only saves the
  * common (sequential retry) case a round trip through a failed insert. Both
- * paths go through `resolveIdempotencyReplay`, so a key reused with a DIFFERENT
- * request is a 409 rather than a quiet answer about someone else's deposit.
+ * paths delegate matching and authorization of the winning row to the caller.
  */
 async function reserveDeposit(
   repo: PrivateChannelDepositRepository,
@@ -209,7 +204,7 @@ async function reserveDeposit(
       idempotencyKey: input.idempotencyKey,
     });
 
-  const existing = await resolveIdempotencyReplay(findExisting, fingerprint);
+  const existing = await findExisting();
   if (existing) {
     return { row: existing, replayed: true };
   }
@@ -233,7 +228,7 @@ async function reserveDeposit(
     if (!isPostgresUniqueViolation(error)) {
       throw error;
     }
-    const raced = await resolveIdempotencyReplay(findExisting, fingerprint);
+    const raced = await findExisting();
     if (!raced) {
       throw error;
     }
@@ -271,9 +266,8 @@ export async function createChannelDeposit(
   }
 
   const repo = createPrivateChannelDepositRepository(env);
-  // The reservation is taken BEFORE the signer is derived or anything is
-  // broadcast, so a retry — or a second request racing the first — can only ever
-  // reach the row the winner created.
+  // The route has admitted and prepared its exact signer. Only the request that
+  // wins this reservation may sign or send; a loser must authorize the winner.
   const { row: created, replayed } = await reserveDeposit(repo, {
     organizationId,
     projectId,
@@ -295,7 +289,7 @@ export async function createChannelDeposit(
     idempotencyKey: input.idempotencyKey,
   });
   if (replayed) {
-    return mapPrivateChannelDepositRow(created);
+    return input.onReplay(created);
   }
 
   let latest: PrivateChannelDepositRow = created;
@@ -305,11 +299,12 @@ export async function createChannelDeposit(
   let signature: Signature;
   let recordedSignature: Signature | null = null;
   try {
-    signature = await broadcastDeposit(env, {
+    signature = await broadcastDeposit({
       instance,
       organizationId,
       projectId,
       wallet,
+      signer: input.signer,
       mint: address(mint),
       tokenProgram: address(tokenProgram),
       recipient: address(recipient),

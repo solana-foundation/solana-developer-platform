@@ -3,9 +3,11 @@ import { assertValidAddress } from "@sdp/solana/address";
 import type { Token } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
+import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { badRequest, badRequestQuery, conflict, notFound } from "@/lib/errors";
+import { badRequest, badRequestQuery, conflict, internalError, notFound } from "@/lib/errors";
+import { buildDefaultAssetProfile } from "@/lib/issuance/default-asset-profile";
 import { created, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
@@ -135,7 +137,6 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
     });
   }
 
-  const tokenService = getTenantTokenService(c);
   const signingWallet = body.signingCustodyWalletId
     ? await resolveIssuanceWallet({
         env: c.env,
@@ -145,27 +146,47 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
       })
     : null;
 
-  const token = await tokenService.createToken({
-    projectId,
-    organizationId: orgId,
-    createdBy: auth.id,
-    signingCustodyWalletId: signingWallet?.custodyWalletId,
-    signingWalletId: signingWallet?.providerWalletId,
-    name: body.name,
-    symbol: body.symbol,
-    decimals: resolved.decimals,
-    description: body.description,
-    uri: body.uri,
-    imageUrl: body.imageUrl,
-    template: resolved.template,
-    extensions: resolved.extensions ?? undefined,
-    maxSupply: body.maxSupply,
-    isMintable: body.isMintable,
-    isFreezable: body.isFreezable,
-    requiresAllowlist: resolved.requiresAllowlist,
+  const db = getDb(c.env);
+  const token = await db.transaction(async (tx) => {
+    const client = asTransactionalClient(tx);
+    const tokenService = getTenantTokenService(c, client);
+    const assetProfiles = createPostgresAssetProfilesRepository(client);
+
+    const token = await tokenService.createToken({
+      projectId,
+      organizationId: orgId,
+      createdBy: auth.id,
+      signingCustodyWalletId: signingWallet?.custodyWalletId,
+      signingWalletId: signingWallet?.providerWalletId,
+      name: body.name,
+      symbol: body.symbol,
+      decimals: resolved.decimals,
+      description: body.description,
+      uri: body.uri,
+      imageUrl: body.imageUrl,
+      template: resolved.template,
+      extensions: resolved.extensions ?? undefined,
+      maxSupply: body.maxSupply,
+      isMintable: body.isMintable,
+      isFreezable: body.isFreezable,
+      requiresAllowlist: resolved.requiresAllowlist,
+    });
+    const profile = buildDefaultAssetProfile(token);
+    const createdProfile = await assetProfiles.createAssetProfile({
+      organizationId: orgId,
+      projectId,
+      tokenId: token.id,
+      ...profile,
+      createdBy: auth.id,
+    });
+    if (!createdProfile) {
+      throw internalError("Failed to create the token asset profile");
+    }
+
+    return token;
   });
 
-  const auditService = new AuditService(getDb(c.env));
+  const auditService = new AuditService(db);
   await auditService.log(c, {
     action: "create",
     resourceType: "token",

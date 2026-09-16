@@ -22,11 +22,13 @@
  * mainnet catalogue can be reviewed outside production
  * (`isClusterFundableInEnvironment` is what keeps the mirrored rows
  * un-depositable — the reads derive `fundable: false` and every provider
- * mutation asserts the same predicate). Each lane then DELISTS within the
- * cluster sub-shelf it is the truth for (`deleteUnlistedFromCatalogue`), so the
- * table converges on the live catalogues instead of only ever growing — that
- * is what makes a tightened catalogue gate reach rows already stored — without
- * one lane's keep set tearing down the other lane's shelf. It degrades
+ * mutation asserts the same predicate). Each lane then DEPRECATES unlisted
+ * rows within the cluster sub-shelf it is the truth for
+ * (`deprecateUnlistedFromCatalogue`), so the active set converges on the live
+ * catalogues instead of only ever growing. Deprecated rows retain the stable
+ * exit metadata anonymous holders need. This is what makes a
+ * tightened catalogue gate reach rows already stored without one lane's keep
+ * set tearing down the other lane's shelf. It degrades
  * provider-by-provider: one provider failing (or still being a NOT_IMPLEMENTED
  * stub) must never sink the others' pass. Adding a provider is a registry
  * change only (`EARN_PROVIDER_CLIENTS`) — neither execution path names
@@ -166,11 +168,11 @@ async function syncProviderCatalogue(
  * what `delistScope` is for.
  *
  * A reference MIGRATING between lanes (collided last pass, devnet-delisted
- * this pass) briefly leans on both: the own lane truthfully deletes its devnet
+ * this pass) briefly leans on both: the own lane truthfully deprecates its devnet
  * row, and the mirror lane rewrites the reference as mainnet. If that mirror
- * write fails, the row is simply ABSENT until a later pass succeeds — accepted
- * staleness, chosen deliberately over protecting the devnet row from its own
- * delist, which would keep a vault the provider DELISTED sitting
+ * write fails, the row stays absent from browse until a later pass succeeds;
+ * accepted staleness, chosen deliberately over protecting the devnet row from
+ * its own delist, which would keep a vault the provider DELISTED sitting
  * `fundable: true` for an hour. An hour without a browse-only mirror row beats
  * an hour offering a delisted vault a deposit path.
  *
@@ -303,10 +305,10 @@ async function syncNonProductionEnvironment(
     delistScope: "mainnet-beta",
     keepWithoutUpsert: collidedReferences,
     // Production answered reliably this pass, so an empty mainnet shelf is a
-    // real all-gone delisting, not an unreadable one. The delete asymmetry
+    // real all-gone delisting, not an unreadable one. The convergence asymmetry
     // flips on this lane: its rows are browse-only and re-mirrored hourly, so
-    // a wrong delete costs an hour of a missing browse row, while refusing to
-    // delete costs serving a "production catalogue" forever that production
+    // a wrong delist costs an hour of a missing browse row, while refusing to
+    // delist costs serving a "production catalogue" forever that production
     // no longer lists.
     allowEmptyKeepSet: true,
   });
@@ -384,7 +386,7 @@ interface CatalogueLane {
   /**
    * References this lane's truth source lists but the lane must not WRITE —
    * the mirror's collision-dropped rows. They still belong in the delist keep
-   * set: the source lists them, so deleting them would turn a skipped (or
+   * set: the source lists them, so deprecating them would turn a skipped (or
    * failed) write into a delisting.
    */
   keepWithoutUpsert?: readonly string[];
@@ -469,7 +471,7 @@ async function writeCatalogueLane(
     }
   }
 
-  await deleteUnlistedFromCatalogue(repo, client, lane, {
+  await deprecateUnlistedFromCatalogue(repo, client, lane, {
     listedProviderReferences,
     upsertFailed,
     logContext,
@@ -538,29 +540,30 @@ async function reportLaneAnomalies(
 }
 
 /**
- * Delete catalogue rows the provider no longer lists — the other half of
+ * Deprecate catalogue rows the provider no longer lists: the other half of
  * keeping `earn_strategies` truthful. Upserting alone only ever adds: a vault
  * the provider delists, or one a tightened gate now refuses, would otherwise
- * keep its `active` row and stay depositable forever.
+ * keep its `active` row and stay depositable forever. The deprecated row keeps
+ * the durable exit metadata anonymous holders need.
  *
- * Deliberately conservative — it skips rather than deletes whenever this
+ * Deliberately conservative: it skips rather than deprecates whenever this
  * pass cannot prove what the provider currently lists:
  *
  * - `upsertFailed`: a partial write pass cannot distinguish "not listed" from
  *   "listed but not persisted".
- * - empty keep set: never tear down a whole shelf off one empty response (the
+ * - empty keep set: never deprecate a whole shelf off one empty response (the
  *   repository refuses this too; the log here is what makes it visible),
  *   unless the lane declared its empty read reliable (`allowEmptyKeepSet`,
  *   the mirror lane), where the pass converges the sub-shelf to empty.
  *
- * A skip costs one hour of staleness. Deleting wrongly costs a customer a
- * vault they were mid-deposit into, so the asymmetry decides the default.
+ * A skip costs one hour of staleness. Deprecating wrongly hides a vault a
+ * customer may be mid-deposit into, so the asymmetry decides the default.
  *
- * The delete is scoped to the lane's cluster sub-shelf (`delistScope`): a keep
- * set only ever describes what ITS truth source lists, so letting it reach the
- * other lane's rows would delist a shelf nobody re-read this pass.
+ * The transition is scoped to the lane's cluster sub-shelf (`delistScope`): a
+ * keep set only ever describes what ITS truth source lists, so letting it reach
+ * the other lane's rows would delist a shelf nobody re-read this pass.
  */
-async function deleteUnlistedFromCatalogue(
+async function deprecateUnlistedFromCatalogue(
   repo: EarnRepository,
   client: EarnVaultProvider,
   lane: CatalogueLane,
@@ -585,23 +588,23 @@ async function deleteUnlistedFromCatalogue(
   }
 
   try {
-    const deleted = await repo.deleteUnlistedStrategies({
+    const delisted = await repo.deprecateUnlistedStrategies({
       provider: client.provider,
       environment: lane.environment,
       hostCluster: lane.delistScope,
       listedProviderReferences,
       allowEmptyKeepSet: lane.allowEmptyKeepSet,
     });
-    if (deleted.length > 0) {
+    if (delisted.length > 0) {
       getLogger().info(
-        { ...logContext, deleted_references: deleted },
-        "syncEarnCatalogue: deleted strategies the provider no longer lists"
+        { ...logContext, delisted_references: delisted },
+        "syncEarnCatalogue: deprecated strategies the provider no longer lists"
       );
     }
   } catch (err) {
     getLogger().error(
       { ...logContext, error: err instanceof Error ? err.message : String(err) },
-      "syncEarnCatalogue: failed to delete unlisted strategies"
+      "syncEarnCatalogue: failed to deprecate unlisted strategies"
     );
   }
 }

@@ -1,5 +1,13 @@
 const POSTGRES_UNIQUE_VIOLATION = "23505";
 
+export function buildInClause(length: number): string {
+  return Array.from({ length }, () => "?").join(", ");
+}
+
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
 export function isPostgresUniqueViolation(error: unknown): boolean {
   return (
     typeof error === "object" &&

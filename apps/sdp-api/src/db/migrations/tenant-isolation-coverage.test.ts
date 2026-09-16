@@ -24,6 +24,8 @@ const SHARED_TABLES: Record<string, string> = {
   earn_movement_directions: "shared movement vocabulary (0062_earn_movements)",
   earn_movement_statuses: "shared movement vocabulary (0062_earn_movements)",
   helius_rings_asset_allowlist: "platform reference data seeded by 0057_helius_rings",
+  ramp_webhook_events:
+    "system webhook inbox; rows are persisted before tenant resolution and only system jobs read them",
 };
 
 interface TableSecurityRow {

@@ -622,6 +622,18 @@ export const FIELDS: EnvField[] = [
     derive: (v) => v.SOLANA_NETWORK ?? "devnet",
   },
   {
+    key: "TRUST_PROXY_HEADERS",
+    section: "advanced",
+    kind: "select",
+    label: "Trust proxy headers",
+    defaultValue: "false",
+    options: [
+      { value: "false", label: "Disabled" },
+      { value: "true", label: "Enabled" },
+    ],
+    help: "Enable only behind an ingress that replaces caller-supplied X-Forwarded-For headers. Direct deployments must leave this disabled.",
+  },
+  {
     key: "SDP_FLAG_ASSET_PROFILES",
     section: "advanced",
     kind: "select",

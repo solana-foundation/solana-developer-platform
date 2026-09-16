@@ -27,11 +27,17 @@ export interface Env {
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
+  /** Anonymous Earn paid-upstream budget, per client IP. */
+  EARN_ANONYMOUS_RPC_MAX_REQUESTS?: string;
+  EARN_ANONYMOUS_RPC_WINDOW_SECONDS?: string;
   API_VERSION: string;
   // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
   CLOUD_RUN_JOB?: string;
+  // Trust the first X-Forwarded-For address outside Cloud Run only when a
+  // deployment-owned proxy replaces caller-supplied forwarding headers.
+  TRUST_PROXY_HEADERS?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). The
   // SDP-hosted token metadata URL burned into the on-chain MetadataPointer is
@@ -275,8 +281,6 @@ export interface Env {
   BVNK_WALLET_ID?: string;
   BVNK_WEBHOOK_SECRET?: string;
   BVNK_API_BASE_URL?: string;
-  BVNK_SIGNING_HOST?: string;
-  PROXY_SHARED_SECRET?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;

@@ -245,7 +245,10 @@
         "preparing": "Đang chuẩn bị trạng thái chuyển",
         "preparingDescription": "Đang chờ bản ghi chuyển gắn với Báo giá này.",
         "waitingForPayment": "Đang chờ thanh toán",
-        "waitingForPaymentHostedDescription": "Hoàn tất thanh toán trong cửa sổ Provider ở trên. Khoản nạp này tự động cập nhật sau khi Provider xác nhận."
+        "waitingForPaymentHostedDescription": "Hoàn tất thanh toán trong cửa sổ Provider ở trên. Khoản nạp này tự động cập nhật sau khi Provider xác nhận.",
+        "canceled": "Đã hủy chuyển",
+        "canceledFundingDescription": "Khoản chuyển này đã bị hủy, nên hướng dẫn nạp không còn hiệu lực. Tạo Báo giá mới để tiếp tục.",
+        "canceledPayoutDescription": "Khoản chi trả này đã bị hủy, nên hướng dẫn nạp không còn hiệu lực. Tạo Báo giá mới để tiếp tục."
       },
       "untrustedProviderUrl": "Provider trả về URL không đáng tin cậy nên không được tải. Hãy tạo Báo giá mới hoặc liên hệ hỗ trợ.",
       "destinationCountry": "Quốc gia đích",
@@ -326,7 +329,11 @@
       "simulating": "Đang mô phỏng...",
       "depositSimulated": "Đã mô phỏng nạp",
       "agreementPendingTitle": "Đang xác nhận thỏa thuận của bạn",
-      "agreementPendingDescription": "Chúng tôi đang ghi nhận sự chấp thuận của bạn với BVNK — chỉ mất một chút thời gian."
+      "agreementPendingDescription": "Chúng tôi đang ghi nhận sự chấp thuận của bạn với BVNK — chỉ mất một chút thời gian.",
+      "agreementRequiredTitle": "Xem lại và chấp nhận thỏa thuận",
+      "agreementRequiredDescription": "BVNK yêu cầu Counterparty chấp nhận thỏa thuận nền tảng cho nơi cư trú thuế của họ trước khi thu thập thông tin của họ.",
+      "viewAgreement": "Xem thỏa thuận",
+      "acceptAgreements": "Tôi đồng ý và tiếp tục"
     },
     "lightspark": {
       "verificationRequiredTitle": "Xác minh danh tính",
@@ -972,7 +979,11 @@
       "paymentUpdated": "Đã cập nhật thanh toán định kỳ.",
       "noChangesToSave": "Không có thay đổi để lưu.",
       "sourceWalletUnresolved": "Wallet nguồn không khả dụng",
-      "sourceWalletUnresolvedDescription": "Thanh toán định kỳ này không liên kết với Wallet SDP cụ thể nên không thể thực hiện các thao tác."
+      "sourceWalletUnresolvedDescription": "Thanh toán định kỳ này không liên kết với Wallet SDP cụ thể nên không thể thực hiện các thao tác.",
+      "signingDisabledDraft": "Bản nháp có thể lưu; kích hoạt cần wallet ký.",
+      "signingDisabledTitle": "Ký bị tắt cho Wallet nguồn",
+      "signingDisabledBody": "Bạn không thể thu, thay đổi hoặc hủy thanh toán này cho đến khi ký được bật cho {wallet}.",
+      "signingDisabledPendingBody": "Bạn có thể kích hoạt thanh toán này khi ký được bật cho {wallet} hoặc khi bạn đổi Wallet nguồn."
     },
     "transactions": {
       "searchPlaceholder": "Tìm ID, chữ ký, địa chỉ, tham chiếu hoặc Counterparty (từ 3 ký tự)",
@@ -1052,7 +1063,87 @@
       "filterProvider": "Provider",
       "filterAsset": "Asset",
       "noAssetMatchesDescription": "Số dư đọc từ chain, còn bảng này liệt kê các lần chuyển SDP đã ghi. Token nạp ngoài SDP vẫn hiện số dư nhưng không có lần chuyển ở đây.",
-      "allAssets": "Tất cả Asset"
+      "allAssets": "Tất cả Asset",
+      "searchTransactions": "Tìm giao dịch",
+      "all": "Tất cả",
+      "allKinds": "Tất cả loại",
+      "kindSelectLabel": "Loại giao dịch",
+      "statusSelectLabel": "Trạng thái giao dịch",
+      "walletId": "Wallet ID",
+      "tokenPlaceholder": "Token mint hoặc symbol",
+      "token": "Token",
+      "clearCounterparty": "Xóa bộ lọc Counterparty",
+      "clearWallet": "Xóa bộ lọc Wallet",
+      "clearToken": "Xóa bộ lọc Token",
+      "loadFailed": "Không thể tải giao dịch",
+      "module": "Module",
+      "moduleId": "Module ID",
+      "kind": "Loại",
+      "noTransactionsFound": "Không tìm thấy giao dịch nào",
+      "viewInModule": "Xem trong {module}",
+      "modules": {
+        "payments": "Payments",
+        "earn": "Earn",
+        "dvp": "Delivery vs Payments",
+        "private_channels": "Private channels",
+        "issuance": "Issuance",
+        "rings": "Rings"
+      },
+      "kinds": {
+        "payments": {
+          "pay": "Thanh toán",
+          "confidential_pay": "Thanh toán bảo mật",
+          "batch_pay": "Thanh toán hàng loạt",
+          "recurring_pay": "Thanh toán định kỳ",
+          "deposit": "Nạp",
+          "request_deposit": "Yêu cầu nạp",
+          "onramp": "Onramp",
+          "offramp": "Offramp"
+        },
+        "earn": {
+          "deposit": "Nạp",
+          "withdraw": "Rút"
+        },
+        "dvp": {
+          "fund": "Fund leg",
+          "close": "Close leg"
+        },
+        "private_channels": {
+          "transfer": "Chuyển",
+          "deposit": "Nạp",
+          "withdraw": "Rút"
+        },
+        "issuance": {
+          "mint": "Mint",
+          "burn": "Burn",
+          "freeze": "Freeze",
+          "unfreeze": "Unfreeze",
+          "seize": "Seize",
+          "force_burn": "Force burn",
+          "update_authority": "Update authority",
+          "pause": "Pause",
+          "unpause": "Bỏ tạm dừng",
+          "deploy": "Deploy"
+        },
+        "rings": {
+          "shield": "Shield",
+          "transfer_registered": "Chuyển đã đăng ký",
+          "transfer_anonymous": "Chuyển ẩn danh",
+          "withdraw": "Rút",
+          "merge": "Merge",
+          "timelock_create": "Tạo Timelock",
+          "timelock_settle": "Thanh toán Timelock",
+          "zone_create": "Tạo Zone",
+          "ring_exit": "Thoát Ring",
+          "ring_entry": "Tham gia Ring"
+        }
+      },
+      "statuses": {
+        "pending": "Đang chờ",
+        "succeeded": "Thành công",
+        "failed": "Thất bại",
+        "canceled": "Đã hủy"
+      }
     },
     "requests": {
       "loadFailed": "Không tải được yêu cầu thanh toán",
@@ -1103,6 +1194,8 @@
       "listRequests": "Danh sách yêu cầu thanh toán",
       "createRequest": "Tạo yêu cầu thanh toán",
       "playgroundProductName": "Payment Requests"
-    }
+    },
+    "signingUnavailable": "Ký đã bị tắt cho Wallet này.",
+    "restricted": "Bị hạn chế"
   }
 }
