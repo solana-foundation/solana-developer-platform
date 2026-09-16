@@ -2,11 +2,12 @@
 
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
 import { COUNTRIES } from "@sdp/types/countries";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   type CollectedFieldData,
+  offeredCountryCodes,
+  offeredFiatCurrencies,
   type PayoutRequirementAccount,
   type RequirementField,
   requirementFieldName,
@@ -257,12 +258,24 @@ const COUNTRY_FIELD_OPTIONS = COUNTRIES.map((country) => {
   return { value: country.code, label: `${flag} ${country.name}` };
 });
 
-const CURRENCY_FIELD_OPTIONS = fiatCurrencyOptions(RAMP_FIAT_CURRENCIES);
-
-const STATIC_FIELD_OPTIONS: Record<"country" | "currency", readonly ComboboxOption[]> = {
-  country: COUNTRY_FIELD_OPTIONS,
-  currency: CURRENCY_FIELD_OPTIONS,
-};
+function comboboxOptions(
+  field: Extract<RequirementField, { kind: "select" | "country" | "currency" }>
+): readonly ComboboxOption[] {
+  switch (field.kind) {
+    case "select":
+      return field.options;
+    case "country": {
+      const offeredSet = new Set(offeredCountryCodes(field));
+      return COUNTRY_FIELD_OPTIONS.filter((option) => offeredSet.has(option.value));
+    }
+    case "currency":
+      return fiatCurrencyOptions(offeredFiatCurrencies(field));
+    default: {
+      const exhaustive: never = field;
+      throw new Error(`Unhandled requirement field kind: ${String(exhaustive)}`);
+    }
+  }
+}
 
 function RequirementFieldInput({
   field,
@@ -283,7 +296,7 @@ function RequirementFieldInput({
           label={field.label}
           value={value.length > 0 ? value : null}
           onChange={onChange}
-          options={field.kind === "select" ? field.options : STATIC_FIELD_OPTIONS[field.kind]}
+          options={comboboxOptions(field)}
           placeholder={t("DashboardPayments.ramps.selectField", {
             field: field.label.toLowerCase(),
           })}

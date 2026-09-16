@@ -125,6 +125,7 @@ function sharedWizard<TId extends string>(
     onboarding: null,
     isAdvancing: false,
     retryOnboarding: noop,
+    pendingAgreements: null,
     hostedQuoteLoading: false,
     counterpartyDialogOpen: false,
     setCounterpartyDialogOpen: noop,

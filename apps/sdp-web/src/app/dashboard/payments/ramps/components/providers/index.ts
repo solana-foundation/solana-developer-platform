@@ -28,7 +28,11 @@ type ReadyRequirement = Extract<CounterpartyRequirements, { status: "ready" }>;
 
 export type BvnkOnboardingPanelStatus = Exclude<
   BvnkRequirements["status"] | ReadyRequirement["status"],
-  "collect" | "collect_counterparty" | "customer_agreement_required" | "unsupported"
+  | "collect"
+  | "collect_counterparty"
+  | "collect_counterparty_residence"
+  | "customer_agreement_required"
+  | "unsupported"
 >;
 export type LightsparkOnboardingPanelStatus = Exclude<
   LightsparkRequirements["status"] | ReadyRequirement["status"],
@@ -57,7 +61,6 @@ type PanelOnboardingRequirements =
   | MuralPanelOnboardingRequirements;
 
 const BVNK_ONBOARDING_PANEL_STATUSES = new Set<BvnkOnboardingPanelStatus>([
-  "customer_pending_agreement_acceptance",
   "customer_verification_required",
   "customer_verifying",
   "customer_verification_failed",
