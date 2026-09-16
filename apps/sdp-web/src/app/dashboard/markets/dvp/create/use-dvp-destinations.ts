@@ -20,8 +20,7 @@
 
 import { useState } from "react";
 
-/** Base58 excludes 0, O, I and l so they cannot be confused when read aloud. */
-const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+import { BASE58_ADDRESS_PATTERN } from "../../base58-address";
 
 export type PayoutMode = "party" | "elsewhere";
 
@@ -53,7 +52,8 @@ function usePayout(): DvpPayout {
   const [address, setAddress] = useState("");
 
   const trimmed = address.trim();
-  const looksWrong = mode === "elsewhere" && trimmed.length > 0 && !BASE58_ADDRESS.test(trimmed);
+  const looksWrong =
+    mode === "elsewhere" && trimmed.length > 0 && !BASE58_ADDRESS_PATTERN.test(trimmed);
   const incomplete = mode === "elsewhere" && trimmed.length === 0;
 
   return {

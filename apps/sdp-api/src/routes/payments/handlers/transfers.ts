@@ -3,12 +3,14 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
+  isSuccessfulPaymentTransferStatus,
   type Permission,
   type PolicyCandidate,
-  SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
+  TRANSFER_CHAIN_VERDICT_STATUSES,
 } from "@sdp/types";
-import type { Address } from "@solana/kit";
+import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
+  address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   createTransactionMessage,
@@ -40,12 +42,13 @@ import {
   badRequest,
   badRequestQuery,
   conflict,
+  forbidden,
+  internalError,
   notFound,
-  providerUnavailable,
   solanaRpcError,
+  transactionFailed,
 } from "@/lib/errors";
 import {
-  buildLegacyPaymentTransferFingerprint,
   buildPaymentTransferFingerprint,
   resolveIdentityBoundIdempotencyReplay,
 } from "@/lib/idempotency";
@@ -136,13 +139,11 @@ async function resolveTransferIdempotencyReplay(
   projectId: string | null,
   idempotencyKey: string,
   fingerprint: string,
-  legacyFingerprint: string,
   custodyWalletId: string
 ): Promise<TransferRow | null> {
   return resolveIdentityBoundIdempotencyReplay(
     () => repository.findTransferByIdempotency({ organizationId, projectId, idempotencyKey }),
     fingerprint,
-    legacyFingerprint,
     (row) => row.custody_wallet_id === custodyWalletId
   );
 }
@@ -181,22 +182,18 @@ async function createTransferRecord(
   const idempotencyFingerprint = idempotencyKey
     ? buildPaymentTransferFingerprint(fingerprintInput)
     : null;
-  const legacyIdempotencyFingerprint = idempotencyKey
-    ? buildLegacyPaymentTransferFingerprint(fingerprintInput)
-    : null;
 
   try {
     return await runApprovedWalletOperationEffectTransaction(c, async (db) => {
       const repository = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
 
-      if (idempotencyKey && idempotencyFingerprint && legacyIdempotencyFingerprint) {
+      if (idempotencyKey && idempotencyFingerprint) {
         const existing = await resolveTransferIdempotencyReplay(
           repository,
           input.organizationId,
           input.projectId,
           idempotencyKey,
           idempotencyFingerprint,
-          legacyIdempotencyFingerprint,
           input.custodyWalletId
         );
         if (existing) {
@@ -230,30 +227,23 @@ async function createTransferRecord(
         slot: null,
         initiatedByKeyId: input.initiatedByKeyId ?? null,
         idempotencyKey,
-        // HOO-1023: persist the K2 shape until rollback support ends.
-        idempotencyFingerprint: legacyIdempotencyFingerprint,
+        idempotencyFingerprint,
       });
 
       if (!createdRow) {
-        throw new AppError("INTERNAL_ERROR", "Failed to create payment transfer record");
+        throw internalError("Failed to create payment transfer record");
       }
 
       return { row: createdRow, replayed: false };
     });
   } catch (error) {
-    if (
-      idempotencyKey &&
-      idempotencyFingerprint &&
-      legacyIdempotencyFingerprint &&
-      isPostgresUniqueViolation(error)
-    ) {
+    if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
       const existing = await resolveTransferIdempotencyReplay(
         getPaymentsRepository(c),
         input.organizationId,
         input.projectId,
         idempotencyKey,
         idempotencyFingerprint,
-        legacyIdempotencyFingerprint,
         input.custodyWalletId
       );
       if (existing) {
@@ -270,8 +260,7 @@ async function assertApprovedTransferReplayCompleted(c: AppContext, transfer: Tr
   }
 
   const completed =
-    transfer.signature !== null &&
-    SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.some((status) => status === transfer.status);
+    transfer.signature !== null && isSuccessfulPaymentTransferStatus(transfer.status);
   if (completed) {
     await assertApprovedWalletOperationCustodyWallet(c, transfer.custody_wallet_id);
     return;
@@ -281,10 +270,7 @@ async function assertApprovedTransferReplayCompleted(c: AppContext, transfer: Tr
   // external database damage. Fence it before failing so recovery never turns
   // the incomplete idempotency replay into a successful approved operation.
   await beginApprovedWalletOperationEffect(c);
-  throw new AppError(
-    "CONFLICT",
-    "Approved transfer execution is incomplete and requires manual reconciliation"
-  );
+  throw conflict("Approved transfer execution is incomplete and requires manual reconciliation");
 }
 
 /**
@@ -415,33 +401,6 @@ async function updateOnchainTransferForRamp(
 }
 
 /**
- * Refuse a retired `privateTransfer` request.
- *
- * v1 published this field, so validation still accepts its shape rather than
- * breaking the contract in place; the capability behind it is simply gone. 503
- * is what these callers already had to handle — every failure of the old
- * provider path surfaced as PROVIDER_UNAVAILABLE — so this is a permanent
- * instance of a documented outcome, not a new one.
- *
- * This runs at the very top of the gate's extraction, which is the earliest
- * point in the flow, and that placement is load-bearing rather than tidy. The
- * fingerprint no longer covers `privateTransfer`, so a private-transfer request
- * reusing the Idempotency-Key of an earlier public transfer with the same
- * source, destination, token and amount would otherwise match it in
- * `findTransferIdempotentKeyReplay` and return that public transfer's 200 — a
- * request to move funds privately answered with proof of a public movement.
- * Refusing before the replay lookup is what closes that.
- */
-function assertRetiredPrivateTransfer(body: { privateTransfer?: unknown }): void {
-  if (body.privateTransfer === undefined) {
-    return;
-  }
-  throw providerUnavailable(
-    "privateTransfer is retired: no private-transfer provider is available on this endpoint. Remove the field to send an ordinary public transfer."
-  );
-}
-
-/**
  * Parse and resolve a create-transfer request into its policy candidate for
  * the policy gate: validated body, resolved scope and outbound operation, and
  * the enforcement raw payload.
@@ -453,7 +412,6 @@ export async function extractTransferPolicyCandidate(
   c: ValidatedBodyContext<typeof createTransferSchema>
 ): Promise<PolicyGateExtraction> {
   const body = c.req.valid("json");
-  assertRetiredPrivateTransfer(body);
   assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
 
   const scope = await resolveScope(
@@ -537,7 +495,6 @@ export async function findTransferIdempotentKeyReplay(
     scope.auth.projectId,
     idempotencyKey,
     buildPaymentTransferFingerprint(fingerprintInput),
-    buildLegacyPaymentTransferFingerprint(fingerprintInput),
     operation.sourceWallet.id
   );
   if (!replay) {
@@ -560,7 +517,9 @@ async function updateTransferRecord(
     fee?: number | null;
     error?: string | null;
   }
-): Promise<TransferRow> {
+): Promise<
+  { outcome: "updated"; row: TransferRow } | { outcome: "settled_concurrently"; row: TransferRow }
+> {
   const repository = getPaymentsRepository(c);
   const now = new Date().toISOString();
 
@@ -580,7 +539,7 @@ async function updateTransferRecord(
   });
 
   if (updated) {
-    return updated;
+    return { outcome: "updated", row: updated };
   }
 
   const current = await repository.getTransferById({
@@ -589,10 +548,20 @@ async function updateTransferRecord(
     projectId: transfer.project_id,
   });
   if (!current) {
-    throw new AppError("INTERNAL_ERROR", "Payment transfer record not found for update");
+    throw internalError("Payment transfer record not found for update");
   }
 
-  return current;
+  return { outcome: "settled_concurrently", row: current };
+}
+
+function resolveTransferUpdateResult(
+  result: Awaited<ReturnType<typeof updateTransferRecord>>
+): TransferRow {
+  if (result.outcome === "updated") return result.row;
+  if (TRANSFER_CHAIN_VERDICT_STATUSES.some((status) => status === result.row.status)) {
+    return result.row;
+  }
+  throw conflict("Payment transfer was concurrently updated without a chain verdict");
 }
 
 /** A chain verdict or preflight simulation proves this exact transaction cannot land. */
@@ -634,12 +603,14 @@ async function settleTransferExecutionFailure(
     return success(c, toPayload(submitted));
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
-  const settled = await updateTransferRecord(c, transfer, {
-    status: "failed",
-    error: message,
-    signature: submitted?.signature,
-    blockTime: null,
-  });
+  const settled = resolveTransferUpdateResult(
+    await updateTransferRecord(c, transfer, {
+      status: "failed",
+      error: message,
+      signature: submitted?.signature,
+      blockTime: null,
+    })
+  );
   if (settled.status !== "failed") {
     return success(c, toPayload(settled));
   }
@@ -666,6 +637,71 @@ export function mapTransferExecutionError(error: unknown): AppError {
   return programErrorCode === "0x11" ? accountFrozen(message) : solanaRpcError(message);
 }
 
+async function executeSponsoredTransfer(
+  c: AppContext,
+  params: {
+    sourceWallet: CustodyWallet;
+    submissionStore: SignedSubmissionStore;
+    buildInstructions: (context: {
+      signer: TransactionSigner;
+      feePayer: Address;
+      rpc: solanaRpc.SolanaRpc;
+    }) => Promise<readonly Instruction[]>;
+  }
+): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+  const auth = getAuth(c);
+  const signer = await solanaServices.createOrgSignerForCustodyWallet(
+    c.env,
+    auth.organizationId,
+    auth.projectId,
+    params.sourceWallet.id
+  );
+
+  if (signer.address !== params.sourceWallet.publicKey) {
+    throw badRequest("Resolved signing wallet does not match source wallet");
+  }
+
+  const rpc = solanaRpc.createRpc(c.env);
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const feePayment = getFeePayment(c);
+  const feePayer = await feePayment.getFeePayer();
+  const instructions = await params.buildInstructions({ signer, feePayer, rpc });
+
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
+    (m) => appendTransactionMessageInstructions(instructions, m),
+    (m) => addSignersToTransactionMessage([signer], m)
+  );
+
+  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const txEncoder = getTransactionEncoder();
+  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  await beginApprovedWalletOperationEffect(c);
+  const signature = await submitSponsoredTransaction({
+    feePayment,
+    rpc,
+    transaction: txBytes,
+    lastValidBlockHeight,
+    store: params.submissionStore,
+  });
+
+  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
+    commitment: "confirmed",
+  });
+
+  if (confirmation.err) {
+    throw transactionFailed("Transfer failed on-chain");
+  }
+
+  return {
+    signature,
+    slot: Number(confirmation.slot),
+    blockTime: null,
+  };
+}
+
 async function executeSolTransfer(
   c: AppContext,
   sourceWallet: CustodyWallet,
@@ -677,63 +713,17 @@ async function executeSolTransfer(
   if (lamports <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
   }
-
-  const auth = getAuth(c);
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
-    c.env,
-    auth.organizationId,
-    auth.projectId ?? undefined,
-    sourceWallet.id
-  );
-
-  if (signer.address !== sourceWallet.publicKey) {
-    throw badRequest("Resolved signing wallet does not match source wallet");
-  }
-
-  const rpc = solanaRpc.createRpc(c.env);
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = getFeePayment(c);
-  const feePayer = await feePayment.getFeePayer();
-
-  const instruction = getTransferSolInstruction({
-    source: signer,
-    destination: destinationAddress,
-    amount: lamports,
+  return executeSponsoredTransfer(c, {
+    sourceWallet,
+    submissionStore,
+    buildInstructions: async ({ signer }) => [
+      getTransferSolInstruction({
+        source: signer,
+        destination: destinationAddress,
+        amount: lamports,
+      }),
+    ],
   });
-
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(feePayer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions([instruction], m),
-    (m) => addSignersToTransactionMessage([signer], m)
-  );
-
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-  const txEncoder = getTransactionEncoder();
-  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
-  await beginApprovedWalletOperationEffect(c);
-  const signature = await submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: txBytes,
-    lastValidBlockHeight,
-    store: submissionStore,
-  });
-
-  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
-    commitment: "confirmed",
-  });
-
-  if (confirmation.err) {
-    throw new AppError("TRANSACTION_FAILED", "SOL transfer failed on-chain");
-  }
-
-  return {
-    signature,
-    slot: Number(confirmation.slot),
-    blockTime: null,
-  };
 }
 
 async function executeSplTransfer(
@@ -744,69 +734,21 @@ async function executeSplTransfer(
   amount: string,
   submissionStore: SignedSubmissionStore
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const auth = getAuth(c);
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
-    c.env,
-    auth.organizationId,
-    auth.projectId ?? undefined,
-    sourceWallet.id
-  );
-
-  if (signer.address !== sourceWallet.publicKey) {
-    throw badRequest("Resolved signing wallet does not match source wallet");
-  }
-
-  const rpc = solanaRpc.createRpc(c.env);
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = getFeePayment(c);
-  const feePayer = await feePayment.getFeePayer();
-
-  const { createDestinationAtaInstruction, transferInstruction } =
-    await tokenAccounts.buildSplTransferInstructions(rpc, {
-      authority: signer,
-      destination: destinationAddress,
-      mint: mintAddress,
-      amount,
-      ataRentPayer: feePayer,
-    });
-
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(feePayer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) =>
-      appendTransactionMessageInstructions(
-        [createDestinationAtaInstruction, transferInstruction],
-        m
-      ),
-    (m) => addSignersToTransactionMessage([signer], m)
-  );
-
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-  const txEncoder = getTransactionEncoder();
-  const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
-  await beginApprovedWalletOperationEffect(c);
-  const signature = await submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: txBytes,
-    lastValidBlockHeight,
-    store: submissionStore,
+  return executeSponsoredTransfer(c, {
+    sourceWallet,
+    submissionStore,
+    buildInstructions: async ({ signer, feePayer, rpc }) => {
+      const { createDestinationAtaInstruction, transferInstruction } =
+        await tokenAccounts.buildSplTransferInstructions(rpc, {
+          authority: signer,
+          destination: destinationAddress,
+          mint: mintAddress,
+          amount,
+          ataRentPayer: feePayer,
+        });
+      return [createDestinationAtaInstruction, transferInstruction];
+    },
   });
-
-  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
-    commitment: "confirmed",
-  });
-
-  if (confirmation.err) {
-    throw new AppError("TRANSACTION_FAILED", "SPL token transfer failed on-chain");
-  }
-
-  return {
-    signature,
-    slot: Number(confirmation.slot),
-    blockTime: null,
-  };
 }
 
 function buildTransferReplayPayload(replay: TransferRow) {
@@ -911,13 +853,15 @@ export async function createTransfer(c: AppContext) {
         operation.amount,
         submissionStore
       );
-      const updated = await updateTransferRecord(c, transfer, {
-        status: reusedRampTransfer ? "settling" : "confirmed",
-        signature: solResult.signature,
-        slot: solResult.slot,
-        blockTime: solResult.blockTime,
-        error: null,
-      });
+      const updated = resolveTransferUpdateResult(
+        await updateTransferRecord(c, transfer, {
+          status: reusedRampTransfer ? "settling" : "confirmed",
+          signature: solResult.signature,
+          slot: solResult.slot,
+          blockTime: solResult.blockTime,
+          error: null,
+        })
+      );
       return success(c, { transfer: mapTransferRow(updated) });
     }
 
@@ -931,13 +875,15 @@ export async function createTransfer(c: AppContext) {
       submissionStore
     );
 
-    const updated = await updateTransferRecord(c, transfer, {
-      status: reusedRampTransfer ? "settling" : "confirmed",
-      signature: result.signature,
-      slot: result.slot,
-      blockTime: result.blockTime,
-      error: null,
-    });
+    const updated = resolveTransferUpdateResult(
+      await updateTransferRecord(c, transfer, {
+        status: reusedRampTransfer ? "settling" : "confirmed",
+        signature: result.signature,
+        slot: result.slot,
+        blockTime: result.blockTime,
+        error: null,
+      })
+    );
 
     return success(c, { transfer: mapTransferRow(updated) });
   } catch (error) {
@@ -1039,7 +985,7 @@ export async function listTransfers(c: AppContext) {
     categoryTypes &&
     requestedTypes.some((type) => !categoryTypes.includes(type as never))
   ) {
-    throw new AppError("BAD_REQUEST", "type must match the requested transfer category");
+    throw badRequest("type must match the requested transfer category");
   }
   const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
   // Rows store mints, so a symbol or native-SOL filter must be normalized to
@@ -1052,7 +998,7 @@ export async function listTransfers(c: AppContext) {
   let exactWallet: CustodyWallet | null = null;
   if (custodyWalletId) {
     if (walletAuthorization && !walletAuthorization.custodyWalletIds.includes(custodyWalletId)) {
-      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+      throw forbidden("API key is not authorized for the requested wallet");
     }
     if (includeObserved) {
       const scope = await resolveScope(c);
@@ -1061,11 +1007,11 @@ export async function listTransfers(c: AppContext) {
   }
 
   if (includeObserved && !exactWallet) {
-    throw new AppError("BAD_REQUEST", "custodyWalletId is required when includeObserved=true");
+    throw badRequest("custodyWalletId is required when includeObserved=true");
   }
 
   if (hasProviderReference && !hasProvider) {
-    throw new AppError("BAD_REQUEST", "provider is required for provider reference lookup");
+    throw badRequest("provider is required for provider reference lookup");
   }
 
   if (hasExactProviderReference) {
@@ -1107,7 +1053,7 @@ export async function listTransfers(c: AppContext) {
 
     // 1. Fetch on-chain signature history via Helius (or fallback RPC)
     const heliusRpc = createSignatureHistoryRpc(c.env);
-    const ownerAddress = sourceAddress as Address;
+    const ownerAddress = address(sourceAddress);
     const historyLimit = Math.min(pageSize * 5, 200);
     const signatureSearchAddresses: Address[] = [ownerAddress];
 
@@ -1300,7 +1246,7 @@ export async function getTransfer(c: AppContext) {
     projectId: auth.projectId,
   });
 
-  if (!row) throw new AppError("NOT_FOUND", "Transfer not found");
+  if (!row) throw notFound("Transfer");
   assertTransferReadAccess(c, row);
 
   return success(c, { transfer: mapTransferRow(row) });

@@ -27,6 +27,23 @@ api/dashboard/markets/earn/
                                      treasury-solutions/. Auth comes from the
                                      proxy middleware; failures answer 502 so
                                      the cell degrades to its placeholder.
+                                     Kamino's allocations source is
+                                     mainnet-only, so the handler refuses any
+                                     other cluster with a 400 before reading
+                                     anything else. Everything else about the
+                                     request is policed by the store module —
+                                     the server boundary: Kamino would answer
+                                     any well-formed mainnet vault, so the
+                                     store admits a vault only if it is a
+                                     public key AND the strategy catalogue
+                                     fronts it. The allowlist is resolved
+                                     from `/v1/earn/strategies` (provider
+                                     kamino, mainnet-beta) through
+                                     `createSdpApiClient`, cached beside the
+                                     allocations cache, and a failed catalogue
+                                     read fails closed into the same generic
+                                     502 — a refused vault is
+                                     indistinguishable from an outage.
                                      Answers the BARE parsed payload, never an
                                      envelope: `dashboardFetch` hands the body
                                      straight to the SWR hook, which re-parses
@@ -89,8 +106,15 @@ program create still sends the body `requestId` form.
 - `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
   configuration surface with a strategy dropdown, the selected strategy ID,
   live APY and liquidity, and code that updates in place. The legacy
-  `/integrate` deep link renders the same surface for bookmarked strategy URLs.
-  The guide covers the sectioned **server-side** EXTERNAL-WALLET flow —
+  `/integrate` deep link renders the same surface for bookmarked strategy URLs
+  (`?strategy=` only; the former `?cluster=` toggle is gone). No network
+  toggle: sandbox reads both shelves (`useIntegrationCatalogue`) and lists the
+  devnet rows first, then the mirrored mainnet rows disabled as "Mainnet only",
+  the same posture as the Treasury table. There is no mainnet "preview" mode
+  in the guide any more: a mainnet deep link in sandbox is refused as a
+  network mismatch.
+  The guide covers the sectioned **server-side, authenticated**
+  EXTERNAL-WALLET flow:
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
   signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
@@ -104,8 +128,10 @@ program create still sends the body `requestId` form.
   snippets — a B2B2C partner cannot name a custody wallet. The optional
   partner `feePayer` (the implementor sponsoring its customers' fees) is
   documented in the public docs guide
-  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`), which mirrors
-  these snippets — update both together. The guide is
+  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`). That public guide
+  also owns the keyless quickstart; these dashboard snippets intentionally stay
+  keyed because they include submit and tenant read routes. Keep the shared
+  authenticated flow aligned across both. The guide is
   entirely derived from the strategy catalogue: nothing is persisted, there is
   no styling to save, and no public handoff token exists. (The UI builder that
   used to hold those — styled previews, saved per-project configuration, the
@@ -124,8 +150,10 @@ program create still sends the body `requestId` form.
   configuration and integration-guide shapes. The shell's navigation-loading
   resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
   same route-specific skeleton used by its `loading.tsx` boundary.
-- The portfolio's zero-position state is the onboarding card. The removed UI
-  builder persisted the only former configuration state, so there is no honest
+- The portfolio's zero-position state is the onboarding card alone: the three
+  metric tiles are hidden at zero positions because all-zero tiles with empty
+  charts read as data rather than "nothing yet". The removed UI builder
+  persisted the only former configuration state, so there is no honest
   "configured but awaiting a deposit" distinction to infer from the live
   position summary.
 
@@ -133,8 +161,11 @@ program create still sends the body `requestId` form.
 
 - `earn-surfacing.ts` — the availability brain. `SURFACED_CUSTODIAL_EARN_PROVIDERS`,
   `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`, `EARN_PROGRAM_CREATION_ENABLED`,
-  `EARN_PROGRAM_CREATE_PROVIDER` and `earnVaultDepositAvailability`, all DERIVED
-  from `@sdp/types` — **no provider id is hand-set here**. Carries no
+  `EARN_PROGRAM_CREATE_PROVIDER`, `earnVaultDepositAvailability` and
+  `earnVaultDepositOnlyEnvironment` (which side an `environment_unavailable`
+  verdict points at, so Jupiter/Ondo read "Production only" rather than the
+  sandbox-era "Sandbox only"), all DERIVED from `@sdp/types` — **no provider id
+  is hand-set here**. Carries no
   `"use client"` directive, on purpose (see "The client/server boundary bug").
 - `earn-provider-access.server.ts` — `loadEarnProviderAccess()`: reads
   `/v1/onboarding/status` then provider availability for that organization.
@@ -144,9 +175,15 @@ program create still sends the body `requestId` form.
 - `earn-integration-guide.tsx` — owns strategy selection and re-checks
   availability rather than trusting a deep link. Unavailable strategies stay
   visible but disabled. The selected strategy's ID, APY, liquidity, provider,
-  and availability remain beside four freely navigable reference tabs (client
-  setup, deposits, reads, withdraw). The snippets remain server-only and say so,
-  because the module they document carries a secret API key.
+  and availability sit in one plain line under the dropdown ("Kamino · Instant
+  liquidity · 6.2% APY", APY omitted when unknown) with the ID as its own
+  copyable code block. A short intro paragraph explains the loop, then four
+  freely navigable reference tabs (client setup, deposits, reads, withdraw).
+  "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
+  just the active tab. The snippets remain server-only and the page says so in
+  a warning callout, because the module they document carries a secret API key.
+  Do not imply that catalogue, preview, or unsigned build access always needs
+  that key; the public guide documents their keyless tier.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is
@@ -316,9 +353,11 @@ program create still sends the body `requestId` form.
   versioned `sessionStorage` key.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
-  mint's scale, floored, one-atom minimum), `isSlippageExceededRefusal` (the
-  API's `details.reason` seam), the debounced quote hook and (in
-  `earn-vault-slippage-section.tsx`) the disclosure section. One copy on
+  mint's scale, floored, one-atom minimum; a quote FINER than that scale is a
+  malformed response and answers `null`, while `isZeroQuote` reads it `false` —
+  not provably zero — so both fail closed like an unavailable quote),
+  `isSlippageExceededRefusal` (the API's `details.reason` seam), the debounced
+  quote hook and (in `earn-vault-slippage-section.tsx`) the disclosure section. One copy on
   purpose — two copies of a funds-protection rule is how one drifts, the same
   reasoning as the idempotency-key store. The floor is derived from a LIVE
   provider quote, never from the caller's own input; an unavailable quote

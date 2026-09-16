@@ -1,8 +1,14 @@
 import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import { type Address, createNoopSigner, type TransactionSigner } from "@solana/kit";
+import {
+  type Address,
+  address,
+  createNoopSigner,
+  type JsonParsedTokenAccount,
+  type TransactionSigner,
+} from "@solana/kit";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
@@ -12,8 +18,8 @@ import { badRequest } from "@/lib/errors";
 
 export { SOL_MINT } from "@/services/payment-operation.service";
 
-const SPL_TOKEN_PROGRAM_ID = SPL_TOKEN_PROGRAMS["spl-token"] as Address;
-const SPL_TOKEN_2022_PROGRAM_ID = SPL_TOKEN_PROGRAMS["token-2022"] as Address;
+const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
+const SPL_TOKEN_2022_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["token-2022"]);
 const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;
 
 export type TokenLabelsByMint = ReadonlyMap<string, string>;
@@ -23,65 +29,18 @@ interface GetSplTokenBalancesOptions {
 }
 
 export function resolveTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string {
-  return tokenLabelsByMint?.get(mint)?.trim() || WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol || mint;
-}
-
-type JsonParsedTokenAccountEntry = {
-  pubkey?: string;
-  account?: {
-    data?: {
-      parsed?: {
-        info?: unknown;
-      };
-    };
-  };
-};
-
-type JsonParsedTokenAccountsByOwnerResponse = {
-  value?: JsonParsedTokenAccountEntry[];
-};
-
-type TokenAccountsByOwnerRpc = {
-  getTokenAccountsByOwner: (
-    address: Address,
-    filter: { programId: Address },
-    config: { encoding: "jsonParsed"; commitment: "confirmed" }
-  ) => {
-    send: () => Promise<JsonParsedTokenAccountsByOwnerResponse>;
-  };
-};
-
-type TokenSupplyRpc = {
-  getTokenSupply: (
-    mint: Address,
-    config: { commitment: "confirmed" }
-  ) => {
-    send: () => Promise<{ value?: { decimals?: number } }>;
-  };
-};
-
-async function getTokenAccountsByOwnerJsonParsed(
-  rpc: ReturnType<typeof createRpc>,
-  owner: Address,
-  programId: Address
-): Promise<JsonParsedTokenAccountsByOwnerResponse> {
-  return (rpc as unknown as TokenAccountsByOwnerRpc)
-    .getTokenAccountsByOwner(
-      owner,
-      { programId },
-      { encoding: "jsonParsed", commitment: "confirmed" }
-    )
-    .send();
+  const issuedLabel = tokenLabelsByMint?.get(mint)?.trim();
+  if (issuedLabel) return issuedLabel;
+  const wellKnownToken = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+  return wellKnownToken ? wellKnownToken.symbol : mint;
 }
 
 export async function resolveMintDecimals(
   rpc: ReturnType<typeof createRpc>,
   mint: Address
 ): Promise<number> {
-  const response = await (rpc as unknown as TokenSupplyRpc)
-    .getTokenSupply(mint, { commitment: "confirmed" })
-    .send();
-  const decimals = response.value?.decimals;
+  const response = await rpc.getTokenSupply(mint, { commitment: "confirmed" }).send();
+  const decimals = response.value.decimals;
 
   if (typeof decimals !== "number" || !Number.isInteger(decimals) || decimals < 0) {
     throw badRequest("Token mint decimals could not be resolved");
@@ -90,70 +49,41 @@ export async function resolveMintDecimals(
   return decimals;
 }
 
-function parseTokenAmountInfo(
-  value: unknown
-): { mint: string; amount: bigint; decimals: number; uiAmount?: string } | null {
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-
-  const info = value as Record<string, unknown>;
-  const mint = typeof info.mint === "string" ? info.mint : null;
-  if (!mint) {
-    return null;
-  }
-
-  const tokenAmount =
-    typeof info.tokenAmount === "object" && info.tokenAmount !== null
-      ? (info.tokenAmount as Record<string, unknown>)
-      : null;
-  if (!tokenAmount) {
-    return null;
-  }
-
-  const rawAmount = tokenAmount.amount;
-  const rawDecimals = tokenAmount.decimals;
-
-  if (
-    (typeof rawAmount !== "string" && typeof rawAmount !== "number") ||
-    typeof rawDecimals !== "number"
-  ) {
-    return null;
-  }
-
-  let amount: bigint;
-  try {
-    amount = BigInt(String(rawAmount));
-  } catch {
-    return null;
-  }
-
-  const decimals = Number(rawDecimals);
-  if (!Number.isInteger(decimals) || decimals < 0) {
-    return null;
-  }
-
-  const uiAmount =
-    typeof tokenAmount.uiAmountString === "string" ? tokenAmount.uiAmountString : undefined;
-
-  return { mint, amount, decimals, uiAmount };
+function parseTokenAmountInfo(info: JsonParsedTokenAccount): {
+  mint: Address;
+  amount: bigint;
+  decimals: number;
+  uiAmount: string;
+} {
+  return {
+    mint: info.mint,
+    amount: BigInt(info.tokenAmount.amount),
+    decimals: info.tokenAmount.decimals,
+    uiAmount: info.tokenAmount.uiAmountString,
+  };
 }
 
 export async function getSplTokenBalances(
   rpc: ReturnType<typeof createRpc>,
   owner: Address,
-  options: GetSplTokenBalancesOptions = {}
+  options?: GetSplTokenBalancesOptions
 ): Promise<
   Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
 > {
-  const balancesByMint = new Map<string, { amount: bigint; decimals: number; uiAmount?: string }>();
+  const balancesByMint = new Map<string, { amount: bigint; decimals: number; uiAmount: string }>();
 
   for (const programId of SPL_TOKEN_PROGRAM_IDS) {
-    const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, programId);
+    const response = await rpc
+      .getTokenAccountsByOwner(
+        owner,
+        { programId },
+        { encoding: "jsonParsed", commitment: "confirmed" }
+      )
+      .send();
 
-    for (const account of response.value ?? []) {
-      const parsed = parseTokenAmountInfo(account.account?.data?.parsed?.info);
-      if (!parsed || parsed.amount <= 0n) {
+    for (const account of response.value) {
+      const parsed = parseTokenAmountInfo(account.account.data.parsed.info);
+      if (parsed.amount <= 0n) {
         continue;
       }
 
@@ -174,10 +104,10 @@ export async function getSplTokenBalances(
   return Array.from(balancesByMint.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([mint, balance]) => ({
-      token: resolveTokenLabel(mint, options.tokenLabelsByMint),
+      token: resolveTokenLabel(mint, options?.tokenLabelsByMint),
       mint,
       amount: balance.amount.toString(),
-      uiAmount: balance.uiAmount ?? formatDecimalAmount(balance.amount, balance.decimals),
+      uiAmount: balance.uiAmount,
       decimals: balance.decimals,
     }));
 }
@@ -190,13 +120,19 @@ export async function getSplTokenAccountAddresses(
   const seen = new Set<string>();
   const responses = await Promise.all(
     SPL_TOKEN_PROGRAM_IDS.map((programId) =>
-      getTokenAccountsByOwnerJsonParsed(rpc, owner, programId)
+      rpc
+        .getTokenAccountsByOwner(
+          owner,
+          { programId },
+          { encoding: "jsonParsed", commitment: "confirmed" }
+        )
+        .send()
     )
   );
 
   for (const response of responses) {
-    for (const account of response.value ?? []) {
-      if (typeof account.pubkey !== "string" || seen.has(account.pubkey)) {
+    for (const account of response.value) {
+      if (seen.has(account.pubkey)) {
         continue;
       }
 
@@ -211,7 +147,7 @@ export async function getSplTokenAccountAddresses(
 
 function assertSupportedTokenProgram(program: string): Address {
   if (program === SPL_TOKEN_PROGRAM_ID || program === SPL_TOKEN_2022_PROGRAM_ID) {
-    return program as Address;
+    return address(program);
   }
   throw badRequest("Unsupported token program for mint");
 }
@@ -251,26 +187,20 @@ export async function resolveSourceTokenAccountOrAta(
   mint: Address,
   tokenProgram: Address
 ): Promise<{ tokenAccount: Address; decimals: number; exists: boolean }> {
-  const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
-
-  if (selected) {
-    return {
-      ...selected,
-      exists: true,
-    };
-  }
-
   const [tokenAccount] = await findAssociatedTokenPda({
     owner,
     tokenProgram,
     mint,
   });
-  const decimals = await resolveMintDecimals(rpc, mint);
+  const [tokenAccountInfo, decimals] = await Promise.all([
+    getAccountInfo(rpc, tokenAccount),
+    resolveMintDecimals(rpc, mint),
+  ]);
 
   return {
     tokenAccount,
     decimals,
-    exists: false,
+    exists: tokenAccountInfo !== null,
   };
 }
 
@@ -335,21 +265,23 @@ async function findSourceTokenAccount(
   mint: Address,
   tokenProgram: Address
 ): Promise<{ tokenAccount: Address; decimals: number; amount: bigint } | null> {
-  const response = await getTokenAccountsByOwnerJsonParsed(rpc, owner, tokenProgram);
+  const response = await rpc
+    .getTokenAccountsByOwner(
+      owner,
+      { programId: tokenProgram },
+      { encoding: "jsonParsed", commitment: "confirmed" }
+    )
+    .send();
   let selected: { tokenAccount: Address; decimals: number; amount: bigint } | null = null;
 
-  for (const account of response.value ?? []) {
-    if (typeof account.pubkey !== "string") {
-      continue;
-    }
-
-    const parsed = parseTokenAmountInfo(account.account?.data?.parsed?.info);
-    if (!parsed || parsed.mint !== mint) {
+  for (const account of response.value) {
+    const parsed = parseTokenAmountInfo(account.account.data.parsed.info);
+    if (parsed.mint !== mint) {
       continue;
     }
 
     const tokenAccount = assertValidAddress(account.pubkey, "sourceToken");
-    if (!selected || parsed.amount > selected.amount) {
+    if (selected === null || parsed.amount > selected.amount) {
       selected = {
         tokenAccount,
         decimals: parsed.decimals,

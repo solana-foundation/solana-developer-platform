@@ -11,7 +11,14 @@
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { type Address, fetchEncodedAccounts } from "@solana/kit";
+import { DVP_LEG_REFUSAL } from "@sdp/types";
+import {
+  type Address,
+  assertAccountExists,
+  decodeAccount,
+  fetchEncodedAccounts,
+} from "@solana/kit";
+import { getSysvarClockDecoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
 import { conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
@@ -108,15 +115,21 @@ export async function readEscrowState(
   const observed = readLeg(account, leg, swapDvp);
   if (!observed.exists && observed.tampered) {
     throw conflict(
-      `DvP trade ${tradeId}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`
+      `DvP trade ${tradeId}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`,
+      { reason: DVP_LEG_REFUSAL.escrowMismatch }
     );
   }
   return observed.exists ? { amount: observed.amount, frozen: observed.frozen } : null;
 }
 
 /**
- * Fetches a trade and both escrows at one slot for callers that must verify
- * terms before acting.
+ * Fetches a trade, both escrows and the cluster clock at one slot, for callers
+ * that must verify terms or time before acting.
+ *
+ * The clock rides in the same request so its `unixTimestamp` is the one the
+ * program would read against exactly these balances: `settle_dvp.rs` judges
+ * the window by `Clock`, and a separate read could straddle an expiry second.
+ * Decoded with `@solana/sysvars`, the same decoder `fetchSysvarClock` uses.
  */
 export async function readDvpAccounts(
   rpc: SolanaRpc,
@@ -126,12 +139,24 @@ export async function readDvpAccounts(
   trade: Awaited<ReturnType<typeof fetchEncodedAccounts>>[number];
   legA: DvpLegObservation;
   legB: DvpLegObservation;
+  /** The cluster's `Clock.unix_timestamp` at the slot these accounts were read. */
+  clusterUnixTimestamp: bigint;
 }> {
-  const accounts = await fetchEncodedAccounts(rpc, [swapDvp, legs.a.escrow, legs.b.escrow]);
+  const accounts = await fetchEncodedAccounts(rpc, [
+    swapDvp,
+    legs.a.escrow,
+    legs.b.escrow,
+    SYSVAR_CLOCK_ADDRESS,
+  ]);
+  const clock = accounts[3];
+  // The Clock sysvar always exists; an RPC answering otherwise is not one to
+  // judge a settlement window by, so this throws like any failed read.
+  assertAccountExists(clock);
   return {
     trade: accounts[0],
     legA: readLeg(accounts[1], legs.a, swapDvp),
     legB: readLeg(accounts[2], legs.b, swapDvp),
+    clusterUnixTimestamp: decodeAccount(clock, getSysvarClockDecoder()).data.unixTimestamp,
   };
 }
 
@@ -198,6 +223,7 @@ export async function readDvpTradeObservation(
     legA: accounts.legA,
     legB: accounts.legB,
     blockHeight,
+    clusterUnixTimestamp: accounts.clusterUnixTimestamp,
     closeResolution: null,
   };
 }

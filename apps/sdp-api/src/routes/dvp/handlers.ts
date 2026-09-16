@@ -1,5 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_TRADE_STATUSES } from "@sdp/types";
+import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -30,12 +30,15 @@ import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import type { DvpCallerWallet } from "@/services/dvp/inbound";
 import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
+import { runDvpLegActionOnce } from "@/services/dvp/leg-action-idempotency";
 import { deriveDvpLegOutcome, observedAfterClose } from "@/services/dvp/leg-outcome";
+import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import {
   observeDvpTradeIfStale,
   observeDvpTradeNow,
   observeDvpTradeWithoutRecording,
 } from "@/services/dvp/observe-now";
+import { reclaimDvpTradeLeg } from "@/services/dvp/reclaim";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { TokenService } from "@/services/token.service";
@@ -146,22 +149,21 @@ function resolveParty(
 }
 
 /**
- * The transaction that moved a leg into escrow: the receipt, else the live
- * claim's signature while the funding is in flight, else null. Claims rows
- * are tenant-scoped to the FUNDING org, so an unseen row simply reads null.
+ * The transfer this organization sent into a leg's escrow, or null.
+ *
+ * Only the receipt, recorded once the transfer was broadcast. The claim's own
+ * signature is not shown while a funding is in flight: it is computed before
+ * broadcast, and a transfer the cluster drops would leave the leg linking a
+ * transaction that never existed. This is SDP's transfer, not every deposit:
+ * a counterparty's payment never has a claim, and claim rows are tenant-scoped
+ * to the funding organization, so anyone else reads null.
  */
 function fundingSignatureFor(
   claims: ReadonlyMap<DvpTradeSide, DvpLegFundingClaim>,
   side: DvpTradeSide
 ): string | null {
   const claim = claims.get(side);
-  if (claim === undefined) {
-    return null;
-  }
-  if (claim.fundingTx !== null) {
-    return claim.fundingTx;
-  }
-  return claim.signature;
+  return claim === undefined ? null : claim.fundingTx;
 }
 
 /**
@@ -204,7 +206,7 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
     settlementDestination: leg.settlementDestination,
     outcome: leg.outcome,
     funding,
-    /** Which transaction funded this leg. @see {@link fundingSignatureFor} */
+    /** The transfer this organization sent into the escrow. @see {@link fundingSignatureFor} */
     fundingSignature,
   };
 }
@@ -289,6 +291,8 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
     nonce: row.nonce,
     expiryTimestamp: row.expiryTimestamp,
     earliestSettlementTimestamp: row.earliestSettlementTimestamp,
+    /** Judged by the cluster clock read with the last observation. @see {@link deriveDvpSettlementAvailability} */
+    settlementAvailability: deriveDvpSettlementAvailability(row),
     refString: row.refString,
     createSignature: row.createSignature,
     /** The transaction that closed it, so settlement is verifiable after the fact. */
@@ -524,13 +528,19 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
 };
 
 /**
- * Funds one side of a trade. The right to fund side X is holding an active custody
- * wallet whose public key equals `user_x`.
+ * Resolves the trade, the side and the custody wallet for an action on one leg.
  *
- * @param c - Validated request context for the funding action.
- * @returns The funded-leg response envelope.
+ * The right to act on side X, funding or reclaiming, is holding an active
+ * custody wallet whose public key equals `user_x`. The auth context can be an
+ * hour stale, so the wallet is derived and the key's binding asserted from the
+ * database before anything is broadcast. Omitted `walletId`, that is the custody
+ * lookup on the party address; explicit, it is that the named wallet still
+ * holds the address (naming narrows).
+ *
+ * @param c - Validated request context naming the side.
+ * @returns The trade and the re-read wallet to sign with.
  */
-export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+async function resolveLegAction(c: ValidatedBodyContext<typeof fundDvpTradeSchema>) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
@@ -545,12 +555,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
   const side = body.side;
   const partyAddress = side === "a" ? trade.userA : trade.userB;
 
-  // The auth context can be an hour stale, so the wallet is derived and the
-  // key's binding asserted from the database before anything is broadcast.
-  // Omitted `walletId`, that is the custody lookup on the party address;
-  // explicit, it is that the named wallet still holds the address (naming
-  // narrows).
-  const rereadWalletId =
+  const custodyWalletId =
     body.walletId !== null && body.walletId !== undefined
       ? await walletIdIfHoldsAddress(
           getDb(c.env),
@@ -565,24 +570,69 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
           partyAddress,
           getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"])
         );
-  if (rereadWalletId === null) {
+  if (custodyWalletId === null) {
     throw forbidden(
       `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
     );
   }
   await assertFreshApiKeyActive(getDb(c.env), auth);
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, rereadWalletId, [
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, custodyWalletId, [
     "payments:write",
   ]);
 
-  const result = await fundDvpTradeLeg(c, trade, {
-    side,
-    custodyWalletId: rereadWalletId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
+  return {
+    trade,
+    params: { side, custodyWalletId, organizationId: auth.organizationId, projectId },
+  };
+}
 
-  await observeDvpTradeNow(c.env, trade, result.signature);
+/**
+ * Funds one side of a trade from the custody wallet holding its party address.
+ *
+ * @param c - Validated request context for the funding action.
+ * @returns The funded-leg response envelope.
+ */
+export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+  const { trade, params } = await resolveLegAction(c);
+  const { result, replayed } = await runDvpLegActionOnce(
+    c.env,
+    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+    { action: "fund", tradeId: trade.id, ...params },
+    (recordAttempt) => fundDvpTradeLeg(c, trade, { ...params, recordAttempt })
+  );
+
+  // A replay moved nothing now, so there is no new effect to wait for.
+  if (!replayed) {
+    await observeDvpTradeNow(c.env, trade, result.signature);
+  }
+
+  return success(c, {
+    tradeId: trade.id,
+    leg: result.leg,
+    amount: result.amount,
+    signature: result.signature,
+  });
+};
+
+/**
+ * Pulls one side's deposit back into the custody wallet holding its party
+ * address. The trade stays open and the leg can be funded again.
+ *
+ * @param c - Validated request context naming the side.
+ * @returns The reclaimed-leg response envelope.
+ */
+export const reclaimTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+  const { trade, params } = await resolveLegAction(c);
+  const { result, replayed } = await runDvpLegActionOnce(
+    c.env,
+    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+    { action: "reclaim", tradeId: trade.id, ...params },
+    (recordAttempt) => reclaimDvpTradeLeg(c, trade, { ...params, recordAttempt })
+  );
+
+  if (!replayed) {
+    await observeDvpTradeNow(c.env, trade, result.signature);
+  }
 
   return success(c, {
     tradeId: trade.id,
@@ -636,6 +686,7 @@ export const listTrades = async (c: AppContext) => {
   const query = listDvpTradesQuerySchema.safeParse({
     limit: c.req.query("limit"),
     status: c.req.query("status"),
+    settlementAvailability: c.req.query("settlementAvailability"),
     q: c.req.query("q"),
   });
   if (!query.success) {
@@ -645,6 +696,11 @@ export const listTrades = async (c: AppContext) => {
     if (issue.path[0] === "status") {
       throw badRequest("Invalid status query parameter", {
         allowedStatuses: DVP_TRADE_STATUSES,
+      });
+    }
+    if (issue.path[0] === "settlementAvailability") {
+      throw badRequest("Invalid settlementAvailability query parameter", {
+        allowedSettlementAvailability: DVP_SETTLEMENT_AVAILABILITY,
       });
     }
     throw badRequest(
@@ -662,6 +718,8 @@ export const listTrades = async (c: AppContext) => {
     },
     {
       statuses: query.data.status === undefined ? null : query.data.status,
+      settlementAvailability:
+        query.data.settlementAvailability === undefined ? null : query.data.settlementAvailability,
       q: query.data.q === undefined || query.data.q === "" ? null : query.data.q,
     },
     query.data.limit

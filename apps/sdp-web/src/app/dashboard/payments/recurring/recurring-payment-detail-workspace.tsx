@@ -1,11 +1,14 @@
 "use client";
 
-import type {
-  CounterpartyAccount,
-  PaymentRecurringPayment,
-  PaymentRecurringPaymentStatus,
-  PaymentSubscriptionCollectionAttempt,
-  UpdatePaymentRecurringPaymentRequest,
+import {
+  type CounterpartyAccount,
+  doesRecurringPaymentStatusRequireReactivation,
+  isPendingActivationRecurringPaymentStatus,
+  PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
+  type PaymentRecurringPayment,
+  type PaymentRecurringPaymentStatus,
+  type PaymentSubscriptionCollectionAttempt,
+  type UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types";
 import {
   AlertCircleIcon,
@@ -23,6 +26,7 @@ import {
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
@@ -38,7 +42,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
-import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
   formatTimestamp,
@@ -77,7 +81,7 @@ import {
 } from "./recurring-payments-shared";
 
 interface RecurringPaymentDetailWorkspaceProps {
-  recurringPayment: PaymentRecurringPayment;
+  recurringPayment: PaymentRecurringPayment & { sourceCustodyWalletId: string };
   wallet: RecurringPaymentWalletView | null;
   wallets: RecurringPaymentWalletView[];
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
@@ -173,34 +177,45 @@ function primaryDetailAction(
   error: DetailActionError | null,
   t: Translate
 ): DetailAction | null {
-  if (status === "pending_activation") {
-    return {
-      action: "activate",
-      label:
-        error?.action === "activate"
-          ? t("DashboardPayments.recurring.retryActivation")
-          : t("DashboardPayments.recurring.activate"),
-    };
+  switch (status) {
+    case "pending_activation":
+      return {
+        action: "activate",
+        label:
+          error?.action === "activate"
+            ? t("DashboardPayments.recurring.retryActivation")
+            : t("DashboardPayments.recurring.activate"),
+      };
+    case "active":
+      return dueNow
+        ? {
+            action: "collect",
+            label:
+              error?.action === "collect"
+                ? t("DashboardPayments.recurring.retryCollection")
+                : t("DashboardPayments.recurring.collectNow"),
+          }
+        : null;
+    case "canceled":
+      return {
+        action: "resume",
+        label:
+          error?.action === "resume"
+            ? t("DashboardPayments.recurring.retryResume")
+            : t("DashboardPayments.recurring.resume"),
+      };
+    case "activating":
+    case "updating":
+    case "canceling":
+    case "resuming":
+    case "paused":
+    case "expired":
+      return null;
+    default: {
+      const exhaustive: never = status;
+      throw new Error(`Unhandled recurring payment status: ${String(exhaustive)}`);
+    }
   }
-  if (dueNow) {
-    return {
-      action: "collect",
-      label:
-        error?.action === "collect"
-          ? t("DashboardPayments.recurring.retryCollection")
-          : t("DashboardPayments.recurring.collectNow"),
-    };
-  }
-  if (status === "canceled") {
-    return {
-      action: "resume",
-      label:
-        error?.action === "resume"
-          ? t("DashboardPayments.recurring.retryResume")
-          : t("DashboardPayments.recurring.resume"),
-    };
-  }
-  return null;
 }
 
 function secondaryDetailAction(
@@ -334,14 +349,14 @@ function RecurringPaymentLifecycleBand({
       </ActionBand>
     );
   }
-  if (status === "pending_activation") {
+  if (isPendingActivationRecurringPaymentStatus(status)) {
     return (
       <ActionBand variant="info" title={t("DashboardPayments.recurring.readyToActivate")}>
         {t("DashboardPayments.recurring.readyToActivateDescription")}
       </ActionBand>
     );
   }
-  if (status === "paused" || status === "expired") {
+  if (doesRecurringPaymentStatusRequireReactivation(status)) {
     return (
       <ActionBand
         variant="warning"
@@ -368,8 +383,8 @@ export function RecurringPaymentDetailWorkspace({
 }: RecurringPaymentDetailWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
-  const workspace = useOptionalDashboardWorkspace();
-  const custodyEnabled = workspace?.flags.custody ?? true;
+  const workspace = useDashboardWorkspace();
+  const custodyEnabled = workspace.flags.custody;
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -377,7 +392,7 @@ export function RecurringPaymentDetailWorkspace({
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentValidationError, setPaymentValidationError] = useState<string | null>(null);
   const [selectedCustodyWalletId, setSelectedCustodyWalletId] = useState(
-    recurringPayment.sourceCustodyWalletId ?? ""
+    recurringPayment.sourceCustodyWalletId
   );
   const [selectedReceivingAccountId, setSelectedReceivingAccountId] = useState(
     recurringPayment.counterpartyAccountId
@@ -394,9 +409,10 @@ export function RecurringPaymentDetailWorkspace({
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
   const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
-  const receivingAccount =
-    counterpartyAccounts.find((account) => account.id === recurringPayment.counterpartyAccountId) ??
-    null;
+  const foundReceivingAccount = counterpartyAccounts.find(
+    (account) => account.id === recurringPayment.counterpartyAccountId
+  );
+  const receivingAccount = foundReceivingAccount === undefined ? null : foundReceivingAccount;
   const receivingAccountLabel = accountLabel(
     receivingAccount,
     recurringPayment.counterpartyAccountId
@@ -444,7 +460,7 @@ export function RecurringPaymentDetailWorkspace({
     setSelectedToken(recurringPayment.token);
     setSelectedSchedulePreset(schedulePresetForPeriodHours(recurringPayment.periodHours));
     setSelectedCustomPeriodHours(String(recurringPayment.periodHours));
-    setSelectedCustodyWalletId(recurringPayment.sourceCustodyWalletId ?? "");
+    setSelectedCustodyWalletId(recurringPayment.sourceCustodyWalletId);
     setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
     setPaymentValidationError(null);
     setEditingPayment(true);
@@ -701,8 +717,10 @@ export function RecurringPaymentDetailWorkspace({
                       <span className="min-w-0 truncate">{sourceWalletLabel}</span>
                     )}
                     <CopyableValue
-                      value={wallet?.publicKey ?? recurringPayment.sourceAddress}
-                      label={shortenAddress(wallet?.publicKey ?? recurringPayment.sourceAddress)}
+                      value={wallet === null ? recurringPayment.sourceAddress : wallet.publicKey}
+                      label={shortenAddress(
+                        wallet === null ? recurringPayment.sourceAddress : wallet.publicKey
+                      )}
                     />
                   </span>
                 </div>
@@ -867,7 +885,8 @@ export function RecurringPaymentDetailWorkspace({
               label={t("DashboardPayments.recurring.billingInterval")}
               value={selectedSchedulePreset}
               onChange={(value) => {
-                setSelectedSchedulePreset(value as SchedulePreset);
+                const parsed = z.enum(PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS).safeParse(value);
+                if (parsed.success) setSelectedSchedulePreset(parsed.data);
                 setPaymentValidationError(null);
               }}
               options={getSchedulePresets(t)}

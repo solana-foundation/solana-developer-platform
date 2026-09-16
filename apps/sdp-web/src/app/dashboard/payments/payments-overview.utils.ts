@@ -1,6 +1,9 @@
 import {
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
+  PAYMENT_TRANSFER_STATUS_TONE,
+  type PaymentTransferStatus,
+  type PaymentTransferStatusTone,
   SOL_DECIMALS,
   SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
@@ -323,12 +326,7 @@ export function formatRampQuoteTimeRemaining(
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-/**
- * Transfer/transaction status → catalog key, the same keys the transactions
- * filter labels use, so status copy localizes instead of leaking raw English.
- * Unknown statuses return null; callers fall back to `formatStatus`.
- */
-const STATUS_MESSAGE_KEYS: Partial<Record<string, MessageKey>> = {
+const STATUS_MESSAGE_KEYS = {
   pending: "DashboardPayments.transactions.pending",
   processing: "DashboardPayments.transactions.processing",
   confirmed: "DashboardPayments.transactions.confirmed",
@@ -339,27 +337,21 @@ const STATUS_MESSAGE_KEYS: Partial<Record<string, MessageKey>> = {
   completed: "DashboardPayments.transactions.completed",
   canceled: "DashboardPayments.transactions.canceled",
   expired: "DashboardPayments.transactions.expired",
-};
+} as const satisfies Record<PaymentTransferStatus, MessageKey>;
 
-export function statusMessageKey(status: string): MessageKey | null {
-  return STATUS_MESSAGE_KEYS[status] ?? null;
+export function statusMessageKey(status: PaymentTransferStatus): MessageKey {
+  return STATUS_MESSAGE_KEYS[status];
 }
 
-export function statusVariant(status: string): BadgeVariant {
-  if (["completed", "confirmed", "finalized"].includes(status)) return "success";
-  if (["pending", "processing", "awaiting_payment", "settling"].includes(status)) {
-    return "warning";
-  }
-  if (status === "failed") return "danger";
-  return "default";
-}
+const BADGE_VARIANT_BY_TONE = {
+  success: "success",
+  pending: "warning",
+  danger: "danger",
+  neutral: "default",
+} as const satisfies Record<PaymentTransferStatusTone, BadgeVariant>;
 
-export function formatStatus(status: string): string {
-  return status
-    .split("_")
-    .filter(Boolean)
-    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
-    .join(" ");
+export function statusVariant(status: PaymentTransferStatus): BadgeVariant {
+  return BADGE_VARIANT_BY_TONE[PAYMENT_TRANSFER_STATUS_TONE[status]];
 }
 
 export function formatDirection(direction: string | undefined, t: Translate): string {
@@ -369,19 +361,37 @@ export function formatDirection(direction: string | undefined, t: Translate): st
   return direction[0]?.toUpperCase() + direction.slice(1);
 }
 
-export function resolveCounterparty(transfer: TransferRecord, t: Translate): string {
-  if (transfer.direction === "outbound") {
-    return transfer.destination ?? t("DashboardPayments.unavailable");
-  }
+type TransactionCounterpartyFields = Pick<
+  TransferRecord,
+  "counterpartyId" | "type" | "direction" | "source" | "destination"
+>;
 
-  if (transfer.direction === "inbound") {
-    return transfer.source ?? t("DashboardPayments.unavailable");
-  }
-
-  return transfer.destination ?? transfer.source ?? t("DashboardPayments.unavailable");
+function trimmed(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const result = value.trim();
+  return result === "" ? undefined : result;
 }
 
-export function resolveTransferTypeLabel(type: string | undefined, t: Translate): string {
+export function resolveTransactionCounterpartyReference(
+  transfer: TransactionCounterpartyFields
+): string | undefined {
+  const counterpartyId = trimmed(transfer.counterpartyId);
+  if (counterpartyId !== undefined) return counterpartyId;
+
+  const source = trimmed(transfer.source);
+  const destination = trimmed(transfer.destination);
+  if (transfer.direction === "inbound" || transfer.type === "onramp") {
+    return source === undefined ? destination : source;
+  }
+  return destination === undefined ? source : destination;
+}
+
+export function resolveCounterparty(transfer: TransferRecord, t: Translate): string {
+  const reference = resolveTransactionCounterpartyReference(transfer);
+  return reference === undefined ? t("DashboardPayments.unavailable") : reference;
+}
+
+export function formatPaymentTransferType(type: string | undefined, t: Translate): string {
   if (type === "onramp") {
     return t("DashboardPayments.deposit");
   }

@@ -66,7 +66,7 @@ async function findRetainedPaymentWallet(
   return null;
 }
 
-export async function resolveScope(c: AppContext, retainedCustodyWalletId?: string) {
+export async function resolveScope(c: AppContext, retainedCustodyWalletId?: string | null) {
   const auth = getAuth(c);
   const [operationalWallets, retainedWallet] = await Promise.all([
     new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({

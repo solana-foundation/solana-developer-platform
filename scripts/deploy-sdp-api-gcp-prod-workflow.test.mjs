@@ -8,6 +8,23 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workflowPath = path.resolve(here, "../.github/workflows/deploy-sdp-api-gcp-prod.yml");
 const workflow = fs.readFileSync(workflowPath, "utf8");
 
+test("a canary failure after promotion reports canary-failed, not a deploy failure", () => {
+  assert.match(
+    workflow,
+    /- name: Record canary outcome\n\s+id: canary_outcome\n\s+if: \$\{\{ always\(\) \}\}/
+  );
+  assert.match(workflow, /canary: \$\{\{ steps\.canary_outcome\.outputs\.result \}\}/);
+  assert.match(
+    workflow,
+    /'cancelled' \|\|\n\s+needs\.deploy\.outputs\.canary == 'failure' && needs\.deploy\.outputs\.tail_clean == 'true' && 'canary-failed'/
+  );
+  assert.match(workflow, /tail_clean: \$\{\{ steps\.tail_outcome\.outputs\.clean \}\}/);
+  assert.match(
+    workflow,
+    /clean=\$\{\{ \(steps\.rollback_guard\.outcome == 'success' \|\| steps\.rollback_guard\.outcome == 'skipped'\) && \(steps\.remove_tag\.outcome == 'success' \|\| steps\.remove_tag\.outcome == 'skipped'\) \}\}/
+  );
+});
+
 test("manual production deploy requires an immutable SHA-tagged image", () => {
   assert.match(
     workflow,
@@ -75,7 +92,10 @@ test("candidate is revision-specific and Cloud Run-ready before promotion", () =
 });
 
 test("candidate traffic tag is always removed", () => {
-  assert.match(workflow, /- name: Remove candidate traffic tag\n\s+if: \$\{\{ always\(\) \}\}/);
+  assert.match(
+    workflow,
+    /- name: Remove candidate traffic tag\n\s+id: remove_tag\n\s+if: \$\{\{ always\(\) \}\}/
+  );
   assert.match(workflow, /--remove-tags "\$\{CANDIDATE_TAG\}"/);
 
   const promotion = workflow.indexOf("- name: Promote service and cron with rollback");
@@ -109,7 +129,7 @@ test("cancellation-safe rollback restores resolved traffic and cron together", (
   assert.match(workflow, /ROLLOUT_COMPLETE=true/);
   assert.match(
     workflow,
-    /- name: Roll back incomplete rollout\n\s+if: \$\{\{ always\(\) \}\}\n\s+timeout-minutes: 5/
+    /- name: Roll back incomplete rollout\n\s+id: rollback_guard\n\s+if: \$\{\{ always\(\) \}\}\n\s+timeout-minutes: 5/
   );
   assert.match(workflow, /--to-revisions "\$\{CANDIDATE_REVISION\}=100"/);
   assert.match(workflow, /--to-revisions "\$\{PREVIOUS_TRAFFIC\}"/);

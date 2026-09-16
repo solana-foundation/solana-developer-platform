@@ -18,7 +18,45 @@ export const RATE_LIMIT_TIERS = {
   unlimited: 10_000,
 } as const satisfies Record<RateLimitTier, number>;
 
-const ANONYMOUS_MAX_REQUESTS = 20;
+export const ANONYMOUS_MAX_REQUESTS = 20;
+export const ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS = 120;
+export const ANONYMOUS_EARN_BUILD_MAX_REQUESTS = 30;
+
+const ANONYMOUS_EARN_BUILD_PATHS = new Set([
+  "/v1/earn/vault-deposit-previews",
+  "/v1/earn/external-wallet/deposit-transactions",
+  "/v1/earn/external-wallet/withdrawal-previews",
+  "/v1/earn/external-wallet/withdrawal-transactions",
+]);
+
+function anonymousRequestLimit(c: Context<{ Bindings: Env }>): {
+  identifierPrefix: string | null;
+  maxRequests: number;
+  metricTier: string;
+} {
+  if (
+    c.req.method === "GET" &&
+    (c.req.path === "/v1/earn/strategies" || c.req.path.startsWith("/v1/earn/strategies/"))
+  ) {
+    return {
+      identifierPrefix: "anonymous:earn:catalogue",
+      maxRequests: ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS,
+      metricTier: "anonymous_earn_catalogue",
+    };
+  }
+  if (c.req.method === "POST" && ANONYMOUS_EARN_BUILD_PATHS.has(c.req.path)) {
+    return {
+      identifierPrefix: "anonymous:earn:build",
+      maxRequests: ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
+      metricTier: "anonymous_earn_build",
+    };
+  }
+  return {
+    identifierPrefix: null,
+    maxRequests: ANONYMOUS_MAX_REQUESTS,
+    metricTier: "anonymous_default",
+  };
+}
 
 /**
  * Per-user-per-org ceiling for dashboard traffic (Clerk JWT or cookie
@@ -208,7 +246,12 @@ export async function enforceRateLimit(
   c: Context<{ Bindings: Env }>,
   identifier: string,
   maxRequests: number,
-  options: { failClosed?: boolean; cost?: number } = {}
+  options: {
+    failClosed?: boolean;
+    cost?: number;
+    windowMs?: number;
+    metricTier?: string;
+  } = {}
 ): Promise<void> {
   const kv = c.var.kv?.rateLimits;
   if (!kv) {
@@ -222,21 +265,22 @@ export async function enforceRateLimit(
     return;
   }
 
+  const windowMs = options.windowMs ?? RATE_LIMIT_WINDOW_MS;
   const now = Date.now();
-  const windowStart = Math.floor(now / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
-  const previousWindowStart = windowStart - RATE_LIMIT_WINDOW_MS;
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const previousWindowStart = windowStart - windowMs;
 
   const windowKey = getWindowKey(identifier, windowStart);
   const previousWindowKey = getWindowKey(identifier, previousWindowStart);
 
   const elapsed = now - windowStart;
-  const previousWeight = Math.max(0, 1 - elapsed / RATE_LIMIT_WINDOW_MS);
+  const previousWeight = Math.max(0, 1 - elapsed / windowMs);
 
   const admission = await kv
     .admitSlidingWindow(windowKey, previousWindowKey, {
       maxRequests,
       previousWeight,
-      expirationTtl: Math.ceil((RATE_LIMIT_WINDOW_MS * 2) / 1000),
+      expirationTtl: Math.ceil((windowMs * 2) / 1000),
       ...(options.cost === undefined ? {} : { cost: options.cost }),
     })
     .catch((err) => {
@@ -262,12 +306,22 @@ export async function enforceRateLimit(
     "X-RateLimit-Remaining",
     Math.max(0, Math.floor(maxRequests - estimatedCount)).toString()
   );
-  const windowEndMs = windowStart + RATE_LIMIT_WINDOW_MS;
+  const windowEndMs = windowStart + windowMs;
   c.header("X-RateLimit-Reset", Math.ceil(windowEndMs / 1000).toString());
 
   if (!admission.admitted) {
     const retryAfter = Math.max(1, Math.ceil((windowEndMs - now) / 1000));
     c.header("Retry-After", retryAfter.toString());
+    getLogger().warn(
+      {
+        event: "sdp_api_rate_limit_rejected",
+        tier: options.metricTier ?? "default",
+        method: c.req.method,
+        route: c.req.path,
+        limit: maxRequests,
+      },
+      "Rate limit rejected request"
+    );
     throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
   }
 }
@@ -315,11 +369,18 @@ export function skipRateLimitPaths(...paths: string[]) {
     const apiKey = extractApiKey(c);
     const presentsApiKey = apiKey !== null && looksLikeApiKey(apiKey);
 
-    await enforceRateLimit(
-      c,
-      getClientIp(c) ?? "unknown",
-      presentsApiKey ? KEYED_IP_BACKSTOP_MAX_REQUESTS : ANONYMOUS_MAX_REQUESTS
-    );
+    const clientIp = getClientIp(c) ?? "unknown";
+    if (presentsApiKey) {
+      await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS);
+    } else {
+      const limit = anonymousRequestLimit(c);
+      await enforceRateLimit(
+        c,
+        limit.identifierPrefix ? `${limit.identifierPrefix}:ip:${clientIp}` : clientIp,
+        limit.maxRequests,
+        { metricTier: limit.metricTier }
+      );
+    }
     await next();
   };
 }

@@ -90,14 +90,13 @@ describe("OpenAPI spec", () => {
     }
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
 
-    // ── SECURITY REVIEW GATE (PRO-1872, threat model EARN-027) ──────────────
-    // The public/preview split is a PUBLICATION boundary, not an auth boundary:
-    // every /v1/earn route accepts every auth mode at runtime, so the public
-    // document is the whole partner-facing contract. Promoting a preview route
-    // into it is a security-relevant scope change and a threat-model revisit
-    // trigger. This list is the gate: a PR that grows it must carry security
-    // sign-off (routes/earn/CLAUDE.md, "Public OpenAPI promotion"). Do not
-    // widen the list to make a red test pass.
+    // SECURITY REVIEW GATE (PRO-1872, threat model EARN-027)
+    // The public/preview split is a publication boundary. Earn also has a
+    // narrower keyless runtime tier, but changing either the operation list or
+    // an operation's public security declaration is a threat-model revisit
+    // trigger. This list is the route-publication gate: a PR that grows it must
+    // carry security sign-off (routes/earn/CLAUDE.md, "Public OpenAPI
+    // promotion"). Do not widen the list to make a red test pass.
     const publicEarnOperations = Object.entries(publicDocument.paths ?? {})
       .filter(([path]) => path.startsWith("/v1/earn"))
       .flatMap(([path, item]) =>
@@ -123,11 +122,12 @@ describe("OpenAPI spec", () => {
         "POST /v1/earn/external-wallet/withdrawals",
       ].sort()
     );
+    expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
     // Coverage parity across the boundary: every published operation is the
     // same registered route as its internal twin (same operationId), so the
     // app-level request tracing and rate limiting that wrap `/v1/*` apply to
     // both by construction; there is no public-only mount to fall outside them.
-    for (const operation of publicEarnOperations) {
+    for (const operation of [...publicEarnOperations, "GET /v1/transactions"]) {
       const [method, path] = operation.split(" ") as [string, string];
       const key = method.toLowerCase() as "get" | "post";
       expect(internal.paths?.[path]?.[key]?.operationId).toBe(
@@ -135,6 +135,9 @@ describe("OpenAPI spec", () => {
       );
     }
 
+    // This remains the conservative authenticated contract until PRO-1943's
+    // named security review approves the keyless subset. The approved change
+    // must replace this with an exact optional-auth vs keyed-only matrix.
     for (const path of [
       "/v1/earn/vault-deposit-previews",
       "/v1/earn/external-wallet/deposit-transactions",
@@ -165,6 +168,27 @@ describe("OpenAPI spec", () => {
         publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.responses?.["200"]
       )
     ).toContain("sharesOut");
+
+    const withdrawalBuildRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/external-wallet/withdrawal-transactions"]?.post?.requestBody
+    );
+    expect(withdrawalBuildRequest.anyOf).toEqual([
+      expect.objectContaining({
+        required: expect.arrayContaining(["positionId", "shares"]),
+      }),
+      expect.objectContaining({
+        required: expect.arrayContaining(["strategyId", "ownerAddress", "shares"]),
+      }),
+    ]);
+
+    for (const path of [
+      "/v1/earn/external-wallet/deposit-transactions",
+      "/v1/earn/external-wallet/withdrawal-transactions",
+    ]) {
+      expect(JSON.stringify(publicDocument.paths?.[path]?.post?.responses?.["200"])).toContain(
+        '"sponsored"'
+      );
+    }
 
     const submitRequest = getJsonSchema(
       publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody

@@ -4,31 +4,10 @@
  */
 
 /** Operation state, ordered along the happy path (draft → completed). `failed` is terminal from any non-terminal state; `voided` is terminal from `failed` only. */
-export const OPERATION_STATES = [
-  "draft",
-  "preparing",
-  "approval_required",
-  "proving",
-  "ready_to_sign",
-  "submitted",
-  "indexing",
-  "completed",
-  "failed",
-  "voided",
-] as const;
-
-export const OP_TYPES = [
-  "shield",
-  "transfer_registered",
-  "transfer_anonymous",
-  "withdraw",
-  "merge",
-  "timelock_create",
-  "timelock_settle",
-  "zone_create",
-  "ring_exit",
-  "ring_entry",
-] as const;
+export {
+  HELIUS_RINGS_OPERATION_STATUSES as OPERATION_STATES,
+  HELIUS_RINGS_OPERATION_TYPES as OP_TYPES,
+} from "@sdp/types";
 
 export const FAILURE_CODES = [
   "policy_denied",

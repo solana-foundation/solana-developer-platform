@@ -43,11 +43,15 @@ export default async function RecurringPaymentsPage({ searchParams }: RecurringP
           fetchPaymentsIssuedTokenSymbols(apiClient.request)
         ),
       ]);
+      if (!recurringPaymentsResult.ok) {
+        throw new Error(recurringPaymentsResult.error);
+      }
+      const recurringPayments = recurringPaymentsResult.data;
       const issuedTokensByMint = Object.fromEntries(
         (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token])
       );
       const counterpartyIds = [
-        ...new Set(recurringPaymentsResult.data.map((payment) => payment.counterpartyId)),
+        ...new Set(recurringPayments.recurringPayments.map((payment) => payment.counterpartyId)),
       ];
       const counterparties = await trace.step("fetch_recurring_payment_counterparties", () =>
         Promise.all(
@@ -60,8 +64,8 @@ export default async function RecurringPaymentsPage({ searchParams }: RecurringP
 
       trace.log({
         ok: recurringPaymentsResult.ok,
-        recurringPaymentCount: recurringPaymentsResult.data.length,
-        recurringPaymentTotal: recurringPaymentsResult.total,
+        recurringPaymentCount: recurringPayments.recurringPayments.length,
+        recurringPaymentTotal: recurringPayments.total,
         walletsOk: walletsResult.ok,
         walletCount: walletsResult.data?.length ?? 0,
         counterpartiesOk: resolvedCounterparties.length === counterpartyIds.length,
@@ -71,11 +75,11 @@ export default async function RecurringPaymentsPage({ searchParams }: RecurringP
       return (
         <div className="flex h-full min-h-0 w-full flex-col">
           <RecurringPaymentsWorkspace
-            initialRecurringPayments={recurringPaymentsResult.data}
-            total={recurringPaymentsResult.total}
+            initialRecurringPayments={recurringPayments.recurringPayments}
+            total={recurringPayments.total}
             listState={listState}
             issuedTokensByMint={issuedTokensByMint}
-            initialError={recurringPaymentsResult.error}
+            initialError={undefined}
             wallets={walletsResult.data ?? []}
             counterparties={resolvedCounterparties.map((counterparty) => ({
               id: counterparty.id,

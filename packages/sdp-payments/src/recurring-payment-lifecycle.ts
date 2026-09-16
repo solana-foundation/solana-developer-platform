@@ -1,14 +1,23 @@
-import type { PaymentRecurringPaymentStatus } from "@sdp/types";
+import {
+  type PaymentRecurringPaymentLifecycleOperation,
+  type PaymentRecurringPaymentStatus,
+  type PaymentRecurringPaymentTransitionResult,
+  RECURRING_PAYMENT_ACTIVATION_TRANSITION,
+  RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
+  RECURRING_PAYMENT_UPDATE_TRANSITION,
+} from "@sdp/types";
+import { z } from "zod";
 
 export const RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS = 15 * 60 * 1000;
 
-export type RecurringPaymentLifecycleOperation = "cancel" | "resume";
-export type RecurringPaymentTransition =
-  | "already_final"
-  | "claimable"
-  | "recoverable"
-  | "processing"
-  | "invalid";
+export type RecurringPaymentLifecycleOperation = PaymentRecurringPaymentLifecycleOperation;
+export type RecurringPaymentTransition = PaymentRecurringPaymentTransitionResult;
+
+export const recurringPaymentScheduleRequestSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("requested"), dueAt: z.string(), clampToMinimum: z.boolean() }),
+  z.object({ kind: z.literal("next_period") }),
+]);
+export type RecurringPaymentScheduleRequest = z.infer<typeof recurringPaymentScheduleRequestSchema>;
 
 export type RecurringPaymentScheduleResolution =
   | {
@@ -27,7 +36,6 @@ export function getRecurringPaymentOperationStaleBefore(nowIso: string): string 
     new Date(nowIso).getTime() - RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS
   ).toISOString();
 }
-
 export function isRecurringPaymentOperationStale(input: {
   updatedAt: string;
   nowIso: string;
@@ -44,17 +52,7 @@ export function getRecurringPaymentLifecycleStatuses(
   claimableStatus: PaymentRecurringPaymentStatus;
   finalStatus: PaymentRecurringPaymentStatus;
 } {
-  return operation === "cancel"
-    ? {
-        processingStatus: "canceling",
-        claimableStatus: "active",
-        finalStatus: "canceled",
-      }
-    : {
-        processingStatus: "resuming",
-        claimableStatus: "canceled",
-        finalStatus: "active",
-      };
+  return RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[operation];
 }
 
 export function decideRecurringPaymentLifecycleTransition(input: {
@@ -66,9 +64,7 @@ export function decideRecurringPaymentLifecycleTransition(input: {
   const { claimableStatus, finalStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
     input.operation
   );
-  if (input.status === finalStatus) {
-    return "already_final";
-  }
+  if (input.status === finalStatus) return "already_final";
   if (input.status === processingStatus) {
     return isRecurringPaymentOperationStale(input) ? "recoverable" : "processing";
   }
@@ -80,13 +76,13 @@ export function decideRecurringPaymentActivationTransition(input: {
   updatedAt: string;
   nowIso: string;
 }): RecurringPaymentTransition {
-  if (input.status === "active") {
-    return "already_final";
-  }
-  if (input.status === "activating") {
+  const { claimableStatus, finalStatus, processingStatus } =
+    RECURRING_PAYMENT_ACTIVATION_TRANSITION;
+  if (input.status === finalStatus) return "already_final";
+  if (input.status === processingStatus) {
     return isRecurringPaymentOperationStale(input) ? "recoverable" : "processing";
   }
-  return input.status === "pending_activation" ? "claimable" : "invalid";
+  return input.status === claimableStatus ? "claimable" : "invalid";
 }
 
 export function decideRecurringPaymentUpdateTransition(input: {
@@ -94,13 +90,11 @@ export function decideRecurringPaymentUpdateTransition(input: {
   updatedAt: string;
   nowIso: string;
 }): RecurringPaymentTransition {
-  if (input.status === "pending_activation" || input.status === "active") {
-    return "claimable";
-  }
-  if (input.status === "updating") {
+  const { claimableStatuses, processingStatus } = RECURRING_PAYMENT_UPDATE_TRANSITION;
+  if (input.status === processingStatus) {
     return isRecurringPaymentOperationStale(input) ? "recoverable" : "processing";
   }
-  return "invalid";
+  return claimableStatuses.some((status) => status === input.status) ? "claimable" : "invalid";
 }
 
 export function nextRecurringPaymentCollectionDueAt(dueAt: string, periodHours: number): string {
@@ -116,20 +110,15 @@ export function hasRecurringPaymentAdvancedPastDueAt(
   return Number.isFinite(nextDueTime) && Number.isFinite(dueTime) && nextDueTime > dueTime;
 }
 
-export function isRecurringPaymentCollectionActive(status: PaymentRecurringPaymentStatus): boolean {
-  return status === "active";
-}
-
 export function resolveRecurringPaymentCollectionSchedule(input: {
-  requested: string | null;
+  request: RecurringPaymentScheduleRequest;
   periodStartAt: string;
   periodHours: number;
-  clampToMinimum?: boolean;
 }): RecurringPaymentScheduleResolution {
   const minimumDueAt = nextRecurringPaymentCollectionDueAt(input.periodStartAt, input.periodHours);
-  const requested = input.requested ?? minimumDueAt;
+  const requested = input.request.kind === "requested" ? input.request.dueAt : minimumDueAt;
   if (new Date(requested).getTime() < new Date(minimumDueAt).getTime()) {
-    if (input.clampToMinimum) {
+    if (input.request.kind === "requested" && input.request.clampToMinimum) {
       return {
         kind: "scheduled",
         nextCollectionDueAt: minimumDueAt,
@@ -146,4 +135,16 @@ export function resolveRecurringPaymentCollectionSchedule(input: {
     minimumDueAt,
     clamped: false,
   };
+}
+
+export function generateProgramPlanId(): string {
+  const bytes = new Uint8Array(8);
+  let value = 0n;
+
+  while (value === 0n) {
+    crypto.getRandomValues(bytes);
+    value = new DataView(bytes.buffer).getBigUint64(0, false);
+  }
+
+  return value.toString();
 }

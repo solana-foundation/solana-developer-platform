@@ -12,21 +12,25 @@
  */
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
+import { DVP_LEG_REFUSAL } from "@sdp/types";
 import {
-  address,
   getSignatureFromTransaction,
   getTransactionDecoder,
-  getTransactionEncoder,
   none,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
   some,
 } from "@solana/kit";
-import { generateKeyPairSigner, partiallySignTransactionWithSigners } from "@solana/signers";
+import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
-import type { OwnedSubmissionLifecycle } from "@/services/sponsorship.service";
+import {
+  acceptTransaction,
+  buildDvpTradeRow,
+  createTestSponsor,
+  DVP_TEST_T22,
+} from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -45,18 +49,7 @@ const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const fetchMaybeToken = vi.hoisted(() => vi.fn());
 
-let sponsorSigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
-
-/** Co-signs a partially signed transaction as the sponsor, the way Kora would. */
-async function sponsorSign(transaction: Uint8Array, lifecycle: OwnedSubmissionLifecycle) {
-  const decoded = getTransactionDecoder().decode(transaction);
-  const signed = await partiallySignTransactionWithSigners([sponsorSigner], decoded);
-  const signature = getSignatureFromTransaction(signed);
-  const signedTransaction = new Uint8Array(getTransactionEncoder().encode(signed));
-  await lifecycle.persistSigned({ signature, signedTransaction });
-  await lifecycle.markStarted();
-  return { signature, signedTransaction, releaseDefinitelyUnbroadcast: vi.fn() };
-}
+let sponsor: Awaited<ReturnType<typeof createTestSponsor>>;
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
@@ -95,67 +88,21 @@ vi.mock("@sdp/rpc/solana", () => ({
 
 const { fundDvpTradeLeg } = await import("./fund");
 
-const T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const _T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
-  return {
-    id: "dvp_fund_test",
-    organizationId: "org_a",
-    projectId: "prj_a",
-    swapDvp: address("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po"),
-    settlementAuthority: address("9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY"),
-    userA: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
-    userB: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
-    mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
-    mintB: address("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"),
-    nonce: "42",
-    tokenProgramA: address(T22),
-    tokenProgramB: address(T22),
-    decimalsA: 6,
-    decimalsB: 6,
-    symbolA: "ATD",
-    symbolB: "USDC",
-    nameA: "Acme Treasury Debt",
-    nameB: "USD Coin",
-    amountA: "1000",
-    amountB: "2000",
-    expiryTimestamp: "1900000000",
-    earliestSettlementTimestamp: null,
-    userASettlementDestination: address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn"),
-    userBSettlementDestination: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
-    refString: null,
-    escrowA: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
-    escrowB: address("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y"),
-    counterpartyAccountIdA: null,
-    counterpartyAccountIdB: null,
-    status: "created",
-    observedAt: null,
-    idempotencyKey: null,
-    idempotencyFingerprint: null,
-    createSignature: null,
-    createLastValidBlockHeight: null,
-    closeSignature: null,
-    closeResolutionAttempts: 0,
-    closeResolutionAfter: null,
-    closedAt: null,
-    escrowAAmount: null,
-    escrowBAmount: null,
-    escrowAPeakAmount: null,
-    escrowBPeakAmount: null,
-    escrowAFrozen: null,
-    escrowBFrozen: null,
-    createdAt: "2026-09-03T00:00:00.000Z",
-    updatedAt: "2026-09-03T00:00:00.000Z",
-    ...overrides,
-  };
+  return buildDvpTradeRow({ id: "dvp_fund_test", ...overrides });
 }
 
 /** The funder: whoever's custody wallet holds the side's party address. */
+const recordAttempt = vi.hoisted(() => vi.fn());
+
 const FUNDER_A = {
   side: "a" as const,
   custodyWalletId: "cwlt_a",
   organizationId: "org_x",
   projectId: "prj_x",
+  recordAttempt,
 };
 
 const context = { env } as never;
@@ -163,7 +110,7 @@ const context = { env } as never;
 describe("fundDvpTradeLeg", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    sponsorSigner = await generateKeyPairSigner();
+    sponsor = await createTestSponsor();
     createOrgSignerForCustodyWallet.mockResolvedValue(await generateKeyPairSigner());
     readEscrowState.mockResolvedValue({ amount: 0n, frozen: false });
     readDvpAccounts.mockImplementation(async () => {
@@ -193,14 +140,12 @@ describe("fundDvpTradeLeg", () => {
     }));
     readMintDecimals.mockResolvedValue(6);
     fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 10_000n } });
-    prepareOwnedSubmission.mockImplementation(sponsorSign);
+    prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
     createProjectSponsorshipFeePayment.mockResolvedValue({
-      getFeePayer: async () => sponsorSigner.address,
+      getFeePayer: async () => sponsor.address,
       prepareOwnedSubmission,
     });
-    sendTransaction.mockImplementation(async (_rpc, bytes) =>
-      getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
-    );
+    sendTransaction.mockImplementation(acceptTransaction);
     claimFunding.mockResolvedValue(true);
     releaseFunding.mockResolvedValue(undefined);
     rebindSignature.mockResolvedValue(true);
@@ -217,12 +162,28 @@ describe("fundDvpTradeLeg", () => {
     expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
 
+  // A retry with the same key has to be able to ask the chain what this send
+  // did, so the transaction is on the idempotency record before it goes out.
+  it("records the signed transfer for its idempotency key before broadcasting it", async () => {
+    const result = await fundDvpTradeLeg(context, trade(), FUNDER_A);
+
+    expect(recordAttempt).toHaveBeenCalledWith({
+      signature: result.signature,
+      amount: "1000",
+      expiryHeight: "100",
+    });
+    expect(recordAttempt.mock.invocationCallOrder[0]).toBeLessThan(
+      sendTransaction.mock.invocationCallOrder[0]
+    );
+  });
+
   it("funds leg B when that is the side named", async () => {
     const result = await fundDvpTradeLeg(context, trade(), {
       side: "b",
       custodyWalletId: "cwlt_b",
       organizationId: "org_x",
       projectId: "prj_x",
+      recordAttempt,
     });
 
     expect(result.leg).toBe("b");
@@ -252,18 +213,20 @@ describe("fundDvpTradeLeg", () => {
   it("refuses a leg that already holds its target", async () => {
     readEscrowState.mockResolvedValue({ amount: 1000n, frozen: false });
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-      /nothing left to fund/
-    );
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(/nothing left to fund/),
+      details: { reason: DVP_LEG_REFUSAL.legAlreadyFunded },
+    });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
   it("refuses a leg already holding more than its target", async () => {
     readEscrowState.mockResolvedValue({ amount: 5000n, frozen: false });
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-      /nothing left to fund/
-    );
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(/nothing left to fund/),
+      details: { reason: DVP_LEG_REFUSAL.legAlreadyFunded },
+    });
   });
 
   // Topping up must send the SHORTFALL. Sending the full target on top of a
@@ -282,16 +245,20 @@ describe("fundDvpTradeLeg", () => {
   it("refuses a frozen escrow, and says why", async () => {
     readEscrowState.mockResolvedValue({ amount: 0n, frozen: true });
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(/frozen/);
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(/frozen/),
+      details: { reason: DVP_LEG_REFUSAL.escrowFrozen },
+    });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
   it("refuses a fundable leg whose escrow is missing", async () => {
     readEscrowState.mockResolvedValue(null);
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-      /escrow for this leg is missing; nothing was sent/
-    );
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(/escrow for this leg is missing; nothing was sent/),
+      details: { reason: DVP_LEG_REFUSAL.escrowMissing },
+    });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
@@ -307,6 +274,7 @@ describe("fundDvpTradeLeg", () => {
       message: expect.stringContaining(
         "the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it"
       ),
+      details: { reason: DVP_LEG_REFUSAL.escrowMismatch },
     });
     expect(claimFunding).not.toHaveBeenCalled();
   });
@@ -316,9 +284,10 @@ describe("fundDvpTradeLeg", () => {
       new SwapDvpVerificationError("there is no SwapDvp at that address")
     );
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-      /trade is no longer on chain; nothing was sent/
-    );
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(/trade is no longer on chain; nothing was sent/),
+      details: { reason: DVP_LEG_REFUSAL.tradeNotOnChain },
+    });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
@@ -340,9 +309,12 @@ describe("fundDvpTradeLeg", () => {
       },
     }));
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-      /on-chain trade does not match the recorded terms; nothing was sent/
-    );
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(
+        /on-chain trade does not match the recorded terms; nothing was sent/
+      ),
+      details: { reason: DVP_LEG_REFUSAL.termsMismatch },
+    });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
@@ -366,17 +338,21 @@ describe("fundDvpTradeLeg", () => {
       },
     }));
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-      /on-chain trade does not match the recorded terms; nothing was sent/
-    );
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(
+        /on-chain trade does not match the recorded terms; nothing was sent/
+      ),
+      details: { reason: DVP_LEG_REFUSAL.termsMismatch },
+    });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
   it("refuses a trade that can no longer be funded", async () => {
     for (const status of ["settled", "cancelled", "closed_unknown", "create_failed"] as const) {
-      await expect(fundDvpTradeLeg(context, trade({ status }), FUNDER_A)).rejects.toThrow(
-        /can no longer be funded/
-      );
+      await expect(fundDvpTradeLeg(context, trade({ status }), FUNDER_A)).rejects.toMatchObject({
+        message: expect.stringMatching(/can no longer be funded/),
+        details: { reason: DVP_LEG_REFUSAL.tradeNotFundable },
+      });
     }
     expect(sendTransaction).not.toHaveBeenCalled();
   });
@@ -386,9 +362,10 @@ describe("fundDvpTradeLeg", () => {
   it("refuses to broadcast when another request holds the funding claim", async () => {
     claimFunding.mockResolvedValue(false);
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-      /already being funded/
-    );
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(/already being funded/),
+      details: { reason: DVP_LEG_REFUSAL.legFundingInProgress },
+    });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
@@ -400,7 +377,7 @@ describe("fundDvpTradeLeg", () => {
     });
     prepareOwnedSubmission.mockImplementation(async (transaction, lifecycle) => {
       order.push("sponsor");
-      return sponsorSign(transaction, lifecycle);
+      return sponsor.prepareOwnedSubmission(transaction, lifecycle);
     });
     sendTransaction.mockImplementation(async () => {
       order.push("send");
@@ -455,7 +432,10 @@ describe("fundDvpTradeLeg", () => {
   it("refuses when the mint cannot be read", async () => {
     readMintDecimals.mockResolvedValue(null);
 
-    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(/could not be read/);
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      message: expect.stringMatching(/could not be read/),
+      details: { reason: DVP_LEG_REFUSAL.mintUnreadable },
+    });
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
@@ -468,6 +448,7 @@ describe("fundDvpTradeLeg", () => {
       code: "BAD_REQUEST",
       statusCode: 400,
       message: expect.stringContaining(signer.address),
+      details: { reason: DVP_LEG_REFUSAL.walletHoldsNoToken },
     } satisfies Partial<AppError>);
 
     expect(claimFunding).not.toHaveBeenCalled();
@@ -481,6 +462,7 @@ describe("fundDvpTradeLeg", () => {
       code: "BAD_REQUEST",
       statusCode: 400,
       message: expect.stringMatching(/holds 0\.00025 of the 0\.001 /),
+      details: { reason: DVP_LEG_REFUSAL.walletBalanceShort },
     } satisfies Partial<AppError>);
 
     expect(claimFunding).not.toHaveBeenCalled();
@@ -497,7 +479,7 @@ describe("fundDvpTradeLeg", () => {
         logs: [
           "Program log: Instruction: TransferChecked",
           "Program log: Error: IncorrectProgramId",
-          `Program ${T22} failed: incorrect program id for instruction`,
+          `Program ${DVP_TEST_T22} failed: incorrect program id for instruction`,
         ],
         postBalances: null,
         postTokenBalances: null,
@@ -531,9 +513,10 @@ describe("fundDvpTradeLeg", () => {
         .mockResolvedValueOnce({ amount: 0n, frozen: false })
         .mockResolvedValueOnce({ amount: 400n, frozen: false });
 
-      await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow(
-        /no longer the amount owed/
-      );
+      await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+        message: expect.stringMatching(/no longer the amount owed/),
+        details: { reason: DVP_LEG_REFUSAL.escrowBalanceChanged },
+      });
       expect(sendTransaction).not.toHaveBeenCalled();
     });
 
@@ -591,6 +574,7 @@ describe("fundDvpTradeLeg", () => {
         custodyWalletId: "cwlt_b_of_org_b",
         organizationId: "org_b",
         projectId: "prj_b",
+        recordAttempt,
       });
 
       expect(claimFunding).toHaveBeenCalledWith(
@@ -612,12 +596,14 @@ describe("fundDvpTradeLeg", () => {
         custodyWalletId: "cwlt_a",
         organizationId: "org_a",
         projectId: "prj_a",
+        recordAttempt,
       });
       await fundDvpTradeLeg(context, trade(), {
         side: "b",
         custodyWalletId: "cwlt_b",
         organizationId: "org_b",
         projectId: "prj_b",
+        recordAttempt,
       });
 
       expect(claimFunding).toHaveBeenCalledTimes(2);

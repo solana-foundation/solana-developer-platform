@@ -6,19 +6,31 @@ import {
   type Address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
+  assertIsSignature,
   createTransactionMessage,
   getTransactionEncoder,
   type Instruction,
+  partiallySignTransactionMessageWithSigners,
   pipe,
   type Signature,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
 } from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import type {
+  PaymentRecurringPaymentRow,
+  PaymentSubscriptionPlanRow,
+  PaymentSubscriptionRow,
+} from "@/db/repositories";
 import { createTokenRepository } from "@/db/repositories";
-import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
-import { AppError, badRequest } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  conflict,
+  internalError,
+  PUBLIC_INTERNAL_ERROR_MESSAGE,
+  transactionFailed,
+} from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { isNativePaymentToken, normalizePaymentToken } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
@@ -68,19 +80,45 @@ export async function assertRecurringPaymentTokenMint(
   return mint;
 }
 
-export function generateProgramPlanId(): string {
-  const bytes = new Uint8Array(8);
-  let value = 0n;
+/** Adapts nullable stored metadata to the subscription program's required string argument. */
+export function subscriptionProgramMetadataUri(metadataUri: string | null): string {
+  return metadataUri === null ? "" : metadataUri;
+}
 
-  while (value === 0n) {
-    crypto.getRandomValues(bytes);
-    value = 0n;
-    for (const byte of bytes) {
-      value = (value << 8n) | BigInt(byte);
-    }
+export function parseNullableStoredSignature(value: string | null): Signature | null {
+  if (value === null) return null;
+  assertIsSignature(value);
+  return value;
+}
+
+export function canonicalAttemptSignature(input: {
+  attemptSignature: string | null;
+  journalSignature: string | null;
+  label: string;
+}): string | null {
+  if (input.journalSignature !== null && input.journalSignature !== input.attemptSignature) {
+    throw internalError(`${input.label} signatures do not match`);
   }
+  return input.attemptSignature;
+}
 
-  return value.toString();
+export function requireUpdatedAttempt<T>(attempt: T | null): T {
+  if (attempt === null) throw conflict("Recurring payment attempt changed concurrently");
+  return attempt;
+}
+
+export function requireUpdatedPlan(
+  plan: PaymentSubscriptionPlanRow | null
+): PaymentSubscriptionPlanRow {
+  if (plan === null) throw conflict("Recurring payment plan changed concurrently");
+  return plan;
+}
+
+export function requireUpdatedSubscription(
+  subscription: PaymentSubscriptionRow | null
+): PaymentSubscriptionRow {
+  if (subscription === null) throw conflict("Recurring payment subscription changed concurrently");
+  return subscription;
 }
 
 export function assertRecurringPaymentSourceWallet(
@@ -91,7 +129,7 @@ export function assertRecurringPaymentSourceWallet(
   sourceWallet: Pick<CustodyWallet, "id" | "walletId" | "publicKey">
 ): void {
   if (!recurringPayment.source_custody_wallet_id) {
-    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
+    throw conflict("Recurring payment source wallet is unresolved");
   }
   if (recurringPayment.source_custody_wallet_id !== sourceWallet.id) {
     throw badRequest("Recurring payment exact source wallet does not match request");
@@ -158,7 +196,7 @@ export async function sendSubscriptionInstructions(input: {
 export async function confirmSubscriptionSignature(
   env: Env,
   signature: Signature,
-  message = "Recurring payment activation failed on-chain"
+  message: string
 ): Promise<void> {
   const rpc = solanaRpc.createRpc(env);
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
@@ -166,10 +204,10 @@ export async function confirmSubscriptionSignature(
   });
 
   if (confirmation.err) {
-    throw new AppError("TRANSACTION_FAILED", message);
+    throw transactionFailed(message);
   }
 }
 
-export function activationErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+export function recurringPaymentErrorMessage(error: Error): string {
+  return error instanceof AppError ? error.message : PUBLIC_INTERNAL_ERROR_MESSAGE;
 }

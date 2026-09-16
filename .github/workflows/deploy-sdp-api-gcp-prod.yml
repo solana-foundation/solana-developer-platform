@@ -87,6 +87,9 @@ jobs:
       id-token: write
 
   deploy:
+    outputs:
+      canary: ${{ steps.canary_outcome.outputs.result }}
+      tail_clean: ${{ steps.tail_outcome.outputs.clean }}
     name: Deploy production image
     needs: smoke
     if: >-
@@ -512,13 +515,20 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run prod canary against the promoted revision
+        id: canary
         if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
         timeout-minutes: 5
         run: |
           gcloud run jobs execute sdp-prod-canary \
             --region "${REGION}" --project "${PROJECT_ID}" --wait
 
+      - name: Record canary outcome
+        id: canary_outcome
+        if: ${{ always() }}
+        run: echo "result=${{ steps.canary.outcome }}" >> "$GITHUB_OUTPUT"
+
       - name: Roll back incomplete rollout
+        id: rollback_guard
         if: ${{ always() }}
         timeout-minutes: 5
         run: |
@@ -546,6 +556,7 @@ jobs:
           fi
 
       - name: Remove candidate traffic tag
+        id: remove_tag
         if: ${{ always() }}
         timeout-minutes: 5
         run: |
@@ -556,6 +567,11 @@ jobs:
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --remove-tags "${CANDIDATE_TAG}"
+
+      - name: Record tail cleanup outcome
+        id: tail_outcome
+        if: ${{ always() }}
+        run: echo "clean=${{ (steps.rollback_guard.outcome == 'success' || steps.rollback_guard.outcome == 'skipped') && (steps.remove_tag.outcome == 'success' || steps.remove_tag.outcome == 'skipped') }}" >> "$GITHUB_OUTPUT"
 
 
   notify-result:
@@ -591,6 +607,7 @@ jobs:
           STATUS: >-
             ${{ needs.deploy.result == 'success' && 'success' ||
                 (needs.deploy.result == 'cancelled' || needs.smoke.result == 'cancelled') && 'cancelled' ||
+                needs.deploy.outputs.canary == 'failure' && needs.deploy.outputs.tail_clean == 'true' && 'canary-failed' ||
                 'failure' }}
           VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
           DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}

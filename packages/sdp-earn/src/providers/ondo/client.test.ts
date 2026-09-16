@@ -5,6 +5,7 @@ import { ONDO_DEPLOYMENTS, ondoDeployment } from "@sdp/types/ondo-programs";
 import { SdpEarnError } from "../../errors";
 import { isStrategyWithinDeclaredSupport } from "../../support";
 import { ONDO_USDY_DECIMALS, OndoEarnClient } from "./client";
+import { ONDO_ASSETS_API_URL } from "./usdy-rate";
 
 /**
  * Canonical no-network harness (see src/fetch.test.ts): `globalThis.fetch` is
@@ -23,6 +24,34 @@ const USDY_MINT = MAINNET.usdyMint;
 const USDC_MAINNET = wellKnownMint("USDC", "mainnet-beta") as string;
 const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
+/**
+ * The issuer side (Ondo's public assets API, see usdy-rate.test.ts for its own
+ * suite): every stub answers it by URL, so the Solana fixtures stay about the
+ * mint.
+ */
+interface AssetsFixture {
+  /** Answer with this HTTP status instead (an outage). */
+  status?: number;
+}
+
+function answerAssets(fixture: AssetsFixture): Response {
+  if (fixture.status !== undefined) {
+    return new Response("upstream error", { status: fixture.status });
+  }
+  return Response.json({
+    timestamp: "2026-09-15T19:01:39Z",
+    assets: [
+      {
+        symbol: "usdy",
+        apy: 3.5999629806,
+        priceUsd: 1.1463,
+        tvlUsd: { total: 2.2e9, solana: 179668490.6 },
+      },
+      { symbol: "ousg", apy: 3.45 },
+    ],
+  });
+}
+
 /** An 82-byte SPL mint account with the given decimals at offset 44. */
 function mintAccountData(decimals: number): string {
   const data = new Uint8Array(82);
@@ -40,9 +69,11 @@ interface AccountFixture {
 /** Answers getGenesisHash and getAccountInfo the way a mainnet RPC would. */
 function stubRpc(
   fixture: AccountFixture,
-  genesis: string = GENESIS_HASH_BY_CLUSTER["mainnet-beta"]
+  genesis: string = GENESIS_HASH_BY_CLUSTER["mainnet-beta"],
+  assets: AssetsFixture = {}
 ) {
-  mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
+  mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
+    if (String(url) === ONDO_ASSETS_API_URL) return answerAssets(assets);
     const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string };
     if (body.method === "getGenesisHash") {
       return Response.json({ jsonrpc: "2.0", id: 1, result: genesis });
@@ -67,6 +98,7 @@ function stubRpc(
  */
 function stubTwoClusterRpc(urls: { devnet: string; mainnet: string }) {
   mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
+    if (String(url) === ONDO_ASSETS_API_URL) return answerAssets({});
     const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string };
     const onMainnet = String(url) === urls.mainnet;
     if (body.method === "getGenesisHash") {
@@ -147,7 +179,11 @@ describe("OndoEarnClient.listStrategies", () => {
     assert.equal(snapshot.hostCluster, "mainnet-beta");
     assert.equal(snapshot.liquidityTerm, "instant");
     assert.equal(snapshot.redemptionDelayDays, undefined);
-    assert.equal(snapshot.currentApy, undefined);
+    // The issuer's published APY (3.5999…%, Sep 2026) as a truncated fraction:
+    // Ondo's own site shows 3.60%, SDP never quotes above it (PRO-1833).
+    assert.equal(snapshot.currentApy, "0.035999");
+    assert.equal(snapshot.apyType, "variable");
+    assert.equal(snapshot.riskMetadata?.tvlUsd, 179668490.6);
     assert.equal(snapshot.riskMetadata?.curator, "ondo");
     // The eligibility constraints ride the row (PRO-1832): an integrator reads
     // them from the catalogue, not from a doc they have to know exists.
@@ -155,6 +191,14 @@ describe("OndoEarnClient.listStrategies", () => {
     assert.match(String(snapshot.riskMetadata?.issuerControls), /freeze authority/);
     // The row must sit inside the envelope the sync validates against.
     assert.equal(isStrategyWithinDeclaredSupport(client.declaredSupport, snapshot), true);
+  });
+
+  it("fails the pass when the issuer API is unreachable (rows keep their last figures)", async () => {
+    stubRpc({}, GENESIS_HASH_BY_CLUSTER["mainnet-beta"], { status: 502 });
+    await assert.rejects(
+      client._listUsdyStrategy("https://rpc.test", "mainnet-beta", MAINNET),
+      (error: unknown) => error instanceof SdpEarnError && error.code !== "PROVIDER_NOT_CONFIGURED"
+    );
   });
 
   it("refuses an endpoint that serves the wrong chain", async () => {

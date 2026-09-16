@@ -222,7 +222,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes a public on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. The deprecated `privateTransfer` field is retired: SDP no longer integrates a private-transfer provider, so a request carrying it is refused with 503 and no transfer is created. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
+      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,
@@ -374,10 +374,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Recurring Payments
-  // ═══════════════════════════════════════════════════════════════════════════
 
   registry.registerPath({
     method: "post",
@@ -560,10 +556,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Recurring Subscriptions
-  // ═══════════════════════════════════════════════════════════════════════════
 
   registry.registerPath({
     method: "post",

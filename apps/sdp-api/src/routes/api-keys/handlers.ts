@@ -578,6 +578,11 @@ export const createApiKeyControlProfile = async (
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot manage control profiles of the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   const profile = await new ApiKeyPolicyStore(
@@ -606,6 +611,11 @@ export const createApiKeyControlProfileRevision = async (
   const { keyId, profileId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot manage control profiles of the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   const revision = await new ApiKeyPolicyStore(
@@ -639,6 +649,11 @@ export const activateApiKeyControlProfileRevision = async (c: AppContext) => {
   const { keyId, profileId, revisionId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot manage control profiles of the API key being used for this request");
+  }
+
   const active = await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))
   ).activateApiKeyControlProfileRevision({
@@ -665,6 +680,11 @@ export const writeApiKeyPolicyBindings = async (
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot replace policy bindings of the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   const custodyTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());

@@ -185,12 +185,12 @@ const contracts: ValueMovingContract[] = [
     replay: [
       {
         mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/routes/payments.transfers.test.ts",
+        file: "apps/sdp-api/src/routes/payments.transfers.idempotency.test.ts",
         evidence: "replays a transfer when the same Idempotency-Key + body is retried",
       },
       {
         mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/routes/payments.transfers.test.ts",
+        file: "apps/sdp-api/src/routes/payments.transfers.idempotency.test.ts",
         evidence: "rejects the same Idempotency-Key with a different body",
       },
     ],

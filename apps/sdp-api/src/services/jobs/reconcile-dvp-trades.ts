@@ -19,6 +19,7 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { isMarketsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";
+import { classifyDvpFundingReceipt } from "@/services/dvp/funding-receipt";
 import { closeIsKnown, deriveDvpTradeState } from "@/services/dvp/observe";
 import { readDvpTradeObservation } from "@/services/dvp/read-chain";
 import type { Env } from "@/types/env";
@@ -97,13 +98,23 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
     for (const claim of expiredBroadcast) {
       try {
         assertIsSignature(claim.signature);
-        const [status] = await getSignatureStatuses(rpc, [claim.signature], {
+        const statuses = await getSignatureStatuses(rpc, [claim.signature], {
           searchTransactionHistory: true,
         });
-        // Two ways a transfer moved nothing: it never landed (null), or it
-        // landed and FAILED (`err` set — fees consumed, zero tokens moved).
-        // Both leave the claim neither lock nor receipt, so both release it.
-        if (status === null || status.err !== null) {
+        // One signature asked, one answer owed. A short reply is a failed read,
+        // never "not found", and a failed read never deletes.
+        if (statuses.length !== 1) {
+          throw new Error(
+            `getSignatureStatuses returned ${statuses.length} statuses for 1 signature`
+          );
+        }
+        const status = statuses[0];
+        // Two ways a transfer moved nothing: it never landed (null, and the
+        // query above only lists receipts already past their expiry height),
+        // or it landed and FAILED (`err` set, fees consumed, zero tokens
+        // moved). Both leave the claim neither lock nor receipt. The same
+        // classification decides whether reclaim may take a receipt over.
+        if (classifyDvpFundingReceipt(status, true) === "moved_nothing") {
           await claims.deleteBroadcastClaim(claim.tradeId, claim.side, claim.signature);
           getLogger().info(
             {
@@ -232,6 +243,7 @@ async function reconcileTrade(
     escrowAFrozen: observation.legA.exists ? observation.legA.frozen : null,
     escrowBFrozen: observation.legB.exists ? observation.legB.frozen : null,
     observedAt: new Date().toISOString(),
+    observedClusterTimestamp: observation.clusterUnixTimestamp.toString(),
     closeSignature:
       observation.closeResolution === null ? null : observation.closeResolution.signature,
   });

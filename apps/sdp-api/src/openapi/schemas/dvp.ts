@@ -8,14 +8,20 @@
  * names an escrow address that does not exist.
  */
 
-import { DVP_LEG_OUTCOMES, DVP_TRADE_SIDES, DVP_TRADE_STATUSES } from "@sdp/types";
+import {
+  DVP_LEG_OUTCOMES,
+  DVP_LEG_REFUSAL,
+  DVP_SETTLEMENT_AVAILABILITY,
+  DVP_TRADE_SIDES,
+  DVP_TRADE_STATUSES,
+} from "@sdp/types";
 import {
   createDvpTradeSchema as createDvpTradeSchemaBase,
   dvpTradeIdParamsSchema as dvpTradeIdParamsSchemaBase,
   fundDvpTradeSchema as fundDvpTradeSchemaBase,
   listDvpTradesQuerySchema as listDvpTradesQuerySchemaBase,
 } from "../../routes/dvp/schemas";
-import { isoDateTimeSchema, withOpenApi, z } from "./base";
+import { errorSchema, isoDateTimeSchema, withOpenApi, z } from "./base";
 
 export const dvpTradeIdParamSchema = withOpenApi(dvpTradeIdParamsSchemaBase.shape.tradeId, {
   description: "DvP trade identifier.",
@@ -36,6 +42,11 @@ export const listDvpTradesQuerySchema = listDvpTradesQuerySchemaBase
         "Filter by trade status. Accepts a comma-separated list of the documented statuses.",
       example: "created,funded",
     }),
+    settlementAvailability: withOpenApi(listDvpTradesQuerySchemaBase.shape.settlementAvailability, {
+      description:
+        "Filter by settlement availability, as the trade's `settlementAvailability` reports it. Accepts a comma-separated list.",
+      example: "available",
+    }),
     q: withOpenApi(listDvpTradesQuerySchemaBase.shape.q, {
       description:
         "Case-insensitive substring search over trade ID, the on-chain trade account, both party addresses, both escrow addresses, both mints and both leg symbols. Use at least 2 non-whitespace characters; a blank value is treated as no search filter.",
@@ -53,6 +64,12 @@ const dvpTradeStatusSchema = z.enum(DVP_TRADE_STATUSES).openapi({
   description:
     "Last observed lifecycle state. The program emits no events and funding never invokes it, so this is a cache of a poll rather than an event log. `creating` means the create transaction was signed and recorded but its outcome is not yet known. `closed_unknown` means the on-chain account is gone but which terminal path closed it has not been determined.",
   example: "created",
+});
+
+const dvpSettlementAvailabilitySchema = z.enum(DVP_SETTLEMENT_AVAILABILITY).nullable().openapi({
+  description:
+    "Whether the trade can settle, judged by the cluster's Clock read with the last observation (the clock the program checks), never a host clock. `available`: both legs funded and inside the window. `unfunded`: a leg is short. `too_early`: funded, but before `earliestSettlementTimestamp`. `expired`: past expiry, only cancel or reclaim remain. Null for a closed trade, or a funded trade not yet observed with a cluster clock.",
+  example: "available",
 });
 
 const dvpLegOutcomeSchema = z.enum(DVP_LEG_OUTCOMES).openapi({
@@ -151,7 +168,7 @@ const dvpTradeLegSchema = z
       }),
     fundingSignature: z.string().nullable().openapi({
       description:
-        "The transaction that moved this leg into escrow: the funding receipt when one exists, else the live claim's signature while a funding is still in flight (so an in-flight funding links to the transaction it is waiting on), else null. Funding claims are tenant-scoped to the funding organization, so an organization that cannot read the claim row gets null — never a guess.",
+        "The transfer the calling organization sent into this leg's escrow, once it was broadcast. Null while that transfer is still being sent, for a leg funded by anyone else, and for an organization that did not fund it. Not a record of every deposit: the escrow accepts transfers from any address.",
     }),
     outcome: dvpLegOutcomeSchema,
   })
@@ -182,6 +199,7 @@ export const dvpTradeSchema = z
     earliestSettlementTimestamp: z.string().nullable().openapi({
       description: "Unix seconds before which settlement is refused, as a string (i64), or null.",
     }),
+    settlementAvailability: dvpSettlementAvailabilitySchema,
     refString: z.string().nullable().openapi({
       description:
         "Opaque client reference. Unauthenticated — anyone's trade can carry the same value, so treat it as a correlation hint and never as proof of origin.",
@@ -285,6 +303,7 @@ export const dvpInboundTradeSchema = z
     earliestSettlementTimestamp: z.string().nullable().openapi({
       description: "Unix seconds before which settlement is refused, as a string (i64), or null.",
     }),
+    settlementAvailability: dvpSettlementAvailabilitySchema,
     createdAt: isoDateTimeSchema,
     observedAt: isoDateTimeSchema.nullable().openapi({
       description: "When the escrow balances were last confirmed against the chain.",
@@ -304,3 +323,34 @@ export const dvpCloseResponseSchema = z.object({
   }),
   signature: z.string().openapi({ description: "Signature of the closing transaction." }),
 });
+
+export const dvpLegActionResponseSchema = z.object({
+  tradeId: dvpTradeIdParamSchema,
+  leg: z.enum(DVP_TRADE_SIDES).openapi({ description: "The side that was funded or reclaimed." }),
+  amount: z.string().openapi({
+    description:
+      "Base units, as a string (u64). For fund, the shortfall sent. For reclaim, the escrow balance read before sending; the program returns whatever the escrow holds when it executes.",
+  }),
+  signature: z.string().openapi({ description: "Signature of the transaction." }),
+});
+
+/**
+ * The error envelope fund and reclaim refuse with. Same shape as every other
+ * error, with the refusal code documented, since clients branch on it.
+ */
+export const dvpLegRefusalErrorResponseSchema = z
+  .object({
+    error: errorSchema.extend({
+      details: z
+        .object({
+          reason: z.enum(DVP_LEG_REFUSAL).optional().openapi({
+            description:
+              "Why this leg action was refused, for a client to name in its own words. Absent on refusals that are not about the leg, such as request validation.",
+          }),
+        })
+        .catchall(z.unknown())
+        .optional(),
+    }),
+    meta: z.object({ requestId: z.string().optional() }).optional(),
+  })
+  .openapi({ description: "Error response for a refused DvP leg action." });
