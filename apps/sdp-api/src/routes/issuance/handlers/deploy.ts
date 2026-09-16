@@ -15,10 +15,11 @@ import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
+import { AppError, badRequest, conflict, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { isDryRunRequest } from "@/middleware/dry-run";
-import type { PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
@@ -29,6 +30,7 @@ import {
   assertApprovedWalletOperationCustodyWallet,
   beginApprovedWalletOperationEffect,
 } from "@/services/policy/approved-operation-replay";
+import { dryRunPolicyCandidate } from "@/services/policy/candidate-evaluation.service";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -388,6 +390,25 @@ async function createDeployMetadataSigner(
   });
 }
 
+/**
+ * Refuse a metadata signer the gate's extraction did not judge. Mirrors
+ * `assertJudgedCustodyWallet` for the second signer a deploy can carry.
+ */
+function assertJudgedMetadataCustodyWallet(
+  c: Context<{ Bindings: Env }>,
+  deploymentWallet: ResolvedIssuanceWallet,
+  metadataWallet?: ResolvedIssuanceWallet
+): void {
+  if (!metadataWallet || metadataWallet.custodyWalletId === deploymentWallet.custodyWalletId) {
+    return;
+  }
+  const judged = getPolicyGateContext<unknown, { judgedMetadataCustodyWalletId?: string | null }>(c)
+    .resolved?.judgedMetadataCustodyWalletId;
+  if (judged !== undefined && judged !== metadataWallet.custodyWalletId) {
+    throw conflict("Metadata authority wallet changed after the operation was evaluated by policy");
+  }
+}
+
 async function fenceApprovedUnsettledDeployReplay(
   c: Context<{ Bindings: Env }>,
   status: string
@@ -591,6 +612,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       requiredWalletPermissions: ["tokens:write"],
     });
     custodyAddress = signer.address;
+    assertJudgedMetadataCustodyWallet(c, deploymentWallet, metadataWallet);
     const metadataSigner = await createDeployMetadataSigner(
       c.env,
       auth,
@@ -1281,9 +1303,46 @@ export async function extractDeployPolicyCandidate(
     tokenService,
   });
 
+  // The metadata authority wallet is a SECOND signer when it differs from the
+  // deployment wallet: it signs the metadata-URI follow-up inside the same
+  // deploy. The gate judges one wallet per operation, so that wallet's own
+  // policy is evaluated here without persisting an operation, and anything
+  // short of a plain allow refuses the deploy — a secondary signer cannot
+  // carry its own approval flow.
+  const metadataCustodyWalletId = body.authorityCustodyWalletIds?.metadata;
+  let judgedMetadataCustodyWalletId: string | null = null;
+  if (metadataCustodyWalletId && metadataCustodyWalletId !== wallet.custodyWalletId) {
+    const metadataWallet = await resolveIssuanceWallet({
+      env: c.env,
+      auth,
+      custodyWalletId: metadataCustodyWalletId,
+      requiredWalletPermissions: ["tokens:write"],
+    });
+    const verdict = await dryRunPolicyCandidate(
+      c.env,
+      getRequestTenantScope(c),
+      buildIssuancePolicyCandidate({
+        auth,
+        token,
+        custodyWalletId: metadataWallet.custodyWalletId,
+        walletId: metadataWallet.providerWalletId,
+        operationType: "issuance_deploy_execute",
+        amount: null,
+        destination: null,
+      }),
+      []
+    );
+    if (verdict.decision !== "allow") {
+      throw forbidden(
+        "Wallet policy does not allow the metadata authority wallet to sign this deploy"
+      );
+    }
+    judgedMetadataCustodyWalletId = metadataWallet.custodyWalletId;
+  }
+
   return {
     ...emptyExtraction,
-    resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
+    resolved: { judgedCustodyWalletId: wallet.custodyWalletId, judgedMetadataCustodyWalletId },
     candidate: buildIssuancePolicyCandidate({
       auth,
       token,
