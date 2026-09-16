@@ -3,45 +3,32 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 
 const DEFAULT_RELOAD_DELAY_MS = 15_000;
+const SIDEBAR_ROW_IDS = ["home", "wallets", "issuance", "payments", "api-keys"];
 
-const SIDEBAR_ROW_IDS = [
-  "shell-skeleton-nav-1",
-  "shell-skeleton-nav-2",
-  "shell-skeleton-nav-3",
-  "shell-skeleton-nav-4",
-  "shell-skeleton-nav-5",
-];
-
-const CONTENT_CARD_IDS = ["shell-skeleton-card-1", "shell-skeleton-card-2"];
-
-/**
- * Stand-in for the whole dashboard while the client auth session resolves.
- *
- * It draws the shell's silhouette rather than a centred spinner. The route
- * skeletons Next.js streams are discarded when this renders, so a bare spinner
- * replaced a laid-out page with an empty screen for the best part of a second and
- * read as a hang. Same markup cost, same control flow — only what gets painted
- * changed, so the navigation loading contract is untouched.
- *
- * Callers that know which route is loading pass that route's skeleton as
- * `children`, so the chrome silhouette wraps the shape the page actually
- * settles into. Callers without a route in scope — the pre-workspace state and
- * the dedicated interstitial — omit it and keep the generic content blocks.
- *
- * The status text stays in the accessibility tree; sighted users get the shape.
- */
+/** Shared dashboard frame while workspace, scope, or client auth resolves. */
 export function FullscreenLoadingIndicator({
   allowDelayedReload = false,
   children,
   contentWidthClass = "max-w-7xl",
+  hideTitle = false,
+  isSidebarOpen = true,
   reloadDelayMs = DEFAULT_RELOAD_DELAY_MS,
+  statusMessage,
+  action,
+  paused = false,
 }: {
   allowDelayedReload?: boolean;
-  children?: ReactNode;
+  children: ReactNode;
   contentWidthClass?: string;
+  hideTitle?: boolean;
+  isSidebarOpen?: boolean;
   reloadDelayMs?: number;
+  statusMessage?: string;
+  action?: ReactNode;
+  paused?: boolean;
 }) {
   const t = useTranslations();
   const [showReload, setShowReload] = useState(false);
@@ -52,79 +39,78 @@ export function FullscreenLoadingIndicator({
     return () => window.clearTimeout(timeout);
   }, [allowDelayedReload, reloadDelayMs]);
 
+  const recoveryAction =
+    action ??
+    (showReload ? (
+      <button
+        type="button"
+        className="shrink-0 text-sm text-secondary underline underline-offset-4 hover:text-primary"
+        onClick={() => window.location.reload()}
+      >
+        {t("Shared.dashboardShell.reloadDashboard")}
+      </button>
+    ) : null);
+
   return (
     <main
-      aria-busy="true"
+      aria-busy={!paused}
       data-shell-loading-skeleton
-      className="flex min-h-screen bg-[var(--sdp-shell-bg)] text-primary"
+      className={cn(
+        "flex min-h-screen bg-[var(--sdp-shell-bg)] text-primary",
+        paused && "[&_*]:animate-none"
+      )}
     >
-      <p role="status" aria-live="polite" className="sr-only">
-        {t("Shared.dashboardShell.loadingDashboard")}
-      </p>
-
-      {/* Sidebar silhouette. Hidden below md to match the real shell, which has no
-          persistent sidebar on small screens. */}
       <div
         aria-hidden="true"
-        className="hidden w-72 shrink-0 flex-col gap-8 border-r border-border-default px-4 py-5 md:flex"
+        style={{ width: isSidebarOpen ? 296 : 64 }}
+        className="hidden shrink-0 flex-col gap-8 px-4 py-5 md:flex"
       >
         <div className="flex items-center gap-3">
           <SkeletonBlock className="size-8 shrink-0 rounded-lg" />
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <SkeletonBlock className="h-3.5 w-24 rounded-[4px]" />
-            <SkeletonBlock className="h-3 w-32 rounded-[4px]" />
-          </div>
+          {isSidebarOpen ? (
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <SkeletonBlock className="h-3.5 w-24 rounded-[4px]" />
+              <SkeletonBlock className="h-3 w-32 rounded-[4px]" />
+            </div>
+          ) : null}
         </div>
         <div className="space-y-2">
           {SIDEBAR_ROW_IDS.map((id) => (
-            <SkeletonBlock key={id} className="h-9 w-full rounded-[10px]" />
+            <SkeletonBlock key={id} className="h-10 w-full rounded-[10px]" />
           ))}
         </div>
+        <SkeletonBlock className="mt-auto h-10 w-full rounded-[10px]" />
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div
-          aria-hidden="true"
-          className="flex h-16 shrink-0 items-center justify-between border-b border-border-default px-6"
-        >
-          <SkeletonBlock className="h-7 w-40 max-w-[45%] rounded-[6px]" />
-          <div className="flex items-center gap-3">
-            <SkeletonBlock className="size-8 rounded-full" />
-            <SkeletonBlock className="h-7 w-20 rounded-full" />
+      <section className="relative min-w-0 flex-1 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80 px-3 py-5 md:p-6">
+        <div aria-hidden="true" className="space-y-6">
+          <div className="grid min-h-10 grid-cols-[1fr_auto] items-center gap-3 sm:grid-cols-[1fr_auto_1fr]">
+            <SkeletonBlock className="size-8 rounded-lg md:invisible" />
+            {hideTitle ? null : (
+              <SkeletonBlock className="col-span-2 row-start-2 mx-auto h-10 w-40 rounded-[6px] sm:col-span-1 sm:col-start-2 sm:row-start-1" />
+            )}
+            <SkeletonBlock className="col-start-2 row-start-1 h-8 w-20 justify-self-end rounded-full sm:col-start-3" />
+          </div>
+          <div className={`mx-auto min-w-0 w-full ${contentWidthClass} pb-20 md:pb-0`}>
+            {children}
           </div>
         </div>
 
-        {/* Padding tracks the settled shell's content section (px-3 py-5 md:p-6) so the
-            skeleton and the page that replaces it occupy the same measure at every
-            breakpoint. */}
         <div
-          aria-hidden="true"
-          className={`mx-auto w-full ${contentWidthClass} space-y-6 px-3 py-5 md:p-6`}
+          role="status"
+          aria-live="polite"
+          className={
+            recoveryAction || statusMessage
+              ? "sticky bottom-20 mx-auto flex max-w-xl items-center justify-between gap-4 rounded-xl border border-border-default bg-surface-raised p-4 shadow-sm md:bottom-6"
+              : "sr-only"
+          }
         >
-          {children ?? (
-            <div data-shell-loading-generic-content="true" className="space-y-6">
-              <div className="grid gap-4 sm:grid-cols-2">
-                {CONTENT_CARD_IDS.map((id) => (
-                  <SkeletonBlock key={id} className="h-28 w-full rounded-[18px]" />
-                ))}
-              </div>
-              <SkeletonBlock className="h-64 w-full rounded-[18px]" />
-            </div>
-          )}
+          <p className="text-sm text-secondary">
+            {statusMessage ?? t("Shared.dashboardShell.loadingDashboard")}
+          </p>
+          {recoveryAction}
         </div>
-
-        {showReload ? (
-          <div className="flex justify-center pb-10">
-            <button
-              type="button"
-              className="text-sm text-secondary underline underline-offset-4 transition-colors hover:text-primary motion-reduce:transition-none"
-              onClick={() => window.location.reload()}
-            >
-              {t("Shared.dashboardShell.reloadDashboard")}
-            </button>
-          </div>
-        ) : null}
-      </div>
+      </section>
     </main>
   );
 }
