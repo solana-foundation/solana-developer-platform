@@ -56,6 +56,7 @@ export function DepositProgress({
     {
       fallbackData: initial,
       keepPreviousData: false,
+      dedupingInterval: POLL_INTERVAL_MS,
       revalidateOnMount: false,
       revalidateOnFocus: true,
       revalidateOnReconnect: true,

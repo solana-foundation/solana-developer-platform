@@ -51,7 +51,7 @@ for (const kind of ["deposit", "withdrawal"] as const) {
   function progress(initial = movement()) {
     return (
       <SWRConfig
-        value={{ provider: () => new Map(), dedupingInterval: 0, errorRetryInterval: 1500 }}
+        value={{ provider: () => new Map(), dedupingInterval: 10_000, errorRetryInterval: 1500 }}
       >
         <I18nProvider locale="en" messages={getMessages("en")}>
           {kind === "deposit" ? (
@@ -81,6 +81,15 @@ for (const kind of ["deposit", "withdrawal"] as const) {
         await vi.advanceTimersByTimeAsync(6000);
       });
       expect(mocks[kind]).toHaveBeenCalledTimes(1);
+    });
+
+    it("refreshes at the progress interval despite the dashboard cache defaults", async () => {
+      mocks[kind].mockResolvedValue(movement());
+      render(progress());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4500);
+      });
+      expect(mocks[kind]).toHaveBeenCalledTimes(3);
     });
 
     it("does not poll a hidden page", async () => {
