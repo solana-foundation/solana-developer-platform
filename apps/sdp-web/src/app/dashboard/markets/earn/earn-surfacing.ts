@@ -42,8 +42,8 @@ export type EarnVaultDepositAvailability =
  *
  * A list, not a pin, and DERIVED from two declarations in `@sdp/types` rather
  * than hand-set: surfacing says what is offered, `earnDepositStyle` says which
- * of those have a program model. It is `["ground"]` when Ground is surfaced and
- * `[]` today. Nothing here may hardcode a provider id — that is what let an
+ * of those have a program model — `[]` today, since the one custodial provider
+ * was retired. Nothing here may hardcode a provider id — that is what let an
  * earlier revision filter the org's own positions down to one provider and hide
  * the rest.
  */
@@ -93,6 +93,19 @@ export function earnVaultDepositAvailability(
   // closed as `strategy_unavailable`.
   const provider = strategy.provider as EarnProviderId;
   return providerAccess[provider]?.enabled === true ? "available" : "provider_unavailable";
+}
+
+/**
+ * The ONE environment whose projects may open a deposit with this provider, or
+ * `undefined` when neither or both may. "environment_unavailable" is a verdict
+ * about the current project; this names the other side so a label can say
+ * "Production only" for Jupiter and Ondo instead of the sandbox-era default.
+ */
+export function earnVaultDepositOnlyEnvironment(provider: string): SdpEnvironment | undefined {
+  const sandbox = isVaultDirectDepositEnabled("sandbox", provider);
+  const production = isVaultDirectDepositEnabled("production", provider);
+  if (sandbox === production) return undefined;
+  return sandbox ? "sandbox" : "production";
 }
 
 export function isEarnVaultDepositAvailable(

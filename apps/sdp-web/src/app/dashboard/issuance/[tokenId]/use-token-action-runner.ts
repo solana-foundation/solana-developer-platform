@@ -1,5 +1,6 @@
 "use client";
 
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -10,9 +11,25 @@ import type {
   ActionExecutionResult,
   RunActionOptions,
 } from "./token-management-workspace.types";
-import { executeActionRequest } from "./token-management-workspace.utils";
+import {
+  executeActionRequest,
+  getSignerWalletUnavailableReason,
+} from "./token-management-workspace.utils";
 
-export function useTokenActionRunner() {
+function withActionSigner(
+  input: ActionExecutionInput,
+  signingCustodyWalletId: string
+): ActionExecutionInput {
+  if (input.method === "DELETE") {
+    const [path, query] = input.path.split("?");
+    const params = new URLSearchParams(query);
+    params.set("signingCustodyWalletId", signingCustodyWalletId);
+    return { ...input, path: `${path}?${params}` };
+  }
+  return { ...input, body: { ...input.body, signingCustodyWalletId } };
+}
+
+export function useTokenActionRunner(authorityWallets?: PaymentsDashboardWallet[]) {
   const t = useTranslations();
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
@@ -24,6 +41,19 @@ export function useTokenActionRunner() {
     input: ActionExecutionInput,
     options: RunActionOptions = {}
   ): Promise<ActionExecutionResult> => {
+    const signerId =
+      input.method === "DELETE"
+        ? new URLSearchParams(input.path.split("?")[1]).get("signingCustodyWalletId")
+        : input.body?.signingCustodyWalletId;
+    const unavailableReason = getSignerWalletUnavailableReason(
+      authorityWallets ?? options.signerWallets ?? [],
+      typeof signerId === "string" ? signerId : null,
+      t
+    );
+    if (unavailableReason) {
+      toast.error(unavailableReason);
+      return { ok: false, message: unavailableReason, status: null, body: null };
+    }
     const submitToast =
       options.submitToast ??
       t("DashboardIssuance.management.submittingAction", { action: input.label.toLowerCase() });
@@ -69,15 +99,25 @@ export function useTokenActionRunner() {
   };
 
   const runAction = (input: ActionExecutionInput, options: RunActionOptions = {}) => {
-    if (options.requiresConfirmation) {
+    const wallets = options.signerWallets;
+    if (wallets?.length === 0) {
+      toast.error(t("DashboardIssuance.management.noControlledWalletsAvailable"));
+      return;
+    }
+    const signingCustodyWalletId = wallets?.length === 1 ? wallets[0].id : undefined;
+    if (options.requiresConfirmation || (wallets && wallets.length > 1)) {
       setActionConfirmation({
         input,
+        signerWallets: wallets,
+        signingCustodyWalletId,
         options: {
           confirmationTitle:
             options.confirmationTitle ?? t("DashboardIssuance.management.sendTransaction"),
           confirmationDescription:
             options.confirmationDescription ??
             t("DashboardIssuance.management.sendTransactionDescription"),
+          confirmationDetails: options.confirmationDetails,
+          confirmationWarning: options.confirmationWarning,
           confirmButtonLabel:
             options.confirmButtonLabel ?? t("DashboardIssuance.management.goAhead"),
           submitToast:
@@ -93,7 +133,10 @@ export function useTokenActionRunner() {
       return;
     }
 
-    void executeAction(input, options);
+    void executeAction(
+      signingCustodyWalletId ? withActionSigner(input, signingCustodyWalletId) : input,
+      options
+    );
   };
 
   const dismissActionConfirmation = () => {
@@ -105,16 +148,47 @@ export function useTokenActionRunner() {
     if (!pendingConfirmation) {
       return;
     }
+    const { signerWallets, signingCustodyWalletId } = pendingConfirmation;
+    if (signerWallets && !signerWallets.some((wallet) => wallet.id === signingCustodyWalletId)) {
+      return;
+    }
+    const unavailableReason = getSignerWalletUnavailableReason(
+      authorityWallets ?? signerWallets ?? [],
+      signingCustodyWalletId,
+      t
+    );
+    if (unavailableReason) {
+      toast.error(unavailableReason);
+      return;
+    }
     setActionConfirmation(null);
-    void executeAction(pendingConfirmation.input, pendingConfirmation.options);
+    void executeAction(
+      signingCustodyWalletId
+        ? withActionSigner(pendingConfirmation.input, signingCustodyWalletId)
+        : pendingConfirmation.input,
+      { ...pendingConfirmation.options, signerWallets }
+    );
+  };
+
+  const selectConfirmationWallet = (signingCustodyWalletId: string) => {
+    setActionConfirmation((current) => (current ? { ...current, signingCustodyWalletId } : null));
   };
 
   return {
     isPending,
-    actionConfirmation,
+    actionConfirmation:
+      actionConfirmation?.signerWallets && authorityWallets
+        ? {
+            ...actionConfirmation,
+            signerWallets: actionConfirmation.signerWallets.flatMap(
+              (wallet) => authorityWallets.find((current) => current.id === wallet.id) ?? []
+            ),
+          }
+        : actionConfirmation,
     runAction,
     runActionImmediately: executeAction,
     dismissActionConfirmation,
     confirmAction,
+    selectConfirmationWallet,
   };
 }

@@ -14,6 +14,7 @@ export type ErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "RATE_LIMITED"
+  | "PAYLOAD_TOO_LARGE"
   | "SERVICE_UNAVAILABLE"
   | "INTERNAL_ERROR"
   | "NOT_ALLOWLISTED"
@@ -43,10 +44,13 @@ export type ErrorCode =
   | "CONFIDENTIAL_NOT_ENABLED"
   | "MAX_SUPPLY_EXCEEDED"
   | "SOLANA_RPC_ERROR"
+  | "SOLANA_RPC_TIMEOUT"
+  | "UPSTREAM_RESPONSE_TOO_LARGE"
   | "CUSTODY_ERROR"
   // Transaction errors
   | "TRANSACTION_FAILED"
   | "SIGNING_FAILED"
+  | "SIGNING_REJECTED"
   | "SIGNING_PENDING"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
@@ -70,6 +74,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   NOT_FOUND: 404,
   CONFLICT: 409,
   RATE_LIMITED: 429,
+  PAYLOAD_TOO_LARGE: 413,
   SERVICE_UNAVAILABLE: 503,
   INTERNAL_ERROR: 500,
   NOT_ALLOWLISTED: 403,
@@ -99,16 +104,21 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   CONFIDENTIAL_NOT_ENABLED: 400,
   MAX_SUPPLY_EXCEEDED: 400,
   SOLANA_RPC_ERROR: 502,
+  SOLANA_RPC_TIMEOUT: 504,
+  UPSTREAM_RESPONSE_TOO_LARGE: 502,
   CUSTODY_ERROR: 502,
   // Transaction errors
   TRANSACTION_FAILED: 400,
   SIGNING_FAILED: 400,
+  SIGNING_REJECTED: 422,
   SIGNING_PENDING: 202,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
   ESTIMATE_NOT_AVAILABLE: 503,
   UNSUPPORTED_CORRIDOR: 400,
 };
+
+export const PUBLIC_INTERNAL_ERROR_MESSAGE = "An internal error occurred";
 
 const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   BAD_REQUEST: "Invalid request",
@@ -117,8 +127,9 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: "Resource not found",
   CONFLICT: "Resource already exists",
   RATE_LIMITED: "Too many requests",
+  PAYLOAD_TOO_LARGE: "Request body is too large",
   SERVICE_UNAVAILABLE: "Service temporarily unavailable",
-  INTERNAL_ERROR: "An internal error occurred",
+  INTERNAL_ERROR: PUBLIC_INTERNAL_ERROR_MESSAGE,
   NOT_ALLOWLISTED: "Email or domain not on allowlist",
   INVALID_API_KEY: "Invalid API key",
   EXPIRED_API_KEY: "API key has expired",
@@ -147,10 +158,14 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   CONFIDENTIAL_NOT_ENABLED: "Token does not have confidential balances enabled",
   MAX_SUPPLY_EXCEEDED: "Operation would exceed maximum supply",
   SOLANA_RPC_ERROR: "Error communicating with Solana RPC",
+  SOLANA_RPC_TIMEOUT: "The RPC upstream did not answer in time; the request's outcome is unknown",
+  UPSTREAM_RESPONSE_TOO_LARGE:
+    "The RPC upstream answered with a body larger than the relay returns",
   CUSTODY_ERROR: "Custody provider error",
   // Transaction errors
   TRANSACTION_FAILED: "Transaction failed",
   SIGNING_FAILED: "Transaction signing failed",
+  SIGNING_REJECTED: "The signing provider rejected this transaction",
   SIGNING_PENDING: "Signing request pending approval",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
@@ -207,8 +222,12 @@ export function unauthorized(message?: string): AppError {
   return new AppError("UNAUTHORIZED", message);
 }
 
-export function forbidden(message?: string): AppError {
-  return new AppError("FORBIDDEN", message);
+export function insufficientPermissions(message?: string): AppError {
+  return new AppError("INSUFFICIENT_PERMISSIONS", message);
+}
+
+export function forbidden(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("FORBIDDEN", message, details);
 }
 
 export function notFound(resource?: string): AppError {
@@ -228,6 +247,10 @@ export function conflict(message?: string, details?: Record<string, unknown>): A
 
 export function rateLimited(message?: string): AppError {
   return new AppError("RATE_LIMITED", message);
+}
+
+export function payloadTooLarge(message?: string): AppError {
+  return new AppError("PAYLOAD_TOO_LARGE", message);
 }
 
 export function serviceUnavailable(message?: string): AppError {

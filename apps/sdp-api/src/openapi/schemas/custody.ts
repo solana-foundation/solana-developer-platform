@@ -30,7 +30,7 @@ export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
-    "Signer-check wallet selection. walletId is optional for an API key with one bound signing wallet and required for session-authenticated dashboard requests.",
+    "walletId is a Provider wallet ID. When omitted for an API key, its authenticated signing-wallet selection is used: the configured preference, otherwise the first resolved binding. Session-authenticated dashboard requests must provide walletId. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record.",
   example: { walletId: "privy_wallet_123" },
 });
 
@@ -217,8 +217,19 @@ const custodyWalletBaseSchema = z.object({
     description: "Optional wallet label.",
     example: "Root Signing Wallet",
   }),
+  // Response shape, so it lists every purpose a wallet may actually carry —
+  // including one only SDP mints. The CREATE schemas stay closed on purpose: a
+  // caller must not be able to mint a wallet claiming to be a settlement
+  // authority, which is why they are not simply kept in step with this.
   purpose: z
-    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
+    .enum([
+      "root",
+      "mint_authority",
+      "freeze_authority",
+      "fee_payer",
+      "transfer",
+      "dvp_settlement_authority",
+    ])
     .nullable()
     .openapi({ description: "Optional wallet purpose.", example: "root" }),
   status: z.enum(["active", "inactive"]).openapi({

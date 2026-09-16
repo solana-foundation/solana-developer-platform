@@ -15,7 +15,6 @@ import {
   useTransition,
 } from "react";
 import { SWRConfig } from "swr";
-import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
@@ -35,6 +34,7 @@ export interface DashboardPlaygroundApiKeyOption {
 }
 
 type DashboardWorkspaceContextValue = {
+  initialQuickStartStep: import("@/lib/dashboard-quick-start").QuickStartStep | null;
   dashboardAccess: DashboardAccess;
   flags: DashboardFlags;
   dashboardCacheScope: DashboardCacheScope;
@@ -60,7 +60,9 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 );
 
 type DashboardWorkspaceProviderProps = {
+  initialQuickStartStep?: import("@/lib/dashboard-quick-start").QuickStartStep | null;
   children: ReactNode;
+  scopeRefreshFallback: ReactNode;
   dashboardAccess: DashboardAccess;
   flags: DashboardFlags;
   serverDashboardCacheScope: DashboardCacheScope;
@@ -71,7 +73,9 @@ type DashboardWorkspaceProviderProps = {
 };
 
 export function DashboardWorkspaceProvider({
+  initialQuickStartStep = null,
   children,
+  scopeRefreshFallback,
   dashboardAccess,
   flags,
   serverDashboardCacheScope,
@@ -221,6 +225,7 @@ export function DashboardWorkspaceProvider({
 
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
+      initialQuickStartStep: dashboardScopeIsFresh ? initialQuickStartStep : null,
       dashboardAccess,
       flags,
       dashboardCacheScope: liveDashboardCacheScope,
@@ -241,6 +246,8 @@ export function DashboardWorkspaceProvider({
       toggleSidebar,
     }),
     [
+      initialQuickStartStep,
+      dashboardScopeIsFresh,
       dashboardAccess,
       flags,
       liveDashboardCacheScope,
@@ -264,11 +271,7 @@ export function DashboardWorkspaceProvider({
   return (
     <DashboardWorkspaceContext.Provider value={value}>
       <SWRConfig key={swrScopeKey} value={scopedSwrConfig}>
-        {shouldRenderScopeRefreshFallback ? (
-          <FullscreenLoadingIndicator allowDelayedReload />
-        ) : (
-          children
-        )}
+        {shouldRenderScopeRefreshFallback ? scopeRefreshFallback : children}
       </SWRConfig>
     </DashboardWorkspaceContext.Provider>
   );

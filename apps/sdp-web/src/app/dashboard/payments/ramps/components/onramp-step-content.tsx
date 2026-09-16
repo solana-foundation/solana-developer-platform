@@ -1,11 +1,12 @@
 "use client";
 
-import { isMuralSandboxPayinCurrency } from "@sdp/types";
+import { isMuralSandboxPayinCurrency, isTerminalRampTransferStatus } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
+import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
@@ -18,6 +19,7 @@ import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
+import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
@@ -45,6 +47,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     onboarding,
     isAdvancing,
     retryOnboarding,
+    pendingAgreements,
     quote,
     transferStatus,
     quoteSimulationLoading,
@@ -109,7 +112,13 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     // Native fieldset[disabled] freezes every nested input and combobox trigger
     // while the advance POST is in flight, so mid-flight edits can't desync the
     // form from what the provider was sent.
-    return (
+    return pendingAgreements !== null ? (
+      <BvnkAgreementConsent agreements={pendingAgreements} />
+    ) : onboarding !== null &&
+      hasOnboardingLifecycle(onboarding.provider) &&
+      isOnboardingPanelStatus(onboarding) ? (
+      <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
+    ) : (
       <fieldset disabled={isAdvancing} className="min-w-0">
         <RequirementsFields
           provider={fields.provider}
@@ -192,6 +201,11 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   }
 
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "manual_instructions") {
+    // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
+    if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
+      return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
+    }
+
     if (!quote.paymentInstructions) {
       return (
         <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">

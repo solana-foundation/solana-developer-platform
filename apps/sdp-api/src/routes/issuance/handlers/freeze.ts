@@ -4,12 +4,18 @@ import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sd
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
+import { isDryRunRequest } from "@/middleware/dry-run";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import {
+  approvedWalletOperationId,
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
-import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -18,15 +24,43 @@ import {
 } from "../helpers";
 import type { freezeSchema, unfreezeSchema } from "../schemas";
 import { getTokenAccessControlMode, type TokenAccessControlMode } from "./access-control";
-import { resolveAuthoritySigner, resolveCurrentAuthorityForRole } from "./authority-resolution";
-import { buildIdempotencyMetadata } from "./idempotency";
 import {
+  admitIssuanceRuntimeExecution,
+  createResolvedAuthoritySigner,
+  resolveAuthorityWallet,
+  resolveDirectIssuanceReplay,
+  resolveFreezeOperationAuthority,
+} from "./authority-resolution";
+import { buildIdempotencyMetadata } from "./idempotency";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
+import {
+  isSettledIssuanceTransaction,
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
 
 type AppContext = Context<{ Bindings: Env }>;
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
+
+function replayAccountAddress(transaction: TokenTransaction): string {
+  const accountAddress = transaction.params.accountAddress;
+  if (typeof accountAddress !== "string") {
+    throw new AppError("CONFLICT", "Idempotent issuance transaction has no account identity");
+  }
+  return accountAddress;
+}
+
+async function fenceApprovedUnsettledReplay(
+  c: AppContext,
+  transaction: TokenTransaction
+): Promise<void> {
+  if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
+    await beginApprovedWalletOperationEffect(c);
+    throw conflict(
+      "Approved freeze-state execution is incomplete and requires manual reconciliation"
+    );
+  }
+}
 
 async function recoverFreezeAccountReplay(options: {
   auditService: AuditService;
@@ -226,6 +260,44 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
     throw notFound("Token");
   }
 
+  const idempotencyForWallet = (custodyWalletId: string) =>
+    buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+      tokenId,
+      operation: "freeze",
+      mode: "execute",
+      params: { ...body, signingCustodyWalletId: custodyWalletId },
+    });
+  const earlyReplay = await resolveDirectIssuanceReplay({
+    env: c.env,
+    auth,
+    tokenService,
+    tokenId,
+    type: "freeze",
+    idempotencyKey: c.req.header("Idempotency-Key"),
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:admin"],
+    fingerprintForCustodyWalletId: (custodyWalletId) =>
+      idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
+  });
+  if (earlyReplay) {
+    const replay = await recoverFreezeAccountReplay({
+      auditService: new AuditService(getDb(c.env)),
+      tokenService,
+      transaction: earlyReplay,
+      tokenId,
+      tokenAccount: replayAccountAddress(earlyReplay),
+      actorId: auth.id,
+      reason: body.reason,
+    });
+    await fenceApprovedUnsettledReplay(c, replay.transaction);
+    return created(c, {
+      frozenAccount: {
+        ...replay.frozenAccount,
+        signature: replay.transaction.signature ?? undefined,
+      },
+    });
+  }
+
   if (!token.isFreezable) {
     throw badRequest("Token does not support freeze operations");
   }
@@ -236,24 +308,21 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const accessControlMode = getTokenAccessControlMode(token);
-  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-    c.env,
-    tokenService,
-    token,
-    "freeze"
-  );
+  const currentAuthorityRaw = await resolveFreezeOperationAuthority(c.env, token);
 
   if (!currentAuthorityRaw) {
     throw badRequest("Current freeze authority is not available for this token");
   }
 
-  const { signer } = await resolveAuthoritySigner({
+  const { custodyWalletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
-    token,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: currentAuthorityRaw,
+    requiredWalletPermissions: ["tokens:admin"],
   });
+  assertJudgedCustodyWallet(c, custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
   const requestedAddress = assertValidAddress(body.accountAddress, "accountAddress");
   const { tokenAccount } = await resolveFreezeTarget(
     c.env,
@@ -262,19 +331,20 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
     accessControlMode
   );
 
-  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
-    tokenId,
-    operation: "freeze",
-    mode: "execute",
-    params: {
-      ...body,
-      accountAddress: tokenAccount,
-    },
+  const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    tokenService,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId,
     type: "freeze",
     params: {
       accountAddress: tokenAccount,
@@ -296,6 +366,7 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
       actorId: auth.id,
       reason: body.reason,
     });
+    await fenceApprovedUnsettledReplay(c, replay.transaction);
     return created(c, {
       frozenAccount: {
         ...replay.frozenAccount,
@@ -303,6 +374,14 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
       },
     });
   }
+
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    currentAuthority: currentAuthorityRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
 
   // Execute freeze on Solana first (Token ACL-aware via Mosaic)
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
@@ -315,11 +394,13 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
       accountAddress: tokenAccount,
       tokenAccountAddress: tokenAccount,
       reason: body.reason,
+      custodyWalletId,
     },
   });
   let onChainEffectCompleted = false;
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.freezeAccount({
       tokenAccount,
       feePayer: signer.address,
@@ -354,15 +435,6 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
       state: "frozen",
       actorId: auth.id,
       reason: body.reason,
-    });
-
-    emitTokenOperationCompleted(c, {
-      organizationId: orgId,
-      projectId,
-      tokenId,
-      operation: "freeze",
-      signature: result.signature,
-      slot: result.slot.toString(),
     });
 
     const response: FrozenAccountResponse = {
@@ -443,18 +515,50 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     throw notFound("Token");
   }
 
+  const idempotencyForWallet = (custodyWalletId: string) =>
+    buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
+      tokenId,
+      operation: "unfreeze",
+      mode: "execute",
+      params: { ...body, signingCustodyWalletId: custodyWalletId },
+    });
+  const earlyReplay = await resolveDirectIssuanceReplay({
+    env: c.env,
+    auth,
+    tokenService,
+    tokenId,
+    type: "unfreeze",
+    idempotencyKey: c.req.header("Idempotency-Key"),
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:admin"],
+    fingerprintForCustodyWalletId: (custodyWalletId) =>
+      idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
+  });
+  if (earlyReplay) {
+    const replay = await recoverUnfreezeAccountReplay({
+      auditService: new AuditService(getDb(c.env)),
+      tokenService,
+      transaction: earlyReplay,
+      tokenId,
+      tokenAccount: replayAccountAddress(earlyReplay),
+      actorId: auth.id,
+    });
+    await fenceApprovedUnsettledReplay(c, replay.transaction);
+    return success(c, {
+      frozenAccount: {
+        ...replay.frozenAccount,
+        signature: replay.transaction.signature ?? undefined,
+      },
+    });
+  }
+
   if (!token.mintAddress) {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
   }
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const accessControlMode = getTokenAccessControlMode(token);
-  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-    c.env,
-    tokenService,
-    token,
-    "freeze"
-  );
+  const currentAuthorityRaw = await resolveFreezeOperationAuthority(c.env, token);
 
   if (!currentAuthorityRaw) {
     throw badRequest("Current freeze authority is not available for this token");
@@ -468,27 +572,30 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     accessControlMode
   );
 
-  const { signer } = await resolveAuthoritySigner({
+  const { custodyWalletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
-    token,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: currentAuthorityRaw,
+    requiredWalletPermissions: ["tokens:admin"],
   });
+  assertJudgedCustodyWallet(c, custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
-  const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
-    tokenId,
-    operation: "unfreeze",
-    mode: "execute",
-    params: {
-      ...body,
-      accountAddress: tokenAccount,
-    },
+  const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    tokenService,
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
   });
 
   const { transaction: tx, replayed } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
+    custodyWalletId,
     type: "unfreeze",
     params: {
       accountAddress: tokenAccount,
@@ -508,6 +615,7 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
       tokenAccount,
       actorId: auth.id,
     });
+    await fenceApprovedUnsettledReplay(c, replay.transaction);
     return success(c, {
       frozenAccount: {
         ...replay.frozenAccount,
@@ -515,6 +623,14 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
       },
     });
   }
+
+  const signer = await createResolvedAuthoritySigner({
+    env: c.env,
+    auth,
+    custodyWalletId,
+    currentAuthority: currentAuthorityRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
 
   const frozen = await tokenService.isAccountFrozen(tokenId, tokenAccount);
   if (!frozen) {
@@ -531,11 +647,13 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
       tokenId,
       accountAddress: tokenAccount,
       tokenAccountAddress: tokenAccount,
+      custodyWalletId,
     },
   });
   let onChainEffectCompleted = false;
 
   try {
+    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.thawAccount({
       tokenAccount,
       feePayer: signer.address,
@@ -565,15 +683,6 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
       accountAddress: tokenAccount,
       state: "unfrozen",
       actorId: auth.id,
-    });
-
-    emitTokenOperationCompleted(c, {
-      organizationId: orgId,
-      projectId,
-      tokenId,
-      operation: "unfreeze",
-      signature: result.signature,
-      slot: result.slot.toString(),
     });
 
     const response: FrozenAccountResponse = {
@@ -609,3 +718,128 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     throw error;
   }
 };
+
+async function extractFreezeStatePolicyCandidate(options: {
+  c: ValidatedBodyContext<typeof freezeSchema> | ValidatedBodyContext<typeof unfreezeSchema>;
+  operation: "freeze" | "unfreeze";
+  operationType: "issuance_freeze_execute" | "issuance_unfreeze_execute";
+}): Promise<PolicyGateExtraction> {
+  const { c, operation, operationType } = options;
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const body = c.req.valid("json");
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action: operation,
+      accountAddress: body.accountAddress,
+    },
+    idempotencyKey: null,
+  };
+
+  const idempotencyKey = c.req.header("Idempotency-Key");
+  const replay =
+    idempotencyKey && !isDryRunRequest(c)
+      ? await resolveDirectIssuanceReplay({
+          env: c.env,
+          auth,
+          tokenService,
+          tokenId,
+          type: operation,
+          idempotencyKey,
+          requestedCustodyWalletId: body.signingCustodyWalletId,
+          requiredWalletPermissions: ["tokens:admin"],
+          fingerprintForCustodyWalletId: (custodyWalletId) =>
+            buildIdempotencyMetadata(idempotencyKey, {
+              tokenId,
+              operation,
+              mode: "execute",
+              params: { ...body, signingCustodyWalletId: custodyWalletId },
+            }).idempotencyFingerprint,
+        })
+      : null;
+  if (replay) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  if (operation === "freeze" && !token.isFreezable) {
+    throw badRequest("Token does not support freeze operations");
+  }
+  if (!token.mintAddress) {
+    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
+  }
+
+  const currentAuthorityRaw = await resolveFreezeOperationAuthority(c.env, token);
+  if (!currentAuthorityRaw) {
+    throw badRequest("Current freeze authority is not available for this token");
+  }
+
+  const wallet = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    currentAuthority: currentAuthorityRaw,
+    requiredWalletPermissions: ["tokens:admin"],
+  });
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: wallet.custodyWalletId,
+    tokenService,
+  });
+
+  // Policy must judge the token account the operation will actually modify,
+  // not the submitted address: a wallet address resolves to its token account.
+  const { tokenAccount } = await resolveFreezeTarget(
+    c.env,
+    assertValidAddress(body.accountAddress, "accountAddress"),
+    assertValidAddress(token.mintAddress, "mintAddress"),
+    getTokenAccessControlMode(token)
+  );
+
+  return {
+    ...emptyExtraction,
+    rawPayload: { ...emptyExtraction.rawPayload, tokenAccountAddress: tokenAccount },
+    resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId: wallet.custodyWalletId,
+      walletId: wallet.providerWalletId,
+      operationType,
+      amount: null,
+      destination: tokenAccount,
+    }),
+  };
+}
+
+export async function extractFreezePolicyCandidate(
+  c: ValidatedBodyContext<typeof freezeSchema>
+): Promise<PolicyGateExtraction> {
+  return extractFreezeStatePolicyCandidate({
+    c,
+    operation: "freeze",
+    operationType: "issuance_freeze_execute",
+  });
+}
+
+export async function extractUnfreezePolicyCandidate(
+  c: ValidatedBodyContext<typeof unfreezeSchema>
+): Promise<PolicyGateExtraction> {
+  return extractFreezeStatePolicyCandidate({
+    c,
+    operation: "unfreeze",
+    operationType: "issuance_unfreeze_execute",
+  });
+}

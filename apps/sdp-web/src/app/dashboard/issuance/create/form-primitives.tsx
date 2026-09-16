@@ -1,30 +1,23 @@
 "use client";
 
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
-import { fiatCurrencyDisplayName, fiatCurrencyFlagEmoji } from "@sdp/types/payment-rails";
 import { type LucideIcon, Plus, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
+import { fiatCurrencyOptions } from "@/lib/fiat-currency-options";
 import { cn } from "@/lib/utils";
 import { type FieldDescriptor, fieldOptionLabel } from "./asset-details-config";
 import type { CustomFieldRow, DraftState } from "./issuance-draft-wizard.types";
 
 type UpdateDraft = (patch: Partial<DraftState>) => void;
 
-const FIAT_CURRENCY_OPTIONS: readonly ComboboxOption[] = RAMP_FIAT_CURRENCIES.map((code) => {
-  const flag = fiatCurrencyFlagEmoji(code);
-  return {
-    value: code,
-    label: flag === null ? code : `${flag} ${code}`,
-    description: fiatCurrencyDisplayName(code),
-  };
-});
+const FIAT_CURRENCY_OPTIONS = fiatCurrencyOptions(RAMP_FIAT_CURRENCIES);
 
 export function FormCard({
   title,
@@ -77,9 +70,10 @@ export function TextField({
   error?: string;
 }) {
   const t = useTranslations();
+  const fieldId = useId();
   return (
     <div className="grid gap-1.5">
-      <Label>
+      <Label htmlFor={fieldId}>
         {label}
         {required ? (
           <>
@@ -92,6 +86,7 @@ export function TextField({
         ) : null}
       </Label>
       <Input
+        id={fieldId}
         type={type}
         disabled={disabled}
         value={value}
@@ -121,9 +116,7 @@ export function ReadOnlyField({
   return (
     <div className="grid gap-1.5">
       <Label>{label}</Label>
-      <div className="flex h-10 items-center rounded-[14px] border border-border-default bg-fill-subtle px-4 text-sm text-secondary">
-        {value || "—"}
-      </div>
+      <div className="py-2 text-sm text-secondary">{value || "—"}</div>
       {lockReason ? <p className="text-xs text-tertiary">{lockReason}</p> : null}
     </div>
   );

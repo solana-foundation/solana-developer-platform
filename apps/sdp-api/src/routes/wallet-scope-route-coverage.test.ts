@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import custodyRoutes from "@/routes/custody";
+import dvpRoutes from "@/routes/dvp";
 import issuanceRoutes from "@/routes/issuance";
 import paymentsRoutes from "@/routes/payments";
 
@@ -119,29 +120,14 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /tokens",
       "POST /tokens/:tokenId/allowlist",
       "POST /tokens/:tokenId/supply/refresh",
-      // Asset profiles: holder enrollment and the workflow builder. None of these
-      // resolves a signing wallet — they read and write rule/holder rows and flip
-      // execution status. The signing wallet for a rule's on-chain effect is resolved
-      // by the cron engine at execution time (workflows/actions/onchain.ts), which is
-      // also where that effect is bound to the wallet's operation policy, since no
-      // request is in scope by then.
       // The confidential sub-surface's devnet gate: middleware only, it resolves
       // no wallet. The operations it guards are listed as wallet-scoped below.
       "ALL /tokens/:tokenId/confidential",
       "ALL /tokens/:tokenId/confidential/*",
-      "ALL /tokens/:tokenId/workflows",
-      "ALL /tokens/:tokenId/workflows/*",
-      "DELETE /tokens/:tokenId/workflows/:workflowId",
+      // Asset profiles: holder enrollment reads and writes holder rows only and never
+      // resolves a signing wallet.
       "GET /tokens/:tokenId/holders",
-      "GET /tokens/:tokenId/workflows",
-      "GET /tokens/:tokenId/workflows/catalog",
-      "GET /tokens/:tokenId/workflows/executions",
-      "PATCH /tokens/:tokenId/workflows/:workflowId",
       "POST /tokens/:tokenId/holders",
-      "POST /tokens/:tokenId/workflows",
-      "POST /tokens/:tokenId/workflows/executions/:executionId/approve",
-      "POST /tokens/:tokenId/workflows/executions/:executionId/reject",
-      "POST /tokens/:tokenId/workflows/executions/:executionId/retry",
     ]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
@@ -174,6 +160,33 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /tokens/:tokenId/seize/prepare",
       "POST /tokens/:tokenId/unfreeze",
       "POST /tokens/:tokenId/unpause",
+    ]);
+  });
+
+  // Every DvP route that touches a TRADE is wallet-scoped: every route resolves
+  // custody wallets against the caller, and both the writes and the reads are
+  // bound to them. Behaviour is covered in dvp.test.ts; this list exists so a
+  // new route cannot be added without someone deciding which it is.
+  it("tracks every wallet-scoped DvP route", () => {
+    // Mint inspection is the exception, and deliberately so: it reads public
+    // chain state about an address the caller already has, to answer the create
+    // form BEFORE a wallet is chosen. Scoping it to a wallet would be scoping a
+    // question that has nothing to do with one.
+    const nonWalletScopedRoutes = new Set(["GET /mints/:mint"]);
+
+    // Funding is one route for every funder now: the wallet scoping is the
+    // custody lookup itself — the caller's wallet must hold the named side's
+    // party address. Reclaim resolves its side through the same lookup. `inbound` deliberately takes no party parameter so it
+    // cannot be used to enumerate anyone else's.
+    expect(extractRoutes(dvpRoutes).filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
+      "GET /trades",
+      "GET /trades/:tradeId",
+      "GET /trades/inbound",
+      "POST /trades",
+      "POST /trades/:tradeId/cancel",
+      "POST /trades/:tradeId/fund",
+      "POST /trades/:tradeId/reclaim",
+      "POST /trades/:tradeId/settle",
     ]);
   });
 });

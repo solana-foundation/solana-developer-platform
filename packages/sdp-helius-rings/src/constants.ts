@@ -4,35 +4,21 @@
  */
 
 /** Operation state, ordered along the happy path (draft → completed). `failed` is terminal from any non-terminal state; `voided` is terminal from `failed` only. */
-export const OPERATION_STATES = [
-  "draft",
-  "preparing",
-  "approval_required",
-  "proving",
-  "ready_to_sign",
-  "submitted",
-  "indexing",
-  "completed",
-  "failed",
-  "voided",
-] as const;
-
-export const OP_TYPES = [
-  "shield",
-  "transfer_registered",
-  "transfer_anonymous",
-  "withdraw",
-  "merge",
-  "timelock_create",
-  "timelock_settle",
-  "zone_create",
-] as const;
+export {
+  HELIUS_RINGS_OPERATION_STATUSES as OPERATION_STATES,
+  HELIUS_RINGS_OPERATION_TYPES as OP_TYPES,
+} from "@sdp/types";
 
 export const FAILURE_CODES = [
   "policy_denied",
   "approval_rejected",
   "proof_failed",
   "signer_failed",
+  // Distinct from signer_failed: the signer did not fail, it was never asked.
+  // The wallet's custody provider cannot meet what Rings needs from a signature,
+  // so no retry and no upstream recovery changes the outcome — the wallet has to
+  // move providers.
+  "provider_unsupported",
   "submit_failed",
   "indexing_timeout",
   "gateway_unavailable",

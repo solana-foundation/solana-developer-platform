@@ -1,5 +1,6 @@
 "use client";
 
+import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -8,7 +9,7 @@ import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-ta
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { LanguagePicker } from "@/components/language-picker";
-import { NotificationBell } from "@/components/notification-bell";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { cn } from "@/lib/utils";
@@ -23,27 +24,26 @@ type DashboardPageConfig = {
   titlePosition?: "left" | "center";
   headerTabs?: DashboardHeaderTabsConfig;
   routeTabs?: DashboardRouteTabsConfig;
-  headerVariant?: "default" | "markets";
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
   hideTitle?: boolean;
+  hideTitleOnMobile?: boolean;
   backAction?: {
     href: string;
     label: string;
   };
 };
 
+const TRAILING_CONTENT = <LanguagePicker />;
+
 type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
-  hideTitle?: boolean;
+  titleVisibility: "visible" | "desktop-only" | "screen-reader-only";
   title: string;
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
-  alignTitleWithTabs?: boolean;
-  // Notifications ship with the asset-profiles feature (its only producer today).
-  showNotifications?: boolean;
 };
 
 export function HeaderBackAction({
@@ -104,10 +104,12 @@ export function CenteredDashboardTopBar({
   leadingContent,
   title,
   trailingContent,
+  hideTitleOnMobile = false,
 }: {
   leadingContent: ReactNode;
   title: string;
   trailingContent: ReactNode;
+  hideTitleOnMobile?: boolean;
 }) {
   return (
     <div
@@ -115,7 +117,12 @@ export function CenteredDashboardTopBar({
       data-dashboard-centered-topbar
     >
       <div className="flex min-w-0 items-center gap-3">{leadingContent}</div>
-      <div className="col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+      <div
+        className={cn(
+          "col-span-2 row-start-2 flex min-w-0 items-center justify-center sm:col-span-1 sm:col-start-2 sm:row-start-1",
+          hideTitleOnMobile && "max-xl:sr-only"
+        )}
+      >
         <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
           {title}
         </h1>
@@ -171,27 +178,21 @@ export function StandardDashboardTopBar({
 export function DashboardTopBar({
   isMobileSidebarOpen,
   setMobileSidebarOpen,
-  hideTitle,
+  titleVisibility,
   title,
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
-  alignTitleWithTabs = hasHeaderTabs,
-  showNotifications = false,
 }: DashboardTopBarProps) {
   const centersPageTitle =
-    !hideTitle && (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
-  const trailingContent = (
-    <>
-      <LanguagePicker />
-      {showNotifications ? <NotificationBell /> : null}
-    </>
-  );
+    titleVisibility !== "screen-reader-only" &&
+    (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
 
   if (centersPageTitle) {
     return (
       <CenteredDashboardTopBar
         title={title}
+        hideTitleOnMobile={titleVisibility === "desktop-only"}
         leadingContent={
           <>
             <SidebarToggle
@@ -201,16 +202,16 @@ export function DashboardTopBar({
             {topBarLeadingContent}
           </>
         }
-        trailingContent={trailingContent}
+        trailingContent={TRAILING_CONTENT}
       />
     );
   }
 
   return (
     <StandardDashboardTopBar
-      hideTitle={hideTitle}
+      hideTitle={titleVisibility === "screen-reader-only"}
       title={title}
-      alignTitleWithTabs={alignTitleWithTabs}
+      alignTitleWithTabs={hasHeaderTabs}
       leadingContent={
         <>
           <SidebarToggle
@@ -220,7 +221,7 @@ export function DashboardTopBar({
           {topBarLeadingContent}
         </>
       }
-      trailingContent={trailingContent}
+      trailingContent={TRAILING_CONTENT}
     />
   );
 }
@@ -407,27 +408,41 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
+  // Create is a detail/action route, so it keeps a centred title and a way back
+  // to the list — the only orientation such a route has.
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`) {
+    return {
+      title: t("DashboardMarkets.dvp.createTitle"),
+      titlePosition: "center",
+      backAction: {
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+        label: t("DashboardMarkets.dvp.navLabel"),
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
+  // A trade detail page keeps its own centred title beside a back action: it is
+  // the only orientation a detail route has, unlike a top-level list where the
+  // title would just repeat the active sidebar item.
+  if (new RegExp(`^${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/[^/]+$`).test(pathname)) {
+    return {
+      title: t("DashboardMarkets.dvp.detailTitle"),
+      titlePosition: "center",
+      backAction: {
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
+        label: t("DashboardMarkets.dvp.navLabel"),
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
   if (
     pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp
   ) {
     return {
       title: t("Shared.dashboardShell.markets"),
-      titlePosition: "left",
-      headerVariant: "markets",
-      routeTabs: {
-        ariaLabel: t("Shared.dashboardShell.markets"),
-        tabs: [
-          {
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
-            label: t("Shared.dashboardShell.treasurySolutions"),
-          },
-          {
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
-            label: t("Shared.dashboardShell.earnProgram"),
-          },
-        ],
-      },
+      titlePosition: "center",
       contentWidthClass: "max-w-none",
     };
   }
@@ -561,12 +576,15 @@ function getIssuanceRoutePageConfig(
   // on → the create flow's centered title + capped column; off → the legacy
   // left-aligned, full-width layout, untouched.
   if (assetProfilesEnabled) {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.assetManagement"),
-      backHref: "/dashboard/issuance",
-      backLabel: t("Shared.dashboardShell.backToOverview"),
-      contentWidthClass: "max-w-7xl",
-    });
+    return {
+      ...actionPageConfig({
+        title: t("Shared.dashboardShell.assetManagement"),
+        backHref: "/dashboard/issuance",
+        backLabel: t("Shared.dashboardShell.backToOverview"),
+        contentWidthClass: "max-w-7xl",
+      }),
+      hideTitleOnMobile: true,
+    };
   }
   return {
     title: t("Shared.dashboardShell.issuance"),
@@ -734,6 +752,16 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/payments/transactions") {
     return {
       title: t("Shared.dashboardShell.transactions"),
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("DashboardPayments.transactions.all") },
+          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
+            id: module,
+            label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
+          })),
+        ],
+        hideOnMobile: false,
+      },
       contentWidthClass: "max-w-none",
     };
   }
@@ -793,7 +821,11 @@ export function getDashboardPageConfig(
   if (integrationsConfig) {
     return integrationsConfig;
   }
-  if (pathname.startsWith("/dashboard/settings")) {
+  if (pathname === "/dashboard/helius-rings") {
+    return { title: t("Shared.dashboardShell.heliusRings") };
+  }
+  // Members only redirects into Settings, so its loading frame carries the Settings title.
+  if (pathname.startsWith("/dashboard/settings") || pathname === "/dashboard/members") {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
     // the members table and the RPC form are label/value rows, and letting them span

@@ -71,6 +71,8 @@ function runtimeDatabaseUrl(adminUrl: string): string {
 const providedEnv: Env = {
   ENVIRONMENT: "development",
   API_VERSION: "v1",
+  // Unit requests supply deterministic proxy headers rather than a socket.
+  TRUST_PROXY_HEADERS: "true",
   DATABASE_URL: runtimeDatabaseUrl(adminDatabaseUrl),
   REDIS_URL: workerRedisUrl(baseRedisUrl, workerId),
   API_KEY_PEPPER: "test-pepper-for-unit-tests",
@@ -82,6 +84,9 @@ const providedEnv: Env = {
   SOLANA_RPC_URL: "https://solana-rpc.mock.invalid",
   FEE_PAYMENT_PROVIDER: "kora",
   KORA_RPC_URL: "https://kora-rpc.mock.invalid",
+  // The minted metadata origin comes only from this trusted config value —
+  // deploys that need the SDP-hosted metadata fallback fail closed without it.
+  PUBLIC_API_ORIGIN: "http://localhost",
 };
 
 export const env = {

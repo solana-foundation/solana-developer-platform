@@ -8,8 +8,13 @@ import {
   MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  PAYMENT_RECURRING_PAYMENT_STATUSES,
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
+  PAYMENT_SUBSCRIPTION_PLAN_STATUSES,
+  PAYMENT_SUBSCRIPTION_STATUSES,
+  PAYMENT_TRANSFER_STATUSES,
+  PAYMENT_TRANSFER_TYPES,
   type PolicyRule,
-  type PrivateTransferRequest,
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
   WALLET_OPERATION_FAMILIES,
@@ -270,36 +275,15 @@ export const recurringPaymentIdParamsSchema = z.object({
   id: z.string().min(1),
 });
 
-export const paymentSubscriptionPlanStatusSchema = z.enum(["draft", "active", "archived"]);
+export const paymentSubscriptionPlanStatusSchema = z.enum(PAYMENT_SUBSCRIPTION_PLAN_STATUSES);
 
-export const paymentSubscriptionStatusSchema = z.enum([
-  "pending_authorization",
-  "active",
-  "paused",
-  "canceling",
-  "canceled",
-  "expired",
-]);
+export const paymentSubscriptionStatusSchema = z.enum(PAYMENT_SUBSCRIPTION_STATUSES);
 
-export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "failed",
-  "skipped",
-]);
+export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum(
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES
+);
 
-export const paymentRecurringPaymentStatusSchema = z.enum([
-  "pending_activation",
-  "activating",
-  "active",
-  "updating",
-  "canceling",
-  "resuming",
-  "paused",
-  "canceled",
-  "expired",
-]);
+export const paymentRecurringPaymentStatusSchema = z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES);
 
 export const createRecurringPaymentSchema = z.strictObject({
   sourceCustodyWalletId: z.string().min(1),
@@ -454,35 +438,6 @@ export const listSubscriptionCollectionAttemptsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-const magicBlockPrivateTransferOptionsSchema = z
-  .object({
-    validator: z.string().min(32).max(44).optional(),
-    initIfMissing: z.boolean().optional(),
-    initAtasIfMissing: z.boolean().optional(),
-    initVaultIfMissing: z.boolean().optional(),
-    minDelayMs: z
-      .string()
-      .regex(/^\d+$/, { message: "minDelayMs must be an integer string" })
-      .optional(),
-    maxDelayMs: z
-      .string()
-      .regex(/^\d+$/, { message: "maxDelayMs must be an integer string" })
-      .optional(),
-    clientRefId: z
-      .string()
-      .regex(/^\d+$/, { message: "clientRefId must be an integer string" })
-      .optional(),
-    split: z.number().int().min(1).max(15).optional(),
-    gasless: z.boolean().optional(),
-    legacy: z.boolean().optional(),
-  })
-  .strict();
-
-export const privateTransferSchema: z.ZodType<PrivateTransferRequest> = z.object({
-  provider: z.literal("magicblock"),
-  magicBlock: magicBlockPrivateTransferOptionsSchema,
-});
-
 const rampProviderSchema = z.enum(RAMP_PROVIDERS);
 export const rampDirectionSchema = z.enum(["onramp", "offramp"]);
 export const onrampCryptoRailSchema = z.enum(ONRAMP_CRYPTO_RAILS);
@@ -516,23 +471,12 @@ export const createTransferSchema = z.strictObject({
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),
-  privateTransfer: privateTransferSchema.optional(),
 });
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);
 
-export const transferStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "finalized",
-  "failed",
-  "awaiting_payment",
-  "settling",
-  "completed",
-  "canceled",
-  "expired",
-]);
+export const transferStatusSchema = z.enum(PAYMENT_TRANSFER_STATUSES);
+export const transferTypeSchema = z.enum(PAYMENT_TRANSFER_TYPES);
 
 const transferFilterTimestampSchema = z
   .string()
@@ -560,11 +504,7 @@ export const listTransfersQuerySchema = z.strictObject({
   type: z
     .string()
     .transform((value) => value.split(","))
-    .pipe(
-      z
-        .array(z.enum(["transfer", "transfer_confidential", "transfer_batch", "onramp", "offramp"]))
-        .min(1)
-    )
+    .pipe(z.array(transferTypeSchema).min(1))
     .optional(),
   counterpartyId: z.string().min(1).optional(),
   provider: rampProviderSchema.optional(),

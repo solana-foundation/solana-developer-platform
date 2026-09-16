@@ -13,8 +13,10 @@ import {
 } from "@sdp/types";
 import type { EarnStrategyRow } from "@/db/repositories";
 import { notFound } from "@/lib/errors";
+import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
-import { type AppContext, getEarnRepository, resolveSdpEnvironment } from "../context";
+import type { Env } from "@/types/env";
+import { type AppContext, getEarnRepository, resolveKeylessEarnEnvironment } from "../context";
 import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "../schemas";
 import { CURATED_VAULTS, HIDDEN_STRATEGY_TERMS, HIDDEN_VAULTS } from "./curation";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
@@ -60,10 +62,20 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
  * stored: the catalogue is platform-global and the same row answers differently
  * to a sandbox and a production caller. A mainnet-only provider's row is listed
  * in both and fundable in one — see `hostCluster` in @sdp/types.
+ *
+ * `feeSponsored` is derived the same way, from the deployment's sponsorship
+ * gate: the flag plus the cluster allowlist `resolveVaultSponsorship` reads at
+ * execution, answered for the row's own cluster. A row that is not fundable is
+ * never sponsored (there is no movement to sponsor), so the two agree.
  */
-export function mapToEarnStrategy(row: EarnStrategyRow, environment: SdpEnvironment): EarnStrategy {
+export function mapToEarnStrategy(
+  row: EarnStrategyRow,
+  environment: SdpEnvironment,
+  env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED">
+): EarnStrategy {
   const depositSlippage = earnDepositSlippageFloor(row.provider);
   const withdrawalSlippage = earnWithdrawSlippageFloor(row.provider);
+  const fundable = isClusterFundableInEnvironment(row.host_cluster, environment);
   return {
     id: row.id,
     provider: row.provider,
@@ -86,7 +98,8 @@ export function mapToEarnStrategy(row: EarnStrategyRow, environment: SdpEnvironm
       ? { quoteRequired: true, defaultToleranceBps: withdrawalSlippage.defaultToleranceBps }
       : null,
     hostCluster: row.host_cluster,
-    fundable: isClusterFundableInEnvironment(row.host_cluster, environment),
+    fundable,
+    feeSponsored: fundable && isEarnVaultSponsorshipEnabled(env, row.host_cluster),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -106,7 +119,7 @@ export async function requireEarnStrategy(
 
   if (
     !strategy ||
-    strategy.environment !== resolveSdpEnvironment(c) ||
+    strategy.environment !== resolveKeylessEarnEnvironment(c) ||
     isHiddenStrategy(strategy)
   ) {
     throw notFound("Earn strategy");
@@ -119,7 +132,7 @@ export const listEarnStrategies = async (c: AppContext) => {
   const query = parseQuery(c, listEarnStrategiesQuerySchema);
 
   const repo = getEarnRepository(c);
-  const environment = resolveSdpEnvironment(c);
+  const environment = resolveKeylessEarnEnvironment(c);
   // The shelf a caller can act on is the default; `?cluster=` is the explicit
   // opt-in that browses another cluster's sub-shelf — in practice a sandbox
   // reader reviewing the mirrored mainnet catalogue (PRO-1742). Opting in
@@ -144,7 +157,7 @@ export const listEarnStrategies = async (c: AppContext) => {
   });
 
   const response: ListEarnStrategiesResponse = listResponse(query, total, {
-    strategies: rows.map((row) => mapToEarnStrategy(row, environment)),
+    strategies: rows.map((row) => mapToEarnStrategy(row, environment, c.env)),
   });
 
   return success(c, response);
@@ -156,7 +169,7 @@ export const getEarnStrategy = async (c: AppContext) => {
   const strategy = await requireEarnStrategy(c, strategyId);
 
   const response: EarnStrategyResponse = {
-    strategy: mapToEarnStrategy(strategy, resolveSdpEnvironment(c)),
+    strategy: mapToEarnStrategy(strategy, resolveKeylessEarnEnvironment(c), c.env),
   };
   return success(c, response);
 };

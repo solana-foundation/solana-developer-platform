@@ -4,9 +4,9 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
       "wallets": 19,
-      "payments": 38,
+      "payments": 39,
       "counterparties": 13,
-      "issuance": 54
+      "issuance": 45
     }
   },
   "modules": {
@@ -1630,6 +1630,7 @@
               "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
+              "kind": "pay",
               "direction": "outbound",
               "status": "confirmed",
               "signature": "sig_example",
@@ -1672,16 +1673,6 @@
               },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            },
-            "privateTransfer": {
-              "provider": "magicblock",
-              "magicBlock": {
-                "kind": "transfer",
-                "version": "v0",
-                "instructionCount": 4,
-                "requiredSigners": ["So11111111111111111111111111111111111111112"],
-                "validator": "So11111111111111111111111111111111111111112"
-              }
             }
           },
           "meta": {
@@ -1923,6 +1914,7 @@
               "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
+              "kind": "pay",
               "direction": "outbound",
               "status": "confirmed",
               "signature": "sig_example",
@@ -2001,6 +1993,7 @@
               "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
+              "kind": "pay",
               "direction": "outbound",
               "status": "confirmed",
               "signature": "sig_example",
@@ -2043,16 +2036,6 @@
               },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            },
-            "privateTransfer": {
-              "provider": "magicblock",
-              "magicBlock": {
-                "kind": "transfer",
-                "version": "v0",
-                "instructionCount": 4,
-                "requiredSigners": ["So11111111111111111111111111111111111111112"],
-                "validator": "So11111111111111111111111111111111111111112"
-              }
             }
           },
           "meta": {
@@ -2158,6 +2141,7 @@
                 "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
+                "kind": "pay",
                 "direction": "outbound",
                 "status": "confirmed",
                 "signature": "sig_example",
@@ -2375,6 +2359,7 @@
                 "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
+                "kind": "pay",
                 "direction": "outbound",
                 "status": "confirmed",
                 "signature": "sig_example",
@@ -2894,7 +2879,11 @@
               "status": "pending",
               "signature": "example",
               "error": "example",
-              "metadata": {},
+              "metadata": {
+                "recurringPaymentId": "recurringpayment_example",
+                "initiatedByKeyId": "initiatedbykey_example",
+                "source": "manual"
+              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
             },
@@ -2905,6 +2894,7 @@
               "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
+              "kind": "pay",
               "direction": "outbound",
               "status": "confirmed",
               "signature": "sig_example",
@@ -3703,7 +3693,11 @@
               "status": "pending",
               "signature": "example",
               "error": "example",
-              "metadata": {},
+              "metadata": {
+                "recurringPaymentId": "recurringpayment_example",
+                "initiatedByKeyId": "initiatedbykey_example",
+                "source": "manual"
+              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
             }
@@ -3835,7 +3829,11 @@
                 "status": "pending",
                 "signature": "example",
                 "error": "example",
-                "metadata": {},
+                "metadata": {
+                  "recurringPaymentId": "recurringpayment_example",
+                  "initiatedByKeyId": "initiatedbykey_example",
+                  "source": "manual"
+                },
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               }
@@ -5379,6 +5377,143 @@
           "meta": {
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "list-unified-transactions",
+        "operationId": "listUnifiedTransactions",
+        "title": "List transactions",
+        "method": "GET",
+        "path": "/v1/transactions?module={module}&kind={kind}&status={status}&custodyWalletId={custodyWalletId}&counterpartyId={counterpartyId}&token={token}&search={search}&createdAtFrom={createdAtFrom}&createdAtTo={createdAtTo}&cursor={cursor}&limit={limit}",
+        "pathFields": [
+          {
+            "key": "module",
+            "label": "module",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "payments",
+                "value": "payments"
+              },
+              {
+                "label": "earn",
+                "value": "earn"
+              },
+              {
+                "label": "dvp",
+                "value": "dvp"
+              },
+              {
+                "label": "private_channels",
+                "value": "private_channels"
+              },
+              {
+                "label": "issuance",
+                "value": "issuance"
+              },
+              {
+                "label": "rings",
+                "value": "rings"
+              }
+            ]
+          },
+          {
+            "key": "kind",
+            "label": "kind",
+            "required": false
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "succeeded",
+                "value": "succeeded"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              },
+              {
+                "label": "canceled",
+                "value": "canceled"
+              }
+            ]
+          },
+          {
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "required": false
+          },
+          {
+            "key": "counterpartyId",
+            "label": "counterpartyId",
+            "required": false
+          },
+          {
+            "key": "token",
+            "label": "token",
+            "required": false
+          },
+          {
+            "key": "search",
+            "label": "search",
+            "required": false
+          },
+          {
+            "key": "createdAtFrom",
+            "label": "createdAtFrom",
+            "required": false
+          },
+          {
+            "key": "createdAtTo",
+            "label": "createdAtTo",
+            "required": false
+          },
+          {
+            "key": "cursor",
+            "label": "cursor",
+            "required": false
+          },
+          {
+            "key": "limit",
+            "label": "limit",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "transactions": [
+              {
+                "id": "_example",
+                "moduleId": "module_example",
+                "status": "pending",
+                "organizationId": "organization_example",
+                "projectId": "project_example",
+                "custodyWalletId": "custodywallet_example",
+                "custodyWalletLabel": "example",
+                "token": "example",
+                "amount": "example",
+                "counterpartyId": "counterparty_example",
+                "signature": "example",
+                "createdAt": "example",
+                "module": "payments",
+                "kind": "pay",
+                "moduleStatus": "pending"
+              }
+            ],
+            "nextCursor": "example"
           }
         }
       }
@@ -7788,7 +7923,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true\n}",
+            "defaultValue": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true\n}",
             "required": true
           }
         ],
@@ -7798,7 +7933,7 @@
               "id": "tok_example",
               "projectId": "prj_example",
               "organizationId": "org_example",
-              "signingWalletId": "privy_wallet_123",
+              "signingCustodyWalletId": "cwlt_example",
               "mintAddress": "So11111111111111111111111111111111111111112",
               "mintAuthority": "So11111111111111111111111111111111111111112",
               "freezeAuthority": "So11111111111111111111111111111111111111112",
@@ -7854,7 +7989,9 @@
               "createdBy": "key_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            }
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8005,7 +8142,7 @@
               "id": "tok_example",
               "projectId": "prj_example",
               "organizationId": "org_example",
-              "signingWalletId": "privy_wallet_123",
+              "signingCustodyWalletId": "cwlt_example",
               "mintAddress": "So11111111111111111111111111111111111111112",
               "mintAuthority": "So11111111111111111111111111111111111111112",
               "freezeAuthority": "So11111111111111111111111111111111111111112",
@@ -8106,12 +8243,19 @@
         "operationId": "listIssuanceTransactions",
         "title": "List issuance transactions",
         "method": "GET",
-        "path": "/v1/issuance/transactions?walletId={walletId}&type={type}&status={status}&page={page}&pageSize={pageSize}",
+        "path": "/v1/issuance/transactions?custodyWalletId={custodyWalletId}&walletId={walletId}&type={type}&status={status}&page={page}&pageSize={pageSize}",
         "pathFields": [
+          {
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "description": "Filter to transactions where this exact SDP wallet's address participated. This is participant history, not a signer-only filter.",
+            "defaultValue": "cwlt_example",
+            "required": false
+          },
           {
             "key": "walletId",
             "label": "walletId",
-            "description": "Filter to transactions associated with a wallet. Selected-wallet API keys must have wallet-level tokens:read for the requested wallet.",
+            "description": "Legacy Provider wallet ID filter. Cannot be combined with custodyWalletId.",
             "defaultValue": "privy_wallet_123",
             "required": false
           },
@@ -8215,7 +8359,7 @@
         "operationId": "getToken",
         "title": "Get token",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}",
+        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeMetadataAuthority={includeMetadataAuthority}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8223,6 +8367,42 @@
             "description": "Token identifier.",
             "defaultValue": "tok_example",
             "required": true
+          },
+          {
+            "key": "includeAllowlistAuthority",
+            "label": "includeAllowlistAuthority",
+            "description": "Opt in to a read-only RPC lookup of the current on-chain list authority for wallet selection. Ordinary token reads do not perform this lookup.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
+            "key": "includeMetadataAuthority",
+            "label": "includeMetadataAuthority",
+            "description": "Opt in to a read-only lookup of the current metadata authority for wallet selection. Tokens with a mint use live chain state; tokens without a mint use the stored metadata authority, falling back to stored mint authority, without RPC. Ordinary token reads do not perform this lookup.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
           }
         ],
         "bodyFields": [],
@@ -8232,7 +8412,7 @@
               "id": "tok_example",
               "projectId": "prj_example",
               "organizationId": "org_example",
-              "signingWalletId": "privy_wallet_123",
+              "signingCustodyWalletId": "cwlt_example",
               "mintAddress": "So11111111111111111111111111111111111111112",
               "mintAuthority": "So11111111111111111111111111111111111111112",
               "freezeAuthority": "So11111111111111111111111111111111111111112",
@@ -8288,7 +8468,9 @@
               "createdBy": "key_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            }
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8318,7 +8500,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"status\": \"active\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
             "required": true
           }
         ],
@@ -8328,7 +8510,7 @@
               "id": "tok_example",
               "projectId": "prj_example",
               "organizationId": "org_example",
-              "signingWalletId": "privy_wallet_123",
+              "signingCustodyWalletId": "cwlt_example",
               "mintAddress": "So11111111111111111111111111111111111111112",
               "mintAuthority": "So11111111111111111111111111111111111111112",
               "freezeAuthority": "So11111111111111111111111111111111111111112",
@@ -8384,7 +8566,9 @@
               "createdBy": "key_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            }
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8435,7 +8619,7 @@
               "id": "tok_example",
               "projectId": "prj_example",
               "organizationId": "org_example",
-              "signingWalletId": "privy_wallet_123",
+              "signingCustodyWalletId": "cwlt_example",
               "mintAddress": "So11111111111111111111111111111111111111112",
               "mintAuthority": "So11111111111111111111111111111111111111112",
               "freezeAuthority": "So11111111111111111111111111111111111111112",
@@ -8491,7 +8675,9 @@
               "createdBy": "key_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            }
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8746,14 +8932,24 @@
             "required": true
           }
         ],
-        "bodyFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authorityCustodyWalletIds\": {\n    \"metadata\": \"cwlt_metadata\",\n    \"freeze\": \"cwlt_freeze\",\n    \"permanentDelegate\": \"cwlt_recovery\"\n  },\n  \"feePayment\": \"sponsored\"\n}",
+            "required": false
+          }
+        ],
         "expectedResponse": {
           "data": {
             "token": {
               "id": "tok_example",
               "projectId": "prj_example",
               "organizationId": "org_example",
-              "signingWalletId": "privy_wallet_123",
+              "signingCustodyWalletId": "cwlt_example",
               "mintAddress": "So11111111111111111111111111111111111111112",
               "mintAuthority": "So11111111111111111111111111111111111111112",
               "freezeAuthority": "So11111111111111111111111111111111111111112",
@@ -8809,7 +9005,9 @@
               "createdBy": "key_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            }
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8891,7 +9089,7 @@
               "id": "tok_example",
               "projectId": "prj_example",
               "organizationId": "org_example",
-              "signingWalletId": "privy_wallet_123",
+              "signingCustodyWalletId": "cwlt_example",
               "mintAddress": "So11111111111111111111111111111111111111112",
               "mintAuthority": "So11111111111111111111111111111111111111112",
               "freezeAuthority": "So11111111111111111111111111111111111111112",
@@ -8947,7 +9145,9 @@
               "createdBy": "key_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            }
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -9014,7 +9214,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9080,7 +9280,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9135,7 +9335,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9200,7 +9400,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9254,7 +9454,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9319,7 +9519,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9373,7 +9573,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9438,7 +9638,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9492,7 +9692,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9557,7 +9757,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9611,7 +9811,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9665,7 +9865,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -9719,7 +9919,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"reason\": \"Compliance hold\",\n  \"signingWalletId\": \"privy_abcd1234\"\n}",
+            "defaultValue": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"reason\": \"Compliance hold\",\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
             "required": true
           }
         ],
@@ -9765,7 +9965,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\"\n}",
             "required": true
           }
         ],
@@ -9819,7 +10019,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "defaultValue": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\"\n}",
             "required": true
           }
         ],
@@ -9873,7 +10073,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"amount\": \"100\"\n}",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"amount\": \"100\"\n}",
             "required": true
           }
         ],
@@ -9927,7 +10127,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\"\n}",
             "required": true
           }
         ],
@@ -9981,7 +10181,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"amount\": \"25\",\n  \"destination\": \"So11111111111111111111111111111111111111112\"\n}",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"amount\": \"25\",\n  \"destination\": \"So11111111111111111111111111111111111111112\"\n}",
             "required": true
           }
         ],
@@ -10035,7 +10235,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"amount\": \"100\"\n}",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"amount\": \"100\"\n}",
             "required": true
           }
         ],
@@ -10089,7 +10289,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "defaultValue": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\"\n}",
             "required": true
           }
         ],
@@ -10126,7 +10326,7 @@
         "operationId": "getConfidentialBalance",
         "title": "Get confidential balance",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/confidential/balance?walletAddress={walletAddress}&signingWalletId={signingWalletId}&decryptPendingBalance={decryptPendingBalance}",
+        "path": "/v1/issuance/tokens/{tokenId}/confidential/balance?walletAddress={walletAddress}&signingCustodyWalletId={signingCustodyWalletId}&decryptPendingBalance={decryptPendingBalance}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -10143,8 +10343,8 @@
             "required": true
           },
           {
-            "key": "signingWalletId",
-            "label": "signingWalletId",
+            "key": "signingCustodyWalletId",
+            "label": "signingCustodyWalletId",
             "description": "Optional custody wallet id for the holder.",
             "defaultValue": "privy_wallet_123",
             "required": false
@@ -10207,7 +10407,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_abcd1234\"\n}",
+            "defaultValue": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
             "required": true
           }
         ],
@@ -10376,7 +10576,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"address\": \"So11111111111111111111111111111111111111112\",\n  \"label\": \"Treasury\"\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"address\": \"So11111111111111111111111111111111111111112\",\n  \"label\": \"Treasury\"\n}",
             "required": true
           }
         ],
@@ -10431,7 +10631,7 @@
         "operationId": "removeTokenAllowlistEntry",
         "title": "Remove token allowlist entry",
         "method": "DELETE",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}",
+        "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -10446,381 +10646,17 @@
             "description": "Allowlist entry identifier.",
             "defaultValue": "al_example",
             "required": true
+          },
+          {
+            "key": "signingCustodyWalletId",
+            "label": "signingCustodyWalletId",
+            "description": "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.",
+            "defaultValue": "cwlt_example",
+            "required": false
           }
         ],
         "bodyFields": [],
         "expectedResponse": {}
-      },
-      {
-        "id": "list-workflow-catalog",
-        "operationId": "listWorkflowCatalog",
-        "title": "List the workflow catalog for an asset",
-        "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/workflows/catalog",
-        "pathFields": [
-          {
-            "key": "tokenId",
-            "label": "{tokenId}",
-            "description": "Token identifier.",
-            "defaultValue": "tok_example",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "triggers": [{}],
-            "actions": [{}]
-          },
-          "meta": {}
-        }
-      },
-      {
-        "id": "list-workflows",
-        "operationId": "listWorkflows",
-        "title": "List workflow rules",
-        "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/workflows",
-        "pathFields": [
-          {
-            "key": "tokenId",
-            "label": "{tokenId}",
-            "description": "Token identifier.",
-            "defaultValue": "tok_example",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "workflows": [
-              {
-                "id": "_example",
-                "token_id": "token__example",
-                "trigger_type": "example",
-                "action_type": "example",
-                "enabled": false,
-                "review_mode": "auto",
-                "created_at": "example"
-              }
-            ]
-          },
-          "meta": {}
-        }
-      },
-      {
-        "id": "create-workflow",
-        "operationId": "createWorkflow",
-        "title": "Create a workflow rule",
-        "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/workflows",
-        "pathFields": [
-          {
-            "key": "tokenId",
-            "label": "{tokenId}",
-            "description": "Token identifier.",
-            "defaultValue": "tok_example",
-            "required": true
-          }
-        ],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"triggerType\": \"kyc_approved\",\n  \"actionType\": \"allowlist_add\",\n  \"condition\": {\n    \"all\": [\n      {\n        \"field\": \"example\",\n        \"op\": \"eq\",\n        \"value\": \"example\"\n      }\n    ]\n  },\n  \"actionParams\": {},\n  \"reviewMode\": \"auto\",\n  \"retryPolicy\": {\n    \"maxAttempts\": 1,\n    \"retryAfterMinutes\": 1\n  }\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "data": {
-            "workflow": {
-              "id": "_example",
-              "token_id": "token__example",
-              "trigger_type": "example",
-              "action_type": "example",
-              "enabled": false,
-              "review_mode": "auto",
-              "created_at": "example"
-            }
-          },
-          "meta": {}
-        }
-      },
-      {
-        "id": "update-workflow",
-        "operationId": "updateWorkflow",
-        "title": "Update a workflow rule",
-        "method": "PATCH",
-        "path": "/v1/issuance/tokens/{tokenId}/workflows/{workflowId}",
-        "pathFields": [
-          {
-            "key": "tokenId",
-            "label": "{tokenId}",
-            "description": "Token identifier.",
-            "defaultValue": "tok_example",
-            "required": true
-          },
-          {
-            "key": "workflowId",
-            "label": "{workflowId}",
-            "defaultValue": "asset_workflow_abc123",
-            "required": true
-          }
-        ],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"condition\": {\n    \"all\": [\n      {\n        \"field\": \"example\",\n        \"op\": \"eq\",\n        \"value\": \"example\"\n      }\n    ]\n  },\n  \"actionParams\": {},\n  \"reviewMode\": \"auto\",\n  \"retryPolicy\": {\n    \"maxAttempts\": 1,\n    \"retryAfterMinutes\": 1\n  }\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "data": {
-            "workflow": {
-              "id": "_example",
-              "token_id": "token__example",
-              "trigger_type": "example",
-              "action_type": "example",
-              "enabled": false,
-              "review_mode": "auto",
-              "created_at": "example"
-            }
-          },
-          "meta": {}
-        }
-      },
-      {
-        "id": "delete-workflow",
-        "operationId": "deleteWorkflow",
-        "title": "Delete a workflow rule",
-        "method": "DELETE",
-        "path": "/v1/issuance/tokens/{tokenId}/workflows/{workflowId}",
-        "pathFields": [
-          {
-            "key": "tokenId",
-            "label": "{tokenId}",
-            "description": "Token identifier.",
-            "defaultValue": "tok_example",
-            "required": true
-          },
-          {
-            "key": "workflowId",
-            "label": "{workflowId}",
-            "defaultValue": "asset_workflow_abc123",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "deleted": false
-          },
-          "meta": {}
-        }
-      },
-      {
-        "id": "list-workflow-executions",
-        "operationId": "listWorkflowExecutions",
-        "title": "List workflow executions",
-        "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/workflows/executions?workflowId={workflowId}&page={page}&pageSize={pageSize}",
-        "pathFields": [
-          {
-            "key": "tokenId",
-            "label": "{tokenId}",
-            "description": "Token identifier.",
-            "defaultValue": "tok_example",
-            "required": true
-          },
-          {
-            "key": "workflowId",
-            "label": "workflowId",
-            "defaultValue": "asset_workflow_abc123",
-            "required": false
-          },
-          {
-            "key": "page",
-            "label": "page",
-            "description": "Page number (1-based).",
-            "defaultValue": "1",
-            "required": false,
-            "valueType": "number"
-          },
-          {
-            "key": "pageSize",
-            "label": "pageSize",
-            "description": "Number of items per page.",
-            "defaultValue": "50",
-            "required": false,
-            "valueType": "number"
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "executions": [
-              {
-                "id": "_example",
-                "workflow_id": "workflow__example",
-                "trigger_type": "example",
-                "action_type": "example",
-                "status": "awaiting_review",
-                "attempt_count": 1,
-                "max_attempts": 1,
-                "error": "example",
-                "trigger_payload": {},
-                "result": {},
-                "decided_by": "example",
-                "decided_at": "example",
-                "created_at": "example",
-                "updated_at": "example"
-              }
-            ],
-            "total": 1,
-            "page": 1,
-            "pageSize": 1
-          },
-          "meta": {}
-        }
-      },
-      {
-        "id": "approve-workflow-execution",
-        "operationId": "approveWorkflowExecution",
-        "title": "Approve a held execution",
-        "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve",
-        "pathFields": [
-          {
-            "key": "tokenId",
-            "label": "{tokenId}",
-            "description": "Token identifier.",
-            "defaultValue": "tok_example",
-            "required": true
-          },
-          {
-            "key": "executionId",
-            "label": "{executionId}",
-            "defaultValue": "workflow_execution_abc123",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "execution": {
-              "id": "_example",
-              "workflow_id": "workflow__example",
-              "trigger_type": "example",
-              "action_type": "example",
-              "status": "awaiting_review",
-              "attempt_count": 1,
-              "max_attempts": 1,
-              "error": "example",
-              "trigger_payload": {},
-              "result": {},
-              "decided_by": "example",
-              "decided_at": "example",
-              "created_at": "example",
-              "updated_at": "example"
-            }
-          },
-          "meta": {}
-        }
-      },
-      {
-        "id": "retry-workflow-execution",
-        "operationId": "retryWorkflowExecution",
-        "title": "Retry a failed execution",
-        "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry",
-        "pathFields": [
-          {
-            "key": "tokenId",
-            "label": "{tokenId}",
-            "description": "Token identifier.",
-            "defaultValue": "tok_example",
-            "required": true
-          },
-          {
-            "key": "executionId",
-            "label": "{executionId}",
-            "defaultValue": "workflow_execution_abc123",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "execution": {
-              "id": "_example",
-              "workflow_id": "workflow__example",
-              "trigger_type": "example",
-              "action_type": "example",
-              "status": "awaiting_review",
-              "attempt_count": 1,
-              "max_attempts": 1,
-              "error": "example",
-              "trigger_payload": {},
-              "result": {},
-              "decided_by": "example",
-              "decided_at": "example",
-              "created_at": "example",
-              "updated_at": "example"
-            }
-          },
-          "meta": {}
-        }
-      },
-      {
-        "id": "reject-workflow-execution",
-        "operationId": "rejectWorkflowExecution",
-        "title": "Reject a held execution",
-        "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject",
-        "pathFields": [
-          {
-            "key": "tokenId",
-            "label": "{tokenId}",
-            "description": "Token identifier.",
-            "defaultValue": "tok_example",
-            "required": true
-          },
-          {
-            "key": "executionId",
-            "label": "{executionId}",
-            "defaultValue": "workflow_execution_abc123",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "execution": {
-              "id": "_example",
-              "workflow_id": "workflow__example",
-              "trigger_type": "example",
-              "action_type": "example",
-              "status": "awaiting_review",
-              "attempt_count": 1,
-              "max_attempts": 1,
-              "error": "example",
-              "trigger_payload": {},
-              "result": {},
-              "decided_by": "example",
-              "decided_at": "example",
-              "created_at": "example",
-              "updated_at": "example"
-            }
-          },
-          "meta": {}
-        }
       },
       {
         "id": "list-holders",

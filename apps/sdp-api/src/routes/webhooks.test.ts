@@ -13,6 +13,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { SessionService } from "@/services/session.service";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -238,12 +239,14 @@ describe("Clerk webhooks", () => {
           "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'webhook-cache@example.com', 1, 'active')"
         )
         .bind(userId),
-      db
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Test Project', ?, 'sandbox', 'active', ?)`
-        )
-        .bind(projectId, orgId, projectId, userId),
+    ]);
+    await seedDefaultProjects(db, {
+      organizationId: orgId,
+      createdBy: userId,
+      members: [],
+      ids: { sandbox: projectId, production: `${projectId}_production` },
+    });
+    await db.batch([
       db
         .prepare(
           `INSERT INTO api_keys
@@ -844,24 +847,18 @@ describe("Clerk webhooks", () => {
     );
 
     const apiKeyHash = "webhook_lifecycle_key_hash";
-    const lifecycleProjectId = "prj_webhook_lifecycle";
-    await getDb(env)
+    const lifecycleProject = await getDb(env)
       .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?
-         FROM auth_organization_identities aoi
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
+        `SELECT p.id
+         FROM projects p
+         JOIN auth_organization_identities aoi ON aoi.organization_id = p.organization_id
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ? AND p.environment = 'sandbox'`
       )
-      .bind(
-        lifecycleProjectId,
-        "Lifecycle Project",
-        "lifecycle-project",
-        "sandbox",
-        "active",
-        userId,
-        "org_clerk_lifecycle"
-      )
-      .run();
+      .bind("org_clerk_lifecycle")
+      .first<{ id: string }>();
+    if (!lifecycleProject) {
+      throw new Error("Expected the Clerk organization sandbox project to exist");
+    }
     await getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -872,7 +869,7 @@ describe("Clerk webhooks", () => {
       )
       .bind(
         "key_webhook_lifecycle",
-        lifecycleProjectId,
+        lifecycleProject.id,
         userId,
         "Lifecycle Key",
         "sk_test_web",
@@ -954,13 +951,12 @@ describe("BVNK ramp webhook", () => {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "webhook-user@example.com", 1, "active")
       .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(PROJECT_ID, ORG_ID, "Test", "bvnk-webhook-proj", "sandbox", "active", USER_ID)
-      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await getDb(env)
       .prepare(
         `INSERT INTO counterparties (
@@ -1082,8 +1078,13 @@ describe("BVNK ramp webhook", () => {
         {
           status: "VERIFIED",
           agreements: {
-            relayedAt: "2026-08-01T00:00:00.000Z",
-            entries: { "agreement-1": { status: "ACCEPTED" } },
+            entries: {
+              "agreement-1": {
+                status: "ACCEPTED",
+                name: "EPC Partner Platform Agreement (US)",
+                description: "Terms and conditions for EPC Partner Platform customers in the US",
+              },
+            },
           },
         },
         COUNTERPARTY_ID
@@ -1108,19 +1109,22 @@ describe("BVNK ramp webhook", () => {
       .first<{
         metadata: {
           agreements?: {
-            relayedAt: string;
-            entries: Record<string, { status: string; respondedAt?: string }>;
+            entries: Record<
+              string,
+              { status: string; respondedAt?: string; name: string; description: string }
+            >;
           };
         };
       }>();
     expect(account?.metadata).toEqual({
       status: "VERIFIED",
       agreements: {
-        relayedAt: "2026-08-01T00:00:00.000Z",
         entries: {
           "agreement-1": {
             status: "PENDING",
             respondedAt: "2026-09-02T00:00:00.000Z",
+            name: "EPC Partner Platform Agreement (US)",
+            description: "Terms and conditions for EPC Partner Platform customers in the US",
           },
         },
       },
@@ -1144,8 +1148,13 @@ describe("BVNK ramp webhook", () => {
     const seeded = {
       status: "VERIFIED",
       agreements: {
-        relayedAt: "2026-08-01T00:00:00.000Z",
-        entries: { "agreement-1": { status: "ACCEPTED" } },
+        entries: {
+          "agreement-1": {
+            status: "ACCEPTED",
+            name: "EPC Partner Platform Agreement (US)",
+            description: "Terms and conditions for EPC Partner Platform customers in the US",
+          },
+        },
       },
     };
     await getDb(env)
@@ -2065,13 +2074,12 @@ describe("Lightspark ramp webhook", () => {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "lightspark-webhook-user@example.com", 1, "active")
       .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(PROJECT_ID, ORG_ID, "Test", "lightspark-webhook-proj", "sandbox", "active", USER_ID)
-      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers (
@@ -2419,13 +2427,12 @@ describe("MoonPay ramp webhook", () => {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "moonpay-webhook-user@example.com", 1, "active")
       .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(PROJECT_ID, ORG_ID, "Test", "moonpay-webhook-proj", "sandbox", "active", USER_ID)
-      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await getDb(env)
       .prepare(
         `INSERT INTO counterparties (
@@ -2700,5 +2707,22 @@ describe("MoonPay ramp webhook", () => {
       env
     );
     expect(res.status).toBe(401);
+  });
+
+  it("refuses an oversized body before verifying its signature", async () => {
+    // The handler buffers the whole body to check the HMAC, so an unbounded
+    // body is unauthenticated work on this instance's memory. 413 rather than
+    // the 401 an unsigned request would otherwise get proves the refusal
+    // happens before the handler is reached.
+    const res = await app.request(
+      "/webhooks/payments/ramps/sandbox/moonpay",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Moonpay-Signature-V2": "t=1,s=deadbeef" },
+        body: "x".repeat(1024 * 1024 + 1),
+      },
+      env
+    );
+    expect(res.status).toBe(413);
   });
 });

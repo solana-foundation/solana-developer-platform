@@ -1,5 +1,6 @@
 import {
   type ApiKeyRole,
+  type ApiKeyStatus,
   type ApiKeyWalletBinding,
   type ApiKeyWalletScope,
   getPermissionsForApiKeyRole,
@@ -7,8 +8,9 @@ import {
   hasAnyPermission,
   type Permission,
 } from "@sdp/types";
+import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, badRequest, conflict } from "@/lib/errors";
+import { AppError, badRequest, conflict, insufficientPermissions } from "@/lib/errors";
 import {
   type ExactApiKeyWalletBinding,
   loadApiKeyWalletAuthorization,
@@ -357,8 +359,20 @@ export async function resolveWalletBindingsInScope(
 export function assertGrantableApiKeyPermissions(
   actorPermissions: Permission[],
   resolvedRole: ApiKeyRole,
-  requestedPermissions: Permission[] | null | undefined
+  requestedPermissions: Permission[] | null | undefined,
+  actorApiKeyRole: string | null
 ): void {
+  // The api_admin role carries capabilities beyond its permission list
+  // (wallet policy authoring), so no permission set — including a custom
+  // org:admin grant — lets a lesser API key mint or rotate an api_admin key.
+  // Dashboard actors carry no API-key role and keep the exemptions below.
+  if (resolvedRole === "api_admin" && actorApiKeyRole !== null && actorApiKeyRole !== "api_admin") {
+    throw new AppError(
+      "FORBIDDEN",
+      "Only an api_admin API key can create or rotate api_admin keys"
+    );
+  }
+
   if (hasAnyPermission(actorPermissions, ["org:admin"])) {
     return;
   }
@@ -457,6 +471,107 @@ export function resolveApiKeySigningWalletId(
   }
 
   return null;
+}
+
+/**
+ * The wallet-scope slice of the auth middleware's API key context —
+ * `walletBindings` is genuinely optional there (legacy cached entries carry
+ * only `signingWalletId`), everything else is always present.
+ */
+export type WalletScopeActor = {
+  walletScope?: ApiKeyWalletScope;
+  signingWalletId: string | null;
+  walletBindings?: ApiKeyWalletBinding[];
+};
+
+export type RequestedWalletBinding = {
+  walletId: string | null | undefined;
+  permissions?: Permission[];
+};
+
+/**
+ * A wallet-scoped key granting wallet access it does not itself hold is a
+ * scope escape: the minted key outlives every restriction placed on its
+ * author. Non-key actors and all-wallet keys are unconstrained here.
+ */
+export function isWalletScopedActor(actor: WalletScopeActor): boolean {
+  return (
+    actor.walletScope === "selected" ||
+    (actor.walletScope === undefined &&
+      ((actor.walletBindings?.length ?? 0) > 0 || actor.signingWalletId != null))
+  );
+}
+
+function actorPermissionsForWallet(actor: WalletScopeActor, walletId: string): Permission[] | null {
+  const binding = (actor.walletBindings ?? []).find((entry) => entry.walletId === walletId);
+  if (binding) {
+    return binding.permissions;
+  }
+  // A legacy signing-wallet key carries no binding rows; before per-wallet
+  // permissions existed it held full access to its signing wallet.
+  if (actor.signingWalletId === walletId) {
+    return ["*"];
+  }
+  return null;
+}
+
+function coversRequestedPermissions(actorHeld: Permission[], requested: Permission[]): boolean {
+  if (actorHeld.includes("*")) {
+    return true;
+  }
+  if (requested.includes("*")) {
+    return false;
+  }
+  return requested.every((permission) => actorHeld.includes(permission));
+}
+
+/**
+ * A target key whose signing wallet has no binding row predates per-wallet
+ * permissions and holds full access to that wallet — an actor must hold "*"
+ * on it, not merely have the wallet in scope. A signing wallet that does
+ * have a row is judged by that row instead.
+ */
+export function legacySigningWalletBinding(
+  signingWalletId: string | null,
+  bindings: Array<{ walletId: string }>
+): RequestedWalletBinding[] {
+  if (!signingWalletId || bindings.some((binding) => binding.walletId === signingWalletId)) {
+    return [];
+  }
+  return [{ walletId: signingWalletId, permissions: ["*"] }];
+}
+
+export function assertBindingsWithinActorWalletScope(
+  actor: WalletScopeActor,
+  bindings: RequestedWalletBinding[],
+  requestedWalletScope?: ApiKeyWalletScope
+): void {
+  if (!isWalletScopedActor(actor)) {
+    return;
+  }
+  if (requestedWalletScope === "all") {
+    throw insufficientPermissions(
+      "Cannot grant an API key access to a wallet outside your own wallet scope"
+    );
+  }
+  for (const binding of bindings) {
+    if (!binding.walletId) {
+      continue;
+    }
+    const held = actorPermissionsForWallet(actor, binding.walletId);
+    if (held === null) {
+      throw insufficientPermissions(
+        "Cannot grant an API key access to a wallet outside your own wallet scope"
+      );
+    }
+    // The wallet alone is not the scope: an actor holding [read] on a wallet
+    // must not mint a key holding [*] on it.
+    if (binding.permissions && !coversRequestedPermissions(held, binding.permissions)) {
+      throw insufficientPermissions(
+        "Cannot grant an API key wallet permissions beyond your own on that wallet"
+      );
+    }
+  }
 }
 
 export function getAllowedApiKeyWalletIds(auth: ApiKeyContext): string[] | null {
@@ -597,6 +712,43 @@ export function resolveApiKeyCustodyWalletId(
  * The request auth context may contain a one-hour KV snapshot; duplicate
  * Provider wallet IDs must become deny-only immediately for Payments writes.
  */
+/**
+ * Asserts the calling API key is still active, re-read from the database.
+ *
+ * The auth context is a KV snapshot up to an hour stale, and
+ * {@link assertFreshApiKeyCustodyWalletAccess} only runs for wallet-scoped
+ * keys against a named wallet — so a path that provisions or spends without
+ * naming one (DvP create's defaulted payer) needs this liveness check or a
+ * revoked key keeps acting for the cache window. No-op for non-key auth.
+ */
+export async function assertFreshApiKeyActive(
+  db: DatabaseClient,
+  auth: ApiKeyContext
+): Promise<void> {
+  if (auth.authType !== "api_key") {
+    return;
+  }
+  const currentKey = await db
+    .prepare(
+      `SELECT status, expires_at, rotation_deadline
+       FROM api_keys
+       WHERE id = ? AND organization_id = ?`
+    )
+    .bind(auth.apiKeyId, auth.organizationId)
+    .first<{ status: ApiKeyStatus; expires_at: string | null; rotation_deadline: string | null }>();
+  // The same predicate request authentication applies: exists, active, not
+  // past expiry, and not past its rotation grace period — a rotated key stays
+  // `active` in the row and is retired by the deadline alone.
+  if (
+    !currentKey ||
+    currentKey.status !== "active" ||
+    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date()) ||
+    isRotationDeadlineReached(currentKey.rotation_deadline)
+  ) {
+    throw new AppError("FORBIDDEN", "API key is no longer active");
+  }
+}
+
 export async function assertFreshApiKeyCustodyWalletAccess(
   db: DatabaseClient,
   auth: ApiKeyContext,
@@ -612,15 +764,32 @@ export async function assertFreshApiKeyCustodyWalletAccess(
 
   const currentKey = await db
     .prepare(
-      `SELECT signing_wallet_id
+      `SELECT signing_wallet_id, status, expires_at, rotation_deadline
        FROM api_keys
        WHERE id = ?
          AND organization_id = ?
          AND project_id = ?`
     )
     .bind(auth.apiKeyId, auth.organizationId, auth.projectId)
-    .first<{ signing_wallet_id: string | null }>();
+    .first<{
+      signing_wallet_id: string | null;
+      status: ApiKeyStatus;
+      expires_at: string | null;
+      rotation_deadline: string | null;
+    }>();
   if (!currentKey) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
+  // Re-reading the key's PERMISSIONS while trusting the snapshot's word that
+  // the key still exists leaves the hour-long cache window open for exactly the
+  // key someone just revoked. The predicate request authentication applies:
+  // active, not past expiry, not past its rotation grace period (a rotated key
+  // stays `active` in the row and is retired by the deadline alone).
+  if (
+    currentKey.status !== "active" ||
+    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date()) ||
+    isRotationDeadlineReached(currentKey.rotation_deadline)
+  ) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 

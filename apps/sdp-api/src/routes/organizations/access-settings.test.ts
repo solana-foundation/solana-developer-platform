@@ -5,15 +5,17 @@
 
 import { hashString } from "@sdp/payments/hash";
 import type { OrganizationSettings } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { RATE_LIMIT_TIERS } from "@/middleware/rate-limit";
 import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
 const ORGANIZATION_ID = TEST_CACHED_API_KEY.organizationId;
 const PROJECT_ID = "prj_access_settings";
@@ -63,19 +65,12 @@ async function seedMemberWithProject(): Promise<void> {
     )
     .bind(TEST_MEMBER.id, ORGANIZATION_ID, TEST_USER.id, TEST_MEMBER.role, TEST_MEMBER.status)
     .run();
-  await getDb(env)
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Access Settings', 'access-settings', 'sandbox', 'active', ?)`
-    )
-    .bind(PROJECT_ID, ORGANIZATION_ID, TEST_USER.id)
-    .run();
-  await getDb(env)
-    .prepare(
-      "INSERT INTO project_members (id, project_id, user_id, role) VALUES (?, ?, ?, 'developer')"
-    )
-    .bind("pm_access_settings", PROJECT_ID, TEST_USER.id)
-    .run();
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORGANIZATION_ID,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
 }
 
 function get(headers: Record<string, string>) {
@@ -454,13 +449,17 @@ describe("Organization access settings", () => {
         "x-forwarded-for": "198.51.100.42",
       };
 
-      // Standard tier allows 100 requests per window; the 101st must trip it.
-      let finalStatus = 0;
-      for (let request = 0; request < 101; request++) {
-        finalStatus = (await get(headers)).status;
+      // Pin both the seeded bucket and the request to one window. A live clock
+      // could roll the seeded bucket into the weighted previous window and
+      // intermittently admit the request below the tier limit.
+      const now = Date.now();
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+      try {
+        await seedRateLimit(env, TEST_CACHED_API_KEY.id, RATE_LIMIT_TIERS.standard);
+        expect((await get(headers)).status).toBe(429);
+      } finally {
+        nowSpy.mockRestore();
       }
-
-      expect(finalStatus).toBe(429);
     });
 
     it("intersects with the API key's own allowlist rather than replacing it", async () => {

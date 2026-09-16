@@ -32,11 +32,13 @@ const TEST_WALLETS = {
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operations", () => {
   let apiKeyHash: string;
+  let custodyWalletId = "";
   const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -44,7 +46,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
   });
 
   beforeEach(async () => {
-    await resetIntegrationState(apiKeyHash);
+    const state = await resetIntegrationState(apiKeyHash);
+    custodyWalletId = state.custodyWallet.id;
   });
 
   it("adds wallet to allowlist database", { timeout: 30000 }, async () => {
@@ -57,6 +60,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       body: JSON.stringify({
         name: "ABL Test Token",
         symbol: "ABLT",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
         template: "stablecoin",
         isMintable: true,
@@ -98,6 +102,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       body: JSON.stringify({
         name: "List Test Token",
         symbol: "LSTT",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
         template: "stablecoin",
         requiresAllowlist: true,
@@ -149,6 +154,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       body: JSON.stringify({
         name: "Remove Test Token",
         symbol: "RMVT",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
         template: "stablecoin",
         requiresAllowlist: true,
@@ -205,6 +211,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       body: JSON.stringify({
         name: "Dupe Test Token",
         symbol: "DUPT",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
         template: "stablecoin",
         requiresAllowlist: true,
@@ -251,6 +258,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
       body: JSON.stringify({
         name: "Invalid Addr Token",
         symbol: "INVT",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
         template: "stablecoin",
         requiresAllowlist: true,

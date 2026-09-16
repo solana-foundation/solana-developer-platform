@@ -5,6 +5,7 @@ import { Callout } from "@/components/ui/callout";
 import { Card, CardContent } from "@/components/ui/card";
 import { useTranslations } from "@/i18n/provider";
 import { ActivityCard } from "./activity-card";
+import { RingsConfigurationCard } from "./configuration-card";
 import { HealthStrip } from "./health-strip";
 import {
   executeRingsOperation,
@@ -19,6 +20,8 @@ import {
   type RingsWallet,
 } from "./helius-rings.data";
 import { healthAlerts, isSettling } from "./helius-rings.utils";
+import { fetchRingsSetupStatus, type RingsSetupStatus } from "./helius-rings-configuration.data";
+import { HeliusRingsWorkspaceSkeleton } from "./helius-rings-skeleton";
 import { OperationComposer } from "./operation-composer";
 import { OperationDetailDrawer } from "./operation-detail-drawer";
 import { type CustodyWalletOption, PrivateWalletsCard } from "./private-wallets-card";
@@ -36,6 +39,7 @@ export function HeliusRingsWorkspace({
   const t = useTranslations();
 
   const [health, setHealth] = useState<RingsHealth | null>(null);
+  const [setup, setSetup] = useState<RingsSetupStatus | null>(null);
   const [wallets, setWallets] = useState<RingsWallet[]>([]);
   const [operations, setOperations] = useState<RingsOperationSummary[]>([]);
   const [projectRings, setProjectRings] = useState<ProjectRing[]>([]);
@@ -48,6 +52,15 @@ export function HeliusRingsWorkspace({
 
   const refresh = useCallback(async () => {
     try {
+      const setupResult = await fetchRingsSetupStatus();
+      setSetup(setupResult);
+      if (!setupResult.configured) {
+        setHealth(null);
+        setWallets([]);
+        setOperations([]);
+        setLoadError(null);
+        return;
+      }
       const [healthResult, walletsResult, operationsResult] = await Promise.all([
         fetchRingsHealth(loadFailedCopy),
         fetchRingsWallets(loadFailedCopy),
@@ -183,62 +196,75 @@ export function HeliusRingsWorkspace({
 
       {loadError ? <Callout variant="danger">{loadError}</Callout> : null}
 
-      <HealthStrip health={health} alerts={alerts} />
+      {setup === null ? (
+        // A failed first read leaves setup unset; the error above is then the settled state.
+        loadError ? null : (
+          <HeliusRingsWorkspaceSkeleton />
+        )
+      ) : setup.source !== "database" ? (
+        <RingsConfigurationCard setup={setup} onConfigured={refresh} />
+      ) : null}
 
-      <RingCard rings={projectRings} onChanged={refreshAll} />
-
-      <PrivateWalletsCard
-        wallets={wallets}
-        custodyWallets={custodyWallets}
-        availableCustodyWallets={availableCustodyWallets}
-        selectedWalletId={selectedWallet?.id ?? null}
-        onSelect={setSelectedWalletId}
-        balancesTick={balancesTick}
-        onCreated={refresh}
-      />
-
-      {selectedWallet === null ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-secondary">
-            {t("DashboardHeliusRings.workspace.selectPrompt")}
-          </CardContent>
-        </Card>
-      ) : (
+      {setup?.configured ? (
         <>
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <WalletOverview
-              wallet={selectedWallet}
-              refreshTick={balancesTick}
-              projectRings={projectRings}
-            />
-            <OperationComposer
-              key={selectedWallet.id}
-              wallet={selectedWallet}
-              recipientOptions={wallets.filter(
-                (wallet) => wallet.id !== selectedWallet.id && wallet.shieldedAddress !== null
-              )}
-              custodyPublicKey={
-                custodyByWalletId.get(selectedWallet.sdpWalletId)?.publicKey ?? null
-              }
-              projectRings={projectRings}
-              gatewayRed={upstreamsRed}
-              onPrepared={refresh}
-            />
-          </div>
+          <HealthStrip health={health} alerts={alerts} />
 
-          <ActivityCard
-            operations={filteredOperations}
-            projectRings={projectRings}
-            onChanged={refresh}
-            onSelect={setDetailOperationId}
+          <RingCard rings={projectRings} onChanged={refreshAll} />
+
+          <PrivateWalletsCard
+            wallets={wallets}
+            custodyWallets={custodyWallets}
+            availableCustodyWallets={availableCustodyWallets}
+            selectedWalletId={selectedWallet?.id ?? null}
+            onSelect={setSelectedWalletId}
+            balancesTick={balancesTick}
+            onWalletsChanged={refresh}
+          />
+
+          {selectedWallet === null ? (
+            <Card>
+              <CardContent className="py-8 text-center text-sm text-secondary">
+                {t("DashboardHeliusRings.workspace.selectPrompt")}
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <WalletOverview
+                  wallet={selectedWallet}
+                  refreshTick={balancesTick}
+                  projectRings={projectRings}
+                />
+                <OperationComposer
+                  key={selectedWallet.id}
+                  wallet={selectedWallet}
+                  recipientOptions={wallets.filter(
+                    (wallet) => wallet.id !== selectedWallet.id && wallet.shieldedAddress !== null
+                  )}
+                  custodyPublicKey={
+                    custodyByWalletId.get(selectedWallet.sdpWalletId)?.publicKey ?? null
+                  }
+                  projectRings={projectRings}
+                  gatewayRed={upstreamsRed}
+                  onPrepared={refresh}
+                />
+              </div>
+
+              <ActivityCard
+                operations={filteredOperations}
+                projectRings={projectRings}
+                onChanged={refresh}
+                onSelect={setDetailOperationId}
+              />
+            </>
+          )}
+
+          <OperationDetailDrawer
+            operationId={detailOperationId}
+            onClose={() => setDetailOperationId(null)}
           />
         </>
-      )}
-
-      <OperationDetailDrawer
-        operationId={detailOperationId}
-        onClose={() => setDetailOperationId(null)}
-      />
+      ) : null}
     </div>
   );
 }

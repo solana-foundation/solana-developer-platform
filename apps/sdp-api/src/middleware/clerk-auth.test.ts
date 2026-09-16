@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { optionalClerkAuth } from "@/middleware/clerk-auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, skipRateLimitPaths } from "@/middleware/rate-limit";
 import { env } from "@/test/helpers/env";
@@ -111,6 +112,9 @@ describe("Clerk auth request cache", () => {
         email: c.get("clerk")?.email ?? null,
       });
     });
+    app.get("/admin", requirePermissions("org:admin"), (c) => {
+      return c.json({ role: c.get("clerk")?.role ?? null });
+    });
     app.onError((error, c) => {
       if (error instanceof AppError) {
         return c.json(error.toResponse(), error.statusCode as 401 | 403);
@@ -120,6 +124,45 @@ describe("Clerk auth request cache", () => {
 
     return { app, token };
   }
+
+  function createStrictOptionalApp(payload: ClerkJwtPayload) {
+    const token = createJwt(payload);
+    const app = new Hono<{ Bindings: Env }>();
+
+    app.use("*", async (c, next) => {
+      c.set("verifiedClerkJwt", { token, payload });
+      await next();
+    });
+    app.use("*", optionalClerkAuth({ rejectInvalid: true }));
+    app.get("/optional", (c) => c.json({ authenticated: Boolean(c.get("clerk")) }));
+    app.onError((error, c) => {
+      if (error instanceof AppError) {
+        return c.json(error.toResponse(), error.statusCode as 401);
+      }
+      throw error;
+    });
+
+    return { app, token };
+  }
+
+  it("strict optional auth rejects a verified Clerk token without an organization", async () => {
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_without_org",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createStrictOptionalApp(payload);
+
+    const res = await app.request(
+      "/optional",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({
+      error: { code: "UNAUTHORIZED", message: "Clerk token missing organization" },
+    });
+  });
 
   it("reuses a cached Clerk JWT across rate limiting and auth in one request", async () => {
     const payload: ClerkJwtPayload = {
@@ -158,6 +201,48 @@ describe("Clerk auth request cache", () => {
       "default-production",
       "default-sandbox",
     ]);
+  });
+
+  it("provisions a second administrator from Clerk v2 organization claims", async () => {
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind("usr_clerk_second_admin", "second-admin@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+           VALUES (?, 'clerk', ?, ?, ?)`
+        )
+        .bind(
+          "aui_clerk_second_admin",
+          "clerk_user_second_admin",
+          "usr_clerk_second_admin",
+          "second-admin@example.com"
+        ),
+    ]);
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_second_admin",
+      v: 2,
+      o: {
+        id: "clerk_org_cached",
+        rol: "admin",
+        slg: TEST_ORG.slug,
+      },
+      email: "second-admin@example.com",
+      iss: "https://clerk.example.test",
+    };
+    const { app, token } = createProtectedApp(payload);
+
+    const res = await app.request("/admin", { headers: { Authorization: `Bearer ${token}` } }, env);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ role: "admin" });
+    const membership = await getDb(env)
+      .prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+      .bind(TEST_ORG.id, "usr_clerk_second_admin")
+      .first<{ role: string }>();
+    expect(membership?.role).toBe("admin");
   });
 
   it("counts Clerk dashboard requests against a per-user per-org limit", async () => {

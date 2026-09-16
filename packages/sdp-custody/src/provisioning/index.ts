@@ -4,6 +4,7 @@
  * Creates custody wallets for new organizations using provider APIs.
  */
 
+import { summarizeUpstreamErrorBody } from "@sdp/redaction";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { importPKCS8, SignJWT } from "jose";
@@ -15,6 +16,7 @@ import {
   isCoinbaseCdpAlreadyExistsError,
 } from "./coinbase";
 import {
+  assertHttpsBaseUrl,
   encodeBasicAuth,
   normalizePem,
   normalizeProviderNameFragment,
@@ -230,7 +232,10 @@ export async function provisionFireblocksVaultAccount(
     );
   }
 
-  const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_FIREBLOCKS_API_BASE_URL;
+  const apiBaseUrl = assertHttpsBaseUrl(
+    config.apiBaseUrl ?? DEFAULT_FIREBLOCKS_API_BASE_URL,
+    "Fireblocks"
+  );
   const assetId = config.assetId ?? DEFAULT_FIREBLOCKS_ASSET_ID;
 
   let vaultAccountId = options.vaultAccountId;
@@ -302,7 +307,7 @@ export async function provisionPrivyWallet(
     );
   }
 
-  const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_PRIVY_API_BASE_URL;
+  const apiBaseUrl = assertHttpsBaseUrl(config.apiBaseUrl ?? DEFAULT_PRIVY_API_BASE_URL, "Privy");
   const authHeader = `Basic ${encodeBasicAuth(`${appId}:${appSecret}`)}`;
   validatePrivyProvisionOptions(options);
 
@@ -428,7 +433,10 @@ export async function provisionCoinbaseCdpAccount(
     );
   }
 
-  const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_COINBASE_CDP_API_BASE_URL;
+  const apiBaseUrl = assertHttpsBaseUrl(
+    config.apiBaseUrl ?? DEFAULT_COINBASE_CDP_API_BASE_URL,
+    "Coinbase CDP"
+  );
   const network = config.network ?? DEFAULT_COINBASE_CDP_NETWORK;
 
   const name = await deriveCoinbaseCdpAccountName(runtime, {
@@ -519,7 +527,7 @@ export async function provisionParaWallet(
     );
   }
 
-  const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_PARA_API_BASE_URL;
+  const apiBaseUrl = assertHttpsBaseUrl(config.apiBaseUrl ?? DEFAULT_PARA_API_BASE_URL, "Para");
 
   const userIdentifier = buildParaUserIdentifier(runtime, {
     orgId: options.orgId,
@@ -573,7 +581,10 @@ export async function provisionTurnkeyPrivateKey(
     );
   }
 
-  const apiBaseUrl = config.apiBaseUrl ?? DEFAULT_TURNKEY_API_BASE_URL;
+  const apiBaseUrl = assertHttpsBaseUrl(
+    config.apiBaseUrl ?? DEFAULT_TURNKEY_API_BASE_URL,
+    "Turnkey"
+  );
 
   const created = await turnkeyRequest<TurnkeyActivityResponse>(runtime, {
     apiBaseUrl,
@@ -656,9 +667,9 @@ export async function provisionUtilaWallet(
   );
 
   if (!response.ok) {
-    const detail = await safeReadUtilaError(response);
+    const errorCode = await safeReadUtilaError(response);
     throw new SigningError(
-      `Utila CreateWallet failed (${response.status}): ${detail}`,
+      `Utila CreateWallet failed (${response.status}): code=${errorCode}`,
       "NETWORK_ERROR"
     );
   }
@@ -705,7 +716,7 @@ async function mintUtilaAccessToken(
 }
 
 function normalizeUtilaApiBaseUrl(value?: string): string {
-  const url = value ?? DEFAULT_UTILA_API_BASE_URL;
+  const url = assertHttpsBaseUrl(value ?? DEFAULT_UTILA_API_BASE_URL, "Utila");
   let end = url.length;
 
   while (end > 0 && url.charCodeAt(end - 1) === 47) {
@@ -731,11 +742,15 @@ function extractUtilaWalletId(name?: string): string | undefined {
   return index === -1 ? name : name.slice(index + marker.length);
 }
 
+/**
+ * Utila error bodies can echo the request (including the service-account bearer
+ * token), so only a whitelisted upstream error code is surfaced.
+ */
 async function safeReadUtilaError(response: Response): Promise<string> {
   try {
-    return (await response.text()).slice(0, 300);
+    return summarizeUpstreamErrorBody(await response.text(), response.status);
   } catch {
-    return response.statusText;
+    return "unavailable";
   }
 }
 
@@ -926,7 +941,7 @@ export async function findPrivyWalletByExternalId(
   let wallet: PrivyWalletResponse;
   try {
     wallet = await privyRequest<PrivyWalletResponse>(runtime, {
-      apiBaseUrl: config.apiBaseUrl ?? DEFAULT_PRIVY_API_BASE_URL,
+      apiBaseUrl: assertHttpsBaseUrl(config.apiBaseUrl ?? DEFAULT_PRIVY_API_BASE_URL, "Privy"),
       allowNotFound: true,
       authHeader: `Basic ${encodeBasicAuth(`${appId}:${appSecret}`)}`,
       appId,

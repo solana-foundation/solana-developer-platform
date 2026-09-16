@@ -1,10 +1,15 @@
 "use client";
 
-import type { PaymentRecurringPayment, PaymentRecurringPaymentStatus } from "@sdp/types";
+import {
+  PAYMENT_RECURRING_PAYMENT_STATUSES,
+  type PaymentRecurringPayment,
+  type PaymentRecurringPaymentStatus,
+} from "@sdp/types";
 import { ChevronRightIcon, PlusIcon, RepeatIcon, SearchIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
+import { z } from "zod";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -24,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
   formatDisplayAmount,
@@ -71,17 +76,11 @@ export function RecurringPaymentsWorkspace({
 }: RecurringPaymentsWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
-  const workspace = useOptionalDashboardWorkspace();
-  const custodyEnabled = workspace?.flags.custody ?? true;
+  const workspace = useDashboardWorkspace();
+  const custodyEnabled = workspace.flags.custody;
   const [query, setQuery] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  /**
-   * Applies pagination and status updates to the URL so the server refetches
-   * the list. Defaults are dropped from the URL; status changes reset paging.
-   *
-   * @param updates - The list-state fields to change.
-   */
   const applyListParams = (updates: {
     page?: number;
     pageSize?: number;
@@ -132,14 +131,18 @@ export function RecurringPaymentsWorkspace({
     const wallet = recurringPayment.sourceCustodyWalletId
       ? walletById.get(recurringPayment.sourceCustodyWalletId)
       : undefined;
-    return (
-      wallet?.label ||
-      (wallet ? shortenAddress(wallet.publicKey) : recurringPayment.sourceProviderWalletId)
-    );
+    return wallet === undefined
+      ? recurringPayment.sourceProviderWalletId
+      : wallet.label === null
+        ? shortenAddress(wallet.publicKey)
+        : wallet.label;
   };
-  const getCounterpartyLabel = (recurringPayment: PaymentRecurringPayment) =>
-    counterpartyById.get(recurringPayment.counterpartyId)?.displayName ??
-    t("DashboardPayments.recurring.counterpartyUnavailable");
+  const getCounterpartyLabel = (recurringPayment: PaymentRecurringPayment) => {
+    const counterparty = counterpartyById.get(recurringPayment.counterpartyId);
+    return counterparty === undefined
+      ? t("DashboardPayments.recurring.counterpartyUnavailable")
+      : counterparty.displayName;
+  };
   const getResolvedToken = (recurringPayment: PaymentRecurringPayment) =>
     resolveTokenByMint(
       recurringPayment.token,
@@ -199,12 +202,13 @@ export function RecurringPaymentsWorkspace({
               }
             />
             <Select
-              value={listState.status ?? "all"}
-              onValueChange={(value) =>
+              value={listState.status === null ? "all" : listState.status}
+              onValueChange={(value) => {
+                const parsed = z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES).safeParse(value);
                 applyListParams({
-                  status: value === "all" ? null : (value as PaymentRecurringPaymentStatus),
-                })
-              }
+                  status: value === "all" || !parsed.success ? null : parsed.data,
+                });
+              }}
             >
               <SelectItem value="all">{t("DashboardPayments.recurring.allStatuses")}</SelectItem>
               {RECURRING_PAYMENT_STATUSES.map((status) => (

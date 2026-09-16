@@ -21,11 +21,13 @@ const describeIfIntegrationConfigured = describe.skipIf(
 
 describeIfIntegrationConfigured("Custody Access and Default Signing", () => {
   let apiKeyHash: string;
+  let custodyWalletId = "";
   const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -33,7 +35,8 @@ describeIfIntegrationConfigured("Custody Access and Default Signing", () => {
   });
 
   beforeEach(async () => {
-    await resetIntegrationState(apiKeyHash);
+    const state = await resetIntegrationState(apiKeyHash);
+    custodyWalletId = state.custodyWallet.id;
   });
 
   it("uses the configured default signer for deployments", { timeout: 120000 }, async () => {
@@ -64,6 +67,7 @@ describeIfIntegrationConfigured("Custody Access and Default Signing", () => {
       body: JSON.stringify({
         name: "Custody Token",
         symbol: "CUST",
+        signingCustodyWalletId: custodyWalletId,
         decimals: 6,
         isMintable: true,
         isFreezable: true,
@@ -76,6 +80,8 @@ describeIfIntegrationConfigured("Custody Access and Default Signing", () => {
 
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
     expect(deployRes.status).toBe(200);

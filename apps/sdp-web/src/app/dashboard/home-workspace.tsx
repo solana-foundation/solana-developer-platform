@@ -1,7 +1,13 @@
 "use client";
 
-import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
-import { ArrowLeftRight, Coins, ExternalLink } from "lucide-react";
+import type {
+  CustodyWalletTokenBalance,
+  PaymentsDashboardWallet,
+  PaymentTransferStatus,
+  SolanaCluster,
+  TokenTransactionStatus,
+} from "@sdp/types";
+import { ArrowLeftRightIcon, CoinsIcon, ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/api-keys/create-api-key-modal";
@@ -21,6 +27,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { readApiErrorMessage } from "@/lib/api-error";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -33,14 +40,12 @@ import {
   type HomeActivityExplorerRef,
   type HomeActivityRow,
 } from "./home-page.data";
-import { HomeQuickActions } from "./home-quick-actions";
 import { seriesColorForMint } from "./home-series-color";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { fetchHomeActivity } from "./home-workspace.data";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
-  formatStatus,
   resolveTokenByMint,
   resolveTransferTokenLabel,
   statusMessageKey,
@@ -48,6 +53,7 @@ import {
 } from "./payments/payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
 import { tokenActivityHref } from "./tokens/holdings-links";
+import { useHomeQuickStartPending } from "./use-home-quick-start";
 
 interface HomeWorkspaceProps {
   totalBalance: number | null;
@@ -125,29 +131,24 @@ function ActivityAddress({
       className="flex min-w-0 max-w-full items-center gap-1 text-primary underline underline-offset-2"
     >
       <TruncatedTableText value={row.address} className={`min-w-0 ${className ?? "truncate"}`} />
-      <ExternalLink className="size-3 shrink-0" aria-hidden />
+      <ExternalLinkIcon className="size-3 shrink-0" aria-hidden />
     </a>
   );
 }
 
-/**
- * Exception-only status marker. Success is the norm in this digest, so confirmed
- * rows stay quiet and anything else — failed, pending, processing — gets the same
- * badge variants the payments Transactions table uses. Badging every confirmed
- * row would drown the failed ones this exists to surface.
- */
-function ActivityStatusBadge({ status }: { status: string }) {
+function ActivityStatusBadge({
+  status,
+}: {
+  status: PaymentTransferStatus | TokenTransactionStatus;
+}) {
   const t = useTranslations();
   const variant = statusVariant(status);
-  if (!status || variant === "success") {
+  if (variant === "success") {
     return null;
   }
-  // Known statuses use the transactions catalog keys so the badge localizes;
-  // an unknown one falls back to the raw title-cased status.
-  const messageKey = statusMessageKey(status);
   return (
     <Badge variant={variant} className="shrink-0">
-      {messageKey ? t(messageKey) : formatStatus(status)}
+      {t(statusMessageKey(status))}
     </Badge>
   );
 }
@@ -162,7 +163,7 @@ function ActivityStatusBadge({ status }: { status: string }) {
  */
 function ActivityCategoryMark({ sourceKind }: { sourceKind: HomeActivityRow["sourceKind"] }) {
   const t = useTranslations();
-  const Icon = sourceKind === "issuance" ? Coins : ArrowLeftRight;
+  const Icon = sourceKind === "issuance" ? CoinsIcon : ArrowLeftRightIcon;
   return (
     <>
       <Icon className="size-3.5 shrink-0 text-tertiary" aria-hidden="true" />
@@ -491,19 +492,17 @@ function BalanceHero({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {canManageApiKeys ? (
+            {canManageApiKeys && walletCount > 0 ? (
               <CreateApiKeyModal
                 triggerLabel={t("Shared.SharedComponents.createApiKey")}
                 triggerVariant="secondary"
               />
             ) : null}
             {canManageCustody ? (
-              // Secondary, not primary. An organization with balances has already
-              // created its wallets; leading this screen with "Create Wallet" gave
-              // a setup action top billing over the numbers the page exists to
-              // show. It stays reachable, it just stops competing with them.
-              <Button asChild variant="secondary">
-                <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
+              <Button asChild variant={walletCount === 0 ? "default" : "secondary"}>
+                <Link href="/dashboard/wallets/setup">
+                  {t("Shared.homeWorkspace.createWallet")}
+                </Link>
               </Button>
             ) : null}
           </div>
@@ -542,37 +541,6 @@ function BalanceHero({
   );
 }
 
-/**
- * What to do when there is nothing yet.
- *
- * The populated layout rendered four zeroes and a hint under each, which reads as a
- * broken dashboard rather than a new one. A first run gets one instruction and the
- * action next to it instead.
- */
-function FirstRunPanel({ canCreateWallet }: { canCreateWallet: boolean }) {
-  const t = useTranslations();
-  return (
-    <Card className="min-w-0 gap-0 rounded-[18px] py-0 shadow-none">
-      <CardContent className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 px-6 py-8">
-        <div className="min-w-0 max-w-xl space-y-2">
-          <h2 className="text-[22px] leading-tight font-medium tracking-[-0.02em] text-primary">
-            {t("Shared.homeWorkspace.firstRunTitle")}
-          </h2>
-          <p className="text-sm text-tertiary">{t("Shared.homeWorkspace.firstRunBody")}</p>
-        </div>
-        {canCreateWallet ? (
-          <Button
-            asChild
-            className="!text-on-primary hover:!text-on-primary visited:!text-on-primary"
-          >
-            <Link href="/dashboard/wallets">{t("Shared.homeWorkspace.createWallet")}</Link>
-          </Button>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
 export function HomeWorkspace({
   totalBalance,
   totalBalanceError,
@@ -585,9 +553,9 @@ export function HomeWorkspace({
   const locale = useLocale();
   const cluster = useSolanaCluster();
   const { dashboardAccess, flags } = useDashboardWorkspace();
+  const quickStartPending = useHomeQuickStartPending();
   const custodyEnabled = flags.custody;
   const issuanceEnabled = flags.issuance;
-  const policiesEnabled = flags.policies;
   const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
     HOME_ACTIVITY_KEY,
     () => fetchHomeActivity(),
@@ -616,17 +584,16 @@ export function HomeWorkspace({
     totalBalance,
     balancesUnavailable: totalBalanceError !== null,
   });
+  const balancePresentation =
+    heroState.kind === "populated"
+      ? { totalBalance, hasPricedValue: heroState.hasPricedValue }
+      : { totalBalance: 0, hasPricedValue: true };
   const totalBalanceHint = isWalletEmptyState
     ? t("Shared.homeWorkspace.createFirstWalletBalances")
     : totalBalance === null
       ? t("Shared.homeWorkspace.noTrackedBalances")
       : null;
   const todaysVolume = activitySnapshot?.todaysVolume ?? null;
-  const todaysVolumeError = activityRequestError
-    ? activityRequestError instanceof Error
-      ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
-      : t("Shared.homeWorkspace.activityUnavailable")
-    : (activitySnapshot?.activityError ?? null);
   const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
     issuance: issuanceEnabled,
   });
@@ -635,9 +602,7 @@ export function HomeWorkspace({
     issuedTokens.map((token) => [token.mintAddress, token])
   );
   const activityError = activityRequestError
-    ? activityRequestError instanceof Error
-      ? activityRequestError.message || t("Shared.homeWorkspace.activityUnavailable")
-      : t("Shared.homeWorkspace.activityUnavailable")
+    ? readApiErrorMessage(activityRequestError) || t("Shared.homeWorkspace.activityUnavailable")
     : (activitySnapshot?.activityError ?? null);
   const activityNotice = activitySnapshot?.activityNotice ?? null;
   const emptyActivityMessage = isWalletEmptyState
@@ -648,25 +613,14 @@ export function HomeWorkspace({
 
   return (
     <div className="w-full space-y-8 py-2">
-      <SectionEntry>
-        {heroState.kind === "first_run" && custodyEnabled ? (
-          <FirstRunPanel
-            canCreateWallet={custodyEnabled && dashboardAccess.capabilities.canManageCustody}
-          />
-        ) : heroState.kind !== "populated" ? (
-          <HomeQuickActions
-            capabilities={dashboardAccess.capabilities}
-            custodyEnabled={custodyEnabled}
-            policiesEnabled={policiesEnabled}
-          />
-        ) : (
+      {heroState.kind === "populated" || !quickStartPending ? (
+        <SectionEntry>
           <BalanceHero
-            totalBalance={totalBalance}
+            {...balancePresentation}
             totalBalanceError={totalBalanceError}
             totalBalanceHint={totalBalanceHint}
-            hasPricedValue={heroState.hasPricedValue}
             todaysVolume={todaysVolume}
-            todaysVolumeError={todaysVolumeError}
+            todaysVolumeError={activityError}
             walletCount={walletCount}
             heldTokenCount={heldTokenCount}
             balances={balances}
@@ -675,8 +629,8 @@ export function HomeWorkspace({
             canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
             canManageCustody={custodyEnabled && dashboardAccess.capabilities.canManageCustody}
           />
-        )}
-      </SectionEntry>
+        </SectionEntry>
+      ) : null}
 
       <SectionEntry delay={0.08}>
         <div className="space-y-4">
@@ -684,7 +638,7 @@ export function HomeWorkspace({
             <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 space-y-1">
                 <CardTitle>{t("Shared.homeWorkspace.recentTransactions")}</CardTitle>
-                {activityNotice ? (
+                {activityNotice && !activityError ? (
                   <CardDescription>{activityNotice}</CardDescription>
                 ) : (
                   <CardDescription>{t("Shared.homeWorkspace.activityDescription")}</CardDescription>

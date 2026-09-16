@@ -1,6 +1,6 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
-import type { MoneygramRampEvent } from "@sdp/types";
-import type { PaymentTransferRow, PaymentTransferStatus } from "@/db/repositories";
+import { isTerminalRampTransferStatus, type MoneygramRampEvent } from "@sdp/types";
+import type { PaymentTransferRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -9,17 +9,6 @@ import { type AppContext, getPaymentsRepository } from "../../context";
 import { mapTransferRow } from "../../mappers";
 import type { coinbaseRampEventSchema, moneygramRampEventSchema } from "../../schemas";
 import { isRampQuoteBindingExpired } from "./quote-binding";
-
-const TERMINAL_RAMP_STATUSES = [
-  "completed",
-  "failed",
-  "expired",
-  "canceled",
-] as const satisfies readonly PaymentTransferStatus[];
-
-function isTerminalRampStatus(status: PaymentTransferStatus): boolean {
-  return (TERMINAL_RAMP_STATUSES as readonly PaymentTransferStatus[]).includes(status);
-}
 
 function readMoneygramData(transfer: PaymentTransferRow): Record<string, unknown> {
   const value = transfer.provider_data.moneygram;
@@ -133,7 +122,7 @@ export async function recordCoinbaseRampEvent(
   if (transfer.type !== "onramp") {
     throw badRequest("Coinbase events only apply to on-ramp transfers.");
   }
-  if (isTerminalRampStatus(transfer.status)) {
+  if (isTerminalRampTransferStatus(transfer.status)) {
     return success(c, { transfer: mapTransferRow(transfer) });
   }
 
@@ -178,7 +167,7 @@ export async function recordMoneygramRampEvent(
   if (!transfer) {
     throw notFound("Ramp transfer");
   }
-  if (isTerminalRampStatus(transfer.status)) {
+  if (isTerminalRampTransferStatus(transfer.status)) {
     return success(c, { transfer: mapTransferRow(transfer) });
   }
 

@@ -11,6 +11,11 @@ export type HeliusRingsErrorCode =
   | "gateway_unavailable"
   | "config_error"
   | "insufficient_balance"
+  // The wallet's custody provider cannot meet what Rings needs from a
+  // signature. Distinct from `invalid_input` so the classification survives the
+  // gateway boundary and reaches the operation row: the request was well
+  // formed, and only changing custody provider changes the outcome.
+  | "provider_unsupported"
   | "manual_reconciliation_required";
 
 export class HeliusRingsError extends Error {
@@ -21,4 +26,33 @@ export class HeliusRingsError extends Error {
     this.name = "HeliusRingsError";
     this.code = code;
   }
+}
+
+/**
+ * The discriminator a bridged failure carries on its `cause`. Only a name and,
+ * where there was one, a status: enough to tell two failures apart in a log
+ * without carrying an upstream message that could quote a keyed endpoint.
+ */
+export interface RingsErrorCause {
+  readonly upstream: string;
+  readonly status?: number;
+}
+
+/**
+ * A wallet whose material no longer derives the identity it was provisioned
+ * with. Named on the `cause` rather than matched on a message, because the
+ * service quarantines the wallet on it and that decision must not hinge on
+ * error prose.
+ */
+export const RINGS_IDENTITY_MISMATCH = "identity_mismatch";
+
+/**
+ * Whether a failure is the unrecoverable identity mismatch. Every read derives
+ * the same identity from the same inputs, so this can never clear on its own —
+ * which is what separates it from the other `conflict`s.
+ */
+export function isRingsIdentityMismatch(error: unknown): boolean {
+  if (!(error instanceof HeliusRingsError) || error.code !== "conflict") return false;
+  const cause = error.cause as RingsErrorCause | undefined;
+  return cause?.upstream === RINGS_IDENTITY_MISMATCH;
 }

@@ -27,18 +27,24 @@ export interface Env {
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
+  /** Anonymous Earn paid-upstream budget, per client IP. */
+  EARN_ANONYMOUS_RPC_MAX_REQUESTS?: string;
+  EARN_ANONYMOUS_RPC_WINDOW_SECONDS?: string;
   API_VERSION: string;
   // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
   CLOUD_RUN_JOB?: string;
+  // Trust the first X-Forwarded-For address outside Cloud Run only when a
+  // deployment-owned proxy replaces caller-supplied forwarding headers.
+  TRUST_PROXY_HEADERS?: string;
 
-  // Public-facing origin of this API (e.g. "https://api.example.com"). When set,
-  // it overrides the request-derived origin used to build the SDP-hosted token
-  // metadata URL that gets burned into the on-chain MetadataPointer. Set this in
-  // any environment fronted by a proxy that rewrites Host/scheme, so the URI
-  // can't capture an internal, unreachable address. Falls back to the request
-  // origin when unset.
+  // Public-facing origin of this API (e.g. "https://api.example.com"). The
+  // SDP-hosted token metadata URL burned into the on-chain MetadataPointer is
+  // built from this value and nothing else — it is never derived from the
+  // incoming request, so a spoofed Host header can't pin a hostile origin into
+  // a mint. Deploys that need the SDP-hosted metadata fallback fail closed when
+  // it is unset or not a valid http(s) origin.
   PUBLIC_API_ORIGIN?: string;
 
   // Deployment mode. "managed" (default) uses tier-based provider entitlements
@@ -68,9 +74,6 @@ export interface Env {
   CUSTODY_KMS_METADATA_TOKEN_URL?: string;
   SPC_CREDENTIAL_ENCRYPTION_KEY?: string; // For encrypting invited SPC user passwords
   SPC_CREDENTIAL_KMS_KEY_NAME?: string; // Optional Cloud KMS key for SPC credential envelopes
-  // Email configuration
-  EMAIL_FROM?: string;
-  RESEND_API_KEY?: string;
   FRONTEND_URL?: string;
 
   // Clerk configuration
@@ -223,10 +226,6 @@ export interface Env {
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
 
-  // Recurring payment collection controls
-  PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
-  PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
-
   // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
   SDP_FLAG_ASSET_PROFILES?: string;
 
@@ -241,20 +240,6 @@ export interface Env {
 
   // Helius Rings feature gate — devnet-only shielded wallet API routes.
   HELIUS_RINGS_ENABLED?: string;
-
-  // Rings upstreams, all required once Rings is enabled. Absence does not
-  // disable the gateway: it reports every component red naming what is missing.
-  HELIUS_RINGS_RPC_URL?: string;
-  HELIUS_RINGS_INDEXER_URL?: string;
-  HELIUS_RINGS_PROVER_URL?: string;
-
-  // Helius ring RPC, which mints custom-ring auditor keys. Only ring bring-up
-  // needs it; absent, submitting a ring program id fails with config_error.
-  HELIUS_RINGS_RING_RPC_URL?: string;
-
-  // Permits plain-http Rings upstreams; opt-in per environment because over
-  // plaintext an indexer response reveals which notes an identity owns.
-  HELIUS_RINGS_ALLOW_INSECURE_HTTP?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;
@@ -296,8 +281,6 @@ export interface Env {
   BVNK_WALLET_ID?: string;
   BVNK_WEBHOOK_SECRET?: string;
   BVNK_API_BASE_URL?: string;
-  BVNK_SIGNING_HOST?: string;
-  PROXY_SHARED_SECRET?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
@@ -322,10 +305,13 @@ export interface Env {
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
 
-  // Markets module gate (parent) and its Earn sub-module gate (child). Earn
-  // needs both; clearing MARKETS_ENABLED dark-launches the whole module.
+  // Markets module gate. Clearing it dark-launches every Markets API surface.
   MARKETS_ENABLED?: string;
   EARN_ENABLED?: string;
+  // Settlement authority for DvP trades. Only this key can Settle or Cancel;
+  // the parties can only unwind. It cannot be either party or an executable
+  // account. Where it ultimately lives is still an open decision (PRO-1796).
+  DVP_SETTLEMENT_AUTHORITY?: string;
   // Whether Kora pays fees AND share-ATA rent for Earn vault movements.
   // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
   // process serves both clusters and withdrawals are not environment-gated.
@@ -336,8 +322,6 @@ export interface Env {
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;
   PERENA_SANDBOX_API_KEY?: string;
-  GROUND_API_KEY?: string;
-  GROUND_SANDBOX_API_KEY?: string;
 }
 
 // Extend Hono's context with our bindings

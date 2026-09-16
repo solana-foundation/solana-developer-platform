@@ -4,12 +4,12 @@ import { bindRepositoryToTenant, type TenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 import type { AssetProfilesRepository } from "./asset-profile.repository";
 import { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
-import type { AssetWorkflowsRepository } from "./asset-workflow.repository";
-import { createPostgresAssetWorkflowsRepository } from "./asset-workflow.repository.postgres";
 import type { CounterpartiesRepository } from "./counterparty.repository";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { CounterpartyAccountsRepository } from "./counterparty-account.repository";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
+import type { DvpTradeRepository } from "./dvp-trade.repository";
+import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
 import type { HeliusRingsAssetRepository } from "./helius-rings-asset.repository";
@@ -18,8 +18,6 @@ import type { HeliusRingsEventRepository } from "./helius-rings-event.repository
 import { createPostgresHeliusRingsEventRepository } from "./helius-rings-event.repository.postgres";
 import type { HeliusRingsHealthRepository } from "./helius-rings-health.repository";
 import { createPostgresHeliusRingsHealthRepository } from "./helius-rings-health.repository.postgres";
-import type { HeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository";
-import { createPostgresHeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository.postgres";
 import type { HeliusRingsOperationRepository } from "./helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
 import type { HeliusRingsProjectRingRepository } from "./helius-rings-project-ring.repository";
@@ -30,8 +28,6 @@ import type { HeliusRingsZoneRepository } from "./helius-rings-zone.repository";
 import { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
 import type { KycWalletsRepository } from "./kyc-wallet.repository";
 import { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
-import type { NotificationsRepository } from "./notification.repository";
-import { createPostgresNotificationsRepository } from "./notification.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -66,14 +62,12 @@ import type { PrivateChannelWithdrawalRepository } from "./private-channel-withd
 import { createPostgresPrivateChannelWithdrawalRepository } from "./private-channel-withdrawal.repository.postgres";
 import type { ProjectUserRepository } from "./project-user.repository";
 import { createPostgresProjectUserRepository } from "./project-user.repository.postgres";
+import type { SecretRetirementsRepository } from "./secret-retirement.repository";
+import { createPostgresSecretRetirementsRepository } from "./secret-retirement.repository.postgres";
 import type { TokenRepository } from "./token.repository";
 import { createPostgresTokenRepository } from "./token.repository.postgres";
 import type { WalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository";
 import { createPostgresWalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository.postgres";
-import type { WorkflowExecutionsRepository } from "./workflow-execution.repository";
-import { createPostgresWorkflowExecutionsRepository } from "./workflow-execution.repository.postgres";
-import type { WorkflowSecretRetirementsRepository } from "./workflow-secret-retirement.repository";
-import { createPostgresWorkflowSecretRetirementsRepository } from "./workflow-secret-retirement.repository.postgres";
 
 export function createPaymentsRepository(env: Env, scope: TenantScope): PaymentsRepository {
   return bindRepositoryToTenant(
@@ -130,7 +124,12 @@ export function createPaymentRequestsRepository(
     createPostgresPaymentRequestsRepository(getDb(env)),
     scope,
     "PaymentRequestsRepository",
-    ["getPaymentRequestByPublicToken"]
+    [
+      "getPaymentRequestByPublicToken",
+      "claimSponsoredTransactionWindow",
+      "getSponsoredTransactionClaim",
+      "storeSponsoredTransactionSignature",
+    ]
   );
 }
 
@@ -220,22 +219,8 @@ export function createWalletAssetEnrollmentsRepository(env: Env): WalletAssetEnr
   return createPostgresWalletAssetEnrollmentsRepository(getDb(env));
 }
 
-export function createAssetWorkflowsRepository(env: Env): AssetWorkflowsRepository {
-  return createPostgresAssetWorkflowsRepository(getDb(env));
-}
-
-export function createWorkflowExecutionsRepository(env: Env): WorkflowExecutionsRepository {
-  return createPostgresWorkflowExecutionsRepository(getDb(env));
-}
-
-export function createWorkflowSecretRetirementsRepository(
-  env: Env
-): WorkflowSecretRetirementsRepository {
-  return createPostgresWorkflowSecretRetirementsRepository(getDb(env));
-}
-
-export function createNotificationsRepository(env: Env): NotificationsRepository {
-  return createPostgresNotificationsRepository(getDb(env));
+export function createSecretRetirementsRepository(env: Env): SecretRetirementsRepository {
+  return createPostgresSecretRetirementsRepository(getDb(env));
 }
 
 export function createEarnRepository(env: Env): EarnRepository {
@@ -252,10 +237,6 @@ export function createHeliusRingsOperationRepository(env: Env): HeliusRingsOpera
 
 export function createHeliusRingsProjectRingRepository(env: Env): HeliusRingsProjectRingRepository {
   return createPostgresHeliusRingsProjectRingRepository(getDb(env));
-}
-
-export function createHeliusRingsKeyRefRepository(env: Env): HeliusRingsKeyRefRepository {
-  return createPostgresHeliusRingsKeyRefRepository(getDb(env));
 }
 
 export function createHeliusRingsZoneRepository(env: Env): HeliusRingsZoneRepository {
@@ -288,6 +269,10 @@ export function createPrivateChannelTransferRepository(env: Env): PrivateChannel
 
 export function createPrivateChannelDepositRepository(env: Env): PrivateChannelDepositRepository {
   return createPostgresPrivateChannelDepositRepository(getDb(env));
+}
+
+export function createDvpTradeRepository(env: Env): DvpTradeRepository {
+  return createPostgresDvpTradeRepository(getDb(env));
 }
 
 export function createPrivateChannelVerifiedWalletRepository(

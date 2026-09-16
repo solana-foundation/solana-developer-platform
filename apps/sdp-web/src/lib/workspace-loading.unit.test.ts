@@ -8,14 +8,10 @@ describe("normalizeWorkspaceReturnPath", () => {
     );
   });
 
-  it.each([
-    undefined,
-    "",
-    "//example.com",
-    "/sign-in",
-    "/dashboard/../sign-in",
-    ["/members"],
-  ])("falls back for an unsafe destination: %j", (value) => {
-    expect(normalizeWorkspaceReturnPath(value)).toBe("/dashboard");
-  });
+  it.each([undefined, "", "//example.com", "/sign-in", "/dashboard/../sign-in", ["/members"]])(
+    "falls back for an unsafe destination: %j",
+    (value) => {
+      expect(normalizeWorkspaceReturnPath(value)).toBe("/dashboard");
+    }
+  );
 });

@@ -18,6 +18,7 @@ import {
   extractBearerToken,
   isPlausibleEmail,
   resolveClerkEmail,
+  resolveClerkOrganizationClaims,
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
@@ -406,20 +407,28 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     );
   }
 
+  const organizationClaims = resolveClerkOrganizationClaims(payload);
+  if (!organizationClaims.organizationId) {
+    throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
+  }
+
   // Everything below writes — user provisioning, membership, default projects,
   // email repair — so the allowlist gates entry here rather than the response
   // after: a blocked origin must not leave state behind. Only an organization
   // that already exists can carry a restriction; one first provisioned by this
   // request cannot have one yet, so the callers need no second check.
-  const knownOrganization = await resolveClerkOrganization(getDb(c.env), payload.org_id as string);
+  const knownOrganization = await resolveClerkOrganization(
+    getDb(c.env),
+    organizationClaims.organizationId
+  );
   if (knownOrganization) {
     await enforceOrganizationIpAllowlist(c, knownOrganization.organization_id);
   }
 
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
     clerkUserId: payload.sub as string,
-    clerkOrgId: payload.org_id as string,
-    fallbackOrgSlug: payload.org_slug ?? null,
+    clerkOrgId: organizationClaims.organizationId,
+    fallbackOrgSlug: organizationClaims.organizationSlug,
   });
 
   if (existingContext?.organization_id && existingContext.user_id && existingContext.role) {
@@ -467,27 +476,27 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
       permissions: getPermissionsForOrgRole(role),
       role,
       clerkUserId: payload.sub as string,
-      clerkOrgId: payload.org_id as string,
+      clerkOrgId: organizationClaims.organizationId,
       email: resolvedEmail,
-      orgSlug: payload.org_slug ?? existingContext.org_slug,
-      orgRole: payload.org_role ?? null,
+      orgSlug: organizationClaims.organizationSlug ?? existingContext.org_slug,
+      orgRole: organizationClaims.organizationRole,
     };
   }
 
   const [userIdentity, orgIdentity] = await Promise.all([
     ensureClerkUser(c.env, getDb(c.env), payload.sub as string, email),
-    resolveClerkOrganization(getDb(c.env), payload.org_id as string),
+    resolveClerkOrganization(getDb(c.env), organizationClaims.organizationId),
   ]);
 
   let resolvedOrgIdentity = orgIdentity;
   if (!resolvedOrgIdentity) {
-    const organization = await new ClerkOrganizationsService(c.env).getOrganization(
-      payload.org_id as string
+    const clerkOrganization = await new ClerkOrganizationsService(c.env).getOrganization(
+      organizationClaims.organizationId
     );
     const mapping = await ensureClerkOrganizationMapping({
       env: c.env,
       db: getDb(c.env),
-      organization,
+      organization: clerkOrganization,
     });
     resolvedOrgIdentity = {
       organization_id: mapping.organizationId,
@@ -499,7 +508,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     organizationId: resolvedOrgIdentity.organization_id,
     userId: userIdentity.userId,
     email: userIdentity.email,
-    clerkRole: payload.org_role,
+    clerkRole: organizationClaims.organizationRole,
   });
   await ensureDefaultProjects(
     getDb(c.env),
@@ -515,11 +524,20 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     permissions,
     role,
     clerkUserId: payload.sub as string,
-    clerkOrgId: payload.org_id as string,
+    clerkOrgId: organizationClaims.organizationId,
     email: userIdentity.email,
-    orgSlug: payload.org_slug ?? resolvedOrgIdentity.slug,
-    orgRole: payload.org_role ?? null,
+    orgSlug: organizationClaims.organizationSlug ?? resolvedOrgIdentity.slug,
+    orgRole: organizationClaims.organizationRole,
   };
+}
+
+function assertClerkTenantClaims(payload: ClerkJwtPayload): void {
+  if (!payload.sub) {
+    throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
+  }
+  if (!resolveClerkOrganizationClaims(payload).organizationId) {
+    throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
+  }
 }
 
 export function clerkAuthMiddleware() {
@@ -544,13 +562,7 @@ export function clerkAuthMiddleware() {
         });
       }
 
-      if (!payload.sub) {
-        throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
-      }
-
-      if (!payload.org_id) {
-        throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
-      }
+      assertClerkTenantClaims(payload);
 
       const context = await buildClerkContext(c, payload);
 
@@ -571,7 +583,7 @@ export function clerkAuthMiddleware() {
   };
 }
 
-export function optionalClerkAuth() {
+export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const token = extractBearerToken(c);
 
@@ -583,23 +595,19 @@ export function optionalClerkAuth() {
     try {
       await runWithSystemDatabaseIdentity("http:auth", async () => {
         const payload = await verifyClerkJwtForRequest(c, token);
-
-        if (payload.sub && payload.org_id) {
-          const clerkContext = await buildClerkContext(c, payload);
-          if (clerkContext) {
-            await enforceRateLimit(
-              c,
-              `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
-              DASHBOARD_ACTOR_MAX_REQUESTS
-            );
-            c.set("clerk", clerkContext);
-          }
-        }
+        assertClerkTenantClaims(payload);
+        const clerkContext = await buildClerkContext(c, payload);
+        await enforceRateLimit(
+          c,
+          `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
+          DASHBOARD_ACTOR_MAX_REQUESTS
+        );
+        c.set("clerk", clerkContext);
       });
     } catch (error) {
       // Ignore invalid Clerk auth for optional usage, but never rate
       // limiting — a limited user must not proceed as anonymous.
-      if (error instanceof AppError && error.code === "RATE_LIMITED") {
+      if (options.rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
         throw error;
       }
     }

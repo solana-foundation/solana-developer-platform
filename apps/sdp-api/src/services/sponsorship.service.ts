@@ -6,7 +6,7 @@ import {
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment } from "@sdp/types";
-import type { Signature } from "@solana/kit";
+import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -17,6 +17,7 @@ import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
 import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
+import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 
 export type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
 
@@ -55,10 +56,29 @@ export interface SponsorshipFeePayment extends FeePaymentPort {
 
 function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeePayment {
   const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
+  let feePayer: Promise<Address> | undefined;
+  const sponsor = () => {
+    if (!feePayer) {
+      feePayer = provider.getFeePayer();
+      feePayer.catch(() => {
+        feePayer = undefined;
+      });
+    }
+    return feePayer;
+  };
+  const signVerified = async (transaction: Uint8Array) => {
+    const signedTransaction = await provider.signAsFeePayer(transaction);
+    const decoded = await assertSponsorSignedSameMessage({
+      requested: transaction,
+      sponsorSigned: signedTransaction,
+      sponsor: await sponsor(),
+    });
+    return { signedTransaction, decoded };
+  };
   return {
     providerId: provider.providerId,
-    getFeePayer: () => provider.getFeePayer(),
-    signAsFeePayer: (transaction) => provider.signAsFeePayer(transaction),
+    getFeePayer: () => sponsor(),
+    signAsFeePayer: async (transaction) => (await signVerified(transaction)).signedTransaction,
     signAndSend: (transaction) => provider.signAndSend(transaction),
     ...(getSponsorshipConfiguration
       ? {
@@ -66,9 +86,9 @@ function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeeP
         }
       : {}),
     async prepareOwnedSubmission(transaction, lifecycle) {
-      const signedTransaction = await provider.signAsFeePayer(transaction);
+      const { decoded } = await signVerified(transaction);
       const submission = {
-        ...getFullySignedSubmission(signedTransaction),
+        ...getFullySignedSubmission(decoded),
         releaseDefinitelyUnbroadcast: async () => {},
       };
       await lifecycle.persistSigned(submission);
@@ -147,7 +167,9 @@ export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
       "Managed sponsorship requires a trusted organization or project scope"
     );
   }
-  return instrumentVendorPort(resolveFeePaymentProvider(env), createFeePaymentAdapter(env));
+  return withOwnedSubmissionLifecycle(
+    instrumentVendorPort(resolveFeePaymentProvider(env), createFeePaymentAdapter(env))
+  );
 }
 
 /** Resolve a scope exclusively from trusted request middleware state. */

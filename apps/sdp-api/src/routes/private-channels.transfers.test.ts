@@ -1,10 +1,16 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, PrivateChannelTransfer } from "@sdp/types";
+import { PrivySigner } from "@solana/keychain-privy";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPrivateChannelTransferRepository } from "@/db/repositories";
 import app from "@/index";
-import * as solanaServices from "@/services/solana";
+import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
+import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -12,7 +18,10 @@ const { createChannelTransferMock, resolveGatewayAuthMock } = vi.hoisted(() => (
   createChannelTransferMock: vi.fn(),
   resolveGatewayAuthMock: vi.fn(),
 }));
-const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
+const createProviderSigner = PrivySigner.create;
+const createOrgSignerMock = vi.spyOn(PrivySigner, "create");
+const providerFetch = vi.fn<typeof fetch>();
+const originalPrivy = { appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET };
 
 vi.mock("@/services/private-channels", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/private-channels")>();
@@ -27,7 +36,6 @@ vi.mock("@/services/private-channels/auth/gateway-auth", async (importOriginal) 
 
 const ORGANIZATION_ID = "org_pc_transfers";
 const PROJECT_ID = "prj_pc_transfers";
-const OTHER_PROJECT_ID = "prj_pc_transfers_other";
 const SESSION_ID = "ses_pc_transfers";
 const ACTOR_USER_ID = "usr_pc_transfer_actor";
 const RECIPIENT_USER_ID = "usr_pc_transfer_recipient";
@@ -75,6 +83,55 @@ const UNSAFE_RECIPIENTS = [
 ] as const;
 
 let originalPrivateChannelsEnabled: string | undefined;
+let originalByok: string | undefined;
+
+async function useConnectionSource() {
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = 'cust-pct'")
+      .bind(OTHER_USER_WALLET_ID),
+    db
+      .prepare(`INSERT INTO provider_credentials
+      (id, organization_id, project_id, provider, label, scope, source, storage_backend, status, created_by)
+      VALUES ('pcred-pct', ?, ?, 'privy', 'PC', 'project', 'runtime', 'runtime_env', 'active', ?)`)
+      .bind(ORGANIZATION_ID, PROJECT_ID, ACTOR_USER_ID),
+    db
+      .prepare(`INSERT INTO custody_connections
+      (id, organization_id, project_id, provider, scope, provider_credential_id, provider_credential_scope_key, status, created_by)
+      VALUES ('conn-pct', ?, ?, 'privy', 'project', 'pcred-pct', ?, 'pending', ?)`)
+      .bind(ORGANIZATION_ID, PROJECT_ID, PROJECT_ID, ACTOR_USER_ID),
+    db.prepare(
+      "UPDATE custody_wallets SET custody_config_id = NULL, custody_connection_id = 'conn-pct' WHERE id = 'cw-pct-actor'"
+    ),
+    db
+      .prepare(`UPDATE custody_connections SET default_custody_wallet_id = 'cw-pct-actor', status = 'active',
+      provider_account_fingerprint = ?, activated_at = sdp_iso_now(), last_check_status = 'success', last_check_at = sdp_iso_now()
+      WHERE id = 'conn-pct'`)
+      .bind(await getPrivyProviderAccountFingerprint("pc-transfer-app")),
+  ]);
+}
+
+async function keyTransfer(id: string, pending = false) {
+  await seedTransfer({ id, status: pending ? "pending" : "submitted" });
+  await getDb(env)
+    .prepare(`UPDATE private_channel_transfers SET idempotency_key = ?, idempotency_fingerprint = ?,
+    updated_at = ? WHERE id = ?`)
+    .bind(
+      "idem_route_transfer",
+      buildPrivateChannelTransferFingerprint({
+        instanceId: INSTANCE_ID,
+        channelId: CHANNEL_ID,
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        mint: OUTSIDER_ADDRESS,
+        amount: "1.5",
+      }),
+      new Date(Date.now() - 11 * 60_000).toISOString(),
+      id
+    )
+    .run();
+}
 
 function sessionHeaders(extra: Record<string, string> = {}) {
   return {
@@ -170,28 +227,22 @@ async function seedRouteState(): Promise<void> {
         ORGANIZATION_ID,
         new Date(Date.now() + 60_000).toISOString()
       ),
-    db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES
-           (?, ?, 'Transfer Project', 'pc-transfer-project', 'sandbox', 'active', ?),
-           (?, ?, 'Other Project', 'pc-transfer-other', 'sandbox', 'active', ?)`
-      )
-      .bind(
-        PROJECT_ID,
-        ORGANIZATION_ID,
-        ACTOR_USER_ID,
-        OTHER_PROJECT_ID,
-        ORGANIZATION_ID,
-        ACTOR_USER_ID
-      ),
-    db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_pc_transfers', ?, ?, 'admin')`
-      )
-      .bind(PROJECT_ID, ACTOR_USER_ID),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: ACTOR_USER_ID,
+    members: [ACTOR_USER_ID],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await seedProjectApiKey(db, env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: ORGANIZATION_ID,
+    projectId: `${PROJECT_ID}_production`,
+    createdBy: ACTOR_USER_ID,
+    role: "api_admin",
+    permissions: ["payments:read"],
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO api_keys
@@ -224,6 +275,23 @@ async function seedRouteState(): Promise<void> {
         WITHDRAW_PROGRAM_ID,
         ESCROW_INSTANCE_ADDRESS
       ),
+    db
+      .prepare(`INSERT INTO api_keys
+      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, 'api_admin', ?, 'active')`)
+      .bind(
+        SCOPED_API_KEY.id,
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        ACTOR_USER_ID,
+        SCOPED_API_KEY.prefix,
+        await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER),
+        JSON.stringify(cachedApiKey.permissions)
+      ),
+    db
+      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+      VALUES ('akwp-pct', ?, ?, ?)`)
+      .bind(SCOPED_API_KEY.id, OTHER_USER_WALLET_ID, JSON.stringify(["payments:write"])),
     db
       .prepare(
         `INSERT INTO private_channels
@@ -289,7 +357,7 @@ async function seedRouteState(): Promise<void> {
       .prepare(
         `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, default_wallet_id, status)
-         VALUES ('cust-pct', ?, ?, 'turnkey', '{}', ?, 'active')`
+         VALUES ('cust-pct', ?, ?, 'privy', '{}', ?, 'active')`
       )
       .bind(ORGANIZATION_ID, PROJECT_ID, ACTOR_WALLET_ID),
     db
@@ -372,7 +440,7 @@ async function seedTransfer(input: {
          sender_private_channel_user_id, recipient_private_channel_user_id,
          sender_wallet_id, recipient_verified_wallet_id, sender, recipient,
          mint, amount, status, signature
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '1.5', ?, 'sig-read')`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '1.5', ?, ?)`
     )
     .bind(
       input.id,
@@ -387,7 +455,8 @@ async function seedTransfer(input: {
       ACTOR_ADDRESS,
       RECIPIENT_ADDRESS,
       OUTSIDER_ADDRESS,
-      input.status ?? "submitted"
+      input.status ?? "submitted",
+      input.status === "pending" ? null : "sig-read"
     )
     .run();
 }
@@ -410,18 +479,29 @@ async function postTransfer(
 describe("Private Channels — transfer access and routes", () => {
   afterAll(() => {
     createOrgSignerMock.mockRestore();
+    env.PRIVY_APP_ID = originalPrivy.appId;
+    env.PRIVY_APP_SECRET = originalPrivy.appSecret;
   });
 
   beforeEach(async () => {
+    originalByok = env.PRIVY_BYOK_ENABLED;
     originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
     env.PRIVATE_CHANNELS_ENABLED = "true";
+    env.PRIVY_APP_ID = "pc-transfer-app";
+    env.PRIVY_APP_SECRET = "pc-transfer-secret";
     await seedTestDatabase(env);
     await seedRouteState();
     createChannelTransferMock.mockReset();
     resolveGatewayAuthMock.mockReset();
     createOrgSignerMock.mockReset();
     createChannelTransferMock.mockResolvedValue(transferDto());
-    createOrgSignerMock.mockResolvedValue({ address: ACTOR_ADDRESS } as never);
+    createOrgSignerMock.mockImplementation(createProviderSigner);
+    providerFetch
+      .mockReset()
+      .mockImplementation(async () =>
+        Response.json({ address: ACTOR_ADDRESS, chain_type: "solana", id: ACTOR_WALLET_ID })
+      );
+    vi.stubGlobal("fetch", providerFetch);
     resolveGatewayAuthMock.mockResolvedValue({
       current: "jwt-route",
       pcUserId: ACTOR_PC_USER_ID,
@@ -430,8 +510,185 @@ describe("Private Channels — transfer access and routes", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
+    env.PRIVY_BYOK_ENABLED = originalByok;
     env.PRIVATE_CHANNELS_ENABLED = originalPrivateChannelsEnabled;
     await clearKVStores(env);
+  });
+
+  it.each([false, true])(
+    "uses role permissions for transfer execution and replay (replay=%s)",
+    async (replay) => {
+      if (replay) await keyTransfer("pct_role_replay");
+      await getDb(env)
+        .prepare("UPDATE api_keys SET permissions = NULL WHERE id = ?")
+        .bind(API_KEY.id)
+        .run();
+      await clearKVStores(env);
+
+      const response = await postTransfer(
+        {
+          walletId: ACTOR_WALLET_ID,
+          recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+          amount: "1.5",
+        },
+        { ...apiKeyHeaders(), "Idempotency-Key": "idem_route_transfer" }
+      );
+
+      expect(response.status).toBe(200);
+      if (replay) {
+        expect(await response.json()).toMatchObject({ data: { id: "pct_role_replay" } });
+        expect(createOrgSignerMock).not.toHaveBeenCalled();
+      }
+    }
+  );
+
+  it("requires the original source for transfer replay while history remains readable", async () => {
+    await seedTransfer({ id: "pct_replay" });
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `UPDATE private_channel_transfers SET idempotency_key = ?, idempotency_fingerprint = ? WHERE id = 'pct_replay'`
+        )
+        .bind(
+          "idem_route_transfer",
+          buildPrivateChannelTransferFingerprint({
+            instanceId: INSTANCE_ID,
+            channelId: CHANNEL_ID,
+            walletId: ACTOR_WALLET_ID,
+            recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+            mint: OUTSIDER_ADDRESS,
+            amount: "1.5",
+          })
+        ),
+      getDb(env).prepare(
+        "UPDATE custody_wallets SET status = 'inactive' WHERE id = 'cw-pct-actor'"
+      ),
+    ]);
+    const response = await postTransfer({
+      walletId: ACTOR_WALLET_ID,
+      recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+      amount: "1.500",
+    });
+    expect(response.status).toBe(404);
+    const history = await app.request(
+      "/v1/private-channels/transfers/pct_replay",
+      { headers: sessionHeaders() },
+      env
+    );
+    expect(history.status).toBe(200);
+    expect(await history.json()).toMatchObject({
+      data: { id: "pct_replay", status: "submitted" },
+    });
+    expect(createOrgSignerMock).not.toHaveBeenCalled();
+    expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    "admits an explicitly chosen nondefault Connection before transfer setup (enabled=%s)",
+    async (enabled) => {
+      await useConnectionSource();
+      env.PRIVY_BYOK_ENABLED = String(enabled);
+      const response = await postTransfer({
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        amount: "1.5",
+      });
+      expect(response.status).toBe(enabled ? 200 : 403);
+      expect(createOrgSignerMock).toHaveBeenCalledTimes(enabled ? 1 : 0);
+      expect(resolveGatewayAuthMock).toHaveBeenCalledTimes(enabled ? 1 : 0);
+    }
+  );
+
+  it.each([true, false])(
+    "requires write for abandoned transfer recovery without a signer (write=%s)",
+    async (write) => {
+      await keyTransfer("pct_abandoned", true);
+      await useConnectionSource();
+      env.PRIVY_BYOK_ENABLED = "false";
+      await getDb(env)
+        .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
+        .bind(
+          JSON.stringify(write ? ["payments:read", "payments:write"] : ["payments:read"]),
+          API_KEY.id
+        )
+        .run();
+      const response = await postTransfer(
+        {
+          walletId: ACTOR_WALLET_ID,
+          recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+          amount: "1.5",
+        },
+        { ...apiKeyHeaders(), "Idempotency-Key": "idem_route_transfer" }
+      );
+      expect(response.status).toBe(write ? 200 : 403);
+      const history = await app.request(
+        "/v1/private-channels/transfers/pct_abandoned",
+        { headers: apiKeyHeaders() },
+        env
+      );
+      expect(history.status).toBe(200);
+      expect(await history.json()).toMatchObject({
+        data: { id: "pct_abandoned", status: write ? "failed" : "pending" },
+      });
+      expect(createOrgSignerMock).not.toHaveBeenCalled();
+      expect(resolveGatewayAuthMock).toHaveBeenCalledTimes(write ? 1 : 0);
+    }
+  );
+
+  it.each(['["payments:write"]', '["payments:read", "payments:write"]'])(
+    "rechecks the winner's original source after losing an idempotency reservation (%s)",
+    async (permissions) => {
+      await getDb(env)
+        .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
+        .bind(permissions, API_KEY.id)
+        .run();
+      createChannelTransferMock.mockImplementationOnce(async (_env, input) => {
+        await keyTransfer("pct_race_winner");
+        await getDb(env)
+          .prepare("UPDATE private_channel_transfers SET sender = ? WHERE id = 'pct_race_winner'")
+          .bind(OTHER_USER_ADDRESS)
+          .run();
+        const winner = await createPrivateChannelTransferRepository(env).getTransferById({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          id: "pct_race_winner",
+        });
+        return input.onReplay(winner);
+      });
+      const response = await postTransfer(
+        {
+          walletId: ACTOR_WALLET_ID,
+          recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+          amount: "1.5",
+        },
+        { ...apiKeyHeaders(), "Idempotency-Key": "idem_route_transfer" }
+      );
+      expect(response.status).toBe(409);
+      // Preparatory signer construction is allowed before the losing INSERT;
+      // the winner must still be separately authorized before its result leaves.
+      expect(createOrgSignerMock).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("keeps the selected source when the default changes during signer preparation", async () => {
+    createOrgSignerMock.mockImplementationOnce(async (config) => {
+      await getDb(env)
+        .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = 'cust-pct'")
+        .bind(OTHER_USER_WALLET_ID)
+        .run();
+      return createProviderSigner(config);
+    });
+    const response = await postTransfer({
+      walletId: ACTOR_WALLET_ID,
+      recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+      amount: "1.5",
+    });
+    expect(response.status).toBe(200);
+    expect(createOrgSignerMock).toHaveBeenCalledTimes(1);
+    expect(createOrgSignerMock).toHaveBeenCalledWith(
+      expect.objectContaining({ walletId: ACTOR_WALLET_ID })
+    );
   });
 
   it("allows API keys to use the project's default identity", async () => {
@@ -598,10 +855,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     expect(response.status).toBe(503);
     expect(createOrgSignerMock).toHaveBeenCalledWith(
-      expect.anything(),
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      ACTOR_WALLET_ID
+      expect.objectContaining({ walletId: ACTOR_WALLET_ID })
     );
     expect(createChannelTransferMock).not.toHaveBeenCalled();
     const persisted = await getDb(env)
@@ -611,7 +865,9 @@ describe("Private Channels — transfer access and routes", () => {
   });
 
   it("rejects a signer whose address does not match the verified source wallet", async () => {
-    createOrgSignerMock.mockResolvedValueOnce({ address: RECIPIENT_ADDRESS } as never);
+    providerFetch.mockImplementationOnce(async () =>
+      Response.json({ address: RECIPIENT_ADDRESS, chain_type: "solana", id: ACTOR_WALLET_ID })
+    );
 
     const response = await postTransfer({
       walletId: ACTOR_WALLET_ID,
@@ -619,7 +875,7 @@ describe("Private Channels — transfer access and routes", () => {
       amount: "1.5",
     });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(409);
     expect(createChannelTransferMock).not.toHaveBeenCalled();
     const persisted = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS count FROM private_channel_transfers")
@@ -766,15 +1022,9 @@ describe("Private Channels — transfer access and routes", () => {
     );
   });
 
-  it("keeps transfer reads project scoped and supports an optional channel filter", async () => {
+  it("supports transfer reads and an optional channel filter", async () => {
     await seedTransfer({ id: "pct-visible-a" });
     await seedTransfer({ id: "pct-visible-b", channelId: OTHER_CHANNEL_ID });
-    await seedTransfer({
-      id: "pct-other-project",
-      projectId: OTHER_PROJECT_ID,
-      instanceId: "pci-other",
-      channelId: "pch-other",
-    });
 
     const list = await app.request(
       "/v1/private-channels/transfers",
@@ -809,12 +1059,17 @@ describe("Private Channels — transfer access and routes", () => {
       env
     );
     expect(getVisible.status).toBe(200);
+  });
 
-    const getOtherProject = await app.request(
-      "/v1/private-channels/transfers/pct-other-project",
-      { headers: sessionHeaders() },
+  it("returns 404 for another project's transfer", async () => {
+    await seedTransfer({ id: "pct-sandbox-owned" });
+    const response = await app.request(
+      "/v1/private-channels/transfers/pct-sandbox-owned",
+      {
+        headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
+      },
       env
     );
-    expect(getOtherProject.status).toBe(404);
+    expect(response.status).toBe(404);
   });
 });

@@ -15,7 +15,7 @@ export default async function PrivateChannelsLayout({ children }: { children: Re
     <div className="flex h-full min-h-0 flex-col">
       {/* Gutters match the shell's header padding, which locked routes don't inherit.
           The deep bottom padding clears the fixed mobile bar that hides at xl. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-6 pb-20 md:px-6 xl:pb-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-6 pb-20 md:px-6 md:pb-6">
         {children}
       </div>
     </div>

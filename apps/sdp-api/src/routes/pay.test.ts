@@ -1,13 +1,18 @@
+import type * as solanaRpc from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types";
-import { describe, expect, it } from "vitest";
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { AuditService } from "@/services/audit.service";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
+  createRpcMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
@@ -16,9 +21,52 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Public payment request routes", () => {
   installPaymentsRouteTestHooks();
+
+  function createAwaitingPaymentRequest() {
+    return createPaymentRequestsRepository(
+      env,
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    ).createPaymentRequest({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      counterpartyId: null,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      token: SOL_MINT,
+      amount: "1.5",
+      expiresAt: null,
+      createdBy: TEST_USER.id,
+    });
+  }
+
+  function postTransaction(publicToken: string) {
+    return app.request(
+      `/pay/${publicToken}/tx`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet2 }),
+      },
+      env
+    );
+  }
+
+  function stubSponsorship() {
+    return vi
+      .spyOn(sponsorshipService, "createProjectSponsorshipFeePayment")
+      .mockImplementation(async () => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: sponsorSignTestTransaction,
+        signAndSend: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+  }
 
   it("keeps an unresolved legacy request readable but refuses to build its transaction", async () => {
     const request = await createPaymentRequestsRepository(
@@ -65,5 +113,157 @@ describe("Public payment request routes", () => {
     });
     expect(createFeePaymentAdapterMock).not.toHaveBeenCalled();
     expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+  });
+
+  describe("sponsored transaction window", () => {
+    beforeEach(() => {
+      createRpcMock.mockReturnValue({
+        getSignaturesForAddress: () => ({ send: async () => [] }),
+        getBlockHeight: () => ({ send: async () => 900n }),
+      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    });
+
+    it("signs once per window and replays the stored transaction for the same account", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+
+      const first = await postTransaction(request.public_token);
+      expect(first.status).toBe(200);
+      const firstBody = (await first.json()) as { transaction: string };
+
+      const second = await postTransaction(request.public_token);
+      expect(second.status).toBe(200);
+      const secondBody = (await second.json()) as { transaction: string };
+
+      expect(secondBody.transaction).toBe(firstBody.transaction);
+      expect(sponsorship).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers a different account with 429 and Retry-After while the claim is live", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      const other = await app.request(
+        `/pay/${request.public_token}/tx`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet3 }),
+        },
+        env
+      );
+      expect(other.status).toBe(429);
+      expect(Number(other.headers.get("Retry-After"))).toBeGreaterThan(0);
+    });
+
+    it("lets a new account claim after the window expires", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      createRpcMock.mockReturnValue({
+        getSignaturesForAddress: () => ({ send: async () => [] }),
+        getBlockHeight: () => ({ send: async () => 2_000n }),
+      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+
+      const other = await app.request(
+        `/pay/${request.public_token}/tx`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet3 }),
+        },
+        env
+      );
+      expect(other.status).toBe(200);
+      expect(sponsorship).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps the claim when signing fails and signs the stored bytes on retry", async () => {
+      const sponsorship = stubSponsorship();
+      sponsorship.mockImplementationOnce(async () => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: () => Promise.reject(new Error("signing timed out")),
+        signAndSend: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const request = await createAwaitingPaymentRequest();
+
+      expect((await postTransaction(request.public_token)).status).toBe(500);
+      const retried = await postTransaction(request.public_token);
+      expect(retried.status).toBe(200);
+      expect(sponsorship).toHaveBeenCalledTimes(2);
+    });
+
+    it("audits a fresh sponsored grant exactly once and keeps replay polls off the ledger", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      const rows = await getDb(env)
+        .prepare(
+          "SELECT action, organization_id, metadata FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ?"
+        )
+        .bind(request.id)
+        .all();
+      expect(rows.results).toHaveLength(1);
+      const row = rows.results[0] as Record<string, unknown>;
+      expect(row.action).toBe("sign");
+      expect(row.organization_id).toBe(TEST_ORG.id);
+      const metadata = JSON.parse(String(row.metadata));
+      expect(metadata.sponsoredAccount).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+      expect(metadata.signature).toBeTruthy();
+    });
+
+    it("refuses and does not store the grant when its audit entry cannot be persisted", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+      const failure = vi
+        .spyOn(AuditService.prototype, "log")
+        .mockRejectedValueOnce(new Error("checkpoint store down"));
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(500);
+      expect(failure).toHaveBeenCalledTimes(1);
+      const claim = await getDb(env)
+        .prepare("SELECT sponsored_tx_signed FROM payment_requests WHERE id = ?")
+        .bind(request.id)
+        .first();
+      expect(claim?.sponsored_tx_signed ?? null).toBeNull();
+
+      const retried = await postTransaction(request.public_token);
+      expect(retried.status).toBe(200);
+      const rows = await getDb(env)
+        .prepare(
+          "SELECT id FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ?"
+        )
+        .bind(request.id)
+        .all();
+      expect(rows.results).toHaveLength(1);
+    });
+
+    it("does not open a claim for a payload it cannot build a transaction from", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+
+      const malformed = await app.request(
+        `/pay/${request.public_token}/tx`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account: "not-a-solana-address" }),
+        },
+        env
+      );
+      expect(malformed.status).toBe(400);
+      expect(sponsorship).not.toHaveBeenCalled();
+
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+    });
   });
 });

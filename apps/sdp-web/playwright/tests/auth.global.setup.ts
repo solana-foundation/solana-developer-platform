@@ -4,6 +4,7 @@ import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test as setup } from "@playwright/test";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
+import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
 
 setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
@@ -11,9 +12,6 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   const env = getE2EEnv();
   const identity = await resolveClerkTestIdentity();
 
-  // The ticket flow runs in a manually created context: Playwright tracing only
-  // instruments fixture contexts, so the live sign-in token never enters the
-  // retain-on-failure trace that gets uploaded as a workflow artifact.
   const ticketContext = env.ticketAuth ? await browser.newContext({ baseURL: env.baseURL }) : null;
   const target = ticketContext ? await ticketContext.newPage() : page;
 
@@ -35,47 +33,19 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
       }
       return (await response.json()) as { token: string };
     });
-    await target.goto("/sign-in", { waitUntil: "domcontentloaded" });
-    await target.waitForFunction(
-      () => Boolean((window as unknown as { Clerk?: { client?: unknown } }).Clerk?.client),
-      undefined,
-      { timeout: 120_000 }
+    const redactTicket = <T>(action: Promise<T>): Promise<T> =>
+      action.catch((error: unknown) => {
+        throw new Error(String(error).replaceAll(token, "[redacted-clerk-ticket]"));
+      });
+    await redactTicket(
+      target.goto(`/sign-in?__clerk_ticket=${token}`, { waitUntil: "domcontentloaded" })
     );
-    await target.evaluate(
-      async ({ ticket, organizationId }) => {
-        const clerkClient = (
-          window as unknown as {
-            Clerk?: {
-              client: {
-                signIn: {
-                  create: (p: Record<string, string>) => Promise<{
-                    status: string;
-                    createdSessionId: string | null;
-                  }>;
-                };
-              };
-              setActive: (p: { session: string; organization?: string }) => Promise<void>;
-            };
-          }
-        ).Clerk;
-        if (!clerkClient) {
-          throw new Error("Clerk failed to load in Playwright global setup");
-        }
-        const signIn = await clerkClient.client.signIn.create({ strategy: "ticket", ticket });
-        if (signIn.status !== "complete" || !signIn.createdSessionId) {
-          throw new Error(`ticket sign-in did not complete: status=${signIn.status}`);
-        }
-        await clerkClient.setActive({
-          session: signIn.createdSessionId,
-          organization: organizationId,
-        });
-      },
-      { ticket: token, organizationId: identity.organizationId }
-    );
-    await target.waitForFunction(
-      () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
-      undefined,
-      { timeout: 30_000 }
+    await redactTicket(
+      target.waitForFunction(
+        () => Boolean((window as unknown as { Clerk?: { session?: unknown } }).Clerk?.session),
+        undefined,
+        { timeout: 120_000 }
+      )
     );
   } else {
     await clerkSetup({
@@ -92,28 +62,36 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
     async ({ organizationId }) => {
       const clerkClient = (
         window as unknown as {
-          Clerk?: { setActive: (params: { organization: string }) => Promise<void> };
+          Clerk?: {
+            session?: { id?: string };
+            setActive: (params: { session?: string; organization?: string }) => Promise<void>;
+          };
         }
       ).Clerk;
 
-      if (!clerkClient) {
-        throw new Error("Clerk failed to load in Playwright global setup");
+      if (!clerkClient?.session?.id) {
+        throw new Error("Clerk session not established in Playwright global setup");
       }
 
-      await clerkClient.setActive({ organization: organizationId });
+      await clerkClient.setActive({
+        session: clerkClient.session.id,
+        organization: organizationId,
+      });
     },
     { organizationId: identity.organizationId }
   );
 
   await expect
-    .poll(() =>
-      target.evaluate(() => {
-        return (
-          window as unknown as {
-            Clerk?: { organization?: { id?: string } };
-          }
-        ).Clerk?.organization?.id;
-      })
+    .poll(
+      () =>
+        target.evaluate(() => {
+          return (
+            window as unknown as {
+              Clerk?: { organization?: { id?: string } };
+            }
+          ).Clerk?.organization?.id;
+        }),
+      { timeout: CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS }
     )
     .toBe(identity.organizationId);
 
@@ -131,7 +109,11 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   }
 
   await target.goto(env.useExternalApi ? "/dashboard" : "/dashboard/issuance");
-  await expect(target).toHaveURL(/\/dashboard/);
+  // Local suites seed the SDP organization in beforeAll, after this auth-only
+  // setup. A Clerk session without that mapping must stop at the sync gate.
+  await expect(target).toHaveURL(
+    env.useExternalApi ? /\/dashboard/ : /\/(dashboard|workspace-loading)(?:[/?]|$)/
+  );
   fs.mkdirSync(path.dirname(authStatePath), { recursive: true });
   await target.context().storageState({ path: authStatePath });
   await ticketContext?.close();

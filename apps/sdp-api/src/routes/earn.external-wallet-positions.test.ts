@@ -1,6 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CachedApiKey, EarnExternalWalletPositionSummaryResponse } from "@sdp/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   type EarnPositionRow,
@@ -9,7 +9,10 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
+import { getLogger } from "@/runtime/logger";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -32,6 +35,11 @@ const ORG = "org_external_position_reads";
 const PROJECT = "prj_external_position_reads";
 const USER = "usr_external_position_reads";
 const KEY = { id: "key_external_position_reads", raw: "sk_test_external_position_reads" };
+const PRODUCTION_KEY = {
+  id: "key_external_position_reads_production",
+  raw: "sk_live_external_position_reads",
+  prefix: "sk_live_ext",
+};
 const OWNER_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const OWNER_B = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -64,13 +72,28 @@ async function seedScope() {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "external-positions@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'External positions', 'external-positions', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT, ORG, USER),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+  });
+  const productionKeyHash = await seedProjectApiKey(getDb(env), env, {
+    key: PRODUCTION_KEY,
+    organizationId: ORG,
+    projectId: `${PROJECT}_production`,
+    createdBy: USER,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, productionKeyHash, {
+    ...cachedKey(),
+    id: PRODUCTION_KEY.id,
+    projectId: `${PROJECT}_production`,
+    environment: "production",
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -144,6 +167,10 @@ function get(path: string) {
   return app.request(path, { headers: { Authorization: `Bearer ${KEY.raw}` } }, env);
 }
 
+function getAsProduction(path: string) {
+  return app.request(path, { headers: { Authorization: `Bearer ${PRODUCTION_KEY.raw}` } }, env);
+}
+
 beforeEach(async () => {
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
@@ -167,7 +194,25 @@ beforeEach(async () => {
   );
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("external-wallet position reads", () => {
+  it("summary excludes another project's positions and owner addresses", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    const response = await getAsProduction("/v1/earn/external-wallet/positions/summary");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { summary: { walletCount: 0, positionCount: 0, totalsByStrategy: [] } },
+    });
+  });
+
   it("returns complete exact-decimal totals across wallets by strategy and token", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,
@@ -188,9 +233,11 @@ describe("external-wallet position reads", () => {
       label: "USDT vault",
     });
 
-    const response = await get("/v1/earn/external-wallet/positions/summary");
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true"
+    );
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { data: { summary: Record<string, unknown> } };
+    const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
 
     expect(body.data.summary).toMatchObject({
       walletCount: 2,
@@ -221,6 +268,78 @@ describe("external-wallet position reads", () => {
     expect(resolveVaultDirectClient.mock.calls[0]?.[2]).not.toBe(
       resolveVaultDirectClient.mock.calls[1]?.[2]
     );
+    const strategies = body.data.summary.totalsByStrategy;
+    expect(strategies.find((strategy) => strategy.label === "USDC vault")?.positions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ownerAddress: OWNER_A,
+          tokenMint: USDC,
+          tokenValue: "10.1",
+          shares: "1",
+          withdrawableShares: "1",
+        }),
+        expect.objectContaining({
+          ownerAddress: OWNER_B,
+          tokenMint: USDC,
+          tokenValue: "20.2",
+        }),
+      ])
+    );
+  });
+
+  it("default summary carries no owner address and no position details (EARN-028, PRO-1908)", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+
+    // A fresh earn:read key with no flag: totals only. The address book is
+    // opt-in, never the default.
+    const response = await get("/v1/earn/external-wallet/positions/summary");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        summary: {
+          walletCount: number;
+          totalsByStrategy: Array<Record<string, unknown>>;
+        };
+      };
+    };
+
+    expect(body.data.summary.walletCount).toBe(1);
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]).toMatchObject({
+      walletCount: 1,
+      positionCount: 1,
+    });
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("ownerAddresses");
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("positions");
+    expect(JSON.stringify(body)).not.toContain(OWNER_A);
+  });
+
+  it("summary returns owner addresses only on an explicit opt-in, without position details", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true"
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { summary: { totalsByStrategy: Array<Record<string, unknown>> } };
+    };
+
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]).toMatchObject({
+      ownerAddresses: [OWNER_A],
+    });
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("positions");
   });
 
   it("returns exactly one wallet and leaves an unreadable live value unavailable", async () => {
@@ -251,6 +370,7 @@ describe("external-wallet position reads", () => {
         }));
       }
     );
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
 
     const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
     expect(response.status).toBe(200);
@@ -259,6 +379,15 @@ describe("external-wallet position reads", () => {
     expect(body.data.positions[0]).toMatchObject({ ownerAddress: OWNER_B, label: "Unreadable" });
     expect(body.data.positions[0]).not.toHaveProperty("tokenValue");
     expect(body.data.positions[0]).not.toHaveProperty("shares");
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "kamino",
+        positionCount: 1,
+        error: "RPC unavailable",
+      }),
+      "vault position: live hydration unavailable"
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(OWNER_B);
 
     const summary = (await (await get("/v1/earn/external-wallet/positions/summary")).json()) as {
       data: {
@@ -272,21 +401,109 @@ describe("external-wallet position reads", () => {
     expect(summary.data.summary.totalsByToken[0]).not.toHaveProperty("tokenValue");
   });
 
+  it("omits both end-user owners from mismatch warnings before logger scrubbing", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-owner-mismatch",
+      tokenMint: USDC,
+      label: "Owner mismatch",
+    });
+    readVaultPositions.mockResolvedValue([
+      {
+        providerReference: "vault-owner-mismatch",
+        owner: OWNER_B,
+        cluster: "devnet",
+        shares: "1",
+        withdrawableShares: "1",
+        tokenValue: "1",
+        tokenMint: USDC,
+        shareMint: SHARE,
+      },
+    ]);
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+
+    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+
+    expect(response.status).toBe(200);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "kamino", ownerMismatch: true }),
+      "vault position: ignored live snapshot with mismatched identity"
+    );
+    const warning = JSON.stringify(warn.mock.calls);
+    expect(warning).not.toContain(OWNER_A);
+    expect(warning).not.toContain(OWNER_B);
+  });
+
+  it("summary omits every owner address when the caller opts out in so many words (EARN-028, PRO-1873)", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    await seedPosition({
+      ownerAddress: OWNER_B,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=false"
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { summary: { walletCount: number; totalsByStrategy: Array<Record<string, unknown>> } };
+    };
+
+    // Totals survive; the address book does not. Omitted rather than emptied,
+    // so "not requested" can never read as "no owners".
+    expect(body.data.summary.walletCount).toBe(2);
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]).toMatchObject({
+      walletCount: 2,
+      positionCount: 2,
+    });
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("ownerAddresses");
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("positions");
+    expect(JSON.stringify(body)).not.toContain(OWNER_A);
+    expect(JSON.stringify(body)).not.toContain(OWNER_B);
+  });
+
+  it("summary rejects a malformed includeOwnerAddresses rather than guessing", async () => {
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=maybe"
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects position details when owner addresses are explicitly omitted", async () => {
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=false&includePositions=true"
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects position details without an explicit owner-address opt-in (PRO-1908)", async () => {
+    // Positions name their owners, so the old dashboard shape (includePositions
+    // alone) may not quietly re-enable the address book under the new default.
+    const response = await get("/v1/earn/external-wallet/positions/summary?includePositions=true");
+    expect(response.status).toBe(400);
+  });
+
   it("404s an owner whose claim belongs to another organization", async () => {
     const foreignOrg = "org_external_position_foreign";
     const foreignProject = "prj_external_position_foreign";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(foreignOrg, "Foreign", "external-position-foreign", "enterprise", "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects
-             (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Foreign', 'external-position-foreign', 'sandbox', 'active', ?)`
-        )
-        .bind(foreignProject, foreignOrg, USER),
-    ]);
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(foreignOrg, "Foreign", "external-position-foreign", "enterprise", "active")
+      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: foreignOrg,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: foreignProject, production: `${foreignProject}_production` },
+    });
     await seedPosition({
       ownerAddress: OWNER_B,
       vaultAddress: "vault-foreign",

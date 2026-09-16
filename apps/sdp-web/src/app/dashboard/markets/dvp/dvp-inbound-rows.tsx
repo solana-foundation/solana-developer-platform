@@ -1,0 +1,180 @@
+"use client";
+
+/**
+ * Trades another organization set up that name one of this project's wallets.
+ *
+ * Rows in the existing table rather than a panel of their own. They were a
+ * separate bordered block above the list at first, with its own heading,
+ * description and second table — a lot of furniture for something that is empty
+ * on most days and has one row on the rest, and it read as a banner rather than
+ * as part of the page. One table, one grammar, and the count sits on the filter
+ * control so a reader still learns there is something waiting without a block
+ * announcing it.
+ */
+
+import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { TableCell, TableRow } from "@/components/ui/table";
+import { useTranslations } from "@/i18n/provider";
+import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { formatTimestamp } from "../../payments/payments-overview.utils";
+import { AddressWithCopy } from "./dvp-party-cell";
+import { type DvpPartyRef, formatLegAmount } from "./dvp-trade";
+import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
+import { useDvpTradeActions } from "./use-dvp-trade-actions";
+
+/** One leg, in the same shape the rest of the table uses. */
+function InboundLegCell({ leg, yours }: { leg: DvpInboundLeg; yours: boolean }) {
+  const t = useTranslations();
+
+  return (
+    <div className="min-w-0">
+      <div className="truncate text-primary text-sm tabular-nums">
+        {formatLegAmount(leg.amount, leg.decimals)}
+        {leg.symbol ? <span className="ml-1 text-secondary">{leg.symbol}</span> : null}
+      </div>
+      <div className="truncate text-tertiary text-xs">
+        {yours
+          ? t("DashboardMarkets.dvp.inboundColumnYouDeliver")
+          : t("DashboardMarkets.dvp.inboundColumnYouReceive")}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Funds the reader's own leg from the wallet whose key made it theirs.
+ *
+ * Clicked, not held: paying into an escrow is a step forward rather than
+ * something to walk back, and hold-to-confirm is reserved for destroying
+ * something.
+ *
+ * Its own component so each row owns its pending state; one hook above the rows
+ * would put every row into "Funding…" at once.
+ */
+function InboundFundAction({
+  frozen,
+  side,
+  symbol,
+  tradeId,
+  party,
+}: {
+  frozen: boolean;
+  /** The leg the custody lookup made this caller's. */
+  side: "a" | "b";
+  /** That leg's token symbol, so a refusal names the token. */
+  symbol: string | null;
+  tradeId: string;
+  party: DvpPartyRef;
+}) {
+  const t = useTranslations();
+  const cluster = useSolanaCluster();
+  const { act, pending } = useDvpTradeActions(tradeId, cluster);
+  const wallet = party.actionWallet;
+  const shownWallet = wallet ?? party.wallet;
+  const unavailable = wallet?.isRuntimeExecutionAllowed !== true;
+
+  return (
+    <span className="relative z-10 flex flex-col items-end gap-1">
+      {shownWallet ? (
+        <Link
+          className="max-w-40 truncate text-secondary text-xs hover:underline"
+          href={`/dashboard/wallets/${encodeURIComponent(shownWallet.id)}`}
+          title={party.address}
+        >
+          {shownWallet.name ?? t("DashboardMarkets.dvp.partySdpWallet")}
+        </Link>
+      ) : null}
+      {unavailable ? (
+        <span className="text-warning text-xs">{t("DashboardCustody.signingDisabledTitle")}</span>
+      ) : null}
+      <Button
+        // A transfer into a frozen escrow bounces, so offering to send one is
+        // offering to waste a signature and a fee.
+        disabled={unavailable || frozen || pending.has(`fund:${side}`)}
+        onClick={() => {
+          if (wallet?.isRuntimeExecutionAllowed === true) {
+            void act("fund", { side, walletId: wallet.id, symbol });
+          }
+        }}
+        size="sm"
+        type="button"
+        variant="secondary"
+      >
+        {pending.has(`fund:${side}`)
+          ? t("DashboardMarkets.dvp.inboundFunding")
+          : t("DashboardMarkets.dvp.inboundFundAction")}
+      </Button>
+    </span>
+  );
+}
+
+export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
+  const t = useTranslations();
+
+  return trades.map((trade) => {
+    const yours = trade.yourSide === "a" ? trade.legs.a : trade.legs.b;
+    // Funded from this reader's side once their escrow holds the target. The
+    // trade's own status describes both legs at once and cannot answer this.
+    const funded =
+      yours.observedAmount !== null && BigInt(yours.observedAmount) >= BigInt(yours.amount);
+
+    return (
+      <TableRow className="relative hover:bg-fill-subtle" key={trade.id}>
+        <TableCell>
+          <Link
+            className="after:absolute after:inset-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
+            href={`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${trade.id}`}
+          >
+            <Badge variant={funded ? "success" : "warning"}>
+              {t(
+                funded
+                  ? "DashboardMarkets.dvp.inboundFunded"
+                  : "DashboardMarkets.dvp.inboundBadgeWaiting"
+              )}
+            </Badge>
+          </Link>
+        </TableCell>
+        <TableCell>
+          <InboundLegCell leg={trade.legs.a} yours={trade.yourSide === "a"} />
+        </TableCell>
+        <TableCell>
+          <InboundLegCell leg={trade.legs.b} yours={trade.yourSide === "b"} />
+        </TableCell>
+        <TableCell className="text-secondary text-sm">
+          {/* The escrow, not the parties. On a trade somebody else set up this
+              is the only address a reader acts on, and the column is the one
+              place they would look for it. */}
+          <span className="relative z-10 flex flex-col gap-1">
+            <AddressWithCopy address={yours.escrow} />
+            {/* Disabling the funding button is not enough on its own: the
+                address next to it stays copyable, so somebody can pay a frozen
+                escrow by hand and lose the fee to a transfer that was always
+                going to bounce. The warning belongs where the address is. */}
+            {yours.frozen === true ? (
+              <span className="text-warning text-xs">
+                {t("DashboardMarkets.dvp.inboundFrozen")}
+              </span>
+            ) : null}
+          </span>
+        </TableCell>
+        <TableCell className="text-secondary text-sm">
+          {formatTimestamp(new Date(Number(trade.expiryTimestamp) * 1000).toISOString(), t)}
+        </TableCell>
+        <TableCell>
+          {funded ? null : (
+            <InboundFundAction
+              frozen={yours.frozen === true}
+              side={trade.yourSide}
+              symbol={yours.symbol}
+              tradeId={trade.id}
+              party={yours.party}
+            />
+          )}
+        </TableCell>
+      </TableRow>
+    );
+  });
+}

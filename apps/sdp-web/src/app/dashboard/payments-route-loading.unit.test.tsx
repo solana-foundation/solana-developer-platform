@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import PublicPayLoading from "../pay/[token]/loading";
-import DashboardLoading from "./loading";
+import DashboardLoading from "./(home)/loading";
 import CounterpartyDetailLoading from "./payments/counterparty/[counterpartyId]/loading";
 import CounterpartyCreateLoading from "./payments/counterparty/create/loading";
 import CounterpartyLoading from "./payments/counterparty/loading";

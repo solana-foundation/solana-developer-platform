@@ -12,14 +12,18 @@ import {
   confidentialTransferRequestSchema,
   confirmDeployRequestSchema,
   createTokenRequestSchema,
+  custodyWalletIdParamSchema,
+  deployTokenRequestSchema,
   errorResponseSchema,
   forceBurnRequestSchema,
   freezeAccountRequestSchema,
+  getTokenQueryOpenApiSchema,
   listTokensQueryOpenApiSchema,
   mintRequestSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
   pauseTokenRequestSchema,
+  removeTokenAllowlistQuerySchema,
   seizeRequestSchema,
   templateIdParamSchema,
   tokenIdParamSchema,
@@ -156,7 +160,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token created",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 422, 500]),
     },
   });
 
@@ -210,14 +214,17 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "List issuance transactions",
     operationId: "listIssuanceTransactions",
     description:
-      "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when walletId is omitted. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types.",
+      "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when no wallet selector is supplied. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       query: z.object({
-        walletId: walletIdParamSchema.optional().openapi({
+        custodyWalletId: custodyWalletIdParamSchema.optional().openapi({
           description:
-            "Filter to transactions associated with a wallet. Selected-wallet API keys must have wallet-level tokens:read for the requested wallet.",
+            "Filter to transactions where this exact SDP wallet's address participated. This is participant history, not a signer-only filter.",
+        }),
+        walletId: walletIdParamSchema.optional().openapi({
+          description: "Legacy Provider wallet ID filter. Cannot be combined with custodyWalletId.",
         }),
         type: z
           .array(tokenTransactionTypeQuerySchema)
@@ -247,20 +254,22 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Get token",
     operationId: "getToken",
-    description: "Gets token details.",
+    description:
+      "Gets token details with optional read-only authority lookups for wallet selection.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      query: getTokenQueryOpenApiSchema,
     },
     responses: {
       200: {
         description: "Token",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
     },
   });
 
@@ -404,7 +413,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token updated",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -421,13 +430,17 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         tokenId: tokenIdParamSchema,
       }),
       headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: false,
+        content: jsonContent(deployTokenRequestSchema),
+      },
     },
     responses: {
       200: {
         description: "Token deployed",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502]),
     },
   });
 
@@ -450,7 +463,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared deploy transaction",
         content: jsonContent(prepareDeployResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 502]),
     },
   });
 
@@ -478,7 +491,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token deployed",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502]),
     },
   });
 
@@ -502,7 +515,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared metadata-URI follow-up transaction (or no-op)",
         content: jsonContent(prepareDeployMetadataResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 502]),
     },
   });
 
@@ -529,7 +542,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared mint",
         content: jsonContent(prepareMintResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -556,7 +569,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Mint executed",
         content: jsonContent(executeMintResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -583,7 +596,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared burn",
         content: jsonContent(prepareBurnResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -610,7 +623,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Burn executed",
         content: jsonContent(executeBurnResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -637,7 +650,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared seize",
         content: jsonContent(prepareSeizeResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -664,7 +677,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Seize executed",
         content: jsonContent(executeSeizeResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -691,7 +704,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared force burn",
         content: jsonContent(prepareForceBurnResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -718,7 +731,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Force burn executed",
         content: jsonContent(executeForceBurnResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -745,7 +758,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Prepared authority update",
         content: jsonContent(prepareUpdateAuthorityResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -772,7 +785,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Authority updated",
         content: jsonContent(executeUpdateAuthorityResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -799,7 +812,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token paused",
         content: jsonContent(executePauseResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -826,7 +839,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Token unpaused",
         content: jsonContent(executeUnpauseResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -853,7 +866,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Account frozen",
         content: jsonContent(frozenAccountResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -1071,7 +1084,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
           description: "Holder wallet that owns the confidential token account.",
           example: "So11111111111111111111111111111111111111112",
         }),
-        signingWalletId: z.string().optional().openapi({
+        signingCustodyWalletId: z.string().optional().openapi({
           description: "Optional custody wallet id for the holder.",
           example: "privy_wallet_123",
         }),
@@ -1115,7 +1128,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Account unfrozen",
         content: jsonContent(frozenAccountResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -1222,7 +1235,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         description: "Allowlist entry added",
         content: jsonContent(tokenAllowlistResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -1240,58 +1253,20 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         tokenId: tokenIdParamSchema,
         entryId: allowlistEntryIdParamSchema,
       }),
+      query: removeTokenAllowlistQuerySchema,
     },
     responses: {
       204: {
         description: "Allowlist entry removed",
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Workflows (Phase 5) + Verified holders
+  // Verified holders
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const workflowIdParamSchema = z.string().openapi({ example: "asset_workflow_abc123" });
-  const executionIdParamSchema = z.string().openapi({ example: "workflow_execution_abc123" });
-  const workflowRetryPolicySchema = z.object({
-    maxAttempts: z.number().int().min(1).max(20),
-    retryAfterMinutes: z.number().int().min(1),
-  });
-  const workflowConditionSchema = z
-    .object({
-      all: z.array(
-        z.object({
-          field: z.string(),
-          op: z.enum(["eq", "neq", "in"]),
-          value: z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]),
-        })
-      ),
-    })
-    .openapi("WorkflowCondition");
-  const workflowActionParamsSchema = z.record(z.string(), z.union([z.string(), z.number()]));
-
-  const createWorkflowRequestSchema = z
-    .object({
-      triggerType: z.string().openapi({ example: "kyc_approved" }),
-      actionType: z.string().openapi({ example: "allowlist_add" }),
-      condition: workflowConditionSchema.nullish(),
-      actionParams: workflowActionParamsSchema.optional(),
-      reviewMode: z.enum(["auto", "manual"]).optional(),
-      retryPolicy: workflowRetryPolicySchema.optional(),
-      enabled: z.boolean().optional(),
-    })
-    .openapi("CreateWorkflowRequest");
-  const updateWorkflowRequestSchema = z
-    .object({
-      condition: workflowConditionSchema.nullish(),
-      actionParams: workflowActionParamsSchema.optional(),
-      reviewMode: z.enum(["auto", "manual"]).optional(),
-      retryPolicy: workflowRetryPolicySchema.optional(),
-      enabled: z.boolean().optional(),
-    })
-    .openapi("UpdateWorkflowRequest");
   const enrollHolderRequestSchema = z
     .object({
       walletAddress: z.string(),
@@ -1302,73 +1277,6 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   const envelope = (inner: z.ZodTypeAny, name: string) =>
     z.object({ data: inner, meta: z.record(z.string(), z.unknown()).optional() }).openapi(name);
-  const workflowRuleSchema = z.object({
-    id: z.string(),
-    token_id: z.string(),
-    trigger_type: z.string(),
-    action_type: z.string(),
-    enabled: z.boolean(),
-    review_mode: z.enum(["auto", "manual"]),
-    created_at: z.string(),
-  });
-  const workflowExecutionSchema = z.object({
-    id: z.string(),
-    workflow_id: z.string(),
-    trigger_type: z.string(),
-    action_type: z.string(),
-    status: z.enum([
-      "awaiting_review",
-      "pending",
-      "processing",
-      "succeeded",
-      "failed",
-      "cancelled",
-    ]),
-    attempt_count: z.number(),
-    max_attempts: z.number(),
-    error: z.string().nullable(),
-    // Projected server-side to a fixed field list, so a held execution can be reviewed
-    // (which wallet, what amount) without exposing every key an emitter happens to add.
-    trigger_payload: z.record(z.string(), z.unknown()).openapi({
-      description:
-        "What the action will act on: wallet, source, destination, amount, operation, provider, counterpartyKind, fiatCurrency, cryptoToken, attempt.",
-    }),
-    result: z.record(z.string(), z.unknown()).openapi({
-      description:
-        "Outcome of the run: signature, status, notified, emailed, alreadyFrozen, alreadyThawed, mirrorFailed.",
-    }),
-    decided_by: z.string().nullable().openapi({
-      description: "User who approved or rejected this execution; null when auto-applied.",
-    }),
-    decided_at: z.string().nullable(),
-    created_at: z.string(),
-    updated_at: z.string(),
-  });
-  const workflowResponse = envelope(z.object({ workflow: workflowRuleSchema }), "WorkflowResponse");
-  const workflowListResponse = envelope(
-    z.object({ workflows: z.array(workflowRuleSchema) }),
-    "WorkflowListResponse"
-  );
-  const workflowCatalogResponse = envelope(
-    z.object({
-      triggers: z.array(z.record(z.string(), z.unknown())),
-      actions: z.array(z.record(z.string(), z.unknown())),
-    }),
-    "WorkflowCatalogResponse"
-  );
-  const workflowExecutionsResponse = envelope(
-    z.object({
-      executions: z.array(workflowExecutionSchema),
-      total: z.number(),
-      page: z.number(),
-      pageSize: z.number(),
-    }),
-    "WorkflowExecutionsResponse"
-  );
-  const workflowExecutionResponse = envelope(
-    z.object({ execution: workflowExecutionSchema }),
-    "WorkflowExecutionResponse"
-  );
   const holdersResponse = envelope(
     z.object({ holders: z.array(z.record(z.string(), z.unknown())) }),
     "HoldersResponse"
@@ -1377,181 +1285,6 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     z.object({ enrollment: z.record(z.string(), z.unknown()) }),
     "HolderResponse"
   );
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/workflows/catalog",
-    tags: ["Issuance"],
-    summary: "List the workflow catalog for an asset",
-    operationId: "listWorkflowCatalog",
-    description:
-      "Returns the available triggers and the actions this asset supports (with a capability-gated support verdict per action).",
-    security: [{ apiKeyAuth: [] }],
-    request: { headers: projectScopeHeaders, params: z.object({ tokenId: tokenIdParamSchema }) },
-    responses: {
-      200: { description: "Workflow catalog", content: jsonContent(workflowCatalogResponse) },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/workflows",
-    tags: ["Issuance"],
-    summary: "List workflow rules",
-    operationId: "listWorkflows",
-    description: "Returns the workflow automation rules configured for an asset.",
-    security: [{ apiKeyAuth: [] }],
-    request: { headers: projectScopeHeaders, params: z.object({ tokenId: tokenIdParamSchema }) },
-    responses: {
-      200: { description: "Workflow rules", content: jsonContent(workflowListResponse) },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/workflows",
-    tags: ["Issuance"],
-    summary: "Create a workflow rule",
-    operationId: "createWorkflow",
-    description:
-      "Creates a WHEN → THEN automation rule. The action is capability-gated at save time; an unsupported action returns 400 with a typed reason.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: z.object({ tokenId: tokenIdParamSchema }),
-      body: { required: true, content: jsonContent(createWorkflowRequestSchema) },
-    },
-    responses: {
-      201: { description: "Workflow created", content: jsonContent(workflowResponse) },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "patch",
-    path: "/v1/issuance/tokens/{tokenId}/workflows/{workflowId}",
-    tags: ["Issuance"],
-    summary: "Update a workflow rule",
-    operationId: "updateWorkflow",
-    description:
-      "Updates a rule's condition, action params, review mode, retry policy, or enabled flag.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: z.object({ tokenId: tokenIdParamSchema, workflowId: workflowIdParamSchema }),
-      body: { required: true, content: jsonContent(updateWorkflowRequestSchema) },
-    },
-    responses: {
-      200: { description: "Workflow updated", content: jsonContent(workflowResponse) },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "delete",
-    path: "/v1/issuance/tokens/{tokenId}/workflows/{workflowId}",
-    tags: ["Issuance"],
-    summary: "Delete a workflow rule",
-    operationId: "deleteWorkflow",
-    description:
-      "Soft-deletes a rule: it stops matching and disappears from lists, while its execution history is retained.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: z.object({ tokenId: tokenIdParamSchema, workflowId: workflowIdParamSchema }),
-    },
-    responses: {
-      200: {
-        description: "Workflow deleted",
-        content: jsonContent(
-          envelope(z.object({ deleted: z.boolean() }), "DeleteWorkflowResponse")
-        ),
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/workflows/executions",
-    tags: ["Issuance"],
-    summary: "List workflow executions",
-    operationId: "listWorkflowExecutions",
-    description:
-      "Execution log for an asset's workflows — recent runs with status and retry state.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: z.object({ tokenId: tokenIdParamSchema }),
-      query: z.object({
-        workflowId: workflowIdParamSchema.optional(),
-        page: pageQuerySchema.optional(),
-        pageSize: pageSizeQuerySchema.optional(),
-      }),
-    },
-    responses: {
-      200: { description: "Execution log", content: jsonContent(workflowExecutionsResponse) },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve",
-    tags: ["Issuance"],
-    summary: "Approve a held execution",
-    operationId: "approveWorkflowExecution",
-    description:
-      "Authorizes an awaiting-review execution: status becomes pending and the engine runs it once. Requires the permission implied by the rule's action tier — tokens:admin for sensitive and irreversible actions. Records the approver on the execution and in the audit log.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: z.object({ tokenId: tokenIdParamSchema, executionId: executionIdParamSchema }),
-    },
-    responses: {
-      200: { description: "Execution approved", content: jsonContent(workflowExecutionResponse) },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry",
-    tags: ["Issuance"],
-    summary: "Retry a failed execution",
-    operationId: "retryWorkflowExecution",
-    description:
-      "Re-attempts a failed execution: status becomes pending and the attempt counter resets. Approving a held execution is a separate endpoint.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: z.object({ tokenId: tokenIdParamSchema, executionId: executionIdParamSchema }),
-    },
-    responses: {
-      200: { description: "Execution re-queued", content: jsonContent(workflowExecutionResponse) },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject",
-    tags: ["Issuance"],
-    summary: "Reject a held execution",
-    operationId: "rejectWorkflowExecution",
-    description: "Cancels an awaiting-review execution; the action never runs.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: z.object({ tokenId: tokenIdParamSchema, executionId: executionIdParamSchema }),
-    },
-    responses: {
-      200: { description: "Execution cancelled", content: jsonContent(workflowExecutionResponse) },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
 
   registry.registerPath({
     method: "get",
@@ -1575,7 +1308,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "Enroll a verified holder",
     operationId: "enrollHolder",
     description:
-      "Registers a wallet for this asset (upserts its KYC identity + an active enrollment). When the wallet's KYC is approved, matching workflows fire.",
+      "Registers a wallet for this asset (upserts its KYC identity + an active enrollment).",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

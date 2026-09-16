@@ -2,6 +2,7 @@ import type { Project } from "@sdp/types";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
+import { DashboardScopeLoadingScreen } from "@/components/dashboard-loading-screen";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { SelectExistingOrganizationPanel } from "@/components/select-existing-organization-panel";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
@@ -12,6 +13,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { resolveDashboardProjectSelection } from "@/lib/dashboard-project-selection";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
+import { loadQuickStartStep } from "@/lib/quick-start-server";
 import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
 
 async function loadProjects(): Promise<Project[] | null> {
@@ -42,7 +44,11 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     userId,
   } satisfies DashboardCacheScope;
 
-  const [loadedProjects, cookieStore] = await Promise.all([loadProjects(), cookies()]);
+  const [loadedProjects, cookieStore, initialQuickStartStep] = await Promise.all([
+    loadProjects(),
+    cookies(),
+    loadQuickStartStep(),
+  ]);
   const projects = loadedProjects ?? [];
   const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
   const projectSelection = resolveDashboardProjectSelection(projects, cookieProjectId, {
@@ -52,7 +58,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   return (
     <DashboardWorkspaceProvider
       key={getDashboardCacheScopeKey(dashboardCacheScope)}
+      scopeRefreshFallback={<DashboardScopeLoadingScreen />}
       dashboardAccess={dashboardAccess}
+      initialQuickStartStep={initialQuickStartStep}
       flags={flags}
       serverDashboardCacheScope={dashboardCacheScope}
       projects={projects}

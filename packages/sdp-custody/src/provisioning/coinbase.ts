@@ -31,6 +31,13 @@ interface CoinbaseCdpBearerJwtParams {
   requestPath: string;
 }
 
+// Issuer/audience CDP documents for the bearer token.
+const COINBASE_CDP_JWT_ISSUER = "cdp";
+const COINBASE_CDP_JWT_AUDIENCE = ["cdp_service"];
+// Bearer tokens are documented as valid for 2 minutes, wallet-auth tokens for 1.
+const COINBASE_CDP_BEARER_JWT_TTL_SECONDS = 120;
+const COINBASE_CDP_WALLET_JWT_TTL_SECONDS = 60;
+
 interface CoinbaseCdpWalletJwtParams {
   walletSecret: string;
   requestMethod: string;
@@ -124,11 +131,12 @@ async function createCoinbaseCdpBearerJwt(
   const uri = `${params.requestMethod} ${params.requestHost}${params.requestPath}`;
 
   const payload = new SignJWT({ uris: [uri] })
-    .setIssuer("cdp")
+    .setIssuer(COINBASE_CDP_JWT_ISSUER)
+    .setAudience(COINBASE_CDP_JWT_AUDIENCE)
     .setSubject(params.apiKeyId)
     .setIssuedAt(now)
     .setNotBefore(now)
-    .setExpirationTime(now + 120);
+    .setExpirationTime(now + COINBASE_CDP_BEARER_JWT_TTL_SECONDS);
 
   if (isPemEncodedKey(params.apiKeySecret)) {
     const key = await importPKCS8(params.apiKeySecret, "ES256");
@@ -176,10 +184,16 @@ async function createCoinbaseCdpWalletJwt(
   const privateKeyPem = encodePkcs8Pem(pkcs8DerBytes);
   const key = await importPKCS8(privateKeyPem, "ES256");
 
+  // Wallet-auth tokens authorize a single mutating call. Without `exp` a leaked
+  // token stays replayable forever, so it is bound to the 1-minute window CDP
+  // documents for this header. `iss`/`aud` are deliberately omitted: CDP
+  // documents them for the bearer token only, and its own SDK's wallet JWT
+  // carries neither, so asserting them risks upstream rejection.
   return new SignJWT(payload)
     .setProtectedHeader({ alg: "ES256", typ: "JWT" })
     .setIssuedAt(now)
     .setNotBefore(now)
+    .setExpirationTime(now + COINBASE_CDP_WALLET_JWT_TTL_SECONDS)
     .setJti(randomHex(runtime, 16))
     .sign(key);
 }

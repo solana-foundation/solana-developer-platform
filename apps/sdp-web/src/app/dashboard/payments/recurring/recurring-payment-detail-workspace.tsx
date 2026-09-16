@@ -1,11 +1,14 @@
 "use client";
 
-import type {
-  CounterpartyAccount,
-  PaymentRecurringPayment,
-  PaymentRecurringPaymentStatus,
-  PaymentSubscriptionCollectionAttempt,
-  UpdatePaymentRecurringPaymentRequest,
+import {
+  type CounterpartyAccount,
+  doesRecurringPaymentStatusRequireReactivation,
+  isPendingActivationRecurringPaymentStatus,
+  PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
+  type PaymentRecurringPayment,
+  type PaymentRecurringPaymentStatus,
+  type PaymentSubscriptionCollectionAttempt,
+  type UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types";
 import {
   AlertCircleIcon,
@@ -23,6 +26,7 @@ import {
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
@@ -38,7 +42,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
-import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
   formatTimestamp,
@@ -47,6 +51,7 @@ import {
   shortenAddress,
 } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
+import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
@@ -77,7 +82,7 @@ import {
 } from "./recurring-payments-shared";
 
 interface RecurringPaymentDetailWorkspaceProps {
-  recurringPayment: PaymentRecurringPayment;
+  recurringPayment: PaymentRecurringPayment & { sourceCustodyWalletId: string };
   wallet: RecurringPaymentWalletView | null;
   wallets: RecurringPaymentWalletView[];
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
@@ -173,34 +178,45 @@ function primaryDetailAction(
   error: DetailActionError | null,
   t: Translate
 ): DetailAction | null {
-  if (status === "pending_activation") {
-    return {
-      action: "activate",
-      label:
-        error?.action === "activate"
-          ? t("DashboardPayments.recurring.retryActivation")
-          : t("DashboardPayments.recurring.activate"),
-    };
+  switch (status) {
+    case "pending_activation":
+      return {
+        action: "activate",
+        label:
+          error?.action === "activate"
+            ? t("DashboardPayments.recurring.retryActivation")
+            : t("DashboardPayments.recurring.activate"),
+      };
+    case "active":
+      return dueNow
+        ? {
+            action: "collect",
+            label:
+              error?.action === "collect"
+                ? t("DashboardPayments.recurring.retryCollection")
+                : t("DashboardPayments.recurring.collectNow"),
+          }
+        : null;
+    case "canceled":
+      return {
+        action: "resume",
+        label:
+          error?.action === "resume"
+            ? t("DashboardPayments.recurring.retryResume")
+            : t("DashboardPayments.recurring.resume"),
+      };
+    case "activating":
+    case "updating":
+    case "canceling":
+    case "resuming":
+    case "paused":
+    case "expired":
+      return null;
+    default: {
+      const exhaustive: never = status;
+      throw new Error(`Unhandled recurring payment status: ${String(exhaustive)}`);
+    }
   }
-  if (dueNow) {
-    return {
-      action: "collect",
-      label:
-        error?.action === "collect"
-          ? t("DashboardPayments.recurring.retryCollection")
-          : t("DashboardPayments.recurring.collectNow"),
-    };
-  }
-  if (status === "canceled") {
-    return {
-      action: "resume",
-      label:
-        error?.action === "resume"
-          ? t("DashboardPayments.recurring.retryResume")
-          : t("DashboardPayments.recurring.resume"),
-    };
-  }
-  return null;
 }
 
 function secondaryDetailAction(
@@ -226,6 +242,7 @@ function RecurringPaymentActionsMenu({
   pendingAction,
   actionError,
   disabled,
+  signingUnavailable,
   editable,
   onEdit,
   onAction,
@@ -236,6 +253,7 @@ function RecurringPaymentActionsMenu({
   pendingAction: RecurringPaymentAction | null;
   actionError: DetailActionError | null;
   disabled?: boolean;
+  signingUnavailable: boolean;
   editable: boolean;
   onEdit: () => void;
   onAction: (action: RecurringPaymentAction) => void;
@@ -268,7 +286,7 @@ function RecurringPaymentActionsMenu({
         {primaryAction ? (
           <DropdownMenuItem
             onSelect={() => onAction(primaryAction.action)}
-            disabled={actionsDisabled}
+            disabled={actionsDisabled || signingUnavailable}
           >
             {pendingAction === primaryAction.action ? (
               <Loader2Icon className="size-4 animate-spin" />
@@ -291,7 +309,7 @@ function RecurringPaymentActionsMenu({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={onCancel}
-              disabled={actionsDisabled}
+              disabled={actionsDisabled || signingUnavailable}
               className="items-start text-error focus:text-error"
             >
               {pendingAction === secondaryAction.action ? (
@@ -316,9 +334,17 @@ function RecurringPaymentActionsMenu({
 function RecurringPaymentLifecycleBand({
   status,
   actionError,
+  walletsError,
+  signingUnavailable,
+  signingDisabled,
+  walletLabel,
 }: {
   status: PaymentRecurringPaymentStatus;
   actionError: DetailActionError | null;
+  walletsError: string | null;
+  signingUnavailable: boolean;
+  signingDisabled: boolean;
+  walletLabel: string;
 }) {
   const t = useTranslations();
   if (actionError) {
@@ -334,14 +360,34 @@ function RecurringPaymentLifecycleBand({
       </ActionBand>
     );
   }
-  if (status === "pending_activation") {
+  if (signingDisabled) {
+    return (
+      <ActionBand variant="warning" title={t("DashboardPayments.recurring.signingDisabledTitle")}>
+        {/* Cancel stays open for a pending payment, so its body promises activation only. */}
+        {t(
+          status === "pending_activation"
+            ? "DashboardPayments.recurring.signingDisabledPendingBody"
+            : "DashboardPayments.recurring.signingDisabledBody",
+          { wallet: walletLabel }
+        )}
+      </ActionBand>
+    );
+  }
+  if (walletsError || signingUnavailable) {
+    return (
+      <ActionBand variant="warning" title={t("DashboardPayments.recurring.sourceWalletUnresolved")}>
+        {walletsError ?? t("DashboardPayments.signingUnavailable")}
+      </ActionBand>
+    );
+  }
+  if (isPendingActivationRecurringPaymentStatus(status)) {
     return (
       <ActionBand variant="info" title={t("DashboardPayments.recurring.readyToActivate")}>
         {t("DashboardPayments.recurring.readyToActivateDescription")}
       </ActionBand>
     );
   }
-  if (status === "paused" || status === "expired") {
+  if (doesRecurringPaymentStatusRequireReactivation(status)) {
     return (
       <ActionBand
         variant="warning"
@@ -368,8 +414,8 @@ export function RecurringPaymentDetailWorkspace({
 }: RecurringPaymentDetailWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
-  const workspace = useOptionalDashboardWorkspace();
-  const custodyEnabled = workspace?.flags.custody ?? true;
+  const workspace = useDashboardWorkspace();
+  const custodyEnabled = workspace.flags.custody;
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -377,7 +423,7 @@ export function RecurringPaymentDetailWorkspace({
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentValidationError, setPaymentValidationError] = useState<string | null>(null);
   const [selectedCustodyWalletId, setSelectedCustodyWalletId] = useState(
-    recurringPayment.sourceCustodyWalletId ?? ""
+    recurringPayment.sourceCustodyWalletId
   );
   const [selectedReceivingAccountId, setSelectedReceivingAccountId] = useState(
     recurringPayment.counterpartyAccountId
@@ -390,29 +436,48 @@ export function RecurringPaymentDetailWorkspace({
   );
   const [selectedToken, setSelectedToken] = useState(recurringPayment.token);
   const [selectedAmount, setSelectedAmount] = useState(recurringPayment.amount);
+  const { liveWallets, liveWalletsError } = usePaymentsActionWallets(wallets, null);
+  const liveSourceWallet = liveWallets.find(
+    (entry) => entry.id === recurringPayment.sourceCustodyWalletId
+  );
+  const selectedWallet = liveWallets.find((entry) => entry.id === selectedCustodyWalletId);
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
   const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
-  const receivingAccount =
-    counterpartyAccounts.find((account) => account.id === recurringPayment.counterpartyAccountId) ??
-    null;
+  const foundReceivingAccount = counterpartyAccounts.find(
+    (account) => account.id === recurringPayment.counterpartyAccountId
+  );
+  const receivingAccount = foundReceivingAccount === undefined ? null : foundReceivingAccount;
   const receivingAccountLabel = accountLabel(
     receivingAccount,
     recurringPayment.counterpartyAccountId
   );
   const receivingAccountAddress = accountAddress(receivingAccount);
-  const { sourceWalletUnresolved, isEditable, controlsDisabled } = getRecurringPaymentDetailState({
+  const {
+    sourceWalletUnresolved,
+    isEditable,
+    controlsDisabled,
+    signingUnavailable,
+    signingDisabled,
+    editWalletUnavailable,
+    saveDisabled,
+    signingActionsDisabled,
+    cancelDisabled,
+  } = getRecurringPaymentDetailState({
     sourceCustodyWalletId: recurringPayment.sourceCustodyWalletId,
     status: recurringPayment.status,
     hasPendingAction: pendingAction !== null,
     savingPayment,
+    sourceWallet: liveSourceWallet,
+    selectedWallet,
+    selectedCustodyWalletId,
   });
   const dueNow =
     recurringPayment.status === "active" && isDueNow(recurringPayment.nextCollectionDueAt);
 
   const submitAction = async (action: RecurringPaymentAction) => {
-    if (pendingAction) {
+    if (action === "cancel" ? cancelDisabled : signingActionsDisabled) {
       return;
     }
 
@@ -444,7 +509,7 @@ export function RecurringPaymentDetailWorkspace({
     setSelectedToken(recurringPayment.token);
     setSelectedSchedulePreset(schedulePresetForPeriodHours(recurringPayment.periodHours));
     setSelectedCustomPeriodHours(String(recurringPayment.periodHours));
-    setSelectedCustodyWalletId(recurringPayment.sourceCustodyWalletId ?? "");
+    setSelectedCustodyWalletId(recurringPayment.sourceCustodyWalletId);
     setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
     setPaymentValidationError(null);
     setEditingPayment(true);
@@ -456,7 +521,7 @@ export function RecurringPaymentDetailWorkspace({
   };
 
   const submitPayment = async () => {
-    if (controlsDisabled) {
+    if (saveDisabled) {
       return;
     }
     const amount = selectedAmount.trim();
@@ -578,6 +643,7 @@ export function RecurringPaymentDetailWorkspace({
             editable={isEditable}
             onEdit={openPaymentEditor}
             disabled={controlsDisabled}
+            signingUnavailable={signingUnavailable}
             onAction={(action) => void submitAction(action)}
             onCancel={() => setCancelConfirmOpen(true)}
           />
@@ -594,6 +660,10 @@ export function RecurringPaymentDetailWorkspace({
           <RecurringPaymentLifecycleBand
             status={recurringPayment.status}
             actionError={actionError}
+            walletsError={liveWalletsError}
+            signingUnavailable={signingUnavailable}
+            signingDisabled={signingDisabled}
+            walletLabel={sourceWalletLabel}
           />
         )}
 
@@ -701,8 +771,10 @@ export function RecurringPaymentDetailWorkspace({
                       <span className="min-w-0 truncate">{sourceWalletLabel}</span>
                     )}
                     <CopyableValue
-                      value={wallet?.publicKey ?? recurringPayment.sourceAddress}
-                      label={shortenAddress(wallet?.publicKey ?? recurringPayment.sourceAddress)}
+                      value={wallet === null ? recurringPayment.sourceAddress : wallet.publicKey}
+                      label={shortenAddress(
+                        wallet === null ? recurringPayment.sourceAddress : wallet.publicKey
+                      )}
                     />
                   </span>
                 </div>
@@ -805,15 +877,28 @@ export function RecurringPaymentDetailWorkspace({
                 setSelectedCustodyWalletId(value);
                 setPaymentValidationError(null);
               }}
-              options={wallets.map((entry) => ({
+              options={liveWallets.map((entry) => ({
                 value: entry.id,
                 label: walletLabel(entry, entry.walletId),
                 description: shortenAddress(entry.publicKey),
+                ...(entry.isRuntimeExecutionAllowed !== true
+                  ? {
+                      badge: t("DashboardPayments.restricted"),
+                      badgeVariant: "warning" as const,
+                      // A pending draft may still point at it; an active payment
+                      // would have to sign with it, so the picker does not let the
+                      // user select it.
+                      disabled: recurringPayment.status === "active",
+                    }
+                  : {}),
               }))}
               placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
               icon={<WalletIcon />}
-              disabled={savingPayment || wallets.length === 0}
+              disabled={savingPayment || liveWallets.length === 0}
             />
+            <p role="status" hidden={!editWalletUnavailable} className="text-sm text-warning">
+              {t("DashboardPayments.signingUnavailable")}
+            </p>
             <Combobox
               label={t("DashboardPayments.recurring.receivingWallet")}
               value={selectedReceivingAccountId}
@@ -867,7 +952,8 @@ export function RecurringPaymentDetailWorkspace({
               label={t("DashboardPayments.recurring.billingInterval")}
               value={selectedSchedulePreset}
               onChange={(value) => {
-                setSelectedSchedulePreset(value as SchedulePreset);
+                const parsed = z.enum(PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS).safeParse(value);
+                if (parsed.success) setSelectedSchedulePreset(parsed.data);
                 setPaymentValidationError(null);
               }}
               options={getSchedulePresets(t)}
@@ -909,7 +995,7 @@ export function RecurringPaymentDetailWorkspace({
               <Button
                 type="submit"
                 size="sm"
-                disabled={savingPayment}
+                disabled={saveDisabled}
                 iconLeft={
                   savingPayment ? (
                     <Loader2Icon className="size-4 shrink-0 animate-spin" />
@@ -953,7 +1039,7 @@ export function RecurringPaymentDetailWorkspace({
                 type="button"
                 size="sm"
                 variant="destructive"
-                disabled={pendingAction === "cancel"}
+                disabled={cancelDisabled}
                 iconLeft={
                   pendingAction === "cancel" ? (
                     <Loader2Icon className="size-4 shrink-0 animate-spin" />

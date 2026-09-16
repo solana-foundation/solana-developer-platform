@@ -30,7 +30,10 @@ import {
   attachUsdValuesToBalanceMap,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
+import {
+  assertCustodyProviderEntitled,
+  assertProviderAvailable,
+} from "@/services/provider-availability.service";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import type {
   CustodyWalletAggregateResponse,
@@ -122,7 +125,7 @@ async function queryWalletSummaries(
     : wallets.filter((wallet) => allowedWalletIds.includes(wallet.id));
 }
 
-async function findAuthorizedOperationalWallet(
+export async function findAuthorizedOperationalWallet(
   c: AppContext,
   walletId: string,
   permissions: Parameters<typeof resolveApiKeyCustodyWalletId>[2],
@@ -537,6 +540,7 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
     if (!isCustodyConnectionRuntimeEnabled(c.env, wallet.provider)) {
       throw new AppError("FORBIDDEN", "Custody Connection runtime is disabled");
     }
+    await assertCustodyProviderEntitled(c.env, getDb(c.env), actor.organizationId, wallet.provider);
     if (!wallet.isRuntimeExecutionAllowed) {
       throw new AppError("CONFLICT", "Custody Connection is unavailable");
     }

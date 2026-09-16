@@ -1,8 +1,15 @@
 import type { CustodyWalletTokenBalance } from "@sdp/types";
-import { Children, type ComponentProps, isValidElement, type ReactNode } from "react";
+import {
+  Children,
+  type ComponentProps,
+  type ElementType,
+  isValidElement,
+  type ReactNode,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
+import { Callout } from "@/components/ui/callout";
 import { getTranslations } from "@/i18n/server";
 
 const { mockAuth, mockIssuanceFlag, mockLoadWalletActivity, mockPoliciesFlag, mockRequest } =
@@ -49,7 +56,10 @@ vi.mock("@/app/dashboard/custody/wallet-activity.data", async (importOriginal) =
   };
 });
 
-import WalletDetailPage, { WalletBalanceSummary, WalletBalancesSection } from "./page";
+import WalletDetailPage, {
+  WalletBalanceSummary,
+  WalletBalancesSection,
+} from "./wallet-detail-page";
 
 const solBalance: CustodyWalletTokenBalance = {
   token: "SOL",
@@ -59,6 +69,8 @@ const solBalance: CustodyWalletTokenBalance = {
   decimals: 9,
 };
 
+let walletOverrides: Record<string, unknown> = {};
+
 function walletMetadataResponse(): Response {
   return Response.json({
     data: {
@@ -67,6 +79,8 @@ function walletMetadataResponse(): Response {
         custodyConfigId: "config_test",
         provider: "privy",
         isDefaultProvider: true,
+        isRuntimeExecutionAllowed: true,
+        ...walletOverrides,
         walletId: "wallet/one",
         publicKey: "11111111111111111111111111111111",
         label: "Fast wallet",
@@ -86,29 +100,37 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function findWalletLabelEditor(
-  node: ReactNode
-): ComponentProps<typeof WalletLabelInlineEditor> | null {
+function findElementProps<T extends ElementType>(
+  node: ReactNode,
+  type: T
+): ComponentProps<T> | null {
   if (!isValidElement(node)) {
     return null;
   }
 
-  if (node.type === WalletLabelInlineEditor) {
-    return node.props as ComponentProps<typeof WalletLabelInlineEditor>;
+  if (node.type === type) {
+    return node.props as ComponentProps<T>;
   }
 
   const { children } = node.props as { children?: ReactNode };
   for (const child of Children.toArray(children)) {
-    const editorProps = findWalletLabelEditor(child);
-    if (editorProps) {
-      return editorProps;
+    const props = findElementProps(child, type);
+    if (props) {
+      return props;
     }
   }
 
   return null;
 }
 
+function findWalletLabelEditor(
+  node: ReactNode
+): ComponentProps<typeof WalletLabelInlineEditor> | null {
+  return findElementProps(node, WalletLabelInlineEditor);
+}
+
 beforeEach(() => {
+  walletOverrides = {};
   mockAuth.mockReset();
   mockIssuanceFlag.mockReset();
   mockLoadWalletActivity.mockReset();
@@ -196,6 +218,23 @@ describe("WalletDetailPage critical path", () => {
       label: "Fast wallet",
       walletId: "wallet/one",
     });
+  });
+
+  it("explains a signing restriction in the identity shell", async () => {
+    walletOverrides = { isRuntimeExecutionAllowed: false };
+    const restricted = await WalletDetailPage({
+      params: Promise.resolve({ walletId: "wallet%2Fone" }),
+    });
+    expect(findElementProps(restricted, Callout)).toMatchObject({
+      variant: "warning",
+      title: "DashboardCustody.signingDisabledTitle",
+    });
+
+    walletOverrides = {};
+    const allowed = await WalletDetailPage({
+      params: Promise.resolve({ walletId: "wallet%2Fone" }),
+    });
+    expect(findElementProps(allowed, Callout)).toBeNull();
   });
 
   it("loads metadata only and leaves wallet activity off the initial render path", async () => {

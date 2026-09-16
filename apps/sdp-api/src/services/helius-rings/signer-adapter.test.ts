@@ -14,12 +14,16 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import type { TransactionPartialSigner } from "@solana/signers";
+import {
+  createSignableMessage,
+  type MessagePartialSigner,
+  type TransactionPartialSigner,
+} from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
-import { signRingsOuterTransaction } from "./signer-adapter";
+import { signRingsMessage, signRingsOuterTransaction } from "./signer-adapter";
 
 const FEE_PAYER = "11111111111111111111111111111111" as Address;
 const OTHER_KEY = "22222222222222222222222222222222" as Address;
@@ -51,6 +55,22 @@ function unsignedTxBase64(): string {
       )
   );
   return base64.decode(getTransactionEncoder().encode(compileTransaction(message)));
+}
+
+/**
+ * A signer that can sign raw messages, which `partialSigner` deliberately
+ * cannot. `signRingsMessage` is the load-bearing path for every Rings operation
+ * now that the shielded keys derive from a custody signature, not just for the
+ * ring auditor attestation.
+ */
+function messageSigner(
+  signature: Uint8Array = new Uint8Array(64).fill(3),
+  address: Address = FEE_PAYER
+): MessagePartialSigner {
+  return {
+    address,
+    signMessages: async () => [{ [address]: signature as SignatureBytes }],
+  };
 }
 
 function partialSigner(
@@ -117,7 +137,11 @@ describe("signRingsOuterTransaction", () => {
   describe("resolving the owner's custody wallet", () => {
     it("signs through the custody row that holds the owner's key", async () => {
       const signature = new Uint8Array(64).fill(3) as SignatureBytes;
-      findActiveWalletByPublicKey.mockResolvedValue({ id: "cw_owner", publicKey: FEE_PAYER });
+      findActiveWalletByPublicKey.mockResolvedValue({
+        id: "cw_owner",
+        publicKey: FEE_PAYER,
+        provider: "turnkey",
+      });
       createOrgSignerForCustodyWallet.mockResolvedValue(
         partialSigner(async () => [{ [FEE_PAYER]: signature }])
       );
@@ -153,7 +177,11 @@ describe("signRingsOuterTransaction", () => {
 
     // The custody row and its provider have diverged.
     it("refuses when the resolved signer holds a different key", async () => {
-      findActiveWalletByPublicKey.mockResolvedValue({ id: "cw_stale", publicKey: FEE_PAYER });
+      findActiveWalletByPublicKey.mockResolvedValue({
+        id: "cw_stale",
+        publicKey: FEE_PAYER,
+        provider: "turnkey",
+      });
       createOrgSignerForCustodyWallet.mockResolvedValue(
         partialSigner(
           async () => [{ [OTHER_KEY]: new Uint8Array(64) as SignatureBytes }],
@@ -167,8 +195,73 @@ describe("signRingsOuterTransaction", () => {
       expect((error as Error).message).toContain("cw_stale");
     });
 
+    /**
+     * Two refusal classes, one gate. Cannot sign the bytes: `utila` has a
+     * `signMessages` that throws, so it satisfies `isMessagePartialSigner` and
+     * would surface as a *retryable* failure and retry forever; `coinbase_cdp`
+     * UTF-8-decodes the payload, and the derivation envelope starts with 0xff;
+     * `anchorage` does no signing. Cannot sign them reproducibly: `fireblocks`,
+     * `para` and `dfns` are MPC signers whose EdDSA nonce is random by design
+     * (RFC 9591), so the signature-rooted shielded keys change on every call;
+     * `ibm_haven` is unverified.
+     */
+    it.each(["coinbase_cdp", "utila", "anchorage", "fireblocks", "para", "dfns", "ibm_haven"])(
+      "refuses %s, which cannot reproducibly sign raw messages",
+      async (provider) => {
+        findActiveWalletByPublicKey.mockResolvedValue({
+          id: "cw_owner",
+          publicKey: FEE_PAYER,
+          provider,
+        });
+
+        const error = await rejection(signRingsOuterTransaction(signInput()));
+
+        // Its own code, not signer_failed: nothing signed and nothing broke, so
+        // this must not read as an outage. Non-retryable, because no retry
+        // changes how a provider signs.
+        expect(error).toMatchObject({ failureCode: "provider_unsupported", retryable: false });
+        expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+
+        // The message is the remedy: an operator has to move the wallet, so it
+        // names the provider refused and the ones that would work.
+        const message = (error as Error).message;
+        expect(message).toContain(provider);
+        for (const supported of ["local", "privy", "turnkey"]) {
+          expect(message).toContain(supported);
+        }
+      }
+    );
+
+    // The allowlist's other half: the providers verified to sign the derivation
+    // message reproducibly (privy/turnkey by live probe, local by RFC 8032)
+    // must keep resolving a signer.
+    it.each(["local", "privy", "turnkey"])(
+      "signs through a %s custody wallet",
+      async (provider) => {
+        const signature = new Uint8Array(64).fill(3) as SignatureBytes;
+        findActiveWalletByPublicKey.mockResolvedValue({
+          id: "cw_owner",
+          publicKey: FEE_PAYER,
+          provider,
+        });
+        createOrgSignerForCustodyWallet.mockResolvedValue(
+          partialSigner(async () => [{ [FEE_PAYER]: signature }])
+        );
+
+        const signed = await signRingsOuterTransaction(signInput());
+
+        expect(getTransactionDecoder().decode(base64.encode(signed)).signatures[FEE_PAYER]).toEqual(
+          signature
+        );
+      }
+    );
+
     it("maps a custody resolution failure through the signer's retry classification", async () => {
-      findActiveWalletByPublicKey.mockResolvedValue({ id: "cw_owner", publicKey: FEE_PAYER });
+      findActiveWalletByPublicKey.mockResolvedValue({
+        id: "cw_owner",
+        publicKey: FEE_PAYER,
+        provider: "turnkey",
+      });
       createOrgSignerForCustodyWallet.mockRejectedValue(
         new SigningError("provider not set up", "PROVIDER_NOT_CONFIGURED")
       );
@@ -177,6 +270,92 @@ describe("signRingsOuterTransaction", () => {
 
       expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
     });
+  });
+});
+
+/**
+ * `signRingsMessage` roots the shielded keys: the owner's signature over
+ * Zolana's derivation message is the seed they expand from. It was previously
+ * only reachable through ring bring-up and untested.
+ */
+describe("signRingsMessage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function messageInput(overrides: Partial<Parameters<typeof signRingsMessage>[0]> = {}) {
+    return {
+      env,
+      organizationId: "org_1",
+      projectId: "prj_1",
+      owner: FEE_PAYER as string,
+      messageBase64: base64.decode(new Uint8Array([1, 2, 3])),
+      ...overrides,
+    };
+  }
+
+  it("returns the signature for the named owner, base64 encoded", async () => {
+    const signature = new Uint8Array(64).fill(5);
+
+    const result = await signRingsMessage(
+      messageInput({ signer: messageSigner(signature) as never })
+    );
+
+    expect(result).toBe(base64.decode(signature));
+  });
+
+  it("hands the signer the exact bytes it was given", async () => {
+    const message = new Uint8Array([9, 8, 7, 0xff]);
+    const signMessages = vi.fn(async () => [{ [FEE_PAYER]: new Uint8Array(64) as SignatureBytes }]);
+
+    await signRingsMessage(
+      messageInput({
+        messageBase64: base64.decode(message),
+        signer: { address: FEE_PAYER, signMessages } as never,
+      })
+    );
+
+    // Byte-exact: the derivation seed is a signature over one specific 99-byte
+    // envelope, and any mangling would derive a different, silently wrong identity.
+    expect(signMessages).toHaveBeenCalledWith([createSignableMessage(message)]);
+  });
+
+  it("refuses a signer that cannot sign raw messages", async () => {
+    const error = await rejection(
+      signRingsMessage(messageInput({ signer: partialSigner(async () => [{}]) as never }))
+    );
+
+    expect(error).toBeInstanceOf(RingsAdapterError);
+    expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+  });
+
+  it("refuses when the signer returns nothing for the named owner", async () => {
+    // A dictionary keyed by someone else: signing "succeeded" but produced no
+    // signature this owner can use, which must not read as success.
+    const signer = {
+      address: FEE_PAYER,
+      signMessages: async () => [{ [OTHER_KEY]: new Uint8Array(64) as SignatureBytes }],
+    };
+
+    const error = await rejection(signRingsMessage(messageInput({ signer: signer as never })));
+
+    expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+  });
+
+  // The gate on the path that actually roots the keys: this is the call whose
+  // signature becomes the shielded identity, so a provider that cannot serve it
+  // has to be refused here and not only on the transaction path.
+  it("refuses a provider that cannot reproducibly sign raw messages", async () => {
+    findActiveWalletByPublicKey.mockResolvedValue({
+      id: "cw_owner",
+      publicKey: FEE_PAYER,
+      provider: "coinbase_cdp",
+    });
+
+    const error = await rejection(signRingsMessage(messageInput()));
+
+    expect(error).toMatchObject({ failureCode: "provider_unsupported", retryable: false });
+    expect((error as Error).message).toContain("coinbase_cdp");
   });
 });
 

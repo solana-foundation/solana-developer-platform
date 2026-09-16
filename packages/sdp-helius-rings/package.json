@@ -15,6 +15,9 @@
     "lint": "biome check src/",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@sdp/types": "workspace:*"
+  },
   "devDependencies": {
     "vitest": "4.1.11"
   }

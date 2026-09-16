@@ -1,9 +1,9 @@
-import type { WalletOperationActor } from "@sdp/types";
+import { recurringPaymentPolicyPayloadSchema, type WalletOperationActor } from "@sdp/types";
 import {
   createPaymentRecurringPaymentsRepository,
   type PaymentRecurringPaymentRow,
 } from "@/db/repositories";
-import { AppError } from "@/lib/errors";
+import { internalError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -21,8 +21,8 @@ export async function createRecurringPayment(input: {
   token: string;
   amount: string;
   periodHours: number;
-  firstCollectionAt?: string | null;
-  metadataUri?: string | null;
+  firstCollectionAt: string | null;
+  metadataUri: string | null;
   createdBy: string | null;
   apiKeyId: string | null;
   actor: WalletOperationActor | null;
@@ -47,17 +47,17 @@ export async function createRecurringPayment(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     sourceWallet: input.sourceWallet,
-    operationType: "recurring_payment_create",
     token: tokenMint,
     amount: input.amount,
     destination: destination.destinationAddress,
     apiKeyId: input.apiKeyId,
     actor: input.actor,
-    rawPayload: {
+    rawPayload: recurringPaymentPolicyPayloadSchema.parse({
+      operationType: "recurring_payment_create",
       counterpartyId: input.counterpartyId,
       counterpartyAccountId: input.counterpartyAccountId,
       periodHours: input.periodHours,
-    },
+    }),
   });
 
   const now = new Date().toISOString();
@@ -77,15 +77,15 @@ export async function createRecurringPayment(input: {
     token: tokenMint,
     amount: input.amount,
     periodHours: input.periodHours,
-    firstCollectionAt: input.firstCollectionAt ?? null,
-    metadataUri: input.metadataUri ?? null,
+    firstCollectionAt: input.firstCollectionAt,
+    metadataUri: input.metadataUri,
     createdBy: input.createdBy,
     createdAt: now,
     updatedAt: now,
   });
 
   if (!recurringPayment) {
-    throw new AppError("INTERNAL_ERROR", "Failed to create recurring payment");
+    throw internalError("Failed to create recurring payment");
   }
 
   return recurringPayment;

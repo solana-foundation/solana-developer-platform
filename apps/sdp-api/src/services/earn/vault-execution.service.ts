@@ -1,7 +1,7 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import * as rpcCore from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { SolanaCluster } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
 import {
   type Address,
   type AddressesByLookupTableAddress,
@@ -9,7 +9,6 @@ import {
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   type Blockhash,
-  bytesEqual,
   compileTransaction,
   compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
@@ -57,9 +56,6 @@ function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][
     data: Uint8Array.from(Buffer.from(instruction.data, "base64")),
   } as unknown as Instruction;
 }
-
-// biome-ignore lint/security/noSecrets: public Solana Memo program address.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 /**
  * Bind the caller's idempotency key into the transaction plan.
@@ -304,29 +300,6 @@ export async function signVaultPlan(
     signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
       feePayment.signAsFeePayer(ownerSignedBytes)
     );
-    // A paymaster returns BYTES, not a signature, so nothing about the call
-    // constrains it to return the message SDP just signed. Both checks belong
-    // HERE, before the bytes are persisted: past that point a sigverify
-    // rejection at broadcast is indistinguishable from a lost response, and the
-    // movement parks reconcilable until its blockhash expires.
-    //
-    // Message equality is the check that catches a swap, because the cheaper
-    // ones do not. The owner slot still carries a signature (over the OLD
-    // message), and a SUBSTITUTED fee payer still satisfies
-    // `getSignatureFromTransaction` below, which reads whatever sits in slot
-    // zero. It also means Kora may not rewrite the plan: a relayer that injects
-    // its own compute-budget or fee-transfer instruction fails here, loudly,
-    // rather than sending bytes that were never simulated or size-checked.
-    const sponsorSigned = getTransactionDecoder().decode(signedBytes);
-    if (!bytesEqual(sponsorSigned.messageBytes, ownerSigned.messageBytes)) {
-      throw new Error("Sponsored vault transaction came back over a different message");
-    }
-    if (
-      sponsorSigned.signatures[feePayer] === null ||
-      sponsorSigned.signatures[feePayer] === undefined
-    ) {
-      throw new Error("Vault transaction is missing the sponsor fee-payer signature");
-    }
   } else if (input.fee.kind === "caller-provided") {
     // Unreachable from the custody paths by construction; asserted so a new
     // caller cannot silently fall through to wallet-pays and sign the custody

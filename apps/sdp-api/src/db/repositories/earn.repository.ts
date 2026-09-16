@@ -39,6 +39,12 @@ export interface EarnStrategyRow {
   risk_metadata: EarnStrategyRiskMetadata;
   status: EarnStrategyStatus;
   /**
+   * Set only when catalogue sync deprecated this row after a provider stopped
+   * listing it. The row remains as an exit-safe metadata tombstone. A null
+   * value means the status is provider- or operator-owned instead.
+   */
+  catalogue_delisted_at: string | null;
+  /**
    * Cluster the instrument lives on — NOT implied by `environment`, which is
    * why it is a column. Since PRO-1742 a non-production environment holds BOTH
    * clusters on purpose: its own cluster's shelf plus a browse-only mirror of
@@ -72,7 +78,7 @@ export interface EarnProviderWalletRow {
   environment: SdpEnvironment;
   /** Open TEXT, same drift rule as EarnStrategyRow.provider. */
   provider: string;
-  /** Provider-side wallet identifier (e.g. Ground wallet UUID). */
+  /** Provider-side wallet identifier. */
   provider_wallet_ref: string;
   label: string | null;
   created_by: string;
@@ -118,14 +124,15 @@ export interface UpdateEarnStrategyMetricsInput {
 
 /**
  * Delist pass input: everything the provider still lists for (provider,
- * environment). Anything else the table holds is stale — a vault the provider
- * delisted or one a tightened catalogue gate now refuses — and is deleted.
+ * environment). Any other active row is stale, either a vault the provider
+ * delisted or one a tightened catalogue gate now refuses, and becomes a
+ * deprecated metadata tombstone so existing anonymous positions remain exitable.
  *
- * `listedProviderReferences` is the KEEP set, never the delete set, so the
+ * `listedProviderReferences` is the KEEP set, never the delist set, so the
  * caller cannot enumerate stale rows it does not know about: the provider's
  * live list is the only input, and the DB decides what that leaves behind.
  */
-export interface DeleteUnlistedEarnStrategiesInput {
+export interface DeprecateUnlistedEarnStrategiesInput {
   provider: EarnProviderId;
   environment: SdpEnvironment;
   /**
@@ -133,7 +140,7 @@ export interface DeleteUnlistedEarnStrategiesInput {
    * holds two independently-sourced shelves since PRO-1742 — its own cluster's
    * catalogue plus the mirrored mainnet one — and each fetch may only delist
    * the rows it is the truth for: an unscoped delist run with one lane's keep
-   * set would tear down the other lane's shelf. Omitted, the delist covers the
+   * set would deprecate the other lane's shelf. Omitted, the delist covers the
    * whole environment (production, where the provider's own fetch IS the total
    * truth and stray wrong-cluster rows should converge away). A NULL
    * `host_cluster` row counts as the environment's own cluster — the same rule
@@ -148,7 +155,7 @@ export interface DeleteUnlistedEarnStrategiesInput {
    * successful production fetch with no mainnet rows, or a steady-state "no
    * production catalogue"), so previously mirrored rows converge away instead
    * of being served forever as a catalogue production no longer vouches for.
-   * Requires `hostCluster`: an authorized-empty delist may tear down one
+   * Requires `hostCluster`: an authorized-empty delist may deprecate one
    * cluster sub-shelf, never a whole environment.
    */
   allowEmptyKeepSet?: true;
@@ -211,6 +218,20 @@ export interface ListEarnStrategiesInput {
   offset: number;
 }
 
+/**
+ * The volatile figures of one stored strategy, as the anomaly check reads them
+ * before a catalogue or metrics write (PRO-1867, threat model EARN-010).
+ * `tvl_usd` is lifted out of the `risk_metadata` bag and is null unless the
+ * stored value is a JSON number, the same guard `listStrategies` ranks by.
+ */
+export interface EarnStrategyFigureRow {
+  provider_reference: string;
+  host_cluster: SolanaCluster;
+  status: EarnStrategyStatus;
+  current_apy: string | null;
+  tvl_usd: number | null;
+}
+
 export interface ListEarnStrategiesResult {
   rows: EarnStrategyRow[];
   total: number;
@@ -228,6 +249,8 @@ export interface InsertEarnProviderWalletInput {
 
 export interface ListEarnProviderWalletsInput {
   organizationId: string;
+  /** The owning project; the list is a project boundary like every per-program route. */
+  projectId: string;
   environment: SdpEnvironment;
   /** Optional filter; omitted lists every provider's programs. */
   provider?: EarnProviderId;
@@ -258,6 +281,16 @@ export interface EarnRepository {
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
   listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult>;
   /**
+   * Every stored strategy's volatile figures for one (provider, environment),
+   * both clusters and every status: the "before" the catalogue sync and the
+   * metrics refresh diff their incoming figures against (PRO-1867). Whole shelf
+   * on purpose, so a paused row's rate moving 10x is still visible.
+   */
+  listStrategyFigures(params: {
+    provider: string;
+    environment: SdpEnvironment;
+  }): Promise<EarnStrategyFigureRow[]>;
+  /**
    * Every catalogued strategy that mints a share token on the given cluster,
    * for share-mint → vault attribution (PRO-1741). The WHOLE stored inventory
    * on purpose: no status filter and no curation, because a held share of a
@@ -270,19 +303,20 @@ export interface EarnRepository {
     hostCluster: SolanaCluster;
   }): Promise<EarnStrategyRow[]>;
   /**
-   * DELETE every `active` strategy for (provider, environment) — optionally
+   * Deprecate every `active` strategy for (provider, environment), optionally
    * narrowed to one cluster's sub-shelf — that the provider no longer lists.
-   * Returns the deleted provider references so the caller can log exactly what
-   * left the catalogue. Idempotent: a second pass over the same keep set
-   * matches nothing.
+   * Returns the transitioned provider references so the caller can log exactly
+   * what left the live catalogue. Idempotent: a second pass over the same keep
+   * set matches nothing.
    *
-   * Deleted, not flagged: this table is a cache of the provider catalogue (the
-   * sync is its only admitting writer) and nothing references a strategy id — no
-   * foreign key, and a program's allocations carry the PROVIDER's reference,
-   * resolved against live provider state. A status flag would leave rows SDP
-   * must not carry sitting in the table indefinitely.
+   * The retained row is exit metadata, not a browsable or depositable strategy.
+   * Anonymous builds write no tenant position, so its stable id and immutable
+   * provider/vault/mint identity are the only server-side facts that let a
+   * holder exit after delisting. `catalogue_delisted_at` distinguishes this
+   * sync-owned deprecation from a sticky operator status and lets a later
+   * provider relist reactivate the same id safely.
    */
-  deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput): Promise<string[]>;
+  deprecateUnlistedStrategies(input: DeprecateUnlistedEarnStrategiesInput): Promise<string[]>;
 
   /**
    * One program by its own id, scoped to (organization, environment). The

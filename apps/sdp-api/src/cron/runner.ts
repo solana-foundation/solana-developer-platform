@@ -10,12 +10,10 @@
  */
 
 import { type ScheduledTask, schedule } from "node-cron";
+import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
+import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-split-swaps";
 import { runWithSystemDatabaseIdentity } from "@/db";
-import {
-  isAssetProfilesEnabled,
-  isEarnEnabled,
-  isPrivateChannelsEnabled,
-} from "@/lib/feature-flags";
+import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import { noopObservability, type Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
@@ -49,6 +47,10 @@ import {
   runPendingWithdrawalsReconciliation,
 } from "./pending-withdrawals";
 import {
+  PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
+  runProviderCredentialSecretCleanup,
+} from "./provider-credential-secret-cleanup";
+import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
 } from "./recurring-payments";
@@ -58,15 +60,7 @@ import {
 } from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { runWithCronRunEvent } from "./run-event";
-import {
-  runWorkflowExecutions,
-  WORKFLOW_EXECUTIONS_CRON,
-  WORKFLOW_EXECUTIONS_MONITOR,
-} from "./workflow-executions";
-import {
-  runWorkflowSecretRetirements,
-  WORKFLOW_SECRET_RETIREMENTS_CRON,
-} from "./workflow-secret-retirements";
+import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
 
 export interface CronDeps {
   env: Env;
@@ -204,18 +198,6 @@ export function startCron(deps: CronDeps): CronHandle | null {
     )
   );
 
-  if (isAssetProfilesEnabled(deps.env)) {
-    tasks.push(
-      scheduleSystemTask(
-        WORKFLOW_EXECUTIONS_CRON,
-        "cron:workflow-executions",
-        runWorkflowExecutions
-      )
-    );
-  } else {
-    scheduleDisabledTickProofOfLife(WORKFLOW_EXECUTIONS_CRON, WORKFLOW_EXECUTIONS_MONITOR);
-  }
-
   if (isPrivateChannelsEnabled(deps.env)) {
     tasks.push(
       scheduleSystemTask(
@@ -260,20 +242,17 @@ export function startCron(deps: CronDeps): CronHandle | null {
     scheduleDisabledTickProofOfLife(EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR);
   }
 
-  // Deliberately outside every feature gate, and in particular outside the asset-profiles
-  // block above. The queue this drains is durable and outlives the feature that filled
-  // it: a rule's signing-secret version is already orphaned by the time a row exists —
-  // the rule is gone, nothing references the version, and it stays readable in the
-  // backend until something destroys it. Riding on the workflow tick meant turning asset
-  // profiles off stranded that cleanup permanently, which is the opposite of what
-  // disabling a feature should do (and disabling it is a plausible incident response,
-  // exactly when the cleanup matters most). The sweep is a no-op on the empty queue every
-  // other deployment has.
+  // Outside every feature gate: the queue this drains holds credentials that are already
+  // orphaned, so cleanup must outlive whichever feature queued them.
+  tasks.push(
+    scheduleSystemTask(SECRET_RETIREMENTS_CRON, "cron:secret-retirements", runSecretRetirements)
+  );
+
   tasks.push(
     scheduleSystemTask(
-      WORKFLOW_SECRET_RETIREMENTS_CRON,
-      "cron:workflow-secret-retirements",
-      runWorkflowSecretRetirements
+      PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
+      "cron:provider-credential-secret-cleanup",
+      runProviderCredentialSecretCleanup
     )
   );
 
@@ -285,6 +264,26 @@ export function startCron(deps: CronDeps): CronHandle | null {
       "cron:earn-vault-movements",
       runEarnVaultMovementsReconciliation
     )
+  );
+
+  // The DvP job checks the Markets flag itself and returns early, so it is registered
+  // unconditionally: an open trade holds a counterparty's money in escrow, and
+  // must keep being observed even if the flag is turned off during an incident.
+  // Through scheduleSystemTask like every other sweep, NOT a bare schedule().
+  // Reconciliation is cross-tenant by nature and 0086 puts forced row-level
+  // security on dvp_trades, which fails closed when no identity is declared -
+  // so a bare tick would read zero open trades, find no funding, and go on
+  // reporting success while a counterparty's escrowed deposit sat unnoticed.
+  tasks.push(scheduleSystemTask(DVP_TRADES_CRON, "cron:dvp-trades", runDvpTradeReconciliation));
+
+  // Orphaned split-swap detection (PRO-1864). Advisory and read-only against
+  // the ledger, but cross-tenant like every sweep, so it takes the system
+  // identity through scheduleSystemTask: under 0081's forced row-level
+  // security an identity-less tick would read zero open advisories and report
+  // a clean sweep over swaps it never looked at. Registered unconditionally:
+  // an advisory written before an incident flag flip must keep being watched.
+  tasks.push(
+    scheduleSystemTask(EARN_SPLIT_SWAPS_CRON, "cron:earn-split-swaps", runEarnSplitSwapDetection)
   );
 
   return {

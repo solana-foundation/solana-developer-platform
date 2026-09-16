@@ -26,6 +26,16 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
 }
 
 describe("OpenAPI spec", () => {
+  it("documents exact signer-check runtime failures without changing its Provider-ID request", () => {
+    const operation = createPublicOpenApiDocument().paths?.["/v1/wallets/signer-check"]?.post;
+    expect(operation?.responses).toHaveProperty("403");
+    expect(operation?.responses).toHaveProperty("404");
+    expect(operation?.responses).toHaveProperty("409");
+    const request = getJsonSchema(operation?.requestBody);
+    expect(request.properties).toEqual({ walletId: expect.any(Object) });
+    expect(request.required).toBeUndefined();
+  });
+
   it("documents path-based versioning policy", () => {
     const doc = createOpenApiDocument();
 
@@ -80,6 +90,54 @@ describe("OpenAPI spec", () => {
     }
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
 
+    // SECURITY REVIEW GATE (PRO-1872, threat model EARN-027)
+    // The public/preview split is a publication boundary. Earn also has a
+    // narrower keyless runtime tier, but changing either the operation list or
+    // an operation's public security declaration is a threat-model revisit
+    // trigger. This list is the route-publication gate: a PR that grows it must
+    // carry security sign-off (routes/earn/CLAUDE.md, "Public OpenAPI
+    // promotion"). Do not widen the list to make a red test pass.
+    const publicEarnOperations = Object.entries(publicDocument.paths ?? {})
+      .filter(([path]) => path.startsWith("/v1/earn"))
+      .flatMap(([path, item]) =>
+        Object.keys(item ?? {})
+          .filter((method) => ["get", "post", "put", "patch", "delete"].includes(method))
+          .map((method) => `${method.toUpperCase()} ${path}`)
+      )
+      .sort();
+    expect(publicEarnOperations).toEqual(
+      [
+        "GET /v1/earn/strategies",
+        "GET /v1/earn/strategies/{strategyId}",
+        "POST /v1/earn/vault-deposit-previews",
+        "GET /v1/earn/external-wallet/positions/summary",
+        "GET /v1/earn/external-wallet/positions",
+        "GET /v1/earn/external-wallet/movements",
+        "GET /v1/earn/external-wallet/movements/{movementId}",
+        "GET /v1/earn/external-wallet/earnings",
+        "POST /v1/earn/external-wallet/deposit-transactions",
+        "POST /v1/earn/external-wallet/deposits",
+        "POST /v1/earn/external-wallet/withdrawal-previews",
+        "POST /v1/earn/external-wallet/withdrawal-transactions",
+        "POST /v1/earn/external-wallet/withdrawals",
+      ].sort()
+    );
+    expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
+    // Coverage parity across the boundary: every published operation is the
+    // same registered route as its internal twin (same operationId), so the
+    // app-level request tracing and rate limiting that wrap `/v1/*` apply to
+    // both by construction; there is no public-only mount to fall outside them.
+    for (const operation of [...publicEarnOperations, "GET /v1/transactions"]) {
+      const [method, path] = operation.split(" ") as [string, string];
+      const key = method.toLowerCase() as "get" | "post";
+      expect(internal.paths?.[path]?.[key]?.operationId).toBe(
+        publicDocument.paths?.[path]?.[key]?.operationId
+      );
+    }
+
+    // This remains the conservative authenticated contract until PRO-1943's
+    // named security review approves the keyless subset. The approved change
+    // must replace this with an exact optional-auth vs keyed-only matrix.
     for (const path of [
       "/v1/earn/vault-deposit-previews",
       "/v1/earn/external-wallet/deposit-transactions",
@@ -110,6 +168,27 @@ describe("OpenAPI spec", () => {
         publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.responses?.["200"]
       )
     ).toContain("sharesOut");
+
+    const withdrawalBuildRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/external-wallet/withdrawal-transactions"]?.post?.requestBody
+    );
+    expect(withdrawalBuildRequest.anyOf).toEqual([
+      expect.objectContaining({
+        required: expect.arrayContaining(["positionId", "shares"]),
+      }),
+      expect.objectContaining({
+        required: expect.arrayContaining(["strategyId", "ownerAddress", "shares"]),
+      }),
+    ]);
+
+    for (const path of [
+      "/v1/earn/external-wallet/deposit-transactions",
+      "/v1/earn/external-wallet/withdrawal-transactions",
+    ]) {
+      expect(JSON.stringify(publicDocument.paths?.[path]?.post?.responses?.["200"])).toContain(
+        '"sponsored"'
+      );
+    }
 
     const submitRequest = getJsonSchema(
       publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
@@ -234,6 +313,24 @@ describe("OpenAPI spec", () => {
       expect(operation?.responses?.["409"]).toBeDefined();
       expect(operation?.responses?.["503"]).toBeDefined();
     }
+  });
+
+  it("documents the 422 SIGNING_REJECTED response on sponsored submit operations", () => {
+    const doc = createOpenApiDocument();
+    const sponsored = [
+      ["/v1/earn/external-wallet/deposits", "post"],
+      ["/v1/earn/external-wallet/withdrawals", "post"],
+      ["/v1/payments/transfers", "post"],
+      ["/v1/issuance/tokens/{tokenId}/mint", "post"],
+      ["/v1/dvp/trades/{tradeId}/settle", "post"],
+    ] as const;
+    for (const [path, method] of sponsored) {
+      expect(doc.paths?.[path]?.[method]?.responses, path).toHaveProperty("422");
+    }
+    const codes = (doc.components?.schemas?.ApiErrorCode ?? doc.components?.schemas?.ErrorCode) as
+      | { enum?: string[] }
+      | undefined;
+    if (codes?.enum) expect(codes.enum).toContain("SIGNING_REJECTED");
   });
 
   it("documents exact-one wallet ownership and request-time runtime admission", () => {
@@ -380,6 +477,42 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
     expect(doc.paths?.["/v1/policies"]?.get).toBeDefined();
+  });
+
+  // DvP is documented internally and deliberately withheld from the public
+  // document: the swap program is devnet-only and the family is flag-gated off,
+  // so every environment a customer can reach answers 403. Publishing it would
+  // document an endpoint nobody can call. Promoting it is a product decision.
+  it("documents the DvP trade routes on the internal document only", () => {
+    const internal = createOpenApiDocument();
+    const publicDocument = createPublicOpenApiDocument();
+
+    expect(internal.paths?.["/v1/dvp/trades"]?.post).toBeDefined();
+    expect(internal.paths?.["/v1/dvp/trades"]?.get).toBeDefined();
+    expect(internal.paths?.["/v1/dvp/trades/{tradeId}"]?.get).toBeDefined();
+    expect(internal.components?.schemas?.DvpTrade).toBeDefined();
+
+    expect(Object.keys(publicDocument.paths ?? {}).filter((p) => p.includes("/dvp"))).toEqual([]);
+    expect((publicDocument.tags ?? []).map((tag) => tag.name)).not.toContain("DvP");
+  });
+
+  // Every 64-bit value on this surface is a string. A JSON number rounds above
+  // 2^53, and the nonce is a PDA seed, so a rounded value names an escrow
+  // address that does not exist. Documenting one as a number would hand a
+  // generated client the bug.
+  it("documents DvP u64 fields as strings, never numbers", () => {
+    const doc = createOpenApiDocument();
+    const trade = doc.components?.schemas?.DvpTrade as {
+      properties: Record<string, { type?: string }>;
+    };
+
+    for (const field of ["nonce", "expiryTimestamp"]) {
+      expect(trade.properties[field]?.type).toBe("string");
+    }
+
+    const createBody = JSON.stringify(doc.paths?.["/v1/dvp/trades"]?.post?.requestBody);
+    expect(createBody).not.toContain('"type":"number"');
+    expect(createBody).not.toContain('"type":"integer"');
   });
 
   it("documents the managed RPC round-robin order", () => {

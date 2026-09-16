@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
   buildEarnVaultDepositFingerprint,
-  buildLegacyPaymentTransferFingerprint,
-  buildLegacyTransferBatchFingerprint,
   buildPaymentTransferFingerprint,
   buildTransferBatchFingerprint,
   normalizeForFingerprint,
@@ -62,14 +60,13 @@ describe("resolveIdempotencyReplay", () => {
 });
 
 describe("resolveIdentityBoundIdempotencyReplay", () => {
-  const row = { id: "row_1", idempotency_fingerprint: "legacy", custody_wallet_id: "cwlt_1" };
+  const row = { id: "row_1", idempotency_fingerprint: "current", custody_wallet_id: "cwlt_1" };
 
-  it("accepts a complete legacy fingerprint only for the requested exact wallet", async () => {
+  it("accepts a matching fingerprint only for the requested exact wallet", async () => {
     expect(
       await resolveIdentityBoundIdempotencyReplay(
         async () => row,
         "current",
-        "legacy",
         (existing) => existing.custody_wallet_id === "cwlt_1"
       )
     ).toBe(row);
@@ -80,7 +77,6 @@ describe("resolveIdentityBoundIdempotencyReplay", () => {
       resolveIdentityBoundIdempotencyReplay(
         async () => row,
         "current",
-        "legacy",
         (existing) => existing.custody_wallet_id === "cwlt_2"
       )
     ).rejects.toSatisfy((error: unknown) => error instanceof AppError && error.code === "CONFLICT");
@@ -126,55 +122,9 @@ describe("buildPaymentTransferFingerprint", () => {
     );
   });
 
-  it("keeps the pre-K3 fingerprint available for compatible legacy replay", () => {
-    expect(buildLegacyPaymentTransferFingerprint(base)).toBe(
-      '{"amount":"1","destinationAddress":"Dst","memo":null,"privateTransfer":null,"scope":"payment_transfer","sourceAddress":"Src","token":"SOL","type":"transfer"}'
-    );
-  });
-
   it("differs when a money-relevant field changes", () => {
     expect(buildPaymentTransferFingerprint(base)).not.toBe(
       buildPaymentTransferFingerprint({ ...base, amount: "2" })
-    );
-  });
-
-  it("differs when private transfer options differ", () => {
-    const base = {
-      custodyWalletId: "cwlt_source_1",
-      sourceAddress: "Src",
-      destinationAddress: "Dst",
-      token: "SOL",
-      amount: "1",
-      memo: null,
-      type: "transfer_confidential",
-    };
-    expect(
-      buildPaymentTransferFingerprint({ ...base, privateTransfer: { magicBlock: { split: 2 } } })
-    ).not.toBe(
-      buildPaymentTransferFingerprint({ ...base, privateTransfer: { magicBlock: { split: 3 } } })
-    );
-  });
-
-  it("is stable for identical private transfer options regardless of key order", () => {
-    const base = {
-      custodyWalletId: "cwlt_source_1",
-      sourceAddress: "Src",
-      destinationAddress: "Dst",
-      token: "SOL",
-      amount: "1",
-      memo: null,
-      type: "transfer_confidential",
-    };
-    expect(
-      buildPaymentTransferFingerprint({
-        ...base,
-        privateTransfer: { magicBlock: { split: 2, gasless: true } },
-      })
-    ).toBe(
-      buildPaymentTransferFingerprint({
-        ...base,
-        privateTransfer: { magicBlock: { gasless: true, split: 2 } },
-      })
     );
   });
 });
@@ -232,20 +182,6 @@ describe("buildTransferBatchFingerprint", () => {
         recipients: [firstRecipient],
         options: undefined,
       })
-    );
-  });
-
-  it("keeps the pre-K3 fingerprint available for compatible legacy replay", () => {
-    expect(
-      buildLegacyTransferBatchFingerprint({
-        sourceCustodyWalletId: "cwlt_source_1",
-        sourceAddress: "Source111",
-        token: "SOL",
-        recipients: [firstRecipient],
-        options: undefined,
-      })
-    ).toBe(
-      '{"options":null,"recipients":[{"amount":"1.5","counterpartyAccountId":"account-1","counterpartyId":"counterparty-1","destinationAddress":"Destination111","externalId":"recipient-1"}],"scope":"payment_transfer_batch","sourceAddress":"Source111","token":"SOL"}'
     );
   });
 

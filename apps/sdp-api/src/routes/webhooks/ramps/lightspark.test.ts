@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { LightsparkWebhookProcessor } from "./lightspark";
-import type { AppContext } from "./processor";
 
 const ORGANIZATION_ID = "org_lightspark_webhook_test";
 const PROJECT_ID = "prj_lightspark_webhook_test";
@@ -52,7 +52,6 @@ const REAL_COMPLETED_PAYLOAD = `{
 }`;
 
 const processor = new LightsparkWebhookProcessor();
-const appContext = { env } as unknown as AppContext;
 
 async function seedTransfer() {
   await getDb(env).batch([
@@ -68,20 +67,14 @@ async function seedTransfer() {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "lightspark-webhook@example.com", 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        PROJECT_ID,
-        ORGANIZATION_ID,
-        "Lightspark Webhook Project",
-        "lightspark-webhook-project",
-        "sandbox",
-        "active",
-        USER_ID
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO payment_transfers (
@@ -166,8 +159,8 @@ describe("LightsparkWebhookProcessor", () => {
 
   it("settles the transfer whose quote reference the event carries, idempotently", async () => {
     await seedTransfer();
-    await processor.process(appContext, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
-    await processor.process(appContext, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
+    await processor.process(env, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
+    await processor.process(env, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
 
     const transfer = await getDb(env)
       .prepare(
@@ -199,7 +192,7 @@ describe("LightsparkWebhookProcessor", () => {
       `"quoteId": "${QUOTE_ID}"`,
       '"quoteId": "Quote:unknown"'
     );
-    await processor.process(appContext, "sandbox", processor.parse(payload));
+    await processor.process(env, "sandbox", processor.parse(payload));
 
     const transfer = await getDb(env)
       .prepare("SELECT status, signature, provider_reference FROM payment_transfers WHERE id = ?")

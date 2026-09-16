@@ -26,6 +26,9 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
+  assertBindingsWithinActorWalletScope,
+  isWalletScopedActor,
+  legacySigningWalletBinding,
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
   resolveWalletBindingsInScope,
@@ -33,6 +36,7 @@ import {
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
 import {
   type ExactApiKeyWalletBinding,
+  listApiKeyWalletBindings,
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
@@ -275,12 +279,27 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
     connectionId,
   });
 
+  const actorApiKey = c.get("apiKey");
+  if (actorApiKey) {
+    assertBindingsWithinActorWalletScope(
+      actorApiKey,
+      [{ walletId: walletSelection.defaultSigningWalletId }, ...walletSelection.bindings],
+      walletScope
+    );
+  }
+
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
   if (provisionWalletRequested) {
     if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
+    }
+    if (actorApiKey && isWalletScopedActor(actorApiKey)) {
+      throw new AppError(
+        "INSUFFICIENT_PERMISSIONS",
+        "Cannot provision a wallet from an API key with a selected wallet scope"
+      );
     }
 
     try {
@@ -364,6 +383,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       createdByUserId: createdBy,
       createdByKeyId: actor.apiKeyId ?? undefined,
       actorPermissions: actor.permissions,
+      actorApiKeyRole: c.get("apiKey")?.role ?? null,
       name,
       description,
       role,
@@ -462,6 +482,10 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot update the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   // Verify key belongs to this organization and the current project scope
@@ -482,6 +506,15 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
     signingWalletIds: body.signingWalletIds,
     walletBindings: body.walletBindings,
   });
+
+  const updateActorApiKey = c.get("apiKey");
+  if (updateActorApiKey && walletSelection.touched) {
+    assertBindingsWithinActorWalletScope(
+      updateActorApiKey,
+      [{ walletId: walletSelection.defaultSigningWalletId }, ...walletSelection.bindings],
+      body.walletScope
+    );
+  }
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
   if (walletSelection.touched) {
@@ -500,6 +533,7 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
       organizationId: actor.organizationId,
       projectId,
       actorPermissions: actor.permissions,
+      actorApiKeyRole: c.get("apiKey")?.role ?? null,
       currentRole: existing.role,
       name: body.name,
       description: body.description,
@@ -546,6 +580,11 @@ export const createApiKeyControlProfile = async (
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot manage control profiles of the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   const profile = await new ApiKeyPolicyStore(
@@ -574,6 +613,11 @@ export const createApiKeyControlProfileRevision = async (
   const { keyId, profileId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot manage control profiles of the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   const revision = await new ApiKeyPolicyStore(
@@ -607,6 +651,11 @@ export const activateApiKeyControlProfileRevision = async (c: AppContext) => {
   const { keyId, profileId, revisionId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot manage control profiles of the API key being used for this request");
+  }
+
   const active = await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))
   ).activateApiKeyControlProfileRevision({
@@ -633,6 +682,11 @@ export const writeApiKeyPolicyBindings = async (
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot replace policy bindings of the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   const custodyTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
@@ -716,13 +770,51 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     );
   }
 
+  const rotatingActorKey = c.get("apiKey");
+  if (rotatingActorKey && isWalletScopedActor(rotatingActorKey)) {
+    const target = await getDb(c.env)
+      .prepare(
+        `SELECT signing_wallet_id
+         FROM api_keys
+         WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'`
+      )
+      .bind(keyId, actor.organizationId, projectId)
+      .first<{ signing_wallet_id: string | null }>();
+    if (target) {
+      const targetBindings = await listApiKeyWalletBindings(getDb(c.env), keyId);
+      const targetScope =
+        target.signing_wallet_id !== null || targetBindings.length > 0 ? "selected" : "all";
+      assertBindingsWithinActorWalletScope(
+        rotatingActorKey,
+        [
+          ...legacySigningWalletBinding(target.signing_wallet_id, targetBindings),
+          ...targetBindings,
+        ],
+        targetScope
+      );
+    }
+  }
+
   const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const rotation = await apiKeyService.rotateApiKey(
     keyId,
     actor.organizationId,
     projectId,
     gracePeriodHours,
-    c.env.API_KEY_PEPPER
+    actor.permissions,
+    c.get("apiKey")?.role ?? null,
+    c.env.API_KEY_PEPPER,
+    // The pre-flight check above fails fast, but the rows it judged can
+    // change before the rotation lock is taken; this guard re-judges the
+    // bindings the transaction actually copies.
+    rotatingActorKey && isWalletScopedActor(rotatingActorKey)
+      ? ({ signingWalletId, bindings }) =>
+          assertBindingsWithinActorWalletScope(
+            rotatingActorKey,
+            [...legacySigningWalletBinding(signingWalletId, bindings), ...bindings],
+            signingWalletId !== null || bindings.length > 0 ? "selected" : "all"
+          )
+      : undefined
   );
 
   if (!rotation) {

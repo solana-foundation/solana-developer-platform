@@ -22,12 +22,13 @@ import {
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
 import {
+  checkPrivyCredential,
   getPrivyProviderAccountFingerprint,
   PRIVY_RUNTIME_ENV_FIELDS,
+  type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
 import {
   findPrivyWalletByExternalId,
-  type PrivyCredentialAuthentication,
   type ProvisionPrivyResult,
   provisionPrivyWallet,
 } from "@/services/custody/provisioning";
@@ -48,7 +49,6 @@ import {
 import type { Env } from "@/types/env";
 
 const INSTALLATION_UNAVAILABLE_MESSAGE = "Provider credential installation is unavailable";
-const PRIVY_CHECK_TIMEOUT_MS = 10_000;
 
 type CompletionStatus = "running" | "success" | "failed" | "retry_unknown";
 type CompletionFailureCode =
@@ -113,6 +113,115 @@ export async function getProviderCredentialInstallation(
   const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
   return { connection: projectConnection(c.env, loaded) };
+}
+
+export async function deactivateCustodyConnection(
+  c: Context<{ Bindings: Env }>,
+  connectionId: string
+): Promise<{ custodyConnection: SafeInstallationConnection }> {
+  const context = createInstallationContext(c);
+  const loaded = await loadInstallation(context, connectionId);
+  if (loaded.target.status === "deactivated") {
+    return { custodyConnection: projectConnection(c.env, loaded) };
+  }
+  if (loaded.target.status !== "failed" && loaded.target.status !== "active") {
+    throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+  }
+  if (
+    await context.store.hasActiveInstallationWallet(
+      context.organizationId,
+      context.projectId,
+      connectionId
+    )
+  ) {
+    throw conflict("Connection cannot be deactivated while it has active wallets");
+  }
+  const intent = await context.audit.beginCritical(c, {
+    organizationId: context.organizationId,
+    userId: context.userId,
+    action: "deactivate",
+    resourceType: "custody_connection",
+    resourceId: connectionId,
+    metadata: { event: "custody_connection_deactivation_started", provider: "privy" },
+  });
+  let changed = false;
+  let result: SafeInstallationConnection;
+  try {
+    result = await context.db.transaction(async (tx) => {
+      const store = new ProviderCredentialStore(tx);
+      if (
+        !(await store.lockAuthorizedProjects(context.organizationId, context.userId, [
+          context.projectId,
+        ]))
+      ) {
+        throw forbidden("Requested project is not accessible");
+      }
+      const target = await store.findInstallationConnection(
+        context.organizationId,
+        context.projectId,
+        connectionId,
+        { lock: true }
+      );
+      if (!target) throw notFound("Custody Connection");
+      if (target.status !== "deactivated") {
+        if (target.status !== "failed" && target.status !== "active") {
+          throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+        }
+        if (
+          await store.hasActiveInstallationWallet(
+            context.organizationId,
+            context.projectId,
+            connectionId
+          )
+        ) {
+          throw conflict("Connection cannot be deactivated while it has active wallets");
+        }
+        if (
+          !(await store.deactivateInstallationConnection({
+            organizationId: context.organizationId,
+            projectId: context.projectId,
+            connectionId,
+            credentialId: target.provider_credential_id,
+            credentialStatus: target.credential_status,
+            observedStatus: target.status,
+          }))
+        ) {
+          throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+        }
+        changed = true;
+      }
+      const deactivated = { ...target, status: "deactivated" as const };
+      return projectConnection(c.env, {
+        target: deactivated,
+        decisions: decideInstallation(
+          installationFactsFromConnection(deactivated, await store.getDatabaseNowMs(), false)
+        ),
+      });
+    });
+  } catch (error) {
+    if (changed) {
+      // Preserve the durable intent when the commit outcome cannot be established.
+      throw providerUnavailable("Connection deactivation outcome is temporarily unknown");
+    }
+    await completeInstallationCriticalNoop(
+      context,
+      intent,
+      "custody_connection_deactivation_not_committed"
+    );
+    throw error;
+  }
+  if (changed) {
+    await context.audit.completeCritical(c, intent, {
+      metadata: { event: "custody_connection_deactivated", provider: "privy" },
+    });
+  } else {
+    await completeInstallationCriticalNoop(
+      context,
+      intent,
+      "custody_connection_deactivation_replayed"
+    );
+  }
+  return { custodyConnection: result };
 }
 
 export async function completeProviderCredentialInstallation(
@@ -528,7 +637,7 @@ async function executeCompletionMode(
     return lookupProviderWallet(context.c.env, externalId, credential);
   }
 
-  const validation = await validatePrivyCredential(context.c.env, credential);
+  const validation = await checkPrivyCredential(context.c.env, credential);
   if (validation !== "success") {
     return validation === "failed"
       ? { kind: "failed", code: "invalid_credentials" }
@@ -638,38 +747,6 @@ async function acquireCompletionLease(
     expectedLastCheckStatus: target.last_check_status,
     expectedLastCheckAt: target.last_check_at,
   });
-}
-
-async function validatePrivyCredential(
-  env: Env,
-  credential: PrivyCredentialAuthentication
-): Promise<"success" | "failed" | "retry_unknown"> {
-  const baseUrl = (env.PRIVY_API_BASE_URL ?? "https://api.privy.io/v1").replace(/\/+$/, "");
-  try {
-    const response = await fetch(`${baseUrl}/wallets?limit=1&chain_type=solana`, {
-      method: "GET",
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${credential.appId}:${credential.appSecret}`).toString("base64")}`,
-        "privy-app-id": credential.appId,
-      },
-      signal: AbortSignal.timeout(PRIVY_CHECK_TIMEOUT_MS),
-    });
-    if (response.status === 401) return "failed";
-    if (response.status !== 200) return "retry_unknown";
-    const body = await response.json().catch(() => null);
-    return isWalletListResponse(body) ? "success" : "retry_unknown";
-  } catch {
-    return "retry_unknown";
-  }
-}
-
-function isWalletListResponse(value: unknown): value is { data: unknown[] } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "data" in value &&
-    Array.isArray((value as { data?: unknown }).data)
-  );
 }
 
 async function persistSuccess(

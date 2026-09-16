@@ -2,10 +2,77 @@ import { EARN_PROVIDERS } from "@sdp/types";
 
 const PROVIDERS = new Set<string>(EARN_PROVIDERS);
 
-/** Longest cursor we will forward — Ground cursors are short opaque tokens. */
+/** Longest cursor we will forward — provider cursors are short opaque tokens. */
 const MAX_CURSOR_LENGTH = 512;
 
 export type ProxyQueryValidation = { ok: true; query: string } | { ok: false; message: string };
+
+/**
+ * Shared legs of the strict readers below. Each returns the 400 verdict for
+ * the first violation it finds, or `undefined` when the parameter set is
+ * clean; the limit and cursor helpers forward an accepted value into `query`.
+ * `resource` names the feed in the message exactly as the route spells it.
+ */
+function rejectUnknownParams(
+  incoming: URLSearchParams,
+  allowed: ReadonlySet<string>,
+  resource: string
+): ProxyQueryValidation | undefined {
+  for (const key of incoming.keys()) {
+    if (!allowed.has(key)) {
+      return { ok: false, message: `Unsupported ${resource} query parameter: ${key}` };
+    }
+  }
+  return undefined;
+}
+
+function rejectDuplicateParams(
+  incoming: URLSearchParams,
+  allowed: ReadonlySet<string>,
+  title: string
+): ProxyQueryValidation | undefined {
+  for (const key of allowed) {
+    if (incoming.getAll(key).length > 1) {
+      return { ok: false, message: `${title} query parameter must be unique: ${key}` };
+    }
+  }
+  return undefined;
+}
+
+/** An integer from 1 to 100, digits only — no zero padding, no sign. */
+const LIMIT_PATTERN = /^(?:[1-9]|[1-9]\d|100)$/;
+
+function validateLimit(
+  incoming: URLSearchParams,
+  title: string,
+  query: URLSearchParams
+): ProxyQueryValidation | undefined {
+  const limit = incoming.get("limit");
+  if (limit === null) return undefined;
+  if (!LIMIT_PATTERN.test(limit)) {
+    return { ok: false, message: `${title} limit must be an integer from 1 to 100` };
+  }
+  query.set("limit", limit);
+  return undefined;
+}
+
+function validateCursor(
+  incoming: URLSearchParams,
+  title: string,
+  query: URLSearchParams
+): ProxyQueryValidation | undefined {
+  const before = incoming.get("before");
+  if (before === null) return undefined;
+  if (
+    before.length === 0 ||
+    before.length > MAX_CURSOR_LENGTH ||
+    !/^[A-Za-z0-9_-]+$/.test(before)
+  ) {
+    return { ok: false, message: `${title} cursor is invalid` };
+  }
+  query.set("before", before);
+  return undefined;
+}
 
 /**
  * Allowlisted query passthrough for the program proxy routes: every param is
@@ -60,38 +127,16 @@ function positionsProxyQuery(
   const incoming = new URL(request.url).searchParams;
   const allowed = new Set(["limit", "before"]);
 
-  for (const key of incoming.keys()) {
-    if (!allowed.has(key)) {
-      return { ok: false, message: `Unsupported ${labels.resource} query parameter: ${key}` };
-    }
-  }
-
-  for (const key of allowed) {
-    if (incoming.getAll(key).length > 1) {
-      return { ok: false, message: `${labels.title} query parameter must be unique: ${key}` };
-    }
-  }
+  const rejected =
+    rejectUnknownParams(incoming, allowed, labels.resource) ??
+    rejectDuplicateParams(incoming, allowed, labels.title);
+  if (rejected) return rejected;
 
   const query = new URLSearchParams();
-  const limit = incoming.get("limit");
-  if (limit !== null) {
-    if (!/^(?:[1-9]|[1-9]\d|100)$/.test(limit)) {
-      return { ok: false, message: `${labels.title} limit must be an integer from 1 to 100` };
-    }
-    query.set("limit", limit);
-  }
-
-  const before = incoming.get("before");
-  if (before !== null) {
-    if (
-      before.length === 0 ||
-      before.length > MAX_CURSOR_LENGTH ||
-      !/^[A-Za-z0-9_-]+$/.test(before)
-    ) {
-      return { ok: false, message: `${labels.title} cursor is invalid` };
-    }
-    query.set("before", before);
-  }
+  const limitRejected = validateLimit(incoming, labels.title, query);
+  if (limitRejected) return limitRejected;
+  const cursorRejected = validateCursor(incoming, labels.title, query);
+  if (cursorRejected) return cursorRejected;
 
   return { ok: true, query: query.size > 0 ? `?${query}` : "" };
 }
@@ -130,38 +175,16 @@ function vaultMovementsProxyQuery(
   const allowed = new Set(["limit", "before", "requestId", "settled"]);
   const label = resource === "deposits" ? "Vault deposits" : "Vault withdrawals";
 
-  for (const key of incoming.keys()) {
-    if (!allowed.has(key)) {
-      return { ok: false, message: `Unsupported vault ${resource} query parameter: ${key}` };
-    }
-  }
-
-  for (const key of allowed) {
-    if (incoming.getAll(key).length > 1) {
-      return { ok: false, message: `${label} query parameter must be unique: ${key}` };
-    }
-  }
+  const rejected =
+    rejectUnknownParams(incoming, allowed, `vault ${resource}`) ??
+    rejectDuplicateParams(incoming, allowed, label);
+  if (rejected) return rejected;
 
   const query = new URLSearchParams();
-  const limit = incoming.get("limit");
-  if (limit !== null) {
-    if (!/^(?:[1-9]|[1-9]\d|100)$/.test(limit)) {
-      return { ok: false, message: `${label} limit must be an integer from 1 to 100` };
-    }
-    query.set("limit", limit);
-  }
-
-  const before = incoming.get("before");
-  if (before !== null) {
-    if (
-      before.length === 0 ||
-      before.length > MAX_CURSOR_LENGTH ||
-      !/^[A-Za-z0-9_-]+$/.test(before)
-    ) {
-      return { ok: false, message: `${label} cursor is invalid` };
-    }
-    query.set("before", before);
-  }
+  const limitRejected = validateLimit(incoming, label, query);
+  if (limitRejected) return limitRejected;
+  const cursorRejected = validateCursor(incoming, label, query);
+  if (cursorRejected) return cursorRejected;
 
   const requestId = incoming.get("requestId");
   if (requestId !== null) {
@@ -224,47 +247,16 @@ export function earnMovementsProxyQuery(request: Request): ProxyQueryValidation 
     "destinationAddress",
   ]);
 
-  for (const key of incoming.keys()) {
-    if (!allowed.has(key)) {
-      return {
-        ok: false,
-        message: `Unsupported Embedded Yield movements query parameter: ${key}`,
-      };
-    }
-  }
-
-  for (const key of allowed) {
-    if (incoming.getAll(key).length > 1) {
-      return {
-        ok: false,
-        message: `Embedded Yield movements query parameter must be unique: ${key}`,
-      };
-    }
-  }
+  const rejected =
+    rejectUnknownParams(incoming, allowed, "Embedded Yield movements") ??
+    rejectDuplicateParams(incoming, allowed, "Embedded Yield movements");
+  if (rejected) return rejected;
 
   const query = new URLSearchParams();
-  const limit = incoming.get("limit");
-  if (limit !== null) {
-    if (!/^(?:[1-9]|[1-9]\d|100)$/.test(limit)) {
-      return {
-        ok: false,
-        message: "Embedded Yield movements limit must be an integer from 1 to 100",
-      };
-    }
-    query.set("limit", limit);
-  }
-
-  const before = incoming.get("before");
-  if (before !== null) {
-    if (
-      before.length === 0 ||
-      before.length > MAX_CURSOR_LENGTH ||
-      !/^[A-Za-z0-9_-]+$/.test(before)
-    ) {
-      return { ok: false, message: "Embedded Yield movements cursor is invalid" };
-    }
-    query.set("before", before);
-  }
+  const limitRejected = validateLimit(incoming, "Embedded Yield movements", query);
+  if (limitRejected) return limitRejected;
+  const cursorRejected = validateCursor(incoming, "Embedded Yield movements", query);
+  if (cursorRejected) return cursorRejected;
 
   const direction = incoming.get("direction");
   if (direction !== null) {

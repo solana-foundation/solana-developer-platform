@@ -3,13 +3,27 @@ export type PolicyDefaultAction = "allow" | "deny" | "approval_required" | "revi
 export type EffectivePolicySource = "implicit_default_allow" | "customer_profile";
 
 export const WALLET_OPERATION_TYPES = [
+  // Settling a DvP trade moves BOTH legs in one transaction and closes the
+  // trade permanently; cancelling refunds both. They are the only two actions
+  // the settlement authority can take, and both are irreversible, which is
+  // exactly the shape an org should be able to require approval on.
+  "dvp_cancel",
+  // Moving SDP's own leg into escrow. A spend from a custody wallet like any
+  // other, and irreversible once the escrow holds it: only settle, cancel or
+  // reclaim get it back.
+  "dvp_fund",
+  "dvp_settle",
   "earn_program_withdrawal",
   "earn_vault_deposit",
   "earn_vault_withdrawal",
   "issuance_burn_execute",
   "issuance_force_burn_execute",
+  "issuance_freeze_execute",
   "issuance_mint_execute",
+  "issuance_pause_execute",
   "issuance_seize_execute",
+  "issuance_unfreeze_execute",
+  "issuance_unpause_execute",
   "issuance_update_authority_execute",
   "payment_transfer_batch_execute",
   "payment_transfer_execute",
@@ -30,6 +44,8 @@ export const WALLET_OPERATION_TYPES = [
   "rings_timelock_create",
   "rings_timelock_settle",
   "rings_zone_create",
+  "rings_ring_exit",
+  "rings_ring_entry",
 ] as const;
 
 export type WalletOperationType = (typeof WALLET_OPERATION_TYPES)[number];

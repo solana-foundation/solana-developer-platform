@@ -54,7 +54,8 @@ packages/*
 !packages/sdp-issuance
 docs
 infra
-scripts
+scripts/*
+!scripts/docker
 skills
 
 .env

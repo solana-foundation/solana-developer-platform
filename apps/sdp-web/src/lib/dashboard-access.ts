@@ -13,9 +13,6 @@ export interface DashboardCapabilities {
   canManageCustody: boolean;
   canManageOrgSettings: boolean;
   canManageTokenAdmin: boolean;
-  // Authoring `automated` workflow rules (allowlist/notify/webhook/record) — reversible
-  // side effects that don't need the admin bar the on-chain tiers do. The API enforces
-  // the same split per action tier; this only decides what the builder offers.
   canManageTokenWrite: boolean;
   canUseWalletSignerCheck: boolean;
 }

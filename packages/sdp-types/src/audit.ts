@@ -33,7 +33,7 @@ export interface AssetAuditEvent {
   action: string;
   resourceType: string;
   resourceId: string | null;
-  /** `system` covers automated/workflow actions with no human or API-key actor. */
+  /** `system` covers automated actions with no human or API-key actor. */
   actorType: AssetAuditActorType;
   actorLabel: string;
   status: AssetAuditStatus;

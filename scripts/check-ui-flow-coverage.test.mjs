@@ -101,6 +101,17 @@ test("multi-spec rows check every listed spec", () => {
   ]);
 });
 
+test("a route group is not a section and needs no row", () => {
+  const problems = auditFlowMatrix(
+    fixture({
+      sections: ["payments", "(home)"],
+      specs: ["payments.e2e.spec.ts"],
+      rows: [{ section: "payments", spec: "payments.e2e.spec.ts" }],
+    })
+  );
+  assert.deepEqual(problems, []);
+});
+
 test("duplicate rows for one section fail", () => {
   const problems = auditFlowMatrix(
     fixture({

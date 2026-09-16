@@ -26,11 +26,30 @@ export interface ProvisionIdentityInput {
 export interface ProvisionIdentityResult {
   identity: ShieldedIdentity;
   registrationSignatures: string[];
-  mergingEnabled: boolean;
   materialTag: MaterialTag;
 }
 
 export interface ReadIdentityInput {
+  walletId: string;
+  owner: string;
+}
+
+export interface EnsureMergingEnabledInput {
+  walletId: string;
+  owner: string;
+}
+
+export interface EnsureMergingEnabledResult {
+  /** Null when the record already permitted merging and nothing was sent. */
+  signature: string | null;
+}
+
+/**
+ * Rotating a published record to the identity the wallet's material derives
+ * now. Destructive and irreversible: notes encrypted to the old keys stay on
+ * chain with nothing able to derive the keys that open them.
+ */
+export interface RekeyIdentityInput {
   walletId: string;
   owner: string;
 }
@@ -138,6 +157,20 @@ export interface RingsGatewayPort {
    */
   provisionRing(input: ProvisionRingInput): Promise<ProvisionRingResult>;
   readIdentity(input: ReadIdentityInput): Promise<ReadIdentityResult>;
+  /**
+   * Repoints the owner's on-chain record at the identity its material derives
+   * now, abandoning every note encrypted to the published keys. Only for a
+   * wallet already quarantined for a mismatch, and only behind an explicit
+   * human confirmation — nothing about this is recoverable.
+   */
+  rekeyIdentity(input: RekeyIdentityInput): Promise<ProvisionIdentityResult>;
+  /**
+   * Clears the on-chain precondition for merging, which registration cannot
+   * set. Idempotent and cheap when already on: it reads the record first and
+   * sends nothing in the common case. Provisioning runs it for new wallets, so
+   * this is reached only by wallets registered before merge shipped.
+   */
+  ensureMergingEnabled(input: EnsureMergingEnabledInput): Promise<EnsureMergingEnabledResult>;
   syncPhoton(input: SyncPhotonInput): Promise<SyncPhotonResult>;
   buildOperation(input: BuildOperationInput): Promise<BuildOperationResult>;
   verifyIndexed(signature: string): Promise<VerifyIndexedResult | null>;

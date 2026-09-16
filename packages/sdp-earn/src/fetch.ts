@@ -10,8 +10,8 @@ export interface ProviderRequestInit<TBody> {
    * body into `SdpEarnError.details`.
    *
    * Exists because the useful half of some provider errors is structured, not
-   * prose: Ground answers an over-withdrawal with `409 insufficient_funds` and
-   * the lane's actual balance breakdown, and keeping only the message throws
+   * prose — e.g. an over-withdrawal answered with `409 insufficient_funds` and
+   * the lane's actual balance breakdown — and keeping only the message throws
    * away the one number the caller needs (PRO-1675).
    *
    * The hook is the seam that keeps this file provider-NEUTRAL — every wire
@@ -67,12 +67,13 @@ export function classifyProviderStatus(status: number): SdpEarnErrorCode {
  * The provider's own explanation, from whichever field it puts it in.
  *
  * `error` is read BOTH as an object carrying `message` and as a bare string,
- * because providers disagree: Ground answers a rejected write with
- * `{"error":"Invalid query params: unknown parameter(s)","code":"…"}`, and
- * reading only `error.message` there yields `undefined` — every Ground 4xx
- * degraded to the caller's fallback ("ground request failed with status 400"),
- * which names the status and explains nothing. The reason a write was refused is
- * the most useful sentence on this path; do not narrow these shapes again.
+ * because providers disagree: a rejected write answered with
+ * `{"error":"Invalid query params: unknown parameter(s)","code":"…"}` is a
+ * bare string, and reading only `error.message` there yields `undefined` —
+ * every such 4xx degraded to the caller's fallback ("provider request failed
+ * with status 400"), which names the status and explains nothing. The reason a
+ * write was refused is the most useful sentence on this path; do not narrow
+ * these shapes again.
  */
 export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;

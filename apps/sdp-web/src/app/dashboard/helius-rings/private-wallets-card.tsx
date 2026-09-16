@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { type MouseEvent, useCallback, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
@@ -39,7 +39,7 @@ export interface CustodyWalletOption {
 /**
  * Private wallets card: the create form, the wallets table, and row selection.
  * Owns its own create-form state; the parent only supplies the wallet list and
- * an `onCreated` callback to refresh.
+ * an `onWalletsChanged` callback to refresh.
  */
 export function PrivateWalletsCard({
   wallets,
@@ -48,7 +48,7 @@ export function PrivateWalletsCard({
   selectedWalletId,
   onSelect,
   balancesTick,
-  onCreated,
+  onWalletsChanged,
 }: {
   wallets: readonly RingsWallet[];
   custodyWallets: readonly CustodyWalletOption[];
@@ -56,7 +56,7 @@ export function PrivateWalletsCard({
   selectedWalletId: string | null;
   onSelect: (walletId: string) => void;
   balancesTick: number;
-  onCreated: () => Promise<void>;
+  onWalletsChanged: () => Promise<void>;
 }) {
   const t = useTranslations();
 
@@ -90,8 +90,8 @@ export function PrivateWalletsCard({
     } finally {
       setCreating(false);
     }
-    await onCreated();
-  }, [selectedCustodyWallet, walletName, onCreated, t]);
+    await onWalletsChanged();
+  }, [selectedCustodyWallet, walletName, onWalletsChanged, t]);
 
   return (
     <Card className="min-w-0">
@@ -190,6 +190,7 @@ export function PrivateWalletsCard({
                     custodyName={custodyLabel(wallet.sdpWalletId)}
                     onSelect={() => onSelect(wallet.id)}
                     balancesTick={balancesTick}
+                    onWalletsChanged={onWalletsChanged}
                   />
                 ))}
               </TableBody>
@@ -201,18 +202,81 @@ export function PrivateWalletsCard({
   );
 }
 
+/**
+ * Replays POST /wallets for a pending row. Create is idempotent on the bound
+ * custody wallet, so this is how a failed registration (empty owner balance,
+ * simulation reject) is retried after the owner is funded. The create form
+ * cannot do it: a pending row already holds the slot.
+ */
+function RetryProvisionButton({
+  wallet,
+  onRetried,
+}: {
+  wallet: RingsWallet;
+  onRetried: () => Promise<void>;
+}) {
+  const t = useTranslations();
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const handleRetry = useCallback(
+    async (event: MouseEvent) => {
+      event.stopPropagation();
+      setRetrying(true);
+      setRetryError(null);
+      try {
+        const result = await createRingsWallet({
+          walletId: wallet.sdpWalletId,
+          name: wallet.name,
+        });
+        if (!result.wallet) {
+          setRetryError(result.error ?? t("DashboardHeliusRings.wallets.createFailed"));
+        }
+      } catch {
+        setRetryError(t("DashboardHeliusRings.wallets.createFailed"));
+      } finally {
+        setRetrying(false);
+      }
+      await onRetried();
+    },
+    [wallet.sdpWalletId, wallet.name, onRetried, t]
+  );
+
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <Button
+        variant="secondary"
+        size="sm"
+        disabled={retrying}
+        onClick={(event) => void handleRetry(event)}
+      >
+        {t(
+          retrying ? "DashboardHeliusRings.wallets.creating" : "DashboardHeliusRings.wallets.retry"
+        )}
+      </Button>
+      {retryError ? (
+        <Callout variant="danger" live>
+          {retryError}
+        </Callout>
+      ) : null}
+    </div>
+  );
+}
+
 function PrivateWalletRow({
   wallet,
   selected,
   custodyName,
   onSelect,
   balancesTick,
+  onWalletsChanged,
 }: {
   wallet: RingsWallet;
   selected: boolean;
   custodyName: string;
   onSelect: () => void;
   balancesTick: number;
+  onWalletsChanged: () => Promise<void>;
 }) {
   const t = useTranslations();
   return (
@@ -233,14 +297,26 @@ function PrivateWalletRow({
             <span className="text-sm text-secondary">
               {t("DashboardHeliusRings.wallets.shieldedAddressPending")}
             </span>
-            {wallet.status === "pending" ? <WalletIdentityCheck wallet={wallet} /> : null}
+            {/* Paused counts as well as pending: a re-key claims the row before
+                it rotates, so a failed rotation leaves a wallet paused with no
+                address, and this check is where an operator sees why. */}
+            {wallet.status === "pending" ? (
+              <RetryProvisionButton wallet={wallet} onRetried={onWalletsChanged} />
+            ) : null}
+            {wallet.status === "pending" || wallet.status === "paused" ? (
+              <WalletIdentityCheck wallet={wallet} onRekeyed={onWalletsChanged} />
+            ) : null}
           </div>
         ) : (
           <ShieldedAddress address={wallet.shieldedAddress} />
         )}
       </TableCell>
       <TableCell className="min-w-0 align-top">
-        <ShieldedBalanceCard wallet={wallet} refreshTick={balancesTick} />
+        <ShieldedBalanceCard
+          wallet={wallet}
+          refreshTick={balancesTick}
+          onRekeyed={onWalletsChanged}
+        />
       </TableCell>
       <TableCell>
         <Badge variant={WALLET_BADGE[wallet.status]}>

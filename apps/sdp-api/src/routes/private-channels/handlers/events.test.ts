@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPrivateChannelEventRepository } from "@/db/repositories/private-channel-event.repository.postgres";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { listChannelEvents, listProjectEvents } from "./events";
@@ -83,13 +84,12 @@ describe("Private Channels event handlers", () => {
         .bind(id, email)
         .run();
     }
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Events Project', 'events-project', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, USER_ID)
-      .run();
+    await seedDefaultProjects(db, {
+      organizationId: ORGANIZATION_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
     await db
       .prepare(
         `INSERT INTO private_channel_instances

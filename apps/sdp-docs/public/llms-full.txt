@@ -14,15 +14,16 @@
 ### What is SDP?
 Source: https://platform.solana.com/docs/introduction
 
-> One API for tokenization, custody, payments, and compliance on Solana.
+> One API for tokenization, custody, payments, embedded yield, and compliance on Solana.
 
-SDP gives organizations project-scoped access to tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Integrate against the API once; swap or add providers without changing your integration code.
+SDP provides tokenization, custody, payments, embedded yield, and compliance through one stable API in front of interchangeable providers. Most operations use project-scoped authentication. Embedded Yield also offers a keyless strategy, quote, and unsigned external-wallet build tier for self-custodial integrations.
 
 | Module | What it does |
 | --- | --- |
 | **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
 | **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
+| **Embedded Yield** | Discover curated strategies and build self-custodial deposit or withdrawal transactions, [with or without an API key](/docs/guides/embedded-yield) |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
@@ -248,20 +249,20 @@ Source: https://platform.solana.com/docs/developing-with-sdp
 SDP exposes two interfaces that operate over the same backend and enforce the same permissions, policies, and audit trails:
 
 - **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
-- **REST API** — programmatic access for backend integrations. Authenticate with an API key in the `Authorization` header.
+- **REST API:** programmatic access for backend integrations. Most routes authenticate with an API key in the `Authorization` header. Embedded Yield also has a [keyless catalogue and unsigned-build tier](/docs/guides/embedded-yield#without-an-api-key).
 
 Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
 
 ## Environments
 
-Environments are a property of the **project**, not of individual requests. Every resource — and every API key — belongs to a project, and inherits that project's environment.
+Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment. Keyless Earn requests instead use the API deployment's operator-configured environment.
 
 | Environment  | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
 | `sandbox`    | devnet       | `sk_test_`     |
 | `production` | mainnet-beta | `sk_live_`     |
 
-Both environments expose identical APIs. Develop and test against a sandbox project, then switch to production by swapping your API key.
+Both environments expose identical APIs. Develop and test against a sandbox project, then switch authenticated integrations to production by swapping your API key. Keyless integrations switch only when the API operator changes the deployment environment.
 
 ## Response conventions
 
@@ -286,7 +287,7 @@ Include the `requestId` when reporting an issue — it links your request to our
 
 ## Execution model
 
-SDP executes every operation: it builds the transaction, signs it with the custody wallet's key, and submits it to Solana.
+SDP executes custody operations by building, signing, and submitting with the configured custody wallet. For Embedded Yield, the customer's external wallet signs. A keyless integration broadcasts and tracks that signed transaction itself; an authenticated integration may submit it back to SDP for durable tracking.
 
 ---
 
@@ -343,7 +344,7 @@ Source: https://platform.solana.com/docs/developing-with-sdp/authentication
 
 SDP layers independent controls onto a single API key — role, per-key permissions, wallet bindings, policy profiles, and IP allowlist — so a key grants exactly the access its integration needs, and no more.
 
-Every API request carries an API key in the `Authorization` header:
+Authenticated API requests carry an API key in the `Authorization` header:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/wallets \
@@ -351,6 +352,8 @@ curl https://api.solana.com/v1/wallets \
 ```
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
+
+The Embedded Yield strategy catalogue, quote routes, and unsigned external-wallet transaction builders also support [keyless access](/docs/guides/embedded-yield#without-an-api-key). Those requests have no organization or project identity and cannot submit transactions or read tenant state.
 
 ## Key scope
 
@@ -380,7 +383,7 @@ Authentication and authorization failures are always machine-distinguishable:
 
 | Condition | Status | Code |
 | --- | --- | --- |
-| No API key on the request | 401 | `UNAUTHORIZED` |
+| No API key on a keyed-only request | 401 | `UNAUTHORIZED` |
 | Malformed or unknown key | 401 | `INVALID_API_KEY` |
 | Key has been revoked | 401 | `REVOKED_API_KEY` |
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
@@ -892,37 +895,81 @@ HttpRequest request = HttpRequest.newBuilder()
 ### Embedded Yield
 Source: https://platform.solana.com/docs/guides/embedded-yield
 
-> Offer yield to your users from your own app. SDP builds the transactions, your customer's wallet signs, and you can sponsor their fees.
+> Offer yield from your own app. SDP builds the transactions, your customer's wallet signs, and an authenticated integration can pay the fees with its own co-signing wallet.
 
 {/* Keep this guide and the dashboard integration snippets (apps/sdp-web/src/app/dashboard/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
 
-Embedded Yield lets your platform offer vault yield to your end users without SDP ever holding their funds. Your backend asks SDP to **build** an unsigned Solana transaction for the customer's own wallet, the customer signs it in your app, and your backend **submits** the signed bytes back. SDP verifies the signature, records the movement, then broadcasts it. Withdrawals work the same way in reverse.
+Embedded Yield lets your platform offer vault yield without SDP holding your users' funds. SDP can build an unsigned Solana transaction with or without an API key. The customer's wallet signs it every time.
 
 Two properties define the surface:
 
 - **Non-custodial.** SDP holds no key for your customers' wallets. The customer's signature is the authorization, every time.
-- **Server-side.** Your SDP API key stays on your backend. The browser or mobile app only ever sees unsigned transaction bytes and returns signed ones.
+- **Two access tiers.** An anonymous integration signs, broadcasts, and tracks its own transaction. An authenticated integration can submit signed bytes back to SDP and use its movement, position, and earnings APIs.
 
-All endpoints live under `/v1/earn`. Authenticate with `Authorization: Bearer <SDP_API_KEY>`; the key needs the `earn:read` and `earn:write` permissions. Start in sandbox, which uses Solana devnet. A sandbox strategy is depositable only when its `hostCluster` is `devnet`, `fundable` is `true`, and `status` is `active`.
+All endpoints live under `/v1/earn`. Keyless requests use the API deployment's configured environment. The preview deployment uses Solana devnet. A strategy is depositable only when its `hostCluster` matches the deployment, `fundable` is `true`, and `status` is `active`.
 
-## The endpoints at a glance
+## Choose an access tier
 
-| Step | Endpoint |
-| --- | --- |
-| Discover strategies | `GET /v1/earn/strategies` |
-| Preview a direct deposit | `POST /v1/earn/vault-deposit-previews` |
-| Build a deposit | `POST /v1/earn/external-wallet/deposit-transactions` |
-| Submit the signed deposit | `POST /v1/earn/external-wallet/deposits` |
-| Poll a movement | `GET /v1/earn/external-wallet/movements/{movementId}` |
-| Balance and earnings | `GET /v1/earn/external-wallet/earnings?ownerAddress=…` |
-| Activity feed | `GET /v1/earn/external-wallet/movements?ownerAddress=…` |
-| Live positions | `GET /v1/earn/external-wallet/positions?ownerAddress=…` |
-| Portfolio totals | `GET /v1/earn/external-wallet/positions/summary` |
-| Preview a withdrawal | `POST /v1/earn/external-wallet/withdrawal-previews` |
-| Build a withdrawal | `POST /v1/earn/external-wallet/withdrawal-transactions` |
-| Submit the signed withdrawal | `POST /v1/earn/external-wallet/withdrawals` |
+| Capability | Without an API key | With an API key |
+| --- | --- | --- |
+| List and inspect strategies | Yes | Yes |
+| Preview deposits and withdrawals | Yes | Yes |
+| Build unsigned external-wallet transactions | Yes, owner pays | Yes, owner or your `feePayer` |
+| Submit signed transactions through SDP | No | Yes, `earn:write` |
+| Track movements, positions, balances, and earnings | No | Yes, `earn:read` |
+| Create or operate custody vaults and programs | No | Yes |
 
-Every per-owner read addresses the customer's wallet the same way: a required `ownerAddress` query parameter.
+The keyless tier has no organization or project identity and creates no build, advisory, movement, or position record. Its response carries `sponsored: false` and no `movementId`. The caller must sign, broadcast, and track the transaction.
+
+The keyed tier preserves the API key's project and environment. Build records can be submitted through SDP. SDP verifies all required signatures, records the movement before broadcast, and reconciles it to a terminal state. Keep the key on your backend and request `earn:read` and `earn:write` only where needed.
+
+## Without an API key
+
+This devnet walkthrough lists the catalogue and builds a deposit without an onboarding step. Replace the two placeholders with a returned strategy id and the customer's funded devnet wallet.
+
+```bash
+export SDP_API_URL=https://api-preview.solana.com
+
+curl --fail-with-body --silent --show-error \
+  "$SDP_API_URL/v1/earn/strategies"
+
+curl --fail-with-body --silent --show-error \
+  --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "strategyId": "<STRATEGY_ID>",
+    "ownerAddress": "<OWNER_ADDRESS>",
+    "amount": "1"
+  }' \
+  "$SDP_API_URL/v1/earn/external-wallet/deposit-transactions"
+```
+
+If the strategy's `depositSlippage` is non-null, call `POST /v1/earn/vault-deposit-previews` first and include a quote-derived `minSharesOut`. Never derive that floor from the deposit amount.
+
+Deserialize the response's base64 `transaction.transaction`, have the owner wallet sign it, and broadcast the signed wire transaction to the same cluster. In the example below, `build` is the parsed JSON response from the build request above. Do not call SDP's submit endpoint for a keyless build: the `transactionId` is ephemeral and no server-side row exists to consume.
+
+```ts
+const transaction = VersionedTransaction.deserialize(
+  Buffer.from(build.data.transaction.transaction, "base64"),
+);
+const signed = await wallet.signTransaction(transaction);
+const signature = await connection.sendRawTransaction(signed.serialize());
+await connection.confirmTransaction({
+  signature,
+  blockhash: transaction.message.recentBlockhash,
+  lastValidBlockHeight: Number(build.data.transaction.lastValidBlockHeight),
+});
+```
+
+For a keyless withdrawal, both preview and build use `{ strategyId, ownerAddress, shares }`. Add `minAmountOut` to the build when the strategy's `withdrawalSlippage` is non-null. An anonymous caller never supplies a tenant `positionId`.
+
+If a swap-funded keyless deposit returns `{ requiresSeparateSwap: true, swap, followUp }`, persist `followUp`, sign and broadcast the swap, then request the ordinary deposit build with that body. SDP stores no split advisory for an anonymous request, so recovery and tracking remain entirely with the caller.
+
+## With an API key
+
+Authenticate with `Authorization: Bearer <SDP_API_KEY>`. The same catalogue, preview, and build endpoints retain their existing keyed behavior. A keyed build is durable, may name a partner-controlled `feePayer`, and can be submitted to SDP. Authenticated withdrawals use the `positionId` returned by the positions API.
+
+Every keyed per-owner read uses the same required `ownerAddress` query parameter.
 
 ## 1. Pick a strategy
 
@@ -930,17 +977,19 @@ Every per-owner read addresses the customer's wallet the same way: a required `o
 
 Two fields gate what you may offer:
 
-- **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive. `true` is necessary but not sufficient: the strategy must also be `active`, and your organization entitled to the provider.
+- **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive. `true` is necessary but not sufficient: the strategy must also be `active`. Authenticated calls additionally require the organization to be entitled to the provider.
 - **`status`** is the catalogue lifecycle; only `active` strategies accept new deposits. Positions in a strategy that later pauses stay fully withdrawable: money out is never gated by money-in rules.
 
 Each row also carries **`depositSlippage`** and **`withdrawalSlippage`**. Non-null means that direction's builder refuses to run without an explicit protection floor (`minSharesOut` on deposits, `minAmountOut` on withdrawals): quote first, then derive the floor from the live figure minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). Null means the floor is optional there.
 
 Jupiter Lend currently contributes one strategy: its mainnet USDT Earn market. Because Jupiter Lend is mainnet-only, the strategy can appear in a sandbox catalogue as a browse-only row with `fundable: false`; do not offer a deposit action for that row. Deposits mint jlUSDT receipt tokens to the signing wallet, and withdrawals redeem those receipt tokens back to USDT when protocol liquidity is available.
 
+Ondo contributes one strategy: holding USDY, its yield-bearing US Treasury token, on mainnet. There is no vault program. A deposit is a USDC to USDY swap routed through Jupiter and signed by the wallet, the position is the wallet's USDY balance, and a withdrawal is the reverse swap, so both directions carry a 50 bps default slippage policy and both require a live quote first. Like Jupiter Lend it is mainnet-only and appears in sandbox as a browse-only row. The row carries no `currentApy` yet, and its `riskMetadata` states the eligibility constraints: USDY is a Reg S instrument for non-US persons, which SDP does not enforce on-chain, and the issuer holds the mint's freeze authority.
+
 ## 2. Deposit: build, sign, submit, poll
 
 ```ts
-const SDP_API_URL = "https://api.solana.com";
+const SDP_API_URL = process.env.SDP_API_URL ?? "https://api.solana.com";
 // For a local SDP API, use the configured base URL, usually http://127.0.0.1:8787.
 
 function sdpHeaders(extra: Record<string, string> = {}) {
@@ -1015,7 +1064,7 @@ const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transac
     ...(minSharesOut ? { minSharesOut } : {}),
   }),
 });
-// { transactionId, transaction, lastValidBlockHeight, ... }
+// { transactionId, transaction, lastValidBlockHeight, sponsored, ... }
 ```
 
 **Sign.** Hand the base64 `transaction.transaction` to the customer's wallet, for example with wallet-adapter:
@@ -1056,6 +1105,8 @@ Statuses are `requested`, `submitted`, `confirmed`, `finalized`, `failed`. Only 
 
 **To pay on your customers' behalf, name a `feePayer` on the build.** The named wallet, one you control, becomes the transaction's fee payer and funds the account rent, and the built transaction then requires its signature alongside the customer's. Co-sign server-side after the customer signs, in either order, then submit:
 
+The response's `sponsored` field means SDP supplied the fee payer. It remains `false` when you provide your own `feePayer`; your wallet, not SDP, is sponsoring that transaction.
+
 ```ts
 
 // 1. Build with your sponsor wallet as the fee payer.
@@ -1085,12 +1136,26 @@ What to know when sponsoring:
 
 The Treasury surface uses SDP's configured paymaster when Earn sponsorship is enabled for the cluster. Otherwise the organization custody wallet pays its own fee and rent. This is separate from the partner-controlled `feePayer` on Embedded Yield builds.
 
+### Protect the sponsor key
+
+The sponsor is a hot key on your backend by design: it has to co-sign inside the blockhash window, so it cannot sit behind a manual approval. That makes it a target. Nothing SDP does limits what a stolen or abused sponsor key can spend, because the key never touches SDP; the controls are yours. Treat the following as the minimum before you sponsor on mainnet.
+
+- **Dedicated signer.** Use a keypair whose only job is co-signing SDP builds. Never reuse a treasury, deployer, or hot-wallet key: a compromise of the sponsor must cost you at most the sponsor's float.
+- **Programmatic co-sign only, and only of SDP builds.** Your co-signing code should sign transactions your own backend just received from `deposit-transactions`, `withdrawal-transactions`, or a split swap, for a customer session you authenticated, and nothing else. Do not expose a "sign this" endpoint that accepts arbitrary bytes, and do not let the key sign from a client. Verify the fee payer and the program IDs in the decoded message match what you asked SDP to build before signing.
+- **Bound the float.** Keep only what a day or two of expected sponsorship costs in the sponsor wallet, and top it up from a cold or multisig-controlled source on a schedule. A drained sponsor stops new deposits for a while; a drained treasury does not come back.
+- **Monitor spend and alert on it.** Track the sponsor's SOL balance and outflow per hour. Alert on the balance crossing your refill threshold, on outflow above your expected per-hour ceiling, and on any transfer from the sponsor that is not a fee or rent payment. Fee and rent griefing shows up first as a spend curve that does not match your deposit volume, so compare the two.
+- **Rate-limit sponsorship per customer.** A build costs you nothing until you co-sign, so decide per customer and per session how many sponsored transactions you will sign in a window, and refuse to co-sign past it. SDP will not do this for you: it does not know which of your customers a wallet belongs to.
+- **Plan rotation.** Keep the sponsor address in configuration, not code, so you can swap to a fresh keypair without a deploy. Rotate on any suspected exposure and on a fixed schedule. Rent refunds go to the funder recorded at deposit time, so a position sponsored by a retired key still refunds to that key on exit; keep retired sponsor keys retrievable until their positions are closed.
+- **Store the key like a secret.** A secrets manager or KMS-backed signer, never an environment variable in a repository or a file in an image. Log the sponsor's public key freely and its secret never.
+
 ## 4. Show balances and activity
 
 - `GET /v1/earn/external-wallet/earnings?ownerAddress=…` returns balance and total earned per deposit token. `earned` is stated only when exact; otherwise it is absent with a named `earnedUnavailableReason`. Render a dash for an absent figure, never $0.
 - `GET /v1/earn/external-wallet/movements?ownerAddress=…` is the customer's activity feed, newest first, keyset-paged via `before`.
 - `GET /v1/earn/external-wallet/positions?ownerAddress=…` lists live positions. Page it to completion; a silently short list hides withdrawable money. Read `id` and `withdrawableShares` here to drive withdrawals. If live RPC hydration fails, `shares`, `withdrawableShares`, and `tokenValue` are absent, never zero. Show an unavailable state and disable withdrawal until a fresh read returns the ceiling.
-- `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token.
+- `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token. By default it is address-free: each strategy total carries `walletCount` and token totals, and no `ownerAddresses`. Pass `includeOwnerAddresses=true` only from a surface that has to show per-customer detail; that list is the full set of your customers' wallet addresses, and any `earn:read` key that requests it becomes a holder of personal data. An interactive surface can add `includePositions=true` to receive the already hydrated position details inside each strategy total instead of making one live request per owner; this detailed shape requires the explicit `includeOwnerAddresses=true` and is rejected without it.
+
+  **Changed in 0.77:** earlier releases included `ownerAddresses` unless you passed `includeOwnerAddresses=false`. If your integration reads that field, or passes `includePositions=true` on its own, add `includeOwnerAddresses=true` to the request. Passing `includeOwnerAddresses=false` still works and is now a no-op.
 
 ## 5. Withdraw
 
@@ -1127,14 +1192,26 @@ Pass `sourceTokenMint` (USDC, USDG, PYUSD or USDT on your cluster) to accept a s
 
 If the composed transaction cannot fit one Solana packet, the response is `{ requiresSeparateSwap: true, swap, followUp }` instead: have the wallet sign `swap.transaction` and broadcast it yourself, then build again with the `followUp` body, which echoes your original `minSharesOut` and `feePayer` so the follow-up keeps the same protections.
 
+Recovery across that authenticated split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. SDP records a keyed advisory that it handed the swap out and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so an integration that drops the follow-up will be noticed; it will not be repaired for you. The keyless form described above stores no advisory. Demonstrating split-swap recovery in sandbox is part of the [production checklist](#before-production).
+
 ## Idempotency, in one place
 
 | Call | Rule |
 | --- | --- |
-| Builds | No key. A build moves no money and expires with its blockhash. |
+| Builds | No `Idempotency-Key`. A build moves no money and expires with its blockhash. |
 | Submits | `Idempotency-Key` header required. Same key on retry returns the original movement (`replayed: true`); a different key against an already-consumed build is a 409. |
 
-A `400` means the request or current vault state must change before retrying. A `503 PROVIDER_UNAVAILABLE` means live provider or RPC state could not be read; retry the read-only preview or build with bounded backoff. For an uncertain submit response, retry the exact signed transaction with the same idempotency key.
+A `400` means the request or current vault state must change before retrying. A `422 SIGNING_REJECTED` means the fee sponsor refused the transaction by policy; the same transaction will be refused again, so do not retry it unchanged. A `503 PROVIDER_UNAVAILABLE` means live provider or RPC state could not be read; retry the read-only preview or build with bounded backoff. For an uncertain submit response, retry the exact signed transaction with the same idempotency key.
+
+## Before production
+
+Work through this in sandbox before you go live. Each item is something SDP cannot check for you.
+
+- Your submit path retries an uncertain response with the same signed bytes and the same `Idempotency-Key`, and treats a `409` as "already consumed".
+- Your UI polls past `confirmed` and only treats `finalized` and `failed` as terminal.
+- Absent fields render as absent (a dash, never `$0`), and you handle every status in the vocabulary rather than collapsing unknown ones.
+- If you accept swap-funded deposits, you have demonstrated split-swap recovery in sandbox: a swap broadcast, a simulated crash, and the follow-up deposit rebuilt from persisted state.
+- If you sponsor fees, the sponsor key meets every point in [Protect the sponsor key](#protect-the-sponsor-key), and the spend alerts have fired at least once in a drill.
 
 Full request and response shapes: [Earn API reference](/docs/reference/api/earn).
 
@@ -1315,7 +1392,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens \
 
 <Step number={3} title="Set operational settings">
 
-Choose the wallet that will sign token operations, and configure Token Access Control and supply controls.
+Choose the exact SDP Wallet that will deploy the token, and configure Token Access Control and supply controls.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -1323,7 +1400,7 @@ Choose the wallet that will sign token operations, and configure Token Access Co
 
 In step 3 of 3, configure:
 
-- **Main signer** — the SDP-controlled wallet for deploy and token actions
+- **Main signer** — the exact SDP-controlled wallet selected for deployment
 - **Allowlist** — Token Access Control's allowlist mode; toggle on or off, required and locked for `tokenized-security`
 
 Click **Create token** to save the draft.
@@ -1333,7 +1410,7 @@ Click **Create token** to save the draft.
 </Tab>
 <Tab value="API">
 
-Add operational fields to the same body:
+Add operational fields to the same body. `signingCustodyWalletId` is the exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`), not the provider-specific `walletId` or the wallet's public key. You can omit it while drafting and provide it when you deploy.
 
 ```typescript title="create-token.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
@@ -1348,6 +1425,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
     decimals: 6,
     description: "USD-backed stablecoin",
     template: "stablecoin",
+    signingCustodyWalletId: "cwlt_abc123",
     requiresAllowlist: false,
     isMintable: true,
     isFreezable: true,
@@ -1363,6 +1441,7 @@ body: JSON.stringify({
   symbol: "GAME",
   decimals: 0,
   template: "custom",
+  signingCustodyWalletId: "cwlt_abc123",
   overrides: {
     extensions: {
       pausable: {},
@@ -1405,6 +1484,7 @@ A successful response returns the new token object:
 const { data } = await res.json();
 // data.token.id     — save this; used in all subsequent calls
 // data.token.status — "pending"
+// data.token.signingCustodyWalletId — exact wallet selected for deployment
 ```
 
 The token is not yet onchain. Pass `data.token.id` to [Deploy a Token](/docs/tokens/deploy-a-token).
@@ -1424,12 +1504,12 @@ Source: https://platform.solana.com/docs/tokens/deploy-a-token
 
 > Deploy a created token to the Solana blockchain.
 
-After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and assigns authorities to your configured wallets.
+After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and signs the deployment with the exact SDP Wallet selected for execution.
 
 ## Prerequisites
 
 - A token in `pending` status
-- A [wallet configured](/docs/guides/setup-wallets) as the token's main signer
+- The exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
 
 ## How it works
 
@@ -1437,7 +1517,7 @@ After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deploy
 
 <Step number={1} title="Open the deploy action">
 
-Locate the token you want to deploy. Deployment is irreversible — the mint account is created onchain and authorities are locked to your configured wallets.
+Locate the token you want to deploy. Deployment is irreversible — the mint account and its configured authorities are created onchain.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -1459,7 +1539,12 @@ curl https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-deploy calls.
+Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-deploy calls. Also list your wallets and use the wallet record's `id`, not its provider-specific `walletId` or public key:
+
+```bash title="Terminal"
+curl https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_test_..."
+```
 
 </Tab>
 </Tabs>
@@ -1469,7 +1554,7 @@ Note the `id` field (e.g., `tok_abc123`) — required for all deploy and post-de
 
 <Step number={2} title="Deploy the token">
 
-SDP signs and submits the deploy transaction using the token's configured signer wallet.
+SDP signs and submits the deploy transaction using `signingCustodyWalletId`. If you supply it here, it overrides the pending draft's execution wallet; if you omit it, SDP uses the value stored on the draft. One of those values is required. An override changes the deployment signer and historical attribution, but it does not rewrite immutable authority values already captured in the token's configuration.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
@@ -1491,7 +1576,9 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
   -H "Authorization: Bearer sk_test_..." \
-  -H "Idempotency-Key: deploy-acme-001"
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: deploy-acme-001" \
+  -d '{"signingCustodyWalletId":"cwlt_abc123"}'
 ```
 
 ```typescript title="deploy-token.ts"
@@ -1501,8 +1588,10 @@ const res = await fetch(
     method: "POST",
     headers: {
       Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
       "Idempotency-Key": "deploy-acme-001",
     },
+    body: JSON.stringify({ signingCustodyWalletId: "cwlt_abc123" }),
   }
 );
 const { data } = await res.json();
@@ -1537,7 +1626,10 @@ The deploy response includes the confirmed state:
 ```typescript title="deploy-token.ts"
 // data.token.status      — "active"
 // data.token.mintAddress — e.g., "AcMeXYZ..."
+// data.token.signingCustodyWalletId — exact wallet used for deployment
 ```
+
+After deployment, `signingCustodyWalletId` is historical deployment attribution. Mint and admin actions resolve their current on-chain authority, while a standard burn uses its exact source wallet; none use the deployment wallet as a fallback.
 
 Fetch the token at any time to verify:
 
@@ -1567,6 +1659,7 @@ After [deploying a token](/docs/tokens/deploy-a-token), you can mint new tokens 
 
 - A deployed token with status `active`
 - `tokens:write` permission — or `tokens:admin` for force-burn
+- For standard burn, the exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
 
 ## How it works
 
@@ -1598,6 +1691,8 @@ POST /v1/issuance/tokens/{tokenId}/force-burn
 ```
 
 The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
+
+`signingCustodyWalletId` always means the exact SDP Wallet `id`, not a provider-specific `walletId` or public key. It is required for a standard burn because that wallet owns and signs for the source. For mint and force-burn it is optional, but when supplied it must control the current mint or permanent-delegate authority. When omitted, SDP requires exactly one accessible wallet to match that live authority. Later actions never fall back to the token's deployment wallet.
 
 </Tab>
 </Tabs>
@@ -1642,6 +1737,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
   -d '{
+    "signingCustodyWalletId": "cwlt_abc123",
     "mint": {
       "destination": "7xKXz...9fGh",
       "amount": "1000",
@@ -1661,6 +1757,7 @@ const res = await fetch(
       "Idempotency-Key": "mint-001",
     },
     body: JSON.stringify({
+      signingCustodyWalletId: "cwlt_abc123",
       mint: {
         destination: "7xKXz...9fGh",
         amount: "1000",
@@ -1723,6 +1820,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
     "Idempotency-Key": "burn-001",
   },
   body: JSON.stringify({
+    signingCustodyWalletId: "cwlt_abc123",
     burn: { source: "3xYZa...2aBc", amount: "250", memo: "Redemption" },
   }),
 });
@@ -1739,6 +1837,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
     "Idempotency-Key": "force-burn-001",
   },
   body: JSON.stringify({
+    signingCustodyWalletId: "cwlt_abc123",
     forceBurn: { source: "3xYZa...2aBc", amount: "250", memo: "Compliance action" },
   }),
 });
@@ -1855,6 +1954,8 @@ Open the token detail page and go to the **Compliance** tab, then select **Allow
 
 Enter the wallet address and an optional label, then click **Add allowlist entry**. The address is enforced on the next allowlist-checked operation.
 
+For an on-chain list, SDP uses its authority wallet automatically when there is one matching wallet. If several custody records match, select the signer in the confirmation dialog. Database-only lists need no signer.
+
 ![Compliance Allowlist tab with empty address and label fields, ready to add a new entry](/images/tokens/allowlist-empty.png)
 
 After adding, the entry appears below the form with a **Remove entry** button.
@@ -1888,6 +1989,8 @@ const res = await fetch(
 );
 // res.data.entry.id — save this to remove the entry later
 ```
+
+For on-chain additions, the JSON body accepts optional `signingCustodyWalletId` (an exact `cwlt_…` record ID). It must control the list's current authority, which may differ from the token's freeze authority. Without the selector, multiple matching custody records return `409`. Selecting a wallet does not bypass permissions or runtime availability checks.
 
 </Tab>
 </Tabs>
@@ -1955,7 +2058,7 @@ Remove an address when a holder's compliance status changes. Existing token hold
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Compliance → Allowlist** tab, click **Remove entry** next to the address. The entry is removed immediately and the Control Lists sidebar updates to 0 entries.
+In the **Compliance → Allowlist** tab, click **Remove entry** next to the address. For an on-chain list with multiple matching wallets, choose the signer in the confirmation dialog. After successful removal, the list and its count refresh.
 
 </Tab>
 <Tab value="API">
@@ -1967,6 +2070,8 @@ curl -X DELETE \
 ```
 
 Use the `entry.id` returned when the address was added.
+
+For an on-chain removal, pass the optional exact signer as a query parameter: `?signingCustodyWalletId=cwlt_example`. To discover the current list authority, request `GET /v1/issuance/tokens/{tokenId}?includeAllowlistAuthority=true` and read `data.allowlistAuthority` (`null` for a database-only list). Match that address against your wallets; do not infer it from the token's freeze authority.
 
 </Tab>
 </Tabs>
@@ -2131,6 +2236,8 @@ Confirm the on-chain submission in the confirmation prompt.
 
 ![Pause token confirmation dialog](/images/tokens/pause-confirm.png)
 
+The prompt uses the only matching authority wallet automatically. If several custody records control the same authority, select the signer before confirming. The Unpause button uses the same selection rules.
+
 The "Pause transaction finalized." toast appears and an orange **Token is paused** banner displays across the page. All supply and transfer operations are now blocked.
 
 ![Compliance tab showing Token is paused banner and Pause transaction finalized toast](/images/tokens/pause-confirmed.png)
@@ -2145,12 +2252,18 @@ To resume, click **Unpause token** and confirm.
 ```bash title="Terminal"
 # Pause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{"signingCustodyWalletId":"cwlt_example"}'
 
 # Unpause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{"signingCustodyWalletId":"cwlt_example"}'
 ```
+
+`signingCustodyWalletId` is optional when exactly one in-scope custody record matches the current pause authority; send `{}` to use that resolution. Multiple matches without a selector return `409`. An explicit choice must control the live authority and pass authorization and runtime checks. Reusing an idempotency key with a different wallet returns `409`.
 
 While paused, all transfer-related and supply-management operations are rejected until unpause.
 
@@ -2211,6 +2324,10 @@ Source: https://platform.solana.com/docs/tokens/manage-token-settings
 > Update token authorities and operational settings after deployment.
 
 After a token is deployed, you can rotate its authorities and adjust operational settings. Authority management is separate from compliance actions — for freeze, pause, and seize flows see [Freeze and Compliance](/docs/tokens/freeze-and-compliance).
+
+For on-chain metadata edits, `PATCH /v1/issuance/tokens/{tokenId}` accepts optional `signingCustodyWalletId`. It selects the exact custody record controlling the current metadata authority for this request, not a new deployment wallet or authority. Omission requires exactly one matching in-scope record; multiple matches return `409`. Database-only edits need no signer. In the dashboard, one matching wallet is automatic; when there are several, choose one in the metadata confirmation or beside the Asset Profile Save button. Historical `data.token.signingCustodyWalletId` does not change.
+
+To select that signer after an external authority rotation, request `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true` and use `data.metadataAuthority`. For tokens with a mint this is read live from the chain, unlike the stored snapshot in `data.token.metadataAuthority`; tokens without a mint return their stored metadata authority or mint authority without RPC. RPC failure returns `502`, never the stored value as a fallback. The dashboard keeps metadata and allowlist lookup errors separate, and the update rechecks authority before signing. This read changes neither the stored token nor its deployment wallet.
 
 ## Prerequisites
 
@@ -4160,16 +4277,27 @@ Now confirm the setup by listing the wallets bound to your project:
 
 ```javascript title="list-wallets.js"
 const { data } = await sdp.get("/v1/wallets");
+const custodyWallet = data.wallets.find(
+  (wallet) => wallet.status === "active" && wallet.isRuntimeExecutionAllowed
+);
+if (!custodyWallet) throw new Error("No active custody wallet can execute");
+
+const signingCustodyWalletId = custodyWallet.id;
+const custodyAddress = custodyWallet.publicKey;
 console.log(`Custody wallets configured: ${data.wallets.length}`);
+console.log(`Deployment wallet: ${signingCustodyWalletId}`);
 ```
 
 A working setup prints:
 
 ```text title="Output"
 Custody wallets configured: 2
+Deployment wallet: cwlt_123
 ```
 
-If the response shows at least one wallet, your custody is bound and you are ready to deploy a token. If it returns an empty array, your custody provider has not finished provisioning. For the Anchorage pipeline, contact your onboarding lead. For the self-serve sandbox, wait a minute and re-run; Privy's initial wallet provision can lag the SDP organization creation by a few seconds.
+If the response includes an active wallet with `isRuntimeExecutionAllowed: true`, your custody is bound and you are ready to deploy a token. If it returns no wallets, your custody provider has not finished provisioning. For the Anchorage pipeline, contact your onboarding lead. For the self-serve sandbox, wait a minute and re-run; Privy's initial wallet provision can lag the SDP organization creation by a few seconds.
+
+Keep both values. `signingCustodyWalletId` is the exact SDP Wallet record `id` (`cwlt_*`) used by issuance requests. It is not the provider-specific `walletId` or the Solana `publicKey`; `custodyAddress` is that public key and is used only where an on-chain address is required.
 
 ## 3. Design the token
 
@@ -4217,6 +4345,7 @@ const tokenConfig = {
   name: "Treasury Pilot USD",
   symbol: "TPUSD",
   decimals: 6,
+  signingCustodyWalletId,
   description: "GENIUS-compliant treasury pilot stablecoin.",
   maxSupply: "100000000",
   isFreezable: true,
@@ -4289,6 +4418,7 @@ A successful response:
       "symbol": "TPUSD",
       "decimals": 6,
       "status": "pending",
+      "signingCustodyWalletId": "cwlt_123",
       "mintAddress": null,
       "isFreezable": true,
       "isMintable": true,
@@ -4309,7 +4439,7 @@ The deploy call submits a Token-2022 mint creation transaction to Solana via the
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/deploy`,
-  {},
+  { signingCustodyWalletId },
   { idempotencyKey: deployKey }
 );
 const mintAddress = deployed.data.token.mintAddress;
@@ -4323,6 +4453,7 @@ A successful response carries the deployed token record with `status: "active"` 
     "token": {
       "id": "tok_e152fd38-...",
       "status": "active",
+      "signingCustodyWalletId": "cwlt_123",
       "mintAddress": "6V5bTuMsmXyhdY2Hj6VWQZsuacugACBmPqNtQgGtar8L",
       "mintAuthority": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
       "freezeAuthority": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
@@ -4337,7 +4468,7 @@ A successful response carries the deployed token record with `status: "active"` 
 }
 ```
 
-The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to the custody wallet address that SDP picked from your configured custody (the project signing wallet, falling back to the org signing wallet). The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority.
+The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to the public key of the exact `signingCustodyWalletId` supplied above. The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority. After deployment, the token's `signingCustodyWalletId` is historical attribution, not a preferred signer or fallback; authority-gated operations are checked against their live on-chain authority, and a standard burn uses its exact source wallet.
 
 <Callout type="warn">
 Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. Fund the custody wallet via the faucet and re-run `/deploy` with the same `Idempotency-Key` to replay, or a fresh key for a new attempt. SDP treats different keys as different requests; the same key with the same params replays the prior result.
@@ -4372,6 +4503,8 @@ Every other section of this tutorial is engineering. This one is the regulatory 
 
 Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer as a financial institution for purposes of the Bank Secrecy Act. That single sentence is what makes everything below load-bearing. The Act also requires you to have "[the technological capability to comply with all lawful orders to seize, freeze, burn or prevent the transfer of outstanding stablecoins](https://www.skadden.com/insights/publications/2025/07/us-establishes-first-federal-regulatory-framework)." The endpoints in this section map directly onto that statutory phrase, in the order you'll encounter them: screening first, freeze for per-account blocks, seize for compliance recovery, force-burn as the final remedy.
 
+The issuance selectors below reuse the exact `signingCustodyWalletId` from Section 2. SDP verifies that it controls the live freeze or permanent-delegate authority before signing.
+
 ### Screen before you move
 
 Every transfer destination and every allowlist entry gets screened before your application acts on it. One API call, one response.
@@ -4403,6 +4536,7 @@ const holderFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
   {
+    signingCustodyWalletId,
     accountAddress: holderAddress,
     reason: "Court order #2026-IL-0142",
   },
@@ -4425,6 +4559,7 @@ const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/seize`,
   {
+    signingCustodyWalletId,
     seize: {
       source: holderAddress,
       destination: custodyAddress,
@@ -4447,6 +4582,7 @@ const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/force-burn`,
   {
+    signingCustodyWalletId,
     forceBurn: {
       source: holderAddress,
       amount: "12000.00",
@@ -4479,6 +4615,7 @@ const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
   `/v1/issuance/tokens/${tokenId}/mint`,
   {
+    signingCustodyWalletId,
     mint: {
       destination: custodyAddress,
       amount: "1000000",
@@ -4489,8 +4626,9 @@ const minted = await sdp.post(
 );
 ```
 
-Three field rules to keep clear:
+Four field rules to keep clear:
 
+- **`signingCustodyWalletId`** is the exact SDP Wallet `id` from Section 2. SDP verifies that this wallet controls the current mint authority; the historical deployment wallet is not used as a fallback.
 - **`destination`** is a Solana base58 address. For the initial issuer-holds-supply pattern, this is your custody wallet's public key. For subsequent mints to client wallets, it's the recipient's wallet.
 - **`amount`** is a decimal string in UI units (post-decimals). Not a BigInt, not a number. `"1000000"` mints one million TPUSD because the token has 6 decimals.
 - **`memo`** is up to 100 characters. SDP stores it on the transaction record. This is the institutional audit attribution: the reference your compliance officer will use months later when reconciling the mint against the reserve custodian's monthly report.
@@ -4558,8 +4696,7 @@ Section 5's compliance controls only matter if they enforce. This section moves 
 Transfers run on the `/v1/payments/transfers` endpoint family, separate from the issuance family that Section 4 used. The required permissions are `payments:write` and `wallets:read`, both of which the Developer key (`sdp`) carries:
 
 ```javascript title="transfer-tokens.js"
-const { data } = await sdp.get("/v1/wallets");
-const sourceCustodyWalletId = data.wallets[0].id;
+const sourceCustodyWalletId = signingCustodyWalletId;
 
 const screening = await sdpAdmin.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
@@ -4624,6 +4761,7 @@ const transferFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
   `/v1/issuance/tokens/${tokenId}/freeze`,
   {
+    signingCustodyWalletId,
     accountAddress: destinationAddress,
     reason: "Compliance hold pending OFAC review 2026-04-019",
   },
@@ -4701,6 +4839,7 @@ For a production environment, unfreezing happens only after the underlying compl
 
 ```javascript title="unfreeze-account.js"
 await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+  signingCustodyWalletId,
   accountAddress: destinationAddress,
 });
 ```
@@ -5167,13 +5306,6 @@ These must be set or the stack will refuse to start:
 The configurator generates `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY` for you
 and can auto-generate `POSTGRES_PASSWORD`.
 
-## Transactional Email
-
-SDP-owned Transactional Email uses Resend. Set `EMAIL_FROM` to the sender address
-and `RESEND_API_KEY` to the Resend API key before enabling product flows that send
-email. Organization member invitation emails are handled by Clerk and do not use
-these settings.
-
 ## Database
 
 In the configurator, `DATABASE_MODE` chooses between the bundled Postgres and an
@@ -5219,6 +5351,9 @@ For provider-managed co-signer runtimes that live outside the default stack, see
 | `SDP_API_PORT` | `8787` | Host port for the API. |
 | `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
 | `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
+| `EARN_ANONYMOUS_RPC_MAX_REQUESTS` | `20` | Paid-upstream calls allowed per anonymous client IP in one Earn RPC quota window. |
+| `EARN_ANONYMOUS_RPC_WINDOW_SECONDS` | `60` | Anonymous Earn RPC quota window in seconds. |
+| `TRUST_PROXY_HEADERS` | `false` | Trust the first `X-Forwarded-For` address outside Cloud Run. Enable only behind an ingress that replaces caller-supplied forwarding headers; direct deployments share the fail-closed unidentified quota bucket. |
 
 `SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`
 for server-to-server calls. The browser-facing `NEXT_PUBLIC_*` URLs default to
@@ -5789,7 +5924,6 @@ Source: https://platform.solana.com/docs/reference/api/projects
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `GET` | `/v1/projects` | List projects |
-| `DELETE` | `/v1/projects/{projectId}` | Archive project |
 | `GET` | `/v1/projects/{projectId}` | Get project |
 | `PATCH` | `/v1/projects/{projectId}` | Update project |
 | `GET` | `/v1/projects/{projectId}/api-keys` | List project API keys |
@@ -5843,15 +5977,6 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | Unpause token transfers |
-| `GET` | `/v1/issuance/tokens/{tokenId}/workflows` | List workflow rules |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows` | Create a workflow rule |
-| `DELETE` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Delete a workflow rule |
-| `PATCH` | `/v1/issuance/tokens/{tokenId}/workflows/{workflowId}` | Update a workflow rule |
-| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/catalog` | List the workflow catalog for an asset |
-| `GET` | `/v1/issuance/tokens/{tokenId}/workflows/executions` | List workflow executions |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/approve` | Approve a held execution |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/reject` | Reject a held execution |
-| `POST` | `/v1/issuance/tokens/{tokenId}/workflows/executions/{executionId}/retry` | Retry a failed execution |
 | `GET` | `/v1/issuance/tokens/facets` | List token filter facets |
 | `GET` | `/v1/issuance/transactions` | List issuance transactions |
 
@@ -5902,6 +6027,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations` | List wallet policy evaluations |
 | `GET` | `/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}` | Get wallet policy evaluation |
 | `GET` | `/v1/payments/wallets/{walletId}/policies/revisions` | List wallet policy revisions |
+| `GET` | `/v1/transactions` | List transactions |
 
 ---
 
@@ -5947,7 +6073,7 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 ### Earn
 Source: https://platform.solana.com/docs/reference/api/earn
 
-> The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.
+> Keyless Earn catalogue, quotes, and unsigned external-wallet builds plus authenticated submission and tenant tracking.
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |

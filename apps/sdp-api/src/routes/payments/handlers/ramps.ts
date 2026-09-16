@@ -1,9 +1,5 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import {
-  bvnkOfframpFields,
-  isBvnkOfframpCurrency,
-} from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import type {
   BvnkCustomerResolution,
   BvnkPaymentRuleResolution,
@@ -21,6 +17,10 @@ import {
   readBvnkOnrampPaymentRuleState,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
+  bvnkOfframpFields,
+  isBvnkOfframpCurrency,
+} from "@sdp/payments/ramps/providers/bvnk/requirements";
+import {
   lightsparkCollectAccountRequirements,
   lightsparkOfframpReady,
   lightsparkOnrampReady,
@@ -37,7 +37,9 @@ import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
+  CANCELABLE_RAMP_TRANSFER_STATUSES,
   getCryptoRailAssetLabel,
+  isCancelableRampTransferStatus,
   isCountryCode,
   type PaymentRampEstimate,
   type PaymentRampInstruction,
@@ -810,8 +812,8 @@ export async function advanceCounterpartyRequirements(
         getCryptoRailAssetLabel(input.assetRail)
       );
       const resolution = await ensureBvnkPaymentRule(
-        c,
         rampRuntime(c),
+        getCounterpartiesRepository(c),
         input.counterparty,
         input.projectId,
         customer,
@@ -1044,7 +1046,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(
         getCryptoRailAssetLabel(input.assetRail)
       );
-      const bvnkCustomer = await readBvnkCustomerLink(c, counterparty);
+      const bvnkCustomer = await readBvnkCustomerLink(c.env, counterparty);
       if (!bvnkCustomer) {
         throw counterpartyNotProvisioned("bvnk", "onramp", { customerStatus: undefined });
       }
@@ -1417,8 +1419,7 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
   if (!isRampTransferType(transfer.type)) {
     throw badRequest("Only ramp transfers can be canceled through this endpoint.");
   }
-  const cancelableStatuses: readonly PaymentTransferStatus[] = ["pending", "awaiting_payment"];
-  if (!cancelableStatuses.includes(transfer.status)) {
+  if (!isCancelableRampTransferStatus(transfer.status)) {
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
   }
 
@@ -1426,7 +1427,7 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
     transferId: transfer.id,
     organizationId: scope.auth.organizationId,
     projectId,
-    fromStatuses: cancelableStatuses,
+    fromStatuses: CANCELABLE_RAMP_TRANSFER_STATUSES,
     toStatus: "canceled",
     updatedAt: new Date().toISOString(),
   });

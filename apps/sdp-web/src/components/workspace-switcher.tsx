@@ -5,7 +5,6 @@ import {
   CheckIcon,
   ChevronsUpDownIcon,
   CopyIcon,
-  LockIcon,
   type LucideIcon,
   Settings2Icon,
 } from "lucide-react";
@@ -183,35 +182,15 @@ export function WorkspaceSwitcher({
               ) : (
                 projects.map((project) => {
                   const isActive = project.id === selectedProjectId;
-                  const isProduction = project.environment === "production";
                   return (
                     <DropdownMenuItem
                       key={project.id}
-                      disabled={isProduction || isOrganizationSwitching || isProjectSwitching}
+                      disabled={isOrganizationSwitching || isProjectSwitching}
                       onSelect={() => selectProject(project.id)}
                       className="gap-2 text-xs"
                     >
                       <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                      {isProduction ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="pointer-events-auto shrink-0 text-tertiary">
-                              <LockIcon
-                                className="size-3.5"
-                                aria-label={t("Shared.SharedComponents.locked")}
-                              />
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" align="center">
-                            <span className="block">
-                              {t("Shared.SharedComponents.sandboxOnly")}
-                            </span>
-                            <span className="block">
-                              {t("Shared.SharedComponents.mainnetSoon")}
-                            </span>
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : isActive ? (
+                      {isActive ? (
                         <span className="shrink-0 rounded-full bg-fill-subtle px-1.5 py-0.5 text-[10px] font-medium text-secondary">
                           {t("Shared.SharedComponents.current")}
                         </span>

@@ -9,6 +9,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createEarnVaultDeposit,
+  earnExternalWalletSummaryRefreshInterval,
   earnProgramsRefreshInterval,
   earnVaultMovementRefreshInterval,
   fetchEarnExternalWalletPositionSummary,
@@ -28,7 +29,7 @@ const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 function strategy(id: string): EarnStrategy {
   return {
     id,
-    provider: "ground",
+    provider: "kamino",
     providerReference: `${id}-ref`,
     name: id,
     sourceKind: "defi",
@@ -41,6 +42,7 @@ function strategy(id: string): EarnStrategy {
     withdrawalSlippage: null,
     hostCluster: "devnet",
     fundable: true,
+    feeSponsored: false,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
   };
@@ -87,6 +89,15 @@ describe("earnVaultMovementRefreshInterval", () => {
 
   it("stops polling only after the movement reaches a terminal state", () => {
     expect(earnVaultMovementRefreshInterval({ settled: true, startedAt: 0, now: 120_000 })).toBe(0);
+  });
+});
+
+describe("earnExternalWalletSummaryRefreshInterval", () => {
+  it("refreshes drawer details at the prior cadence without polling the overview as often", () => {
+    expect(earnExternalWalletSummaryRefreshInterval(false, "production")).toBe(60_000);
+    expect(earnExternalWalletSummaryRefreshInterval(true, "production")).toBe(15_000);
+    expect(earnExternalWalletSummaryRefreshInterval(false, "development")).toBe(3_000);
+    expect(earnExternalWalletSummaryRefreshInterval(true, "development")).toBe(3_000);
   });
 });
 
@@ -167,13 +178,13 @@ describe("fetchEarnStrategies", () => {
         return {
           ok: false,
           status: 503,
-          json: async () => ({ error: { message: "Ground is not configured for sandbox mode." } }),
+          json: async () => ({ error: { message: "Kamino is not configured for sandbox mode." } }),
         } as unknown as Response;
       })
     );
 
     await expect(fetchEarnStrategies()).rejects.toThrow(
-      "Ground is not configured for sandbox mode."
+      "Kamino is not configured for sandbox mode."
     );
   });
 });
@@ -189,6 +200,7 @@ function vaultPosition(id: string, provider = "kamino"): EarnVaultPosition {
     shareMint: `${id}-share-mint`,
     createdAt: TIMESTAMP,
     closedAt: null,
+    feeSponsored: false,
     shares: "1",
     tokenValue: "1.05",
   };
@@ -198,7 +210,7 @@ describe("fetchEarnVaultPositions", () => {
   it("follows every live keyset page without filtering un-surfaced providers", async () => {
     const pages = [
       {
-        positions: [vaultPosition("vault_1", "ground")],
+        positions: [vaultPosition("vault_1", "upshift")],
         hasMore: true,
         nextCursor: "cursor_1",
       },
@@ -218,7 +230,7 @@ describe("fetchEarnVaultPositions", () => {
 
     const positions = await fetchEarnVaultPositions();
 
-    expect(positions.map((position) => position.provider)).toEqual(["ground", "kamino"]);
+    expect(positions.map((position) => position.provider)).toEqual(["upshift", "kamino"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/dashboard/markets/earn/vault-positions?limit=100"
@@ -282,7 +294,7 @@ describe("external-wallet position reads", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("continues one wallet past one hundred strict cursor pages", async () => {
+  it("throws when a wallet feed keeps minting fresh cursors past the safety limit", async () => {
     let page = 0;
     const fetchMock = vi.fn(async () => {
       const current = page;
@@ -291,8 +303,8 @@ describe("external-wallet position reads", () => {
         JSON.stringify({
           data: {
             positions: [externalWalletPosition(`p${current}`)],
-            hasMore: current < 100,
-            nextCursor: current < 100 ? `cursor_${current}` : null,
+            hasMore: true,
+            nextCursor: `cursor_${current}`,
           },
         }),
         { headers: { "Content-Type": "application/json" } }
@@ -302,8 +314,35 @@ describe("external-wallet position reads", () => {
 
     await expect(
       fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
-    ).resolves.toHaveLength(101);
-    expect(fetchMock).toHaveBeenCalledTimes(101);
+    ).rejects.toThrow("External-wallet positions pagination exceeded its safety limit");
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+  });
+
+  it("accepts a twentieth page that ends the feed without a twenty-first request", async () => {
+    // The boundary this pins: the last allowed page may still be the one that
+    // closes the feed. An off-by-one in the loop bound would either reject
+    // this final page or fire an unnecessary extra request.
+    let page = 0;
+    const fetchMock = vi.fn(async () => {
+      const current = page;
+      page += 1;
+      return new Response(
+        JSON.stringify({
+          data: {
+            positions: [externalWalletPosition(`p${current}`)],
+            hasMore: current < 19,
+            nextCursor: current < 19 ? `cursor_${current}` : null,
+          },
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+    ).resolves.toHaveLength(20);
+    expect(fetchMock).toHaveBeenCalledTimes(20);
   });
 
   it("fails loudly when a wallet cursor repeats", async () => {
@@ -373,7 +412,7 @@ describe("vault deposit availability", () => {
       isEarnVaultDepositAvailable({ ...kamino, status: "paused" }, "sandbox", providerAccess)
     ).toBe(false);
     expect(
-      isEarnVaultDepositAvailable({ ...kamino, provider: "ground" }, "sandbox", providerAccess)
+      isEarnVaultDepositAvailable({ ...kamino, provider: "upshift" }, "sandbox", providerAccess)
     ).toBe(false);
   });
 });
@@ -550,7 +589,7 @@ function stubProgramsPages(all: unknown[], pageSize = 100) {
 function programFixture(id: string, status = "ready") {
   return {
     id,
-    provider: "ground",
+    provider: "upshift",
     label: null,
     createdAt: TIMESTAMP,
     wallet: {
@@ -668,7 +707,7 @@ function withdrawalRecord(
 ): EarnProgramWithdrawalRecord {
   return {
     id,
-    provider: "ground",
+    provider: "upshift",
     status,
     amountRequestedUsd: "10",
     token: "usdc",

@@ -5,6 +5,7 @@ import type {
   PublicTokenMetadata,
 } from "@sdp/types";
 import type { AppDb } from "@/db";
+import { buildInClause } from "@/db/postgres-utils";
 import type {
   ArchiveAssetProfileInput,
   AssetProfileRow,
@@ -15,10 +16,6 @@ import type {
   UpdateAssetProfileInput,
 } from "./asset-profile.repository";
 import { generateAssetProfileId } from "./asset-profile.repository";
-
-function buildInClause(length: number): string {
-  return Array.from({ length }, () => "?").join(", ");
-}
 
 function mapAssetProfileRow(row: Record<string, unknown>): AssetProfileRow {
   return {

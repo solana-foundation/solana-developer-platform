@@ -2,7 +2,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/payments/fee-payment";
 import {
-  type Address,
   type Blockhash,
   compileTransaction,
   createTransactionMessage,
@@ -27,7 +26,13 @@ const projectMocks = vi.hoisted(() => ({
   getProject: vi.fn(),
 }));
 
-const FEE_PAYER = "11111111111111111111111111111111" as Address;
+import {
+  garbageSignTestTransaction,
+  sponsorSignTestTransaction,
+  TEST_MOCK_FEE_PAYER,
+} from "@/test/helpers/sponsor-signing";
+
+const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
 
 function buildTransaction(): Uint8Array {
@@ -43,7 +48,21 @@ function buildTransaction(): Uint8Array {
   return new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
 }
 
-vi.mock("@sdp/payments/fee-payment", () => ({
+function otherTransaction(): Uint8Array {
+  const message = pipe(
+    createTransactionMessage({ version: "legacy" }),
+    (current) => setTransactionMessageFeePayer(FEE_PAYER, current),
+    (current) =>
+      setTransactionMessageLifetimeUsingBlockhash(
+        { blockhash: BLOCKHASH, lastValidBlockHeight: 200n },
+        current
+      )
+  );
+  return new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+}
+
+vi.mock("@sdp/payments/fee-payment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/payments/fee-payment")>()),
   createFeePaymentAdapter: vi.fn(() => ({ providerId: "kora" })),
   resolveFeePaymentProvider: vi.fn(() => "kora"),
 }));
@@ -101,9 +120,56 @@ describe("sponsorship identity boundary", () => {
     );
   });
 
+  function selfHostedFeePayment(signAsFeePayer: (transaction: Uint8Array) => Promise<Uint8Array>) {
+    const provider: FeePaymentPort = {
+      providerId: "kora",
+      getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
+      signAsFeePayer: vi.fn().mockImplementation(signAsFeePayer),
+      signAndSend: vi.fn(),
+    };
+    vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
+    return createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
+      environment: "sandbox",
+      organizationId: "org_1",
+      projectId: "project_1",
+      actor: { type: "user", id: "user_1" },
+    });
+  }
+
+  it("refuses self-hosted sponsor bytes without the sponsor signature", async () => {
+    const feePayment = selfHostedFeePayment(async (transaction) => transaction);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "missing the sponsor fee-payer signature"
+    );
+  });
+
+  it("refuses self-hosted sponsor bytes whose signature does not verify", async () => {
+    const feePayment = selfHostedFeePayment(async (transaction) =>
+      garbageSignTestTransaction(transaction)
+    );
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "invalid sponsor fee-payer signature"
+    );
+  });
+
+  it("refuses self-hosted sponsor bytes returned over a different message", async () => {
+    const feePayment = selfHostedFeePayment(() => sponsorSignTestTransaction(otherTransaction()));
+    const lifecycle = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
+      "came back over a different message"
+    );
+    expect(lifecycle.persistSigned).not.toHaveBeenCalled();
+  });
+
   it("adapts self-hosted providers to the owned persist-before-marker lifecycle", async () => {
-    const signedTransaction = buildTransaction();
-    signedTransaction.fill(1, 1, 65);
+    const signedTransaction = await sponsorSignTestTransaction(buildTransaction());
     const provider: FeePaymentPort = {
       providerId: "kora",
       getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
@@ -125,7 +191,7 @@ describe("sponsorship identity boundary", () => {
     });
     const submission = await feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle);
 
-    expect(submission.signedTransaction).toBe(signedTransaction);
+    expect(submission.signedTransaction).toStrictEqual(signedTransaction);
     expect(lifecycle.persistSigned).toHaveBeenCalledWith(submission);
     expect(lifecycle.persistSigned.mock.invocationCallOrder[0]).toBeLessThan(
       lifecycle.markStarted.mock.invocationCallOrder[0]

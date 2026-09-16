@@ -13,14 +13,8 @@ import type {
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
-import {
-  type CryptoRailId,
-  getCryptoRailAssetLabel,
-  type RampCurrencyLimit,
-} from "@sdp/types/payment-rails";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
-import { z } from "zod";
 import { decimalStringFromNumber, divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
@@ -31,15 +25,7 @@ import {
 } from "../../../errors";
 import { hmacSha256Base64 } from "../../../hash";
 import { type ProviderRequestInit, providerFetch } from "../../fetch";
-import {
-  isActiveIso4217CurrencyCode,
-  isSolanaCryptoAsset,
-  RAMP_RAIL_DUMPS,
-  rampId,
-  SOLANA_ASSET_TO_RAIL,
-  UNREPORTED_COUNTRY_SUPPORT,
-  unreportedCurrencyLimit,
-} from "../../shared";
+import { isSolanaCryptoAsset, rampId, UNREPORTED_COUNTRY_SUPPORT } from "../../shared";
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
@@ -52,18 +38,51 @@ import type {
   ValidateCounterpartyOptions,
 } from "../../types";
 import { validateBvnkCounterparty } from "./counterparty";
+import { discoverBvnkCurrencyAndRails } from "./currencies";
 import {
   type BvnkComplianceInput,
-  type BvnkEntityType,
   type BvnkNetwork,
-  type BvnkRuleEntity,
   buildBvnkOfframpReference,
   normalizeBvnkCurrencyAndNetwork,
 } from "./provider-data";
+import {
+  type BvnkAgreementActionResultsV2,
+  type BvnkAgreementContentV2,
+  type BvnkAgreementsV2,
+  type BvnkAssignedAgreementsV2,
+  type BvnkChannelAddress,
+  type BvnkChannelResponse,
+  type BvnkCustomerV2,
+  type BvnkCustomerV2Detail,
+  type BvnkErrorEnvelopeParse,
+  type BvnkLedgerWalletProfilesV2,
+  type BvnkLedgerWalletV2,
+  type BvnkPayoutEstimateResponse,
+  type BvnkRuleResponse,
+  bvnkChannelResponseSchema,
+  bvnkErrorEnvelopeSchema,
+  bvnkEstimateFiatCurrencySchema,
+  bvnkPayoutEstimateResponseSchema,
+  bvnkQuoteEstimateResponseSchema,
+  bvnkRuleResponseSchema,
+  bvnkV2AgreementActionResultsSchema,
+  bvnkV2AgreementContentSchema,
+  bvnkV2AgreementsResponseSchema,
+  bvnkV2AssignedAgreementsSchema,
+  bvnkV2CustomerDetailSchema,
+  bvnkV2CustomerSummarySchema,
+  bvnkV2LedgerWalletSchema,
+  bvnkV2WalletProfilesSchema,
+  type CreateBvnkAgreementsV2Input,
+  type CreateBvnkCustomerV2Input,
+  type CreateBvnkLedgerWalletV2Input,
+  type CreateBvnkOnrampRuleInput,
+  type ListBvnkLedgerWalletProfilesV2Input,
+  type RespondBvnkAgreementsV2Input,
+} from "./schemas";
 
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
-const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
-const bvnkEstimateFiatCurrencySchema = z.enum(RAMP_FIAT_CURRENCIES);
+export const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
 
 export const BVNK_DECLARED_RAIL_SUPPORT = {
   onramp: {
@@ -103,8 +122,6 @@ interface BvnkConfig {
   auth: { authId: string; secretKey: string };
   walletId: string;
   apiBaseUrl: string;
-  signingHost: string;
-  proxyAuthSecret?: string;
 }
 
 function readBvnkConfig(env: Record<string, string | undefined>, mode: SdpEnvironment): BvnkConfig {
@@ -133,18 +150,7 @@ function readBvnkConfig(env: Record<string, string | undefined>, mode: SdpEnviro
     throw new SdpPaymentsError("INTERNAL_ERROR", "BVNK API URL configuration is invalid.");
   }
 
-  const signingHostInput =
-    env.BVNK_SIGNING_HOST?.trim() ||
-    (mode === "sandbox" ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL);
-  const signingHost = new URL(
-    signingHostInput.includes("://") ? signingHostInput : `https://${signingHostInput}`
-  ).hostname;
-
-  const proxyAuthSecret = apiBaseUrlOverride
-    ? env.PROXY_SHARED_SECRET?.trim() || undefined
-    : undefined;
-
-  return { auth: { authId, secretKey }, walletId, apiBaseUrl, signingHost, proxyAuthSecret };
+  return { auth: { authId, secretKey }, walletId, apiBaseUrl };
 }
 
 function buildBvnkComplianceDetails(
@@ -172,8 +178,7 @@ async function buildBvnkHawkAuthorizationHeader(
   url: URL,
   method: ProviderRequestInit<unknown>["method"],
   authId: string,
-  secretKey: string,
-  signingHost: string
+  secretKey: string
 ): Promise<string> {
   const ts = Math.floor(Date.now() / 1000).toString();
   const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
@@ -185,7 +190,7 @@ async function buildBvnkHawkAuthorizationHeader(
     nonce,
     method,
     resource,
-    signingHost.toLowerCase(),
+    url.hostname,
     "443",
     "",
     "",
@@ -229,7 +234,7 @@ function mapBvnkErrorStatus(
   }
   if (status === 403) {
     return providerNotConfigured(
-      "BVNK request was forbidden (status 403). Check the BVNK Hawk auth/account permissions, and — when BVNK_API_BASE_URL routes through the egress proxy — the PROXY_SHARED_SECRET / X-Proxy-Auth configuration."
+      "BVNK request was forbidden (status 403). Check the BVNK Hawk auth/account permissions and that the API egress IP is allowlisted on the merchant account."
     );
   }
   if (status === 429) {
@@ -241,33 +246,33 @@ function mapBvnkErrorStatus(
   return badRequest(message, options?.details);
 }
 
-const bvnkErrorEnvelopeSchema = z.object({
-  details: z.object({ errors: z.unknown() }).optional(),
-});
-
-function parseBvnkValidationDetails(payload: unknown): Record<string, unknown> | undefined {
-  const result = bvnkErrorEnvelopeSchema.safeParse(payload);
-  if (!result.success || result.data.details === undefined) {
-    return undefined;
+/**
+ * Appends BVNK's error code and message to the status-only failure message so the
+ * caller can tell an idempotency conflict from a bound reference or a validation error.
+ *
+ * @param status - HTTP status BVNK returned.
+ * @param envelope - Parsed BVNK error envelope, when the body was JSON.
+ * @returns The failure message, enriched when BVNK supplied a code or message.
+ */
+function describeBvnkFailure(status: number, envelope: BvnkErrorEnvelopeParse): string {
+  const base = `BVNK request failed with status ${status}`;
+  if (!envelope.success) {
+    return base;
   }
-  return { errors: result.data.details.errors };
+  const parts = [envelope.data.code, envelope.data.message].filter(
+    (part): part is string => part !== undefined
+  );
+  return parts.length === 0 ? base : `${base}: ${parts.join(" ")}`;
 }
 
-const bvnkChannelAddressSchema = z.object({
-  network: z.string().optional(),
-  address: z.string().optional(),
-  uri: z.string().optional(),
-});
-const bvnkChannelResponseSchema = z.object({
-  uuid: z.string().optional(),
-  reference: z.string().optional(),
-  status: z.string().optional(),
-  address: z.string().optional(),
-  network: z.string().optional(),
-  alternatives: z.array(bvnkChannelAddressSchema).optional(),
-});
-type BvnkChannelAddress = z.infer<typeof bvnkChannelAddressSchema>;
-type BvnkChannelResponse = z.infer<typeof bvnkChannelResponseSchema>;
+function parseBvnkValidationDetails(
+  envelope: BvnkErrorEnvelopeParse
+): Record<string, unknown> | undefined {
+  if (!envelope.success || envelope.data.details === undefined) {
+    return undefined;
+  }
+  return { errors: envelope.data.details.errors };
+}
 
 /** Picks the deposit address for the requested network from the channel's primary slot or alternatives. */
 function parseBvnkChannelAddress(channel: BvnkChannelResponse, network: BvnkNetwork): string {
@@ -283,28 +288,6 @@ function parseBvnkChannelAddress(channel: BvnkChannelResponse, network: BvnkNetw
   }
   return match.address;
 }
-
-const bvnkPayoutEstimateResponseSchema = z.object({
-  walletCurrency: z.string(),
-  walletRequiredAmount: z.number(),
-  paidCurrency: z.string(),
-  paidRequiredAmount: z.number(),
-  feeCurrency: z.string(),
-  feePredictedAmount: z.number(),
-  networkFeeCurrency: z.string(),
-  networkFeePredictedAmount: z.number(),
-  totalWalletAmount: z.number(),
-  exchangeRate: z.number(),
-});
-type BvnkPayoutEstimateResponse = z.infer<typeof bvnkPayoutEstimateResponseSchema>;
-
-const bvnkQuoteEstimateResponseSchema = z.object({
-  amountIn: z.number(),
-  amountOut: z.number(),
-  acceptanceExpiryDate: z.number(),
-  payInMethod: z.object({ settlementCurrency: z.string() }),
-  fees: z.object({ value: z.object({ service: z.number(), processing: z.number() }) }),
-});
 
 function assertPositiveDecimalAmount(value: string, fieldName: string): string {
   if (!isDecimalString(value) || compareDecimalAmounts(value, "0") <= 0) {
@@ -384,494 +367,6 @@ function formatBvnkNetExchangeRate(netFiatAmount: string, paidRequiredAmount: nu
   return divideDecimalAmounts(netFiatAmount, decimalStringFromNumber(paidRequiredAmount));
 }
 
-const bvnkCurrencyEntrySchema = z.object({
-  code: z.string().optional(),
-  fiat: z.boolean().optional(),
-  supportsDeposits: z.boolean().optional(),
-  supportsWithdrawals: z.boolean().optional(),
-  protocols: z.array(z.object({ networkCode: z.string().optional() })).optional(),
-});
-
-function addBvnkFiatCurrency(
-  target: Record<string, RampCurrencyLimit>,
-  code: string,
-  droppedCodes: Set<string>
-): void {
-  const normalized = code.trim().toUpperCase();
-  if (!isActiveIso4217CurrencyCode(normalized)) {
-    droppedCodes.add(normalized);
-    return;
-  }
-  target[normalized] = unreportedCurrencyLimit();
-}
-
-export function distillBvnkRailSupport(
-  depositRaw: unknown,
-  fiatRaw: unknown,
-  cryptoRaw: unknown
-): ProviderRailSupportDistillation {
-  const depositList = z.array(bvnkCurrencyEntrySchema).parse(depositRaw);
-  const fiatList = z.array(bvnkCurrencyEntrySchema).parse(fiatRaw);
-  const cryptoList = z.array(bvnkCurrencyEntrySchema).parse(cryptoRaw);
-  const droppedCodes = new Set<string>();
-  const onrampCurrencies: Record<string, RampCurrencyLimit> = {};
-  const offrampCurrencies: Record<string, RampCurrencyLimit> = {};
-  const onrampCryptos = new Set<CryptoRailId>();
-  const offrampCryptos = new Set<CryptoRailId>();
-
-  for (const entry of depositList) {
-    if (entry.fiat !== true) {
-      continue;
-    }
-    if (entry.supportsDeposits !== true) {
-      continue;
-    }
-    if (entry.code === undefined) {
-      continue;
-    }
-    addBvnkFiatCurrency(onrampCurrencies, entry.code, droppedCodes);
-  }
-
-  for (const entry of fiatList) {
-    if (entry.supportsWithdrawals !== true) {
-      continue;
-    }
-    if (entry.code === undefined) {
-      continue;
-    }
-    addBvnkFiatCurrency(offrampCurrencies, entry.code, droppedCodes);
-  }
-
-  for (const entry of cryptoList) {
-    if (entry.code === undefined) {
-      continue;
-    }
-    const upper = entry.code.toUpperCase();
-    if (!isSolanaCryptoAsset(upper)) {
-      continue;
-    }
-    if (entry.protocols === undefined) {
-      continue;
-    }
-    const hasSolana = entry.protocols.some((protocol) => protocol.networkCode === "SOLANA");
-    if (!hasSolana) {
-      continue;
-    }
-    const rail = SOLANA_ASSET_TO_RAIL[upper];
-    if (entry.supportsWithdrawals === true) {
-      onrampCryptos.add(rail);
-    }
-    if (entry.supportsDeposits === true) {
-      offrampCryptos.add(rail);
-    }
-  }
-
-  return {
-    snapshot: {
-      onramp: {
-        currencies: onrampCurrencies,
-        cryptos: [...onrampCryptos].sort(),
-      },
-      offramp: {
-        currencies: offrampCurrencies,
-        cryptos: [...offrampCryptos].sort(),
-      },
-    },
-    droppedCurrencyCodes: [...droppedCodes].sort(),
-    droppedCountryCodes: [],
-  };
-}
-
-export interface CreateBvnkOnrampRuleInput {
-  reference: string;
-  walletId: string;
-  currency: string;
-  network: string;
-  beneficiaryAddress: string;
-  entity: BvnkRuleEntity;
-}
-
-const bvnkV2CustomerStatusSchema = z.enum([
-  "INFO_REQUIRED",
-  "PENDING",
-  "ACTIONS_REQUIRED",
-  "VERIFIED",
-  "REJECTED",
-  "TERMINATED",
-]);
-export type BvnkCustomerV2Status = z.infer<typeof bvnkV2CustomerStatusSchema>;
-
-const bvnkV2CustomerTypeSchema = z.enum(["COMPANY", "INDIVIDUAL"]);
-const bvnkV2CustomerModelSchema = z.enum([
-  "RELIANCE",
-  "CUSTOMER_VIRTUAL_ACCOUNTS",
-  "EMBEDDED_BVNK_MANAGED",
-  "EMBEDDED_SELF_MANAGED",
-  "DOUBLE_EMBEDDED",
-]);
-const bvnkV2CustomerUseCaseSchema = z.enum([
-  "FIAT",
-  "CRYPTO",
-  "STABLECOIN_PAYOUTS",
-  "EMBEDDED_STABLECOIN_WALLETS",
-  "EMBEDDED_FIAT_ACCOUNTS",
-]);
-const bvnkV2AddressSchema = z.object({
-  addressLine1: z.string().min(1),
-  addressLine2: z.string().optional(),
-  city: z.string().min(1),
-  postalCode: z.string().min(1),
-  stateCode: z.string().optional(),
-  countryCode: z.string().min(2),
-});
-export type BvnkCustomerV2Address = z.infer<typeof bvnkV2AddressSchema>;
-
-const bvnkV2TaxIdentificationSchema = z.object({
-  number: z.string().min(1),
-  taxResidenceCountryCode: z.string().min(2),
-});
-
-const bvnkV2EmploymentStatusSchema = z.enum(["SALARIED", "SELF_EMPLOYED", "UNEMPLOYED", "RETIRED"]);
-export type BvnkCustomerV2EmploymentStatus = z.infer<typeof bvnkV2EmploymentStatusSchema>;
-
-const bvnkV2SourceOfFundsSchema = z.enum([
-  "SALARY",
-  "PENSION",
-  "SAVINGS",
-  "SELF_EMPLOYMENT",
-  "CRYPTO_TRADING",
-  "GAMBLING",
-  "REAL_ESTATE",
-  "GIFT",
-  "STUDENT_LOAN_GRANT",
-]);
-export type BvnkCustomerV2SourceOfFunds = z.infer<typeof bvnkV2SourceOfFundsSchema>;
-
-const bvnkV2PepStatusSchema = z.enum([
-  "NOT_PEP",
-  "FORMER_PEP_2_YEARS",
-  "FORMER_PEP_OLDER",
-  "DOMESTIC_PEP",
-  "FOREIGN_PEP",
-  "CLOSE_ASSOCIATES",
-  "FAMILY_MEMBERS",
-  "STATE_OWNED",
-]);
-const bvnkV2IntendedUseOfAccountSchema = z.enum([
-  "TRANSFERS_OWN_WALLET",
-  "TRANSFERS_FAMILY_FRIENDS",
-  "INVESTMENTS",
-  "GOODS_SERVICES",
-  "DONATIONS",
-]);
-export type BvnkCustomerV2IntendedUseOfAccount = z.infer<typeof bvnkV2IntendedUseOfAccountSchema>;
-
-const bvnkV2IncomeSchema = z.enum([
-  "INCOME_0_TO_50K",
-  "INCOME_50K_TO_100K",
-  "INCOME_100K_TO_250K",
-  "INCOME_250K_TO_500K",
-  "INCOME_500K_TO_750K",
-  "INCOME_750K_TO_1M",
-  "INCOME_ABOVE_1M",
-]);
-const bvnkV2IndustrySectorSchema = z.enum([
-  "INVESTMENT",
-  "HEDGE_FUND",
-  "MONEY_SERVICE_BUSINESS",
-  "STO_ISSUER",
-  "PRECIOUS_METALS",
-  "NON_PROFIT",
-  "REGISTERED_INVESTMENT_ADVISOR",
-  "AGRICULTURE_FORESTRY_FISHING_HUNTING",
-  "MINING",
-  "UTILITIES",
-  "CONSTRUCTION",
-  "MANUFACTURING",
-  "WHOLESALE_TRADE",
-  "RETAIL_TRADE",
-  "TRANSPORTATION_WAREHOUSING",
-  "INFORMATION",
-  "FINANCE_INSURANCE",
-  "REAL_ESTATE_RENTAL_LEASING",
-  "PROFESSIONAL_SCIENTIFIC_TECHNICAL_SERVICES",
-  "MANAGEMENT_OF_COMPANIES_ENTERPRISES",
-  "ADMINISTRATIVE_SUPPORT_WASTE_MANAGEMENT_REMEDIATION_SERVICES",
-  "EDUCATIONAL_SERVICES",
-  "HEALTH_CARE_SOCIAL_ASSISTANCE",
-  "ARTS_ENTERTAINMENT_RECREATION",
-  "ACCOMMODATION_FOOD_SERVICES",
-  "OTHER_SERVICES",
-  "PUBLIC_ADMINISTRATION",
-  "NOT_CLASSIFIED",
-  "ADULT_ENTERTAINMENT",
-  "AUCTIONS",
-  "AUTOMOBILES",
-  "BLOCKCHAIN",
-  "CRYPTO",
-  "DRUGS",
-  "EXPORT_IMPORT",
-  "E_COMMERCE",
-  "FINANCIAL_INSTITUTION",
-  "GAMBLING",
-  "INSURANCE",
-  "MARKET_MAKER",
-  "SHELL_BANK",
-  "TRAVEL_TRANSPORT",
-  "WEAPONS",
-]);
-
-const bvnkV2ExpectedMonthlyVolumeSchema = z.object({
-  amount: z.union([z.string().min(1), z.number().finite()]),
-  currency: z.string().min(1),
-});
-export const bvnkV2CddSchema = z.object({
-  employmentStatus: bvnkV2EmploymentStatusSchema,
-  sourceOfFunds: bvnkV2SourceOfFundsSchema,
-  pepStatus: bvnkV2PepStatusSchema,
-  intendedUseOfAccount: bvnkV2IntendedUseOfAccountSchema,
-  expectedMonthlyVolume: bvnkV2ExpectedMonthlyVolumeSchema,
-  estimatedYearlyIncome: bvnkV2IncomeSchema.optional(),
-  employmentIndustrySector: bvnkV2IndustrySectorSchema.optional(),
-});
-
-const bvnkV2IndividualSchema = z.object({
-  address: bvnkV2AddressSchema,
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
-  birthCountryCode: z.string().min(2),
-  emailAddress: z.string().optional(),
-  phoneNumber: z.string().optional(),
-  description: z.string().optional(),
-  placeOfBirth: z.string().optional(),
-  documentNumber: z.string().optional(),
-  nationality: z.string().min(2).optional(),
-  taxIdentification: bvnkV2TaxIdentificationSchema.optional(),
-  cdd: bvnkV2CddSchema.optional(),
-});
-export type BvnkCustomerV2Individual = z.infer<typeof bvnkV2IndividualSchema>;
-
-export type BvnkCustomerV2UseCase = z.infer<typeof bvnkV2CustomerUseCaseSchema>;
-
-export interface CreateBvnkCustomerV2Input {
-  idempotencyKey: string;
-  useCase: BvnkCustomerV2UseCase;
-  reference?: string;
-  model?: "RELIANCE";
-  individual: BvnkCustomerV2Individual;
-}
-
-const bvnkV3ContactSchema = z.object({ contactId: z.string().min(1) });
-export type BvnkContactV3 = z.infer<typeof bvnkV3ContactSchema>;
-
-export interface CreateBvnkContactV3Input {
-  idempotencyKey: string;
-  entity: {
-    type: "INDIVIDUAL";
-    relationshipType: "SELF_OWNED";
-    firstName: string;
-    lastName: string;
-    dateOfBirth: string;
-    address: {
-      addressLine1: string;
-      city: string;
-      region?: string;
-      postalCode: string;
-      country: string;
-    };
-  };
-}
-
-const bvnkV2RequiredActionTargetSchema = z.object({
-  kind: z.enum(["AGREEMENT", "DOCUMENT", "FIELD"]),
-  assignedAgreementId: z.string().optional(),
-  urn: z.string().optional(),
-  version: z.string().optional(),
-  title: z.string().optional(),
-  locale: z.string().optional(),
-  docSetType: z.string().optional(),
-  types: z.array(z.string()).optional(),
-  subTypes: z.array(z.string()).optional(),
-  associateId: z.string().nullable().optional(),
-  path: z.string().optional(),
-});
-const bvnkV2RequiredActionSchema = z.object({
-  type: z.enum(["DATA", "USER_ROLE", "BLOCKER"]),
-  code: z.string(),
-  category: z.string().optional(),
-  description: z.string().optional(),
-  status: z.enum(["REQUIRED", "PROCESSING"]).optional(),
-  target: bvnkV2RequiredActionTargetSchema.optional(),
-});
-export type BvnkCustomerV2RequiredAction = z.infer<typeof bvnkV2RequiredActionSchema>;
-const bvnkV2AuthenticatedLinkSchema = z.object({
-  link: z.string().min(1),
-  expiresAt: z.string().min(1),
-});
-const bvnkV2CustomerSummarySchema = z.object({
-  id: z.string().min(1),
-  reference: z.string().min(1),
-  status: bvnkV2CustomerStatusSchema,
-  type: bvnkV2CustomerTypeSchema,
-  model: bvnkV2CustomerModelSchema,
-  useCase: bvnkV2CustomerUseCaseSchema,
-  name: z.string().optional(),
-  createdAt: z.string().optional(),
-  updatedAt: z.string().optional(),
-});
-export type BvnkCustomerV2 = z.infer<typeof bvnkV2CustomerSummarySchema>;
-const bvnkV2CustomerDetailSchema = bvnkV2CustomerSummarySchema.extend({
-  authenticatedLink: bvnkV2AuthenticatedLinkSchema,
-  requiredActions: z.array(bvnkV2RequiredActionSchema),
-  individual: bvnkV2IndividualSchema.optional(),
-});
-export type BvnkCustomerV2Detail = z.infer<typeof bvnkV2CustomerDetailSchema>;
-
-const bvnkV2AgreementStatusSchema = z.enum(["PENDING", "ACCEPTED", "REJECTED"]);
-const bvnkV2AgreementSchema = z.object({
-  id: z.string().min(1),
-  status: bvnkV2AgreementStatusSchema,
-  declinable: z.boolean(),
-  name: z.string().optional(),
-  description: z.string().optional(),
-});
-const bvnkV2AgreementsResponseSchema = z.object({
-  id: z.string().min(1),
-  reference: z.string().min(1),
-  agreements: z.array(bvnkV2AgreementSchema),
-  signingUrl: z.string().min(1),
-});
-export type BvnkAgreementsV2 = z.infer<typeof bvnkV2AgreementsResponseSchema>;
-const bvnkV2AgreementContentSchema = z.object({
-  downloadUrl: z.string().min(1),
-  expiresAt: z.string().nullable().optional(),
-  filename: z.string().min(1),
-});
-export type BvnkAgreementContentV2 = z.infer<typeof bvnkV2AgreementContentSchema>;
-const bvnkV2AgreementActionTypeSchema = z.enum(["ACCEPT", "REJECT"]);
-export type BvnkAgreementActionTypeV2 = z.infer<typeof bvnkV2AgreementActionTypeSchema>;
-export interface BvnkAgreementActionV2 {
-  agreementId: string;
-  type: BvnkAgreementActionTypeV2;
-}
-export interface CreateBvnkAgreementsV2Input {
-  idempotencyKey: string;
-  reference: string;
-  useCase: BvnkCustomerV2UseCase;
-  customerType: BvnkEntityType;
-  countryCode: string;
-}
-export interface RespondBvnkAgreementsV2Input {
-  idempotencyKey: string;
-  reference: string;
-  actions: BvnkAgreementActionV2[];
-}
-const bvnkV2AgreementActionResultSchema = z.object({
-  agreementId: z.string().min(1),
-  status: z.enum(["ACCEPTED", "REJECTED"]).optional(),
-  error: z.string().optional(),
-});
-const bvnkV2PageableSchema = z
-  .object({ pageNumber: z.number().int(), pageSize: z.number().int() })
-  .optional();
-const bvnkV2AgreementActionResultsSchema = z.object({
-  content: z.array(bvnkV2AgreementActionResultSchema),
-  totalElements: z.number().int(),
-  totalPages: z.number().int(),
-  pageable: bvnkV2PageableSchema,
-  hasNext: z.boolean(),
-});
-export type BvnkAgreementActionResultsV2 = z.infer<typeof bvnkV2AgreementActionResultsSchema>;
-
-const bvnkV2AgreementSummarySchema = z.object({
-  version: z.string().nullable().optional(),
-  title: z.string().nullable().optional(),
-  locale: z.string().nullable().optional(),
-});
-const bvnkV2AssignedAgreementSchema = z.object({
-  id: z.string().min(1),
-  agreement: bvnkV2AgreementSummarySchema,
-  status: bvnkV2AgreementStatusSchema,
-  respondedAt: z.string().nullable().optional(),
-  respondedToDocumentChecksum: z.string().nullable().optional(),
-  createdAt: z.string().optional(),
-  updatedAt: z.string().optional(),
-});
-const bvnkV2AssignedAgreementsSchema = z.object({
-  totalElements: z.number().int(),
-  totalPages: z.number().int(),
-  content: z.array(bvnkV2AssignedAgreementSchema),
-  pageable: bvnkV2PageableSchema,
-  hasNext: z.boolean(),
-});
-export type BvnkAssignedAgreementsV2 = z.infer<typeof bvnkV2AssignedAgreementsSchema>;
-
-const bvnkV2WalletProfileSchema = z.object({
-  id: z.string().min(1),
-  currencies: z.array(z.string().min(1)),
-  methods: z.array(z.string().min(1)),
-});
-const bvnkV2WalletProfilesSchema = z.object({
-  totalElements: z.number().int(),
-  totalPages: z.number().int(),
-  content: z.array(bvnkV2WalletProfileSchema),
-  pageable: bvnkV2PageableSchema,
-  hasNext: z.boolean(),
-});
-export type BvnkLedgerWalletProfileV2 = z.infer<typeof bvnkV2WalletProfileSchema>;
-export type BvnkLedgerWalletProfilesV2 = z.infer<typeof bvnkV2WalletProfilesSchema>;
-export interface CreateBvnkLedgerWalletV2Input {
-  idempotencyKey: string;
-  currency: string;
-  name: string;
-  customerId?: string;
-  profileId?: string;
-}
-export interface ListBvnkLedgerWalletProfilesV2Input {
-  customerId?: string;
-  currency?: string;
-}
-
-const bvnkV2BankNidSchema = z.object({
-  value: z.string().min(1),
-  type: z.enum(["ROUTING_NUMBER", "SORT_CODE", "OTHER"]).optional(),
-});
-const bvnkV2BankDetailsSchema = z.object({
-  name: z.string().min(1),
-  bic: z.string().min(1),
-  nid: bvnkV2BankNidSchema.optional(),
-});
-const bvnkV2PaymentInstrumentSchema = z.object({
-  type: z.literal("FIAT"),
-  accountHolderName: z.string().min(1),
-  accountNumber: z.string().min(1),
-  bankDetails: bvnkV2BankDetailsSchema,
-  remittanceInformationPrefix: z.string().optional(),
-});
-export type BvnkLedgerWalletPaymentInstrumentV2 = z.infer<typeof bvnkV2PaymentInstrumentSchema>;
-const bvnkV2LedgerWalletSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  status: z.enum(["ACTIVE", "INACTIVE", "TERMINATED"]),
-  customer: z.object({ id: z.string().min(1), name: z.string().optional() }).optional(),
-  balance: z.object({ amount: z.number(), currency: z.string().min(1) }).optional(),
-  paymentInstruments: z.array(bvnkV2PaymentInstrumentSchema).optional(),
-  createdAt: z.string().optional(),
-  updatedAt: z.string().optional(),
-});
-export type BvnkLedgerWalletV2 = z.infer<typeof bvnkV2LedgerWalletSchema>;
-
-const bvnkRuleResponseSchema = z.object({
-  id: z.string().optional(),
-  reference: z.string().optional(),
-  status: z.string().optional(),
-  originator: z
-    .object({ currency: z.string().optional(), walletId: z.string().optional() })
-    .optional(),
-});
-type BvnkRuleResponse = z.infer<typeof bvnkRuleResponseSchema>;
-
 export class BvnkRampClient implements RampProvider {
   readonly id = "bvnk";
   readonly declaredRailSupport = BVNK_DECLARED_RAIL_SUPPORT;
@@ -890,24 +385,22 @@ export class BvnkRampClient implements RampProvider {
       url,
       init.method,
       config.auth.authId,
-      config.auth.secretKey,
-      config.signingHost
+      config.auth.secretKey
     );
 
     const { response, raw, parsed } = await providerFetch(this.id, url.toString(), {
       ...init,
       headers: {
         Authorization: authorization,
-        ...(config.proxyAuthSecret ? { "X-Proxy-Auth": config.proxyAuthSecret } : {}),
         ...init.headers,
       },
     });
 
     if (!response.ok) {
-      const message = `BVNK request failed with status ${response.status}`;
-      throw mapBvnkErrorStatus(response.status, message, {
+      const envelope = bvnkErrorEnvelopeSchema.safeParse(parsed);
+      throw mapBvnkErrorStatus(response.status, describeBvnkFailure(response.status, envelope), {
         edgeBlocked: isEdgeBlockBody(parsed, raw),
-        details: response.status === 400 ? parseBvnkValidationDetails(parsed) : undefined,
+        details: response.status === 400 ? parseBvnkValidationDetails(envelope) : undefined,
       });
     }
 
@@ -929,46 +422,7 @@ export class BvnkRampClient implements RampProvider {
   async discoverCurrencyAndRails(
     context: RampDiscoveryContext
   ): Promise<ProviderRailSupportDistillation> {
-    if (!context.offline) {
-      const { env, fetchJson, writeDump } = context;
-      const railsBaseOverride = env.BVNK_RAMP_RAILS_API_BASE_URL?.trim();
-      const base = railsBaseOverride || "https://api.sandbox.bvnk.com/";
-      const proxyAuthSecret = railsBaseOverride ? env.PROXY_SHARED_SECRET?.trim() : undefined;
-      // biome-ignore lint/security/noSecrets: BVNK pagination query string, not a secret.
-      const pageQuery = "?offset=0&max=1000";
-
-      for (const request of [
-        {
-          path: `/api/currency/crypto${pageQuery}`,
-          dumpName: RAMP_RAIL_DUMPS.bvnk.cryptoAnon.name,
-        },
-        {
-          path: `/api/currency/fiat${pageQuery}`,
-          dumpName: RAMP_RAIL_DUMPS.bvnk.fiatAnon.name,
-        },
-        {
-          path: `/api/currency/deposit${pageQuery}`,
-          dumpName: RAMP_RAIL_DUMPS.bvnk.depositAnon.name,
-        },
-      ]) {
-        const url = new URL(request.path.replace(/^\//, ""), base);
-        await writeDump(
-          request.dumpName,
-          await fetchJson(this.id, `anon ${request.path}`, url.toString(), {
-            headers: {
-              Accept: "application/json",
-              ...(proxyAuthSecret ? { "X-Proxy-Auth": proxyAuthSecret } : {}),
-            },
-          })
-        );
-      }
-    }
-    const [deposit, fiat, crypto] = await Promise.all([
-      context.readDump(RAMP_RAIL_DUMPS.bvnk.depositAnon.file),
-      context.readDump(RAMP_RAIL_DUMPS.bvnk.fiatAnon.file),
-      context.readDump(RAMP_RAIL_DUMPS.bvnk.cryptoAnon.file),
-    ]);
-    return distillBvnkRailSupport(deposit, fiat, crypto);
+    return discoverBvnkCurrencyAndRails(context);
   }
 
   /**
@@ -989,31 +443,10 @@ export class BvnkRampClient implements RampProvider {
       body: {
         useCase: input.useCase,
         ...(input.reference === undefined ? {} : { reference: input.reference }),
-        ...(input.model === undefined ? {} : { model: input.model }),
         individual: input.individual,
       },
     });
     return bvnkV2CustomerSummarySchema.parse(response);
-  }
-
-  /**
-   * Creates the BVNK v3 travel-rule contact for an individual customer.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - Contact data and a deterministic idempotency key. The entity contains PII and is never logged.
-   * @returns The BVNK contact identifier.
-   */
-  async createContactV3(
-    { env, mode }: RampRuntimeContext,
-    input: CreateBvnkContactV3Input
-  ): Promise<BvnkContactV3> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(config, "/platform/v3/contacts", {
-      method: "POST",
-      headers: { "Idempotency-Key": input.idempotencyKey },
-      body: { entity: input.entity },
-    });
-    return bvnkV3ContactSchema.parse(response);
   }
 
   /**
@@ -1066,7 +499,7 @@ export class BvnkRampClient implements RampProvider {
    *
    * @param ctx - Runtime provider credentials and environment.
    * @param input - Agreement id.
-   * @returns The agreement download URL, filename, and optional expiry.
+   * @returns The agreement download URL and optional expiry.
    */
   async getAgreementContentV2(
     { env, mode }: RampRuntimeContext,

@@ -1,8 +1,7 @@
 export { RingsAdapterError } from "./adapter-error";
 export {
-  type RingsUpstreamEnv,
-  resolveRingsGateway,
-  ringsUpstreamsConfigured,
+  createConfiguredRingsGateway,
+  resolvePersistedRingsGateway,
   UnconfiguredRingsGateway,
 } from "./gateway";
 export {

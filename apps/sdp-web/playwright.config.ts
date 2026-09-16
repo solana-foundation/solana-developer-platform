@@ -53,22 +53,27 @@ export default defineConfig({
           },
         ]
       : []),
-    {
-      command: webCommand,
-      cwd: __dirname,
-      url: env.baseURL,
-      reuseExistingServer: false,
-      env: {
-        ...resolveProcessEnv(),
-        ...env.webServerEnv,
-        PLAYWRIGHT_NEXT_DIST_DIR: nextDistDir,
-        SDP_API_BASE_URL: apiBaseUrl,
-        NEXT_PUBLIC_SDP_API_BASE_URL: apiBaseUrl,
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: 180_000,
-    },
+    // A deployed dashboard (stage smoke) is already serving; nothing to start locally.
+    ...(!env.deployedWeb
+      ? [
+          {
+            command: webCommand,
+            cwd: __dirname,
+            url: env.baseURL,
+            reuseExistingServer: false,
+            env: {
+              ...resolveProcessEnv(),
+              ...env.webServerEnv,
+              PLAYWRIGHT_NEXT_DIST_DIR: nextDistDir,
+              SDP_API_BASE_URL: apiBaseUrl,
+              NEXT_PUBLIC_SDP_API_BASE_URL: apiBaseUrl,
+            },
+            stdout: "pipe" as const,
+            stderr: "pipe" as const,
+            timeout: 180_000,
+          },
+        ]
+      : []),
   ],
   projects: [
     {
@@ -81,6 +86,7 @@ export default defineConfig({
     {
       name: "auth-setup",
       testMatch: /auth\.global\.setup\.ts/,
+      retries: useExternalApi ? 2 : 0,
       use: {
         ...devices["Desktop Chrome"],
       },
@@ -120,6 +126,7 @@ export default defineConfig({
       name: "gcp-read-only",
       testMatch: /.*gcp-read-only.*\.e2e\.spec\.ts/,
       dependencies: ["auth-setup"],
+      retries: useExternalApi ? 2 : 0,
       use: {
         ...devices["Desktop Chrome"],
         storageState: authStatePath,

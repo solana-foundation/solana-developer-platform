@@ -9,6 +9,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./blocked-address": {
+      "types": "./src/blocked-address.ts",
+      "import": "./src/blocked-address.ts",
+      "default": "./src/blocked-address.ts"
+    },
     "./byok": {
       "types": "./src/byok.ts",
       "import": "./src/byok.ts",

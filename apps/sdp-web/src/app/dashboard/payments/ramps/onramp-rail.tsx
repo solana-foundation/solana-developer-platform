@@ -27,6 +27,8 @@ function onrampPrimaryLabel(
       return t("DashboardPayments.verificationPending");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
+    case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
+      return t("DashboardPayments.bvnk.acceptAgreements");
     default:
       return t("DashboardPayments.counterparty.next");
   }
@@ -71,14 +73,16 @@ export function OnrampRail({
     onExit,
   });
 
+  const onOnboardingStep =
+    wizard.currentStepId === "PROVIDER" || wizard.currentStepId === "REQUIREMENTS";
+
   const verificationUrl =
-    wizard.currentStepId === "PROVIDER" &&
-    wizard.onboarding?.status === "customer_verification_required"
+    onOnboardingStep && wizard.onboarding?.status === "customer_verification_required"
       ? wizard.onboarding.verificationUrl
       : undefined;
 
   const verificationPending =
-    wizard.currentStepId === "PROVIDER" &&
+    onOnboardingStep &&
     (wizard.onboarding?.status === "customer_verifying" ||
       wizard.onboarding?.status === "customer_funding_account_provisioning" ||
       wizard.onboarding?.status === "funding_account_provisioning");
@@ -89,7 +93,8 @@ export function OnrampRail({
   ];
   const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const showInlineStatus = wizard.onTransactionStage && Boolean(wizard.quote);
-  const transferState = getRampTransferState(wizard.transferStatus?.status);
+  const transferState =
+    wizard.transferStatus === undefined ? null : getRampTransferState(wizard.transferStatus.status);
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
@@ -109,9 +114,7 @@ export function OnrampRail({
       walletsError={wizard.liveWalletsError}
       onPrimary={onrampPrimaryAction(wizard, verificationUrl)}
       onSecondary={wizard.handleSecondary}
-      counterpartyDialogOpen={false}
-      setCounterpartyDialogOpen={() => {}}
-      onCounterpartyCreated={() => {}}
+      counterpartyDialog={null}
       summary={
         wizard.fields.provider === null ? undefined : <WizardSummaryList details={summaryDetails} />
       }
@@ -130,15 +133,19 @@ export function OnrampRail({
         ) : undefined
       }
       secondaryLabel={
-        wizard.onTransactionStage && transferState.cancelable
+        wizard.onTransactionStage && transferState !== null && transferState.cancelable
           ? t("DashboardPayments.counterparty.cancel")
           : undefined
       }
-      confirmSecondary={wizard.onTransactionStage && transferState.cancelable}
+      confirmSecondary={
+        wizard.onTransactionStage && transferState !== null && transferState.cancelable
+      }
       secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading}
-      hideSecondary={wizard.onTransactionStage && !transferState.cancelable}
+      hideSecondary={
+        wizard.onTransactionStage && transferState !== null && !transferState.cancelable
+      }
       footerActions={
-        transferState.terminal ? (
+        transferState !== null && transferState.terminal ? (
           <Button asChild type="button">
             <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
               {t("DashboardPayments.goToTransaction")}

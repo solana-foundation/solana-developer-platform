@@ -33,7 +33,7 @@ function baseToken(overrides: Partial<IssuanceTokenView> = {}): IssuanceTokenVie
     requiresAllowlist: false,
     description: null,
     uri: null,
-    signingWalletId: null,
+    signingCustodyWalletId: null,
     mintAuthority: null,
     metadataAuthority: null,
     freezeAuthority: null,
@@ -47,6 +47,7 @@ function wallet(publicKey: string): PaymentsDashboardWallet {
   return {
     id: `id_${publicKey}`,
     walletId: `wid_${publicKey}`,
+    isRuntimeExecutionAllowed: true,
     publicKey,
     label: "Treasury",
   };
@@ -146,6 +147,7 @@ describe("buildOverviewHeroData", () => {
       provider: null,
       publicKey: MANAGED,
       walletId: `wid_${MANAGED}`,
+      restricted: false,
     });
   });
 
@@ -192,7 +194,7 @@ describe("buildOverviewHeroData", () => {
   it("resolves the signing wallet to its custody wallet", () => {
     const signer = wallet(MANAGED);
     const data = buildOverviewHeroData(
-      baseToken({ signingWalletId: signer.walletId }),
+      baseToken({ signingCustodyWalletId: signer.id }),
       [signer],
       t,
       "en"
@@ -204,15 +206,15 @@ describe("buildOverviewHeroData", () => {
       provider: null,
       publicKey: MANAGED,
       walletId: `wid_${MANAGED}`,
+      restricted: false,
     });
   });
 
-  // A signer is always a custody wallet (the API takes a walletId, resolved via
-  // createOrgSigner), so the only non-managed states are "none pinned" and
+  // A signer is always an exact custody wallet, so the only non-managed states are "none pinned" and
   // "pinned but unresolvable".
   it("reports the project-default signer when no wallet is pinned", () => {
     const data = buildOverviewHeroData(
-      baseToken({ signingWalletId: null }),
+      baseToken({ signingCustodyWalletId: null }),
       [wallet(MANAGED)],
       t,
       "en"
@@ -223,17 +225,22 @@ describe("buildOverviewHeroData", () => {
 
   it("flags a pinned signer that no longer resolves to a custody wallet", () => {
     const data = buildOverviewHeroData(
-      baseToken({ signingWalletId: "wlt_removed" }),
+      baseToken({ signingCustodyWalletId: "cwlt_removed" }),
       [wallet(MANAGED)],
       t,
       "en"
     );
 
-    expect(data.signerWallet).toEqual({ state: "unresolved", walletId: "wlt_removed" });
+    expect(data.signerWallet).toEqual({ state: "unresolved", walletId: "cwlt_removed" });
   });
 
   it("stays neutral for a pinned signer while the custody wallets are unknown", () => {
-    const data = buildOverviewHeroData(baseToken({ signingWalletId: "wlt_1" }), [], t, "en");
+    const data = buildOverviewHeroData(
+      baseToken({ signingCustodyWalletId: "cwlt_1" }),
+      [],
+      t,
+      "en"
+    );
 
     expect(data.signerWallet).toBeNull();
   });
@@ -345,6 +352,20 @@ describe("toWalletIdentity", () => {
       provider: null,
       publicKey: signer.publicKey,
       walletId: signer.walletId,
+      restricted: false,
+    });
+  });
+
+  it("flags a managed wallet whose signing is restricted, and only that one", () => {
+    const signer = wallet("MANAGEDpubkey1111111111111111111111111111111");
+    expect(
+      toWalletIdentity({ ...signer, isRuntimeExecutionAllowed: false }, null, {
+        unresolvedAs: "external",
+        unlabeled,
+      })
+    ).toMatchObject({ state: "managed", restricted: true });
+    expect(toWalletIdentity(signer, null, { unresolvedAs: "external", unlabeled })).toMatchObject({
+      restricted: false,
     });
   });
 

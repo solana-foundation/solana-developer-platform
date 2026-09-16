@@ -49,8 +49,19 @@ export interface DatabaseClient extends DatabaseExecutor {
     lockKey: string,
     callback: (tx: DatabaseExecutor) => Promise<T>,
     afterCommit: (result: T) => Promise<void>,
-    afterRollback?: (result: T) => Promise<void>
+    afterRollback?: (result: T) => Promise<void>,
+    options?: { wait?: boolean }
   ): Promise<T>;
+}
+
+export class SessionLockUnavailableError extends Error {
+  readonly lockKey: string;
+
+  constructor(lockKey: string) {
+    super(`session lock is already held: ${lockKey}`);
+    this.name = "SessionLockUnavailableError";
+    this.lockKey = lockKey;
+  }
 }
 
 interface QueryArgs {
@@ -268,7 +279,8 @@ abstract class BasePostgresClient extends PostgresExecutor implements DatabaseCl
     lockKey: string,
     callback: (tx: DatabaseExecutor) => Promise<T>,
     afterCommit: (result: T) => Promise<void>,
-    afterRollback?: (result: T) => Promise<void>
+    afterRollback?: (result: T) => Promise<void>,
+    options?: { wait?: boolean }
   ): Promise<T>;
 }
 
@@ -371,7 +383,8 @@ class PooledPostgresClient extends BasePostgresClient {
     lockKey: string,
     callback: (tx: DatabaseExecutor) => Promise<T>,
     afterCommit: (result: T) => Promise<void>,
-    afterRollback?: (result: T) => Promise<void>
+    afterRollback?: (result: T) => Promise<void>,
+    options?: { wait?: boolean }
   ): Promise<T> {
     const client = await this.pool.connect();
     let releaseError: Error | undefined;
@@ -379,13 +392,25 @@ class PooledPostgresClient extends BasePostgresClient {
     let lockHeld = false;
     let callbackCompleted = false;
     let callbackResult: T | undefined;
+    const wait = options?.wait ?? true;
 
     try {
-      await client.query({
-        // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
-        text: "SELECT pg_advisory_lock(hashtext($1))",
-        values: [lockKey],
-      });
+      if (wait) {
+        await client.query({
+          // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+          text: "SELECT pg_advisory_lock(hashtext($1))",
+          values: [lockKey],
+        });
+      } else {
+        const lockResult = await client.query({
+          // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+          text: "SELECT pg_try_advisory_lock(hashtext($1)) AS acquired",
+          values: [lockKey],
+        });
+        if (lockResult.rows[0]?.acquired !== true) {
+          throw new SessionLockUnavailableError(lockKey);
+        }
+      }
       lockHeld = true;
 
       // Marked open before the combined BEGIN + identity stamp: if the stamp

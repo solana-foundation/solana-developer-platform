@@ -5,9 +5,9 @@ import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { MuralWebhookProcessor } from "./mural";
-import type { AppContext } from "./processor";
 
 function context(input: {
   headers?: Record<string, string>;
@@ -96,7 +96,6 @@ describe("MuralWebhookProcessor.process", () => {
   const muralOrganizationId = "mural_org_webhook_test";
   const accountId = "mural_account_webhook_test";
   const processor = new MuralWebhookProcessor();
-  const appContext = { env } as unknown as AppContext;
 
   async function seedTransfer(id: string): Promise<void> {
     const now = new Date().toISOString();
@@ -156,20 +155,14 @@ describe("MuralWebhookProcessor.process", () => {
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(userId, "mural-webhook@example.com", 1, "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          projectId,
-          organizationId,
-          "Mural Webhook Project",
-          "mural-webhook-project",
-          "sandbox",
-          "active",
-          userId
-        ),
+    ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId,
+      createdBy: userId,
+      members: [],
+      ids: { sandbox: projectId, production: `${projectId}_production` },
+    });
+    await getDb(env).batch([
       getDb(env)
         .prepare(
           `INSERT INTO counterparties (
@@ -194,7 +187,7 @@ describe("MuralWebhookProcessor.process", () => {
   it("consumes a signed account-credit delivery once", async () => {
     await seedTransfer("xfr_mural_first");
 
-    await processor.process(appContext, "sandbox", {
+    await processor.process(env, "sandbox", {
       kind: "account_credited",
       organizationId: muralOrganizationId,
       accountId,
@@ -202,7 +195,7 @@ describe("MuralWebhookProcessor.process", () => {
       deliveryId: "delivery_mural_once",
     });
     await seedTransfer("xfr_mural_second");
-    await processor.process(appContext, "sandbox", {
+    await processor.process(env, "sandbox", {
       kind: "account_credited",
       organizationId: muralOrganizationId,
       accountId,
@@ -218,7 +211,7 @@ describe("MuralWebhookProcessor.process", () => {
     await seedTransfer("xfr_mural_ambiguous_a");
     await seedTransfer("xfr_mural_ambiguous_b");
 
-    await processor.process(appContext, "sandbox", {
+    await processor.process(env, "sandbox", {
       kind: "account_credited",
       organizationId: muralOrganizationId,
       accountId,
@@ -259,7 +252,7 @@ describe("MuralWebhookProcessor.process", () => {
       .bind(organizationId, projectId, "wallet_mural_webhook_test", counterpartyId)
       .run();
 
-    await processor.process(appContext, "sandbox", {
+    await processor.process(env, "sandbox", {
       kind: "account_credited",
       organizationId: muralOrganizationId,
       accountId,
@@ -300,7 +293,7 @@ describe("MuralWebhookProcessor.process", () => {
     ).rejects.toSatisfy(isPostgresUniqueViolation);
     await seedTransfer("xfr_mural_ambiguous_tenant");
 
-    await processor.process(appContext, "sandbox", {
+    await processor.process(env, "sandbox", {
       kind: "account_credited",
       organizationId: muralOrganizationId,
       accountId,

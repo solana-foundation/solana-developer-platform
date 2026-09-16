@@ -14,7 +14,9 @@ import {
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
+  getTransactionEncoder,
   type Signature,
+  type Transaction,
 } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -28,6 +30,12 @@ import {
 } from "@/db/repositories/sponsorship-budget.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
+import {
+  assertSponsorSignedSameMessage,
+  SponsorMessageMismatchError,
+  SponsorResponseUndecodableError,
+  SponsorResponseUnusableError,
+} from "@/services/sponsorship-integrity";
 import type { Env } from "@/types/env";
 import type {
   OwnedSignedSubmission,
@@ -55,15 +63,14 @@ type BudgetRepository = Pick<
   | "tripGlobalBreaker"
 >;
 
-export function getFullySignedSubmission(signedTransaction: Uint8Array): OwnedSignedSubmission {
-  const decoded = getTransactionDecoder().decode(signedTransaction);
+export function getFullySignedSubmission(decoded: Transaction): OwnedSignedSubmission {
   try {
     assertIsFullySignedTransaction(decoded);
   } catch {
     throw new Error("Sponsored transaction is not fully signed");
   }
   return {
-    signedTransaction,
+    signedTransaction: new Uint8Array(getTransactionEncoder().encode(decoded)),
     signature: getSignatureFromTransaction(decoded),
   };
 }
@@ -86,6 +93,8 @@ type AdmissionResult = {
   replay: SponsorshipReservation | null;
   cancel: AdmissionCancel | null;
   settlement: AdmissionSettlement | null;
+  feePayer: Address;
+  requested: Transaction;
 };
 type DurableAdmission =
   | { kind: "owned" | "replay"; result: AdmissionResult }
@@ -93,6 +102,7 @@ type DurableAdmission =
 type AdmissionContext = {
   id: string;
   network: SponsorshipNetwork;
+  decoded: Transaction;
   amount: number;
   transactionDigest: string;
   feePayer: string;
@@ -194,32 +204,98 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     return this.provider.getFeePayer();
   }
 
+  private async verifySponsorResponse(
+    sponsorSigned: Uint8Array,
+    reservation: AdmissionResult
+  ): Promise<Transaction> {
+    try {
+      return await assertSponsorSignedSameMessage({
+        requested: reservation.requested,
+        sponsorSigned,
+        sponsor: reservation.feePayer,
+      });
+    } catch (error) {
+      if (error instanceof SponsorResponseUndecodableError) {
+        return this.accountingUnavailable(
+          resolveNetwork(this.env),
+          "Signed sponsorship result could not be reconstructed",
+          "Sponsor response bytes were undecodable",
+          error
+        );
+      }
+      if (error instanceof SponsorResponseUnusableError) {
+        await this.releaseDeterministic(reservation, error);
+      } else {
+        await this.markAmbiguous(reservation, error);
+      }
+      throw error;
+    }
+  }
+
+  private async replayedSponsorTransaction(reservation: AdmissionResult): Promise<Uint8Array> {
+    const stored = reservation.replay?.signedTransaction;
+    if (!stored) {
+      throw new FeePaymentError(
+        "Stored sponsored transaction does not match the requested message",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    const replayed = decodeBase64(stored);
+    try {
+      await assertSponsorSignedSameMessage({
+        requested: reservation.requested,
+        sponsorSigned: replayed,
+        sponsor: reservation.feePayer,
+      });
+    } catch (error) {
+      logEvent("error", {
+        event: "sdp_api_sponsorship_replay_integrity_failure",
+        reservation_id: reservation.id,
+        failure_class:
+          error instanceof SponsorMessageMismatchError
+            ? "mismatch"
+            : error instanceof SponsorResponseUnusableError
+              ? "unusable"
+              : error instanceof SponsorResponseUndecodableError
+                ? "undecodable"
+                : "invalid_signature",
+        organization_id: this.scope.organizationId,
+        project_id: this.scope.projectId,
+        reason: describeError(error),
+      });
+      throw new FeePaymentError(
+        "Stored sponsored transaction does not match the requested message",
+        "PROVIDER_NOT_AVAILABLE",
+        error instanceof Error ? error : undefined
+      );
+    }
+    return replayed;
+  }
+
   async signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array> {
     const reservation = await this.admit(transaction, "sign");
     if (reservation.replay?.signedTransaction) {
-      return decodeBase64(reservation.replay.signedTransaction);
+      return this.replayedSponsorTransaction(reservation);
     }
     let signed: Uint8Array;
     try {
       signed = await this.provider.signAsFeePayer(transaction);
     } catch (error) {
-      // Once custody has been asked to sign, no error proves that a usable
-      // signature was not produced before the response was lost. Retain the
-      // full reservation and block an unsafe replay.
+      if (isStructuredProviderRejection(error)) {
+        // Kora answered with a policy verdict, so nothing was signed and the
+        // same bytes will be refused again. Release so a corrected retry is
+        // not blocked by a charged_unknown row.
+        await this.releaseDeterministic(reservation, error);
+        throw error;
+      }
+      // Otherwise, once custody has been asked to sign, no error proves that a
+      // usable signature was not produced before the response was lost.
+      // Retain the full reservation and block an unsafe replay.
       await this.markAmbiguous(reservation, error);
       throw error;
     }
-    let signature: Signature;
-    try {
-      signature = getSignatureFromTransaction(getTransactionDecoder().decode(signed));
-    } catch (error) {
-      return this.accountingUnavailable(
-        resolveNetwork(this.env),
-        "Signed sponsorship result could not be reconstructed",
-        "Signed sponsorship signature extraction failed",
-        error
-      );
-    }
+    const signedTransaction = await this.verifySponsorResponse(signed, reservation);
+    const signature = getSignatureFromTransaction(signedTransaction);
     let result: SignaturePersistResult;
     try {
       result = await this.repository.markSigned(
@@ -269,11 +345,18 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         "PROVIDER_NOT_AVAILABLE"
       );
     }
+    let signedTransaction: Uint8Array;
+    try {
+      signedTransaction = await this.provider.signAsFeePayer(transaction);
+    } catch (error) {
+      await this.markAmbiguous(reservation, error);
+      throw error;
+    }
+    const decoded = await this.verifySponsorResponse(signedTransaction, reservation);
     let submission: PreparedOwnedSubmission;
     try {
-      const signedTransaction = await this.provider.signAsFeePayer(transaction);
       submission = {
-        ...getFullySignedSubmission(signedTransaction),
+        ...getFullySignedSubmission(decoded),
         releaseDefinitelyUnbroadcast: (error) =>
           this.releaseDeterministic(reservation, error, "after_submission"),
       };
@@ -466,6 +549,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     return {
       id,
       network,
+      decoded: decodedTransaction,
       amount,
       transactionDigest,
       feePayer: providerConfig.signerAddress,
@@ -495,6 +579,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         replay: durableReplay,
         cancel: null,
         settlement: null,
+        feePayer: context.feePayer as Address,
+        requested: context.decoded,
       };
     }
     if (durableReplay?.status === "charged_unknown") {
@@ -676,6 +762,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         replay: null,
         cancel,
         settlement: this.settlementInput(context, attempt),
+        feePayer: context.feePayer as Address,
+        requested: context.decoded,
       },
     });
     try {
@@ -705,6 +793,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
             replay: existing,
             cancel: null,
             settlement: null,
+            feePayer: context.feePayer as Address,
+            requested: context.decoded,
           },
         };
       }
@@ -929,10 +1019,22 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 function isDeterministicProviderRejection(error: unknown): boolean {
   return (
     error instanceof FeePaymentError &&
-    ["SIGNING_FAILED", "TRANSACTION_TOO_LARGE", "INSUFFICIENT_BALANCE", "RATE_LIMITED"].includes(
-      error.code
-    )
+    [
+      "PROVIDER_REJECTED",
+      "SIGNING_FAILED",
+      "TRANSACTION_TOO_LARGE",
+      "INSUFFICIENT_BALANCE",
+      "RATE_LIMITED",
+    ].includes(error.code)
   );
+}
+
+// Narrower than the pre-send set above: only a structured provider verdict
+// proves that a sign-only request produced no signature. SIGNING_FAILED and
+// the balance/limit codes can also come from a custody exception after
+// signing, so they stay ambiguous on the sign-only path.
+function isStructuredProviderRejection(error: unknown): boolean {
+  return error instanceof FeePaymentError && error.code === "PROVIDER_REJECTED";
 }
 
 function reservationHasResponse(

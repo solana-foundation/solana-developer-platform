@@ -2,10 +2,13 @@ import { HeliusRingsError } from "@sdp/helius-rings";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const buildRegistrationTransaction = vi.fn();
+const buildSetMergingEnabledTransaction = vi.fn();
 const fetchUserRecord = vi.fn();
 
 vi.mock("@heliuslabs/zolana/wallet", () => ({
   buildRegistrationTransaction: (...args: unknown[]) => buildRegistrationTransaction(...args),
+  buildSetMergingEnabledTransaction: (...args: unknown[]) =>
+    buildSetMergingEnabledTransaction(...args),
   fetchUserRecord: (...args: unknown[]) => fetchUserRecord(...args),
 }));
 
@@ -16,39 +19,26 @@ vi.mock("@solana/kit", async (importOriginal) => ({
   getTransactionEncoder: () => ({ encode: () => new Uint8Array([1, 2, 3]) }),
 }));
 
-const { createDeterministicMaterialSource } = await import("./deterministic-ka/index.js");
-const { deriveMaterial } = await import("./deterministic-ka/derivation.js");
 const { provisionRingsIdentity } = await import("./provision.js");
+const {
+  honestRecord: derivedRecord,
+  TEST_OWNER,
+  TEST_REQUEST,
+  testMaterialSource,
+} = await import("./test/shielded-identity-fixtures.js");
 
-const SEED = new Uint8Array(32).fill(7);
-const OWNER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
-const REQUEST = {
-  organizationId: "org_1",
-  projectId: "proj_1",
-  walletId: "hrw_1",
-  owner: OWNER,
-};
+const OWNER = TEST_OWNER;
+const REQUEST = TEST_REQUEST;
 
-/** The record the seed above genuinely derives, so a match is a real match. */
-async function honestRecord(mergingEnabled: boolean) {
-  const material = await deriveMaterial(SEED, REQUEST);
-  try {
-    return {
-      owner: OWNER,
-      nullifierPublicKey: material.nullifierKey.publicKey(),
-      viewingPublicKey: material.viewingKey.publicKey().toBytes(),
-      mergingEnabled,
-      bump: 255,
-    };
-  } finally {
-    material.destroy();
-  }
+/** The record the test signer genuinely derives, so a match is a real match. */
+function honestRecord() {
+  return derivedRecord({ mergingEnabled: true, request: REQUEST });
 }
 
 function deps(overrides: Partial<Parameters<typeof provisionRingsIdentity>[0]> = {}) {
   return {
     client: { confirmTransaction: vi.fn().mockResolvedValue(1n) } as never,
-    material: createDeterministicMaterialSource({ seed: SEED }),
+    material: testMaterialSource(),
     signTransaction: vi.fn(async (unsigned: string) => `signed:${unsigned}`),
     submitTransaction: vi.fn(async (signed: string) => `sig-for-${signed.length}`),
     organizationId: "org_1",
@@ -62,40 +52,36 @@ describe("provisionRingsIdentity", () => {
     vi.clearAllMocks();
   });
 
-  it("registers and verifies the record without enabling merging", async () => {
+  it("registers and verifies the record", async () => {
     buildRegistrationTransaction.mockResolvedValue({ kind: "registration" });
-    fetchUserRecord
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(await honestRecord(false));
+    fetchUserRecord.mockResolvedValueOnce(undefined).mockResolvedValueOnce(await honestRecord());
 
     const wiring = deps();
     const result = await provisionRingsIdentity(wiring, { walletId: "hrw_1", owner: OWNER });
 
     expect(result.registrationSignatures).toHaveLength(1);
-    expect(result.mergingEnabled).toBe(false);
     expect(result.materialTag).toBe("live");
     expect(result.identity.owner).toBe(OWNER);
-    // Custody signs only registration; product-disabled merge is not provisioned.
+    // Registration is the only transaction custody signs on this path.
     expect(wiring.signTransaction).toHaveBeenCalledTimes(1);
     expect(wiring.submitTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it("sends nothing when the identity is already registered with merging disabled", async () => {
-    const record = await honestRecord(false);
+  it("sends nothing when the identity is already registered", async () => {
+    const record = await honestRecord();
     fetchUserRecord.mockResolvedValue(record);
 
     const wiring = deps();
     const result = await provisionRingsIdentity(wiring, { walletId: "hrw_1", owner: OWNER });
 
     expect(result.registrationSignatures).toEqual([]);
-    expect(result.mergingEnabled).toBe(false);
     expect(buildRegistrationTransaction).not.toHaveBeenCalled();
     expect(wiring.signTransaction).not.toHaveBeenCalled();
     expect(wiring.submitTransaction).not.toHaveBeenCalled();
   });
 
   it("refuses to provision over a record publishing different keys", async () => {
-    const foreign = await honestRecord(true);
+    const foreign = await honestRecord();
     fetchUserRecord.mockResolvedValue({
       ...foreign,
       nullifierPublicKey: new Uint8Array(32).fill(9),
@@ -127,7 +113,7 @@ describe("provisionRingsIdentity", () => {
       order.push("fetch");
       return order.filter((step) => step === "fetch").length === 1
         ? undefined
-        : await honestRecord(false);
+        : await honestRecord();
     });
 
     await provisionRingsIdentity(deps({ client: { confirmTransaction } as never }), {
@@ -139,5 +125,28 @@ describe("provisionRingsIdentity", () => {
     // pre-registration state and reject a provision that in fact succeeded.
     expect(order.at(-1)).toBe("fetch");
     expect(order.at(-2)).toBe("confirm");
+  });
+
+  it("enables merging when a freshly registered record still refuses it", async () => {
+    const disabled = { ...(await honestRecord()), mergingEnabled: false };
+    const enabled = { ...disabled, mergingEnabled: true };
+    buildRegistrationTransaction.mockResolvedValue({ kind: "registration" });
+    buildSetMergingEnabledTransaction.mockResolvedValue({ kind: "set-merging" });
+    fetchUserRecord
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(disabled)
+      .mockResolvedValueOnce(disabled)
+      .mockResolvedValueOnce(enabled);
+
+    const wiring = deps();
+    const result = await provisionRingsIdentity(wiring, { walletId: "hrw_1", owner: OWNER });
+
+    // Registration cannot set the flag, so a second custody-signed transaction
+    // is what makes the new wallet mergeable. Its signature has to be in the
+    // result, or a crash after enable would look like a wallet that never did.
+    expect(result.registrationSignatures).toHaveLength(2);
+    expect(buildSetMergingEnabledTransaction).toHaveBeenCalledTimes(1);
+    expect(wiring.signTransaction).toHaveBeenCalledTimes(2);
+    expect(wiring.submitTransaction).toHaveBeenCalledTimes(2);
   });
 });

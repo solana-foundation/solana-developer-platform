@@ -19,9 +19,11 @@ interface RampWizardShellProps {
   walletsError: string | null;
   onPrimary: () => void;
   onSecondary: () => void;
-  counterpartyDialogOpen: boolean;
-  setCounterpartyDialogOpen: (open: boolean) => void;
-  onCounterpartyCreated: (created: Counterparty) => void;
+  counterpartyDialog: {
+    open: boolean;
+    setOpen: (open: boolean) => void;
+    onCreated: (created: Counterparty) => void;
+  } | null;
   children: ReactNode;
   /** Rendered top-right, next to the step title (e.g. the "Powered by" badge). */
   header?: ReactNode;
@@ -46,9 +48,7 @@ export function RampWizardShell({
   walletsError,
   onPrimary,
   onSecondary,
-  counterpartyDialogOpen,
-  setCounterpartyDialogOpen,
-  onCounterpartyCreated,
+  counterpartyDialog,
   children,
   header,
   summary,
@@ -128,11 +128,13 @@ export function RampWizardShell({
         </div>
       </WizardFrame>
 
-      <CounterpartyCreateDialog
-        open={counterpartyDialogOpen}
-        onClose={() => setCounterpartyDialogOpen(false)}
-        onCreated={onCounterpartyCreated}
-      />
+      {counterpartyDialog === null ? null : (
+        <CounterpartyCreateDialog
+          open={counterpartyDialog.open}
+          onClose={() => counterpartyDialog.setOpen(false)}
+          onCreated={counterpartyDialog.onCreated}
+        />
+      )}
 
       <CancelTransactionDialog
         open={cancelConfirmOpen && cancelConfirmationAvailable}

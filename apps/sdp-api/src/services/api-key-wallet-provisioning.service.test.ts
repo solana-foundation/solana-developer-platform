@@ -8,6 +8,7 @@ import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-cre
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import { provisionApiKeyWallet } from "./api-key-wallet-provisioning.service";
@@ -401,19 +402,14 @@ async function seedFixture(): Promise<void> {
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind("usr_api_key_provisioning", "api-key-provisioning@example.com"),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'API key provisioning', 'api-key-provisioning', 'sandbox', 'active', ?)`
-      )
-      .bind(PROJECT_ID, ORGANIZATION_ID, "usr_api_key_provisioning"),
-    db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Foreign API key provisioning', 'api-key-provisioning-foreign',
-                 'sandbox', 'active', ?)`
-      )
-      .bind(FOREIGN_PROJECT_ID, ORGANIZATION_ID, "usr_api_key_provisioning"),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: "usr_api_key_provisioning",
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: FOREIGN_PROJECT_ID },
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO api_keys

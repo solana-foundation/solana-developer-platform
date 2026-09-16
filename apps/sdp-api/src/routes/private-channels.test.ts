@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -56,20 +57,14 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_PROJECT.id,
-        TEST_ORG.id,
-        "Test Project",
-        TEST_PROJECT.slug,
-        "sandbox",
-        "active",
-        TEST_USER.id
-      ),
+  ]);
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+  });
+  await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -379,6 +374,66 @@ describe("Private Channels routes", () => {
     );
     const getBody = (await getRes.json()) as { data: PrivateChannelInstanceEnvelope };
     expect(getBody.data.instance).toBeNull();
+  });
+
+  it("DELETE /instance drains first: in-flight movement → 409, admission closed, retry deletes", async () => {
+    probeConnectionMock.mockResolvedValueOnce(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    const instanceId = createdBody.data.instance.id;
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_deposits (
+             id, organization_id, project_id, instance_id, wallet_id,
+             depositor, recipient, mint, amount, context
+           ) VALUES ('pcd_inflight', ?, ?, ?, 'w1', 'dep1', 'rec1', 'mint1', '1', '{}'::jsonb)`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId)
+      .run();
+
+    // In-flight movement: deletion refuses but the drain is durable.
+    const refused = await app.request(
+      "/v1/private-channels/instance",
+      { method: "DELETE", headers: authHeaders() },
+      env
+    );
+    expect(refused.status).toBe(409);
+    const refusedBody = (await refused.json()) as { error: { message: string } };
+    expect(refusedBody.error.message).toContain("draining for deletion");
+
+    // The barrier is atomic with admission: the guarded INSERT refuses now.
+    const admitted = await db
+      .prepare(
+        `INSERT INTO private_channel_deposits (
+             id, organization_id, project_id, instance_id, wallet_id,
+             depositor, recipient, mint, amount, context
+           )
+           SELECT 'pcd_late', ?, ?, ?, 'w1', 'dep1', 'rec1', 'mint1', '1', '{}'::jsonb
+            WHERE EXISTS (
+              SELECT 1 FROM private_channel_instances i
+               WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
+            )
+        RETURNING id`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId, instanceId)
+      .first<{ id: string }>();
+    expect(admitted).toBeNull();
+
+    // The in-flight movement settles; the retry now deletes cleanly.
+    await db
+      .prepare("UPDATE private_channel_deposits SET status = 'failed' WHERE id = 'pcd_inflight'")
+      .run();
+    const retried = await app.request(
+      "/v1/private-channels/instance",
+      { method: "DELETE", headers: authHeaders() },
+      env
+    );
+    expect(retried.status).toBe(200);
   });
 
   it("DELETE /instance returns 404 when there is no active row", async () => {

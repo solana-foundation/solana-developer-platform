@@ -47,6 +47,12 @@ export interface OrganizationSettings {
    */
   legacyAllowedIpAddresses?: unknown;
   providerOverrides?: OrganizationProviderOverrides;
+  /**
+   * Set from Clerk org `private_metadata.sdp.enableProductionProject` by the
+   * Clerk webhook sync; `true` unlocks selecting production projects in the
+   * dashboard.
+   */
+  enableProductionProject?: boolean;
   customRateLimits?: {
     requestsPerMinute?: number;
     requestsPerDay?: number;

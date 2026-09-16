@@ -1,6 +1,6 @@
 import type {
   PaymentTransferSummary,
-  TokenTransaction,
+  PublicTokenTransaction,
   TokenTransactionListItem,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -64,7 +64,7 @@ function resolvePaymentAddress(transfer: PaymentTransferSummary): string | undef
   return transfer.destination ?? transfer.source;
 }
 
-function resolveIssuanceAddress(transaction: TokenTransaction): string | undefined {
+function resolveIssuanceAddress(transaction: PublicTokenTransaction): string | undefined {
   for (const key of [
     "source",
     "destination",
@@ -82,7 +82,7 @@ function resolveIssuanceAddress(transaction: TokenTransaction): string | undefin
   return undefined;
 }
 
-function resolveIssuanceAmount(transaction: TokenTransaction): string | undefined {
+function resolveIssuanceAmount(transaction: PublicTokenTransaction): string | undefined {
   const amount = readTransactionParam(transaction.params, "amount");
   return amount === null ? undefined : String(amount);
 }
@@ -130,13 +130,13 @@ export function buildWalletActivityRows(
 
 export async function fetchWalletIssuanceActivity(
   request: SdpApiClient["request"],
-  walletId: string,
+  custodyWalletId: string,
   t: Translate,
   pageSize = WALLET_ACTIVITY_LIMIT
 ): Promise<FetchResult<TokenTransactionListItem[]>> {
   try {
     const query = new URLSearchParams({
-      walletId,
+      custodyWalletId,
       page: "1",
       pageSize: String(pageSize),
     });
@@ -178,7 +178,7 @@ export async function loadWalletActivity(
       custodyWalletId: wallet.custodyWalletId,
       includeObserved: true,
     }),
-    fetchWalletIssuanceActivity(request, wallet.providerWalletId, t, pageSize),
+    fetchWalletIssuanceActivity(request, wallet.custodyWalletId, t, pageSize),
   ]);
 
   const activityRows = buildWalletActivityRows(

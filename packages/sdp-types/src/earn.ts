@@ -140,13 +140,12 @@ export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
 /**
  * Display labels ONLY — never a matching vocabulary. Order is irrelevant and
  * adding an entry can never change how any provider derives a curator: that
- * derivation is provider-specific and keeps its own vocabulary (Ground's lives
- * in `@sdp/earn` providers/ground/client.ts). Keeping the two apart is what
- * makes "onboarding a curator is a data change" literally true.
+ * derivation is provider-specific and keeps its own vocabulary. Keeping the
+ * two apart is what makes "onboarding a curator is a data change" literally
+ * true.
  */
 export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
-  // Curator houses. A house is chain-agnostic because Ground can route Solana
-  // USDC into sources it hosts elsewhere.
+  // Curator houses.
   gauntlet: "Gauntlet",
   steakhouse: "Steakhouse Financial",
   sentora: "Sentora",
@@ -158,15 +157,14 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   superstate: "Superstate",
   maple: "Maple",
   centrifuge: "Centrifuge",
-  // Ids Ground reports when a protocol or fund curates its own vaults;
-  // `g<ticker>` is Ground's own wrapper of a Superstate fund. Some stored rows
-  // (Aave/Morpho) are hidden by strategy API policy, but inventory tooling still
-  // renders their metadata.
+  // Ids providers report when a protocol or fund curates its own vaults. Some
+  // stored rows (Aave/Morpho) are hidden by strategy API policy, but inventory
+  // tooling still renders their metadata.
   kamino: "Kamino",
   jupiter: "Jupiter",
+  // The USDY issuer; `providers/ondo/client.ts` reports it as the row's curator.
+  ondo: "Ondo",
   aave_v3: "Aave V3",
-  gustb: "Superstate USTB",
-  guscc: "Superstate USCC",
 };
 
 export function earnCuratorLabel(curator: string): string {
@@ -263,6 +261,20 @@ export interface EarnStrategy {
    * of a platform-global catalogue row.
    */
   fundable: boolean;
+  /**
+   * Whether SDP's treasury vault flow would pay the network fee (and any
+   * share-ATA rent) for a movement on this strategy from **the caller's
+   * environment**, derived per request and never stored, like `fundable`.
+   *
+   * This is the SAME gate execution applies (`resolveVaultSponsorship`), so it
+   * is the field a client reads for honest fee copy. It deliberately does not
+   * ride on the deposit quote: providers with no quote-derived floor (Kamino)
+   * never fetch a quote, and a flag that only travels with one is unreadable
+   * exactly for them. Always `false` when not `fundable`. A swap-funded deposit
+   * is wallet-pays regardless; the swap choice is the client's, so the client
+   * applies that override.
+   */
+  feeSponsored: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -281,6 +293,13 @@ export interface EarnVaultPosition {
   shareMint: string;
   createdAt: string;
   closedAt: string | null;
+  /**
+   * Whether SDP would pay the network fee for a withdrawal from this position:
+   * the execution gate (`resolveVaultSponsorship`) answered per request for the
+   * caller's environment, so the exit copy never depends on a quote the
+   * provider may not offer. See `EarnStrategy.feeSponsored`.
+   */
+  feeSponsored: boolean;
   /** Absent when the provider read failed; never coerce an unavailable value to zero. */
   shares?: string;
   /** Unstaked shares immediately redeemable through SDP; absent when unreadable. */
@@ -335,8 +354,21 @@ export interface EarnExternalWalletStrategyTotal {
   provider: string;
   providerReference: string;
   label: string;
-  /** Exact project-scoped owners contributing to this strategy total. */
-  ownerAddresses: string[];
+  /**
+   * Exact project-scoped owners contributing to this strategy total. ABSENT by
+   * default; present only when the caller passed `includeOwnerAddresses=true`
+   * (PRO-1873 added the flag, PRO-1908 made omission the default). This is the
+   * end-user address book of the whole project, so only a surface that renders
+   * per-customer detail should opt in.
+   */
+  ownerAddresses?: string[];
+  /**
+   * Complete live positions contributing to this strategy total. Present only
+   * when the caller passes `includePositions=true` alongside
+   * `includeOwnerAddresses=true`; absent from totals-only responses so
+   * analytics consumers do not receive per-customer details.
+   */
+  positions?: EarnExternalWalletPosition[];
   walletCount: number;
   positionCount: number;
   totalsByToken: EarnExternalWalletTokenTotal[];
@@ -522,29 +554,31 @@ export interface EarnVaultWithdrawalsPage {
  * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
  *
  * An external wallet is a NON-CUSTODIAL wallet the partner's platform
- * connects; SDP holds no key for it and never signs. Each direction is two
- * calls: a BUILD returns an unsigned transaction to sign, and a SUBMIT
- * takes the signed bytes back, records the movement, then broadcasts. These
- * surfaces postdate the unified ledger, so statuses are the ledger's own
- * vault vocabulary (`requested … finalized`), never the legacy deposit one.
+ * connects; SDP holds no key for it and never signs. A BUILD always returns an
+ * unsigned transaction. A keyed integration can SUBMIT the signed bytes for a
+ * durable movement and SDP broadcast. A keyless integration broadcasts and
+ * tracks the transaction itself. These surfaces postdate the unified ledger,
+ * so recorded statuses use its vault vocabulary (`requested … finalized`).
  */
 
 /** One unsigned transaction SDP built for an external wallet to sign. */
 export interface EarnExternalWalletTransaction {
-  /** Names the built transaction on the submit call. Single-use. */
+  /** Opaque build id. A durable keyed build is single-use on submit. */
   transactionId: string;
   /**
    * Base64 wire bytes of the UNSIGNED transaction. The external wallet signs
-   * exactly these bytes — the fee payer is the owner, or the partner's
-   * `feePayer` when one was named on the build — and the partner returns the
-   * signed encoding on the submit call; any other change is refused there.
+   * exactly these bytes. The fee payer is the owner, or the partner's
+   * `feePayer` on a keyed build. A keyed integration returns the signed
+   * encoding on submit; a keyless integration broadcasts it directly.
    */
   transaction: string;
   /** Block height after which these exact bytes can no longer land. */
   lastValidBlockHeight: string;
+  /** Whether SDP supplied and signed the transaction's fee payer. */
+  sponsored: boolean;
   ownerAddress: string;
   /**
-   * The partner fee payer compiled into the transaction, echoed from the
+   * The partner fee payer compiled into a keyed transaction, echoed from the
    * build request. Present, the transaction requires this wallet's signature
    * IN ADDITION to the owner's — co-sign server-side before submitting — and
    * this wallet pays the network fee plus any account rent the transaction
@@ -585,21 +619,27 @@ export interface EarnExternalWalletDepositTransactionResponse {
  * Response body of POST /v1/earn/external-wallet/deposit-transactions when a
  * swap-funded deposit could not fit in ONE Solana transaction (the packet
  * limit is 1,232 bytes and some Jupiter routes leave no room for the vault
- * instructions). Nothing is persisted for this answer: SDP hands back an
- * unsigned SWAP-ONLY transaction for the owner to sign and broadcast itself,
- * plus the exact follow-up deposit to build once the swap lands. The follow-up
- * build then takes the ordinary single-transaction path.
+ * instructions). No CONSUMABLE build is persisted for this answer: SDP hands
+ * back an unsigned SWAP-ONLY transaction for the owner to sign and broadcast
+ * itself, plus the exact follow-up deposit to build once the swap lands. The
+ * follow-up build then takes the ordinary single-transaction path. SDP does
+ * records an advisory for a keyed split and flags owners whose swap landed
+ * without a follow-up deposit (PRO-1864). An anonymous split writes nothing;
+ * recovery stays the caller's duty in both tiers.
  */
 export interface EarnExternalWalletDepositSwapSplitResponse {
   /** Discriminates from the atomic response, which carries `transaction`. */
   requiresSeparateSwap: true;
+  /** Split swap transactions are never sponsored by SDP. */
+  sponsored: false;
   swap: EarnDepositSwap & {
     /**
      * Base64 wire bytes of the UNSIGNED swap transaction. The fee payer is
      * the owner, or the original request's `feePayer` (which then co-signs
-     * this transaction too). The partner broadcasts it itself — it moves only
+     * this transaction too). The partner broadcasts it itself; it moves only
      * the owner's own funds between the owner's own token accounts, so SDP
-     * records nothing for it.
+     * records no movement. Only a keyed request creates an orphan-detection
+     * advisory.
      */
     transaction: string;
     /** Block height after which these exact bytes can no longer land. */
@@ -627,16 +667,27 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
   };
 }
 
+type EarnExternalWalletExitReference =
+  | {
+      /** The tenant position being exited on an authenticated build. */
+      positionId: string;
+      strategyId?: never;
+    }
+  | {
+      /** The catalogue strategy being exited on an anonymous build. */
+      strategyId: string;
+      positionId?: never;
+    };
+
 /** Response body of POST /v1/earn/external-wallet/withdrawal-transactions. */
 export interface EarnExternalWalletWithdrawalTransactionResponse {
-  transaction: EarnExternalWalletTransaction & {
-    /** The external-wallet position being exited. */
-    positionId: string;
-    /** Shares encoded in the transaction, share units. */
-    shares: string;
-    /** Minimum deposit-token amount encoded in the transaction, or null. */
-    minAmountOut: string | null;
-  };
+  transaction: EarnExternalWalletTransaction &
+    EarnExternalWalletExitReference & {
+      /** Shares encoded in the transaction, share units. */
+      shares: string;
+      /** Minimum deposit-token amount encoded in the transaction, or null. */
+      minAmountOut: string | null;
+    };
 }
 
 /** One recorded external-wallet vault movement, either direction. */
@@ -877,8 +928,8 @@ export interface EarnPortfolioDepositsPage {
 
 /**
  * `pending_approval` is synthesized by the provider client, never reported
- * top-level by the provider: Ground parks the affected payout leg in
- * `pending_customer_approval` (awaiting a customer-side Turnkey stamp) while
+ * top-level by the provider: a provider may park the affected payout leg in
+ * `pending_customer_approval` (awaiting a customer-side signature) while
  * the withdrawal itself keeps saying `processing`, so the client folds a
  * parked leg up into this distinct status — a withdrawal waiting on an
  * approval must be legible, not an indefinite `processing`.

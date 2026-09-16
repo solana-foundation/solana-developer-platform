@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { MoonpayWebhookProcessor } from "./moonpay";
-import type { AppContext } from "./processor";
 
 const ORGANIZATION_ID = "org_moonpay_webhook_test";
 const PROJECT_ID = "prj_moonpay_webhook_test";
@@ -13,7 +13,6 @@ const MOONPAY_TRANSACTION_ID = "772f7a7f-142e-43cf-824f-8d861aefe8bd";
 
 describe("MoonpayWebhookProcessor.process", () => {
   const processor = new MoonpayWebhookProcessor();
-  const appContext = { env } as unknown as AppContext;
 
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -30,20 +29,14 @@ describe("MoonpayWebhookProcessor.process", () => {
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(USER_ID, "moonpay-webhook@example.com", 1, "active"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          PROJECT_ID,
-          ORGANIZATION_ID,
-          "MoonPay Webhook Project",
-          "moonpay-webhook-project",
-          "sandbox",
-          "active",
-          USER_ID
-        ),
+    ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORGANIZATION_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
+    await getDb(env).batch([
       getDb(env)
         .prepare(
           `INSERT INTO payment_transfers (
@@ -90,9 +83,9 @@ describe("MoonpayWebhookProcessor.process", () => {
       transferId: TRANSFER_ID,
     } as const;
 
-    await processor.process(appContext, "sandbox", event);
-    await processor.process(appContext, "sandbox", event);
-    await processor.process(appContext, "sandbox", {
+    await processor.process(env, "sandbox", event);
+    await processor.process(env, "sandbox", event);
+    await processor.process(env, "sandbox", {
       ...event,
       reference: "different-moonpay-transaction",
     });

@@ -19,7 +19,7 @@ import type {
 import { MosaicTransactionPlanError } from "@sdp/issuance/mosaic/types";
 import { createRpcForSdk } from "@sdp/rpc/solana";
 import { type Address, assertValidAddress } from "@sdp/solana/address";
-import type { TokenTransaction, TokenTransactionType } from "@sdp/types";
+import type { Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
 import { createNoopSigner } from "@solana/kit";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context, Next } from "hono";
@@ -36,7 +36,6 @@ import {
 import { tokenHasConfidentialBalances } from "@/services/issuance/confidential-support";
 import type { TokenService } from "@/services/token.service";
 import { parsePositiveTokenAmount } from "@/services/token-operation.service";
-import { emitTokenOperationCompleted } from "@/services/workflows/token-events";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -68,6 +67,21 @@ type MosaicService = ReturnType<typeof createIssuanceMosaicService>;
 
 /** Confidential transaction types are also audit actions, one-to-one. */
 type ConfidentialOperation = Extract<TokenTransactionType, `confidential_${string}`> & AuditAction;
+
+/**
+ * The custody-wallet permissions each operation's signing wallet must carry.
+ * Mirrors the `requirePermissions` guard on the matching route: the route check
+ * is about the API key, this one is about the wallet it reaches for.
+ */
+const CONFIDENTIAL_OPERATION_WALLET_PERMISSIONS = {
+  confidential_configure: ["tokens:write"],
+  confidential_approve: ["tokens:admin"],
+  confidential_deposit: ["tokens:write"],
+  confidential_apply_pending: ["tokens:write"],
+  confidential_transfer: ["tokens:admin"],
+  confidential_withdraw: ["tokens:admin"],
+  confidential_empty_account: ["tokens:write"],
+} as const satisfies Record<ConfidentialOperation, readonly Permission[]>;
 
 /**
  * Confidential balances are still being validated on devnet. Mainnet exposure is
@@ -261,7 +275,7 @@ interface RunConfidentialOptions {
   operation: ConfidentialOperation;
   /** Signer for this operation — the account owner, or the mint's confidential authority. */
   signerAddress: string;
-  requestedWalletId?: string | null;
+  requestedCustodyWalletId?: string | null;
   /** Persisted on the transaction row and used for replay recovery. */
   params: Record<string, unknown>;
   /** Fingerprinted for idempotency; the raw request body. */
@@ -269,7 +283,7 @@ interface RunConfidentialOptions {
   /**
    * `walletId` is the custody wallet actually resolved for `signerAddress` — not
    * the one the caller asked for. Key derivation must use it, or a holder who
-   * omits `signingWalletId` derives against the org default wallet and the
+   * omits `signingCustodyWalletId` derives against the org default wallet and the
    * signature never matches the owner.
    */
   run: (
@@ -281,7 +295,7 @@ interface RunConfidentialOptions {
 /**
  * The freeze/seize execute skeleton, generalized over the seven confidential
  * operations: idempotent transaction row → replay short-circuit → critical audit
- * bracket → on-chain call → settlement → workflow event.
+ * bracket → on-chain call → settlement.
  *
  * Multi-transaction plans settle on the LAST transaction (the one that carries
  * the operation's effect; the others set up and tear down proof context state).
@@ -292,14 +306,14 @@ async function runConfidentialOperation(
   options: RunConfidentialOptions
 ): Promise<TokenTransaction> {
   const { c, resolved, operation, params } = options;
-  const { tokenService, token, auth, orgId, projectId } = resolved;
+  const { tokenService, token, auth } = resolved;
 
-  const { signer, walletId } = await resolveAuthoritySigner({
+  const { signer, custodyWalletId: walletId } = await resolveAuthoritySigner({
     env: c.env,
     auth,
-    token,
-    requestedWalletId: options.requestedWalletId,
+    requestedCustodyWalletId: options.requestedCustodyWalletId,
     currentAuthority: options.signerAddress,
+    requiredWalletPermissions: [...CONFIDENTIAL_OPERATION_WALLET_PERMISSIONS[operation]],
   });
 
   const idempotencyMetadata = buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
@@ -367,15 +381,6 @@ async function runConfidentialOperation(
             ...planFields,
           },
         }),
-    });
-
-    emitTokenOperationCompleted(c, {
-      organizationId: orgId,
-      projectId,
-      tokenId: token.id,
-      operation,
-      signature: settlement.signature,
-      slot: settlement.slot.toString(),
     });
 
     return updatedTx;
@@ -462,7 +467,7 @@ export const configureConfidentialAccount = async (
     resolved,
     operation: "confidential_configure",
     signerAddress: owner,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     params: { accountAddress: tokenAccount, walletAddress: owner },
     requestBody: body,
     run: (mosaic, walletId) =>
@@ -510,7 +515,7 @@ export const approveConfidentialAccount = async (
     resolved,
     operation: "confidential_approve",
     signerAddress: authority,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     params: { accountAddress: tokenAccount, authority },
     requestBody: body,
     run: (mosaic) =>
@@ -539,7 +544,7 @@ export const depositConfidential = async (
     resolved,
     operation: "confidential_deposit",
     signerAddress: owner,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     params: { accountAddress: tokenAccount, walletAddress: owner, amount: body.amount },
     requestBody: body,
     // Deposit needs no proof and therefore no keys: it moves a publicly visible
@@ -570,7 +575,7 @@ export const applyPendingConfidentialBalance = async (
     resolved,
     operation: "confidential_apply_pending",
     signerAddress: owner,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     params: { accountAddress: tokenAccount, walletAddress: owner },
     requestBody: body,
     run: (mosaic, walletId) =>
@@ -603,7 +608,7 @@ export const confidentialTransfer = async (
     resolved,
     operation: "confidential_transfer",
     signerAddress: owner,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     params: {
       source: tokenAccount,
       destination,
@@ -642,7 +647,7 @@ export const withdrawConfidential = async (
     resolved,
     operation: "confidential_withdraw",
     signerAddress: owner,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     params: { accountAddress: tokenAccount, walletAddress: owner, amount: body.amount },
     requestBody: body,
     run: (mosaic, walletId) =>
@@ -674,7 +679,7 @@ export const emptyConfidentialAccount = async (
     resolved,
     operation: "confidential_empty_account",
     signerAddress: owner,
-    requestedWalletId: body.signingWalletId,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
     params: { accountAddress: tokenAccount, walletAddress: owner },
     requestBody: body,
     run: (mosaic, walletId) =>
@@ -705,12 +710,12 @@ export const getConfidentialBalance = async (c: AppContext) => {
   // The read never signs, but decrypting needs the owner's keys — so the caller
   // must be authorized for the owner's custody wallet, and the derivation has to
   // run against that wallet rather than the org default.
-  const { walletId } = await resolveAuthorityWallet({
+  const { custodyWalletId: walletId } = await resolveAuthorityWallet({
     env: c.env,
     auth: resolved.auth,
-    token: resolved.token,
-    requestedWalletId: query.data.signingWalletId,
+    requestedCustodyWalletId: query.data.signingCustodyWalletId,
     currentAuthority: owner,
+    requiredWalletPermissions: ["tokens:read"],
   });
   const mosaic = createIssuanceMosaicService(c, createNoopSigner(owner), "sponsored");
 

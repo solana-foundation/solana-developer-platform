@@ -18,7 +18,45 @@ export const RATE_LIMIT_TIERS = {
   unlimited: 10_000,
 } as const satisfies Record<RateLimitTier, number>;
 
-const ANONYMOUS_MAX_REQUESTS = 20;
+export const ANONYMOUS_MAX_REQUESTS = 20;
+export const ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS = 120;
+export const ANONYMOUS_EARN_BUILD_MAX_REQUESTS = 30;
+
+const ANONYMOUS_EARN_BUILD_PATHS = new Set([
+  "/v1/earn/vault-deposit-previews",
+  "/v1/earn/external-wallet/deposit-transactions",
+  "/v1/earn/external-wallet/withdrawal-previews",
+  "/v1/earn/external-wallet/withdrawal-transactions",
+]);
+
+function anonymousRequestLimit(c: Context<{ Bindings: Env }>): {
+  identifierPrefix: string | null;
+  maxRequests: number;
+  metricTier: string;
+} {
+  if (
+    c.req.method === "GET" &&
+    (c.req.path === "/v1/earn/strategies" || c.req.path.startsWith("/v1/earn/strategies/"))
+  ) {
+    return {
+      identifierPrefix: "anonymous:earn:catalogue",
+      maxRequests: ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS,
+      metricTier: "anonymous_earn_catalogue",
+    };
+  }
+  if (c.req.method === "POST" && ANONYMOUS_EARN_BUILD_PATHS.has(c.req.path)) {
+    return {
+      identifierPrefix: "anonymous:earn:build",
+      maxRequests: ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
+      metricTier: "anonymous_earn_build",
+    };
+  }
+  return {
+    identifierPrefix: null,
+    maxRequests: ANONYMOUS_MAX_REQUESTS,
+    metricTier: "anonymous_default",
+  };
+}
 
 /**
  * Per-user-per-org ceiling for dashboard traffic (Clerk JWT or cookie
@@ -39,9 +77,9 @@ export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIM
 
 /**
  * Per-user ceiling for verified Clerk dashboard traffic. Set well above what a person
- * driving the UI produces — a dashboard page can fan out to a dozen endpoints, and the
- * notification bell polls on a timer — so this is a runaway-loop backstop, not a
- * throttle anyone should meet while using the product.
+ * driving the UI produces — a dashboard page can fan out to a dozen endpoints and
+ * several panels poll on timers — so this is a runaway-loop backstop, not a throttle
+ * anyone should meet while using the product.
  */
 export const CLERK_USER_MAX_REQUESTS = 600;
 
@@ -144,20 +182,16 @@ function looksLikeClerkJwt(token: string, env: Env): boolean {
 }
 
 /**
- * Verifies the token's signature against Clerk's JWKS.
- *
- * @param c - Request context (provides the JWKS configuration).
- * @param token - JWT-shaped bearer token.
- * @returns True when verification succeeds; false on any verification error.
- */
-/**
  * The verified Clerk user id, or null when the token isn't a valid Clerk JWT.
  *
  * Dashboard traffic used to skip rate limiting entirely, which left every authenticated
- * endpoint unbounded per user: a signed-in caller could loop rule creation or execution
- * decisions (each several queries plus a write), and a `notify` rule turns that into
- * unbounded outbound email. Verification is already cached per request by
+ * endpoint unbounded per user: a signed-in caller could loop any write endpoint (each
+ * several queries plus a write). Verification is already cached per request by
  * `verifyClerkJwtForRequest`, so keying on the user costs nothing extra.
+ *
+ * @param c - Request context (provides the JWKS configuration).
+ * @param token - JWT-shaped bearer token.
+ * @returns The token's `sub` claim, or null when verification fails.
  */
 async function verifiedClerkUserId(
   c: Context<{ Bindings: Env }>,
@@ -212,7 +246,12 @@ export async function enforceRateLimit(
   c: Context<{ Bindings: Env }>,
   identifier: string,
   maxRequests: number,
-  options: { failClosed?: boolean } = {}
+  options: {
+    failClosed?: boolean;
+    cost?: number;
+    windowMs?: number;
+    metricTier?: string;
+  } = {}
 ): Promise<void> {
   const kv = c.var.kv?.rateLimits;
   if (!kv) {
@@ -226,21 +265,23 @@ export async function enforceRateLimit(
     return;
   }
 
+  const windowMs = options.windowMs ?? RATE_LIMIT_WINDOW_MS;
   const now = Date.now();
-  const windowStart = Math.floor(now / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
-  const previousWindowStart = windowStart - RATE_LIMIT_WINDOW_MS;
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const previousWindowStart = windowStart - windowMs;
 
   const windowKey = getWindowKey(identifier, windowStart);
   const previousWindowKey = getWindowKey(identifier, previousWindowStart);
 
   const elapsed = now - windowStart;
-  const previousWeight = Math.max(0, 1 - elapsed / RATE_LIMIT_WINDOW_MS);
+  const previousWeight = Math.max(0, 1 - elapsed / windowMs);
 
   const admission = await kv
     .admitSlidingWindow(windowKey, previousWindowKey, {
       maxRequests,
       previousWeight,
-      expirationTtl: Math.ceil((RATE_LIMIT_WINDOW_MS * 2) / 1000),
+      expirationTtl: Math.ceil((windowMs * 2) / 1000),
+      ...(options.cost === undefined ? {} : { cost: options.cost }),
     })
     .catch((err) => {
       getLogger().error({ error: err, identifier }, "Failed to update rate limit");
@@ -265,12 +306,22 @@ export async function enforceRateLimit(
     "X-RateLimit-Remaining",
     Math.max(0, Math.floor(maxRequests - estimatedCount)).toString()
   );
-  const windowEndMs = windowStart + RATE_LIMIT_WINDOW_MS;
+  const windowEndMs = windowStart + windowMs;
   c.header("X-RateLimit-Reset", Math.ceil(windowEndMs / 1000).toString());
 
   if (!admission.admitted) {
     const retryAfter = Math.max(1, Math.ceil((windowEndMs - now) / 1000));
     c.header("Retry-After", retryAfter.toString());
+    getLogger().warn(
+      {
+        event: "sdp_api_rate_limit_rejected",
+        tier: options.metricTier ?? "default",
+        method: c.req.method,
+        route: c.req.path,
+        limit: maxRequests,
+      },
+      "Rate limit rejected request"
+    );
     throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
   }
 }
@@ -318,11 +369,18 @@ export function skipRateLimitPaths(...paths: string[]) {
     const apiKey = extractApiKey(c);
     const presentsApiKey = apiKey !== null && looksLikeApiKey(apiKey);
 
-    await enforceRateLimit(
-      c,
-      getClientIp(c) ?? "unknown",
-      presentsApiKey ? KEYED_IP_BACKSTOP_MAX_REQUESTS : ANONYMOUS_MAX_REQUESTS
-    );
+    const clientIp = getClientIp(c) ?? "unknown";
+    if (presentsApiKey) {
+      await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS);
+    } else {
+      const limit = anonymousRequestLimit(c);
+      await enforceRateLimit(
+        c,
+        limit.identifierPrefix ? `${limit.identifierPrefix}:ip:${clientIp}` : clientIp,
+        limit.maxRequests,
+        { metricTier: limit.metricTier }
+      );
+    }
     await next();
   };
 }

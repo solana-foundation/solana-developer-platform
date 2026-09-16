@@ -23,6 +23,10 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
+import {
+  createPostgresEarnSplitSwapAdvisoriesRepository,
+  generateEarnSplitSwapAdvisoryId,
+} from "@/db/repositories/earn-split-swap-advisories.repository";
 import { badRequest, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnExternalWalletDepositFingerprint,
@@ -44,8 +48,10 @@ import {
   MAX_COMPUTE_UNIT_LIMIT,
   prependSwapLegToVaultPlan,
   RETRY_SWAP_MAX_ACCOUNTS,
+  requireWellKnownMintDecimals,
   withComputeUnitLimit,
 } from "./jupiter-swap.service";
+import { readOwnerMintBalance } from "./owner-token-balance";
 import { createVaultDeadline } from "./vault-deadline";
 import { requireAcceptedPlan } from "./vault-deposit.service";
 import {
@@ -67,26 +73,77 @@ import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
  * The external-wallet (caller-signed) vault flows: SDP moves money for a wallet it
  * does NOT custody (PRO-1722, ADR 0002 addendum 2026-08-26).
  *
- * Each direction is two calls. The BUILD produces one complete unsigned
- * transaction for the external wallet — provider build, simulation with the
- * owner as fee payer, memo binding, compile — and persists it, because the
- * later submit must prove the bytes it receives are ones SDP built. The SUBMIT
- * verifies the returned signature over exactly those message bytes, records
- * the movement durably, and only then broadcasts: record-before-broadcast is
- * unchanged from the custody flow; the point where the signature becomes
- * knowable simply moved from SDP's signer to the submit call. Past the durable
- * write the two flows share one tail and one reconciler.
+ * Each direction starts with a BUILD that produces one complete unsigned
+ * transaction: provider build, simulation with the resolved fee payer, memo
+ * binding, and compile. An authenticated build is persisted so the keyed
+ * SUBMIT can prove it received the exact bytes SDP built. An anonymous build
+ * is ephemeral, writes no transaction, advisory, position, or movement row,
+ * and must be broadcast and tracked by the caller. The keyed SUBMIT verifies
+ * every returned signature, records the movement durably, and only then
+ * broadcasts. Past that durable write, the custody and external-wallet flows
+ * share one tail and one reconciler.
  *
  * NOTHING here signs, resolves a signer, or touches custody: the owner's
  * own signature is the authorization to move the owner's money, which is
  * why these paths take no wallet policy gate.
  */
 
-export interface ExternalWalletDepositBuildInput {
+interface ExternalWalletBuildTenantContext {
   organizationId: string;
   projectId: string;
+  userId?: string | null;
+  apiKeyId?: string | null;
+}
+
+interface AnonymousExternalWalletBuildContext {
+  organizationId?: never;
+  projectId?: never;
+  userId?: never;
+  apiKeyId?: never;
+}
+
+export type ExternalWalletBuildContext =
+  | ExternalWalletBuildTenantContext
+  | AnonymousExternalWalletBuildContext;
+
+function hasExternalWalletBuildTenant(
+  input: ExternalWalletBuildContext
+): input is ExternalWalletBuildTenantContext {
+  return input.organizationId !== undefined && input.projectId !== undefined;
+}
+
+/**
+ * Fields the builder and wire adapter share across durable and ephemeral
+ * builds. Database-only metadata stays on the repository row instead of
+ * becoming optional throughout the service contract.
+ */
+export type ExternalWalletBuiltTransaction = Pick<
+  EarnExternalWalletTransactionRow,
+  | "id"
+  | "environment"
+  | "provider"
+  | "direction"
+  | "owner_address"
+  | "vault_address"
+  | "token_mint"
+  | "share_mint"
+  | "label"
+  | "position_id"
+  | "denomination"
+  | "amount_requested"
+  | "min_shares_out"
+  | "creates_share_account"
+  | "fee_payer"
+  | "share_ata_rent_funder"
+  | "unsigned_transaction"
+  | "last_valid_block_height"
+>;
+
+export type ExternalWalletDepositBuildInput = ExternalWalletBuildContext & {
   environment: SdpEnvironment;
   provider: EarnProviderId;
+  /** Catalogue row id, so a split-swap advisory can name the strategy (PRO-1864). */
+  strategyId: string;
   /** Vault address — the strategy's providerReference. */
   providerReference: string;
   /** The external wallet that will sign and own the shares. */
@@ -118,9 +175,7 @@ export interface ExternalWalletDepositBuildInput {
     sourceTokenMint: string;
     slippageBps: number;
   };
-  userId?: string | null;
-  apiKeyId?: string | null;
-}
+};
 
 /**
  * Normalize a provider build failure, shared by both directions: a refused
@@ -158,16 +213,18 @@ function throwSimulationRefusal(
 export type ExternalWalletDepositBuildResult =
   | {
       kind: "built";
-      built: EarnExternalWalletTransactionRow;
+      built: ExternalWalletBuiltTransaction;
       /** The swap leg composed into the transaction, when the build was swap-funded. */
       swap?: JupiterSwapLeg;
     }
   | {
       /**
        * The composed swap + deposit could not fit one Solana packet, even
-       * after re-routing for compactness. Nothing was persisted. The caller
-       * gets an unsigned SWAP-ONLY transaction to sign and broadcast itself,
-       * then requests an ordinary (unswapped) build for `swap.minOutAmount`.
+       * after re-routing for compactness. No submit-capable build or movement
+       * was persisted. A keyed build records only its recovery advisory; an
+       * anonymous build writes no row. The caller gets an unsigned SWAP-ONLY
+       * transaction to sign and broadcast itself, then requests an ordinary
+       * unswapped build for `swap.minOutAmount`.
        */
       kind: "swap_required";
       swap: JupiterSwapLeg;
@@ -202,6 +259,9 @@ export async function buildExternalWalletDepositTransaction(
   // the same three-places-must-agree rule sponsorship follows
   // (vault-sponsorship.ts).
   const feePayer = input.feePayer === input.ownerAddress ? undefined : input.feePayer;
+  if (!hasExternalWalletBuildTenant(input) && feePayer !== undefined) {
+    throw badRequest("Anonymous external-wallet builds must use the owner as fee payer");
+  }
   const fee: VaultFeeMode = feePayer
     ? { kind: "caller-provided", feePayer: address(feePayer) }
     : { kind: "wallet-pays" };
@@ -352,31 +412,102 @@ export async function buildExternalWalletDepositTransaction(
   }
   if (!attempt.fit) {
     // Split flow: the swap alone, compiled through the same simulate-and-size
-    // seam, for the owner to sign and broadcast itself. Deliberately NOT
-    // persisted and carrying no request memo — it moves the owner's own funds
-    // between the owner's own accounts, records no SDP movement, and its
-    // follow-up deposit build takes the ordinary path.
+    // seam, for the owner to sign and broadcast itself. It carries no request
+    // memo and records NO movement: it moves the owner's own funds between the
+    // owner's own accounts, and the follow-up deposit build takes the ordinary
+    // path. A keyed build records an ADVISORY (PRO-1864, EARN-026): the
+    // standalone swap is the one transaction this flow hands out that SDP never
+    // sees again, so without a row a partner that broadcast it and crashed left
+    // the customer's funds swapped-but-undeposited with nothing for a detector
+    // to inspect. An anonymous build records nothing and leaves recovery to the
+    // caller.
     const swapLeg = attempt.swapLeg;
-    return {
-      kind: "swap_required",
-      swap: swapLeg,
-      swapTransaction: await compileStandaloneSwapTransaction(env, {
+    const sourceTokenMint = input.swap?.sourceTokenMint ?? input.tokenMint;
+    const depositTokenDecimals = requireWellKnownMintDecimals(input.tokenMint, "deposit token");
+    const hasTenant = hasExternalWalletBuildTenant(input);
+    // Compile and read the keyed-only baseline concurrently, preserving the
+    // partner's blockhash window. The baseline fails closed alongside the
+    // advisory insert; an anonymous build skips the read entirely.
+    const [swapTransaction, baseline] = await Promise.all([
+      compileStandaloneSwapTransaction(env, {
         cluster,
         deadline,
         rpcUrl,
         ownerAddress: input.ownerAddress,
-        sourceTokenMint: input.swap?.sourceTokenMint ?? input.tokenMint,
+        sourceTokenMint,
         depositTokenMint: input.tokenMint,
         swapLeg,
         // The split swap is one of the transactions this flow hands out, so
-        // the partner fee payer covers it too — co-signed before the owner
+        // the partner fee payer covers it too and co-signs before the owner
         // broadcasts it, exactly like the deposit it precedes.
         fee,
       }),
-    };
+      hasTenant
+        ? deadline.run("Reading the split-swap baseline balance", () =>
+            readOwnerMintBalance(env, input.environment, input.ownerAddress, input.tokenMint)
+          )
+        : Promise.resolve(null),
+    ]);
+    if (!hasTenant) {
+      return { kind: "swap_required", swap: swapLeg, swapTransaction };
+    }
+    if (baseline === null) throw internalError("Split-swap baseline balance is unavailable");
+    if (baseline.decimals !== null && baseline.decimals !== depositTokenDecimals) {
+      throw internalError(
+        `Split-swap baseline balance reports ${baseline.decimals} decimals for a ${depositTokenDecimals}-decimal deposit token`
+      );
+    }
+    await createPostgresEarnSplitSwapAdvisoriesRepository(getDb(env)).create({
+      id: generateEarnSplitSwapAdvisoryId(),
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      environment: input.environment,
+      provider: input.provider,
+      strategyId: input.strategyId,
+      vaultAddress: input.providerReference,
+      ownerAddress: input.ownerAddress,
+      sourceTokenMint,
+      depositTokenMint: input.tokenMint,
+      depositTokenDecimals,
+      swapSourceAmount: swapLeg.sourceAmount,
+      swapMinOutAmount: swapLeg.minOutAmount,
+      swapMinOutAtoms: swapLeg.minOutAtoms,
+      swapLastValidBlockHeight: swapTransaction.lastValidBlockHeight,
+      feePayer: feePayer ?? null,
+      baselineDepositTokenAtoms: baseline.atoms.toString(),
+      createdBy: input.userId ?? null,
+      initiatedByKeyId: input.apiKeyId ?? null,
+    });
+    return { kind: "swap_required", swap: swapLeg, swapTransaction };
   }
 
   const { unsigned, plan, depositAmount, minSharesOut, swapLeg } = attempt;
+  if (!hasExternalWalletBuildTenant(input)) {
+    return {
+      kind: "built",
+      built: {
+        id: transactionId,
+        environment: input.environment,
+        provider: input.provider,
+        direction: "deposit",
+        owner_address: input.ownerAddress,
+        vault_address: input.providerReference,
+        token_mint: input.tokenMint,
+        share_mint: input.shareMint,
+        label: input.label,
+        position_id: null,
+        denomination: input.tokenMint,
+        amount_requested: depositAmount,
+        min_shares_out: minSharesOut,
+        creates_share_account: plan.createsShareAccount === true,
+        fee_payer: feePayer ?? null,
+        share_ata_rent_funder: null,
+        unsigned_transaction: Buffer.from(unsigned.bytes).toString("base64"),
+        last_valid_block_height: unsigned.lastValidBlockHeight,
+      },
+      ...(swapLeg === undefined ? {} : { swap: swapLeg }),
+    };
+  }
   const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
     id: transactionId,
     organizationId: input.organizationId,
@@ -519,13 +650,11 @@ async function compileStandaloneSwapTransaction(
   });
 }
 
-export interface ExternalWalletWithdrawalBuildInput {
-  organizationId: string;
-  projectId: string;
+export type ExternalWalletWithdrawalBuildInput = ExternalWalletBuildContext & {
   environment: SdpEnvironment;
   provider: string;
   /** The EXISTING external-wallet holding being exited. */
-  positionId: string;
+  positionId: string | null;
   vaultAddress: string;
   tokenMint: string;
   shareMint: string;
@@ -543,14 +672,12 @@ export interface ExternalWalletWithdrawalBuildInput {
   shares: string;
   /** Minimum deposit-token amount the exit may return. */
   minAmountOut?: string;
-  userId?: string | null;
-  apiKeyId?: string | null;
-}
+};
 
 export async function buildExternalWalletWithdrawalTransaction(
   env: Env,
   input: ExternalWalletWithdrawalBuildInput
-): Promise<EarnExternalWalletTransactionRow> {
+): Promise<ExternalWalletBuiltTransaction> {
   const deadline = createVaultDeadline();
   // Capability is the ONLY provider-shaped refusal on this path (ADR 0002 exit
   // safety): no surfacing, no entitlement, no availability, no catalogue.
@@ -576,6 +703,9 @@ export async function buildExternalWalletWithdrawalTransaction(
   // fee mode drives the provider's rent payer (an exit consolidation can
   // create an account), the simulation fee payer, and the compiled seat.
   const feePayer = input.feePayer === input.ownerAddress ? undefined : input.feePayer;
+  if (!hasExternalWalletBuildTenant(input) && feePayer !== undefined) {
+    throw badRequest("Anonymous external-wallet builds must use the owner as fee payer");
+  }
   const fee: VaultFeeMode = feePayer
     ? { kind: "caller-provided", feePayer: address(feePayer) }
     : { kind: "wallet-pays" };
@@ -629,6 +759,29 @@ export async function buildExternalWalletWithdrawalTransaction(
     ...(fee.kind === "caller-provided" ? { feePayer: fee.feePayer } : {}),
     prepared: simulation.prepared,
   });
+
+  if (!hasExternalWalletBuildTenant(input)) {
+    return {
+      id: transactionId,
+      environment: input.environment,
+      provider: input.provider,
+      direction: "withdrawal",
+      owner_address: input.ownerAddress,
+      vault_address: input.vaultAddress,
+      token_mint: input.tokenMint,
+      share_mint: input.shareMint,
+      label: input.label,
+      position_id: input.positionId,
+      denomination: input.shareMint,
+      amount_requested: input.shares,
+      min_shares_out: input.minAmountOut ?? null,
+      creates_share_account: plan.createsShareAccount === true,
+      fee_payer: feePayer ?? null,
+      share_ata_rent_funder: null,
+      unsigned_transaction: Buffer.from(unsigned.bytes).toString("base64"),
+      last_valid_block_height: unsigned.lastValidBlockHeight,
+    };
+  }
 
   return createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
     id: transactionId,

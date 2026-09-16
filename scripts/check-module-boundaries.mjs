@@ -21,6 +21,7 @@ const MODULE_METADATA = [
     purpose: "Node.js API and application composition root.",
     allowedDependencies: [
       "@sdp/custody",
+      "@sdp/dvp",
       "@sdp/earn",
       "@sdp/env-config",
       "@sdp/helius-rings",
@@ -28,6 +29,7 @@ const MODULE_METADATA = [
       "@sdp/issuance",
       "@sdp/kamino",
       "@sdp/jupiter-lend",
+      "@sdp/ondo",
       "@sdp/payments",
       "@sdp/policy",
       "@sdp/private-channels",
@@ -87,6 +89,12 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/redaction", "@sdp/types"],
   },
   {
+    name: "@sdp/dvp",
+    directory: "packages/sdp-dvp",
+    purpose: "Generated @solana/kit client for the DvP atomic swap program.",
+    allowedDependencies: [],
+  },
+  {
     name: "@sdp/earn",
     directory: "packages/sdp-earn",
     purpose: "Earn domain services, yield strategies, and vault-infra providers.",
@@ -123,6 +131,19 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/earn", "@sdp/types"],
   },
   {
+    name: "@sdp/ondo",
+    directory: "packages/sdp-ondo",
+    purpose:
+      "Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port.",
+    // The arrow points INWARD and only inward, same as @sdp/kamino and
+    // @sdp/veda. This package carries NO chain SDK and no Jupiter client of its
+    // own: executable instructions come through a port the API injects, so the
+    // Jupiter instruction trust boundary stays single-owner in the API's
+    // jupiter-swap.service. The Ondo deployment registry lives in @sdp/types,
+    // which @sdp/earn's catalogue client reaches without a cycle.
+    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+  },
+  {
     name: "@sdp/veda",
     directory: "packages/sdp-veda",
     purpose: "Kit-native Veda SVM vault deposit plans and position reads over @vedatech/svm-sdk.",
@@ -150,7 +171,7 @@ const MODULE_METADATA = [
     name: "@sdp/helius-rings",
     directory: "packages/sdp-helius-rings",
     purpose: "Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet).",
-    allowedDependencies: [],
+    allowedDependencies: ["@sdp/types"],
   },
   {
     name: "@sdp/helius-rings-sdk",

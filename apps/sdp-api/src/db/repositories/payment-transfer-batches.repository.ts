@@ -1,7 +1,10 @@
-import type {
-  PaymentTransferBatchRecipientStatus,
-  PaymentTransferBatchStatus,
-  PaymentTransferStatus,
+import {
+  ONCHAIN_TRANSFER_IN_FLIGHT_STATUSES,
+  ONCHAIN_TRANSFER_SETTLED_STATUSES,
+  type PaymentTransferBatchRecipientStatus,
+  type PaymentTransferBatchStatus,
+  type PaymentTransferStatus,
+  type TransferChainVerdictStatus,
 } from "@sdp/types";
 
 /**
@@ -15,11 +18,15 @@ import type {
 export function deriveTransferBatchStatus(
   statuses: ReadonlyArray<PaymentTransferStatus | PaymentTransferBatchRecipientStatus>
 ): PaymentTransferBatchStatus {
-  if (statuses.some((status) => status === "pending" || status === "processing")) {
+  if (
+    statuses.some((status) =>
+      ONCHAIN_TRANSFER_IN_FLIGHT_STATUSES.some((inFlight) => inFlight === status)
+    )
+  ) {
     return "processing";
   }
-  const settled = statuses.filter(
-    (status) => status === "confirmed" || status === "finalized"
+  const settled = statuses.filter((status) =>
+    ONCHAIN_TRANSFER_SETTLED_STATUSES.some((settledStatus) => settledStatus === status)
   ).length;
   if (settled === statuses.length) {
     return "confirmed";
@@ -225,7 +232,7 @@ export interface SettlePaymentTransferBatchInput {
   transferId: string;
   organizationId: string;
   projectId: string;
-  transferStatus: "confirmed" | "finalized" | "failed";
+  transferStatus: TransferChainVerdictStatus;
   error: string | null;
   slot: number | null;
   updatedAt: string;

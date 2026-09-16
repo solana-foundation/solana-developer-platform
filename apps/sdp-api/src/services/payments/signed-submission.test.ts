@@ -8,10 +8,8 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
-import {
-  createTransferSignedSubmissionStore,
-  submitSignedPaymentTransaction,
-} from "./signed-submission";
+import { submitSponsoredTransaction } from "../sponsorship-submission";
+import { createTransferSignedSubmissionStore } from "./signed-submission";
 
 const SIGNATURE =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
@@ -34,7 +32,7 @@ function preflightError(cause?: unknown) {
   });
 }
 
-describe("submitSignedPaymentTransaction", () => {
+describe("submitSponsoredTransaction", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -67,7 +65,7 @@ describe("submitSignedPaymentTransaction", () => {
     });
 
     await expect(
-      submitSignedPaymentTransaction({
+      submitSponsoredTransaction({
         feePayment,
         rpc: {} as solanaRpc.SolanaRpc,
         transaction: new Uint8Array([9]),
@@ -105,7 +103,7 @@ describe("submitSignedPaymentTransaction", () => {
       .mockRejectedValueOnce(new Error("fetch failed"))
       .mockResolvedValueOnce(SIGNATURE);
 
-    const result = submitSignedPaymentTransaction({
+    const result = submitSponsoredTransaction({
       feePayment,
       rpc: {} as solanaRpc.SolanaRpc,
       transaction: new Uint8Array([9]),
@@ -146,7 +144,7 @@ describe("submitSignedPaymentTransaction", () => {
     vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(error);
 
     await expect(
-      submitSignedPaymentTransaction({
+      submitSponsoredTransaction({
         feePayment,
         rpc: {} as solanaRpc.SolanaRpc,
         transaction: new Uint8Array([9]),
@@ -180,7 +178,7 @@ describe("submitSignedPaymentTransaction", () => {
     );
 
     await expect(
-      submitSignedPaymentTransaction({
+      submitSponsoredTransaction({
         feePayment,
         rpc: {} as solanaRpc.SolanaRpc,
         transaction: new Uint8Array([9]),
@@ -212,7 +210,7 @@ describe("submitSignedPaymentTransaction", () => {
       .mockRejectedValueOnce(deterministicError);
 
     const result = expect(
-      submitSignedPaymentTransaction({
+      submitSponsoredTransaction({
         feePayment,
         rpc: {} as solanaRpc.SolanaRpc,
         transaction: new Uint8Array([9]),
@@ -252,7 +250,7 @@ describe("submitSignedPaymentTransaction", () => {
       .mockRejectedValueOnce(finalError);
 
     const result = expect(
-      submitSignedPaymentTransaction({
+      submitSponsoredTransaction({
         feePayment,
         rpc: {} as solanaRpc.SolanaRpc,
         transaction: new Uint8Array([9]),

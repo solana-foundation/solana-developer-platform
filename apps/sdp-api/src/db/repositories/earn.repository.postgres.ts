@@ -10,7 +10,7 @@ import type {
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { type AppDb, asTransactionalClient } from "@/db";
 import type {
-  DeleteUnlistedEarnStrategiesInput,
+  DeprecateUnlistedEarnStrategiesInput,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -30,13 +30,13 @@ import { mintEarnPositionForProviderWallet } from "./earn-movements.repository";
  * expand half of an expand/contract rollout), so the read has to answer for a
  * row an older writer left unset. It answers with the environment's own
  * cluster — the same rule the migration's backfill applies, and true of every
- * writer that predates the column: Ground's catalogue gate only ever admits a
- * source hosted on the environment's own chain.
+ * writer that predates the column: a provider's catalogue gate only ever
+ * admits a source hosted on the environment's own chain.
  *
  * Failing closed here instead would be worse than useless: a NULL row would
  * come back un-fundable, so a mid-deploy or rolled-back write would quietly
- * drop live Ground strategies out of the wizard. Reading the fact that IS
- * known keeps such a row correct until the next sync states it explicitly.
+ * drop live strategies out of the wizard. Reading the fact that IS known keeps
+ * such a row correct until the next sync states it explicitly.
  */
 function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
   const environment = row.environment as SdpEnvironment;
@@ -55,6 +55,7 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
     redemption_delay_days: row.redemption_delay_days as number | null,
     risk_metadata: row.risk_metadata as EarnStrategyRiskMetadata,
     status: row.status as EarnStrategyStatus,
+    catalogue_delisted_at: row.catalogue_delisted_at as string | null,
     host_cluster:
       (row.host_cluster as SolanaCluster | null) ?? CLUSTER_BY_SDP_ENVIRONMENT[environment],
     environment,
@@ -155,18 +156,19 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              redemption_delay_days = EXCLUDED.redemption_delay_days,
              risk_metadata = EXCLUDED.risk_metadata,
              host_cluster = EXCLUDED.host_cluster,
-             -- An operator pause/deprecation outranks the provider catalogue.
-             -- The hourly sync always upserts 'active' for anything a provider
-             -- still lists, so overwriting status here would silently unpause a
-             -- strategy stopped for an exploit or depeg within the hour and let
-             -- deposits resume. Reactivation is therefore deliberate: metadata
-             -- and rates keep flowing, but leaving paused/deprecated takes an
-             -- explicit status write, never a sync.
+             -- Migration 0099 clears the tombstone marker when an operator
+             -- updates status. A sync-owned delisting may be reactivated when
+             -- the provider relists it; operator pauses/deprecations stay sticky.
              status = CASE
-               WHEN earn_strategies.status IN ('paused', 'deprecated')
+               WHEN earn_strategies.status = 'paused'
+                 OR (
+                   earn_strategies.status = 'deprecated'
+                   AND earn_strategies.catalogue_delisted_at IS NULL
+                 )
                  THEN earn_strategies.status
                ELSE EXCLUDED.status
              END,
+             catalogue_delisted_at = NULL,
              updated_at = sdp_iso_now()
            RETURNING *`
         )
@@ -245,30 +247,28 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       return (result.results ?? []).map(mapStrategyRow);
     },
 
-    async deleteUnlistedStrategies(input: DeleteUnlistedEarnStrategiesInput) {
-      // Only `active` rows are deleted. An operator `paused`/`deprecated` is a
-      // deliberate human record, and it is load-bearing: upsertStrategy refuses
-      // to overwrite it precisely so a vault stopped for an exploit or depeg
-      // cannot be silently reactivated by a sync. Deleting such a row would
-      // discard that guard — the next time the provider listed the reference, it
-      // would be inserted fresh as `active`. So an operator-stopped row is the
-      // one thing this pass leaves behind; it is invisible to every read anyway
-      // (the catalogue and program-creation paths both filter `status = 'active'`).
+    async deprecateUnlistedStrategies(input: DeprecateUnlistedEarnStrategiesInput) {
+      // Only `active` rows are transitioned. An operator `paused`/`deprecated`
+      // is a deliberate human record, and it is load-bearing: upsertStrategy
+      // refuses to overwrite it so a vault stopped for an exploit or depeg
+      // cannot be silently reactivated by a sync. A sync-owned transition sets
+      // catalogue_delisted_at, which is what lets a later relist safely reopen
+      // that row without weakening the operator stop.
       //
       // An empty keep set would match EVERY active row (`= ANY('{}')` is false,
-      // so `NOT` admits everything) and delete the provider's whole shelf.
+      // so `NOT` admits everything) and deprecate the provider's whole shelf.
       // "The provider listed nothing" is indistinguishable from a misconfigured
       // account or a silently-empty response, so it can never trigger a
       // catalogue-wide teardown, unless the caller explicitly authorizes it
       // (`allowEmptyKeepSet`), which the mirror lane does when its truth source
       // reliably answered "nothing is listed". Even then the delist must be
-      // cluster-scoped: an authorized empty pass tears down one sub-shelf, never
+      // cluster-scoped: an authorized empty pass deprecates one sub-shelf, never
       // an environment.
       if (input.listedProviderReferences.length === 0 && !input.allowEmptyKeepSet) {
         return [];
       }
       if (input.allowEmptyKeepSet && !input.hostCluster) {
-        throw new Error("deleteUnlistedStrategies: allowEmptyKeepSet requires a cluster scope");
+        throw new Error("deprecateUnlistedStrategies: allowEmptyKeepSet requires a cluster scope");
       }
 
       const conditions = ["provider = ?", "environment = ?", "status = 'active'"];
@@ -287,7 +287,10 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
 
       const rows = await db
         .prepare(
-          `DELETE FROM earn_strategies
+          `UPDATE earn_strategies
+              SET status = 'deprecated',
+                  catalogue_delisted_at = sdp_iso_now(),
+                  updated_at = sdp_iso_now()
             WHERE ${conditions.join("\n              AND ")}
             RETURNING provider_reference`
         )
@@ -395,6 +398,36 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       );
     },
 
+    async listStrategyFigures(params) {
+      // Same jsonb_typeof guard as the ranking in listStrategies: the metadata
+      // bag is open, so a non-numeric tvlUsd reads as "no figure", not a 500.
+      const result = await db
+        .prepare(
+          `SELECT provider_reference, host_cluster, status, current_apy, environment,
+                  CASE WHEN jsonb_typeof(risk_metadata->'tvlUsd') = 'number'
+                       THEN (risk_metadata->>'tvlUsd')::numeric END AS tvl_usd
+             FROM earn_strategies
+            WHERE provider = ? AND environment = ?
+            ORDER BY provider_reference ASC`
+        )
+        .bind(params.provider, params.environment)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map((row) => {
+        const environment = row.environment as SdpEnvironment;
+        const tvl = row.tvl_usd === null || row.tvl_usd === undefined ? null : Number(row.tvl_usd);
+        return {
+          provider_reference: row.provider_reference as string,
+          // NULL host_cluster reads as the environment's own cluster, the
+          // mapStrategyRow rule.
+          host_cluster:
+            (row.host_cluster as SolanaCluster | null) ?? CLUSTER_BY_SDP_ENVIRONMENT[environment],
+          status: row.status as EarnStrategyStatus,
+          current_apy: row.current_apy as string | null,
+          tvl_usd: tvl !== null && Number.isFinite(tvl) ? tvl : null,
+        };
+      });
+    },
+
     async getProviderWalletById(params) {
       const row = await db
         .prepare(
@@ -409,8 +442,8 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
     async listProviderWallets(
       input: ListEarnProviderWalletsInput
     ): Promise<ListEarnProviderWalletsResult> {
-      const conditions = ["organization_id = ?", "environment = ?"];
-      const bindings: unknown[] = [input.organizationId, input.environment];
+      const conditions = ["organization_id = ?", "project_id = ?", "environment = ?"];
+      const bindings: unknown[] = [input.organizationId, input.projectId, input.environment];
 
       if (input.provider) {
         conditions.push("provider = ?");

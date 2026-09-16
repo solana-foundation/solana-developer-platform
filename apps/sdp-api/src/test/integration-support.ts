@@ -3,6 +3,7 @@
  * Keep this facade intentionally small and integration-test specific.
  */
 
+import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
 import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
@@ -30,7 +31,7 @@ import {
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
-import { createOrgSigner, createToken2022Service } from "@/services/solana";
+import { createOrgSigner } from "@/services/solana";
 import { CustodyConfigStore, type CustodyWallet } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -56,10 +57,10 @@ export const apiTestSupport = {
   createOrgSigner,
   createPostgresEarnRepository,
   createSigningService,
-  createToken2022Service,
   createVaultDeadline,
   depositIntoVault,
   CustodyConfigStore,
+  DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
   EARN_PROVIDERS,
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,

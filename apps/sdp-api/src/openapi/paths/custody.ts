@@ -312,7 +312,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Signer check verified in simulation",
         content: jsonContent(custodySignerCheckResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 502]),
     },
   });
 

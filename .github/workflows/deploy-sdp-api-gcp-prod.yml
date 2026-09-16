@@ -87,6 +87,9 @@ jobs:
       id-token: write
 
   deploy:
+    outputs:
+      canary: ${{ steps.canary_outcome.outputs.result }}
+      tail_clean: ${{ steps.tail_outcome.outputs.clean }}
     name: Deploy production image
     needs: smoke
     if: >-
@@ -136,7 +139,10 @@ jobs:
 
       - name: Verify release identity
         if: ${{ inputs.release_sha != '' }}
-        run: .github/scripts/verify-release-identity.sh "${{ inputs.release_tag }}" "${{ inputs.release_sha }}"
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: .github/scripts/verify-release-identity.sh "${RELEASE_TAG}" "${RELEASE_SHA}"
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -168,6 +174,8 @@ jobs:
       - name: Verify and promote release image
         if: ${{ inputs.release_sha != '' }}
         timeout-minutes: 75
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
@@ -176,21 +184,21 @@ jobs:
           # before treating a missing tag or signature as a failure.
           SRC_DIGEST=""
           for attempt in $(seq 1 130); do
-            if SRC_DIGEST="$(crane digest "${SRC_BASE}:${{ inputs.release_tag }}" 2>/dev/null)"; then
+            if SRC_DIGEST="$(crane digest "${SRC_BASE}:${RELEASE_TAG}" 2>/dev/null)"; then
               break
             fi
             echo "release image tag not in GHCR yet (attempt ${attempt}/130); retrying in 30s"
             sleep 30
           done
           if [[ -z "${SRC_DIGEST}" ]]; then
-            echo "release image ${SRC_BASE}:${{ inputs.release_tag }} never appeared in GHCR." >&2
+            echo "release image ${SRC_BASE}:${RELEASE_TAG} never appeared in GHCR." >&2
             exit 1
           fi
           verified=""
           for attempt in $(seq 1 10); do
             if cosign verify "${SRC_BASE}@${SRC_DIGEST}" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/tags/${{ inputs.release_tag }}" \
+              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/tags/${RELEASE_TAG}" \
               --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"; then
               verified=true
               break
@@ -507,13 +515,20 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run prod canary against the promoted revision
+        id: canary
         if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
         timeout-minutes: 5
         run: |
           gcloud run jobs execute sdp-prod-canary \
             --region "${REGION}" --project "${PROJECT_ID}" --wait
 
+      - name: Record canary outcome
+        id: canary_outcome
+        if: ${{ always() }}
+        run: echo "result=${{ steps.canary.outcome }}" >> "$GITHUB_OUTPUT"
+
       - name: Roll back incomplete rollout
+        id: rollback_guard
         if: ${{ always() }}
         timeout-minutes: 5
         run: |
@@ -541,6 +556,7 @@ jobs:
           fi
 
       - name: Remove candidate traffic tag
+        id: remove_tag
         if: ${{ always() }}
         timeout-minutes: 5
         run: |
@@ -551,6 +567,11 @@ jobs:
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --remove-tags "${CANDIDATE_TAG}"
+
+      - name: Record tail cleanup outcome
+        id: tail_outcome
+        if: ${{ always() }}
+        run: echo "clean=${{ (steps.rollback_guard.outcome == 'success' || steps.rollback_guard.outcome == 'skipped') && (steps.remove_tag.outcome == 'success' || steps.remove_tag.outcome == 'skipped') }}" >> "$GITHUB_OUTPUT"
 
 
   notify-result:
@@ -586,6 +607,7 @@ jobs:
           STATUS: >-
             ${{ needs.deploy.result == 'success' && 'success' ||
                 (needs.deploy.result == 'cancelled' || needs.smoke.result == 'cancelled') && 'cancelled' ||
+                needs.deploy.outputs.canary == 'failure' && needs.deploy.outputs.tail_clean == 'true' && 'canary-failed' ||
                 'failure' }}
           VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
           DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}

@@ -49,22 +49,17 @@ export interface ClerkAuthContext {
 }
 
 /**
- * Get authenticated API key context from request.
- * Use this in protected routes instead of c.get("apiKey")!
+ * Get the normalized auth context when the request authenticated through any
+ * supported mode. Optional routes use this to preserve keyed behavior without
+ * manufacturing an identity for anonymous callers.
  *
  * This provides:
  * 1. Type safety without non-null assertions
  * 2. A defensive runtime check (should never fail in protected routes)
  * 3. Clear error if auth middleware wasn't applied
  *
- * @throws AppError with UNAUTHORIZED if auth is not present
- * @example
- * ```ts
- * const auth = getAuth(c);
- * const orgId = auth.organizationId; // No ! needed
- * ```
  */
-export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
+export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | null {
   const apiKey = c.get("apiKey");
   if (apiKey) {
     return {
@@ -126,6 +121,16 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
     };
   }
 
+  return null;
+}
+
+/**
+ * Require the normalized auth context. Protected routes use this instead of
+ * non-null assertions so a missing middleware remains a typed 401.
+ */
+export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
+  const auth = getOptionalAuth(c);
+  if (auth) return auth;
   throw new AppError("UNAUTHORIZED", "Authentication required");
 }
 
@@ -143,6 +148,24 @@ export function requireProjectId(c: Context<{ Bindings: Env }>): string {
     throw badRequest("Project scope is required");
   }
   return projectId;
+}
+
+/**
+ * Whether a dashboard identity may manage organization-wide credentials.
+ *
+ * Clerk contexts carry both the normalized organization role and its derived
+ * permissions. Accepting either admin representation keeps capability hints
+ * aligned with the authenticated membership while session contexts continue
+ * to authorize through their freshly resolved permissions. API keys are
+ * deliberately excluded from human credential-administration surfaces.
+ */
+export function canManageOrganizationCredentials(auth: ApiKeyContext): boolean {
+  if (auth.authType === "api_key") return false;
+  return (
+    auth.role === "admin" ||
+    auth.permissions.includes("org:admin") ||
+    auth.permissions.includes("*")
+  );
 }
 
 export function getClerkAuth(c: Context<{ Bindings: Env }>): ClerkAuthContext {

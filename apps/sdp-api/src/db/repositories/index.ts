@@ -9,15 +9,6 @@ export type {
   UpdateAssetProfileInput,
 } from "./asset-profile.repository";
 export { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
-export type {
-  AssetWorkflowDefinition,
-  AssetWorkflowRow,
-  AssetWorkflowsRepository,
-  CreateAssetWorkflowInput,
-  UpdateAssetWorkflowInput,
-} from "./asset-workflow.repository";
-export { generateAssetWorkflowId } from "./asset-workflow.repository";
-export { createPostgresAssetWorkflowsRepository } from "./asset-workflow.repository.postgres";
 export type { RepositoryDbClient } from "./base";
 export type {
   ArchiveCounterpartyInput,
@@ -62,7 +53,16 @@ export type {
 } from "./counterparty-provider-account.repository";
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 export type {
-  DeleteUnlistedEarnStrategiesInput,
+  DvpTradeInsert,
+  DvpTradeRepository,
+  DvpTradeRow,
+  DvpTradeScope,
+  DvpTradeSide,
+  DvpTradeStatus,
+} from "./dvp-trade.repository";
+export { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
+export type {
+  DeprecateUnlistedEarnStrategiesInput,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -102,14 +102,6 @@ export type {
 } from "./helius-rings-health.repository";
 export { mapHeliusRingsHealthRows } from "./helius-rings-health.repository";
 export { createPostgresHeliusRingsHealthRepository } from "./helius-rings-health.repository.postgres";
-export type {
-  CreateHeliusRingsKeyRefInput,
-  HeliusRingsKeyRefRepository,
-  HeliusRingsKeyRefRepositoryContext,
-  HeliusRingsKeyRefRow,
-} from "./helius-rings-key-ref.repository";
-export { generateHeliusRingsKeyRefId } from "./helius-rings-key-ref.repository";
-export { createPostgresHeliusRingsKeyRefRepository } from "./helius-rings-key-ref.repository.postgres";
 export type {
   FailHeliusRingsOperationInput,
   HeliusRingsOperationRepository,
@@ -184,13 +176,7 @@ export type {
 } from "./kyc-wallet.repository";
 export { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
 export type {
-  CreateNotificationInput,
-  ListNotificationsInput,
-  NotificationRow,
-  NotificationsRepository,
-} from "./notification.repository";
-export { createPostgresNotificationsRepository } from "./notification.repository.postgres";
-export type {
+  CollectibleRecurringPaymentRow,
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   CreatePaymentRecurringPaymentLifecycleAttemptInput,
@@ -203,18 +189,18 @@ export type {
   ListPaymentRecurringPaymentsResult,
   PaymentRecurringPaymentActivationAttemptRow,
   PaymentRecurringPaymentActivationAttemptStage,
-  PaymentRecurringPaymentActivationAttemptStatus,
+  PaymentRecurringPaymentAttemptStatus,
   PaymentRecurringPaymentLifecycleAttemptRow,
   PaymentRecurringPaymentLifecycleAttemptStage,
-  PaymentRecurringPaymentLifecycleAttemptStatus,
   PaymentRecurringPaymentLifecycleOperation,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
   PaymentRecurringPaymentUpdateAttemptMode,
   PaymentRecurringPaymentUpdateAttemptRow,
   PaymentRecurringPaymentUpdateAttemptStage,
-  PaymentRecurringPaymentUpdateAttemptStatus,
   PaymentRecurringPaymentUpdateEventRow,
+  RecoverableCollectionRecurringPaymentRow,
+  RecurringPaymentCollectionCycleRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
   UpdatePaymentRecurringPaymentInput,
@@ -451,20 +437,18 @@ export type {
 export { createPostgresProjectUserRepository } from "./project-user.repository.postgres";
 export {
   createAssetProfilesRepository,
-  createAssetWorkflowsRepository,
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
+  createDvpTradeRepository,
   createEarnRepository,
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
   createHeliusRingsHealthRepository,
-  createHeliusRingsKeyRefRepository,
   createHeliusRingsOperationRepository,
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
   createHeliusRingsZoneRepository,
   createKycWalletsRepository,
-  createNotificationsRepository,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
@@ -481,6 +465,7 @@ export {
   createPrivateChannelVerifiedWalletRepository,
   createPrivateChannelWithdrawalRepository,
   createProjectUserRepository,
+  createSecretRetirementsRepository,
   createSystemAssetProfilesRepository,
   createSystemCounterpartiesRepository,
   createSystemPaymentRequestsRepository,
@@ -489,9 +474,13 @@ export {
   createSystemTransactionalPaymentsRepository,
   createTokenRepository,
   createWalletAssetEnrollmentsRepository,
-  createWorkflowExecutionsRepository,
-  createWorkflowSecretRetirementsRepository,
 } from "./repository-factory";
+export type {
+  RecordSecretRetirementInput,
+  SecretRetirementRow,
+  SecretRetirementsRepository,
+} from "./secret-retirement.repository";
+export { createPostgresSecretRetirementsRepository } from "./secret-retirement.repository.postgres";
 export type {
   ListTokensOptions,
   TokenRepository,
@@ -499,22 +488,16 @@ export type {
 } from "./token.repository";
 export { createPostgresTokenRepository } from "./token.repository.postgres";
 export type {
+  ListUnifiedTransactionsInput,
+  ListUnifiedTransactionsResult,
+  UnifiedTransactionModuleWalletScope,
+  UnifiedTransactionsRepository,
+} from "./unified-transactions.repository";
+export { createPostgresUnifiedTransactionsRepository } from "./unified-transactions.repository.postgres";
+export type {
   EnrolledWalletRow,
   UpsertWalletAssetEnrollmentInput,
   WalletAssetEnrollmentRow,
   WalletAssetEnrollmentsRepository,
 } from "./wallet-asset-enrollment.repository";
 export { createPostgresWalletAssetEnrollmentsRepository } from "./wallet-asset-enrollment.repository.postgres";
-export type {
-  CreateWorkflowExecutionInput,
-  ListWorkflowExecutionsInput,
-  WorkflowExecutionRow,
-  WorkflowExecutionsRepository,
-} from "./workflow-execution.repository";
-export { createPostgresWorkflowExecutionsRepository } from "./workflow-execution.repository.postgres";
-export type {
-  RecordWorkflowSecretRetirementInput,
-  WorkflowSecretRetirementRow,
-  WorkflowSecretRetirementsRepository,
-} from "./workflow-secret-retirement.repository";
-export { createPostgresWorkflowSecretRetirementsRepository } from "./workflow-secret-retirement.repository.postgres";

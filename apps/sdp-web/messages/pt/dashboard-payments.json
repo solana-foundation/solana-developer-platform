@@ -246,7 +246,10 @@
         "preparing": "Preparando o status da transferência",
         "preparingDescription": "Estamos aguardando o registro da transferência vinculado a esta cotação.",
         "waitingForPayment": "Aguardando pagamento",
-        "waitingForPaymentHostedDescription": "Conclua o pagamento na janela do provedor acima. Este depósito é atualizado automaticamente assim que o provedor o confirmar."
+        "waitingForPaymentHostedDescription": "Conclua o pagamento na janela do provedor acima. Este depósito é atualizado automaticamente assim que o provedor o confirmar.",
+        "canceled": "Transferência cancelada",
+        "canceledFundingDescription": "Esta transferência foi cancelada, então as instruções de funding não se aplicam mais. Crie uma nova cotação para continuar.",
+        "canceledPayoutDescription": "Este pagamento de saída foi cancelado, então as instruções de depósito não se aplicam mais. Crie uma nova cotação para continuar."
       },
       "destinationCountry": "País de destino",
       "paymentRail": "Rails de pagamento",
@@ -327,7 +330,11 @@
       "simulating": "Simulando...",
       "depositSimulated": "Depósito simulado",
       "agreementPendingTitle": "Confirmando seu acordo",
-      "agreementPendingDescription": "Estamos registrando sua aceitação junto à BVNK — isso leva apenas um momento."
+      "agreementPendingDescription": "Estamos registrando sua aceitação junto à BVNK — isso leva apenas um momento.",
+      "agreementRequiredTitle": "Revise e aceite os acordos",
+      "agreementRequiredDescription": "A BVNK exige que a contraparte aceite o acordo da plataforma referente à sua residência fiscal antes que os dados dela sejam coletados.",
+      "viewAgreement": "Ver acordo",
+      "acceptAgreements": "Concordo e continuar"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verifique sua identidade",
@@ -442,7 +449,9 @@
       "cancel": "Cancelar",
       "importing": "Importando…",
       "import": "Importar",
-      "unknownToken": "Token desconhecido"
+      "unknownToken": "Token desconhecido",
+      "resultApprovalPending": "Lote aguardando aprovação",
+      "approvalPendingDescription": "Este lote exige aprovação da política antes de ser enviado. Nada foi movido ainda."
     },
     "manualInstructions": {
       "copied": "Copiado: {label}.",
@@ -976,7 +985,11 @@
       "paymentUpdated": "Pagamento recorrente atualizado.",
       "noChangesToSave": "Nenhuma alteração para salvar.",
       "sourceWalletUnresolved": "Wallet de origem indisponível",
-      "sourceWalletUnresolvedDescription": "Este pagamento recorrente não está vinculado a uma Wallet exata da SDP, portanto suas ações estão indisponíveis."
+      "sourceWalletUnresolvedDescription": "Este pagamento recorrente não está vinculado a uma Wallet exata da SDP, portanto suas ações estão indisponíveis.",
+      "signingDisabledDraft": "O rascunho pode ser salvo; a ativação requer uma Wallet de assinatura.",
+      "signingDisabledTitle": "Assinatura desativada para a Wallet de origem",
+      "signingDisabledBody": "Você não pode receber, alterar ou cancelar este pagamento até que a assinatura esteja ativada para {wallet}.",
+      "signingDisabledPendingBody": "Você pode ativar este pagamento assim que a assinatura estiver ativada para {wallet} ou se você alterar a Wallet de origem."
     },
     "transactions": {
       "searchPlaceholder": "Buscar ID, assinatura, endereço, referência ou contraparte (3+ caracteres)",
@@ -1056,7 +1069,94 @@
       "downloadingCsv": "Baixando…",
       "downloadCsvFailed": "Não foi possível baixar o CSV de transações.",
       "noAssetMatchesDescription": "Os saldos são lidos da chain, enquanto esta tabela lista as transferências registradas pela SDP. Um Token com fundos fora da SDP mostra um saldo sem transferências aqui.",
-      "allAssets": "Todos os ativos"
+      "allAssets": "Todos os ativos",
+      "searchTransactions": "Buscar transações",
+      "all": "Todos",
+      "allKinds": "Todos os tipos",
+      "kindSelectLabel": "Tipo de transação",
+      "statusSelectLabel": "Status da transação",
+      "walletId": "ID da Wallet",
+      "tokenPlaceholder": "Mint ou símbolo do Token",
+      "token": "Token",
+      "clearCounterparty": "Limpar filtro de contraparte",
+      "clearWallet": "Limpar filtro de Wallet",
+      "clearToken": "Limpar filtro de Token",
+      "loadFailed": "Não foi possível carregar as transações",
+      "module": "Módulo",
+      "moduleId": "ID do módulo",
+      "kind": "Tipo",
+      "noTransactionsFound": "Nenhuma transação encontrada",
+      "viewInModule": "Ver em {module}",
+      "modules": {
+        "payments": "Pagamentos",
+        "earn": "Earn",
+        "dvp": "Delivery vs Payments",
+        "private_channels": "Canais privados",
+        "issuance": "Emissão",
+        "rings": "Rings"
+      },
+      "kinds": {
+        "payments": {
+          "pay": "Pagar",
+          "confidential_pay": "Pagamento confidencial",
+          "batch_pay": "Pagamento em lote",
+          "recurring_pay": "Pagamento recorrente",
+          "deposit": "Depósito",
+          "request_deposit": "Solicitar depósito",
+          "onramp": "Onramp",
+          "offramp": "Offramp"
+        },
+        "earn": {
+          "deposit": "Depósito",
+          "withdraw": "Saque"
+        },
+        "dvp": {
+          "fund": "Perna de fundos",
+          "close": "Perna de fechamento"
+        },
+        "private_channels": {
+          "transfer": "Transferência",
+          "deposit": "Depósito",
+          "withdraw": "Saque"
+        },
+        "issuance": {
+          "mint": "Mint",
+          "burn": "Burn",
+          "freeze": "Congelar",
+          "unfreeze": "Descongelar",
+          "seize": "Apreender",
+          "force_burn": "Burn forçado",
+          "update_authority": "Update authority",
+          "pause": "Pausar",
+          "unpause": "Despausar",
+          "deploy": "Deploy",
+          "confidential_configure": "Configure confidential account",
+          "confidential_approve": "Approve confidential account",
+          "confidential_deposit": "Confidential deposit",
+          "confidential_apply_pending": "Apply pending balance",
+          "confidential_transfer": "Confidential transfer",
+          "confidential_withdraw": "Confidential withdrawal",
+          "confidential_empty_account": "Empty confidential account"
+        },
+        "rings": {
+          "shield": "Proteger",
+          "transfer_registered": "Transferência registrada",
+          "transfer_anonymous": "Transferência anônima",
+          "withdraw": "Sacar",
+          "merge": "Mesclar",
+          "timelock_create": "Criar timelock",
+          "timelock_settle": "Liquidar timelock",
+          "zone_create": "Criar zona",
+          "ring_exit": "Saída do ring",
+          "ring_entry": "Entrada no ring"
+        }
+      },
+      "statuses": {
+        "pending": "Pendente",
+        "succeeded": "Concluída",
+        "failed": "Falhou",
+        "canceled": "Cancelada"
+      }
     },
     "requests": {
       "loadFailed": "Não foi possível carregar as solicitações de pagamento",
@@ -1107,6 +1207,8 @@
       "listRequests": "Listar solicitações de pagamento",
       "createRequest": "Criar solicitação de pagamento",
       "playgroundProductName": "Solicitações de pagamento"
-    }
+    },
+    "signingUnavailable": "A assinatura está desativada para esta Wallet.",
+    "restricted": "Restrito"
   }
 }

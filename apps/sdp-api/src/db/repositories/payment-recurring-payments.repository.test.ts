@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedRecurringDatabaseTenant } from "@/test/helpers/recurring-payments";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
@@ -18,11 +19,11 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   let repo: PaymentRecurringPaymentsRepository;
 
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
@@ -34,25 +35,18 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     await db.prepare("DELETE FROM counterparties").run();
     await db.prepare("DELETE FROM projects").run();
 
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
-      )
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-         VALUES (?, ?, 'Test Project', 'test-project', 'sandbox', 'active', ?)`
-      )
-      .bind(TEST_PROJECT_ID, TEST_ORG.id, TEST_USER.id)
-      .run();
+    await seedRecurringDatabaseTenant({
+      organizationId: TEST_ORG.id,
+      organizationName: TEST_ORG.name,
+      organizationSlug: TEST_ORG.slug,
+      userId: TEST_USER.id,
+      userEmail: TEST_USER.email,
+      projectId: TEST_PROJECT_ID,
+      custodyConfigId: "cfg_recurring_payments_exact",
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      providerWalletId: TEST_PROVIDER_WALLET_ID,
+      publicKey: TEST_SOURCE_ADDRESS,
+    });
     await db
       .prepare(
         `INSERT INTO custody_configs
@@ -141,6 +135,8 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       });
 
     const exact = await create("recpay_repo_exact_filter", TEST_CUSTODY_WALLET_ID);
+    expect(exact).not.toBeNull();
+    if (exact === null) throw new Error("Failed to create recurring payment");
     await create("recpay_repo_legacy_filter", TEST_CUSTODY_WALLET_ID);
     await create("recpay_repo_sibling_filter", TEST_SIBLING_CUSTODY_WALLET_ID);
     await getDb(env)
@@ -155,7 +151,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       id: "recpay_update_exact_source",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      recurringPaymentId: exact?.id ?? "",
+      recurringPaymentId: exact.id,
       mode: "replacement",
       status: "processing",
       stage: "claim",
@@ -188,8 +184,10 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       offset: 0,
     });
 
-    expect(exact?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(attempt?.new_source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
+    expect(attempt).not.toBeNull();
+    if (attempt === null) throw new Error("Failed to create recurring payment update attempt");
+    expect(exact.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(attempt.new_source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
     expect(authorized.rows.map((row) => row.id).sort()).toEqual([
       "recpay_repo_exact_filter",
       "recpay_repo_legacy_filter",
@@ -207,7 +205,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     ).resolves.toBeNull();
 
     const promoted = await repo.updateRecurringPayment({
-      recurringPaymentId: exact?.id ?? "",
+      recurringPaymentId: exact.id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       sourceCustodyWalletId: TEST_SIBLING_CUSTODY_WALLET_ID,
@@ -216,7 +214,9 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       expectedStatus: "pending_activation",
       updatedAt: "2026-06-29T12:01:00.000Z",
     });
-    expect(promoted?.source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
+    expect(promoted).not.toBeNull();
+    if (promoted === null) throw new Error("Failed to update recurring payment");
+    expect(promoted.source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
   });
 
   it("guards pending updates with the expected updated_at value", async () => {
@@ -241,9 +241,11 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       createdAt,
       updatedAt: createdAt,
     });
+    expect(created).not.toBeNull();
+    if (created === null) throw new Error("Failed to create recurring payment");
 
     const staleUpdate = await repo.updateRecurringPayment({
-      recurringPaymentId: created?.id ?? "",
+      recurringPaymentId: created.id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       amount: "20.00",
@@ -255,15 +257,73 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     expect(staleUpdate).toBeNull();
 
     const updated = await repo.updateRecurringPayment({
-      recurringPaymentId: created?.id ?? "",
+      recurringPaymentId: created.id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       amount: "20.00",
       expectedStatus: "pending_activation",
-      expectedUpdatedAt: created?.updated_at,
+      expectedUpdatedAt: created.updated_at,
       updatedAt: "2026-06-29T12:01:00.000Z",
     });
 
-    expect(updated?.amount).toBe("20.00");
+    expect(updated).not.toBeNull();
+    if (updated === null) throw new Error("Failed to update recurring payment");
+    expect(updated.amount).toBe("20.00");
+  });
+
+  it("does not activate a canceled recurring payment with a stale activation writer", async () => {
+    const { account, counterparty } = await seedCounterpartyAccount();
+    const createdAt = "2026-06-29T12:00:00.000Z";
+    const created = await repo.createRecurringPayment({
+      id: "recpay_repo_stale_activation",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      sourceWalletId: TEST_PROVIDER_WALLET_ID,
+      sourceAddress: TEST_SOURCE_ADDRESS,
+      counterpartyId: counterparty.id,
+      counterpartyAccountId: account.id,
+      destinationAddress: "Destination111111111111111111111111111111",
+      token: "USDC",
+      amount: "10.00",
+      periodHours: 24,
+      firstCollectionAt: null,
+      metadataUri: null,
+      createdBy: TEST_USER.id,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    expect(created).not.toBeNull();
+    if (created === null) throw new Error("Failed to create recurring payment");
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET status = 'canceled' WHERE id = ?")
+      .bind(created.id)
+      .run();
+    const before = await repo.getRecurringPaymentById({
+      recurringPaymentId: created.id,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAuthorization: null,
+    });
+
+    const updated = await repo.updateRecurringPaymentActivation({
+      recurringPaymentId: created.id,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      status: "active",
+      planId: "psp_stale",
+      subscriptionId: "psub_stale",
+      updatedAt: "2026-06-29T12:01:00.000Z",
+    });
+
+    expect(updated).toBeNull();
+    expect(
+      await repo.getRecurringPaymentById({
+        recurringPaymentId: created.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        walletAuthorization: null,
+      })
+    ).toEqual(before);
   });
 });

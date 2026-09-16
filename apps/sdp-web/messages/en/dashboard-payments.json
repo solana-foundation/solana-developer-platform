@@ -1,5 +1,7 @@
 {
   "DashboardPayments": {
+    "signingUnavailable": "Signing is disabled for this wallet.",
+    "restricted": "Restricted",
     "page": {
       "unavailableStatus": "unavailable",
       "unknownError": "Unknown error",
@@ -254,6 +256,9 @@
         "quoteExpired": "Quote expired",
         "quoteExpiredFundingDescription": "This quote expired before the transfer completed. Create a new quote to continue funding.",
         "quoteExpiredPayoutDescription": "This quote expired before the payout completed. Create a new quote to continue the withdrawal.",
+        "canceled": "Transfer canceled",
+        "canceledFundingDescription": "This transfer was canceled, so the funding instructions no longer apply. Create a new quote to continue.",
+        "canceledPayoutDescription": "This payout was canceled, so the deposit instructions no longer apply. Create a new quote to continue.",
         "updated": "Transfer status updated",
         "currentProviderStatus": "Current provider status: {status}.",
         "preparing": "Preparing transfer status",
@@ -301,8 +306,10 @@
       "receiveTitle": "Receive funds onchain"
     },
     "bvnk": {
-      "agreementPendingTitle": "Confirming your agreement",
-      "agreementPendingDescription": "We're registering your acceptance with BVNK — this only takes a moment.",
+      "agreementRequiredTitle": "Review and accept the agreements",
+      "agreementRequiredDescription": "BVNK requires the counterparty to accept the platform agreement for their tax residence before their details are collected.",
+      "viewAgreement": "View agreement",
+      "acceptAgreements": "I agree and continue",
       "verificationRequiredTitle": "Verify your identity",
       "verificationRequiredDescription": "BVNK partners with Sumsub to confirm your identity before activating your funding account. Hit “Complete Verification” to get started — this page refreshes automatically once you're approved, and your instructions will appear right here.",
       "verificationInReviewTitle": "Verification in review",
@@ -864,6 +871,10 @@
       "lifecycleActionUnavailableDescription": "This recurring payment cannot be changed from its current status.",
       "sourceWalletUnresolved": "Source wallet unavailable",
       "sourceWalletUnresolvedDescription": "This recurring payment is not linked to an exact SDP Wallet, so its actions are unavailable.",
+      "signingDisabledDraft": "The draft can be saved; activation requires a signing wallet.",
+      "signingDisabledTitle": "Signing disabled for funding wallet",
+      "signingDisabledBody": "You cannot collect, change, or cancel this payment until signing is enabled for {wallet}.",
+      "signingDisabledPendingBody": "You can activate this payment once signing is enabled for {wallet} or you change the funding wallet.",
       "updatingPayment": "Updating recurring payment.",
       "actionFailed": "Recurring payment action failed.",
       "alreadyFundingWallet": "{wallet} is already the funding wallet.",
@@ -913,9 +924,6 @@
       "searchPlaceholder": "Search ID, signature, address, reference, or counterparty (3+ characters)",
       "clearSearch": "Clear transaction search",
       "filters": "Filters",
-      "downloadCsv": "Download CSV",
-      "downloadingCsv": "Downloading…",
-      "downloadCsvFailed": "Transaction CSV could not be downloaded.",
       "activeFilters": "{count} active",
       "clearFilters": "Clear filters",
       "allStatuses": "All statuses",
@@ -987,7 +995,88 @@
       "filterProvider": "Provider",
       "filterAsset": "Asset",
       "noAssetMatchesDescription": "Balances are read from the chain, while this table lists transfers SDP recorded. A token funded outside SDP shows a balance with no transfers here.",
-      "allAssets": "All assets"
+      "allAssets": "All assets",
+      "searchTransactions": "Search transactions",
+      "all": "All",
+      "allKinds": "All kinds",
+      "kindSelectLabel": "Transaction kind",
+      "statusSelectLabel": "Transaction status",
+      "walletId": "Wallet ID",
+      "tokenPlaceholder": "Token mint or symbol",
+      "token": "Token",
+      "clearCounterparty": "Clear counterparty filter",
+      "clearWallet": "Clear wallet filter",
+      "clearToken": "Clear token filter",
+      "loadFailed": "Unable to load transactions",
+      "module": "Module",
+      "moduleId": "Module ID",
+      "kind": "Kind",
+      "noTransactionsFound": "No transactions found",
+      "viewInModule": "View in {module}",
+      "modules": {
+        "payments": "Payments",
+        "earn": "Earn",
+        "dvp": "Delivery vs Payments",
+        "private_channels": "Private channels",
+        "issuance": "Issuance",
+        "rings": "Rings"
+      },
+      "kinds": {
+        "payments": {
+          "pay": "Pay",
+          "confidential_pay": "Confidential pay",
+          "batch_pay": "Batch pay",
+          "recurring_pay": "Recurring pay",
+          "deposit": "Deposit",
+          "request_deposit": "Request deposit",
+          "onramp": "Onramp",
+          "offramp": "Offramp"
+        },
+        "earn": { "deposit": "Deposit", "withdraw": "Withdraw" },
+        "dvp": { "fund": "Fund leg", "close": "Close leg" },
+        "private_channels": {
+          "transfer": "Transfer",
+          "deposit": "Deposit",
+          "withdraw": "Withdraw"
+        },
+        "issuance": {
+          "mint": "Mint",
+          "burn": "Burn",
+          "freeze": "Freeze",
+          "unfreeze": "Unfreeze",
+          "seize": "Seize",
+          "force_burn": "Force burn",
+          "update_authority": "Update authority",
+          "pause": "Pause",
+          "unpause": "Unpause",
+          "deploy": "Deploy",
+          "confidential_configure": "Configure confidential account",
+          "confidential_approve": "Approve confidential account",
+          "confidential_deposit": "Confidential deposit",
+          "confidential_apply_pending": "Apply pending balance",
+          "confidential_transfer": "Confidential transfer",
+          "confidential_withdraw": "Confidential withdrawal",
+          "confidential_empty_account": "Empty confidential account"
+        },
+        "rings": {
+          "shield": "Shield",
+          "transfer_registered": "Transfer registered",
+          "transfer_anonymous": "Transfer anonymous",
+          "withdraw": "Withdraw",
+          "merge": "Merge",
+          "timelock_create": "Timelock create",
+          "timelock_settle": "Timelock settle",
+          "zone_create": "Zone create",
+          "ring_exit": "Ring exit",
+          "ring_entry": "Ring entry"
+        }
+      },
+      "statuses": {
+        "pending": "Pending",
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "canceled": "Canceled"
+      }
     },
     "requests": {
       "loadFailed": "Unable to load payment requests",

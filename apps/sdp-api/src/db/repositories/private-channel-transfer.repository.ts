@@ -109,6 +109,8 @@ export interface PrivateChannelTransferRepository {
   updateTransfer(
     input: UpdatePrivateChannelTransferInput
   ): Promise<PrivateChannelTransferRow | null>;
+  /** In-flight transfers (pending/submitted) for the delete-drain gate. */
+  countNonTerminalByInstance(instanceId: string): Promise<number>;
   /**
    * The row that already claimed `idempotencyKey` in this tenant, or null.
    * Scoped to (organization, project) to match the unique index, so one

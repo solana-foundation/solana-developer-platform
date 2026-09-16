@@ -7,8 +7,9 @@ Status: Accepted — implemented on `main` (`earn-initial` merged as
 ## Context
 
 Solana Earn (SDP Markets V1) fronts yield strategies through external
-vault-infra providers (Veda, Upshift, Perena, Ground today) and surfaces
-curator risk frameworks (Gauntlet, Steakhouse, Sentora today). Both lists are
+vault-infra providers (Veda, Upshift, Perena, Kamino, Jupiter Lend, Ondo today;
+the Ground integration was removed 2026-09 — see the final addendum) and
+surfaces curator risk frameworks (Gauntlet, Steakhouse, Sentora today). Both lists are
 expected to churn: new partners must be insertable with minimal lift, and
 existing ones must be enable/disable-able — per environment and per
 organization — without breaking existing integrations or trapping customer
@@ -508,10 +509,11 @@ is "what this deployment can talk to", the former is "what we offer today".
   store what a provider reports.
 
 **First application: Ground un-surfaced, Kamino the only offered provider.**
-Ground is the only portfolio-capable provider, so with it un-surfaced nothing
-can create a program and Earn is browse-only — a Kamino comparison catalogue
-plus whatever programs already exist. That is a product consequence of the
-switch, not a property of it; re-surfacing Ground is a one-line change.
+Ground was the only portfolio-capable provider, so with it un-surfaced nothing
+could create a program and Earn was browse-only — a Kamino comparison catalogue
+plus whatever programs already existed. That is a product consequence of the
+switch, not a property of it. (Ground was later removed entirely; see the
+2026-09 addendum below.)
 
 Two consequences worth naming, because both are load-bearing and neither is
 obvious:
@@ -582,7 +584,7 @@ about cluster deployment. Check the chain for a per-cluster program id.
 
 `hostCluster`, `fundable`, and `isClusterFundableInEnvironment` all stay. They
 stop *firing* for Kamino — its rows now match their environment's cluster in
-both — but they still guard Ground, production Kamino, rows already stored under
+both — but they still guard production Kamino, rows already stored under
 the old behaviour, and the next genuinely single-cluster provider. The
 simplification here is to the mental model ("catalogued but not fundable" was a
 Kamino-shaped special case), not to the safety machinery.
@@ -923,17 +925,25 @@ the own-lane foreign-cluster drop: a provider's non-production source reporting
 mainnet instruments is still drift, warned and skipped.
 
 **Each lane delists only the cluster sub-shelf it is the truth for**
-(`deleteUnlistedStrategies` gained a `hostCluster` scope), so one lane's keep
+(`deprecateUnlistedStrategies` gained a `hostCluster` scope), so one lane's keep
 set can never tear down the other lane's rows. The mirror lane additionally
 converges to EMPTY on a reliable "nothing is listed" answer: a successful
 production fetch with no accepted mainnet rows, or a steady-state skip (stub
 provider, production credentials absent or revoked). The usual empty-keep-set
-refusal stays absolute for fundable own shelves, where a wrong delete costs a
-customer a vault mid-deposit; the asymmetry flips for the mirror because its
-rows are browse-only and re-mirrored hourly, while refusing would serve
-orphaned "production catalogue" rows forever after production stopped vouching
-for them. The repository enforces that an authorized-empty delist is
+refusal stays absolute for fundable own shelves, where a wrong delist hides a
+vault a customer may be mid-deposit into; the asymmetry flips for the mirror
+because its rows are browse-only and re-mirrored hourly, while refusing would
+serve orphaned "production catalogue" rows forever after production stopped
+vouching for them. The repository enforces that an authorized-empty delist is
 cluster-scoped, never environment-wide.
+
+PRO-1943 changed the storage half of delisting without changing that active-set
+contract. An unlisted active row is now marked `deprecated` with a
+`catalogue_delisted_at` tombstone instead of being deleted. It remains absent
+from catalogue lists and deposit admission, but preserves the stable provider,
+vault, and mint identity required to build an anonymous exit. A later provider
+relist clears only this sync-owned marker and reactivates the same id; an
+operator pause or deprecation has no marker and remains sticky.
 
 **Accepted cap: the mirror is faithful only for cluster-distinct references.**
 The upsert key stays (provider, provider_reference, environment) with no
@@ -948,6 +958,30 @@ Extending the key to the cluster would make every bare-triple consumer
 (`updateStrategyMetrics` above all) hit both rows; revisit only if a slug-keyed
 provider ever needs a faithful mirror.
 
+## Addendum (2026-09) — Ground removed entirely
+
+The Ground integration was retired: the provider will no longer be shown, and
+no actions are supported against it — not even withdrawals. This is a stronger
+step than the un-surfacing above (which had deliberately kept every money-OUT
+route open): the product decided Ground positions go away completely, and
+existing balances are zeroed by migration rather than remain payable. What was
+removed:
+
+- The `GroundEarnClient`, the `ground` id in `EARN_PROVIDERS` and every
+  per-provider registry map (`EARN_PROGRAM_SOLANA_PAYOUT_TOKENS`, surfacing,
+  deposit styles, slippage floors, availability credentials), the
+  `GROUND[_SANDBOX]_API_KEY` secrets, and the catalogue inventory tooling.
+- All Ground rows in the database: strategies, provider wallets (programs) and
+  their movements (migration 0099).
+
+The provider-neutral seams this ADR established are what made the removal
+mechanical: the capability guard, the fail-closed registry and the open-TEXT
+provider columns mean no code outside the registry maps needed to know Ground
+by name. The portfolio-wallet capability, program routes and custodial ledger
+STAY — they are provider-neutral, and the next custodial provider inherits them
+with zero route changes. `resolveEarnProviderClient` answers a clean 503 for
+the retired id, so a row that somehow survived the migration can never dispatch.
+
 **Accepted staleness, and one fidelity gap.** Mirrored rows refresh at the
 HOURLY catalogue cadence: the mirror upsert carries the snapshot's
 `currentApy` and `riskMetadata`, and the five-minute metrics pass deliberately
@@ -959,6 +993,10 @@ review-surface fidelity gaps, not deposit paths: `fundable: false` holds
 throughout.
 
 ## Addendum — 2026-08-26 External wallets: caller-signed vault movements (PRO-1722)
+
+This section describes the authenticated build-and-submit contract. The
+PRO-1943 addendum below adds an anonymous unsigned-build tier whose caller
+broadcasts directly and whose build is not persisted.
 
 The B2B2C money path ships. An *external wallet* is a **non-custodial wallet**
 the partner's platform connects — SDP holds no key for it, and its owner is
@@ -995,7 +1033,7 @@ row (migration 0070) — and every treasury read scopes by custody wallet, so
 external-wallet rows are structurally invisible to those surfaces rather than
 filtered by convention.
 
-### The two-call shape, and why the build persists
+### The authenticated two-call shape, and why the build persists
 
 Each direction is BUILD then SUBMIT. The build runs the gates, asks the
 provider for the plan, appends a memo carrying the built transaction's id
@@ -1120,7 +1158,8 @@ of non-custodial reads.
 ## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
 
 Supersedes the "Owner pays everything" accepted cost in the 2026-08-26
-addendum. Both external-wallet BUILD routes now take an optional `feePayer`: a
+addendum for authenticated callers. Both authenticated external-wallet BUILD
+routes now take an optional `feePayer`: a
 wallet the API caller (the partner) controls, which becomes the transaction's
 fee payer and, through the provider's `rentPayer`, funds the share-ATA rent an
 account creation needs. The compiled transaction then requires the partner's
@@ -1169,3 +1208,48 @@ payer); the fee payer adds 96 bytes to the compiled transaction, so near-limit
 swap-funded builds fall to the split flow slightly more often; and the
 blockhash window now has to fit the partner's co-signature too, which is why
 the docs tell partners to co-sign programmatically.
+
+## Addendum: 2026-09-14 Keyless catalogue and unsigned builds (PRO-1943)
+
+The hosted Earn API now has two access tiers over one set of route handlers.
+A valid SDP credential enriches a request with its existing organization,
+project, permission, entitlement, and environment context. With no credential,
+only this deliberate keyless subset is reachable:
+
+- `GET /v1/earn/strategies`
+- `GET /v1/earn/strategies/:strategyId`
+- `POST /v1/earn/vault-deposit-previews`
+- `POST /v1/earn/external-wallet/deposit-transactions`
+- `POST /v1/earn/external-wallet/withdrawal-previews`
+- `POST /v1/earn/external-wallet/withdrawal-transactions`
+
+Submits, movements, positions, earnings, programs, custody vault operations,
+and the aggregate movement feed remain authenticated. No second anonymous
+route tree exists; duplicating endpoint definitions would let the two contracts
+drift.
+
+Anonymous calls have no tenant identity. They use the operator-controlled
+`SDP_ENVIRONMENT`, may not supply a different fee payer, and do not evaluate an
+organization entitlement. Most importantly, they never persist an external
+wallet build, split-swap advisory, movement, or position. The owner pays, signs,
+broadcasts, and tracks the returned transaction. `sponsored` means SDP paid and
+is therefore `false`; a caller-provided fee payer on a keyed build is not SDP
+sponsorship.
+
+Withdrawal lookup follows the identity boundary. A keyed request names a
+tenant-scoped `positionId`. A keyless request names `{strategyId,
+ownerAddress, shares}` and never probes the position table. Both paths enforce
+the provider's withdrawal capability and live quote floor without turning a
+money-in entitlement into a money-out gate.
+
+Abuse controls are also tiered. Public catalogue reads receive a generous
+per-IP limit and cache headers. Anonymous previews and builds receive a tighter
+per-IP limit plus a separate RPC budget that fails closed. Authenticated
+metering continues to use the project API key. Structured request and rejection
+logs carry the normalized route and access tier so operations can derive
+traffic and saturation counters without route-specific code.
+
+The OpenAPI document, generated API reference, Embedded Yield guide, and AI
+discovery files are one public contract. Changing an operation's OpenAPI
+`security` declaration still requires the named security review mandated by
+PRO-1872 before those generated artifacts are published.

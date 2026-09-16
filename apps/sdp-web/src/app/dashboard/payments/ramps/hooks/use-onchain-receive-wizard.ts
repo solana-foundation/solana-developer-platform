@@ -34,6 +34,13 @@ export function getOnchainReceiveSteps(
   ];
 }
 
+export function canProceedOnchainReceive(
+  stepId: OnchainReceiveStepId,
+  selectedWallet: PaymentsDashboardWallet | null
+): boolean {
+  return stepId === "WALLET" ? selectedWallet !== null : true;
+}
+
 export interface UseOnchainReceiveWizardProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
@@ -58,14 +65,14 @@ export function useOnchainReceiveWizard({
     walletsError
   );
 
-  const selectedWallet = useMemo(
-    () => liveWallets.find((wallet) => wallet.id === walletId) ?? null,
-    [liveWallets, walletId]
-  );
+  const selectedWallet = useMemo(() => {
+    const wallet = liveWallets.find((candidate) => candidate.id === walletId);
+    return wallet === undefined ? null : wallet;
+  }, [liveWallets, walletId]);
 
   const currentStepId = steps[stepIndex].id;
   const isLastStep = stepIndex === steps.length - 1;
-  const canProceed = currentStepId === "WALLET" ? !!walletId : true;
+  const canProceed = canProceedOnchainReceive(currentStepId, selectedWallet);
 
   const summaryDetails: WizardSummaryDetail[] = optionalDetail(
     selectedWallet === null ? null : selectedWallet.label,

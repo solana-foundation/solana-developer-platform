@@ -230,7 +230,7 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
  * out of date. A settled `ready` wallet still carries provider-live balances,
  * so it refreshes at a quieter cadence instead of freezing at page load.
  *
- * Ground is hit live on every program read, so `busy` is deliberately slower
+ * The provider is hit live on every program read, so `busy` is deliberately slower
  * than `creating`: against a ~40s observed settle the reader loses nothing
  * perceptible and the provider takes a quarter of the requests.
  */
@@ -547,6 +547,14 @@ export function useEarnVaultPositions() {
 const EXTERNAL_WALLET_POSITIONS_PAGE_SIZE = 100;
 
 /**
+ * Hard stop on the paging loop, same reason as the other readers' page limits:
+ * a server that never stops advancing its cursor must not spin this client
+ * (and the BFF it drives) forever. 20 pages × 100 = 2,000 live positions for
+ * one end-user wallet, far past anything a partner wallet can plausibly hold.
+ */
+const EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT = 20;
+
+/**
  * Reads every live position for exactly one partner end-user wallet.
  * Kept at the strict dashboard boundary for the planned wallet drill-down.
  */
@@ -557,7 +565,7 @@ export async function fetchEarnExternalWalletPositions(
   const seenCursors = new Set<string>();
   let before: string | undefined;
 
-  while (true) {
+  for (let page = 1; page <= EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT; page += 1) {
     const query = new URLSearchParams({ limit: String(EXTERNAL_WALLET_POSITIONS_PAGE_SIZE) });
     if (before) query.set("before", before);
     const { status, body } = await requestJson<{ data: EarnExternalWalletPositionsPage }>(
@@ -577,6 +585,9 @@ export async function fetchEarnExternalWalletPositions(
     seenCursors.add(nextCursor);
     before = nextCursor;
   }
+
+  // A partial portfolio is worse than an error because it can hide money.
+  throw new Error("External-wallet positions pagination exceeded its safety limit");
 }
 
 export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
@@ -589,15 +600,26 @@ export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExte
   return body.data.summary;
 }
 
-const EXTERNAL_WALLET_SUMMARY_REFRESH_INTERVAL_MS =
-  process.env.NODE_ENV === "development" ? 3_000 : 60_000;
+export function earnExternalWalletSummaryRefreshInterval(
+  detailsVisible: boolean,
+  environment = process.env.NODE_ENV
+): number {
+  if (environment === "development") return 3_000;
+  return detailsVisible ? 15_000 : 60_000;
+}
 
 /** Live customer portfolio totals refresh while the Embedded Yield dashboard is mounted. */
-export function useEarnExternalWalletPositionSummary() {
+export function useEarnExternalWalletPositionSummary({
+  detailsVisible = false,
+}: {
+  detailsVisible?: boolean;
+} = {}) {
   const { data, error, isLoading, mutate } = useSWR(
     "dashboard-earn-external-wallet-position-summary",
     () => fetchEarnExternalWalletPositionSummary(),
-    { refreshInterval: EXTERNAL_WALLET_SUMMARY_REFRESH_INTERVAL_MS }
+    {
+      refreshInterval: earnExternalWalletSummaryRefreshInterval(detailsVisible),
+    }
   );
   return {
     summary: data,
@@ -642,29 +664,36 @@ const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
   }),
 });
 
+/**
+ * The API's 202 approval hold, identical for deposits and withdrawals: the
+ * custody wallet still owes the transaction a signature. One schema for both
+ * outcome unions so the pending arm cannot drift between the two mirrors.
+ */
+const signingPendingOutcomeSchema = z
+  .object({
+    error: z.object({
+      code: z.literal("SIGNING_PENDING"),
+      message: z.string(),
+      details: z
+        .object({
+          approvalRequestId: z.string().optional(),
+          walletOperationId: z.string().optional(),
+        })
+        .optional(),
+    }),
+  })
+  .transform(({ error }) => ({
+    kind: "approval_pending" as const,
+    message: error.message,
+    approvalRequestId: error.details?.approvalRequestId,
+    walletOperationId: error.details?.walletOperationId,
+  }));
+
 const earnVaultDepositOutcomeSchema = z.union([
   z
     .object({ data: earnVaultDepositSchema })
     .transform(({ data }) => ({ kind: "submitted" as const, deposit: data })),
-  z
-    .object({
-      error: z.object({
-        code: z.literal("SIGNING_PENDING"),
-        message: z.string(),
-        details: z
-          .object({
-            approvalRequestId: z.string().optional(),
-            walletOperationId: z.string().optional(),
-          })
-          .optional(),
-      }),
-    })
-    .transform(({ error }) => ({
-      kind: "approval_pending" as const,
-      message: error.message,
-      approvalRequestId: error.details?.approvalRequestId,
-      walletOperationId: error.details?.walletOperationId,
-    })),
+  signingPendingOutcomeSchema,
 ]);
 
 export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
@@ -1182,25 +1211,7 @@ const earnVaultWithdrawalOutcomeSchema = z.union([
   z
     .object({ data: z.object({ withdrawal: earnVaultWithdrawalSchema }) })
     .transform(({ data }) => ({ kind: "submitted" as const, withdrawal: data.withdrawal })),
-  z
-    .object({
-      error: z.object({
-        code: z.literal("SIGNING_PENDING"),
-        message: z.string(),
-        details: z
-          .object({
-            approvalRequestId: z.string().optional(),
-            walletOperationId: z.string().optional(),
-          })
-          .optional(),
-      }),
-    })
-    .transform(({ error }) => ({
-      kind: "approval_pending" as const,
-      message: error.message,
-      approvalRequestId: error.details?.approvalRequestId,
-      walletOperationId: error.details?.walletOperationId,
-    })),
+  signingPendingOutcomeSchema,
 ]);
 
 export type EarnVaultWithdrawalOutcome = z.infer<typeof earnVaultWithdrawalOutcomeSchema>;

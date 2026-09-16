@@ -3,15 +3,32 @@
 import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
 import { retryProjectBootstrap } from "./project-bootstrap-retry";
-import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "./project-cookie";
-import { createOrgSdpApiClient } from "./sdp-api";
+import {
+  PROJECT_COOKIE_NAME,
+  PROJECT_COOKIE_OPTIONS,
+  WORKSPACE_SCOPE_COOKIE_NAME,
+  workspaceScope,
+} from "./project-cookie";
+import { createOrgSdpApiClient, getSdpAuth } from "./sdp-api";
 
 export async function selectProjectAction(projectId: string | null): Promise<void> {
   const store = await cookies();
   if (projectId) {
+    const { userId, orgId } = await getSdpAuth();
+    const client = await createOrgSdpApiClient();
+    const { projects } = await client.fetch<ListProjectsResponse>("/v1/projects");
+    if (!userId || !orgId || !projects.some((project) => project.id === projectId)) {
+      throw new Error("Project is not available in this organization");
+    }
     store.set(PROJECT_COOKIE_NAME, projectId, PROJECT_COOKIE_OPTIONS);
+    store.set(
+      WORKSPACE_SCOPE_COOKIE_NAME,
+      workspaceScope(userId, orgId, projectId),
+      PROJECT_COOKIE_OPTIONS
+    );
   } else {
     store.delete(PROJECT_COOKIE_NAME);
+    store.delete(WORKSPACE_SCOPE_COOKIE_NAME);
   }
 }
 
@@ -44,11 +61,20 @@ export async function reconcileProjectCookieAction(): Promise<boolean> {
 
   const store = await cookies();
   const current = store.get(PROJECT_COOKIE_NAME)?.value ?? null;
-  if (current && projects.some((p) => p.id === current)) return true;
-
-  const next = projects.find((p) => p.slug === "default-sandbox") ?? projects[0] ?? null;
+  const next =
+    projects.find((p) => p.id === current) ??
+    projects.find((p) => p.slug === "default-sandbox") ??
+    projects[0] ??
+    null;
   if (next) {
+    const { userId, orgId } = await getSdpAuth();
+    if (!userId || !orgId) return false;
     store.set(PROJECT_COOKIE_NAME, next.id, PROJECT_COOKIE_OPTIONS);
+    store.set(
+      WORKSPACE_SCOPE_COOKIE_NAME,
+      workspaceScope(userId, orgId, next.id),
+      PROJECT_COOKIE_OPTIONS
+    );
   } else if (current) {
     store.delete(PROJECT_COOKIE_NAME);
   }

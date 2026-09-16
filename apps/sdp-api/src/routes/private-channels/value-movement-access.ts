@@ -21,7 +21,7 @@
  */
 
 import { isAddress } from "@sdp/solana/address";
-import type { PrivateChannelInstance } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS, type PrivateChannelInstance } from "@sdp/types";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   mapPrivateChannelInstanceRow,
@@ -29,9 +29,11 @@ import {
   type PrivateChannelVerifiedWalletRow,
 } from "@/db/repositories";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, forbidden, walletNotFound } from "@/lib/errors";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
-import { createSigningService } from "@/services/domain/signing.service";
+import { badRequest, conflict, forbidden } from "@/lib/errors";
+import {
+  listPrivateChannelCustodyWallets,
+  resolvePrivateChannelCustodyWallet,
+} from "@/services/private-channels/wallet-access";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 import {
@@ -41,9 +43,6 @@ import {
 import { requireActiveInstance } from "./helpers";
 
 const SYSTEM_PROGRAM_ADDRESS = "11111111111111111111111111111111";
-// biome-ignore lint/security/noSecrets: This is the public Solana Memo program address.
-const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
-
 /**
  * Program, system and connected-instance addresses, which must never be an
  * endpoint of a value movement.
@@ -110,11 +109,7 @@ function loadProjectWallets(
   c: AppContext,
   context: PrivateChannelActorContext
 ): Promise<CustodyWallet[]> {
-  return createSigningService(c.env).getWalletsWithProviders(
-    context.auth.organizationId,
-    context.projectId,
-    { includeAllProviders: true }
-  );
+  return listPrivateChannelCustodyWallets(c.env, context.auth.organizationId, context.projectId);
 }
 
 /**
@@ -131,19 +126,21 @@ export async function resolveVerifiedSourceWallet(
   c: AppContext,
   context: PrivateChannelActorContext,
   walletId: string,
-  wallets: CustodyWallet[]
+  wallets?: CustodyWallet[],
+  allowAddress = true
 ): Promise<{ wallet: CustodyWallet; verified: PrivateChannelVerifiedWalletRow }> {
-  const wallet = wallets.find(
-    (candidate) => candidate.walletId === walletId || candidate.publicKey === walletId
+  const wallet = await resolvePrivateChannelCustodyWallet(
+    c.env,
+    context.auth,
+    context.projectId,
+    walletId,
+    wallets,
+    allowAddress
   );
-  if (!wallet) {
-    throw walletNotFound();
-  }
   // Enrolment answers whether the wallet may move value on this instance at
   // all; the key's wallet bindings answer whether THIS credential may spend
   // from it. Every other money route holds the second line too, and skipping
   // it here would let a key bound to one wallet spend any enrolled wallet.
-  assertApiKeyWalletAccess(context.auth, wallet.walletId, ["payments:write"]);
 
   const verifiedWallets = await getPrivateChannelVerifiedWalletRepository(c).listByUserAndInstance(
     context.actor.id,
@@ -182,9 +179,13 @@ async function resolveCounterpartyAddress(
     requireVerifiedOnInstance: boolean;
   }
 ): Promise<string> {
-  const matched = wallets.find(
+  const matches = wallets.filter(
     (candidate) => candidate.walletId === input.value || candidate.publicKey === input.value
   );
+  if (new Set(matches.map((wallet) => wallet.publicKey)).size > 1) {
+    throw conflict("Counterparty address is ambiguous");
+  }
+  const matched = matches[0];
   const resolved = matched?.publicKey ?? input.value;
 
   if (!matched && !isAddress(resolved)) {

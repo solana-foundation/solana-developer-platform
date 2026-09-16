@@ -1,6 +1,5 @@
 "use client";
 
-import { toNumberAmount } from "@sdp/solana/amount";
 import type { MoneygramRampEvent, PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
@@ -17,6 +16,11 @@ import {
   isTrustedRampDestination,
   MONEYGRAM_WIDGET_APPROVED_HOSTS,
 } from "@/lib/trusted-ramp-destinations";
+import {
+  buildOfframpTransactionPrefill,
+  buildOnrampTransactionPrefill,
+  type MoneygramTransactionPrefill,
+} from "./moneygram-prefill";
 
 const SESSION_REFRESH_MS = 50 * 60 * 1000;
 
@@ -53,14 +57,7 @@ interface MoneygramRampsConfig {
     walletType: "custodial" | "non-custodial";
     displayName?: string;
   };
-  transaction?: {
-    type: "off-ramp" | "on-ramp";
-    destinationCountry?: string;
-    destinationSubdivision?: string;
-    destinationCurrency?: string;
-    amount?: number;
-    asset?: CryptoAssetSymbol;
-  };
+  transaction?: MoneygramTransactionPrefill;
   devConfig?: {
     apiBaseUrl: string;
     mockMode: boolean;
@@ -114,33 +111,6 @@ function loadRampsSdk(sdkUrl: string): Promise<NonNullable<Window["RampsSDK"]>> 
     rampsSdkPromise = null;
   });
   return rampsSdkPromise;
-}
-
-function buildOfframpTransactionPrefill(
-  fiatCurrency: RampFiatCurrency,
-  cryptoAsset: CryptoAssetSymbol,
-  cryptoAmount: string
-): MoneygramRampsConfig["transaction"] {
-  const destinationCountry =
-    fiatCurrency === "USD" ? "USA" : fiatCurrency === "MXN" ? "MEX" : undefined;
-  return {
-    type: "off-ramp",
-    ...(destinationCountry ? { destinationCountry } : {}),
-    destinationCurrency: fiatCurrency,
-    amount: toNumberAmount(cryptoAmount),
-    asset: cryptoAsset,
-  };
-}
-
-function buildOnrampTransactionPrefill(
-  fiatAmount: string,
-  cryptoAsset: CryptoAssetSymbol
-): MoneygramRampsConfig["transaction"] {
-  return {
-    type: "on-ramp",
-    amount: toNumberAmount(fiatAmount),
-    asset: cryptoAsset,
-  };
 }
 
 export interface MoneygramRampWidgetProps {

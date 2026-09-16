@@ -1,0 +1,174 @@
+"use client";
+
+/**
+ * Sending the create request.
+ *
+ * Separate from the form's state so the branching that decides WHAT to send
+ * stays out of the code that decides whether it can be sent at all.
+ */
+
+import { type SolanaCluster, SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
+import { z } from "zod";
+import { useTranslations } from "@/i18n/provider";
+import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { explorerTxUrl } from "@/lib/explorer";
+import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { freshDvpIdempotencyKey } from "../dvp-idempotency-key";
+import type { DvpPartyWire } from "./use-dvp-parties";
+
+const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
+
+export interface DvpCreateRequest {
+  parties: { a: DvpPartyWire; b: DvpPartyWire };
+  amountA: string;
+  amountB: string;
+  /** The expiry as a local wall-clock datetime, "YYYY-MM-DDTHH:mm". */
+  expiry: string;
+  mintA: string;
+  mintB: string;
+  refString: string;
+  /** Each listed mint carries its own program; a pasted one is assumed T22. */
+  tokenProgramA: string | null;
+  tokenProgramB: string | null;
+  /**
+   * Where each party's proceeds go. Empty means the party's own address, which
+   * is what the program records for an omitted destination.
+   */
+  userASettlementDestination: string;
+  userBSettlementDestination: string;
+}
+
+export interface DvpCreateSubmit {
+  error: string | null;
+  submit: (request: DvpCreateRequest) => Promise<void>;
+  submitting: boolean;
+}
+
+/** A refusal's envelope. Only the message is read. */
+const errorEnvelopeSchema = z.object({ error: z.object({ message: z.string() }) });
+
+/** The created trade, as far as the confirmation needs it. */
+const createdEnvelopeSchema = z.object({
+  data: z.object({
+    trade: z.object({ id: z.string().min(1), createSignature: z.string().nullable() }),
+  }),
+});
+
+export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
+  const router = useRouter();
+  const t = useTranslations();
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // One key per logical request. It rotates only once a trade was created, so
+  // a second trade on the same terms is a new request rather than a replay of
+  // the first. Every other outcome keeps it: a throw or a server error may have
+  // left the first attempt broadcasting, and the retry has to replay it rather
+  // than draw a second trade at a second address; a rejection stored nothing,
+  // so the key is still free.
+  const idempotencyKey = useRef<string | null>(null);
+  // Minted on first use rather than as the ref's initial value, which would draw
+  // (and throw away) fresh random bytes on every render.
+  function currentIdempotencyKey(): string {
+    const existing = idempotencyKey.current;
+    if (existing !== null) {
+      return existing;
+    }
+    const minted = freshDvpIdempotencyKey("dvp-create");
+    idempotencyKey.current = minted;
+    return minted;
+  }
+
+  async function submit(request: DvpCreateRequest) {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/dashboard/markets/dvp/trades", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          [IDEMPOTENCY_KEY_HEADER]: currentIdempotencyKey(),
+        },
+        body: JSON.stringify({
+          partyA: request.parties.a.ref,
+          partyB: request.parties.b.ref,
+          mintA: request.mintA,
+          mintB: request.mintB,
+          // A PASTED address is assumed Token-2022; if it is not, create
+          // refuses and names the mismatch rather than publishing an escrow
+          // derived under the wrong program, which is the failure the form
+          // cannot detect itself.
+          tokenProgramA: request.tokenProgramA ?? TOKEN_2022,
+          tokenProgramB: request.tokenProgramB ?? TOKEN_2022,
+          amountA: request.amountA,
+          amountB: request.amountB,
+          // Local wall clock, deliberately: the person picked a time off
+          // their own clock, so the deadline lands at that local moment.
+          expiryTimestamp: String(Math.floor(new Date(`${request.expiry}:59`).getTime() / 1000)),
+          ...(request.refString ? { refString: request.refString } : {}),
+          // Omitted rather than sent empty. The API reads absent as "the
+          // party's own address"; an empty string would fail the address
+          // pattern and 400 an otherwise ordinary trade.
+          ...(request.userASettlementDestination
+            ? { userASettlementDestination: request.userASettlementDestination }
+            : {}),
+          ...(request.userBSettlementDestination
+            ? { userBSettlementDestination: request.userBSettlementDestination }
+            : {}),
+        }),
+      });
+
+      // Status before body. A non-2xx response carries an error envelope, not
+      // a trade, and reading it as one would navigate to `undefined`.
+      if (!response.ok) {
+        const failure = errorEnvelopeSchema.safeParse(await response.json().catch(() => null));
+        setError(
+          failure.success
+            ? failure.data.error.message
+            : t("DashboardMarkets.dvp.actionFailed", { status: String(response.status) })
+        );
+        return;
+      }
+
+      // A success answer that cannot be read says nothing about which trade
+      // exists. The key is kept, so pressing Create again replays the trade the
+      // first request made instead of drawing a second one.
+      const created = createdEnvelopeSchema.safeParse(await response.json().catch(() => null));
+      if (!created.success) {
+        setError(t("DashboardMarkets.dvp.createUnconfirmed"));
+        return;
+      }
+      // The next submit mints a new key: a second trade on the same terms is a new request.
+      idempotencyKey.current = null;
+      const { id: createdId, createSignature } = created.data.data.trade;
+      // Confirmed before the navigation, so the trade page opens with the
+      // reason it opened already stated. Creating publishes two escrow
+      // addresses and costs rent; arriving on a new page with no acknowledgement
+      // leaves somebody guessing whether they just did that twice.
+      toast.success(t("DashboardMarkets.dvp.toastCreated"), {
+        position: "bottom-right",
+        action:
+          createSignature === null
+            ? undefined
+            : {
+                label: t("DashboardMarkets.dvp.viewTransaction"),
+                onClick: () =>
+                  window.open(
+                    explorerTxUrl(createSignature, cluster),
+                    "_blank",
+                    "noopener,noreferrer"
+                  ),
+              },
+      });
+      router.push(`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${createdId}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Create failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return { error, submit, submitting };
+}

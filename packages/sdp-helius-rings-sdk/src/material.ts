@@ -8,7 +8,9 @@ import {
   ShieldedPublicKey,
   ViewingKey,
 } from "@heliuslabs/zolana";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { LocalKeys, type ProofService } from "@heliuslabs/zolana/client";
+import { LocalShieldedKeys } from "@heliuslabs/zolana/transaction";
+import { HeliusRingsError, RINGS_IDENTITY_MISMATCH, type RingsErrorCause } from "@sdp/helius-rings";
 import { address, getAddressEncoder, getBase58Decoder } from "@solana/kit";
 
 /** A viewing secret is a P-256 scalar, so not every 32 bytes are in range. */
@@ -30,14 +32,32 @@ export interface MaterialRequest {
 }
 
 /**
- * Rings key material for one identity. Both keys hold secrets, so prefer
- * receiving this through {@link ShieldedMaterialSource.withMaterial}.
+ * Rings key material for one identity.
+ *
+ * The secrets stay inside: a caller gets the address, the two published halves,
+ * and freshly-built key objects it owns and destroys. Zolana 0.1.6 exposes no
+ * public way back from a derivation seed to a bare `ViewingKey`/`NullifierKey`
+ * pair, so handing those out would rule out the seed-rooted source entirely.
+ * Both factories copy, so each result has its own lifetime.
  */
 export interface ShieldedMaterial {
-  readonly viewingKey: ViewingKey;
-  readonly nullifierKey: NullifierKey;
   readonly shieldedAddress: ShieldedAddress;
+  /** Read only: derivation and decryption, no proving. */
+  readKeys(): LocalShieldedKeys;
+  /** Read and spend. `prove` completes the witness with the nullifier secret. */
+  spendKeys(proofs: ProofService): LocalKeys;
   destroy(): void;
+}
+
+/** The published halves of an identity, as the on-chain registry stores them. */
+export function publishedHalves(shieldedAddress: ShieldedAddress): {
+  nullifierPublicKey: Bytes32;
+  viewingPublicKey: Uint8Array;
+} {
+  return {
+    nullifierPublicKey: shieldedAddress.nullifierPublicKey,
+    viewingPublicKey: shieldedAddress.viewingPublicKey.toBytes(),
+  };
 }
 
 /**
@@ -63,6 +83,13 @@ export interface ShieldedMaterialInput {
   readonly nullifierKeyBytes: Uint8Array;
   /** Base58 Solana address that owns the identity. */
   readonly owner: string;
+}
+
+export interface DerivationSeedMaterialInput {
+  /** Base58 Solana address that owns the identity. */
+  readonly owner: string;
+  /** The owner's 64-byte Ed25519 signature over `ed25519DerivationMessage(owner)`. */
+  readonly derivationSeed: Uint8Array;
 }
 
 /** Raised when a re-derived identity does not match the persisted one. */
@@ -124,11 +151,18 @@ export async function createShieldedMaterial(
       viewingKey.publicKey()
     );
     const resolvedNullifierKey = nullifierKey;
+    // `fromKeys` copies, so the trio these two build from is ours to destroy and
+    // every result owns its own lifetime.
+    const trio = {
+      address: shieldedAddress,
+      viewingKeys: [viewingKey],
+      nullifierKey: resolvedNullifierKey,
+    };
 
     return {
-      viewingKey,
-      nullifierKey: resolvedNullifierKey,
       shieldedAddress,
+      readKeys: () => LocalShieldedKeys.fromKeys(trio),
+      spendKeys: (proofs) => LocalKeys.fromKeys(trio, proofs),
       destroy() {
         viewingKey.destroy();
         resolvedNullifierKey.destroy();
@@ -139,6 +173,48 @@ export async function createShieldedMaterial(
     viewingKey.destroy();
     throw error;
   }
+}
+
+/**
+ * Builds one identity from the owner's derivation seed: its Ed25519 signature
+ * over `ed25519DerivationMessage(owner)`.
+ *
+ * The seed never becomes a bare key pair here. Zolana verifies the signature
+ * against `owner` on every call and expands it internally, so a seed that is the
+ * right width but not that signature fails before it derives anything. Both
+ * factories re-expand rather than share, which costs one HKDF and keeps each
+ * result independently destroyable.
+ *
+ * The caller keeps ownership of `derivationSeed`; the SDK copies it and clears
+ * only its own copy.
+ */
+export async function createShieldedMaterialFromDerivationSeed(
+  input: DerivationSeedMaterialInput
+): Promise<ShieldedMaterial> {
+  // Poseidon has to be resident before an address can be formed; loading is cached.
+  await initializePoseidon();
+
+  const solanaPublicKey = address(input.owner);
+  const seed = input.derivationSeed;
+  const seedInput = { solanaPublicKey, derivationSeed: seed };
+
+  // Built once so a bad seed fails here rather than on first use, and so the
+  // address is available without a factory call.
+  const probe = LocalShieldedKeys.fromDerivationSeed(seedInput);
+  let shieldedAddress: ShieldedAddress;
+  try {
+    shieldedAddress = probe.address();
+  } finally {
+    probe.destroy();
+  }
+
+  return {
+    shieldedAddress,
+    readKeys: () => LocalShieldedKeys.fromDerivationSeed(seedInput),
+    spendKeys: (proofs) => LocalKeys.fromDerivationSeed(seedInput, proofs),
+    // The seed belongs to the source that fetched it; it clears its own copy.
+    destroy() {},
+  };
 }
 
 /**
@@ -179,6 +255,10 @@ export function assertProvisionedIdentity(material: ShieldedMaterial, expected: 
     assertShieldedIdentity(material, expected);
   } catch (error) {
     if (!(error instanceof RingsIdentityMismatchError)) throw error;
-    throw new HeliusRingsError("conflict", IDENTITY_MISMATCH_MESSAGE);
+    // Named on the cause so the service can quarantine on this one conflict
+    // without reading the message. The two addresses stay out of it.
+    throw new HeliusRingsError("conflict", IDENTITY_MISMATCH_MESSAGE, {
+      cause: { upstream: RINGS_IDENTITY_MISMATCH } satisfies RingsErrorCause,
+    });
   }
 }

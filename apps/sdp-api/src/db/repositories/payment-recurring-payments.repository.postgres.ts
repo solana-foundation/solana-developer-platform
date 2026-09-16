@@ -1,8 +1,24 @@
+import {
+  COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
+  COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
+  PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES,
+  PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  PAYMENT_RECURRING_PAYMENT_LIFECYCLE_ATTEMPT_STAGES,
+  PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS,
+  PAYMENT_RECURRING_PAYMENT_STATUSES,
+  PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES,
+  PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES,
+  RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
+  RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
+  RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
+} from "@sdp/types";
+import { z } from "zod";
 import type { DatabaseExecutor } from "@/db";
-import { parseNullableCustodyWalletId } from "./payment-execution-identity";
+import { AppError } from "@/lib/errors";
 import type {
   ClaimPaymentRecurringPaymentLifecycleInput,
   ClaimPaymentRecurringPaymentUpdateInput,
+  CollectibleRecurringPaymentRow,
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   CreatePaymentRecurringPaymentLifecycleAttemptInput,
@@ -14,15 +30,14 @@ import type {
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
   PaymentRecurringPaymentActivationAttemptRow,
-  PaymentRecurringPaymentActivationAttemptStage,
   PaymentRecurringPaymentLifecycleAttemptRow,
-  PaymentRecurringPaymentLifecycleAttemptStage,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
   PaymentRecurringPaymentUpdateAttemptRow,
-  PaymentRecurringPaymentUpdateAttemptStage,
   PaymentRecurringPaymentUpdateEventRow,
   PaymentRecurringWalletAuthorization,
+  RecoverableCollectionRecurringPaymentRow,
+  StalePaymentRecurringPaymentUpdateRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
   UpdatePaymentRecurringPaymentCollectionInput,
@@ -33,47 +48,29 @@ import type {
   UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
 
-function buildInClause(length: number): string {
-  return Array.from({ length }, () => "?").join(", ");
-}
+type DatabaseBindValues = Parameters<ReturnType<DatabaseExecutor["prepare"]>["bind"]>;
 
 function addWalletAuthorization(
   clauses: string[],
-  values: unknown[],
-  authorization: PaymentRecurringWalletAuthorization | undefined
+  values: DatabaseBindValues,
+  authorization: PaymentRecurringWalletAuthorization | null
 ): void {
   if (!authorization) return;
 
   const authorizationClauses: string[] = [];
   if (authorization.custodyWalletIds.length > 0) {
-    authorizationClauses.push(
-      `source_custody_wallet_id IN (${buildInClause(authorization.custodyWalletIds.length)})`
-    );
-    values.push(...authorization.custodyWalletIds);
+    authorizationClauses.push("source_custody_wallet_id = ANY(?::text[])");
+    values.push(authorization.custodyWalletIds);
   }
   if (authorization.providerWalletIds.length > 0) {
     authorizationClauses.push(
-      `(source_custody_wallet_id IS NULL AND source_wallet_id IN (${buildInClause(authorization.providerWalletIds.length)}))`
+      "(source_custody_wallet_id IS NULL AND source_wallet_id = ANY(?::text[]))"
     );
-    values.push(...authorization.providerWalletIds);
+    values.push(authorization.providerWalletIds);
   }
   clauses.push(
     authorizationClauses.length > 0 ? `(${authorizationClauses.join(" OR ")})` : "1 = 0"
   );
-}
-
-function mapStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.map(String);
-  }
-  if (typeof value === "string") {
-    return value
-      .replace(/^\{|\}$/g, "")
-      .split(",")
-      .map((item) => item.trim().replace(/^"|"$/g, ""))
-      .filter(Boolean);
-  }
-  return [];
 }
 
 function toPostgresTextArray(values: string[]): string {
@@ -83,123 +80,163 @@ function toPostgresTextArray(values: string[]): string {
   return `{${escaped.join(",")}}`;
 }
 
+const recurringPaymentRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  source_custody_wallet_id: z.string().min(1).nullable(),
+  source_wallet_id: z.string(),
+  source_address: z.string(),
+  counterparty_id: z.string(),
+  counterparty_account_id: z.string(),
+  destination_address: z.string(),
+  destination_token_account: z.string().nullable(),
+  token: z.string(),
+  amount: z.string(),
+  period_hours: z.number(),
+  first_collection_at: z.string().nullable(),
+  next_collection_due_at: z.string().nullable(),
+  plan_id: z.string().nullable(),
+  subscription_id: z.string().nullable(),
+  plan_pda: z.string().nullable(),
+  plan_created_at: z.string().nullable(),
+  plan_creation_signature: z.string().nullable(),
+  subscription_pda: z.string().nullable(),
+  subscription_authority_address: z.string().nullable(),
+  authorization_signature: z.string().nullable(),
+  status: z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES),
+  metadata_uri: z.string().nullable(),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+const activationAttemptRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  recurring_payment_id: z.string(),
+  status: z.enum(PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES),
+  stage: z.enum(PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES),
+  plan_creation_signature: z.string().nullable(),
+  authorization_signature: z.string().nullable(),
+  error: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+const lifecycleAttemptRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  recurring_payment_id: z.string(),
+  operation: z.enum(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS),
+  status: z.enum(PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES),
+  stage: z.enum(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_ATTEMPT_STAGES),
+  signature: z.string().nullable(),
+  error: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+const updateAttemptRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  recurring_payment_id: z.string(),
+  mode: z.enum(PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES),
+  status: z.enum(PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES),
+  stage: z.enum(PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES),
+  old_plan_id: z.string().nullable(),
+  old_subscription_id: z.string().nullable(),
+  new_plan_id: z.string().nullable(),
+  new_subscription_id: z.string().nullable(),
+  new_source_custody_wallet_id: z.string().min(1).nullable(),
+  plan_update_signature: z.string().nullable(),
+  plan_creation_signature: z.string().nullable(),
+  authorization_setup_signature: z.string().nullable(),
+  authorization_signature: z.string().nullable(),
+  old_cancel_signature: z.string().nullable(),
+  changed_fields: z.array(z.string()),
+  before_values: z.record(z.string(), z.unknown()),
+  after_values: z.record(z.string(), z.unknown()),
+  error: z.string().nullable(),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+const updateEventRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  recurring_payment_id: z.string(),
+  attempt_id: z.string().nullable(),
+  changed_fields: z.array(z.string()),
+  before_values: z.record(z.string(), z.unknown()),
+  after_values: z.record(z.string(), z.unknown()),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+});
+const staleUpdateRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  updated_at: z.string(),
+  oldest_updated_at: z.string(),
+  stale_count: z.number(),
+});
+
 function mapRecurringPaymentRow(row: Record<string, unknown>): PaymentRecurringPaymentRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    source_custody_wallet_id: parseNullableCustodyWalletId(row.source_custody_wallet_id),
-    source_wallet_id: row.source_wallet_id as string,
-    source_address: row.source_address as string,
-    counterparty_id: row.counterparty_id as string,
-    counterparty_account_id: row.counterparty_account_id as string,
-    destination_address: row.destination_address as string,
-    destination_token_account: (row.destination_token_account as string | null | undefined) ?? null,
-    token: row.token as string,
-    amount: row.amount as string,
-    period_hours: row.period_hours as number,
-    first_collection_at: (row.first_collection_at as string | null | undefined) ?? null,
-    next_collection_due_at: (row.next_collection_due_at as string | null | undefined) ?? null,
-    plan_id: (row.plan_id as string | null | undefined) ?? null,
-    subscription_id: (row.subscription_id as string | null | undefined) ?? null,
-    plan_pda: (row.plan_pda as string | null | undefined) ?? null,
-    plan_created_at: (row.plan_created_at as string | null | undefined) ?? null,
-    plan_creation_signature: (row.plan_creation_signature as string | null | undefined) ?? null,
-    subscription_pda: (row.subscription_pda as string | null | undefined) ?? null,
-    subscription_authority_address:
-      (row.subscription_authority_address as string | null | undefined) ?? null,
-    authorization_signature: (row.authorization_signature as string | null | undefined) ?? null,
-    status: row.status as PaymentRecurringPaymentRow["status"],
-    metadata_uri: (row.metadata_uri as string | null | undefined) ?? null,
-    created_by: (row.created_by as string | null | undefined) ?? null,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
+  return recurringPaymentRowSchema.parse(row);
+}
+
+const collectibleRecurringPaymentProjectionSchema = z.object({
+  status: z.literal("active"),
+  subscription_id: z.string(),
+  next_collection_due_at: z.string(),
+});
+
+const recoverableCollectionRecurringPaymentProjectionSchema = z.object({
+  status: z.enum(RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION),
+  subscription_id: z.string(),
+  next_collection_due_at: z.string(),
+});
+
+function mapRecoverableCollectionRecurringPaymentRow(
+  row: Record<string, unknown>
+): RecoverableCollectionRecurringPaymentRow {
+  const recurringPayment = mapRecurringPaymentRow(row);
+  const projection = recoverableCollectionRecurringPaymentProjectionSchema.parse(recurringPayment);
+  return { ...recurringPayment, ...projection };
+}
+
+function mapCollectibleRecurringPaymentRow(
+  row: Record<string, unknown>
+): CollectibleRecurringPaymentRow {
+  const recurringPayment = mapRecurringPaymentRow(row);
+  const projection = collectibleRecurringPaymentProjectionSchema.parse(recurringPayment);
+  return { ...recurringPayment, ...projection };
 }
 
 function mapActivationAttemptRow(
   row: Record<string, unknown>
 ): PaymentRecurringPaymentActivationAttemptRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    recurring_payment_id: row.recurring_payment_id as string,
-    status: row.status as PaymentRecurringPaymentActivationAttemptRow["status"],
-    stage: row.stage as PaymentRecurringPaymentActivationAttemptStage,
-    plan_creation_signature: (row.plan_creation_signature as string | null | undefined) ?? null,
-    authorization_signature: (row.authorization_signature as string | null | undefined) ?? null,
-    error: (row.error as string | null | undefined) ?? null,
-    metadata: (row.metadata as Record<string, unknown> | null | undefined) ?? {},
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
+  return activationAttemptRowSchema.parse(row);
 }
 
 function mapLifecycleAttemptRow(
   row: Record<string, unknown>
 ): PaymentRecurringPaymentLifecycleAttemptRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    recurring_payment_id: row.recurring_payment_id as string,
-    operation: row.operation as PaymentRecurringPaymentLifecycleAttemptRow["operation"],
-    status: row.status as PaymentRecurringPaymentLifecycleAttemptRow["status"],
-    stage: row.stage as PaymentRecurringPaymentLifecycleAttemptStage,
-    signature: (row.signature as string | null | undefined) ?? null,
-    error: (row.error as string | null | undefined) ?? null,
-    metadata: (row.metadata as Record<string, unknown> | null | undefined) ?? {},
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
+  return lifecycleAttemptRowSchema.parse(row);
 }
 
 function mapUpdateAttemptRow(
   row: Record<string, unknown>
 ): PaymentRecurringPaymentUpdateAttemptRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    recurring_payment_id: row.recurring_payment_id as string,
-    mode: row.mode as PaymentRecurringPaymentUpdateAttemptRow["mode"],
-    status: row.status as PaymentRecurringPaymentUpdateAttemptRow["status"],
-    stage: row.stage as PaymentRecurringPaymentUpdateAttemptStage,
-    old_plan_id: (row.old_plan_id as string | null | undefined) ?? null,
-    old_subscription_id: (row.old_subscription_id as string | null | undefined) ?? null,
-    new_plan_id: (row.new_plan_id as string | null | undefined) ?? null,
-    new_subscription_id: (row.new_subscription_id as string | null | undefined) ?? null,
-    new_source_custody_wallet_id: parseNullableCustodyWalletId(row.new_source_custody_wallet_id),
-    plan_update_signature: (row.plan_update_signature as string | null | undefined) ?? null,
-    plan_creation_signature: (row.plan_creation_signature as string | null | undefined) ?? null,
-    authorization_setup_signature:
-      (row.authorization_setup_signature as string | null | undefined) ?? null,
-    authorization_signature: (row.authorization_signature as string | null | undefined) ?? null,
-    old_cancel_signature: (row.old_cancel_signature as string | null | undefined) ?? null,
-    changed_fields: mapStringArray(row.changed_fields),
-    before_values: (row.before_values as Record<string, unknown> | null | undefined) ?? {},
-    after_values: (row.after_values as Record<string, unknown> | null | undefined) ?? {},
-    error: (row.error as string | null | undefined) ?? null,
-    created_by: (row.created_by as string | null | undefined) ?? null,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
+  return updateAttemptRowSchema.parse(row);
 }
 
 function mapUpdateEventRow(row: Record<string, unknown>): PaymentRecurringPaymentUpdateEventRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
-    recurring_payment_id: row.recurring_payment_id as string,
-    attempt_id: (row.attempt_id as string | null | undefined) ?? null,
-    changed_fields: mapStringArray(row.changed_fields),
-    before_values: (row.before_values as Record<string, unknown> | null | undefined) ?? {},
-    after_values: (row.after_values as Record<string, unknown> | null | undefined) ?? {},
-    created_by: (row.created_by as string | null | undefined) ?? null,
-    created_at: row.created_at as string,
-  };
+  return updateEventRowSchema.parse(row);
 }
 
 async function getRecurringPaymentByIdInternal(
@@ -296,6 +333,75 @@ export function createPostgresPaymentRecurringPaymentsRepository(
   db: DatabaseExecutor
 ): PaymentRecurringPaymentsRepository {
   return {
+    async listStaleLifecyclePayments({ staleBefore, limit }) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM payment_recurring_payments
+          WHERE status = ANY(?::text[])
+            AND updated_at <= ? ORDER BY updated_at ASC LIMIT ?`
+        )
+        .bind([...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON], staleBefore, limit)
+        .all<Record<string, unknown>>();
+      return result.rows.map(mapRecurringPaymentRow);
+    },
+    async listStaleUpdatePayments({ staleBefore, limit }) {
+      const result = await db
+        .prepare(
+          `SELECT organization_id, project_id, id, updated_at,
+                COUNT(*) OVER () AS stale_count, MIN(updated_at) OVER () AS oldest_updated_at
+           FROM payment_recurring_payments WHERE status = 'updating' AND updated_at <= ?
+          ORDER BY updated_at DESC, id DESC LIMIT ?`
+        )
+        .bind(staleBefore, limit)
+        .all<Record<string, unknown>>();
+      return result.rows.map(
+        (row): StalePaymentRecurringPaymentUpdateRow => staleUpdateRowSchema.parse(row)
+      );
+    },
+    async listRecoverableCollectionPayments({ staleBefore, limit }) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM (
+           SELECT rp.*, a.updated_at AS attempt_updated_at,
+                  ROW_NUMBER() OVER (PARTITION BY rp.id ORDER BY CASE WHEN a.status = 'confirmed' THEN 0 ELSE 1 END, a.updated_at ASC) AS attempt_rank
+             FROM payment_recurring_payments rp
+             JOIN payment_subscription_collection_attempts a
+               ON a.organization_id = rp.organization_id AND a.project_id = rp.project_id
+              AND a.subscription_id = rp.subscription_id AND a.due_at = rp.next_collection_due_at
+            WHERE rp.status = ANY(?::text[])
+              AND rp.next_collection_due_at IS NOT NULL
+              AND a.status = ANY(?::text[])
+              AND ((a.status = 'processing' AND a.updated_at <= ?) OR (rp.status = 'active' AND a.status = 'confirmed'))
+         ) recoverable_attempts WHERE attempt_rank = 1 ORDER BY attempt_updated_at ASC LIMIT ?`
+        )
+        .bind(
+          [...RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION],
+          [...COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER],
+          staleBefore,
+          limit
+        )
+        .all<Record<string, unknown>>();
+      return result.rows.map(mapRecoverableCollectionRecurringPaymentRow);
+    },
+    async listDueCollectionPayments({ dueBefore, retryBefore, limit }) {
+      const result = await db
+        .prepare(
+          `SELECT rp.* FROM payment_recurring_payments rp
+          WHERE rp.status = 'active' AND rp.next_collection_due_at IS NOT NULL AND rp.next_collection_due_at <= ?
+            AND NOT EXISTS (SELECT 1 FROM payment_subscription_collection_attempts active_attempt
+              WHERE active_attempt.organization_id = rp.organization_id AND active_attempt.project_id = rp.project_id
+                AND active_attempt.subscription_id = rp.subscription_id AND active_attempt.due_at = rp.next_collection_due_at
+                AND active_attempt.status = ANY(?::text[]))
+            AND NOT EXISTS (SELECT 1 FROM payment_subscription_collection_attempts failed_attempt
+              WHERE failed_attempt.organization_id = rp.organization_id AND failed_attempt.project_id = rp.project_id
+                AND failed_attempt.subscription_id = rp.subscription_id AND failed_attempt.due_at = rp.next_collection_due_at
+                AND failed_attempt.status = 'failed' AND failed_attempt.updated_at > ?)
+          ORDER BY rp.next_collection_due_at ASC LIMIT ?`
+        )
+        .bind(dueBefore, [...COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE], retryBefore, limit)
+        .all<Record<string, unknown>>();
+      return result.rows.map(mapCollectibleRecurringPaymentRow);
+    },
     async createRecurringPayment(input: CreatePaymentRecurringPaymentInput) {
       await db
         .prepare(
@@ -499,7 +605,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async updateRecurringPaymentActivation(input: UpdatePaymentRecurringPaymentActivationInput) {
-      const allowActiveUpdate = input.status === "active";
       const row = await db
         .prepare(
           `UPDATE payment_recurring_payments
@@ -524,11 +629,11 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND (status = 'activating' OR ?::boolean)
+              AND status = 'activating'
           RETURNING *`
         )
         .bind(
-          input.status ?? null,
+          input.status === undefined ? null : input.status,
           input.planId !== undefined,
           input.planId ?? null,
           input.subscriptionId !== undefined,
@@ -552,8 +657,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.updatedAt,
           input.recurringPaymentId,
           input.organizationId,
-          input.projectId,
-          allowActiveUpdate
+          input.projectId
         )
         .first<Record<string, unknown>>();
 
@@ -617,8 +721,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async claimRecurringPaymentLifecycle(input: ClaimPaymentRecurringPaymentLifecycleInput) {
-      const processingStatus = input.operation === "cancel" ? "canceling" : "resuming";
-      const claimableStatus = input.operation === "cancel" ? "active" : "canceled";
+      const { processingStatus, claimableStatus } =
+        RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[input.operation];
       const staleBefore = input.staleBefore ?? null;
       const row = await db
         .prepare(
@@ -763,8 +867,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND project_id = ?`
         )
         .bind(
-          input.status ?? null,
-          input.stage ?? null,
+          input.status === undefined ? null : input.status,
+          input.stage === undefined ? null : input.stage,
           input.planCreationSignature !== undefined,
           input.planCreationSignature ?? null,
           input.authorizationSignature !== undefined,
@@ -772,7 +876,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.error !== undefined,
           input.error ?? null,
           input.metadata !== undefined,
-          JSON.stringify(input.metadata ?? {}),
+          input.metadata === undefined ? null : JSON.stringify(input.metadata),
           input.updatedAt,
           input.attemptId,
           input.organizationId,
@@ -780,9 +884,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .run();
 
-      if (rowsAffected === 0) {
-        throw new Error("Activation attempt update did not match an existing attempt");
-      }
+      if (rowsAffected === 0) return null;
 
       return getActivationAttemptByIdInternal(db, {
         attemptId: input.attemptId,
@@ -795,10 +897,14 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       input: GetLatestPaymentRecurringPaymentActivationAttemptInput
     ) {
       const clauses = ["organization_id = ?", "project_id = ?", "recurring_payment_id = ?"];
-      const values: unknown[] = [input.organizationId, input.projectId, input.recurringPaymentId];
+      const values: DatabaseBindValues = [
+        input.organizationId,
+        input.projectId,
+        input.recurringPaymentId,
+      ];
       if (input.statuses?.length) {
-        clauses.push(`status IN (${buildInClause(input.statuses.length)})`);
-        values.push(...input.statuses);
+        clauses.push("status = ANY(?::text[])");
+        values.push([...input.statuses]);
       }
 
       const row = await db
@@ -872,14 +978,14 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           RETURNING *`
         )
         .bind(
-          input.status ?? null,
-          input.stage ?? null,
+          input.status === undefined ? null : input.status,
+          input.stage === undefined ? null : input.stage,
           input.signature !== undefined,
           input.signature ?? null,
           input.error !== undefined,
           input.error ?? null,
           input.metadata !== undefined,
-          JSON.stringify(input.metadata ?? {}),
+          input.metadata === undefined ? null : JSON.stringify(input.metadata),
           input.updatedAt,
           input.attemptId,
           input.organizationId,
@@ -887,11 +993,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .first<Record<string, unknown>>();
 
-      if (!row) {
-        throw new Error("Lifecycle attempt update did not match an existing attempt");
-      }
-
-      return mapLifecycleAttemptRow(row);
+      return row ? mapLifecycleAttemptRow(row) : null;
     },
 
     async getLatestLifecycleAttempt(input: GetLatestPaymentRecurringPaymentLifecycleAttemptInput) {
@@ -901,15 +1003,15 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         "recurring_payment_id = ?",
         "operation = ?",
       ];
-      const values: unknown[] = [
+      const values: DatabaseBindValues = [
         input.organizationId,
         input.projectId,
         input.recurringPaymentId,
         input.operation,
       ];
       if (input.statuses?.length) {
-        clauses.push(`status IN (${buildInClause(input.statuses.length)})`);
-        values.push(...input.statuses);
+        clauses.push("status = ANY(?::text[])");
+        values.push([...input.statuses]);
       }
 
       const row = await db
@@ -1027,8 +1129,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           RETURNING *`
         )
         .bind(
-          input.status ?? null,
-          input.stage ?? null,
+          input.status === undefined ? null : input.status,
+          input.stage === undefined ? null : input.stage,
           input.newPlanId !== undefined,
           input.newPlanId ?? null,
           input.newSubscriptionId !== undefined,
@@ -1044,11 +1146,11 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.oldCancelSignature !== undefined,
           input.oldCancelSignature ?? null,
           input.changedFields !== undefined,
-          toPostgresTextArray(input.changedFields ?? []),
+          input.changedFields === undefined ? null : toPostgresTextArray(input.changedFields),
           input.beforeValues !== undefined,
-          JSON.stringify(input.beforeValues ?? {}),
+          input.beforeValues === undefined ? null : JSON.stringify(input.beforeValues),
           input.afterValues !== undefined,
-          JSON.stringify(input.afterValues ?? {}),
+          input.afterValues === undefined ? null : JSON.stringify(input.afterValues),
           input.error !== undefined,
           input.error ?? null,
           input.updatedAt,
@@ -1058,19 +1160,19 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .first<Record<string, unknown>>();
 
-      if (!row) {
-        throw new Error("Update attempt update did not match an existing attempt");
-      }
-
-      return mapUpdateAttemptRow(row);
+      return row ? mapUpdateAttemptRow(row) : null;
     },
 
     async getLatestUpdateAttempt(input: GetLatestPaymentRecurringPaymentUpdateAttemptInput) {
       const clauses = ["organization_id = ?", "project_id = ?", "recurring_payment_id = ?"];
-      const values: unknown[] = [input.organizationId, input.projectId, input.recurringPaymentId];
+      const values: DatabaseBindValues = [
+        input.organizationId,
+        input.projectId,
+        input.recurringPaymentId,
+      ];
       if (input.statuses?.length) {
-        clauses.push(`status IN (${buildInClause(input.statuses.length)})`);
-        values.push(...input.statuses);
+        clauses.push("status = ANY(?::text[])");
+        values.push([...input.statuses]);
       }
 
       const row = await db
@@ -1126,7 +1228,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
 
     async getRecurringPaymentById(params) {
       const clauses = ["id = ?", "organization_id = ?", "project_id = ?"];
-      const values: unknown[] = [
+      const values: DatabaseBindValues = [
         params.recurringPaymentId,
         params.organizationId,
         params.projectId,
@@ -1148,7 +1250,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
 
     async listRecurringPayments(params: ListPaymentRecurringPaymentsInput) {
       const clauses = ["organization_id = ?", "project_id = ?"];
-      const values: unknown[] = [params.organizationId, params.projectId];
+      const values: DatabaseBindValues = [params.organizationId, params.projectId];
 
       if (params.status) {
         clauses.push("status = ?");
@@ -1182,9 +1284,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           .first<{ total: number }>(),
       ]);
 
+      if (countRow === null) {
+        throw new AppError("INTERNAL_ERROR", "Recurring payment count query returned no row");
+      }
       return {
         rows: rows.results.map(mapRecurringPaymentRow),
-        total: countRow?.total ?? 0,
+        total: countRow.total,
       } satisfies ListPaymentRecurringPaymentsResult;
     },
   };

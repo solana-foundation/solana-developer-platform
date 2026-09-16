@@ -1,4 +1,4 @@
-import type { SolanaCluster } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { kaminoProgramAllowlist } from "./programs";
 import type { KaminoInstructionPlan } from "./types";
@@ -17,8 +17,7 @@ const CLUSTER_INVARIANT_PROGRAMS: readonly string[] = [
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
   // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
-  // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
-  "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+  MEMO_PROGRAM_ADDRESS,
   "ComputeBudget111111111111111111111111111111",
 ];
 

@@ -31,6 +31,9 @@ export {
   type SettingsResolution,
 } from "./resolver";
 export {
+  DVP_BLOCKED_EXTENSIONS,
+  type DvpBlockReason,
+  dvpBlockReason,
   expandLegacySettingKeys,
   findIncompatibleExtensionPair,
   INCOMPATIBLE_EXTENSION_PAIRS,

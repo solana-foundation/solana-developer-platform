@@ -1,0 +1,485 @@
+/**
+ * Settle and cancel.
+ *
+ * The two things worth asserting here are ORDERING and ACCOUNT WIRING. Ordering,
+ * because the approved-operation fence has to be crossed before any bytes go
+ * out or a crash becomes unrecoverable. Wiring, because settle moves two
+ * parties' tokens at once and a swapped destination sends the wrong asset to
+ * the wrong person — a mistake nothing downstream would catch.
+ */
+
+import assert from "node:assert/strict";
+import { getSettleDvpInstruction } from "@sdp/dvp";
+import {
+  address,
+  getCompiledTransactionMessageDecoder,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  partiallySignTransaction,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SolanaError,
+} from "@solana/kit";
+import { generateKeyPairSigner } from "@solana/signers";
+import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DvpTradeRow } from "@/db/repositories";
+import { type AppError, conflict } from "@/lib/errors";
+import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
+import { buildFundedDvpTradeRow, DVP_TEST_AUTHORITY, DVP_TEST_USER_B } from "@/test/fixtures/dvp";
+import { env } from "@/test/helpers/env";
+import { deriveDvpSettleAtas } from "./settle-atas";
+import type { DvpSettlementWallet } from "./settlement-wallet";
+
+const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
+const getFeePayer = vi.hoisted(() => vi.fn());
+const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
+const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
+const sendTransaction = vi.hoisted(() => vi.fn());
+const readDvpAccounts = vi.hoisted(() => vi.fn());
+const getRecentBlockhash = vi.hoisted(() =>
+  vi.fn(async () => ({
+    blockhash: "11111111111111111111111111111111",
+    lastValidBlockHeight: 100n,
+  }))
+);
+
+vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
+vi.mock("@/services/sponsorship.service", async () => {
+  const actual = await vi.importActual<typeof import("@/services/sponsorship.service")>(
+    "@/services/sponsorship.service"
+  );
+  return {
+    ...actual,
+    createRequestSponsorshipFeePayment: () => ({
+      getFeePayer,
+      prepareOwnedSubmission,
+      providerId: "test",
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn(),
+    }),
+  };
+});
+vi.mock("./read-chain", () => ({ readDvpAccounts }));
+vi.mock("@sdp/rpc/solana", () => ({
+  createRpc: () => ({}),
+  getRecentBlockhash,
+  sendTransaction,
+}));
+
+const { closeDvpTrade } = await import("./settle");
+
+let SETTLEMENT_AUTHORITY = DVP_TEST_AUTHORITY;
+
+function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
+  return buildFundedDvpTradeRow({
+    id: "dvp_settle_test",
+    organizationId: "org_x",
+    projectId: "prj_x",
+    settlementAuthority: SETTLEMENT_AUTHORITY,
+    expiryTimestamp: "1800003600",
+    ...overrides,
+  });
+}
+
+const context = { env } as never;
+/** The cluster clock, inside the fixture's window: 3,600 s before `expiryTimestamp`. */
+const NOW_SECONDS = 1_800_000_000n;
+
+function preflightError(): SolanaError {
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    fee: null,
+    loadedAccountsDataSize: null,
+    loadedAddresses: null,
+    logs: ["Program log: Error: IncorrectProgramId"],
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+  });
+}
+
+describe("closeDvpTrade", () => {
+  let authority: Awaited<ReturnType<typeof generateKeyPairSigner>>;
+  let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
+  let settlement: DvpSettlementWallet;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    // The settlement window is judged by the cluster clock read with the escrows.
+    readDvpAccounts.mockResolvedValue({
+      trade: { exists: true, address: trade().swapDvp },
+      legA: { exists: true, amount: 1000n, frozen: false },
+      legB: { exists: true, amount: 2000n, frozen: false },
+      clusterUnixTimestamp: NOW_SECONDS,
+    });
+    authority = await generateKeyPairSigner();
+    SETTLEMENT_AUTHORITY = authority.address;
+    settlement = {
+      custodyWalletId: "cwlt_settlement",
+      address: authority.address,
+      providerWalletId: "provider_settlement",
+    };
+    sponsor = await generateKeyPairSigner();
+    createOrgSignerForCustodyWallet.mockResolvedValue(authority);
+    getFeePayer.mockResolvedValue(sponsor.address);
+    prepareOwnedSubmission.mockImplementation(
+      async (
+        bytes: Uint8Array,
+        lifecycle: Parameters<SponsorshipFeePayment["prepareOwnedSubmission"]>[1]
+      ) => {
+        const transaction = getTransactionDecoder().decode(bytes);
+        expect(transaction.signatures[sponsor.address]).toBeNull();
+        const signed = await partiallySignTransaction([sponsor.keyPair], transaction);
+        const signedTransaction = new Uint8Array(getTransactionEncoder().encode(signed));
+        const signature = getSignatureFromTransaction(signed);
+        const submission = { signedTransaction, signature, releaseDefinitelyUnbroadcast };
+        await lifecycle.persistSigned(submission);
+        await lifecycle.markStarted();
+        return submission;
+      }
+    );
+    sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) =>
+      getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
+    );
+  });
+
+  // The row lags the chain by up to one observation, so a trade that expired a
+  // moment ago can still read `funded`. The program would refuse it with
+  // DvpExpired after the fee was already spent.
+  it("refuses to settle a funded trade past its expiry, before signing anything", async () => {
+    await expect(
+      closeDvpTrade(
+        context,
+        trade({ expiryTimestamp: String(NOW_SECONDS - 1n) }),
+        "settle",
+        settlement
+      )
+    ).rejects.toThrow(/past its expiry and can only be cancelled/);
+    expect(getFeePayer).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("requests the signer for the wallet the handler authorized", async () => {
+    await closeDvpTrade(context, trade(), "settle", settlement);
+
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+      env,
+      "org_x",
+      "prj_x",
+      "cwlt_settlement"
+    );
+  });
+
+  it.each(["settle", "cancel"] as const)(
+    "refuses %s without sponsorship when the authorized wallet becomes unavailable",
+    async (action) => {
+      const denial = conflict("Custody wallet is unavailable", {
+        reason: "runtime_execution_unavailable",
+      });
+      createOrgSignerForCustodyWallet.mockRejectedValueOnce(denial);
+
+      await expect(closeDvpTrade(context, trade(), action, settlement)).rejects.toBe(denial);
+
+      expect(getFeePayer).not.toHaveBeenCalled();
+      expect(sendTransaction).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refuses a signer whose current address differs from the trade before sponsorship", async () => {
+    createOrgSignerForCustodyWallet.mockResolvedValueOnce(await generateKeyPairSigner());
+
+    await expect(closeDvpTrade(context, trade(), "settle", settlement)).rejects.toThrow(
+      "no longer matches the trade's authority"
+    );
+    expect(getFeePayer).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // `settle_dvp.rs` checks `now <= expiry`, so the expiry second itself settles.
+  it("settles at the exact expiry second", async () => {
+    await closeDvpTrade(
+      context,
+      trade({ expiryTimestamp: String(NOW_SECONDS) }),
+      "settle",
+      settlement
+    );
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  // Cancel has no expiry gate on chain, and it is the only way the money goes back.
+  it("still cancels a funded trade past its expiry", async () => {
+    await closeDvpTrade(
+      context,
+      trade({ expiryTimestamp: String(NOW_SECONDS - 1n) }),
+      "cancel",
+      settlement
+    );
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  // A host clock ahead of the cluster must not close the window early: the
+  // program reads the cluster clock, and so does this check.
+  it("judges expiry by the cluster clock, not the host clock", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Number(NOW_SECONDS + 3_600n) * 1000 + 30_000);
+    try {
+      await closeDvpTrade(
+        context,
+        trade({ expiryTimestamp: String(NOW_SECONDS + 10n) }),
+        "settle",
+        settlement
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to settle before the trade's earliest settlement time", async () => {
+    await expect(
+      closeDvpTrade(
+        context,
+        trade({ earliestSettlementTimestamp: String(NOW_SECONDS + 1n) }),
+        "settle",
+        settlement
+      )
+    ).rejects.toThrow(/before its earliest settlement time/);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("settles from the earliest settlement second onwards", async () => {
+    await closeDvpTrade(
+      context,
+      trade({ earliestSettlementTimestamp: String(NOW_SECONDS) }),
+      "settle",
+      settlement
+    );
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to settle a trade that is already closed", async () => {
+    for (const status of ["settled", "cancelled", "closed_unknown", "create_failed"] as const) {
+      await expect(closeDvpTrade(context, trade({ status }), "settle", settlement)).rejects.toThrow(
+        /can no longer be settled/
+      );
+    }
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // Settle moves both legs, so both must be funded. The row already answers
+  // that, so the chain is not asked: no signature spent, and an RPC outage
+  // cannot turn the 400 into a 500.
+  it("refuses to settle a trade that is not fully funded, without reading the chain", async () => {
+    readDvpAccounts.mockRejectedValue(new Error("rpc down"));
+
+    await expect(
+      closeDvpTrade(context, trade({ status: "partially_funded" }), "settle", settlement)
+    ).rejects.toThrow(/requires both legs funded/);
+    expect(readDvpAccounts).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  // Cancel is the escape hatch. Requiring funding would make an abandoned
+  // half-funded trade impossible to unwind, which is the opposite of the point.
+  it("cancels a partially funded trade", async () => {
+    const result = await closeDvpTrade(
+      context,
+      trade({ status: "partially_funded" }),
+      "cancel",
+      settlement
+    );
+
+    // The owned sponsorship path returns the signature in the submitted bytes.
+    expect(result.signature).toEqual(expect.any(String));
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  // The authority is a PDA seed, so it is fixed in the trade's address. A
+  // rotated settlement wallet cannot sign for older trades and saying so beats
+  // sending a transaction the program will reject.
+  it("refuses when the project's settlement wallet is not the trade's authority", async () => {
+    await expect(
+      closeDvpTrade(context, trade(), "settle", {
+        ...settlement,
+        address: DVP_TEST_USER_B,
+      })
+    ).rejects.toThrow(/part of the trade's address and cannot be changed/);
+    expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  describe("instruction order", () => {
+    it("appends four create-ATA instructions before settle for the derived accounts", async () => {
+      const row = trade();
+      const atas = await deriveDvpSettleAtas(row);
+
+      await closeDvpTrade(context, row, "settle", settlement);
+
+      const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      assert(message.version === 0);
+      expect(message.instructions).toHaveLength(5);
+      expect(
+        message.instructions.slice(0, 4).map((instruction) => {
+          assert(instruction.accountIndices);
+          return message.staticAccounts[instruction.accountIndices[1]];
+        })
+      ).toEqual([
+        atas.userADestinationAtaB,
+        atas.userBDestinationAtaA,
+        atas.userAAtaA,
+        atas.userBAtaB,
+      ]);
+      expect(
+        message.instructions
+          .slice(0, 4)
+          .map((instruction) => message.staticAccounts[instruction.programAddressIndex])
+      ).toEqual(Array.from({ length: 4 }, () => ASSOCIATED_TOKEN_PROGRAM_ADDRESS));
+      expect(message.staticAccounts[message.instructions[4].programAddressIndex]).not.toBe(
+        ASSOCIATED_TOKEN_PROGRAM_ADDRESS
+      );
+    });
+
+    it("appends two create-ATA instructions before cancel for the refund accounts", async () => {
+      const row = trade();
+      const atas = await deriveDvpSettleAtas(row);
+
+      await closeDvpTrade(context, row, "cancel", settlement);
+
+      const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      assert(message.version === 0);
+      expect(message.instructions).toHaveLength(3);
+      expect(
+        message.instructions.slice(0, 2).map((instruction) => {
+          assert(instruction.accountIndices);
+          return message.staticAccounts[instruction.accountIndices[1]];
+        })
+      ).toEqual([atas.userAAtaA, atas.userBAtaB]);
+      expect(
+        message.instructions
+          .slice(0, 2)
+          .map((instruction) => message.staticAccounts[instruction.programAddressIndex])
+      ).toEqual(Array.from({ length: 2 }, () => ASSOCIATED_TOKEN_PROGRAM_ADDRESS));
+      expect(message.staticAccounts[message.instructions[2].programAddressIndex]).not.toBe(
+        ASSOCIATED_TOKEN_PROGRAM_ADDRESS
+      );
+    });
+  });
+
+  // Each party receives the OTHER leg's mint. Getting this backwards would send
+  // the asset to the party who was already holding it and nothing would notice.
+  it("delivers each leg to the counter-party's destination", async () => {
+    const signer = await generateKeyPairSigner();
+    const row = trade();
+    const atas = await deriveDvpSettleAtas({
+      userA: row.userA,
+      userB: row.userB,
+      userASettlementDestination: row.userASettlementDestination,
+      userBSettlementDestination: row.userBSettlementDestination,
+      mintA: row.mintA,
+      mintB: row.mintB,
+      tokenProgramA: row.tokenProgramA,
+      tokenProgramB: row.tokenProgramB,
+    });
+
+    const instruction = getSettleDvpInstruction({
+      settlementAuthority: signer,
+      swapDvp: row.swapDvp,
+      mintA: row.mintA,
+      mintB: row.mintB,
+      dvpAtaA: row.escrowA,
+      dvpAtaB: row.escrowB,
+      userADestinationAtaB: atas.userADestinationAtaB,
+      userBDestinationAtaA: atas.userBDestinationAtaA,
+      userAAtaA: atas.userAAtaA,
+      userBAtaB: atas.userBAtaB,
+      tokenProgramA: row.tokenProgramA,
+      tokenProgramB: row.tokenProgramB,
+      memoProgram: address("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
+      legAExtrasCount: 0,
+    });
+
+    // user A's delivery account holds mint B, and vice versa. Same account in
+    // both directions would mean the trade delivered nothing.
+    expect(atas.userADestinationAtaB).not.toBe(atas.userBDestinationAtaA);
+    expect(atas.userADestinationAtaB).not.toBe(atas.userAAtaA);
+    expect(instruction.accounts).toBeDefined();
+  });
+
+  describe("sponsorship", () => {
+    it("uses the sponsor as fee payer and collects both required signatures", async () => {
+      await closeDvpTrade(context, trade(), "settle", settlement);
+
+      const bytes = sendTransaction.mock.calls[0][1];
+      const transaction = getTransactionDecoder().decode(bytes);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      expect(message.staticAccounts[0]).toBe(sponsor.address);
+      expect(Object.keys(transaction.signatures)).toEqual(
+        expect.arrayContaining([sponsor.address, authority.address])
+      );
+      expect(Object.keys(transaction.signatures)).toHaveLength(2);
+      expect(transaction.signatures[sponsor.address]).not.toBeNull();
+      expect(transaction.signatures[authority.address]).not.toBeNull();
+    });
+
+    it("uses the sponsor as payer for every create-ATA instruction", async () => {
+      await closeDvpTrade(context, trade(), "settle", settlement);
+
+      const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);
+      const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+      assert(message.version === 0);
+      for (const instruction of message.instructions.slice(0, 4)) {
+        assert(instruction.accountIndices);
+        expect(message.staticAccounts[instruction.accountIndices[0]]).toBe(sponsor.address);
+      }
+    });
+
+    it("does not broadcast when the sponsor refuses to sign", async () => {
+      prepareOwnedSubmission.mockRejectedValueOnce(new Error("sponsor rate limited"));
+
+      await expect(closeDvpTrade(context, trade(), "settle", settlement)).rejects.toThrow(
+        "sponsor rate limited"
+      );
+      expect(sendTransaction).not.toHaveBeenCalled();
+    });
+
+    it("maps a preflight rejection and releases the sponsorship reservation", async () => {
+      sendTransaction.mockRejectedValue(preflightError());
+
+      await expect(closeDvpTrade(context, trade(), "settle", settlement)).rejects.toMatchObject({
+        code: "TRANSACTION_FAILED",
+        statusCode: 400,
+      } satisfies Partial<AppError>);
+      expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledOnce();
+    });
+
+    it("rethrows an ambiguous send error without releasing the sponsorship reservation", async () => {
+      const error = new Error("socket hang up");
+      sendTransaction.mockRejectedValue(error);
+
+      await expect(closeDvpTrade(context, trade(), "settle", settlement)).rejects.toBe(error);
+      expect(releaseDefinitelyUnbroadcast).not.toHaveBeenCalled();
+    });
+
+    it("fetches a fresh blockhash for every attempt", async () => {
+      sendTransaction.mockRejectedValueOnce(preflightError());
+
+      await expect(closeDvpTrade(context, trade(), "settle", settlement)).rejects.toMatchObject({
+        code: "TRANSACTION_FAILED",
+      } satisfies Partial<AppError>);
+      await closeDvpTrade(context, trade(), "settle", settlement);
+
+      expect(getRecentBlockhash).toHaveBeenCalledTimes(2);
+    });
+  });
+});

@@ -15,11 +15,13 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)(
   "Mosaic Token ACL constraints",
   () => {
     let apiKeyHash: string;
+    let custodyWalletId = "";
     const request = requestWithApiKey();
 
     beforeAll(async () => {
       const init = await initIntegrationSuite();
       apiKeyHash = init.apiKeyHash;
+      custodyWalletId = init.custodyWallet.id;
     });
 
     afterAll(async () => {
@@ -27,7 +29,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)(
     });
 
     beforeEach(async () => {
-      await resetIntegrationState(apiKeyHash);
+      const state = await resetIntegrationState(apiKeyHash);
+      custodyWalletId = state.custodyWallet.id;
     });
 
     it("rejects freeze for non-freezable token", { timeout: 90000 }, async () => {
@@ -39,6 +42,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)(
         body: JSON.stringify({
           name: "Non-Freezable Token",
           symbol: "NFT",
+          signingCustodyWalletId: custodyWalletId,
           decimals: 6,
           template: "custom",
           isMintable: true,
@@ -52,6 +56,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)(
 
       const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
       });
       expect(deployRes.status).toBe(200);
 
@@ -64,6 +70,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          signingCustodyWalletId: custodyWalletId,
           mint: {
             destination: TEST_WALLET,
             amount: "1",
@@ -83,6 +90,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)(
         body: JSON.stringify({
           accountAddress: mintResult.data.tokenAccount,
           reason: "Should fail",
+          signingCustodyWalletId: custodyWalletId,
         }),
       });
 

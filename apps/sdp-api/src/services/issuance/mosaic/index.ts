@@ -7,7 +7,7 @@
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { TransactionSigner } from "@solana/kit";
-import { transactionFailed } from "@/lib/errors";
+import { badRequest, transactionFailed } from "@/lib/errors";
 import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
@@ -44,5 +44,6 @@ export function createMosaicService(
     // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so
     // the app's error handler maps them to 400 responses.
     transactionFailedError: transactionFailed,
+    invalidArgumentError: badRequest,
   });
 }

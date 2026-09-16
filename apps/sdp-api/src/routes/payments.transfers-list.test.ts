@@ -1,9 +1,11 @@
-import { SOL_MINT } from "@sdp/types";
+import { SOL_MINT, SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -25,6 +27,17 @@ import { seedRateLimit } from "@/test/mocks/kv";
 describe("Payments routes — list transfers", () => {
   installPaymentsRouteTestHooks();
 
+  beforeEach(async () => {
+    await seedProjectApiKey(getDb(env), env, {
+      key: TEST_PRODUCTION_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: `${TEST_PROJECT.id}_production`,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["payments:read"],
+    });
+  });
+
   async function seedTransfer(params: {
     id: string;
     status: string;
@@ -37,7 +50,7 @@ describe("Payments routes — list transfers", () => {
     token?: string;
     amount?: string;
     memo?: string | null;
-    type?: "transfer" | "transfer_confidential" | "transfer_batch" | "onramp" | "offramp";
+    type?: "transfer" | "transfer_batch" | "onramp" | "offramp";
     direction?: "inbound" | "outbound";
     provider?: "moonpay" | "lightspark" | "bvnk" | "moneygram" | "coinbase" | "mural" | "stripe";
     providerReference?: string | null;
@@ -80,10 +93,6 @@ describe("Payments routes — list transfers", () => {
     });
 
     it("matches a token filter against every form the ledger stores it in", async () => {
-      // pt.token is written inconsistently: the same asset is a mint on some rows
-      // and a bare symbol on others. An exact match returned 2 for the symbol and
-      // 1 for the mint when the right answer was 3, so either spelling has to
-      // answer with all of them. This is the HTTP hop over the repository fix.
       const solMint = "So11111111111111111111111111111111111111112";
       await seedTransfer({ id: "xfr_tok_sym_1", status: "confirmed", token: "SOL" });
       await seedTransfer({ id: "xfr_tok_sym_2", status: "confirmed", token: "SOL" });
@@ -1010,9 +1019,6 @@ describe("Payments routes — list transfers", () => {
           "xfr_native_sol",
           "xfr_native_sol_pending",
         ]);
-
-        // The wallet-scoped merged path keeps the exact persisted ledger and
-        // adds missing observations; the filter must be normalized for both.
         const walletRes = await app.request(
           `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&token=${filter}&includeObserved=true`,
           {
@@ -1069,7 +1075,14 @@ describe("Payments routes — list transfers", () => {
     });
 
     it("filters by multiple statuses when status query param is comma-separated", async () => {
-      await seedTransfer({ id: "xfr_multi_completed", status: "completed" });
+      await seedTransfer({
+        id: "xfr_multi_completed",
+        status: "completed",
+        type: "offramp",
+        provider: "moonpay",
+        providerReference: "provider_multi_completed",
+        custodyWalletId: null,
+      });
       await seedTransfer({ id: "xfr_multi_confirmed", status: "confirmed" });
       await seedTransfer({ id: "xfr_multi_pending", status: "pending" });
 
@@ -1088,10 +1101,9 @@ describe("Payments routes — list transfers", () => {
         meta: { total: number };
       };
       expect(body.data).toHaveLength(2);
-      expect(body.data.map((transfer) => transfer.status).sort()).toEqual([
-        "completed",
-        "confirmed",
-      ]);
+      expect(body.data.map((transfer) => transfer.status).sort()).toEqual(
+        SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.filter((status) => status !== "finalized").sort()
+      );
     });
 
     it("composes search, type, provider, and stable database pagination", async () => {
@@ -1351,10 +1363,32 @@ describe("Payments routes — list transfers", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        data: { transfer: { id: string; status: string } };
+        data: { transfer: Record<string, unknown> };
       };
-      expect(body.data.transfer.id).toBe("xfr_single_1");
-      expect(body.data.transfer.status).toBe("confirmed");
+      expect(body.data.transfer).toEqual({
+        id: "xfr_single_1",
+        organizationId: TEST_ORG.id,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        providerWalletId: TEST_WALLET_ID,
+        projectId: TEST_PROJECT.id,
+        type: "transfer",
+        kind: "pay",
+        direction: "outbound",
+        status: "confirmed",
+        signature: null,
+        serializedTx: null,
+        slot: null,
+        blockTime: null,
+        fee: null,
+        error: null,
+        source: TEST_SOLANA_ADDRESSES.wallet1,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        rampsMemo: {},
+        token: "SOL",
+        amount: "1",
+        createdAt: expect.any(String),
+        updatedAt: expect.any(String),
+      });
     });
 
     it("enforces payments:read when getting a transfer by ID", async () => {
@@ -1383,60 +1417,15 @@ describe("Payments routes — list transfers", () => {
       expect(body.error.code).toBe("FORBIDDEN");
     });
 
-    it("returns 404 when the transfer belongs to a different project in the same org", async () => {
-      const otherProjectId = "prj_payments_cross_project";
-      const now = new Date().toISOString();
-
-      await getDb(env)
-        .prepare(
-          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          otherProjectId,
-          TEST_ORG.id,
-          "Other Payments Project",
-          "other-payments-project",
-          "sandbox",
-          "active",
-          TEST_USER.id
-        )
-        .run();
-
-      await getDb(env)
-        .prepare(
-          `INSERT INTO payment_transfers
-             (id, organization_id, project_id, wallet_id, source_address, destination_address, token, amount, memo, type, direction, status, signature, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "xfr_cross_project_iso",
-          TEST_ORG.id,
-          otherProjectId,
-          TEST_WALLET_ID,
-          TEST_SOLANA_ADDRESSES.wallet1,
-          TEST_SOLANA_ADDRESSES.wallet2,
-          "SOL",
-          "1",
-          null,
-          "transfer",
-          "outbound",
-          "confirmed",
-          null,
-          now,
-          now
-        )
-        .run();
-
+    it("returns 404 for another project's transfer", async () => {
+      await seedTransfer({ id: "xfr_sandbox_owned", status: "confirmed" });
       const res = await app.request(
-        "/v1/payments/transfers/xfr_cross_project_iso",
+        "/v1/payments/transfers/xfr_sandbox_owned",
         {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
         },
         env
       );
-
       expect(res.status).toBe(404);
     });
   });

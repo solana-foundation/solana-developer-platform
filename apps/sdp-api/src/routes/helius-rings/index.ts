@@ -11,6 +11,7 @@ import {
   executeRingsOperation,
   getRingsHealth,
   getRingsOperation,
+  getRingsSetup,
   getRingsWallet,
   getRingsWalletIdentity,
   listRingsOperations,
@@ -19,6 +20,7 @@ import {
   listRingsZones,
   prepareRingsOperation,
   recheckRingsOperation,
+  rekeyRingsWallet,
   retryRingsOperation,
   syncRingsWallet,
   voidRingsOperation,
@@ -38,6 +40,7 @@ heliusRings.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: tru
 heliusRings.use("*", projectContextMiddleware());
 
 heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
+heliusRings.get("/setup-status", requirePermissions("payments:read"), getRingsSetup);
 
 heliusRings.get("/rings", requirePermissions("payments:read"), listRingsProjectRings);
 // Recording a ring runs bring-up (signed transactions through custody), so it
@@ -48,6 +51,11 @@ heliusRings.get("/wallets", requirePermissions("payments:read"), listRingsWallet
 heliusRings.post("/wallets", requirePermissions("payments:write"), createRingsWallet);
 heliusRings.get("/wallets/:walletId", requirePermissions("payments:read"), getRingsWallet);
 heliusRings.post("/wallets/:walletId/sync", requirePermissions("payments:write"), syncRingsWallet);
+heliusRings.post(
+  "/wallets/:walletId/rekey",
+  requirePermissions("payments:write"),
+  rekeyRingsWallet
+);
 heliusRings.get(
   "/wallets/:walletId/identity",
   requirePermissions("payments:read"),

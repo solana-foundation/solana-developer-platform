@@ -39,7 +39,7 @@ function mapToCounterpartyAccount(row: CounterpartyAccountRow): CounterpartyAcco
     counterpartyId: row.counterparty_id,
     accountKind: row.account_kind,
     label: row.label,
-    details: row.details,
+    details: cryptoWalletDetailsSchema.parse(row.details),
     providerAccountData: row.provider_account_data,
     status: row.status,
     createdAt: row.created_at,

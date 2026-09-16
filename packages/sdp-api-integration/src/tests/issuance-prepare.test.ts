@@ -22,12 +22,14 @@ import {
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare Endpoints", () => {
   let apiKeyHash: string;
   let custodyAddress = "";
+  let custodyWalletId = "";
   const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
     custodyAddress = init.custodyAddress;
+    custodyWalletId = init.custodyWallet.id;
   });
 
   afterAll(async () => {
@@ -37,6 +39,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
     custodyAddress = state.custodyAddress;
+    custodyWalletId = state.custodyWallet.id;
   });
 
   const prepareMint = async (tokenId: string) => {
@@ -46,6 +49,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         mint: {
           destination: TEST_WALLETS.wallet1,
           amount: "1",
@@ -67,6 +71,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         authority: {
           role: "mint",
           newAuthority: TEST_WALLETS.wallet2,
@@ -81,7 +86,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
   it("prepares a token deployment", {
     timeout: 180000,
   }, async () => {
-    const tokenId = await createStablecoin(request, "Deploy Prepare Coverage", "DPREP");
+    const tokenId = await createStablecoin(
+      request,
+      "Deploy Prepare Coverage",
+      "DPREP",
+      custodyWalletId
+    );
 
     const deployPrepareRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/prepare`, {
       method: "POST",
@@ -96,7 +106,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
   it("prepares a mint after deployment", {
     timeout: 180000,
   }, async () => {
-    const tokenId = await createAndDeployStablecoin(request, "Mint Prepare Coverage", "MPREP");
+    const tokenId = await createAndDeployStablecoin(
+      request,
+      "Mint Prepare Coverage",
+      "MPREP",
+      custodyWalletId
+    );
 
     const mintPrepared = await prepareMint(tokenId);
     expect(mintPrepared.data.transaction.type).toBe("mint");
@@ -109,11 +124,24 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
     const tokenId = await createAndDeployStablecoin(
       request,
       "Operations Prepare Coverage",
-      "OPREP"
+      "OPREP",
+      custodyWalletId
     );
-    const sourceTokenAccount = await mintToWallet(request, tokenId, TEST_WALLETS.wallet1, "3");
-    const destinationTokenAccount = await mintToWallet(request, tokenId, TEST_WALLETS.wallet2, "1");
-    await mintToWallet(request, tokenId, custodyAddress, "1");
+    const sourceTokenAccount = await mintToWallet(
+      request,
+      tokenId,
+      TEST_WALLETS.wallet1,
+      "3",
+      custodyWalletId
+    );
+    const destinationTokenAccount = await mintToWallet(
+      request,
+      tokenId,
+      TEST_WALLETS.wallet2,
+      "1",
+      custodyWalletId
+    );
+    await mintToWallet(request, tokenId, custodyAddress, "1", custodyWalletId);
 
     const burnPrepareRes = await request(`/v1/issuance/tokens/${tokenId}/burn/prepare`, {
       method: "POST",
@@ -121,6 +149,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         burn: {
           source: custodyAddress,
           amount: "1",
@@ -138,6 +167,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         seize: {
           source: sourceTokenAccount,
           destination: destinationTokenAccount,
@@ -156,6 +186,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
         forceBurn: {
           source: destinationTokenAccount,
           amount: "1",
@@ -171,7 +202,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
   it("prepares an authority update", {
     timeout: 180000,
   }, async () => {
-    const tokenId = await createAndDeployStablecoin(request, "Authority Prepare Coverage", "APREP");
+    const tokenId = await createAndDeployStablecoin(
+      request,
+      "Authority Prepare Coverage",
+      "APREP",
+      custodyWalletId
+    );
 
     const authorityPrepared = await prepareAuthorityUpdate(tokenId);
     expect(authorityPrepared.data.transaction.type).toBe("update_authority");
@@ -181,7 +217,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
   it("lists pending transaction history", {
     timeout: 180000,
   }, async () => {
-    const tokenId = await createAndDeployStablecoin(request, "Pending History Coverage", "PHPREP");
+    const tokenId = await createAndDeployStablecoin(
+      request,
+      "Pending History Coverage",
+      "PHPREP",
+      custodyWalletId
+    );
     await prepareMint(tokenId);
     await prepareAuthorityUpdate(tokenId);
 

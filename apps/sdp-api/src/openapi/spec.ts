@@ -9,11 +9,11 @@ import { registerAuthPaths } from "./paths/auth";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
 import { registerCustodyPaths } from "./paths/custody";
+import { registerDvpPaths } from "./paths/dvp";
 import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
-import { registerNotificationPaths } from "./paths/notifications";
 import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
@@ -21,6 +21,10 @@ import { registerPolicyPaths } from "./paths/policies";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
+import { registerTransactionsPaths } from "./paths/transactions";
+
+const EARN_TAG_DESCRIPTION =
+  "Keyless Earn catalogue, quotes, and unsigned external-wallet builds plus authenticated submission and tenant tracking.";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },
@@ -63,13 +67,16 @@ const OPENAPI_TAG = {
   // (sdp-docs generate-api-docs.mjs), so a colon here breaks that YAML.
   PUBLIC_EARN: {
     name: "Earn",
+    description: EARN_TAG_DESCRIPTION,
+  },
+  DVP: {
+    name: "DvP",
     description:
-      "The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.",
+      "Atomic delivery-versus-payment trades. Internal while the swap program is devnet-only and the family is feature-flagged off.",
   },
   EARN: {
     name: "Earn",
-    description:
-      "The embedded-yield strategy catalogue plus the caller-signed external-wallet deposit, exit, and read surfaces.",
+    description: EARN_TAG_DESCRIPTION,
   },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
@@ -106,6 +113,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
   OPENAPI_TAG.EARN,
+  OPENAPI_TAG.DVP,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,
 ];
@@ -151,6 +159,7 @@ function registerPublicPaths(registry: OpenAPIRegistry) {
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
+  registerTransactionsPaths(registry);
   registerPolicyPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
@@ -165,16 +174,17 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerAuthPaths(registry);
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
+  registerDvpPaths(registry);
   registerProjectPaths(registry);
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
+  registerTransactionsPaths(registry);
   registerPolicyPaths(registry);
   registerPrivateChannelsPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);
-  registerNotificationPaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
 }

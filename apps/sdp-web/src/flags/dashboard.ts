@@ -1,6 +1,7 @@
 import {
   assetProfiles,
   custody,
+  dvp,
   earn,
   heliusRings,
   issuance,
@@ -13,6 +14,7 @@ import {
 export type DashboardFlags = {
   assetProfiles: boolean;
   custody: boolean;
+  dvp: boolean;
   earn: boolean;
   heliusRings: boolean;
   issuance: boolean;
@@ -36,6 +38,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
   const [
     assetProfilesEnabled,
     custodyEnabled,
+    dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
     issuanceEnabled,
@@ -46,6 +49,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
   ] = await Promise.all([
     assetProfiles(),
     custody(),
+    dvp(),
     earn(),
     heliusRings(),
     issuance(),
@@ -58,6 +62,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
   return {
     assetProfiles: assetProfilesEnabled,
     custody: custodyEnabled,
+    dvp: dvpEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,

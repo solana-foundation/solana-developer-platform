@@ -41,7 +41,15 @@ function bumpLevel(commits) {
 function incrementVersion(version, level) {
   const [major, minor, patch] = parseVersion(version);
 
-  switch (level) {
+  // Below 1.0.0, a breaking change takes the minor rather than the major.
+  // Reaching 1.0 is a product decision about the stability we are promising
+  // integrators, and it also switches on the planned-major policy: after 1.0
+  // every breaking change needs a deprecation schedule. A `!` in a commit
+  // subject should not make that decision for us. Delete this clause on the
+  // release where the team deliberately ships 1.0.0.
+  const effectiveLevel = level === "major" && major === 0 ? "minor" : level;
+
+  switch (effectiveLevel) {
     case "major":
       return `${major + 1}.0.0`;
     case "minor":

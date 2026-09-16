@@ -66,13 +66,13 @@ import {
   // Token ACL freeze/thaw (object input pattern)
   getFreezeTransaction,
   getListConfigPda,
-  getRemoveAuthorityTransaction,
   getRemoveWalletTransaction,
   getThawPermissionlessTransaction,
   getThawTransaction,
   getTokenMetadata,
-  getUpdateAuthorityTransaction,
+  type getUpdateAuthorityTransaction,
   resolveTokenAccount,
+  TOKEN_ACL_PROGRAM_ID,
 } from "@solana/mosaic-sdk";
 import {
   createApplyConfidentialPendingBalanceInstructionPlan,
@@ -88,6 +88,7 @@ import {
 } from "@solana/mosaic-sdk/confidential";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { findWalletEntryPda } from "@solana/token-acl-gate-sdk";
+import { findMintConfigPda, getSetAuthorityInstruction } from "@solana/token-acl-sdk";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
   decodeMint,
@@ -95,6 +96,7 @@ import {
   getUpdateTokenMetadataFieldInstruction,
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
+import { buildAuthorityTransaction } from "./authority";
 import {
   type AblWalletOptions,
   type ApplyPendingConfidentialBalanceOptions,
@@ -137,8 +139,6 @@ type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 export type MosaicIssuanceEnv = RpcEnv & {
   /** When "true", confirmations use processed commitment with a fixed timeout. */
   KORA_SURFPOOL_SHIM?: string;
-  /** Consumed by the legacy Token2022Service fallback (createCustomToken). */
-  SOLANA_MOCK?: string;
 };
 
 /**
@@ -151,6 +151,7 @@ export interface MosaicServiceOptions {
    * their TRANSACTION_FAILED HTTP mapping; defaults to a plain `Error`.
    */
   transactionFailedError?: (message: string) => Error;
+  invalidArgumentError?: (message: string) => Error;
 }
 
 /**
@@ -190,6 +191,7 @@ export class MosaicService {
   private feePayment?: FeePaymentPort;
   private rpc: Rpc<SolanaRpcApi> & MosaicSdkRpc;
   private transactionFailedError: (message: string) => Error;
+  private invalidArgumentError: (message: string) => Error;
 
   constructor(
     env: MosaicIssuanceEnv,
@@ -203,6 +205,7 @@ export class MosaicService {
     this.rpc = createRpcForSdk<MosaicSdkRpc>(env) as unknown as Rpc<SolanaRpcApi> & MosaicSdkRpc;
     this.transactionFailedError =
       options?.transactionFailedError ?? ((message: string) => new Error(message));
+    this.invalidArgumentError = options?.invalidArgumentError ?? ((message) => new Error(message));
   }
 
   private isRetryableRpcError(error: unknown): boolean {
@@ -311,8 +314,8 @@ export class MosaicService {
       );
       result = await this.signAndSubmitWithMintKeypair(slimTx, mintKeypair);
 
-      // The mint is now live on-chain. In custodial deploy `this.signer` is the
-      // mint's metadata update authority, so it can set the uri; the caller's
+      // The mint is now live on-chain. Its selected metadata authority signs
+      // the URI update (falling back to the deployment signer); the caller's
       // fee payer pays for the follow-up too (resolveFeePayerSigner swaps in
       // Kora when sponsored). If that follow-up fails, surface the created mint
       // so the caller can persist it — otherwise a retry mints a second,
@@ -321,7 +324,7 @@ export class MosaicService {
         await this.updateMetadata({
           mint,
           uri: requestedUri,
-          updateAuthority: this.signer,
+          updateAuthority: options.metadataAuthority ?? this.signer,
           feePayer: options.feePayer,
         });
       } catch (cause) {
@@ -375,14 +378,17 @@ export class MosaicService {
     return this.toMosaicTransaction(fullTx, mint);
   }
 
-  private async buildCreateTokenTransaction(
-    template: string,
+  /**
+   * Fee payer, authorities and extension config for a create-token build.
+   *
+   * Extracted from buildCreateTokenTransaction so the template switch there
+   * stays within the cognitive-complexity budget: every template needs the same
+   * resolution, and none of it depends on which template was chosen.
+   */
+  private async resolveCreateTokenBuildInputs(
     options: CreateTokenOptions,
-    mintKeypair: TransactionSigner,
-    aclMode: "allowlist" | "blocklist",
-    enableSrfc37: boolean,
-    forClientSigning = false
-  ): Promise<FullTransaction> {
+    forClientSigning: boolean
+  ) {
     // Resolve fee payer - use Kora if available, otherwise from options. This
     // applies to sRFC-37 deploys too: the patched mosaic-sdk templates fund the
     // on-chain ABL/TACL setup from the fee payer (Kora) while keeping the mint
@@ -398,34 +404,66 @@ export class MosaicService {
         ? this.signer
         : options.mintAuthority;
     const mintAuthorityAddress = resolveMintAuthorityAddress(options);
-
-    const freezeAuthority = options.freezeAuthority ?? undefined;
-    const permanentDelegateAuthority =
-      typeof options.extensions?.permanentDelegate === "string"
-        ? (options.extensions.permanentDelegate as Address)
-        : undefined;
-    const pausableAuthority = options.extensions?.pausable?.authority as Address | undefined;
-    const scaledUiAmount = options.extensions?.scaledUiAmount;
-    const transferHook = options.extensions?.transferHook;
     const confidentialTransfers = options.extensions?.confidentialTransfers;
-    // `ConfidentialBalancesConfig` carries only policy + auditor; the authority
-    // travels separately through each template's confidentialBalancesAuthority.
-    const confidentialBalances = confidentialTransfers
-      ? {
-          policy: confidentialTransfers.policy,
-          auditorElgamalPubkey: confidentialTransfers.auditorElgamalPubkey as Address | undefined,
-        }
-      : undefined;
-    const confidentialBalancesAuthority =
-      (confidentialTransfers?.authority as Address | undefined) ?? mintAuthorityAddress;
 
+    return {
+      feePayer,
+      mintAuthority,
+      mintAuthorityAddress,
+      confidentialTransfers,
+      metadataAuthority: options.metadataAuthority?.address ?? mintAuthorityAddress,
+      freezeAuthority: options.freezeAuthority ?? undefined,
+      permanentDelegateAuthority:
+        typeof options.extensions?.permanentDelegate === "string"
+          ? (options.extensions.permanentDelegate as Address)
+          : undefined,
+      pausableAuthority: options.extensions?.pausable?.authority as Address | undefined,
+      scaledUiAmount: options.extensions?.scaledUiAmount,
+      transferHook: options.extensions?.transferHook,
+      // `ConfidentialBalancesConfig` carries only policy + auditor; the authority
+      // travels separately through each template's confidentialBalancesAuthority.
+      confidentialBalances: confidentialTransfers
+        ? {
+            policy: confidentialTransfers.policy,
+            auditorElgamalPubkey: confidentialTransfers.auditorElgamalPubkey as Address | undefined,
+          }
+        : undefined,
+      confidentialBalancesAuthority:
+        (confidentialTransfers?.authority as Address | undefined) ?? mintAuthorityAddress,
+    };
+  }
+
+  private async buildCreateTokenTransaction(
+    template: string,
+    options: CreateTokenOptions,
+    mintKeypair: TransactionSigner,
+    aclMode: "allowlist" | "blocklist",
+    enableSrfc37: boolean,
+    forClientSigning = false
+  ): Promise<FullTransaction> {
+    const {
+      feePayer,
+      mintAuthority,
+      mintAuthorityAddress,
+      metadataAuthority,
+      freezeAuthority,
+      permanentDelegateAuthority,
+      pausableAuthority,
+      scaledUiAmount,
+      transferHook,
+      confidentialTransfers,
+      confidentialBalances,
+      confidentialBalancesAuthority,
+    } = await this.resolveCreateTokenBuildInputs(options, forClientSigning);
+
+    let transaction: FullTransaction;
     switch (template) {
       case "stablecoin":
         // Stablecoin: full compliance features with blocklist default
         // Signature: (rpc, name, symbol, decimals, uri, mintAuthority, mint, feePayer,
         //            aclMode?, metadataAuth?, pausableAuth?, confidentialAuth?, delegateAuth?,
         //            enableSrfc37?, freezeAuthority?)
-        return createStablecoinInitTransaction(
+        transaction = await createStablecoinInitTransaction(
           this.rpc,
           options.metadata.name,
           options.metadata.symbol,
@@ -435,7 +473,7 @@ export class MosaicService {
           mintKeypair,
           feePayer,
           aclMode,
-          mintAuthorityAddress, // metadataAuthority
+          metadataAuthority,
           pausableAuthority ?? mintAuthorityAddress, // pausableAuthority
           confidentialBalancesAuthority,
           permanentDelegateAuthority ?? mintAuthorityAddress, // permanentDelegateAuthority
@@ -443,13 +481,14 @@ export class MosaicService {
           freezeAuthority,
           confidentialBalances
         );
+        break;
 
       case "arcade":
         // Arcade: closed-loop gaming tokens (always allowlist)
         // Note: No aclMode parameter - arcade is always allowlist
         // Signature: (rpc, name, symbol, decimals, uri, mintAuthority, mint, feePayer,
         //            metadataAuth?, pausableAuth?, delegateAuth?, enableSrfc37?, freezeAuthority?)
-        return createArcadeTokenInitTransaction(
+        transaction = await createArcadeTokenInitTransaction(
           this.rpc,
           options.metadata.name,
           options.metadata.symbol,
@@ -458,17 +497,18 @@ export class MosaicService {
           mintAuthority,
           mintKeypair,
           feePayer,
-          mintAuthorityAddress, // metadataAuthority
+          metadataAuthority,
           pausableAuthority ?? mintAuthorityAddress, // pausableAuthority
           permanentDelegateAuthority ?? mintAuthorityAddress, // permanentDelegateAuthority
           enableSrfc37,
           freezeAuthority
         );
+        break;
 
       case "tokenized-security":
         // Tokenized Security: stablecoin features + scaled UI amount
         // Uses options object for optional parameters
-        return createTokenizedSecurityInitTransaction(
+        transaction = await createTokenizedSecurityInitTransaction(
           this.rpc,
           options.metadata.name,
           options.metadata.symbol,
@@ -480,7 +520,7 @@ export class MosaicService {
           freezeAuthority,
           {
             aclMode,
-            metadataAuthority: mintAuthorityAddress,
+            metadataAuthority,
             pausableAuthority: pausableAuthority ?? mintAuthorityAddress,
             confidentialBalancesAuthority,
             confidentialBalances,
@@ -498,6 +538,7 @@ export class MosaicService {
               : undefined,
           }
         );
+        break;
 
       case "custom": {
         const extensions = options.extensions ?? {};
@@ -507,7 +548,7 @@ export class MosaicService {
         const transferFeeMaximum = transferFee
           ? parseDecimalAmount(transferFee.maxFee, options.decimals)
           : undefined;
-        return createCustomTokenInitTransaction(
+        transaction = await createCustomTokenInitTransaction(
           this.rpc,
           options.metadata.name,
           options.metadata.symbol,
@@ -519,6 +560,7 @@ export class MosaicService {
           {
             enableSrfc37,
             aclMode,
+            metadataAuthority,
             enableDefaultAccountState: !!defaultAccountState,
             defaultAccountStateInitialized:
               defaultAccountState !== undefined ? defaultAccountState !== "frozen" : undefined,
@@ -556,11 +598,37 @@ export class MosaicService {
             freezeAuthority,
           }
         );
+        break;
       }
 
       default:
         throw new Error(`Unsupported template: ${template}`);
     }
+
+    // Token ACL initializes its controller with the mint signer while setting
+    // up gating. Assign the requested freeze controller after that setup, in
+    // the same transaction, so a split authority cannot be silently ignored.
+    if (enableSrfc37 && freezeAuthority && freezeAuthority !== mintAuthorityAddress) {
+      const [mintConfig] = await findMintConfigPda(
+        { mint: mintKeypair.address },
+        { programAddress: TOKEN_ACL_PROGRAM_ID }
+      );
+      return appendTransactionMessageInstructions(
+        [
+          getSetAuthorityInstruction(
+            {
+              authority:
+                typeof mintAuthority === "string" ? createNoopSigner(mintAuthority) : mintAuthority,
+              mintConfig,
+              newAuthority: freezeAuthority,
+            },
+            { programAddress: TOKEN_ACL_PROGRAM_ID }
+          ),
+        ],
+        transaction
+      );
+    }
+    return transaction;
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -569,6 +637,7 @@ export class MosaicService {
 
   /**
    * Mint tokens to a destination address.
+   * Uses the service signer as mint authority; prepareMintTo uses options.mintAuthority.
    *
    * The SDK handles:
    * - Creating ATA if needed (idempotent)
@@ -1270,22 +1339,17 @@ export class MosaicService {
     const currentAuthority = createNoopSigner(options.currentAuthority);
 
     const fullTx = await this.withRpcRetry(() =>
-      options.newAuthority === null
-        ? getRemoveAuthorityTransaction({
-            rpc: this.rpc,
-            payer,
-            mint: options.mint,
-            role: options.role,
-            currentAuthority,
-          })
-        : getUpdateAuthorityTransaction({
-            rpc: this.rpc,
-            payer,
-            mint: options.mint,
-            role: options.role,
-            currentAuthority,
-            newAuthority: options.newAuthority,
-          })
+      buildAuthorityTransaction(
+        {
+          rpc: this.rpc,
+          payer,
+          mint: options.mint,
+          role: options.role,
+          currentAuthority,
+          newAuthority: options.newAuthority,
+        },
+        this.invalidArgumentError
+      )
     );
 
     return this.toMosaicTransaction(fullTx);
@@ -1301,22 +1365,17 @@ export class MosaicService {
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
 
     const fullTx = await this.withRpcRetry(() =>
-      options.newAuthority === null
-        ? getRemoveAuthorityTransaction({
-            rpc: this.rpc,
-            payer: feePayer,
-            mint: options.mint,
-            role: options.role,
-            currentAuthority: options.currentAuthority,
-          })
-        : getUpdateAuthorityTransaction({
-            rpc: this.rpc,
-            payer: feePayer,
-            mint: options.mint,
-            role: options.role,
-            currentAuthority: options.currentAuthority,
-            newAuthority: options.newAuthority,
-          })
+      buildAuthorityTransaction(
+        {
+          rpc: this.rpc,
+          payer: feePayer,
+          mint: options.mint,
+          role: options.role,
+          currentAuthority: options.currentAuthority,
+          newAuthority: options.newAuthority,
+        },
+        this.invalidArgumentError
+      )
     );
 
     return this.signAndSubmit(fullTx);
@@ -1555,33 +1614,6 @@ export class MosaicService {
     });
 
     return this.signAndSubmit(transactionMessage);
-  }
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // Custom Token Fallback (uses legacy Token2022Service)
-  // ═════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Create a custom token with manual extension configuration.
-   * Falls back to Token2022Service for full control.
-   */
-  async createCustomToken(options: CreateTokenOptions): Promise<MosaicTransactionResult> {
-    const { Token2022Service } = await import("@sdp/solana/token-2022");
-    const legacyService = new Token2022Service(this.env, this.signer, this.feePayment);
-
-    const result = await legacyService.createMint({
-      metadata: options.metadata,
-      decimals: options.decimals,
-      mintAuthority: options.mintAuthority,
-      freezeAuthority: options.freezeAuthority,
-      extensions: options.extensions,
-    });
-
-    return {
-      signature: result.signature,
-      slot: result.slot,
-      mint: result.mint,
-    };
   }
 
   // ═════════════════════════════════════════════════════════════════════════

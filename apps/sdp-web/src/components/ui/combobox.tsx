@@ -44,6 +44,29 @@ export interface ComboboxOption {
   icon?: ReactNode;
   badge?: string;
   badgeVariant?: BadgeVariant;
+  /** Shown but not selectable: click, Enter and only-match auto-select do nothing. */
+  disabled?: boolean;
+}
+
+function ComboboxOptionContent({ option }: { option: ComboboxOption }) {
+  return (
+    <>
+      {option.icon ? <span className="shrink-0">{option.icon}</span> : null}
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-primary">{option.label}</span>
+          {option.badge ? (
+            <Badge variant={option.badgeVariant} className="shrink-0">
+              {option.badge}
+            </Badge>
+          ) : null}
+        </span>
+        {option.description ? (
+          <span className="block truncate text-sm text-tertiary">{option.description}</span>
+        ) : null}
+      </span>
+    </>
+  );
 }
 
 interface ComboboxProps {
@@ -51,6 +74,8 @@ interface ComboboxProps {
   onChange: (value: string) => void;
   options: readonly ComboboxOption[];
   label: string;
+  /** Visually hides the label while preserving it for the trigger's accessible name. */
+  hideLabel?: boolean;
   required?: boolean;
   className?: string;
   placeholder?: string;
@@ -66,6 +91,14 @@ interface ComboboxProps {
   validationError?: string;
   onEnterSelect?: (value: string) => void;
   footer?: (close: () => void) => ReactNode;
+  /**
+   * Derives an extra option from the search text, for values that are typed or
+   * pasted rather than picked (an address, a mint). Called with the trimmed
+   * query; a returned option is appended to the filtered list unless an
+   * existing option already carries its value. Return null for queries the
+   * caller cannot turn into an option.
+   */
+  queryOption?: (query: string) => ComboboxOption | null;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Accessible combobox behavior is clearer when keyboard, filtering, and selection state remain co-located.
@@ -74,6 +107,7 @@ export function Combobox({
   onChange,
   options,
   label,
+  hideLabel,
   required,
   className,
   placeholder,
@@ -89,6 +123,7 @@ export function Combobox({
   validationError,
   onEnterSelect,
   footer,
+  queryOption,
 }: ComboboxProps) {
   const t = useTranslations();
   const resolvedPlaceholder = placeholder ?? t("Shared.SharedComponents.selectAnOption");
@@ -105,13 +140,23 @@ export function Combobox({
   );
 
   const filtered = useMemo(() => {
-    if (!searchable) return options;
-    const needle = query.trim().toLowerCase();
-    if (!needle) return options;
-    return options.filter((option) =>
-      `${option.label} ${option.description ?? ""}`.toLowerCase().includes(needle)
-    );
-  }, [options, query, searchable]);
+    const trimmed = query.trim();
+    const needle = trimmed.toLowerCase();
+    const base =
+      !searchable || !needle
+        ? options
+        : options.filter((option) =>
+            `${option.label} ${option.description ?? ""}`.toLowerCase().includes(needle)
+          );
+    if (!queryOption || !trimmed) {
+      return base;
+    }
+    const extra = queryOption(trimmed);
+    if (extra === null || base.some((option) => option.value === extra.value)) {
+      return base;
+    }
+    return [...base, extra];
+  }, [options, query, searchable, queryOption]);
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
@@ -127,28 +172,29 @@ export function Combobox({
     setActiveIndex(-1);
   }
 
-  function selectOption(value: string, submit: boolean) {
-    onChange(value);
+  function selectOption(option: ComboboxOption, submit: boolean) {
+    if (option.disabled) return;
+    onChange(option.value);
     close();
     if (submit) {
-      onEnterSelect?.(value);
+      onEnterSelect?.(option.value);
     }
   }
 
   function selectOnlyMatch(submit = false) {
     if (filtered.length !== 1) return;
-    selectOption(filtered[0].value, submit);
+    selectOption(filtered[0], submit);
   }
 
   function selectActive(submit = false) {
     const active = filtered[activeIndex];
     if (!active) return false;
-    selectOption(active.value, submit);
+    selectOption(active, submit);
     return true;
   }
 
   useEffect(() => {
-    setActiveIndex(filtered.length === 1 ? 0 : -1);
+    setActiveIndex(filtered.length === 1 && !filtered[0].disabled ? 0 : -1);
   }, [filtered]);
 
   const trigger = (
@@ -172,7 +218,9 @@ export function Combobox({
       <span className="min-w-0 flex-1 text-left">
         {selected ? (
           <span className="flex min-w-0 items-center gap-2">
-            {selected.icon ? <span className="shrink-0">{selected.icon}</span> : null}
+            {selected.icon ? (
+              <span className="flex shrink-0 items-center">{selected.icon}</span>
+            ) : null}
             <span className="truncate text-primary">{selected.label}</span>
             {selected.badge ? (
               <Badge variant={selected.badgeVariant} className="shrink-0">
@@ -184,7 +232,7 @@ export function Combobox({
             ) : null}
           </span>
         ) : (
-          <span className="text-tertiary">{resolvedPlaceholder}</span>
+          <span className="block truncate text-tertiary">{resolvedPlaceholder}</span>
         )}
       </span>
       {trailing ? <span className="shrink-0">{trailing}</span> : null}
@@ -260,35 +308,22 @@ export function Combobox({
                 key={option.value}
                 id={`${labelId}-option-${index}`}
                 type="button"
+                disabled={option.disabled}
+                aria-disabled={option.disabled || undefined}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-[var(--select-item-radius)] text-left transition-colors",
                   variant === "dialog" ? "px-3.5 py-3" : "px-3 py-2.5",
-                  highlighted
-                    ? "bg-[var(--select-item-highlight-bg)]"
+                  // The arrow keys may land on a disabled option, so it keeps the
+                  // highlight: a keyboard user must see where the cursor is.
+                  highlighted && "bg-[var(--select-item-highlight-bg)]",
+                  option.disabled
+                    ? "cursor-not-allowed opacity-50"
                     : "hover:bg-[var(--select-item-highlight-bg)]"
                 )}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => {
-                  onChange(option.value);
-                  close();
-                }}
+                onMouseEnter={option.disabled ? undefined : () => setActiveIndex(index)}
+                onClick={() => selectOption(option, false)}
               >
-                {option.icon ? <span className="shrink-0">{option.icon}</span> : null}
-                <span className="min-w-0 flex-1">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-primary">{option.label}</span>
-                    {option.badge ? (
-                      <Badge variant={option.badgeVariant} className="shrink-0">
-                        {option.badge}
-                      </Badge>
-                    ) : null}
-                  </span>
-                  {option.description ? (
-                    <span className="block truncate text-sm text-tertiary">
-                      {option.description}
-                    </span>
-                  ) : null}
-                </span>
+                <ComboboxOptionContent option={option} />
                 {active ? <CheckIcon className="size-4 shrink-0 text-primary" /> : null}
               </button>
             );
@@ -302,7 +337,7 @@ export function Combobox({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label id={labelId}>
+      <Label className={hideLabel ? "sr-only" : undefined} id={labelId}>
         {label}
         {required ? (
           <>

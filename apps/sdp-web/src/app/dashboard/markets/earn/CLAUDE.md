@@ -19,6 +19,39 @@ api/dashboard/markets/earn/
   provider-query.ts                  allowlisted query passthrough — lives at
                                      the earn/ ROOT because its importers sit
                                      at several depths under programs/
+  kamino-allocations/route.ts        NOT a proxy: the one route that fetches a
+                                     THIRD PARTY (Kamino's public allocations
+                                     endpoint) server-side for the Treasury
+                                     "Information" column, TTL-cached 45s and
+                                     zod-parsed through the schema module in
+                                     treasury-solutions/. Auth comes from the
+                                     proxy middleware; failures answer 502 so
+                                     the cell degrades to its placeholder.
+                                     Kamino's allocations source is
+                                     mainnet-only, so the handler refuses any
+                                     other cluster with a 400 before reading
+                                     anything else. Everything else about the
+                                     request is policed by the store module —
+                                     the server boundary: Kamino would answer
+                                     any well-formed mainnet vault, so the
+                                     store admits a vault only if it is a
+                                     public key AND the strategy catalogue
+                                     fronts it. The allowlist is resolved
+                                     from `/v1/earn/strategies` (provider
+                                     kamino, mainnet-beta) through
+                                     `createSdpApiClient`, cached beside the
+                                     allocations cache, and a failed catalogue
+                                     read fails closed into the same generic
+                                     502 — a refused vault is
+                                     indistinguishable from an outage.
+                                     Answers the BARE parsed payload, never an
+                                     envelope: `dashboardFetch` hands the body
+                                     straight to the SWR hook, which re-parses
+                                     it with the same schema (an envelope once
+                                     failed every cell to "—" while both unit
+                                     suites stayed green; the seam test in
+                                     treasury-solutions/kamino-allocations-bff
+                                     wires route → dashboardFetch → hook).
   strategies/route.ts
   programs/route.ts                  GET list (page window) · POST create
   programs/[programId]/route.ts      GET one · PUT re-target
@@ -67,12 +100,21 @@ program create still sends the body `requestId` form.
 ## Routes
 
 - `/dashboard/markets/embedded-yield` → `EmbeddedYieldDashboard`: the live
-  customer portfolio and entry point for configuration.
+  customer portfolio and entry point for configuration. Its strategy drawer
+  renders the positions already hydrated by the project summary; it must not
+  fan out one metered request per customer wallet.
 - `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
   configuration surface with a strategy dropdown, the selected strategy ID,
   live APY and liquidity, and code that updates in place. The legacy
-  `/integrate` deep link renders the same surface for bookmarked strategy URLs.
-  The guide covers the sectioned **server-side** EXTERNAL-WALLET flow —
+  `/integrate` deep link renders the same surface for bookmarked strategy URLs
+  (`?strategy=` only; the former `?cluster=` toggle is gone). No network
+  toggle: sandbox reads both shelves (`useIntegrationCatalogue`) and lists the
+  devnet rows first, then the mirrored mainnet rows disabled as "Mainnet only",
+  the same posture as the Treasury table. There is no mainnet "preview" mode
+  in the guide any more: a mainnet deep link in sandbox is refused as a
+  network mismatch.
+  The guide covers the sectioned **server-side, authenticated**
+  EXTERNAL-WALLET flow:
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
   `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
   signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
@@ -86,8 +128,10 @@ program create still sends the body `requestId` form.
   snippets — a B2B2C partner cannot name a custody wallet. The optional
   partner `feePayer` (the implementor sponsoring its customers' fees) is
   documented in the public docs guide
-  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`), which mirrors
-  these snippets — update both together. The guide is
+  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`). That public guide
+  also owns the keyless quickstart; these dashboard snippets intentionally stay
+  keyed because they include submit and tenant read routes. Keep the shared
+  authenticated flow aligned across both. The guide is
   entirely derived from the strategy catalogue: nothing is persisted, there is
   no styling to save, and no public handoff token exists. (The UI builder that
   used to hold those — styled previews, saved per-project configuration, the
@@ -106,8 +150,10 @@ program create still sends the body `requestId` form.
   configuration and integration-guide shapes. The shell's navigation-loading
   resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
   same route-specific skeleton used by its `loading.tsx` boundary.
-- The portfolio's zero-position state is the onboarding card. The removed UI
-  builder persisted the only former configuration state, so there is no honest
+- The portfolio's zero-position state is the onboarding card alone: the three
+  metric tiles are hidden at zero positions because all-zero tiles with empty
+  charts read as data rather than "nothing yet". The removed UI builder
+  persisted the only former configuration state, so there is no honest
   "configured but awaiting a deposit" distinction to infer from the live
   position summary.
 
@@ -115,8 +161,11 @@ program create still sends the body `requestId` form.
 
 - `earn-surfacing.ts` — the availability brain. `SURFACED_CUSTODIAL_EARN_PROVIDERS`,
   `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`, `EARN_PROGRAM_CREATION_ENABLED`,
-  `EARN_PROGRAM_CREATE_PROVIDER` and `earnVaultDepositAvailability`, all DERIVED
-  from `@sdp/types` — **no provider id is hand-set here**. Carries no
+  `EARN_PROGRAM_CREATE_PROVIDER`, `earnVaultDepositAvailability` and
+  `earnVaultDepositOnlyEnvironment` (which side an `environment_unavailable`
+  verdict points at, so Jupiter/Ondo read "Production only" rather than the
+  sandbox-era "Sandbox only"), all DERIVED from `@sdp/types` — **no provider id
+  is hand-set here**. Carries no
   `"use client"` directive, on purpose (see "The client/server boundary bug").
 - `earn-provider-access.server.ts` — `loadEarnProviderAccess()`: reads
   `/v1/onboarding/status` then provider availability for that organization.
@@ -126,9 +175,15 @@ program create still sends the body `requestId` form.
 - `earn-integration-guide.tsx` — owns strategy selection and re-checks
   availability rather than trusting a deep link. Unavailable strategies stay
   visible but disabled. The selected strategy's ID, APY, liquidity, provider,
-  and availability remain beside four freely navigable reference tabs (client
-  setup, deposits, reads, withdraw). The snippets remain server-only and say so,
-  because the module they document carries a secret API key.
+  and availability sit in one plain line under the dropdown ("Kamino · Instant
+  liquidity · 6.2% APY", APY omitted when unknown) with the ID as its own
+  copyable code block. A short intro paragraph explains the loop, then four
+  freely navigable reference tabs (client setup, deposits, reads, withdraw).
+  "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
+  just the active tab. The snippets remain server-only and the page says so in
+  a warning callout, because the module they document carries a secret API key.
+  Do not imply that catalogue, preview, or unsigned build access always needs
+  that key; the public guide documents their keyless tier.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is
@@ -136,12 +191,16 @@ program create still sends the body `requestId` form.
 - `earn-program-data.ts` — THE data seam, over the BFF proxies above.
   `useEarnStrategies()` is what this module's pages read today — it takes an
   optional `{ cluster }` (PRO-1742), the explicit opt-in that browses the
-  mirrored mainnet shelf; the cluster is part of the SWR key. Treasury's
-  strategies card passes it from its sandbox-only toggle and deliberately keeps
-  a SECOND, default hook call alive: the default read doubles as the
-  allocation summary's share-mint vocabulary, and repointing it at mainnet
-  would blank the devnet vocabulary under the page (the two calls share one
-  SWR key until the toggle leaves the default). The program,
+  mirrored mainnet shelf; the cluster is part of the SWR key. In sandbox,
+  Treasury's strategies card always requests that mirror and lists it above
+  the default (devnet) shelf, and deliberately keeps the SECOND, default hook
+  call alive: the default read doubles as the allocation summary's share-mint
+  vocabulary, and repointing it at mainnet would blank the devnet vocabulary
+  under the page. Neither shelf gates the other (PRO-1961): whichever has
+  loaded renders, a failed or slow shelf is reported inline above the other's
+  rows, and the full-card error is reserved for both failing. Devnet rows are
+  the only ones sandbox can deposit into, so a mirror outage must never hide
+  them. The program,
   vault-position and vault-deposit seams serve Treasury Solutions next door (see
   "Where these seams are consumed"). **No provider id is spelled in this file** — surfacing comes
   from `./earn-surfacing`, and reads are provider-agnostic on purpose so a
@@ -294,9 +353,11 @@ program create still sends the body `requestId` form.
   versioned `sessionStorage` key.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
-  mint's scale, floored, one-atom minimum), `isSlippageExceededRefusal` (the
-  API's `details.reason` seam), the debounced quote hook and (in
-  `earn-vault-slippage-section.tsx`) the disclosure section. One copy on
+  mint's scale, floored, one-atom minimum; a quote FINER than that scale is a
+  malformed response and answers `null`, while `isZeroQuote` reads it `false` —
+  not provably zero — so both fail closed like an unavailable quote),
+  `isSlippageExceededRefusal` (the API's `details.reason` seam), the debounced
+  quote hook and (in `earn-vault-slippage-section.tsx`) the disclosure section. One copy on
   purpose — two copies of a funds-protection rule is how one drifts, the same
   reasoning as the idempotency-key store. The floor is derived from a LIVE
   provider quote, never from the caller's own input; an unavailable quote
@@ -415,8 +476,8 @@ to `EarnProviderId`; an unknown value has already failed closed as
 
 ## Withdrawal rules
 
-Measured against Ground sandbox 2026-08-13 (see `packages/sdp-earn/CLAUDE.md` →
-Conventions). All still hold:
+Measured against a live provider sandbox 2026-08-13 (see
+`packages/sdp-earn/CLAUDE.md` → Conventions). All still hold:
 
 - **A 409 can be the answer.** The amount-less preview may refuse while still
   reporting the lane balance, so a 409 carrying
@@ -432,13 +493,13 @@ Conventions). All still hold:
   `earnProgramSolanaPayoutTokens(provider)` from `@sdp/types` — the same
   registry the provider client gates on, so the button and the server cannot
   disagree. A token the provider never routes to Solana is NOT OFFERED at all.
-  Do not reintroduce a module-level Ground-only constant here.
+  Do not reintroduce a module-level per-provider constant here.
 - **Never disable a money verb on status.** Withdraw gates on `withdrawableUsd`
   alone: the provider already reserves an in-flight amount out of that figure,
   so the balance expresses the constraint without a status lock that could trap
   an exit.
 - Preview failures render TRANSLATED copy naming the per-lane reality — never
-  the provider's wire text ("ground request failed with status 409" explains
+  the provider's wire text ("provider request failed with status 409" explains
   nothing).
 
 ## Money is a decimal STRING, end to end

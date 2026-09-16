@@ -2,12 +2,13 @@
  * SPC wallet-verification orchestration (the write path) + the default-identity read.
  *
  * Drives the SPC auth handshake for one SDP custody wallet:
- *   1. resolve the connected instance + the selected project identity's SPC user
- *   2. open an SPC JWT handle (KV-cached via ./auth/gateway-auth)
- *   3. `challenge-wallet` → sign the challenge with THAT wallet → `verify-wallet`
- *   4. persist the verification (idempotent per (user, instance, pubkey))
+ *   1. authorize/admit the exact custody wallet and prepare its signer
+ *   2. resolve the connected instance + the selected project identity's SPC user
+ *   3. open an SPC JWT handle (KV-cached via ./auth/gateway-auth)
+ *   4. `challenge-wallet` → sign the challenge with THAT wallet → `verify-wallet`
+ *   5. persist the verification (idempotent per (user, instance, pubkey))
  *
- * Signing is wallet-specific via `createOrgSigner(...walletId)` (not
+ * Signing is exact-wallet-specific via `createOrgSignerForCustodyWallet` (not
  * `SigningService.sign`, which signs with the scope-default wallet). The
  * resolved signer is a message-partial-signer at runtime; we sign the challenge
  * as raw bytes — matching SPC's `signature.verify(pubkey, message.as_bytes())` —
@@ -31,9 +32,9 @@ import {
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, forbidden, notFound, providerNotConfigured } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import { createOrgSigner } from "@/services/solana";
 import type { Env } from "@/types/env";
 import { openSpcAuthContext, type SpcAuthContext, withSpcAuth } from "./auth/gateway-auth";
+import { createPrivateChannelSigner, resolvePrivateChannelCustodyWallet } from "./wallet-access";
 
 const base58 = getBase58Codec();
 
@@ -161,6 +162,11 @@ export async function verifyPrivateChannelWallet(
   walletId: string,
   principalId?: string
 ): Promise<{ row: PrivateChannelVerifiedWalletRow; instance: PrivateChannelInstanceRow }> {
+  const wallet = await resolvePrivateChannelCustodyWallet(env, auth, projectId, walletId);
+  const signer = await createPrivateChannelSigner(env, auth.organizationId, projectId, wallet);
+  if (!isMessagePartialSigner(signer)) {
+    throw new AppError("SIGNING_FAILED", "This wallet cannot sign verification messages.");
+  }
   const { scope, instance, pcUser, client, spcAuth } = await resolveWalletSession(
     env,
     auth,
@@ -168,13 +174,7 @@ export async function verifyPrivateChannelWallet(
     principalId
   );
 
-  // Resolve the wallet to a signer BEFORE the SPC challenge, so an
-  // invalid/unsignable wallet fails without minting a nonce. Kept outside
-  // withSpcAuth so a 401 retry does not re-derive the signer.
-  const signer = await createOrgSigner(env, auth.organizationId, projectId, walletId);
-  if (!isMessagePartialSigner(signer)) {
-    throw new AppError("SIGNING_FAILED", "This wallet cannot sign verification messages.");
-  }
+  // The exact signer is retained across the challenge retry.
   const pubkey = signer.address;
 
   // Retry unit is challenge → sign → verify (restarted from challenge on 401).

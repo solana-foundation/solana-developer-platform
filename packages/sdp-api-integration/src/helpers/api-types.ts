@@ -1,11 +1,11 @@
-import type { Token } from "@sdp/types";
+import type { PublicToken, PublicTokenTransaction } from "@sdp/types";
 
 export interface ApiResponse<T> {
   data: T;
   meta?: Record<string, unknown>;
 }
 
-export interface TokenApiResponse extends ApiResponse<{ token: Token }> {}
+export interface TokenApiResponse extends ApiResponse<{ token: PublicToken }> {}
 
 export interface DeployPrepareApiResponse
   extends ApiResponse<{
@@ -34,7 +34,7 @@ export interface DeployPrepareMetadataApiResponse
  * client signs and submits a prepared (non-custodial) deploy tx. Returns the
  * now-deployed token.
  */
-export interface DeployConfirmApiResponse extends ApiResponse<{ token: Token }> {}
+export interface DeployConfirmApiResponse extends ApiResponse<{ token: PublicToken }> {}
 
 export interface PreparedTransactionApiResponse
   extends ApiResponse<{
@@ -51,13 +51,7 @@ export interface MintPrepareApiResponse
     simulation?: { success: boolean; logs: string[]; unitsConsumed?: number };
   }> {}
 
-export interface TransactionRecord {
-  id: string;
-  status: string;
-  signature?: string;
-  type: string;
-  [key: string]: unknown;
-}
+export type TransactionRecord = PublicTokenTransaction;
 
 export interface MintApiResponse
   extends ApiResponse<{

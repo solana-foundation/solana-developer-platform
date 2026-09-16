@@ -7,6 +7,7 @@ import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custod
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedRecurringDatabaseTenant } from "@/test/helpers/recurring-payments";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   assertNoPendingRecurringCollectionApproval,
@@ -22,72 +23,18 @@ const FIRST_DUE_AT = "2026-07-01T12:00:00.000Z";
 const SECOND_DUE_AT = "2026-07-02T12:00:00.000Z";
 
 async function seedPolicyFixtures(): Promise<void> {
-  const db = getDb(env);
-
-  await db
-    .prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-    )
-    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-    .run();
-
-  await db
-    .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-    .bind(TEST_USER.id, TEST_USER.email)
-    .run();
-
-  await db
-    .prepare(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       VALUES (?, ?, ?, ?, ?, 'active', ?)`
-    )
-    .bind(
-      TEST_PROJECT.id,
-      TEST_ORG.id,
-      TEST_PROJECT.name,
-      TEST_PROJECT.slug,
-      TEST_PROJECT.environment,
-      TEST_USER.id
-    )
-    .run();
-
-  // The config's default_wallet_id FK is deferred, so the config and its
-  // default wallet must land in one transaction.
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO custody_configs (
-           id,
-           organization_id,
-           project_id,
-           provider,
-           config_encrypted,
-           default_wallet_id,
-           status
-         ) VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
-      )
-      .bind(TEST_CUSTODY_CONFIG.id, TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET.walletId),
-    db
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id,
-           custody_config_id,
-           wallet_id,
-           public_key,
-           label,
-           purpose,
-           status
-         ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
-      )
-      .bind(
-        TEST_CUSTODY_WALLET.id,
-        TEST_CUSTODY_CONFIG.id,
-        TEST_CUSTODY_WALLET.walletId,
-        TEST_CUSTODY_WALLET.publicKey,
-        TEST_CUSTODY_WALLET.label,
-        TEST_CUSTODY_WALLET.purpose
-      ),
-  ]);
+  await seedRecurringDatabaseTenant({
+    organizationId: TEST_ORG.id,
+    organizationName: TEST_ORG.name,
+    organizationSlug: TEST_ORG.slug,
+    userId: TEST_USER.id,
+    userEmail: TEST_USER.email,
+    projectId: TEST_PROJECT.id,
+    custodyConfigId: TEST_CUSTODY_CONFIG.id,
+    custodyWalletId: TEST_CUSTODY_WALLET.id,
+    providerWalletId: TEST_CUSTODY_WALLET.walletId,
+    publicKey: TEST_CUSTODY_WALLET.publicKey,
+  });
 }
 
 async function seedApprovalRequiredWalletPolicy(): Promise<void> {
@@ -98,13 +45,17 @@ async function seedApprovalRequiredWalletPolicy(): Promise<void> {
     custodyWalletId: TEST_CUSTODY_WALLET.id,
     name: "Collection approval controls",
   });
+  expect(profile).not.toBeNull();
+  if (profile === null) throw new Error("Failed to create wallet control profile");
   const revision = await repo.createWalletControlProfileRevision({
-    profileId: profile?.id ?? "",
+    profileId: profile.id,
     defaultAction: "approval_required",
   });
+  expect(revision).not.toBeNull();
+  if (revision === null) throw new Error("Failed to create wallet control profile revision");
   await repo.activateWalletControlProfileRevision({
-    profileId: profile?.id ?? "",
-    revisionId: revision?.id ?? "",
+    profileId: profile.id,
+    revisionId: revision.id,
   });
 }
 
@@ -114,13 +65,13 @@ function collectionPolicyInput(collectionDueAt: string) {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
     sourceWallet: TEST_CUSTODY_WALLET,
-    operationType: "recurring_payment_collection" as const,
     token: "TokenMint1111111111111111111111111111111111",
     amount: "10",
     destination: "Destination11111111111111111111111111111111",
     apiKeyId: null,
     actor: null,
     rawPayload: {
+      operationType: "recurring_payment_collection" as const,
       recurringPaymentId: "prp_collection_policy",
       subscriptionId: "sub_collection_policy",
       collectionDueAt,
@@ -132,10 +83,9 @@ async function expectSigningPending(promise: Promise<unknown>): Promise<AppError
   try {
     await promise;
   } catch (error) {
-    expect(error).toBeInstanceOf(AppError);
-    const appError = error as AppError;
-    expect(appError.code).toBe("SIGNING_PENDING");
-    return appError;
+    if (!(error instanceof AppError)) throw error;
+    expect(error.code).toBe("SIGNING_PENDING");
+    return error;
   }
   throw new Error("Expected the collection to pause for policy approval");
 }
@@ -157,15 +107,15 @@ async function pendingRows() {
 
 describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
     await seedPolicyFixtures();
     await seedApprovalRequiredWalletPolicy();
   });
@@ -178,9 +128,12 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
       enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
     );
 
-    expect(first.details?.approvalRequestId).toEqual(expect.any(String));
-    expect(retry.details?.approvalRequestId).toBe(first.details?.approvalRequestId);
-    expect(retry.details?.walletOperationId).toBe(first.details?.walletOperationId);
+    expect(first.details).not.toBeNull();
+    expect(retry.details).not.toBeNull();
+    if (first.details == null || retry.details == null) throw new Error("Missing error details");
+    expect(first.details.approvalRequestId).toEqual(expect.any(String));
+    expect(retry.details.approvalRequestId).toBe(first.details.approvalRequestId);
+    expect(retry.details.walletOperationId).toBe(first.details.walletOperationId);
 
     const { approvals, operations } = await pendingRows();
     expect(approvals).toHaveLength(1);
@@ -192,7 +145,9 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
     const pending = await expectSigningPending(
       enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
     );
-    const operationId = pending.details?.walletOperationId as string;
+    expect(pending.details).not.toBeNull();
+    if (pending.details == null) throw new Error("Missing error details");
+    const operationId = pending.details.walletOperationId;
 
     await getDb(env)
       .prepare("UPDATE wallet_operations SET custody_wallet_id = NULL WHERE id = ?")
@@ -214,8 +169,8 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
       message: "Recurring payment source cannot change while a collection approval is pending",
       details: {
         walletOperationId: operationId,
-        policyEvaluationId: pending.details?.policyEvaluationId,
-        approvalRequestId: pending.details?.approvalRequestId,
+        policyEvaluationId: pending.details.policyEvaluationId,
+        approvalRequestId: pending.details.approvalRequestId,
       },
     });
   });
@@ -224,11 +179,10 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
     const first = await expectSigningPending(
       enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
     );
-    const operationId = first.details?.walletOperationId as string;
-    const approvalId = first.details?.approvalRequestId as string;
-
-    // What granting an approval leaves behind: the request is approved and
-    // the operation moves to executing while it waits to run.
+    expect(first.details).not.toBeNull();
+    if (first.details == null) throw new Error("Missing error details");
+    const operationId = first.details.walletOperationId;
+    const approvalId = first.details.approvalRequestId;
     await getDb(env)
       .prepare("UPDATE approval_requests SET status = 'approved' WHERE id = ?")
       .bind(approvalId)
@@ -242,8 +196,10 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
       enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
     );
 
-    expect(retry.details?.approvalRequestId).toBe(approvalId);
-    expect(retry.details?.walletOperationId).toBe(operationId);
+    expect(retry.details).not.toBeNull();
+    if (retry.details == null) throw new Error("Missing error details");
+    expect(retry.details.approvalRequestId).toBe(approvalId);
+    expect(retry.details.walletOperationId).toBe(operationId);
 
     const allApprovals = await getDb(env)
       .prepare("SELECT id FROM approval_requests")
@@ -255,8 +211,10 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
     const first = await expectSigningPending(
       enforceRecurringPaymentPolicy(collectionPolicyInput(FIRST_DUE_AT))
     );
-    const operationId = first.details?.walletOperationId as string;
-    const approvalId = first.details?.approvalRequestId as string;
+    expect(first.details).not.toBeNull();
+    if (first.details == null) throw new Error("Missing error details");
+    const operationId = first.details.walletOperationId;
+    const approvalId = first.details.approvalRequestId;
 
     await getDb(env).batch([
       getDb(env)
@@ -277,7 +235,7 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
       message: "Recurring payment collection approval wallet identity is unresolved",
       details: {
         walletOperationId: operationId,
-        policyEvaluationId: first.details?.policyEvaluationId,
+        policyEvaluationId: first.details.policyEvaluationId,
         approvalRequestId: approvalId,
       },
     });
@@ -302,7 +260,11 @@ describe("enforceRecurringPaymentPolicy (collection approvals)", () => {
       enforceRecurringPaymentPolicy(collectionPolicyInput(SECOND_DUE_AT))
     );
 
-    expect(nextCycle.details?.approvalRequestId).not.toBe(first.details?.approvalRequestId);
+    expect(first.details).not.toBeNull();
+    expect(nextCycle.details).not.toBeNull();
+    if (first.details == null || nextCycle.details == null)
+      throw new Error("Missing error details");
+    expect(nextCycle.details.approvalRequestId).not.toBe(first.details.approvalRequestId);
 
     const { approvals } = await pendingRows();
     expect(approvals).toHaveLength(2);

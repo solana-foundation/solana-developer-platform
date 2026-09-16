@@ -3,63 +3,62 @@
 import { CopyIcon } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
-import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import useSWR from "swr";
+import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
+function QrCodeBox({
+  qrCodeUrl,
+  isLoading,
+  alt,
+}: {
+  qrCodeUrl: string | null;
+  isLoading: boolean;
+  alt: string;
+}) {
+  if (qrCodeUrl !== null) {
+    return (
+      <Image src={qrCodeUrl} alt={alt} width={148} height={148} unoptimized className="size-full" />
+    );
+  }
+  if (isLoading) {
+    return <div className="size-full animate-pulse rounded-xl bg-fill-strong" />;
+  }
+  return null;
+}
+
 export function WalletReceiveCard({ address }: { address: string }) {
   const t = useTranslations();
-  const [qrCodeUrl, setQrCodeUrl] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!address) {
-      setQrCodeUrl("");
-      return;
+  const {
+    data: qrCodeUrl,
+    error,
+    isLoading,
+  } = useSWR(
+    paymentsQueryKeys.walletAddressQr(address),
+    () =>
+      QRCode.toDataURL(address, {
+        margin: 1,
+        width: 240,
+        color: { dark: "#1c1c1d", light: "#ffffff" },
+      }),
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
     }
-
-    void QRCode.toDataURL(address, {
-      margin: 1,
-      width: 240,
-      color: { dark: "#1c1c1d", light: "#ffffff" },
-    })
-      .then((url) => {
-        if (!cancelled) {
-          setQrCodeUrl(url);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setQrCodeUrl("");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [address]);
-
-  if (!address) {
-    return null;
-  }
+  );
 
   return (
     <section className="rounded-2xl border border-border-default bg-fill-subtle p-6">
       <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
         <div className="flex size-[180px] items-center justify-center rounded-2xl bg-[white] p-4 ring-1 ring-border-subtle">
-          {qrCodeUrl ? (
-            <Image
-              src={qrCodeUrl}
-              alt={t("DashboardPayments.ramps.walletAddressQrCode")}
-              width={148}
-              height={148}
-              unoptimized
-              className="size-full"
-            />
-          ) : (
-            <div className="size-full animate-pulse rounded-xl bg-fill-strong" />
-          )}
+          <QrCodeBox
+            qrCodeUrl={error === undefined && qrCodeUrl !== undefined ? qrCodeUrl : null}
+            isLoading={isLoading}
+            alt={t("DashboardPayments.ramps.walletAddressQrCode")}
+          />
         </div>
         <div className="min-w-0 flex-1 space-y-3">
           <p className="text-sm text-tertiary">

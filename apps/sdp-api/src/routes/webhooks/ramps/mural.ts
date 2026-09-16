@@ -17,12 +17,8 @@ import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
-import {
-  emitKycApprovedForClearedEnrollments,
-  emitKycRejectedForEnrollments,
-} from "@/services/workflows/clearance";
-import { emitRampSettled } from "@/services/workflows/payment-events";
-import type { AppContext, WebhookProcessor } from "./processor";
+import type { Env } from "@/types/env";
+import type { WebhookProcessor } from "./processor";
 
 const MURAL_DELIVERY_ID_FIELD = "__sdpDeliveryId";
 
@@ -83,13 +79,13 @@ function readMuralWebhookPublicKey(
 }
 
 async function findMuralOnrampTransfer(
-  c: AppContext,
+  env: Env,
   payments: PaymentsRepository,
   counterparty: CounterpartyRow,
   accountId: string,
   statuses: PaymentTransferStatus[]
 ): Promise<PaymentTransferRow | undefined> {
-  const matches = await getDb(c.env)
+  const matches = await getDb(env)
     .prepare(
       `SELECT id
        FROM payment_transfers
@@ -131,7 +127,7 @@ async function findMuralOnrampTransfer(
 }
 
 async function handleAccountCredited(
-  c: AppContext,
+  env: Env,
   event: {
     organizationId: string;
     accountId: string;
@@ -143,14 +139,14 @@ async function handleAccountCredited(
     `[mural webhook] account_credited account=${event.accountId} amount=${event.tokenAmount} org=${event.organizationId}`
   );
   const counterparty = await createSystemCounterpartiesRepository(
-    c.env
+    env
   ).findCounterpartyByMuralOrganizationId(event.organizationId);
   if (!counterparty) {
     getLogger().warn(`[mural webhook] no counterparty for org ${event.organizationId}`);
     return;
   }
-  const payments = createSystemPaymentsRepository(c.env);
-  const replay = await getDb(c.env)
+  const payments = createSystemPaymentsRepository(env);
+  const replay = await getDb(env)
     .prepare(
       `SELECT id
        FROM payment_transfers
@@ -163,7 +159,7 @@ async function handleAccountCredited(
   if (replay) {
     return;
   }
-  const transfer = await findMuralOnrampTransfer(c, payments, counterparty, event.accountId, [
+  const transfer = await findMuralOnrampTransfer(env, payments, counterparty, event.accountId, [
     "awaiting_payment",
   ]);
   if (!transfer) {
@@ -194,32 +190,44 @@ async function handleAccountCredited(
   getLogger().info(
     `[mural webhook] transfer ${transfer.id} completed (payin ${event.tokenAmount})`
   );
+}
 
-  // Workflow trigger seam: this on-ramp settled (Mural credit path bypasses
-  // applyRampSettlementEvent, so it emits here directly).
-  if (transfer.project_id) {
-    emitRampSettled(c.env, {
-      organizationId: transfer.organization_id,
-      projectId: transfer.project_id,
-      direction: "onramp",
-      transferId: transfer.id,
-      provider: transfer.provider,
-      counterpartyId: transfer.counterparty_id,
-      amount: String(event.tokenAmount),
-      fiatCurrency: transfer.fiat_currency,
-      cryptoToken: transfer.token,
-    });
+const MURAL_TERMINAL_KYC_STATUSES: ReadonlySet<string> = new Set(["approved", "rejected"]);
+
+/** A non-decision status arriving after a recorded decision is a replayed stale event. */
+function isStaleMuralKycStatus(counterparty: CounterpartyRow, incoming: MuralKycStatus): boolean {
+  if (MURAL_TERMINAL_KYC_STATUSES.has(incoming)) {
+    return false;
   }
+  const mural = counterparty.provider_data.mural;
+  const organization =
+    mural && typeof mural === "object" && !Array.isArray(mural)
+      ? (mural as Record<string, unknown>).organization
+      : undefined;
+  const current =
+    organization && typeof organization === "object" && !Array.isArray(organization)
+      ? (organization as Record<string, unknown>).kycStatus
+      : undefined;
+  return typeof current === "string" && MURAL_TERMINAL_KYC_STATUSES.has(current);
 }
 
 async function handleOrganizationLifecycleEvent(
-  c: AppContext,
+  env: Env,
   event: Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }>
 ): Promise<void> {
-  const repo = createSystemCounterpartiesRepository(c.env);
+  const repo = createSystemCounterpartiesRepository(env);
   const counterparty = await repo.findCounterpartyByMuralOrganizationId(event.organizationId);
   if (!counterparty) {
     getLogger().warn(`[mural webhook] no counterparty for organization ${event.organizationId}`);
+    return;
+  }
+  if (event.kind === "kyc_status" && isStaleMuralKycStatus(counterparty, event.kycStatus)) {
+    // A replayed pre-decision event must not undo a delivered compliance
+    // decision: the inbox can re-apply an old `pending` after `approved` or
+    // `rejected` already landed.
+    getLogger().info(
+      `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}`
+    );
     return;
   }
   const organization: Record<string, unknown> =
@@ -229,47 +237,16 @@ async function handleOrganizationLifecycleEvent(
     organization,
   });
 
-  // Workflow trigger seam: mirror the KYC status onto the SDP-owned kyc_wallets, then
-  // emit a kyc_approved event for every asset this counterparty's wallets are cleared
-  // for. No-op when the counterparty has no registered kyc_wallets.
+  // Mirror the KYC status onto the SDP-owned kyc_wallets. No-op when the counterparty
+  // has no registered kyc_wallets.
   if (event.kind === "kyc_status") {
-    const status = mapMuralKycStatusToSdp(event.kycStatus);
-    const wallets = await createKycWalletsRepository(c.env).setKycStatusByCounterparty({
+    await createKycWalletsRepository(env).setKycStatusByCounterparty({
       counterpartyId: counterparty.id,
       organizationId: counterparty.organization_id,
       projectId: counterparty.project_id,
-      status,
+      status: mapMuralKycStatusToSdp(event.kycStatus),
       provider: "mural",
     });
-    // Fire-and-forget off the webhook response path — the per-wallet enrollment,
-    // counterparty and rule lookups shouldn't add latency to the provider's delivery.
-    // Falls back to awaiting inline when no ExecutionContext is available.
-    const emitAll = async () => {
-      if (status === "verified") {
-        for (const wallet of wallets) {
-          await emitKycApprovedForClearedEnrollments(c.env, {
-            kycWallet: wallet,
-            provider: "mural",
-          });
-        }
-      } else if (status === "rejected") {
-        for (const wallet of wallets) {
-          await emitKycRejectedForEnrollments(c.env, { kycWallet: wallet, provider: "mural" });
-        }
-      }
-    };
-    try {
-      c.executionCtx.waitUntil(
-        emitAll().catch((error) => {
-          getLogger().error(
-            { error: error instanceof Error ? error.message : String(error) },
-            "mural webhook: KYC workflow emit failed"
-          );
-        })
-      );
-    } catch {
-      await emitAll();
-    }
   }
 }
 
@@ -329,28 +306,24 @@ export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralPro
     return { ...event, deliveryId };
   }
 
-  async process(
-    c: AppContext,
-    _environment: SdpEnvironment,
-    event: MuralProcessorEvent
-  ): Promise<void> {
+  async process(env: Env, _environment: SdpEnvironment, event: MuralProcessorEvent): Promise<void> {
     switch (event.kind) {
       case "ignore":
         getLogger().info(`[mural webhook] ignored event: ${event.reason}`);
         return;
       case "kyc_status":
       case "tos_accepted":
-        return handleOrganizationLifecycleEvent(c, event);
+        return handleOrganizationLifecycleEvent(env, event);
       case "account_credited":
-        return handleAccountCredited(c, event);
+        return handleAccountCredited(env, event);
       case "payout_settled":
-        return applyRampSettlementEvent(c.env, {
+        return applyRampSettlementEvent(env, {
           provider: "mural",
           kind: "settled",
           reference: event.payoutRequestId,
         });
       case "payout_failed":
-        return applyRampSettlementEvent(c.env, {
+        return applyRampSettlementEvent(env, {
           provider: "mural",
           kind: "failed",
           reference: event.payoutRequestId,

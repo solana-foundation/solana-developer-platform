@@ -5,11 +5,46 @@ import type { Env } from "@/types/env";
 
 export interface ClerkJwtPayload extends JWTPayload {
   sub?: string;
+  v?: number;
+  o?: {
+    id?: string | null;
+    rol?: string | null;
+    slg?: string | null;
+  } | null;
   org_id?: string | null;
   org_role?: string | null;
   org_slug?: string | null;
   email?: string;
   email_addresses?: Array<{ email_address: string }>;
+}
+
+export interface ClerkOrganizationClaims {
+  organizationId: string | null;
+  organizationRole: string | null;
+  organizationSlug: string | null;
+}
+
+/**
+ * Read organization context from both Clerk JWT formats.
+ *
+ * Version 2 session tokens compact the organization fields under `o`, with
+ * role values such as `admin` that need the `org:` prefix restored. Older
+ * tokens and customized templates expose the long-form `org_*` claims.
+ */
+export function resolveClerkOrganizationClaims(payload: ClerkJwtPayload): ClerkOrganizationClaims {
+  if (payload.v === 2 && payload.o) {
+    return {
+      organizationId: payload.o.id ?? null,
+      organizationRole: payload.o.rol ? `org:${payload.o.rol}` : null,
+      organizationSlug: payload.o.slg ?? null,
+    };
+  }
+
+  return {
+    organizationId: payload.org_id ?? null,
+    organizationRole: payload.org_role ?? null,
+    organizationSlug: payload.org_slug ?? null,
+  };
 }
 
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();

@@ -16,6 +16,7 @@ const strategy: EarnStrategy = {
   withdrawalSlippage: null,
   hostCluster: "devnet",
   fundable: true,
+  feeSponsored: false,
   createdAt: "2026-08-18T00:00:00.000Z",
   updatedAt: "2026-08-18T00:00:00.000Z",
 };
@@ -78,5 +79,30 @@ describe("earnVaultDepositAvailability", () => {
     expect(earnVaultDepositAvailability({ ...jupiter, fundable: false }, "sandbox", access)).toBe(
       "cluster_unavailable"
     );
+  });
+
+  it("offers Ondo USDY on production while its mirrored sandbox row stays browse-only", () => {
+    const ondo = {
+      ...strategy,
+      provider: "ondo",
+      sourceKind: "rwa" as const,
+      hostCluster: "mainnet-beta" as const,
+      depositSlippage: { quoteRequired: true as const, defaultToleranceBps: 50 },
+      withdrawalSlippage: { quoteRequired: true as const, defaultToleranceBps: 50 },
+    };
+    const access = {
+      ondo: { entitled: true, configured: true, enabled: true },
+    };
+
+    expect(earnVaultDepositAvailability(ondo, "production", access)).toBe("available");
+    expect(earnVaultDepositAvailability({ ...ondo, fundable: false }, "sandbox", access)).toBe(
+      "cluster_unavailable"
+    );
+    // Entitlement is still the org's: the flip offers the row, it grants nothing.
+    expect(
+      earnVaultDepositAvailability(ondo, "production", {
+        ondo: { entitled: false, configured: true, enabled: false },
+      })
+    ).toBe("provider_unavailable");
   });
 });

@@ -1,13 +1,9 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types";
 import type { AppDb } from "@/db";
-import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { buildInClause, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import type { ListTokensOptions, TokenRepository } from "./token.repository";
-
-function buildInClause(length: number): string {
-  return Array.from({ length }, () => "?").join(", ");
-}
 
 function parseExtensionValue(value: string | null): unknown {
   if (!value) {
@@ -27,6 +23,7 @@ function mapTokenRow(
     id: row.id as string,
     projectId: row.project_id as string,
     organizationId: row.organization_id as string,
+    signingCustodyWalletId: (row.signing_custody_wallet_id as string | null | undefined) ?? null,
     signingWalletId: (row.signing_wallet_id as string | null | undefined) ?? null,
     mintAddress: (row.mint_address as string | null | undefined) ?? null,
     mintAuthority: (row.mint_authority as string | null | undefined) ?? null,

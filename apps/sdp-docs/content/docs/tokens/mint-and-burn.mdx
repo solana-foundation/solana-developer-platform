@@ -14,6 +14,7 @@ After [deploying a token](/docs/tokens/deploy-a-token), you can mint new tokens 
 
 - A deployed token with status `active`
 - `tokens:write` permission — or `tokens:admin` for force-burn
+- For standard burn, the exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
 
 ## How it works
 
@@ -45,6 +46,8 @@ POST /v1/issuance/tokens/{tokenId}/force-burn
 ```
 
 The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
+
+`signingCustodyWalletId` always means the exact SDP Wallet `id`, not a provider-specific `walletId` or public key. It is required for a standard burn because that wallet owns and signs for the source. For mint and force-burn it is optional, but when supplied it must control the current mint or permanent-delegate authority. When omitted, SDP requires exactly one accessible wallet to match that live authority. Later actions never fall back to the token's deployment wallet.
 
 </Tab>
 </Tabs>
@@ -89,6 +92,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
   -d '{
+    "signingCustodyWalletId": "cwlt_abc123",
     "mint": {
       "destination": "7xKXz...9fGh",
       "amount": "1000",
@@ -108,6 +112,7 @@ const res = await fetch(
       "Idempotency-Key": "mint-001",
     },
     body: JSON.stringify({
+      signingCustodyWalletId: "cwlt_abc123",
       mint: {
         destination: "7xKXz...9fGh",
         amount: "1000",
@@ -170,6 +175,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
     "Idempotency-Key": "burn-001",
   },
   body: JSON.stringify({
+    signingCustodyWalletId: "cwlt_abc123",
     burn: { source: "3xYZa...2aBc", amount: "250", memo: "Redemption" },
   }),
 });
@@ -186,6 +192,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
     "Idempotency-Key": "force-burn-001",
   },
   body: JSON.stringify({
+    signingCustodyWalletId: "cwlt_abc123",
     forceBurn: { source: "3xYZa...2aBc", amount: "250", memo: "Compliance action" },
   }),
 });

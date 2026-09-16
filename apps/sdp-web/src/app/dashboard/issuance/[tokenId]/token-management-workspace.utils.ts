@@ -2,17 +2,14 @@ import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/t
 import type { AppLocale } from "@/i18n/config";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { formatDisplayLabel } from "@/lib/utils";
 import { type AccessControlMode, getTokenAccessControlMode } from "../access-control.utils";
 import type {
   ActionExecutionInput,
   ActionExecutionResult,
-  AdminAction,
   AllowlistFormState,
   AuthorityFormState,
   BurnFormState,
   BurnValidationErrors,
-  ExtensionRow,
   ForceBurnFormState,
   ForceBurnValidationErrors,
   FreezeFormState,
@@ -23,7 +20,6 @@ import type {
   PermissionRow,
   SeizeFormState,
   SeizeValidationErrors,
-  TokenManagementTab,
 } from "./token-management-workspace.types";
 
 export const SOLANA_ADDRESS_PATTERN = "[1-9A-HJ-NP-Za-km-z]{32,44}";
@@ -98,9 +94,9 @@ function getDestinationAccessControlError({
   const accessControlMode = getTokenAccessControlMode(token);
   const isListed = allowlistEntries.some((entry) => entry.address === normalizedDestination);
 
-  if (accessControlMode === "allowlist" && !isListed) {
-    return t("DashboardIssuance.management.destinationNotAllowlisted");
-  }
+  // Lists are loaded separately and paginated. Absence from this snapshot is
+  // not evidence that a wallet is unapproved. The API checks current on-chain
+  // membership (and, for minting, approves new recipients but rejects revocations).
 
   if (accessControlMode === "blocklist" && isListed) {
     return t("DashboardIssuance.management.destinationDenylisted");
@@ -169,6 +165,7 @@ export function createInitialFreezeForm(): FreezeFormState {
   return {
     accountAddress: "",
     reason: "",
+    signingWalletId: "",
   };
 }
 
@@ -179,12 +176,18 @@ export function createInitialAllowlistForm(): AllowlistFormState {
   };
 }
 
+function parseActivityDate(value: string): Date {
+  // Legacy audit rows are SQL UTC timestamps without an explicit timezone.
+  const isSqlUtc = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value);
+  return new Date(isSqlUtc ? `${value.replace(" ", "T")}Z` : value);
+}
+
 export function formatDate(value: string | null | undefined, locale: AppLocale): string {
   if (!value) {
     return "—";
   }
 
-  const date = new Date(value);
+  const date = parseActivityDate(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
@@ -202,7 +205,7 @@ export function formatDateTime(value: string | null | undefined, locale: AppLoca
     return "—";
   }
 
-  const date = new Date(value);
+  const date = parseActivityDate(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
@@ -228,7 +231,7 @@ export function formatActivityTimestamp(
     return "—";
   }
 
-  const date = new Date(value);
+  const date = parseActivityDate(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
@@ -244,14 +247,6 @@ export function formatActivityTimestamp(
   }
 
   return formatDate(value, locale);
-}
-
-export function stringifyBody(body: unknown): string {
-  try {
-    return JSON.stringify(body, null, 2);
-  } catch {
-    return String(body);
-  }
 }
 
 export function asOptionalString(value: string): string | undefined {
@@ -707,7 +702,9 @@ function getPendingAuthoritySignerWallet(
     return null;
   }
 
-  return findWalletByWalletId(availableWallets, token.signingWalletId) ?? availableWallets[0];
+  return token.signingCustodyWalletId
+    ? findWalletByCustodyWalletId(availableWallets, token.signingCustodyWalletId)
+    : availableWallets[0];
 }
 
 function pendingTokenRequiresPermanentDelegate(token: Token): boolean {
@@ -766,7 +763,9 @@ export type SignerAwareAction =
   | "force-burn"
   | "authority"
   | "freeze"
-  | "pause";
+  | "pause"
+  | "metadata"
+  | "allowlist";
 
 export interface SignerSelectionState {
   wallets: PaymentsDashboardWallet[];
@@ -780,20 +779,38 @@ export function getAvailableSignerWallets(
   return authorityWallets.filter((wallet) => wallet.publicKey.trim());
 }
 
-export function getSignerWalletOptionLabel(wallet: PaymentsDashboardWallet, t: Translate): string {
+export function getSignerWalletOptionLabel(
+  wallet: PaymentsDashboardWallet,
+  t: Translate,
+  includeCustodyWalletId = false
+): string {
   const primaryLabel = wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled");
-  return `${primaryLabel} · ${formatValue(wallet.walletId, t)} · ${formatValue(wallet.publicKey, t)}`;
+  const label = `${primaryLabel} · ${formatValue(wallet.publicKey, t)}`;
+  return includeCustodyWalletId ? `${label} · ${wallet.id}` : label;
 }
 
-export function findWalletByWalletId(
+export function findWalletByCustodyWalletId(
   authorityWallets: PaymentsDashboardWallet[],
-  walletId: string | null | undefined
+  custodyWalletId: string | null | undefined
 ): PaymentsDashboardWallet | null {
-  if (!walletId) {
+  if (!custodyWalletId) {
     return null;
   }
 
-  return authorityWallets.find((wallet) => wallet.walletId === walletId) ?? null;
+  return authorityWallets.find((wallet) => wallet.id === custodyWalletId) ?? null;
+}
+
+export function getSignerWalletUnavailableReason(
+  wallets: PaymentsDashboardWallet[],
+  custodyWalletId: string | null | undefined,
+  t: Translate
+): string | null {
+  if (!custodyWalletId) return null;
+  const wallet = findWalletByCustodyWalletId(wallets, custodyWalletId);
+  if (!wallet) return t("DashboardIssuance.management.requiredSignerNotControlled");
+  return wallet.isRuntimeExecutionAllowed === true
+    ? null
+    : t("DashboardIssuance.management.signingUnavailable");
 }
 
 export function findWalletByPublicKey(
@@ -829,6 +846,8 @@ export function getSignerSelectionForAction({
   token,
   authorityWallets,
   metadataAuthority,
+  metadataAuthorityError,
+  allowlistAuthority,
   permissionRow,
   t,
 }: {
@@ -836,9 +855,14 @@ export function getSignerSelectionForAction({
   token: Token;
   authorityWallets: PaymentsDashboardWallet[];
   metadataAuthority: string | null;
+  metadataAuthorityError?: string | null;
+  allowlistAuthority?: string | null;
   permissionRow?: PermissionRow | null;
   t: Translate;
 }): SignerSelectionState {
+  if (action === "metadata" && metadataAuthorityError) {
+    return { wallets: [], defaultWalletId: "", unavailableReason: metadataAuthorityError };
+  }
   const availableWallets = getAvailableSignerWallets(authorityWallets);
 
   if (availableWallets.length === 0) {
@@ -849,14 +873,42 @@ export function getSignerSelectionForAction({
     };
   }
 
-  if (action === "deploy" || action === "burn") {
-    const preferredWallet =
-      findWalletByWalletId(availableWallets, token.signingWalletId) ?? availableWallets[0];
+  if (action === "deploy") {
+    const preferredWallet = findWalletByCustodyWalletId(
+      availableWallets,
+      token.signingCustodyWalletId
+    );
+    if (token.signingCustodyWalletId && !preferredWallet) {
+      return {
+        wallets: availableWallets,
+        defaultWalletId: "",
+        unavailableReason: t("DashboardIssuance.management.requiredSignerNotControlled"),
+      };
+    }
 
     return {
       wallets: availableWallets,
-      defaultWalletId: preferredWallet.walletId,
-      unavailableReason: null,
+      defaultWalletId: (preferredWallet ?? availableWallets[0]).id,
+      unavailableReason: availableWallets.some(
+        (wallet) => wallet.isRuntimeExecutionAllowed === true
+      )
+        ? null
+        : t("DashboardIssuance.management.signingUnavailable"),
+    };
+  }
+
+  if (action === "burn") {
+    const hasDuplicateAddress =
+      new Set(availableWallets.map((wallet) => wallet.publicKey)).size < availableWallets.length;
+
+    return {
+      wallets: availableWallets,
+      defaultWalletId: hasDuplicateAddress ? "" : availableWallets[0].id,
+      unavailableReason: availableWallets.some(
+        (wallet) => wallet.isRuntimeExecutionAllowed === true
+      )
+        ? null
+        : t("DashboardIssuance.management.signingUnavailable"),
     };
   }
 
@@ -898,6 +950,12 @@ export function getSignerSelectionForAction({
       missingReason = t("DashboardIssuance.management.noPauseAuthorityConfigured");
       uncontrolledReason = t("DashboardIssuance.management.pauseAuthorityNotControlled");
       break;
+    case "metadata":
+      requiredAuthority = metadataAuthority;
+      break;
+    case "allowlist":
+      requiredAuthority = allowlistAuthority ?? null;
+      break;
     default:
       break;
   }
@@ -910,8 +968,10 @@ export function getSignerSelectionForAction({
     };
   }
 
-  const matchedWallet = findWalletByPublicKey(availableWallets, requiredAuthority);
-  if (!matchedWallet) {
+  const matchedWallets = availableWallets.filter(
+    (wallet) => wallet.publicKey === requiredAuthority
+  );
+  if (matchedWallets.length === 0) {
     return {
       wallets: [],
       defaultWalletId: "",
@@ -920,9 +980,11 @@ export function getSignerSelectionForAction({
   }
 
   return {
-    wallets: [matchedWallet],
-    defaultWalletId: matchedWallet.walletId,
-    unavailableReason: null,
+    wallets: matchedWallets,
+    defaultWalletId: matchedWallets.length === 1 ? matchedWallets[0].id : "",
+    unavailableReason: matchedWallets.some((wallet) => wallet.isRuntimeExecutionAllowed === true)
+      ? null
+      : t("DashboardIssuance.management.signingUnavailable"),
   };
 }
 
@@ -951,7 +1013,7 @@ export function getMintValidationErrors({
   if (normalizedAmount) {
     const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
     if (amountBaseUnits === null) {
-      amountError = t("DashboardIssuance.management.validMintAmount");
+      amountError = t("DashboardIssuance.management.amountPrecision", { decimals: token.decimals });
     } else if (amountBaseUnits <= ZERO_BIGINT) {
       amountError = t("DashboardIssuance.management.mintAmountPositive");
     } else if (token.maxSupply) {
@@ -1024,7 +1086,7 @@ export function getBurnValidationErrors({
   if (normalizedAmount) {
     const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
     if (amountBaseUnits === null) {
-      amountError = t("DashboardIssuance.management.validBurnAmount");
+      amountError = t("DashboardIssuance.management.amountPrecision", { decimals: token.decimals });
     } else if (amountBaseUnits <= ZERO_BIGINT) {
       amountError = t("DashboardIssuance.management.burnAmountPositive");
     } else if (!normalizedSource || !signerWallet) {
@@ -1141,7 +1203,7 @@ export function getSeizeValidationErrors({
 
   const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
   if (amountBaseUnits === null) {
-    amountError = t("DashboardIssuance.management.validTransferAmount");
+    amountError = t("DashboardIssuance.management.amountPrecision", { decimals: token.decimals });
   } else if (amountBaseUnits <= ZERO_BIGINT) {
     amountError = t("DashboardIssuance.management.transferAmountPositive");
   }
@@ -1211,7 +1273,7 @@ export function getForceBurnValidationErrors({
 
   const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
   if (amountBaseUnits === null) {
-    amountError = t("DashboardIssuance.management.validBurnAmount");
+    amountError = t("DashboardIssuance.management.amountPrecision", { decimals: token.decimals });
   } else if (amountBaseUnits <= ZERO_BIGINT) {
     amountError = t("DashboardIssuance.management.forceBurnAmountPositive");
   }
@@ -1262,130 +1324,4 @@ export function getForceBurnValidationReason(args: {
 }): string | null {
   const errors = getForceBurnValidationErrors(args);
   return getFirstValidationError(errors.source, errors.amount);
-}
-
-export function getExtensionRows(token: Token, t: Translate): ExtensionRow[] {
-  const configuredExtensionRows: ExtensionRow[] = [];
-  const controlListCopy = getControlListCopy(getTokenAccessControlMode(token), t);
-
-  if (token.extensions?.defaultAccountState) {
-    configuredExtensionRows.push({
-      id: "default-account-state",
-      title: t("DashboardIssuance.management.defaultAccountState"),
-      helper: t("DashboardIssuance.management.defaultAccountStateHelper"),
-      value: formatDisplayLabel(token.extensions.defaultAccountState),
-    });
-  }
-
-  if (token.extensions?.transferFee) {
-    configuredExtensionRows.push({
-      id: "transfer-fee",
-      title: t("DashboardIssuance.management.transferFee"),
-      helper: t("DashboardIssuance.management.transferFeeHelper"),
-      value: t("DashboardIssuance.management.configured"),
-    });
-  }
-
-  if (token.extensions?.scaledUiAmount) {
-    configuredExtensionRows.push({
-      id: "scaled-ui",
-      title: t("DashboardIssuance.management.scaledUiAmount"),
-      helper: t("DashboardIssuance.management.scaledUiAmountHelper"),
-      value: t("DashboardIssuance.management.configured"),
-    });
-  }
-
-  if (token.extensions?.transferHook) {
-    configuredExtensionRows.push({
-      id: "transfer-hook",
-      title: t("DashboardIssuance.management.transferHook"),
-      helper: t("DashboardIssuance.management.transferHookHelper"),
-      value: t("DashboardIssuance.management.configured"),
-    });
-  }
-
-  if (token.extensions?.interestBearing) {
-    configuredExtensionRows.push({
-      id: "interest-bearing",
-      title: t("DashboardIssuance.management.interestBearing"),
-      helper: t("DashboardIssuance.management.interestBearingHelper"),
-      value: t("DashboardIssuance.management.configured"),
-    });
-  }
-
-  if (token.extensions?.nonTransferable) {
-    configuredExtensionRows.push({
-      id: "non-transferable",
-      title: t("DashboardIssuance.management.nonTransferable"),
-      helper: t("DashboardIssuance.management.nonTransferableHelper"),
-      value: t("DashboardIssuance.management.enabled"),
-    });
-  }
-
-  return [
-    {
-      id: "template",
-      title: t("DashboardIssuance.management.template"),
-      helper: t("DashboardIssuance.management.templateHelper"),
-      value: formatDisplayLabel(token.template),
-    },
-    ...(controlListCopy
-      ? [
-          {
-            id: "control-list",
-            title: controlListCopy.label,
-            helper: controlListCopy.extensionHelper,
-            value: t("DashboardIssuance.management.enabled"),
-          } satisfies ExtensionRow,
-        ]
-      : []),
-    {
-      id: "mintable",
-      title: t("DashboardIssuance.management.mintable"),
-      helper: t("DashboardIssuance.management.mintableHelper"),
-      value: token.isMintable
-        ? t("DashboardIssuance.management.enabled")
-        : t("DashboardIssuance.management.disabled"),
-    },
-    {
-      id: "freezable",
-      title: t("DashboardIssuance.management.freezable"),
-      helper: t("DashboardIssuance.management.freezableHelper"),
-      value: token.isFreezable
-        ? t("DashboardIssuance.management.enabled")
-        : t("DashboardIssuance.management.disabled"),
-    },
-    ...configuredExtensionRows,
-  ];
-}
-
-export function getTabForAction(action: AdminAction): TokenManagementTab {
-  switch (action) {
-    case "authority":
-      return "permissions";
-    case "allowlist":
-    case "freeze":
-    case "pause":
-    case "seize":
-    case "force-burn":
-      return "compliance";
-    case "update-metadata":
-      return "metadata";
-    case "mint":
-    case "burn":
-      return "fund-management";
-  }
-}
-
-export function getDefaultActionForTab(tab: TokenManagementTab): AdminAction | null {
-  switch (tab) {
-    case "compliance":
-      return "allowlist";
-    case "metadata":
-      return "update-metadata";
-    case "fund-management":
-      return "mint";
-    default:
-      return null;
-  }
 }

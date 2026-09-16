@@ -153,6 +153,7 @@ export function useBatchSendWizard({
     () => liveWallets.find((wallet) => wallet.id === walletId) ?? null,
     [liveWallets, walletId]
   );
+  const signingUnavailable = !!walletId && selectedWallet?.isRuntimeExecutionAllowed !== true;
   const assetOptions = useMemo(
     () =>
       walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t).map((option) => {
@@ -315,7 +316,9 @@ export function useBatchSendWizard({
   const currentStepId = steps[stepIndex].id;
   const isLastStep = stepIndex === steps.length - 1;
   const canProceed =
-    currentStepId === "RECIPIENTS" ? recipientsValid && !exceedsBalance && hasMint : true;
+    batchResult !== null ||
+    (selectedWallet?.isRuntimeExecutionAllowed === true &&
+      (currentStepId === "RECIPIENTS" ? recipientsValid && !exceedsBalance && hasMint : true));
 
   const { data: estimate, error: estimateError } = useSWR(
     currentStepId === "REVIEW" && canProceed && !batchResult
@@ -435,6 +438,8 @@ export function useBatchSendWizard({
     liveWallets,
     walletsLoading,
     liveWalletsError,
+    sourceWalletHint:
+      signingUnavailable && !batchResult ? t("DashboardPayments.signingUnavailable") : null,
     walletId,
     selectWallet,
     asset,

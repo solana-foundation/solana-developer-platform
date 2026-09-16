@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentsDashboardWallet, TokenAllowlistEntry } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import type { Dispatch, SetStateAction } from "react";
 import { TokenActionAdminForms } from "./token-action-admin-forms";
 import { TokenActionPrimaryForms } from "./token-action-primary-forms";
@@ -41,9 +41,6 @@ interface TokenActionFormsProps {
   allowlistForm: AllowlistFormState;
   setAllowlistForm: Dispatch<SetStateAction<AllowlistFormState>>;
   tokenId: string;
-  enableControlListSearch?: boolean;
-  allowlistEntries: TokenAllowlistEntry[];
-  allowlistError: string | null;
   controlListLabel: string | null;
   controlListDescription: string | null;
   controlListAddActionLabel: string;
@@ -120,9 +117,6 @@ export function TokenActionForms(props: TokenActionFormsProps) {
         allowlistForm={props.allowlistForm}
         setAllowlistForm={props.setAllowlistForm}
         tokenId={props.tokenId}
-        enableControlListSearch={props.enableControlListSearch}
-        allowlistEntries={props.allowlistEntries}
-        allowlistError={props.allowlistError}
         controlListLabel={props.controlListLabel}
         controlListDescription={props.controlListDescription}
         controlListAddActionLabel={props.controlListAddActionLabel}

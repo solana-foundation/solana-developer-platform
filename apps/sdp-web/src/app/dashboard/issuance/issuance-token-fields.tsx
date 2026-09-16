@@ -29,8 +29,8 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { profileToDraftState } from "./[tokenId]/asset-profile/asset-profile-mapping";
 import {
   classifyAuthorityControl,
+  findWalletByCustodyWalletId,
   findWalletByPublicKey,
-  findWalletByWalletId,
   formatDate as formatDateLong,
   getDisplayedAuthorityAddress,
 } from "./[tokenId]/token-management-workspace.utils";
@@ -40,7 +40,7 @@ import { type DetailFieldKey, detailFieldOptionLabel } from "./create/asset-deta
 import { getCategoryPresentation, getSubTypePresentation } from "./create/asset-taxonomy";
 import type { DraftState } from "./create/issuance-draft-wizard.types";
 import { getTemplateCatalogEntry, type IssuanceTemplateId } from "./template-catalog";
-import type { WalletIdentity } from "./wallet-identity";
+import { toWalletIdentity, type WalletIdentity } from "./wallet-identity";
 
 // Shared model + derivations for the issuance asset list/grid. The list view
 // (`IssuanceTokenView`) is a lightweight projection of the full `Token`; adapters
@@ -75,7 +75,7 @@ export interface IssuanceTokenView {
   requiresAllowlist: boolean;
   description: string | null;
   uri: string | null;
-  signingWalletId: string | null;
+  signingCustodyWalletId: string | null;
   mintAuthority: string | null;
   metadataAuthority: string | null;
   freezeAuthority: string | null;
@@ -273,7 +273,8 @@ function viewAsToken(view: IssuanceTokenView): Token {
     id: view.id,
     projectId: "",
     organizationId: "",
-    signingWalletId: view.signingWalletId,
+    signingCustodyWalletId: view.signingCustodyWalletId,
+    signingWalletId: null,
     mintAddress: view.mintAddress,
     mintAuthority: view.mintAuthority,
     metadataAuthority: view.metadataAuthority,
@@ -366,13 +367,10 @@ export function buildWalletIdentityForAuthority(
   if (control === "sdp") {
     const wallet = findWalletByPublicKey(authorityWallets, address);
     if (wallet) {
-      return {
-        state: "managed",
-        name: wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled"),
-        provider: wallet.provider ?? null,
-        publicKey: wallet.publicKey,
-        walletId: wallet.walletId,
-      };
+      return toWalletIdentity(wallet, null, {
+        unresolvedAs: "external",
+        unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+      });
     }
   }
   return { state: control === "external" ? "external" : "unknown", publicKey: address };
@@ -489,27 +487,26 @@ function buildCategoryTiles(
 }
 
 export function buildWalletIdentityForSigner(
-  signingWalletId: string | null | undefined,
+  signingCustodyWalletId: string | null | undefined,
   authorityWallets: PaymentsDashboardWallet[],
   t: Translate
 ): WalletIdentity | null {
-  if (!signingWalletId) {
+  if (!signingCustodyWalletId) {
     return { state: "default" };
   }
   if (authorityWallets.length === 0) {
     return null;
   }
-  const wallet = findWalletByWalletId(authorityWallets, signingWalletId);
+  const wallet = findWalletByCustodyWalletId(authorityWallets, signingCustodyWalletId);
   if (!wallet) {
-    return { state: "unresolved", walletId: signingWalletId };
+    return { state: "unresolved", walletId: signingCustodyWalletId };
   }
-  return {
-    state: "managed",
-    name: wallet.label?.trim() || t("DashboardIssuance.wallet.unlabeled"),
-    provider: wallet.provider ?? null,
-    publicKey: wallet.publicKey,
-    walletId: wallet.walletId,
-  };
+  // A signer is never `external` (see wallet-identity.tsx); the framing is moot
+  // here because the wallet resolved, but it is spelled the way signer sites do.
+  return toWalletIdentity(wallet, null, {
+    unresolvedAs: "custom",
+    unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+  });
 }
 
 export interface ListCardHeroData {
@@ -597,7 +594,7 @@ export function buildOverviewHeroData(
     authorityRows: buildAuthorityGlyphRows(token, authorityWallets, controlKnown, t),
     accessMode: resolveAccessMode(token, draft),
     verifiedHolders: resolveVerifiedHolders(draft),
-    signerWallet: buildWalletIdentityForSigner(view.signingWalletId, authorityWallets, t),
+    signerWallet: buildWalletIdentityForSigner(view.signingCustodyWalletId, authorityWallets, t),
     issuer: draft?.issuerName.trim() || null,
     categoryTiles: draft ? buildCategoryTiles(view, draft, t) : [],
   };
