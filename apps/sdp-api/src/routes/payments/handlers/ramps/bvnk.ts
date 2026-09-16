@@ -87,6 +87,7 @@ import {
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
+import type { Env } from "@/types/env";
 import {
   type AppContext,
   getPaymentsRepository,
@@ -216,14 +217,12 @@ function bvnkWalletBankAccount(wallet: BvnkLedgerWalletV2): BvnkBankFundingDetai
 }
 
 async function persistBvnkOnrampState(
-  c: AppContext,
+  repo: CounterpartiesRepository,
   counterparty: CounterpartyRow,
   projectId: string,
   key: string,
-  entry: BvnkOnrampPaymentRuleState,
-  repository?: CounterpartiesRepository
+  entry: BvnkOnrampPaymentRuleState
 ): Promise<void> {
-  const repo = repository ?? getCounterpartiesRepository(c);
   // TODO(PRO-1823): Move BVNK on-ramp state to counterparty_provider_accounts.
   await repo.mutateProviderData({
     counterpartyId: counterparty.id,
@@ -686,11 +685,11 @@ async function createBvnkCustomer(
  * @returns The row-backed customer resolution, or null when no BVNK customer exists.
  */
 export async function readBvnkCustomerLink(
-  c: AppContext,
+  env: Env,
   counterparty: CounterpartyRow
 ): Promise<BvnkCustomerResolution | null> {
   const link = await createPostgresCounterpartyProviderAccountsRepository(
-    getDb(c.env)
+    getDb(env)
   ).getProviderAccount({
     organizationId: counterparty.organization_id,
     projectId: counterparty.project_id,
@@ -915,13 +914,12 @@ export async function ensureBvnkCustomer(
  * counterparty.provider_data.bvnk.wallets[key] after each completed step.
  */
 export async function ensureBvnkPaymentRule(
-  c: AppContext,
   ctx: RampRuntimeContext,
+  repository: CounterpartiesRepository,
   counterparty: CounterpartyRow,
   projectId: string,
   customer: BvnkCustomerResolution,
-  params: BvnkOnrampRequestSpec,
-  repository?: CounterpartiesRepository
+  params: BvnkOnrampRequestSpec
 ): Promise<BvnkPaymentRuleResolution> {
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const paymentRuleKey = buildBvnkOnrampPaymentRuleKey(
@@ -942,7 +940,7 @@ export async function ensureBvnkPaymentRule(
 
   if (!entry.request) {
     entry = { ...entry, request: params };
-    await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
+    await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
   }
 
   if (!isBvnkCustomerVerified(customer.status) || !customer.customerReference) {
@@ -985,7 +983,7 @@ export async function ensureBvnkPaymentRule(
       walletStatus: wallet.status,
       bankAccount: bvnkWalletBankAccount(wallet),
     };
-    await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
+    await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
   }
 
   if (entry.walletId && !isBvnkWalletActive(entry.walletStatus)) {
@@ -996,7 +994,7 @@ export async function ensureBvnkPaymentRule(
         walletStatus: wallet.status,
         bankAccount: bvnkWalletBankAccount(wallet) ?? entry.bankAccount,
       };
-      await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
+      await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
     } catch (error) {
       getLogger().warn(
         {
@@ -1022,7 +1020,7 @@ export async function ensureBvnkPaymentRule(
       },
     });
     entry = { ...entry, ruleId: rule.id ?? entry.ruleId, ruleStatus: rule.status };
-    await persistBvnkOnrampState(c, counterparty, projectId, paymentRuleKey, entry, repository);
+    await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
   }
 
   return {

@@ -160,6 +160,15 @@ export function isRampTransferType(type: PaymentTransferType): type is RampTrans
   return RAMP_TRANSFER_TYPES.some((rampType) => rampType === type);
 }
 
+/**
+ * Lifecycle of a persisted ramp webhook event: `pending` until the background
+ * apply or the replay job settles it (applied rows are deleted, not kept), and
+ * `failed` once replay attempts are exhausted and an operator has to look.
+ */
+export const RAMP_WEBHOOK_EVENT_STATUSES = ["pending", "failed"] as const;
+
+export type RampWebhookEventStatus = (typeof RAMP_WEBHOOK_EVENT_STATUSES)[number];
+
 export const PAYMENT_TRANSFER_STATUSES = [
   "pending",
   "processing",

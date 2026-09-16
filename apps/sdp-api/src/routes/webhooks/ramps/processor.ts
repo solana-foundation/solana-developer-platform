@@ -10,5 +10,5 @@ export interface WebhookProcessor<Payload = unknown, Event = unknown> {
   readonly provider: RampProviderId;
   verify(context: RampWebhookValidationContext): Promise<Payload>;
   parse(payload: Payload): Event;
-  process(c: AppContext, environment: SdpEnvironment, event: Event): Promise<void>;
+  process(env: Env, environment: SdpEnvironment, event: Event): Promise<void>;
 }
