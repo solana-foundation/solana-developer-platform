@@ -865,11 +865,20 @@ export class MosaicService {
    * confirming each before the next — later transactions in a multi-tx plan
    * reference on-chain state (context-state accounts) the earlier ones create.
    */
-  private async signAndSubmitPlan(plan: TransactionPlan): Promise<MosaicTransactionPlanResult> {
+  private async signAndSubmitPlan(
+    plan: TransactionPlan,
+    selfPaid = false
+  ): Promise<MosaicTransactionPlanResult> {
     const transactions: MosaicTransactionResult[] = [];
     for (const single of flattenTransactionPlan(plan)) {
       try {
-        transactions.push(await this.signAndSubmit(single.message as unknown as FullTransaction));
+        transactions.push(
+          await this.signAndSubmit(
+            single.message as unknown as FullTransaction,
+            undefined,
+            selfPaid
+          )
+        );
       } catch (error) {
         // Earlier transactions in the plan already landed. Surface them so the
         // caller can journal the orphaned context-state accounts rather than
@@ -904,7 +913,7 @@ export class MosaicService {
   async configureConfidentialAccount(
     options: ConfigureConfidentialAccountOptions
   ): Promise<MosaicTransactionPlanResult> {
-    const feePayer = await this.resolveFeePayerSigner();
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
     const instructionPlan = await createConfigureConfidentialAccountInstructionPlan({
       rpc: this.rpc,
       payer: feePayer,
@@ -915,7 +924,7 @@ export class MosaicService {
       maximumPendingBalanceCreditCounter: options.maximumPendingBalanceCreditCounter,
     });
     const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
-    return this.signAndSubmitPlan(plan);
+    return this.signAndSubmitPlan(plan, feePayer === this.signer);
   }
 
   /**
@@ -939,14 +948,14 @@ export class MosaicService {
   async approveConfidentialAccount(
     options: ApproveConfidentialAccountOptions
   ): Promise<MosaicTransactionResult> {
-    const feePayer = await this.resolveFeePayerSigner();
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
     const instructionPlan = await createApproveConfidentialAccountInstructionPlan({
       tokenAccount: options.tokenAccount,
       mint: options.mint,
       authority: this.signer,
     });
     const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
-    const result = await this.signAndSubmitPlan(plan);
+    const result = await this.signAndSubmitPlan(plan, feePayer === this.signer);
     return result.transactions[0];
   }
 
@@ -971,7 +980,7 @@ export class MosaicService {
   }
 
   async depositConfidential(options: DepositConfidentialOptions): Promise<MosaicTransactionResult> {
-    const feePayer = await this.resolveFeePayerSigner();
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
     const instructionPlan = await createConfidentialDepositInstructionPlan({
       rpc: this.rpc,
       mint: options.mint,
@@ -980,7 +989,7 @@ export class MosaicService {
       amount: options.amount,
     });
     const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
-    const result = await this.signAndSubmitPlan(plan);
+    const result = await this.signAndSubmitPlan(plan, feePayer === this.signer);
     return result.transactions[0];
   }
 
@@ -1002,7 +1011,7 @@ export class MosaicService {
   async applyPendingConfidentialBalance(
     options: ApplyPendingConfidentialBalanceOptions
   ): Promise<MosaicTransactionResult> {
-    const feePayer = await this.resolveFeePayerSigner();
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
     const instructionPlan = await createApplyConfidentialPendingBalanceInstructionPlan({
       rpc: this.rpc,
       tokenAccount: options.tokenAccount,
@@ -1010,7 +1019,7 @@ export class MosaicService {
       keys: options.keys,
     });
     const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
-    const result = await this.signAndSubmitPlan(plan);
+    const result = await this.signAndSubmitPlan(plan, feePayer === this.signer);
     return result.transactions[0];
   }
 
@@ -1040,7 +1049,7 @@ export class MosaicService {
   async confidentialTransfer(
     options: ConfidentialTransferOptions
   ): Promise<MosaicTransactionPlanResult> {
-    const feePayer = await this.resolveFeePayerSigner();
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
     const instructionPlan = await createConfidentialTransferInstructionPlan({
       rpc: this.rpc,
       payer: feePayer,
@@ -1053,7 +1062,7 @@ export class MosaicService {
       auditorElgamalPubkey: options.auditorElgamalPubkey,
     });
     const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
-    return this.signAndSubmitPlan(plan);
+    return this.signAndSubmitPlan(plan, feePayer === this.signer);
   }
 
   /**
@@ -1080,7 +1089,7 @@ export class MosaicService {
   async withdrawConfidential(
     options: WithdrawConfidentialOptions
   ): Promise<MosaicTransactionPlanResult> {
-    const feePayer = await this.resolveFeePayerSigner();
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
     const instructionPlan = await createConfidentialWithdrawInstructionPlan({
       rpc: this.rpc,
       payer: feePayer,
@@ -1091,7 +1100,7 @@ export class MosaicService {
       keys: options.keys,
     });
     const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
-    return this.signAndSubmitPlan(plan);
+    return this.signAndSubmitPlan(plan, feePayer === this.signer);
   }
 
   /**
@@ -1116,7 +1125,7 @@ export class MosaicService {
   async emptyConfidentialAccount(
     options: EmptyConfidentialAccountOptions
   ): Promise<MosaicTransactionResult> {
-    const feePayer = await this.resolveFeePayerSigner();
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
     const instructionPlan = await createEmptyConfidentialAccountInstructionPlan({
       rpc: this.rpc,
       payer: feePayer,
@@ -1125,7 +1134,7 @@ export class MosaicService {
       keys: options.keys,
     });
     const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
-    const result = await this.signAndSubmitPlan(plan);
+    const result = await this.signAndSubmitPlan(plan, feePayer === this.signer);
     return result.transactions[0];
   }
 
@@ -1606,10 +1615,19 @@ export class MosaicService {
    */
   private async signAndSubmit(
     fullTx: FullTransaction,
-    onBeforeSubmit?: () => Promise<void>
+    onBeforeSubmit?: () => Promise<void>,
+    /**
+     * The transaction already carries its own fee payer and full signature set,
+     * so it must bypass Kora. Kora signs *as* the fee payer and rejects anything
+     * whose fee payer is not its own address ("Signer ... not found in
+     * transaction signer keys"). Only the confidential operations set this — see
+     * `resolveConfidentialFeePayerSigner` — and every other caller keeps the
+     * sponsored path unconditionally.
+     */
+    selfPaid = false
   ): Promise<MosaicTransactionResult> {
     const feePayment = this.feePayment;
-    if (feePayment) {
+    if (feePayment && !selfPaid) {
       // Two-signer flow: custody signs locally, Kora adds fee payer + submits
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
@@ -1675,6 +1693,30 @@ export class MosaicService {
 
     const feePayer = await this.feePayment.getFeePayer();
     return createNoopSigner(feePayer);
+  }
+
+  /**
+   * Fee payer for a confidential operation.
+   *
+   * The confidential routes name the operation's own signer as fee payer — the
+   * holder, or the mint's confidential authority for `approve`. That is not
+   * decoration: Kora refuses to sponsor the Token-2022 `Reallocate` that
+   * `configure` needs ("Token2022 Reallocate is not allowed when involving fee
+   * payer"), and the pinned `e9bc391` has no `allow_reallocate` in
+   * `fee_payer_policy.token_2022` to relax it. Until that lands upstream, these
+   * operations are holder-paid rather than sponsored.
+   *
+   * Honour the request only when it names the signer this service already
+   * holds; any other address has no signer here, so it keeps the sponsored path.
+   */
+  private async resolveConfidentialFeePayerSigner(
+    requested: Address | undefined
+  ): Promise<TransactionSigner> {
+    if (requested && requested === this.signer.address) {
+      return this.signer;
+    }
+
+    return this.resolveFeePayerSigner();
   }
 
   private async resolveFeePayerSigner(
