@@ -159,7 +159,9 @@ export function createPostgresDvpLegTransferRepository(
       await db
         .prepare(
           // The order comes from the walk itself: one past this leg's highest so
-          // far, which is the position the cluster's own listing gave it.
+          // far, which is the position the cluster's own listing gave it. Two
+          // sweeps running at once could hand out the same number, so reads
+          // break ties by slot and signature rather than leaving it to chance.
           `INSERT INTO dvp_leg_transfers (${TRANSFER_COLUMNS})
            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?,
                   COALESCE((SELECT MAX(existing.sequence)
@@ -210,7 +212,7 @@ export function createPostgresDvpLegTransferRepository(
           `SELECT ${TRANSFER_COLUMNS}
              FROM dvp_leg_transfers
             WHERE trade_id = ? AND side = ?
-            ORDER BY sequence ASC`
+            ORDER BY sequence ASC, slot::numeric ASC, signature ASC`
         )
         .bind(tradeId, side)
         .all<Record<string, unknown>>();
@@ -230,7 +232,7 @@ export function createPostgresDvpLegTransferRepository(
           `SELECT ${TRANSFER_COLUMNS}
              FROM dvp_leg_transfers
             WHERE trade_id IN (${placeholders})
-            ORDER BY sequence ASC`
+            ORDER BY sequence ASC, slot::numeric ASC, signature ASC`
         )
         .bind(...tradeIds)
         .all<Record<string, unknown>>();
