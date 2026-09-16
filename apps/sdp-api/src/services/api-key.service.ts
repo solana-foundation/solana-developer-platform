@@ -378,6 +378,15 @@ export class ApiKeyService {
       throw error;
     }
 
+    // A key created BY a key inherits its creator's policy foundation, the
+    // same way rotation clones it: otherwise a policy-bound key could mint a
+    // sibling born free of the per-key rules that govern the creator and act
+    // through it. Runs on the caller's transactional client, so the key and
+    // its cloned policy commit together.
+    if (input.createdByKeyId) {
+      await this.cloneApiKeyPolicyFoundation(this.db, input.createdByKeyId, keyId);
+    }
+
     return {
       id: keyId,
       name: input.name,
