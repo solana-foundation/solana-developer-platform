@@ -9,10 +9,10 @@ const rawFiltersSchema = z.object({
   tab: z.string().optional().catch(undefined),
   kind: z.string().trim().min(1).optional().catch(undefined),
   status: z.enum(UNIFIED_TRANSACTION_STATUSES).optional().catch(undefined),
-  custodyWalletId: z.string().trim().min(1).optional().catch(undefined),
-  counterpartyId: z.string().trim().min(1).optional().catch(undefined),
-  token: z.string().trim().min(1).optional().catch(undefined),
-  search: z.string().trim().min(3).optional().catch(undefined),
+  custodyWalletId: z.string().trim().max(128).min(1).optional().catch(undefined),
+  counterpartyId: z.string().trim().max(128).min(1).optional().catch(undefined),
+  token: z.string().trim().max(128).min(1).optional().catch(undefined),
+  search: z.string().trim().max(200).min(3).optional().catch(undefined),
   from: z.iso.date().optional().catch(undefined),
   to: z.iso.date().optional().catch(undefined),
   cursor: z.string().min(1).optional().catch(undefined),
@@ -54,6 +54,18 @@ export function parseTransactionFilters(searchParams: RawSearchParams): Transact
   return { ...rest, module: parseTransactionModule(tab), cursors };
 }
 
+const TRANSACTION_URL_PARAM_KEYS = [
+  "kind",
+  "status",
+  "custodyWalletId",
+  "counterpartyId",
+  "token",
+  "search",
+  "from",
+  "to",
+  "cursor",
+] as const satisfies readonly (keyof Omit<TransactionFilters, "module" | "cursors">)[];
+
 /**
  * Every URL param the transactions page owns, shaped for a shallow history
  * update: present filters carry their value and absent ones are null, so a
@@ -67,15 +79,12 @@ export function toTransactionUrlUpdates(
 ): Record<string, string | null> {
   return {
     tab: filters.module === undefined ? null : filters.module,
-    kind: filters.kind === undefined ? null : filters.kind,
-    status: filters.status === undefined ? null : filters.status,
-    custodyWalletId: filters.custodyWalletId === undefined ? null : filters.custodyWalletId,
-    counterpartyId: filters.counterpartyId === undefined ? null : filters.counterpartyId,
-    token: filters.token === undefined ? null : filters.token,
-    search: filters.search === undefined ? null : filters.search,
-    from: filters.from === undefined ? null : filters.from,
-    to: filters.to === undefined ? null : filters.to,
-    cursor: filters.cursor === undefined ? null : filters.cursor,
+    ...Object.fromEntries(
+      TRANSACTION_URL_PARAM_KEYS.map((key) => [
+        key,
+        filters[key] === undefined ? null : filters[key],
+      ])
+    ),
     cursors: filters.cursors.length === 0 ? null : filters.cursors.join(","),
   };
 }

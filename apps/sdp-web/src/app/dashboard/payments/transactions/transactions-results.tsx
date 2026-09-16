@@ -22,7 +22,7 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatTimestamp, resolveTokenByMint } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { TRANSACTION_MODULE_HREFS } from "./transaction-module-hrefs";
+import { counterpartyHref, TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs";
 import type { TransactionsPageResult } from "./transactions-page.data";
 import { useTransactionFilters } from "./transactions-workspace";
 import { useCursorPagination } from "./use-cursor-pagination";
@@ -33,10 +33,6 @@ const statusVariants = {
   failed: "danger",
   canceled: "outline",
 } as const satisfies Record<UnifiedTransactionStatus, BadgeVariant>;
-
-function walletHref(custodyWalletId: string): string {
-  return `/dashboard/wallets/${encodeURIComponent(custodyWalletId)}`;
-}
 
 function TransactionDetail({
   transaction,
@@ -88,9 +84,7 @@ function TransactionDetail({
       label: t("DashboardPayments.transactions.counterparty"),
       value: transaction.counterpartyId,
       href:
-        transaction.counterpartyId === null
-          ? null
-          : `/dashboard/payments/counterparty/${encodeURIComponent(transaction.counterpartyId)}`,
+        transaction.counterpartyId === null ? null : counterpartyHref(transaction.counterpartyId),
     },
     {
       label: t("DashboardPayments.transactions.signature"),

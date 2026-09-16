@@ -31,6 +31,7 @@ import {
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { paymentsQueryKeys } from "../payments-query-key";
 import { TransactionsResultsSkeleton } from "../payments-route-skeletons";
+import { counterpartyHref, walletHref } from "./transaction-module-hrefs";
 import {
   fetchTransactionsPageFromDashboard,
   type TransactionsPageResult,
@@ -152,14 +153,14 @@ export function TransactionsWorkspace({
       key: "counterpartyId",
       label: t("DashboardPayments.transactions.counterparty"),
       value: filters.counterpartyId,
-      href: (id: string) => `/dashboard/payments/counterparty/${encodeURIComponent(id)}`,
+      href: counterpartyHref,
       clearLabel: t("DashboardPayments.transactions.clearCounterparty"),
     },
     {
       key: "custodyWalletId",
       label: t("DashboardPayments.transactions.wallet"),
       value: filters.custodyWalletId,
-      href: (id: string) => `/dashboard/wallets/${encodeURIComponent(id)}`,
+      href: walletHref,
       clearLabel: t("DashboardPayments.transactions.clearWallet"),
     },
     {

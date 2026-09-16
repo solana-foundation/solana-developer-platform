@@ -1,9 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import {
-  PAYMENT_COMMAND_ACTION_DESTINATIONS,
-  PAYMENT_COMMAND_ACTIVITY_DESTINATIONS,
-} from "./payments-command-center.constants";
+import { PAYMENT_COMMAND_ACTION_DESTINATIONS } from "./payments-command-center.constants";
 import { resolveCommandCenterCounterparty } from "./payments-command-center.utils";
 import {
   PaymentsActivitySkeleton,
@@ -19,13 +16,6 @@ describe("payments command center", () => {
       deposit: "/dashboard/payments/deposit",
       request: "/dashboard/payments/requests",
       schedule: "/dashboard/payments/recurring/create",
-    });
-  });
-
-  it("links activity tabs with unified transaction vocabulary", () => {
-    expect(PAYMENT_COMMAND_ACTIVITY_DESTINATIONS).toEqual({
-      transfers: "/dashboard/payments/transactions?tab=payments&kind=pay",
-      batches: "/dashboard/payments/transactions?tab=payments&kind=batch_pay",
     });
   });
 

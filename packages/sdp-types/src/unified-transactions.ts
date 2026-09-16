@@ -18,10 +18,10 @@ export type UnifiedTransactionModule = (typeof UNIFIED_TRANSACTION_MODULES)[numb
 export const UNIFIED_TRANSACTION_STATUSES = ["pending", "succeeded", "failed", "canceled"] as const;
 export type UnifiedTransactionStatus = (typeof UNIFIED_TRANSACTION_STATUSES)[number];
 
-export interface UnifiedTransactionModuleContract<Kind extends string, Status extends string> {
-  kinds: readonly Kind[];
-  moduleStatuses: readonly Status[];
-  status: Record<Status, UnifiedTransactionStatus>;
+export interface UnifiedTransactionModuleContract {
+  kinds: readonly string[];
+  moduleStatuses: readonly string[];
+  status: Record<string, UnifiedTransactionStatus>;
 }
 
 export const EARN_TRANSACTION_MODULE_STATUSES = [
@@ -140,7 +140,7 @@ export const UNIFIED_TRANSACTION_MODULE_CONTRACTS = {
     >,
   },
 } as const satisfies {
-  [M in UnifiedTransactionModule]: UnifiedTransactionModuleContract<string, string>;
+  [M in UnifiedTransactionModule]: UnifiedTransactionModuleContract;
 };
 
 type UnifiedTransactionContracts = typeof UNIFIED_TRANSACTION_MODULE_CONTRACTS;

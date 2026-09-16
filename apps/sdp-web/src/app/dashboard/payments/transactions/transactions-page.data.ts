@@ -9,11 +9,9 @@ export type TransactionsPageResult = UnifiedTransactionsListResponse;
 const TRANSACTIONS_PAGE_SIZE = 25;
 
 /**
- * The `/v1/transactions` query string for a filter set; the SWR key for the
- * client fetch, so identical filter sets share one cache entry.
- *
- * @param filters - The active filter set.
- * @returns The serialized API query.
+ * The `/v1/transactions` query string for one dashboard page (25 rows), and
+ * the SWR key for the client fetch: identical filter sets share one cache
+ * entry.
  */
 export function transactionsApiQuery(filters: TransactionFilters): string {
   return toTransactionsApiQuery(filters, TRANSACTIONS_PAGE_SIZE).toString();
@@ -29,11 +27,9 @@ export async function fetchTransactionsPage(
 }
 
 /**
- * Browser-side page fetch through the dashboard proxy route. Throws on a failed
- * response so SWR surfaces it as `error`.
- *
- * @param apiQuery - The serialized API query from `transactionsApiQuery`.
- * @returns The transactions page.
+ * Fetches `/v1/transactions` through the `/api/dashboard/payments/transactions`
+ * proxy, which authenticates the session server-side and forwards the query
+ * string untouched. Throws on a non-ok response so SWR surfaces it as `error`.
  */
 export async function fetchTransactionsPageFromDashboard(
   apiQuery: string

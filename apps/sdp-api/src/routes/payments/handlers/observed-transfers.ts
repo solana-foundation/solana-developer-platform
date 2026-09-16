@@ -498,6 +498,7 @@ function buildObservedTransferRows(
         continue;
       }
 
+      const direction = "inbound";
       observedRows.set(dedupeKey, {
         id: `xfr_observed_${destinationWalletId}_${signature}_${mint}_mint`,
         organization_id: context.organizationId,
@@ -511,8 +512,8 @@ function buildObservedTransferRows(
         amount: resolvedUiAmount,
         memo: null,
         type: "transfer",
-        kind: observedTransferKind("inbound"),
-        direction: "inbound",
+        kind: observedTransferKind(direction),
+        direction,
         status,
         provider: null,
         provider_reference: null,

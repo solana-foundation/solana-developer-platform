@@ -64,21 +64,27 @@ async function applyNonTransactionalMigration({ client, migrationFile, sql }) {
   await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [migrationFile]);
 }
 
+async function runInTransaction(client, run) {
+  await client.query("BEGIN");
+  try {
+    await run();
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function applyPostgresMigration({ client, migrationFile, sql }) {
   if (getPostgresMigrationMode(sql) === "non-transactional") {
     await applyNonTransactionalMigration({ client, migrationFile, sql });
     return;
   }
 
-  await client.query("BEGIN");
-  try {
+  await runInTransaction(client, async () => {
     await client.query(sql);
     await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [migrationFile]);
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  }
+  });
 }
 
 export async function runPostgresMigrations({ databaseUrl, migrationsDir }) {
@@ -120,14 +126,8 @@ export async function runPostgresMigrations({ databaseUrl, migrationsDir }) {
       .filter((file) => file.endsWith(".sql"))
       .sort((left, right) => left.localeCompare(right));
     for (const repeatableFile of repeatableFiles) {
-      await client.query("BEGIN");
-      try {
-        await client.query(fs.readFileSync(path.join(repeatableDir, repeatableFile), "utf8"));
-        await client.query("COMMIT");
-      } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
-      }
+      const sql = fs.readFileSync(path.join(repeatableDir, repeatableFile), "utf8");
+      await runInTransaction(client, () => client.query(sql));
     }
   } finally {
     await client.end().catch(() => {});
