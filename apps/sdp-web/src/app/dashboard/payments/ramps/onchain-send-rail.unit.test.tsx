@@ -57,6 +57,7 @@ const reviewWizard = {
   setAddAccountOpen: vi.fn(),
   handleAccountAdded: vi.fn(),
   submitting: false,
+  sourceWalletHint: null,
   transferResult: null,
   heldApprovalRequestId: null,
   finished: false,
@@ -83,6 +84,7 @@ function wrapper({ children }: { children: ReactNode }) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
+        scopeRefreshFallback={null}
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: false,
