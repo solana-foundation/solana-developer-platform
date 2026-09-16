@@ -50,9 +50,10 @@ function defaultExpiry(): string {
 /**
  * The fields the form itself owns.
  *
- * The two party slots validate on their own step via `partiesStepSchema`; the
- * terms and payer gate the last steps. One form so a submit reads one set of
- * values, never a field out of step with the slot that owns it.
+ * The two party slots validate per slot (`partySlotSchema`) and gate the
+ * parties step; the terms and payer gate the last steps. One form so a submit
+ * reads one set of values, never a field out of step with the slot that owns
+ * it.
  */
 const createFormSchema = z.object({
   partyA: partySlotSchema,
@@ -63,14 +64,6 @@ const createFormSchema = z.object({
 });
 
 export type DvpCreateFormValues = z.infer<typeof createFormSchema>;
-
-/** The terms and payer the last stages read. */
-const termsStepSchema = z.object({
-  expiry: z.string().min(1),
-  refString: z.string(),
-});
-
-export { termsStepSchema };
 
 export interface DvpCreateForm {
   values: DvpCreateFormValues;

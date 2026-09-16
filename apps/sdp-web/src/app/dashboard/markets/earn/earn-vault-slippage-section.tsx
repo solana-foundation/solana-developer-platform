@@ -4,9 +4,14 @@ import { ChevronDownIcon } from "lucide-react";
 import type { ChangeEvent } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { MAX_SLIPPAGE_TOLERANCE_BPS } from "./earn-vault-slippage";
+import {
+  isZeroQuote,
+  MAX_SLIPPAGE_TOLERANCE_BPS,
+  type VaultQuoteState,
+} from "./earn-vault-slippage";
 
 export interface VaultSlippageSectionProps {
   /** Unique per surface so two modals can never share an input id. */
@@ -87,4 +92,61 @@ export function VaultSlippageSection({
       ) : null}
     </div>
   );
+}
+
+interface VaultQuoteNoticeKeys {
+  blocked: MessageKey;
+  loading: MessageKey;
+  unavailable: MessageKey;
+  zero: MessageKey;
+}
+
+/**
+ * Quote-state notices under the summary — loading, unavailable, blocked, or a
+ * zero-output quote — shared by the vault DEPOSIT and WITHDRAWAL modals. The
+ * modals name their quote fields and copy through the accessors and keys, so
+ * the four-branch structure exists exactly once.
+ */
+export function VaultQuoteNotices<Preview extends { blockingIssues: { message: string }[] }>({
+  decimals,
+  keys,
+  quantity,
+  quote,
+}: {
+  decimals: (preview: Preview) => number;
+  keys: VaultQuoteNoticeKeys;
+  quantity: (preview: Preview) => string;
+  quote: VaultQuoteState<Preview>;
+}) {
+  const t = useTranslations();
+  if (quote.kind === "loading") {
+    return (
+      <p className="mt-2 text-xs text-tertiary" role="status">
+        {t(keys.loading)}
+      </p>
+    );
+  }
+  if (quote.kind === "unavailable") {
+    return (
+      <p className="mt-2 text-xs text-error" role="alert">
+        {t(keys.unavailable)}
+      </p>
+    );
+  }
+  const blockingIssue = quote.kind === "quoted" ? quote.preview.blockingIssues[0] : undefined;
+  if (blockingIssue) {
+    return (
+      <p className="mt-2 text-xs text-error" role="alert">
+        {t(keys.blocked, { message: blockingIssue.message })}
+      </p>
+    );
+  }
+  if (quote.kind === "quoted" && isZeroQuote(quantity(quote.preview), decimals(quote.preview))) {
+    return (
+      <p className="mt-2 text-xs text-error" role="alert">
+        {t(keys.zero)}
+      </p>
+    );
+  }
+  return null;
 }
