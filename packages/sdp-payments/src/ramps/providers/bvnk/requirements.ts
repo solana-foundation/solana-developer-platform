@@ -142,6 +142,7 @@ export const BVNK_US_MTL_STATES = {
   MD: "Maryland",
   MI: "Michigan",
   MN: "Minnesota",
+  MS: "Mississippi",
   MO: "Missouri",
   NE: "Nebraska",
   NH: "New Hampshire",

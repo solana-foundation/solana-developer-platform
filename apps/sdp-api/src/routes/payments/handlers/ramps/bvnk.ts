@@ -889,16 +889,10 @@ export async function ensureBvnkCustomer(
     countryCode: residenceCountry,
   });
   const entries: BvnkAgreementEntries = Object.fromEntries(
-    agreements.agreements
-      .filter((agreement) => !agreement.declinable)
-      .map((agreement) => [
-        agreement.id,
-        {
-          status: agreement.status,
-          name: agreement.name,
-          description: agreement.description,
-        },
-      ])
+    agreements.agreements.map((agreement) => [
+      agreement.id,
+      { status: agreement.status, name: agreement.name, description: agreement.description },
+    ])
   );
   await persistBvnkAgreementState(
     c,

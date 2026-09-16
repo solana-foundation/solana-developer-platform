@@ -9,7 +9,7 @@ import {
   bvnkOnrampFields,
 } from "@sdp/payments/ramps/providers/bvnk/requirements";
 import { countryField, parseCollectedFields } from "@sdp/payments/ramps/requirements";
-import type { Counterparty } from "@sdp/types";
+import type { Counterparty, CountryCode } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 
 const ONRAMP_REQUIREMENTS_OPTIONS = {
@@ -80,8 +80,12 @@ describe("validateBvnkCounterparty", () => {
 
 describe("bvnkOnrampFields", () => {
   it("adds the US-only fields for US counterparties", () => {
-    const usKeys = bvnkOnrampFields("US").map((field) => field.key);
-    const baseKeys = bvnkOnrampFields("GB").map((field) => field.key);
+    const flatKeys = (countryCode: CountryCode) =>
+      bvnkOnrampFields(countryCode).flatMap((field) =>
+        field.kind === "address" ? field.fields.map((nested) => nested.key) : [field.key]
+      );
+    const usKeys = flatKeys("US");
+    const baseKeys = flatKeys("GB");
 
     expect(usKeys).toContain("address.stateCode");
     expect(baseKeys).not.toContain("address.stateCode");
@@ -171,6 +175,7 @@ describe("buildBvnkCustomerRequest", () => {
         "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
         "cdd.expectedMonthlyVolume.amount": "1000.50",
         "cdd.expectedMonthlyVolume.currency": "EUR",
+        "taxIdentification.number": "12345678901",
       },
       "DE"
     );
@@ -188,6 +193,7 @@ describe("buildBvnkCustomerRequest", () => {
       birthCountryCode: "GB",
       nationality: "GB",
       emailAddress: "ada@example.com",
+      taxIdentification: { number: "12345678901", taxResidenceCountryCode: "DE" },
       cdd: {
         employmentStatus: "SELF_EMPLOYED",
         sourceOfFunds: "SALARY",
@@ -196,7 +202,6 @@ describe("buildBvnkCustomerRequest", () => {
         expectedMonthlyVolume: { amount: "1000.50", currency: "EUR" },
       },
     });
-    expect(customer.taxIdentification).toBeUndefined();
   });
 });
 

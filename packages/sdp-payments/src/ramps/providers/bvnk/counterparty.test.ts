@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Counterparty } from "@sdp/types";
+import type { Counterparty, CountryCode } from "@sdp/types";
 import type { ValidateCounterpartyOptions } from "../../types";
 import {
   buildBvnkCustomerRequest,
@@ -89,8 +89,12 @@ describe("BVNK counterparty builders", () => {
   });
 
   it("only adds US conditional fields for US residence", () => {
-    const usKeys = bvnkOnrampFields("US").map((field) => field.key);
-    const gbKeys = bvnkOnrampFields("GB").map((field) => field.key);
+    const flatKeys = (countryCode: CountryCode) =>
+      bvnkOnrampFields(countryCode).flatMap((field) =>
+        field.kind === "address" ? field.fields.map((nested) => nested.key) : [field.key]
+      );
+    const usKeys = flatKeys("US");
+    const gbKeys = flatKeys("GB");
 
     assert.equal(usKeys.includes("address.stateCode"), true);
     assert.equal(usKeys.includes("taxIdentification.number"), true);

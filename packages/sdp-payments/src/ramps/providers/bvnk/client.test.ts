@@ -135,9 +135,8 @@ describe("BvnkRampClient v2 customer surfaces", () => {
         expiresAt: "2030-01-01T00:00:00Z",
       },
       requiredActions: [{ type: "DATA", code: "TAX_ID", status: "REQUIRED" }],
-      individual,
     };
-    queueFetch(respond(response));
+    queueFetch(respond({ ...response, individual }));
 
     const result = await new BvnkRampClient().getCustomerV2(runtimeContext, {
       id: customerSummary.id,
@@ -167,7 +166,15 @@ describe("BvnkRampClient v2 agreement surfaces", () => {
     const response = {
       id: "working-set-id",
       reference: "customer-reference",
-      agreements: [{ id: "agreement-id", status: "PENDING", declinable: false, name: "Terms" }],
+      agreements: [
+        {
+          id: "agreement-id",
+          status: "PENDING",
+          declinable: false,
+          name: "Terms",
+          description: "Platform terms and conditions",
+        },
+      ],
       signingUrl: "https://onboarding.example/sign",
     };
     const { requests } = queueFetch(respond(response));
