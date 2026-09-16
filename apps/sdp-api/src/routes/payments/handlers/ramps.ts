@@ -95,7 +95,6 @@ import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/po
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { AuditService } from "@/services/audit.service";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
 import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
@@ -139,6 +138,7 @@ import {
   ensureBvnkOfframpWallet,
   ensureBvnkPaymentRule,
   readBvnkCustomerLink,
+  requestProvisioningAudit,
 } from "./ramps/bvnk";
 import {
   ensureLightsparkCustomer,
@@ -819,13 +819,7 @@ export async function advanceCounterpartyRequirements(
         input.projectId,
         customer,
         { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency },
-        async ({ action, metadata }) =>
-          new AuditService(getDb(c.env)).log(c, {
-            action: "update",
-            resourceType: "counterparty",
-            resourceId: input.counterparty.id,
-            metadata: { action, provider: "bvnk", ...metadata },
-          })
+        requestProvisioningAudit(c, input.counterparty)
       );
       if (resolution.onboardingStatus === "verification_required") {
         return bvnkCustomerVerificationRequirements(

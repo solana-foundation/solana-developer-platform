@@ -446,9 +446,13 @@ export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWa
   });
 
   // Wallet policies gate money movement, so rewriting one is itself an
-  // auditable security-control change: fail closed, mirroring the API-key
-  // control-profile writes. The mutable revision row's commitMessage is
-  // caller-authored prose; the ledger entry is what attribution rests on.
+  // auditable security-control change. The hash-chained ledger seals entries
+  // with a session-locked post-commit action and refuses to run inside an
+  // outer transaction, so this entry follows the commit; the write is awaited
+  // and uncaught, so a refused entry fails the request loudly instead of
+  // reporting an unattributed rewrite as success. The mutable revision row's
+  // commitMessage is caller-authored prose; this entry is what attribution
+  // rests on.
   await new AuditService(getDb(c.env)).log(c, {
     action: "update",
     resourceType: "custody_wallet",
