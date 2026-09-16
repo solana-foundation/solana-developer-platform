@@ -6,6 +6,7 @@ import type {
   RecordPolicyEvaluationInput,
   VelocityCandidate,
   VelocityObservation,
+  VelocityObservationKey,
 } from "@sdp/policy";
 import {
   IMPLICIT_DEFAULT_ALLOW_POLICY,
@@ -31,6 +32,38 @@ import { internalError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import { ApiKeyPolicyStore } from "./api-key-policy.store";
 import { WalletPolicyStore } from "./wallet-policy.store";
+
+/** Velocity window sums in flight at once, per operation evaluation. */
+const VELOCITY_SUM_CONCURRENCY = 8;
+
+/**
+ * Run `task` over every item with at most `limit` promises in flight, keeping
+ * result order. A plain `Promise.all` would open every aggregate at once and
+ * pool-slam the database; the worker count, not the item count, bounds it.
+ *
+ * @param items - The items to map over.
+ * @param limit - The maximum concurrent tasks.
+ * @param task - The async task per item.
+ * @returns Results in input order.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next;
+        next += 1;
+        results[index] = await task(items[index]);
+      }
+    })
+  );
+  return results;
+}
 
 /**
  * Postgres-backed {@link PolicyEnforcementStore}: wallet-operation lifecycle
@@ -118,6 +151,9 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
    * operation under evaluation (already inserted by enforcement) is excluded
    * by id as well.
    * A rule whose window does not parse gets no observation and reviews.
+   * The per-key sums run in parallel under a small concurrency cap: the
+   * schema permits enough unique keys that measuring them one await at a
+   * time would dominate the operation's latency.
    *
    * @param candidate - The candidate whose scopes narrow the sums.
    * @param rules - The velocity rules across both effective policies.
@@ -129,35 +165,37 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
   ): Promise<VelocityObservation[]> {
     assertTenantClaim(this.scope, candidate, "PolicyEnforcementStore.loadVelocityObservations");
     const now = Date.now();
-    const observations = new Map<string, VelocityObservation>();
+    const seen = new Set<string>();
+    const pending: { key: VelocityObservationKey; since: string }[] = [];
 
     for (const rule of rules) {
       for (const key of velocityObservationKeys(rule)) {
         const serialized = serializeVelocityObservationKey(key);
-        if (observations.has(serialized)) {
-          continue;
-        }
         const windowMs = parseIsoDurationMs(key.window);
-        if (windowMs === null) {
+        if (windowMs === null || seen.has(serialized)) {
           continue;
         }
-        const total = await this.repository.sumWalletOperationAmounts({
-          organizationId: candidate.organizationId,
-          projectId: candidate.projectId,
-          scope: key.scope,
-          custodyWalletId: candidate.custodyWalletId,
-          walletId: candidate.walletId,
-          apiKeyId: candidate.apiKeyId,
-          asset: key.asset,
-          operationTypes: key.operationTypes,
-          since: new Date(now - windowMs).toISOString(),
-          excludeWalletOperationId: candidate.id ?? null,
-        });
-        observations.set(serialized, { ...key, total });
+        seen.add(serialized);
+        pending.push({ key, since: new Date(now - windowMs).toISOString() });
       }
     }
 
-    return [...observations.values()];
+    const totals = await mapWithConcurrency(pending, VELOCITY_SUM_CONCURRENCY, ({ key, since }) =>
+      this.repository.sumWalletOperationAmounts({
+        organizationId: candidate.organizationId,
+        projectId: candidate.projectId,
+        scope: key.scope,
+        custodyWalletId: candidate.custodyWalletId,
+        walletId: candidate.walletId,
+        apiKeyId: candidate.apiKeyId,
+        asset: key.asset,
+        operationTypes: key.operationTypes,
+        since,
+        excludeWalletOperationId: candidate.id ?? null,
+      })
+    );
+
+    return pending.map(({ key }, index) => ({ ...key, total: totals[index] }));
   }
 
   async createApprovalRequest(input: CreateApprovalRequestInput) {

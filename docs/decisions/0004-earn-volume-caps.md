@@ -92,6 +92,13 @@ stays a small enough fraction of any vault that its customers can always leave.
   address, and inherits the CODEOWNERS gate from PRO-1869. A missing entry
   means the platform default applies; `null` means uncapped (explicit, so a
   reviewer sees it).
+- Launch note for the flag-flip runbook (PRO-1937): a fresh vault whose
+  five-minute metrics refresh has not yet reported reads `tvlUsd = 0`, which
+  makes the share bound 0, so every deposit into it `would_block` once
+  `EARN_VOLUME_CAPS_ENFORCED` flips even though the absolute ceiling is far
+  away. That is the strict reading working as designed, not a bug — expect
+  `would_block` storms on zero-TVL rows until metrics land, and read the
+  shadow-mode data with that in mind.
 - Withdrawals are untouched. A vault over its cap is exit-only, same posture as
   `paused`.
 

@@ -514,7 +514,11 @@ organization's own custody wallets.
     Refuses with a typed **409 `VAULT_EXPOSURE_CAP`** only when
     `EARN_VOLUME_CAPS_ENFORCED` is truthy; otherwise (shadow mode, the
     default) it only emits `sdp_api_earn_volume_cap_evaluated` with
-    `would_block`. An unreadable exposure is a 503 in BOTH modes. Two
+    `would_block`. An unreadable exposure is a 503 in BOTH modes. A readable
+    TVL of 0 (fresh vault, metrics refresh has not landed) is NOT unreadable:
+    it drives the share bound to 0, so at flag flip (PRO-1937) expect
+    `would_block` storms on zero-TVL rows — expected strictness, not a bug.
+    Two
     honesty notes: withdrawals are ledgered in SHARES, so the figure is gross
     inflow (never subtracts exits, so it errs toward refusing); and it is
     token units against a USD TVL, which is dollar-for-dollar only because V1
