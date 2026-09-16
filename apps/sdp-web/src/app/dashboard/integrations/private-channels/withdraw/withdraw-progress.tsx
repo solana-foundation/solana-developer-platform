@@ -1,14 +1,15 @@
 "use client";
 
-import type { PrivateChannelWithdrawal } from "@sdp/types";
+import { isPrivateChannelWithdrawalTerminal, type PrivateChannelWithdrawal } from "@sdp/types";
 import { CheckCircle2Icon, CircleIcon, Loader2Icon, XCircleIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import useSWR from "swr";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
+import { privateChannelsQueryKeys } from "../private-channels-query-key";
 import { fetchWithdrawalAction } from "./actions";
 
 const RANK: Record<PrivateChannelWithdrawal["status"], number> = {
@@ -37,7 +38,6 @@ const STAGES = [
   },
 ] as const;
 
-const TERMINAL: ReadonlySet<PrivateChannelWithdrawal["status"]> = new Set(["settled", "failed"]);
 const POLL_INTERVAL_MS = 1500;
 
 export function WithdrawProgress({
@@ -47,35 +47,32 @@ export function WithdrawProgress({
   withdrawal: PrivateChannelWithdrawal;
   onReset: () => void;
 }) {
-  const [withdrawal, setWithdrawal] = useState(initial);
   const cluster = useSolanaCluster();
   const t = useTranslations();
-
-  useEffect(() => {
-    setWithdrawal(initial);
-  }, [initial]);
-
-  useEffect(() => {
-    if (TERMINAL.has(withdrawal.status)) {
-      return;
+  const { data = initial } = useSWR(
+    privateChannelsQueryKeys.withdrawal(initial.id),
+    async () => {
+      const result = await fetchWithdrawalAction(initial.id);
+      if (result === null) throw new Error("Private channel status is unavailable");
+      return result;
+    },
+    {
+      fallbackData: initial,
+      keepPreviousData: false,
+      revalidateOnMount: false,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      errorRetryCount: Infinity,
+      errorRetryInterval: POLL_INTERVAL_MS,
+      refreshInterval: (current) =>
+        current && isPrivateChannelWithdrawalTerminal(current.status) ? 0 : POLL_INTERVAL_MS,
     }
-    let active = true;
-    const timer = setInterval(async () => {
-      const next = await fetchWithdrawalAction(withdrawal.id);
-      if (active && next) {
-        setWithdrawal(next);
-      }
-    }, POLL_INTERVAL_MS);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [withdrawal.id, withdrawal.status]);
+  );
+  const withdrawal = data;
 
   const rank = RANK[withdrawal.status];
   const failed = withdrawal.status === "failed";
-  const settled = withdrawal.status === "settled";
-  const terminal = failed || settled;
+  const terminal = isPrivateChannelWithdrawalTerminal(withdrawal.status);
 
   return (
     <div className="space-y-5">
