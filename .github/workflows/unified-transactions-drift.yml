@@ -1,0 +1,47 @@
+name: Unified Transactions Drift
+
+on:
+  pull_request:
+    paths:
+      - 'apps/sdp-api/scripts/unified-transactions-view.ts'
+      - 'apps/sdp-api/src/db/unified-transactions/**'
+      - 'apps/sdp-api/src/db/migrations/postgres/repeatable/unified_transactions.sql'
+      - 'packages/sdp-types/src/unified-transactions.ts'
+      - '.github/workflows/unified-transactions-drift.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/sdp-api/scripts/unified-transactions-view.ts'
+      - 'apps/sdp-api/src/db/unified-transactions/**'
+      - 'apps/sdp-api/src/db/migrations/postgres/repeatable/unified_transactions.sql'
+      - 'packages/sdp-types/src/unified-transactions.ts'
+      - '.github/workflows/unified-transactions-drift.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unified-transactions-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 10.16.0
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Check view drift
+        run: pnpm --filter @sdp/api unified-transactions:drift

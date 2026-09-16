@@ -34,7 +34,7 @@ const managementTabIds: AssetManagementTab[] = [
   "settings",
 ];
 
-// Deep links minted for the legacy workspace keep working.
+// Preserve historical detail-tab deep links.
 const LEGACY_TAB_MAP: Record<string, AssetManagementTab> = {
   "fund-management": "operations",
   metadata: "settings",
@@ -78,7 +78,6 @@ export function AssetManagementWorkspace({
 
   const ops = useTokenOperations({
     token,
-    shouldLoadSupportingData: true,
     // Authority wallets are also needed on the overview for the SDP-controlled
     // authorities tile (custody-vs-external roll-up), so load them everywhere.
     shouldLoadAuthorityWallets: true,
@@ -125,9 +124,6 @@ export function AssetManagementWorkspace({
           pauseDisabledReason={ops.effectivePauseDisabledReason}
           canManageTokenAdmin={canManageTokenAdmin}
           onCopyAddress={() => void ops.handleCopy(token.mintAddress)}
-          onCopyTokenId={() =>
-            void ops.handleCopy(token.id, t("DashboardIssuance.management.tokenIdCopied"))
-          }
           onDeploy={() => {
             if (!form.dirty && !draftDeploymentBlocker) {
               ops.deployToken({

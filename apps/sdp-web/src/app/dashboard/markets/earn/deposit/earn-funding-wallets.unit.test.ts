@@ -50,6 +50,23 @@ describe("fetchFundingWallets", () => {
 
     await expect(fetchFundingWallets()).resolves.toEqual([active]);
   });
+
+  it("keeps same-address Connection owners and runtime-disabled wallets in inventory", async () => {
+    const wallets = [
+      { ...wallet({ id: "wallet-a" }), custodyConnectionId: "connection-a" },
+      {
+        ...wallet({ id: "wallet-b", isRuntimeExecutionAllowed: false }),
+        custodyConnectionId: "connection-b",
+      },
+      { ...wallet({ id: "wallet-c" }), custodyConfigId: "config-c" },
+    ];
+    stubResponse({ data: { wallets } });
+
+    await expect(fetchFundingWallets()).resolves.toEqual(wallets);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/dashboard/wallets?view=summary&includeBalances=true&includeAllProviders=true"
+    );
+  });
 });
 
 describe("live funding wallet balances", () => {

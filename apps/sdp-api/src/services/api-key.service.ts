@@ -52,6 +52,7 @@ export interface CreateApiKeyInput {
   createdByKeyId?: string;
   createdByUserId?: string;
   actorPermissions: Permission[];
+  actorApiKeyRole: string | null;
   name: string;
   description?: string | null;
   role: ApiKeyRole;
@@ -67,6 +68,7 @@ export interface UpdateApiKeyInput {
   organizationId: string;
   projectId: string;
   actorPermissions: Permission[];
+  actorApiKeyRole: string | null;
   currentRole: ApiKeyRole;
   name?: string;
   description?: string | null;
@@ -288,7 +290,12 @@ export class ApiKeyService {
 
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
     assertTenantClaim(this.scope, input, "ApiKeyService.createApiKey");
-    assertGrantableApiKeyPermissions(input.actorPermissions, input.role, input.permissions);
+    assertGrantableApiKeyPermissions(
+      input.actorPermissions,
+      input.role,
+      input.permissions,
+      input.actorApiKeyRole
+    );
 
     const project = await this.db
       .prepare(
@@ -390,7 +397,8 @@ export class ApiKeyService {
       assertGrantableApiKeyPermissions(
         input.actorPermissions,
         input.currentRole,
-        input.permissions
+        input.permissions,
+        input.actorApiKeyRole
       );
     }
 
@@ -441,6 +449,7 @@ export class ApiKeyService {
     projectId: string,
     gracePeriodHours: number,
     actorPermissions: Permission[],
+    actorApiKeyRole: string | null,
     pepper?: string,
     guardTargetWalletScope?: (target: {
       signingWalletId: string | null;
@@ -468,7 +477,8 @@ export class ApiKeyService {
     assertGrantableApiKeyPermissions(
       actorPermissions,
       existing.role,
-      existing.permissions === null ? null : parsePostgresJson<Permission[]>(existing.permissions)
+      existing.permissions === null ? null : parsePostgresJson<Permission[]>(existing.permissions),
+      actorApiKeyRole
     );
 
     const newKeyId = `key_${crypto.randomUUID()}`;
@@ -531,7 +541,8 @@ export class ApiKeyService {
         assertGrantableApiKeyPermissions(
           actorPermissions,
           target.role,
-          target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions)
+          target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions),
+          actorApiKeyRole
         );
 
         const signingWalletId = target.signing_wallet_id;

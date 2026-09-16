@@ -51,6 +51,7 @@ import {
   shortenAddress,
 } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
+import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
@@ -241,6 +242,7 @@ function RecurringPaymentActionsMenu({
   pendingAction,
   actionError,
   disabled,
+  signingUnavailable,
   editable,
   onEdit,
   onAction,
@@ -251,6 +253,7 @@ function RecurringPaymentActionsMenu({
   pendingAction: RecurringPaymentAction | null;
   actionError: DetailActionError | null;
   disabled?: boolean;
+  signingUnavailable: boolean;
   editable: boolean;
   onEdit: () => void;
   onAction: (action: RecurringPaymentAction) => void;
@@ -283,7 +286,7 @@ function RecurringPaymentActionsMenu({
         {primaryAction ? (
           <DropdownMenuItem
             onSelect={() => onAction(primaryAction.action)}
-            disabled={actionsDisabled}
+            disabled={actionsDisabled || signingUnavailable}
           >
             {pendingAction === primaryAction.action ? (
               <Loader2Icon className="size-4 animate-spin" />
@@ -306,7 +309,7 @@ function RecurringPaymentActionsMenu({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={onCancel}
-              disabled={actionsDisabled}
+              disabled={actionsDisabled || signingUnavailable}
               className="items-start text-error focus:text-error"
             >
               {pendingAction === secondaryAction.action ? (
@@ -331,9 +334,17 @@ function RecurringPaymentActionsMenu({
 function RecurringPaymentLifecycleBand({
   status,
   actionError,
+  walletsError,
+  signingUnavailable,
+  signingDisabled,
+  walletLabel,
 }: {
   status: PaymentRecurringPaymentStatus;
   actionError: DetailActionError | null;
+  walletsError: string | null;
+  signingUnavailable: boolean;
+  signingDisabled: boolean;
+  walletLabel: string;
 }) {
   const t = useTranslations();
   if (actionError) {
@@ -346,6 +357,26 @@ function RecurringPaymentLifecycleBand({
             label={t("DashboardPayments.recurring.copyError")}
           />
         </div>
+      </ActionBand>
+    );
+  }
+  if (signingDisabled) {
+    return (
+      <ActionBand variant="warning" title={t("DashboardPayments.recurring.signingDisabledTitle")}>
+        {/* Cancel stays open for a pending payment, so its body promises activation only. */}
+        {t(
+          status === "pending_activation"
+            ? "DashboardPayments.recurring.signingDisabledPendingBody"
+            : "DashboardPayments.recurring.signingDisabledBody",
+          { wallet: walletLabel }
+        )}
+      </ActionBand>
+    );
+  }
+  if (walletsError || signingUnavailable) {
+    return (
+      <ActionBand variant="warning" title={t("DashboardPayments.recurring.sourceWalletUnresolved")}>
+        {walletsError ?? t("DashboardPayments.signingUnavailable")}
       </ActionBand>
     );
   }
@@ -405,6 +436,11 @@ export function RecurringPaymentDetailWorkspace({
   );
   const [selectedToken, setSelectedToken] = useState(recurringPayment.token);
   const [selectedAmount, setSelectedAmount] = useState(recurringPayment.amount);
+  const { liveWallets, liveWalletsError } = usePaymentsActionWallets(wallets, null);
+  const liveSourceWallet = liveWallets.find(
+    (entry) => entry.id === recurringPayment.sourceCustodyWalletId
+  );
+  const selectedWallet = liveWallets.find((entry) => entry.id === selectedCustodyWalletId);
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
@@ -418,17 +454,30 @@ export function RecurringPaymentDetailWorkspace({
     recurringPayment.counterpartyAccountId
   );
   const receivingAccountAddress = accountAddress(receivingAccount);
-  const { sourceWalletUnresolved, isEditable, controlsDisabled } = getRecurringPaymentDetailState({
+  const {
+    sourceWalletUnresolved,
+    isEditable,
+    controlsDisabled,
+    signingUnavailable,
+    signingDisabled,
+    editWalletUnavailable,
+    saveDisabled,
+    signingActionsDisabled,
+    cancelDisabled,
+  } = getRecurringPaymentDetailState({
     sourceCustodyWalletId: recurringPayment.sourceCustodyWalletId,
     status: recurringPayment.status,
     hasPendingAction: pendingAction !== null,
     savingPayment,
+    sourceWallet: liveSourceWallet,
+    selectedWallet,
+    selectedCustodyWalletId,
   });
   const dueNow =
     recurringPayment.status === "active" && isDueNow(recurringPayment.nextCollectionDueAt);
 
   const submitAction = async (action: RecurringPaymentAction) => {
-    if (pendingAction) {
+    if (action === "cancel" ? cancelDisabled : signingActionsDisabled) {
       return;
     }
 
@@ -472,7 +521,7 @@ export function RecurringPaymentDetailWorkspace({
   };
 
   const submitPayment = async () => {
-    if (controlsDisabled) {
+    if (saveDisabled) {
       return;
     }
     const amount = selectedAmount.trim();
@@ -594,6 +643,7 @@ export function RecurringPaymentDetailWorkspace({
             editable={isEditable}
             onEdit={openPaymentEditor}
             disabled={controlsDisabled}
+            signingUnavailable={signingUnavailable}
             onAction={(action) => void submitAction(action)}
             onCancel={() => setCancelConfirmOpen(true)}
           />
@@ -610,6 +660,10 @@ export function RecurringPaymentDetailWorkspace({
           <RecurringPaymentLifecycleBand
             status={recurringPayment.status}
             actionError={actionError}
+            walletsError={liveWalletsError}
+            signingUnavailable={signingUnavailable}
+            signingDisabled={signingDisabled}
+            walletLabel={sourceWalletLabel}
           />
         )}
 
@@ -823,15 +877,28 @@ export function RecurringPaymentDetailWorkspace({
                 setSelectedCustodyWalletId(value);
                 setPaymentValidationError(null);
               }}
-              options={wallets.map((entry) => ({
+              options={liveWallets.map((entry) => ({
                 value: entry.id,
                 label: walletLabel(entry, entry.walletId),
                 description: shortenAddress(entry.publicKey),
+                ...(entry.isRuntimeExecutionAllowed !== true
+                  ? {
+                      badge: t("DashboardPayments.restricted"),
+                      badgeVariant: "warning" as const,
+                      // A pending draft may still point at it; an active payment
+                      // would have to sign with it, so the picker does not let the
+                      // user select it.
+                      disabled: recurringPayment.status === "active",
+                    }
+                  : {}),
               }))}
               placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
               icon={<WalletIcon />}
-              disabled={savingPayment || wallets.length === 0}
+              disabled={savingPayment || liveWallets.length === 0}
             />
+            <p role="status" hidden={!editWalletUnavailable} className="text-sm text-warning">
+              {t("DashboardPayments.signingUnavailable")}
+            </p>
             <Combobox
               label={t("DashboardPayments.recurring.receivingWallet")}
               value={selectedReceivingAccountId}
@@ -928,7 +995,7 @@ export function RecurringPaymentDetailWorkspace({
               <Button
                 type="submit"
                 size="sm"
-                disabled={savingPayment}
+                disabled={saveDisabled}
                 iconLeft={
                   savingPayment ? (
                     <Loader2Icon className="size-4 shrink-0 animate-spin" />
@@ -972,7 +1039,7 @@ export function RecurringPaymentDetailWorkspace({
                 type="button"
                 size="sm"
                 variant="destructive"
-                disabled={pendingAction === "cancel"}
+                disabled={cancelDisabled}
                 iconLeft={
                   pendingAction === "cancel" ? (
                     <Loader2Icon className="size-4 shrink-0 animate-spin" />

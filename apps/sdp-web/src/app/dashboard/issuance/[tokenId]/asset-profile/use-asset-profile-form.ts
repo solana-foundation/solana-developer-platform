@@ -8,6 +8,7 @@ import { useTranslations } from "@/i18n/provider";
 import { buildIssuanceMetadata, getAssetDetailsErrors } from "../../create/draft-mapping";
 import type { DraftState } from "../../create/issuance-draft-wizard.types";
 import {
+  getSignerWalletUnavailableReason,
   isMaxSupplyBelowMintedSupply,
   isSupplyLockedOnChain,
   type SignerSelectionState,
@@ -78,6 +79,11 @@ export function useAssetProfileForm({
   const requiresMetadataSigner = Boolean(token.mintAddress && token.status !== "pending");
   const metadataSignerUnavailableReason = requiresMetadataSigner
     ? (metadataSignerSelection.unavailableReason ??
+      getSignerWalletUnavailableReason(
+        metadataSignerSelection.wallets,
+        metadataSignerWalletId,
+        t
+      ) ??
       (metadataSignerSelection.wallets.some((wallet) => wallet.id === metadataSignerWalletId)
         ? null
         : t("DashboardIssuance.signer.select")))

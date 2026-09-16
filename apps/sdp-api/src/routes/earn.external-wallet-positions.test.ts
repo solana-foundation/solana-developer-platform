@@ -233,7 +233,9 @@ describe("external-wallet position reads", () => {
       label: "USDT vault",
     });
 
-    const response = await get("/v1/earn/external-wallet/positions/summary?includePositions=true");
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true"
+    );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
 
@@ -285,7 +287,7 @@ describe("external-wallet position reads", () => {
     );
   });
 
-  it("keeps owner addresses but omits position details from the default summary", async () => {
+  it("default summary carries no owner address and no position details (EARN-028, PRO-1908)", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
@@ -293,14 +295,44 @@ describe("external-wallet position reads", () => {
       label: "USDC vault",
     });
 
+    // A fresh earn:read key with no flag: totals only. The address book is
+    // opt-in, never the default.
     const response = await get("/v1/earn/external-wallet/positions/summary");
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       data: {
         summary: {
+          walletCount: number;
           totalsByStrategy: Array<Record<string, unknown>>;
         };
       };
+    };
+
+    expect(body.data.summary.walletCount).toBe(1);
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]).toMatchObject({
+      walletCount: 1,
+      positionCount: 1,
+    });
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("ownerAddresses");
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("positions");
+    expect(JSON.stringify(body)).not.toContain(OWNER_A);
+  });
+
+  it("summary returns owner addresses only on an explicit opt-in, without position details", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true"
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { summary: { totalsByStrategy: Array<Record<string, unknown>> } };
     };
 
     expect(body.data.summary.totalsByStrategy).toHaveLength(1);
@@ -402,7 +434,7 @@ describe("external-wallet position reads", () => {
     expect(warning).not.toContain(OWNER_B);
   });
 
-  it("summary omits every owner address when the caller asks for totals only (EARN-028, PRO-1873)", async () => {
+  it("summary omits every owner address when the caller opts out in so many words (EARN-028, PRO-1873)", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
@@ -449,6 +481,13 @@ describe("external-wallet position reads", () => {
     const response = await get(
       "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=false&includePositions=true"
     );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects position details without an explicit owner-address opt-in (PRO-1908)", async () => {
+    // Positions name their owners, so the old dashboard shape (includePositions
+    // alone) may not quietly re-enable the address book under the new default.
+    const response = await get("/v1/earn/external-wallet/positions/summary?includePositions=true");
     expect(response.status).toBe(400);
   });
 

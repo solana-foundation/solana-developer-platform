@@ -13,6 +13,7 @@ import {
   resolveCustodyProviderAvailability,
 } from "@/app/dashboard/custody/provider-display-status";
 import { PrivyCredentialForm } from "@/app/dashboard/custody/setup/privy-credential-form";
+import { useWalletInventoryRefresh } from "@/app/dashboard/custody/use-wallet-inventory-refresh";
 import { WalletProviderChoices } from "@/app/dashboard/custody/wallet-provider-choices";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,6 +104,7 @@ export function WalletSetupFlow({
 }: WalletSetupFlowProps) {
   const t = useTranslations();
   const router = useRouter();
+  const refreshWalletInventory = useWalletInventoryRefresh();
   const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
   const availability = useMemo(
@@ -195,6 +197,7 @@ export function WalletSetupFlow({
         if (selectedProjectId) {
           completeQuickStartStep(quickStartKey(dashboardCacheScope), "wallet");
         }
+        refreshWalletInventory();
         router.refresh();
         router.push("/dashboard/wallets");
       } finally {

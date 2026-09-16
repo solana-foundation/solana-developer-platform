@@ -18,8 +18,13 @@ import {
  * Kamino's allocations source is mainnet-only, so a vault on any other
  * cluster is an UNSUPPORTED read, not a failing one: the SWR key stays null,
  * the same way a non-Kamino row's does, and the cell shows the placeholder.
- * The cluster still travels on the wire so the BFF can enforce the same
- * refusal server-side.
+ * This client-side gate keeps an unsupported row from costing any network at
+ * all, and the request states its cluster explicitly so the BFF's own
+ * mainnet-only refusal (a 400 for any other cluster) never fires for a row
+ * this hook would not have issued anyway. The route's store is the server
+ * boundary that independently refuses a value that is not a public key or
+ * that the strategy catalogue does not front (the vault is interpolated
+ * into the upstream URL).
  *
  * `undefined` vault (a non-Kamino row) issues no request at all: the SWR key
  * is null, so the strategies table costs nothing for providers this column

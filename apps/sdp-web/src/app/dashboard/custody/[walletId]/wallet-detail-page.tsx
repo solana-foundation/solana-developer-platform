@@ -29,7 +29,9 @@ import {
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Callout } from "@/components/ui/callout";
 import { issuance, policies } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -289,6 +291,10 @@ export default async function WalletDetailPage({
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
+                {/* Restriction first: it is the one status a reader must not miss. */}
+                {wallet.isRuntimeExecutionAllowed ? null : (
+                  <Badge variant="warning">{t("DashboardCustody.restricted")}</Badge>
+                )}
                 {category ? <WalletCategoryBadge category={category} compact /> : null}
                 {purposeLabel ? (
                   <span className="rounded-full bg-fill px-3 py-1.5 text-xs font-medium text-primary">
@@ -297,6 +303,12 @@ export default async function WalletDetailPage({
                 ) : null}
               </div>
             </div>
+
+            {wallet.isRuntimeExecutionAllowed ? null : (
+              <Callout variant="warning" title={t("DashboardCustody.signingDisabledTitle")}>
+                {t("DashboardCustody.signingDisabledBody")}
+              </Callout>
+            )}
 
             <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
               <WalletInfoRow

@@ -1,36 +1,19 @@
 /**
- * DvP end to end, over HTTP, against a real cluster, in both leg directions.
- *
- * This exists because the whole DvP stack shipped at Greptile 5/5 with ~1,400
- * unit tests green and had never once been run. Six defects were then found by
- * a person clicking buttons, and every one type-checked and passed the suite:
- *
- * - the settlement wallet was provisioned at the wrong scope, so the FIRST
- *   trade in every project failed;
- * - the policy candidate got an on-chain address where the provider's wallet id
- *   belonged, so fund, settle and cancel all failed;
- * - a retry collided on its idempotency key, turning one failure into a wall;
- * - the settlement authority is provisioned empty and pays every fee, so settle
- *   could not succeed at all.
- *
- * None of it is reachable from a unit test, because all four live at seams a
- * unit test mocks: the custody provider, the policy store, the chain. The mocks
- * agreed with the code and the code was wrong.
- *
- * So this goes through the HTTP routes — auth, policy gate, services, chain —
- * and asserts on BALANCES rather than call counts. It runs both directions
- * deliberately: `side` decides which escrow SDP funds, which wallet signs,
- * and which way the delivery accounts cross, and only one side has ever been
- * exercised by hand.
+ * Exercises DvP creation, custody funding, and balance readback over HTTP in
+ * both leg directions. Uses real custody signing and chain transactions; it
+ * does not fund the external leg or settle the trade.
  */
 
-import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
+import { type ApiTestCustodyWallet, type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
+import { address, generateKeyPairSigner } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
-  createToken2022Service,
+  createMosaicService,
   env,
+  fundAddressToLamports,
+  INTEGRATION_CUSTODY_PROVIDER,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
   requestWithApiKey,
@@ -39,9 +22,9 @@ import {
   TEST_PROJECT,
 } from "../helpers/integration";
 
-const { createOrgSigner } = apiTestSupport;
+const { createOrgSigner, createSigningService, getDb } = apiTestSupport;
 
-/** Covers create rent, both transfers, and the close. */
+/** Covers the custody wallet's funding transaction and account rent. */
 const WALLET_FUNDING_LAMPORTS = 2_000_000_000;
 const ASSET_UNITS = 1_000;
 const CASH_UNITS = 10;
@@ -98,45 +81,95 @@ async function tokenBalance(address: string): Promise<bigint> {
   return BigInt(body.result?.value?.amount ?? "0");
 }
 
-describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", () => {
+describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and funding", () => {
+  const originalMarketsEnabled = env.MARKETS_ENABLED;
+  let localPartyWallet: ApiTestCustodyWallet | undefined;
+
   beforeAll(async () => {
-    await initIntegrationSuite();
+    env.MARKETS_ENABLED = "true";
+    const state = await initIntegrationSuite();
+    if (INTEGRATION_CUSTODY_PROVIDER === "local") {
+      const signing = createSigningService(env as ApiTestEnv);
+      localPartyWallet =
+        (await signing.getWalletById(TEST_ORG.id, undefined, state.custodyWallet.id)) ?? undefined;
+      if (!localPartyWallet) throw new Error("Local DvP party wallet was not initialized");
+      await fundAddressToLamports(localPartyWallet.publicKey, WALLET_FUNDING_LAMPORTS);
+
+      // Local custody has one key per config and cannot provision extra wallets.
+      // Seed a separate project key as the authority; production providers still
+      // exercise first-trade settlement-wallet provisioning through the route.
+      const settlement = await signing.initializeLocalSigning(TEST_ORG.id, TEST_PROJECT.id, {
+        walletLabel: "DvP settlement authority",
+      });
+      const db = getDb(env);
+      const authority = await db
+        .prepare(
+          `UPDATE custody_wallets SET purpose = 'dvp_settlement_authority'
+           WHERE custody_config_id = ? AND wallet_id = ? RETURNING id`
+        )
+        .bind(settlement.configId, settlement.walletId)
+        .first<{ id: string }>();
+      if (!authority) throw new Error("Local DvP settlement wallet was not initialized");
+      await db
+        .prepare(
+          `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+           VALUES (?, ?, ?)`
+        )
+        .bind(TEST_PROJECT.id, TEST_ORG.id, authority.id)
+        .run();
+      await fundAddressToLamports(settlement.publicKey, WALLET_FUNDING_LAMPORTS);
+    } else {
+      // First-trade provisioning mutates the project config without org fallback.
+      await createSigningService(env as ApiTestEnv).initializePrivySigning(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        { walletLabel: "DvP project root" }
+      );
+    }
   });
 
   afterAll(async () => {
+    env.MARKETS_ENABLED = originalMarketsEnabled;
     await cleanupIntegrationSuite();
   });
 
   // Both directions, identical assertions. Running only one is how the reverse
   // path stayed unexercised through every manual test.
   it.each(["a", "b"] as const)(
-    "creates, funds and settles a trade where SDP delivers leg %s",
+    "creates, funds and reads back a trade where SDP delivers leg %s",
     { timeout: 240_000 },
     async (side) => {
       const api = requestWithApiKey();
       const signer = await createOrgSigner(env as ApiTestEnv, TEST_ORG.id, TEST_PROJECT.id);
-      const token2022 = createToken2022Service(env as ApiTestEnv, signer, {
+      const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
         environment: TEST_PROJECT.environment,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
         actor: { type: "project", id: TEST_PROJECT.id },
       });
 
-      const wallet = await createFundedIntegrationWallet({
-        label: `dvp-leg-${side}`,
-        fundLamports: WALLET_FUNDING_LAMPORTS,
-      });
+      const wallet =
+        localPartyWallet ??
+        (await createFundedIntegrationWallet({
+          label: `dvp-leg-${side}`,
+          fundLamports: WALLET_FUNDING_LAMPORTS,
+        }));
+      const externalPartyAddress = (await generateKeyPairSigner()).address;
+      await fundAddressToLamports(externalPartyAddress, 1_000_000);
 
-      // Two distinct mints: legs sharing one would settle without ever proving
-      // the sides cross.
+      // Distinct mints prove each direction funds the correct escrow.
       const [asset, cash] = await Promise.all([
-        token2022.createMint({
+        mosaic.createToken({
+          template: "custom",
+          feePayer: signer,
           metadata: { name: "Settlement Asset", symbol: "SETA", uri: "" },
           decimals: DECIMALS,
           mintAuthority: signer,
           freezeAuthority: null,
         }),
-        token2022.createMint({
+        mosaic.createToken({
+          template: "custom",
+          feePayer: signer,
           metadata: { name: "Settlement Cash", symbol: "SETC", uri: "" },
           decimals: DECIMALS,
           mintAuthority: signer,
@@ -144,20 +177,21 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
         }),
       ]);
 
-      // SDP has to hold whichever leg it delivers, and the counterparty the
-      // other. Both are minted to the same custody wallet here: what is under
-      // test is the settlement path, not who controls the counterparty key.
-      await token2022.mintTo({
+      if (!asset.mint || !cash.mint) throw new Error("Settlement fixture mints were not created");
+
+      // Give the custody wallet exactly the tokens required for its leg.
+      await mosaic.mintTo({
         mint: side === "a" ? asset.mint : cash.mint,
-        destination: wallet.publicKey as never,
+        destination: address(wallet.publicKey),
         amount: side === "a" ? ASSET_UNITS : CASH_UNITS,
-        mintAuthority: signer,
+        mintAuthority: signer.address, // Matches the signer bound to MosaicService above.
+        feePayer: signer.address,
       });
 
-      // SDP is a party slot, the counterparty a bare external address. Kora
-      // pays create fee and rent; this wallet still needs SOL for settlement.
-      const partyA = side === "a" ? { walletId: wallet.id } : { address: signer.address };
-      const partyB = side === "a" ? { address: signer.address } : { walletId: wallet.id };
+      // The external address is distinct from all custody wallets, including
+      // the one-key local fixture, so the caller is principal on exactly one leg.
+      const partyA = side === "a" ? { walletId: wallet.id } : { address: externalPartyAddress };
+      const partyB = side === "a" ? { address: externalPartyAddress } : { walletId: wallet.id };
 
       const created = await api("/v1/dvp/trades", {
         method: "POST",
@@ -176,7 +210,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
         timeoutMs: 90_000,
       });
 
-      expect(created.status).toBe(201);
+      expect(created.status, await created.clone().text()).toBe(201);
       const trade = ((await created.json()) as DvpTradeResponse).data.trade;
       expect(trade.status).toBe("created");
 
@@ -192,17 +226,22 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
       const custodiedParty = {
         address: wallet.publicKey,
         counterparty: null,
-        wallet: { id: wallet.id, name: `dvp-leg-${side}` },
+        wallet: { id: wallet.id, name: wallet.label },
       };
-      const externalParty = { address: signer.address, counterparty: null, wallet: null };
+      const externalParty = { address: externalPartyAddress, counterparty: null, wallet: null };
       expect(trade.legs.a.party).toEqual(side === "a" ? custodiedParty : externalParty);
       expect(trade.legs.b.party).toEqual(side === "a" ? externalParty : custodiedParty);
       expect(trade.kind).toBe("principal");
 
-      // A just-created trade has claims and observations for nobody: null is
-      // not zero, and not funded.
-      expect(trade.legs.a.funding).toBeNull();
-      expect(trade.legs.b.funding).toBeNull();
+      // Create observes both empty escrows, but neither leg has a funding receipt.
+      const emptyFunding = {
+        observedAmount: "0",
+        funded: false,
+        surplus: null,
+        frozen: false,
+      };
+      expect(trade.legs.a.funding).toEqual(emptyFunding);
+      expect(trade.legs.b.funding).toEqual(emptyFunding);
       expect(trade.legs.a.fundingSignature).toBeNull();
       expect(trade.legs.b.fundingSignature).toBeNull();
 
@@ -220,7 +259,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP settlement", 
         timeoutMs: 90_000,
       });
 
-      expect(funded.status).toBe(200);
+      expect(funded.status, await funded.clone().text()).toBe(200);
       const fund = ((await funded.json()) as DvpFundResponse).data;
       expect(fund.tradeId).toBe(trade.id);
       expect(fund.leg).toBe(side);

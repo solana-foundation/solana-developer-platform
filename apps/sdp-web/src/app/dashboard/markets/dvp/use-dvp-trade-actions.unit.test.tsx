@@ -67,7 +67,10 @@ describe("useDvpTradeActions", () => {
       wrapper: withI18n,
     });
 
-    await act(async () => await result.current.act("fund", { side: "a", symbol: "USDC" }));
+    await act(
+      async () =>
+        await result.current.act("fund", { side: "a", walletId: "cwlt_shown_a", symbol: "USDC" })
+    );
 
     expect(toast.error).toHaveBeenCalledWith(
       "Leg already funded.",
@@ -105,17 +108,42 @@ describe("useDvpTradeActions", () => {
 
   // The unified fund endpoint names the leg it moves; the action is the same
   // whatever the side, so settle and cancel carry no body.
-  it("sends the side as the fund request body", async () => {
+  it("sends the side and exact displayed wallet in the fund request body", async () => {
     const fetchMock = respond(200);
     global.fetch = fetchMock as never;
     const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
       wrapper: withI18n,
     });
 
-    await act(async () => await result.current.act("fund", { side: "b", symbol: "USDC" }));
+    await act(
+      async () =>
+        await result.current.act("fund", { side: "b", walletId: "cwlt_shown_b", symbol: "USDC" })
+    );
 
     const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
-    expect(JSON.parse(init.body)).toEqual({ side: "b" });
+    expect(JSON.parse(init.body)).toEqual({ side: "b", walletId: "cwlt_shown_b" });
+  });
+
+  describe.each(["fund", "reclaim"] as const)("%s wallet selection", (action) => {
+    it.each([undefined, null, ""])(
+      "never submits an implicit leg request for a missing wallet ID: %s",
+      async (walletId) => {
+        const fetchMock = respond(200);
+        global.fetch = fetchMock as never;
+        const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+          wrapper: withI18n,
+        });
+
+        await act(
+          async () =>
+            await result.current.act(action, { side: "a", walletId, symbol: "USDC" } as never)
+        );
+
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(toast.error).toHaveBeenCalled();
+        expect(result.current.pending.size).toBe(0);
+      }
+    );
   });
 
   it("sends no body for settle", async () => {
@@ -147,7 +175,9 @@ describe("useDvpTradeActions", () => {
       wrapper: withI18n,
     });
 
-    await act(async () => await result.current.act("fund", { side: "a", symbol }));
+    await act(
+      async () => await result.current.act("fund", { side: "a", walletId: "cwlt_shown_a", symbol })
+    );
 
     expect(toast.error).toHaveBeenCalledWith(copy, expect.anything());
   });
@@ -165,7 +195,10 @@ describe("useDvpTradeActions", () => {
       wrapper: withI18n,
     });
 
-    await act(async () => await result.current.act("reclaim", { side: "a", symbol: "USDC" }));
+    await act(
+      async () =>
+        await result.current.act("reclaim", { side: "a", walletId: "cwlt_shown_a", symbol: "USDC" })
+    );
 
     expect(toast.error).toHaveBeenCalledWith(
       "This leg's escrow is already empty.",
@@ -228,7 +261,10 @@ describe("useDvpTradeActions", () => {
       wrapper: withI18n,
     });
 
-    await act(async () => await result.current.act("fund", { side: "a", symbol: "USDC" }));
+    await act(
+      async () =>
+        await result.current.act("fund", { side: "a", walletId: "cwlt_shown_a", symbol: "USDC" })
+    );
 
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith(
@@ -247,8 +283,14 @@ describe("useDvpTradeActions", () => {
       wrapper: withI18n,
     });
 
-    await act(async () => await result.current.act("fund", { side: "a", symbol: "USDC" }));
-    await act(async () => await result.current.act("reclaim", { side: "a", symbol: "USDC" }));
+    await act(
+      async () =>
+        await result.current.act("fund", { side: "a", walletId: "cwlt_shown_a", symbol: "USDC" })
+    );
+    await act(
+      async () =>
+        await result.current.act("reclaim", { side: "a", walletId: "cwlt_shown_a", symbol: "USDC" })
+    );
     await act(async () => await result.current.act("settle"));
 
     const keys = fetchMock.mock.calls.map(
@@ -268,11 +310,14 @@ describe("useDvpTradeActions", () => {
       wrapper: withI18n,
     });
 
-    await act(async () => await result.current.act("reclaim", { side: "b", symbol: "USDC" }));
+    await act(
+      async () =>
+        await result.current.act("reclaim", { side: "b", walletId: "cwlt_shown_b", symbol: "USDC" })
+    );
 
     const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
     expect(url).toBe("/api/dashboard/markets/dvp/trades/dvp_1/reclaim");
-    expect(JSON.parse(init.body)).toEqual({ side: "b" });
+    expect(JSON.parse(init.body)).toEqual({ side: "b", walletId: "cwlt_shown_b" });
     expect(toast.success).toHaveBeenCalledWith(
       "Your deposit is on its way back.",
       expect.anything()

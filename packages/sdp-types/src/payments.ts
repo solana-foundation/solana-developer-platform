@@ -13,6 +13,7 @@ import type {
   WalletOperationStatus,
 } from "./policy";
 import type { RampProviderId } from "./provider-access";
+import type { PaymentTransactionKind } from "./unified-transactions";
 
 export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
   batchSize: 25,
@@ -54,6 +55,9 @@ export interface PaymentsDashboardWallet {
   publicKey: string;
   label: string | null;
   provider?: CustodyProvider;
+  custodyConfigId?: string;
+  custodyConnectionId?: string;
+  isRuntimeExecutionAllowed: boolean;
   balances?: CustodyWalletTokenBalance[];
 }
 
@@ -155,6 +159,15 @@ export type RampTransferType = (typeof RAMP_TRANSFER_TYPES)[number];
 export function isRampTransferType(type: PaymentTransferType): type is RampTransferType {
   return RAMP_TRANSFER_TYPES.some((rampType) => rampType === type);
 }
+
+/**
+ * Lifecycle of a persisted ramp webhook event: `pending` until the background
+ * apply or the replay job settles it (applied rows are deleted, not kept), and
+ * `failed` once replay attempts are exhausted and an operator has to look.
+ */
+export const RAMP_WEBHOOK_EVENT_STATUSES = ["pending", "failed"] as const;
+
+export type RampWebhookEventStatus = (typeof RAMP_WEBHOOK_EVENT_STATUSES)[number];
 
 export const PAYMENT_TRANSFER_STATUSES = [
   "pending",
@@ -364,6 +377,7 @@ export interface PaymentTransferSummary {
   signature: string | null;
   error?: string | null;
   type?: PaymentTransferType;
+  kind?: PaymentTransactionKind;
   direction?: string;
   source?: string;
   destination?: string;

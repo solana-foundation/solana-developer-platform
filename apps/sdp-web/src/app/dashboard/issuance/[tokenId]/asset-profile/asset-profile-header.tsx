@@ -23,7 +23,6 @@ interface AssetProfileHeaderProps {
   deployDisabledReason?: string | null;
   pauseDisabledReason?: string | null;
   onCopyAddress: () => void;
-  onCopyTokenId: () => void;
   onDeploy: () => void;
   onUnpause: () => void;
   onRefreshSupply?: () => void;
@@ -122,7 +121,10 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
 
             <div className="hidden flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:flex">
               {token.mintAddress ? (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span
+                  data-testid="overview-row-token-address"
+                  className="inline-flex min-w-0 items-center gap-1.5"
+                >
                   <span className="text-tertiary">{t("DashboardIssuance.header.mint")}</span>
                   <span className="text-primary" title={token.mintAddress}>
                     {shortenAddress(token.mintAddress)}
@@ -150,7 +152,7 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
         </div>
       </div>
       <dl className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs sm:pl-[60px]">
-        <div className="flex items-center gap-2">
+        <div data-testid="overview-row-supply" className="flex items-center gap-2">
           <dt className="text-tertiary">{t("DashboardIssuance.simplified.issuedSupply")}</dt>
           <dd className="text-secondary">
             {formatSupply(token.totalSupply, locale)} {token.symbol}

@@ -29,7 +29,7 @@ import {
   walletDisplayName,
 } from "./deposit/earn-funding-wallets";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
+import { compareUnsignedDecimals, MAX_AMOUNT_LENGTH, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
 import { shortenMarketAddress, sumDecimalStrings } from "./earn-market-presentation";
@@ -51,6 +51,7 @@ import {
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
 import {
+  atomsToDecimalString,
   floorForTolerance,
   isExpiredQuote,
   isSlippageExceededRefusal,
@@ -62,10 +63,6 @@ import {
 } from "./earn-vault-slippage";
 import { VaultSlippageSection } from "./earn-vault-slippage-section";
 import { earnVaultDepositUiState, earnVaultPositionStatusDisplay } from "./earn-vault-ui-state";
-
-const MAX_AMOUNT_LENGTH = 128;
-
-export { compareUnsignedDecimals };
 
 export type VaultDepositAmountValidation =
   | { kind: "valid"; canonicalAmount: string }
@@ -93,14 +90,6 @@ export function validateVaultDepositAmount(
   }
 
   return { kind: "valid", canonicalAmount: amount.canonical };
-}
-
-function atomsToDecimalString(atoms: bigint, decimals: number): string {
-  if (decimals === 0) return atoms.toString();
-  const padded = atoms.toString().padStart(decimals + 1, "0");
-  const whole = padded.slice(0, -decimals);
-  const fraction = padded.slice(-decimals).replace(/0+$/, "");
-  return fraction ? `${whole}.${fraction}` : whole;
 }
 
 /**

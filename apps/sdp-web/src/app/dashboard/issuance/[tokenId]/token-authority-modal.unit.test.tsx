@@ -13,10 +13,17 @@ vi.mock("@/components/ui/modal", () => ({
 }));
 
 const wallets: PaymentsDashboardWallet[] = [
-  { id: "cwlt_config", walletId: "provider_same", publicKey: "authority", label: "Config" },
+  {
+    id: "cwlt_config",
+    walletId: "provider_same",
+    isRuntimeExecutionAllowed: true,
+    publicKey: "authority",
+    label: "Config",
+  },
   {
     id: "cwlt_connection",
     walletId: "provider_same",
+    isRuntimeExecutionAllowed: true,
     publicKey: "authority",
     label: "Connection",
   },

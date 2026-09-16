@@ -361,19 +361,37 @@ export function formatDirection(direction: string | undefined, t: Translate): st
   return direction[0]?.toUpperCase() + direction.slice(1);
 }
 
-export function resolveCounterparty(transfer: TransferRecord, t: Translate): string {
-  if (transfer.direction === "outbound") {
-    return transfer.destination ?? t("DashboardPayments.unavailable");
-  }
+type TransactionCounterpartyFields = Pick<
+  TransferRecord,
+  "counterpartyId" | "type" | "direction" | "source" | "destination"
+>;
 
-  if (transfer.direction === "inbound") {
-    return transfer.source ?? t("DashboardPayments.unavailable");
-  }
-
-  return transfer.destination ?? transfer.source ?? t("DashboardPayments.unavailable");
+function trimmed(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const result = value.trim();
+  return result === "" ? undefined : result;
 }
 
-export function resolveTransferTypeLabel(type: string | undefined, t: Translate): string {
+export function resolveTransactionCounterpartyReference(
+  transfer: TransactionCounterpartyFields
+): string | undefined {
+  const counterpartyId = trimmed(transfer.counterpartyId);
+  if (counterpartyId !== undefined) return counterpartyId;
+
+  const source = trimmed(transfer.source);
+  const destination = trimmed(transfer.destination);
+  if (transfer.direction === "inbound" || transfer.type === "onramp") {
+    return source === undefined ? destination : source;
+  }
+  return destination === undefined ? source : destination;
+}
+
+export function resolveCounterparty(transfer: TransferRecord, t: Translate): string {
+  const reference = resolveTransactionCounterpartyReference(transfer);
+  return reference === undefined ? t("DashboardPayments.unavailable") : reference;
+}
+
+export function formatPaymentTransferType(type: string | undefined, t: Translate): string {
   if (type === "onramp") {
     return t("DashboardPayments.deposit");
   }

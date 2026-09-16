@@ -245,6 +245,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   "label": {
                                     "type": "string",
                                   },
+                                  "options": {
+                                    "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                    "items": {
+                                      "type": "string",
+                                    },
+                                    "type": "array",
+                                  },
+                                  "required": {
+                                    "type": "boolean",
+                                  },
+                                },
+                                "required": [
+                                  "kind",
+                                  "key",
+                                  "label",
+                                  "required",
+                                ],
+                                "type": "object",
+                              },
+                              {
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "currency",
+                                    ],
+                                    "type": "string",
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                  },
+                                  "options": {
+                                    "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                    "items": {
+                                      "type": "string",
+                                    },
+                                    "type": "array",
+                                  },
                                   "required": {
                                     "type": "boolean",
                                   },
@@ -392,6 +432,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                             },
                                             "label": {
                                               "type": "string",
+                                            },
+                                            "options": {
+                                              "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                              "items": {
+                                                "type": "string",
+                                              },
+                                              "type": "array",
+                                            },
+                                            "required": {
+                                              "type": "boolean",
+                                            },
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "key",
+                                            "label",
+                                            "required",
+                                          ],
+                                          "type": "object",
+                                        },
+                                        {
+                                          "properties": {
+                                            "key": {
+                                              "type": "string",
+                                            },
+                                            "kind": {
+                                              "enum": [
+                                                "currency",
+                                              ],
+                                              "type": "string",
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                            },
+                                            "options": {
+                                              "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                              "items": {
+                                                "type": "string",
+                                              },
+                                              "type": "array",
                                             },
                                             "required": {
                                               "type": "boolean",
@@ -617,6 +697,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                             "label": {
                               "type": "string",
                             },
+                            "options": {
+                              "description": "Subset of country codes the client may offer; absent means every supported country.",
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "currency",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "options": {
+                              "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
                             "required": {
                               "type": "boolean",
                             },
@@ -764,6 +884,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                       },
                                       "label": {
                                         "type": "string",
+                                      },
+                                      "options": {
+                                        "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                        "items": {
+                                          "type": "string",
+                                        },
+                                        "type": "array",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "currency",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "options": {
+                                        "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                        "items": {
+                                          "type": "string",
+                                        },
+                                        "type": "array",
                                       },
                                       "required": {
                                         "type": "boolean",
@@ -982,6 +1142,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                             "label": {
                               "type": "string",
                             },
+                            "options": {
+                              "description": "Subset of country codes the client may offer; absent means every supported country.",
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "currency",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "options": {
+                              "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
                             "required": {
                               "type": "boolean",
                             },
@@ -1129,6 +1329,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                       },
                                       "label": {
                                         "type": "string",
+                                      },
+                                      "options": {
+                                        "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                        "items": {
+                                          "type": "string",
+                                        },
+                                        "type": "array",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "currency",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "options": {
+                                        "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                        "items": {
+                                          "type": "string",
+                                        },
+                                        "type": "array",
                                       },
                                       "required": {
                                         "type": "boolean",
@@ -1341,6 +1581,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                             "label": {
                               "type": "string",
                             },
+                            "options": {
+                              "description": "Subset of country codes the client may offer; absent means every supported country.",
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "currency",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "options": {
+                              "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
                             "required": {
                               "type": "boolean",
                             },
@@ -1489,6 +1769,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                       "label": {
                                         "type": "string",
                                       },
+                                      "options": {
+                                        "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                        "items": {
+                                          "type": "string",
+                                        },
+                                        "type": "array",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "currency",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "options": {
+                                        "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                        "items": {
+                                          "type": "string",
+                                        },
+                                        "type": "array",
+                                      },
                                       "required": {
                                         "type": "boolean",
                                       },
@@ -1572,6 +1892,445 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "status": {
                     "enum": [
                       "collect_counterparty",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                  "fields",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "fields": {
+                    "items": {
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "text",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "mask": {
+                              "type": "string",
+                            },
+                            "maxLength": {
+                              "minimum": 0,
+                              "type": "integer",
+                            },
+                            "minLength": {
+                              "minimum": 0,
+                              "type": "integer",
+                            },
+                            "pattern": {
+                              "type": "string",
+                            },
+                            "placeholder": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "select",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "options": {
+                              "items": {
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                  },
+                                },
+                                "required": [
+                                  "value",
+                                  "label",
+                                ],
+                                "type": "object",
+                              },
+                              "type": "array",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                            "options",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "country",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "options": {
+                              "description": "Subset of country codes the client may offer; absent means every supported country.",
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "currency",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "options": {
+                              "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                              "items": {
+                                "type": "string",
+                              },
+                              "type": "array",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "before": {
+                              "type": "string",
+                            },
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "date",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "fields": {
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "text",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "mask": {
+                                        "type": "string",
+                                      },
+                                      "maxLength": {
+                                        "minimum": 0,
+                                        "type": "integer",
+                                      },
+                                      "minLength": {
+                                        "minimum": 0,
+                                        "type": "integer",
+                                      },
+                                      "pattern": {
+                                        "type": "string",
+                                      },
+                                      "placeholder": {
+                                        "type": "string",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "select",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "options": {
+                                        "items": {
+                                          "properties": {
+                                            "label": {
+                                              "type": "string",
+                                            },
+                                            "value": {
+                                              "type": "string",
+                                            },
+                                          },
+                                          "required": [
+                                            "value",
+                                            "label",
+                                          ],
+                                          "type": "object",
+                                        },
+                                        "type": "array",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                      "options",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "country",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "options": {
+                                        "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                        "items": {
+                                          "type": "string",
+                                        },
+                                        "type": "array",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "currency",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "options": {
+                                        "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                        "items": {
+                                          "type": "string",
+                                        },
+                                        "type": "array",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "before": {
+                                        "type": "string",
+                                      },
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "date",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                ],
+                              },
+                              "type": "array",
+                            },
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "address",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                            "fields",
+                          ],
+                          "type": "object",
+                        },
+                      ],
+                    },
+                    "type": "array",
+                  },
+                  "provider": {
+                    "enum": [
+                      "bvnk",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "collect_counterparty_residence",
                     ],
                     "type": "string",
                   },
@@ -1759,6 +2518,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   "label": {
                                     "type": "string",
                                   },
+                                  "options": {
+                                    "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                    "items": {
+                                      "type": "string",
+                                    },
+                                    "type": "array",
+                                  },
+                                  "required": {
+                                    "type": "boolean",
+                                  },
+                                },
+                                "required": [
+                                  "kind",
+                                  "key",
+                                  "label",
+                                  "required",
+                                ],
+                                "type": "object",
+                              },
+                              {
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "currency",
+                                    ],
+                                    "type": "string",
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                  },
+                                  "options": {
+                                    "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                    "items": {
+                                      "type": "string",
+                                    },
+                                    "type": "array",
+                                  },
                                   "required": {
                                     "type": "boolean",
                                   },
@@ -1906,6 +2705,46 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                             },
                                             "label": {
                                               "type": "string",
+                                            },
+                                            "options": {
+                                              "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                              "items": {
+                                                "type": "string",
+                                              },
+                                              "type": "array",
+                                            },
+                                            "required": {
+                                              "type": "boolean",
+                                            },
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "key",
+                                            "label",
+                                            "required",
+                                          ],
+                                          "type": "object",
+                                        },
+                                        {
+                                          "properties": {
+                                            "key": {
+                                              "type": "string",
+                                            },
+                                            "kind": {
+                                              "enum": [
+                                                "currency",
+                                              ],
+                                              "type": "string",
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                            },
+                                            "options": {
+                                              "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                              "items": {
+                                                "type": "string",
+                                              },
+                                              "type": "array",
                                             },
                                             "required": {
                                               "type": "boolean",
@@ -2126,20 +2965,28 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "agreements": {
                     "items": {
                       "properties": {
+                        "description": {
+                          "description": "Agreement summary text.",
+                          "type": "string",
+                        },
                         "downloadUrl": {
+                          "description": "Agreement text URL, minted JIT per response and never persisted.",
                           "format": "uri",
                           "type": "string",
                         },
-                        "filename": {
+                        "id": {
+                          "description": "BVNK agreement id.",
                           "type": "string",
                         },
-                        "id": {
+                        "name": {
+                          "description": "Agreement display name.",
                           "type": "string",
                         },
                       },
                       "required": [
                         "id",
-                        "filename",
+                        "name",
+                        "description",
                         "downloadUrl",
                       ],
                       "type": "object",
@@ -2173,37 +3020,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "provider",
                   "status",
                   "agreements",
-                ],
-                "type": "object",
-              },
-              {
-                "properties": {
-                  "direction": {
-                    "description": "Ramp direction evaluated for this counterparty.",
-                    "enum": [
-                      "onramp",
-                      "offramp",
-                    ],
-                    "example": "onramp",
-                    "type": "string",
-                  },
-                  "provider": {
-                    "enum": [
-                      "bvnk",
-                    ],
-                    "type": "string",
-                  },
-                  "status": {
-                    "enum": [
-                      "customer_pending_agreement_acceptance",
-                    ],
-                    "type": "string",
-                  },
-                },
-                "required": [
-                  "direction",
-                  "provider",
-                  "status",
                 ],
                 "type": "object",
               },

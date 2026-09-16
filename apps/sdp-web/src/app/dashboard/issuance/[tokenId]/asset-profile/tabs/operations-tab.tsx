@@ -4,7 +4,8 @@ import type { Token } from "@sdp/types";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { useTranslations } from "@/i18n/provider";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
 import { AnimatedSection } from "../animated-section";
 import type { TokenOperations } from "../use-token-operations";
@@ -26,6 +27,7 @@ export function OperationsTab({
   canManageTokenAdmin: boolean;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const [activeAction, setActiveAction] = useState<OperationAction | null>(null);
   const labels = getOperationLabels(token, t);
   const { supply, transfers, recovery } = getOperationGroups({
@@ -49,6 +51,28 @@ export function OperationsTab({
         rows={transfers}
         pending={ops.isPending}
       />
+      {token.mintAddress ? (
+        <section
+          data-testid="frozen-accounts-summary-card"
+          className="flex items-center justify-between gap-4 border-t border-border-subtle pt-5"
+        >
+          <h3 className="text-sm font-medium text-primary">
+            {t("DashboardIssuance.controlLists.frozenAccounts")}
+          </h3>
+          {ops.frozenAccountsLoading ? (
+            <SkeletonBlock className="h-5 w-20" />
+          ) : (
+            <p
+              className={ops.frozenAccountsError ? "text-sm text-error" : "text-sm text-secondary"}
+            >
+              {ops.frozenAccountsError ??
+                t("DashboardIssuance.controlLists.accountsCount", {
+                  count: ops.frozenAccountsTotal.toLocaleString(locale),
+                })}
+            </p>
+          )}
+        </section>
+      ) : null}
       {recovery.length ? (
         <AnimatedSection
           title={t("DashboardIssuance.simplified.recovery")}

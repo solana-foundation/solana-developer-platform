@@ -1078,8 +1078,13 @@ describe("BVNK ramp webhook", () => {
         {
           status: "VERIFIED",
           agreements: {
-            relayedAt: "2026-08-01T00:00:00.000Z",
-            entries: { "agreement-1": { status: "ACCEPTED" } },
+            entries: {
+              "agreement-1": {
+                status: "ACCEPTED",
+                name: "EPC Partner Platform Agreement (US)",
+                description: "Terms and conditions for EPC Partner Platform customers in the US",
+              },
+            },
           },
         },
         COUNTERPARTY_ID
@@ -1104,19 +1109,22 @@ describe("BVNK ramp webhook", () => {
       .first<{
         metadata: {
           agreements?: {
-            relayedAt: string;
-            entries: Record<string, { status: string; respondedAt?: string }>;
+            entries: Record<
+              string,
+              { status: string; respondedAt?: string; name: string; description: string }
+            >;
           };
         };
       }>();
     expect(account?.metadata).toEqual({
       status: "VERIFIED",
       agreements: {
-        relayedAt: "2026-08-01T00:00:00.000Z",
         entries: {
           "agreement-1": {
             status: "PENDING",
             respondedAt: "2026-09-02T00:00:00.000Z",
+            name: "EPC Partner Platform Agreement (US)",
+            description: "Terms and conditions for EPC Partner Platform customers in the US",
           },
         },
       },
@@ -1140,8 +1148,13 @@ describe("BVNK ramp webhook", () => {
     const seeded = {
       status: "VERIFIED",
       agreements: {
-        relayedAt: "2026-08-01T00:00:00.000Z",
-        entries: { "agreement-1": { status: "ACCEPTED" } },
+        entries: {
+          "agreement-1": {
+            status: "ACCEPTED",
+            name: "EPC Partner Platform Agreement (US)",
+            description: "Terms and conditions for EPC Partner Platform customers in the US",
+          },
+        },
       },
     };
     await getDb(env)

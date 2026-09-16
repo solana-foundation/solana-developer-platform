@@ -162,3 +162,13 @@ describe("wallets overview search", () => {
     expect(html).not.toContain("walletSearchResults");
   });
 });
+
+describe("wallets overview signing restriction", () => {
+  it("badges a wallet whose signing is disabled, and only that wallet", () => {
+    expect(renderOverview("")).not.toContain("Restricted");
+    const html = renderOverview("", {
+      wallets: [{ ...wallets[0], isRuntimeExecutionAllowed: false }, wallets[1]],
+    });
+    expect(html.match(/Restricted/g)).toHaveLength(1);
+  });
+});

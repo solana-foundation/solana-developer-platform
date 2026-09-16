@@ -1,14 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import type { AssetProfile, Token } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
-import { assetProfiles } from "@/flags";
+import { Suspense } from "react";
 import { getTranslations } from "@/i18n/server";
 import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { IssuanceDetailSkeleton } from "../issuance-detail-skeleton";
 import { AssetManagementWorkspace } from "./asset-profile/asset-management-workspace";
-import { TokenManagementWorkspace } from "./token-management-workspace";
 
 interface TokenManagementPageProps {
   params: Promise<{
@@ -20,13 +20,6 @@ interface FetchResult<T> {
   status: number | null;
   data: T | null;
   error: string | null;
-  total: number | null;
-  hasMore: boolean;
-}
-
-interface PaginatedMeta {
-  total?: number;
-  hasMore?: boolean;
 }
 
 function parseErrorMessage(body: string, fallback: string): string {
@@ -53,30 +46,23 @@ async function fetchData<T>(
         status: response.status,
         data: null,
         error: parseErrorMessage(body, unknownErrorMessage),
-        total: null,
-        hasMore: false,
       };
     }
 
     const payload = (await response.json()) as {
       data?: unknown;
-      meta?: PaginatedMeta;
     };
 
     return {
       status: response.status,
       data: map(payload?.data),
       error: null,
-      total: typeof payload.meta?.total === "number" ? payload.meta.total : null,
-      hasMore: payload.meta?.hasMore === true,
     };
   } catch (error) {
     return {
       status: null,
       data: null,
       error: error instanceof Error ? error.message : requestFailedMessage,
-      total: null,
-      hasMore: false,
     };
   }
 }
@@ -100,11 +86,10 @@ function mapAssetProfile(payload: unknown): AssetProfile | null {
 }
 
 export default async function IssuanceTokenManagementPage({ params }: TokenManagementPageProps) {
-  const [t, { userId, orgId }, { tokenId }, assetProfilesEnabled] = await Promise.all([
+  const [t, { userId, orgId }, { tokenId }] = await Promise.all([
     getTranslations(),
     auth(),
     params,
-    assetProfiles(),
   ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -120,30 +105,26 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
       createSdpApiClient(trace.childContext("dashboard.issuance.token.api"))
     );
 
-    const profileResultPromise = assetProfilesEnabled
-      ? trace.step("fetch_asset_profile", () =>
-          fetchData<AssetProfile | null>(
-            apiClient.request,
-            `/v1/issuance/asset-profiles/by-token/${tokenId}`,
-            mapAssetProfile,
-            t("DashboardIssuance.errors.requestFailed"),
-            t("DashboardIssuance.errors.unknown")
-          )
+    const [tokenResult, profileResult] = await Promise.all([
+      trace.step("fetch_token", () =>
+        fetchData<Token | null>(
+          apiClient.request,
+          `/v1/issuance/tokens/${tokenId}`,
+          mapToken,
+          t("DashboardIssuance.errors.requestFailed"),
+          t("DashboardIssuance.errors.unknown")
         )
-      : Promise.resolve(null);
-    // Token 404s exit before the speculative profile request is awaited. Attach
-    // a rejection observer so that early exit remains safe even if the profile
-    // fetch wrapper gains a throwing path later.
-    void profileResultPromise.catch(() => undefined);
-    const tokenResult = await trace.step("fetch_token", () =>
-      fetchData<Token | null>(
-        apiClient.request,
-        `/v1/issuance/tokens/${tokenId}`,
-        mapToken,
-        t("DashboardIssuance.errors.requestFailed"),
-        t("DashboardIssuance.errors.unknown")
-      )
-    );
+      ),
+      trace.step("fetch_asset_profile", () =>
+        fetchData<AssetProfile | null>(
+          apiClient.request,
+          `/v1/issuance/asset-profiles/by-token/${tokenId}`,
+          mapAssetProfile,
+          t("DashboardIssuance.errors.requestFailed"),
+          t("DashboardIssuance.errors.unknown")
+        )
+      ),
+    ]);
 
     if (tokenResult.status === 404 || !tokenResult.data) {
       trace.log({
@@ -154,72 +135,38 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
       notFound();
     }
 
-    const profileResult = await profileResultPromise;
-
-    // Tokens with an active asset profile get the new management workspace
-    // (behind the asset-profiles UI flag). Any profile-fetch failure — 404 (no
-    // profile), 403 (backend flag off), 5xx — degrades to the legacy workspace.
-    const assetProfile = profileResult?.data ?? null;
-    if (profileResult?.error && profileResult.status !== 404) {
+    if (!profileResult.data) {
       trace.log({
         ok: false,
         tokenId,
         profileStatus: profileResult.status,
         profileError: profileResult.error,
       });
+      if (profileResult.status === 404) {
+        throw new Error(t("DashboardIssuance.errors.assetProfileNotFound"));
+      }
+      throw new Error(
+        t("DashboardIssuance.errors.assetProfileLoadFailed", {
+          status: profileResult.status ?? t("DashboardIssuance.errors.unavailable"),
+          error: profileResult.error ?? t("DashboardIssuance.errors.unknown"),
+        })
+      );
     }
 
     trace.log({
       ok: true,
       tokenId,
-      hasAssetProfile: assetProfile !== null,
+      hasAssetProfile: true,
     });
 
-    if (assetProfile) {
-      return (
+    return (
+      <Suspense fallback={<IssuanceDetailSkeleton />}>
         <AssetManagementWorkspace
           token={tokenResult.data}
-          assetProfile={assetProfile}
-          tokenError={
-            tokenResult.error
-              ? t("DashboardIssuance.errors.apiRequestFailed", {
-                  resource: t("DashboardIssuance.errors.tokenResource"),
-                  status: tokenResult.status ?? t("DashboardIssuance.errors.unavailable"),
-                  error: tokenResult.error,
-                })
-              : null
-          }
+          assetProfile={profileResult.data}
+          tokenError={null}
         />
-      );
-    }
-
-    return (
-      <TokenManagementWorkspace
-        token={tokenResult.data}
-        tokenError={
-          tokenResult.error
-            ? t("DashboardIssuance.errors.apiRequestFailed", {
-                resource: t("DashboardIssuance.errors.tokenResource"),
-                status: tokenResult.status ?? t("DashboardIssuance.errors.unavailable"),
-                error: tokenResult.error,
-              })
-            : null
-        }
-        authorityWallets={[]}
-        authorityWalletsError={null}
-        transactions={[]}
-        transactionsError={null}
-        transactionsTotal={null}
-        transactionsHasMore={false}
-        allowlistEntries={[]}
-        allowlistError={null}
-        allowlistTotal={null}
-        allowlistHasMore={false}
-        frozenAccounts={[]}
-        frozenAccountsError={null}
-        frozenAccountsTotal={null}
-        frozenAccountsHasMore={false}
-      />
+      </Suspense>
     );
   } catch (error) {
     trace.log({

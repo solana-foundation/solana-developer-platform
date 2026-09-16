@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  fiatCurrencyDisplayName,
-  fiatCurrencyFlagEmoji,
-  getCryptoRailAssetLabel,
-} from "@sdp/types/payment-rails";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import {
@@ -15,6 +11,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
+import { fiatCurrencyOptions } from "@/lib/fiat-currency-options";
 import { findWalletBalanceForToken } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { useRampSelection } from "./ramp-selection-context";
@@ -38,18 +35,7 @@ export function CurrencyPairSelector() {
     onAssetRailChange,
   } = useRampSelection();
 
-  const currencyOptions = useMemo(
-    () =>
-      fiatCurrencies.map((c) => {
-        const flag = fiatCurrencyFlagEmoji(c);
-        return {
-          value: c,
-          label: flag === null ? c : `${flag} ${c}`,
-          description: fiatCurrencyDisplayName(c),
-        };
-      }),
-    [fiatCurrencies]
-  );
+  const currencyOptions = useMemo(() => fiatCurrencyOptions(fiatCurrencies), [fiatCurrencies]);
 
   const walletOptions = useMemo(
     () =>

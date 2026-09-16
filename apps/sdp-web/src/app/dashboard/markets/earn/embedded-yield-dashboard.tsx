@@ -40,7 +40,11 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { earnStrategyLiquidityLabel } from "./earn-format";
-import { earnMintAsset, formatProviderAmount } from "./earn-market-presentation";
+import {
+  earnMintAsset,
+  earnStrategyReferenceKey,
+  formatProviderAmount,
+} from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 
 function PortfolioInfoTip({ label }: { label: string }) {
@@ -377,10 +381,6 @@ function formatLatestDepositDate(
   }).format(latest);
 }
 
-function strategyReferenceKey(provider: string, providerReference: string): string {
-  return JSON.stringify([provider, providerReference]);
-}
-
 function StrategyAvailability({ strategy }: { strategy?: EarnStrategy }) {
   const t = useTranslations();
   if (!strategy) return <span className="text-sm text-tertiary">—</span>;
@@ -505,7 +505,7 @@ function PortfolioByStrategy({
   const reduceMotion = useReducedMotion();
   const strategiesByReference = new Map(
     (strategies ?? []).map((strategy) => [
-      strategyReferenceKey(strategy.provider, strategy.providerReference),
+      earnStrategyReferenceKey(strategy.provider, strategy.providerReference),
       strategy,
     ])
   );
@@ -542,7 +542,7 @@ function PortfolioByStrategy({
                 const detailsId = safeStrategyId;
                 const isOpen = selectedStrategyId === strategyId;
                 const strategyDefinition = strategiesByReference.get(
-                  strategyReferenceKey(strategy.provider, strategy.providerReference)
+                  earnStrategyReferenceKey(strategy.provider, strategy.providerReference)
                 );
                 return (
                   <Fragment key={strategyId}>

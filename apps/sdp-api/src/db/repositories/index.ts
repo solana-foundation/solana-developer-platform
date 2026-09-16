@@ -62,7 +62,7 @@ export type {
 } from "./dvp-trade.repository";
 export { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 export type {
-  DeleteUnlistedEarnStrategiesInput,
+  DeprecateUnlistedEarnStrategiesInput,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -487,6 +487,13 @@ export type {
   TokenRepositoryContext,
 } from "./token.repository";
 export { createPostgresTokenRepository } from "./token.repository.postgres";
+export type {
+  ListUnifiedTransactionsInput,
+  ListUnifiedTransactionsResult,
+  UnifiedTransactionModuleWalletScope,
+  UnifiedTransactionsRepository,
+} from "./unified-transactions.repository";
+export { createPostgresUnifiedTransactionsRepository } from "./unified-transactions.repository.postgres";
 export type {
   EnrolledWalletRow,
   UpsertWalletAssetEnrollmentInput,

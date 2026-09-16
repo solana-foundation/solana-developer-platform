@@ -13,15 +13,15 @@
  */
 
 import Link from "next/link";
-import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
-import { formatLegAmount } from "./dvp-trade";
+import { formatTimestamp } from "../../payments/payments-overview.utils";
+import { AddressWithCopy } from "./dvp-party-cell";
+import { type DvpPartyRef, formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -59,6 +59,7 @@ function InboundFundAction({
   side,
   symbol,
   tradeId,
+  party,
 }: {
   frozen: boolean;
   /** The leg the custody lookup made this caller's. */
@@ -66,18 +67,38 @@ function InboundFundAction({
   /** That leg's token symbol, so a refusal names the token. */
   symbol: string | null;
   tradeId: string;
+  party: DvpPartyRef;
 }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
   const { act, pending } = useDvpTradeActions(tradeId, cluster);
+  const wallet = party.actionWallet;
+  const shownWallet = wallet ?? party.wallet;
+  const unavailable = wallet?.isRuntimeExecutionAllowed !== true;
 
   return (
     <span className="relative z-10 flex flex-col items-end gap-1">
+      {shownWallet ? (
+        <Link
+          className="max-w-40 truncate text-secondary text-xs hover:underline"
+          href={`/dashboard/wallets/${encodeURIComponent(shownWallet.id)}`}
+          title={party.address}
+        >
+          {shownWallet.name ?? t("DashboardMarkets.dvp.partySdpWallet")}
+        </Link>
+      ) : null}
+      {unavailable ? (
+        <span className="text-warning text-xs">{t("DashboardCustody.signingDisabledTitle")}</span>
+      ) : null}
       <Button
         // A transfer into a frozen escrow bounces, so offering to send one is
         // offering to waste a signature and a fee.
-        disabled={frozen || pending.has(`fund:${side}`)}
-        onClick={() => act("fund", { side, symbol })}
+        disabled={unavailable || frozen || pending.has(`fund:${side}`)}
+        onClick={() => {
+          if (wallet?.isRuntimeExecutionAllowed === true) {
+            void act("fund", { side, walletId: wallet.id, symbol });
+          }
+        }}
         size="sm"
         type="button"
         variant="secondary"
@@ -127,11 +148,7 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
               is the only address a reader acts on, and the column is the one
               place they would look for it. */}
           <span className="relative z-10 flex flex-col gap-1">
-            <span className="inline-flex items-center gap-1">
-              <span className="sr-only">{yours.escrow}</span>
-              <span aria-hidden>{shortenAddress(yours.escrow)}</span>
-              <WalletAddressCopyButton address={yours.escrow} tooltip={yours.escrow} />
-            </span>
+            <AddressWithCopy address={yours.escrow} />
             {/* Disabling the funding button is not enough on its own: the
                 address next to it stays copyable, so somebody can pay a frozen
                 escrow by hand and lose the fee to a transfer that was always
@@ -153,6 +170,7 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
               side={trade.yourSide}
               symbol={yours.symbol}
               tradeId={trade.id}
+              party={yours.party}
             />
           )}
         </TableCell>

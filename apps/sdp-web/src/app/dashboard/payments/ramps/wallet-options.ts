@@ -66,13 +66,24 @@ export function walletBalanceAssetOptions(
   return assetOptions;
 }
 
-export function walletComboboxOptions(wallets: PaymentsDashboardWallet[]): ComboboxOption[] {
+export function walletComboboxOptions(
+  wallets: PaymentsDashboardWallet[],
+  signingUnavailableLabel?: string,
+  { disableRestricted = false }: { disableRestricted?: boolean } = {}
+): ComboboxOption[] {
   return wallets.map((wallet) => {
+    const restricted = wallet.isRuntimeExecutionAllowed !== true;
     const total = resolveTotalBalance(wallet.balances ?? []);
     return {
       value: wallet.id,
       label: wallet.label ?? wallet.publicKey,
       description: total !== null ? formatCurrencyAmount(total) : undefined,
+      ...(signingUnavailableLabel && restricted
+        ? { badge: signingUnavailableLabel, badgeVariant: "warning" as const }
+        : {}),
+      // A signing flow cannot use a restricted wallet, so its picker does not let
+      // the user select it; receiving and drafts still can, so they leave it open.
+      ...(disableRestricted && restricted ? { disabled: true } : {}),
     };
   });
 }

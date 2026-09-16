@@ -18,6 +18,7 @@ import type {
   ProviderStrategySnapshot,
 } from "../../types";
 import { StubEarnClient } from "../stub";
+import { readOndoUsdyRate } from "./usdy-rate";
 
 /**
  * Ondo vault-infra client — the catalogue half. `@sdp/ondo` extends this class
@@ -33,6 +34,14 @@ import { StubEarnClient } from "../stub";
  * not used — fresh primary mints carry a 40–50 day Reg S transfer lockup and
  * sub-$100k redemptions wait out that window (PRO-1803, measured against
  * Ondo's docs 2026-09-02) — so nothing here needs an Ondo credential.
+ *
+ * ── Where the rate comes from ───────────────────────────────────────────────
+ * Nothing on Solana publishes USDY's rate of return, only its price. The row's
+ * `currentApy` (and its Solana TVL) come from Ondo's public assets API
+ * (`./usdy-rate.ts`, PRO-1833): the issuer's published APY, one keyless GET.
+ * It is written by this hourly pass rather than the five-minute metrics
+ * refresh because Ondo sets the rate once a month, so the next hourly pass is
+ * as fresh as polling would be (playbook §4c).
  *
  * ── Why `sourceKind: "rwa"` is defensible here ──────────────────────────────
  * The bar (see `packages/sdp-earn/CLAUDE.md`, the K-vault name trust boundary)
@@ -159,7 +168,13 @@ export class OndoEarnClient extends StubEarnClient {
     cluster: SolanaCluster,
     deployment: OndoDeployment
   ): Promise<ProviderStrategySnapshot[]> {
-    await readOndoUsdyMint(rpcUrl, cluster, deployment);
+    // The on-chain identity check and the issuer's published figures, in
+    // parallel. Either failing fails the pass: rows keep their last figures
+    // and the outage is logged, rather than the sync nulling a shown rate.
+    const [, rate] = await Promise.all([
+      readOndoUsdyMint(rpcUrl, cluster, deployment),
+      readOndoUsdyRate(),
+    ]);
 
     const depositMints = ondoDepositMints(cluster);
     if (depositMints.length === 0) {
@@ -181,13 +196,11 @@ export class OndoEarnClient extends StubEarnClient {
         shareMint: deployment.usdyMint,
         // Measured by `readOndoUsdyMint`, never derived from ctx.environment.
         hostCluster: cluster,
-        // The price accrues daily at a rate Ondo sets monthly. SDP has no
-        // keyless source for that figure (Ondo's API is credentialed), and one
-        // reading of a market price is not a rate of return, so no
-        // `currentApy` — the dashboard renders "—" rather than a fabricated
-        // number. A live-metrics capability can follow once SDP holds an Ondo
-        // API key (PRO-1803 follow-up).
+        // The price accrues daily at a rate Ondo sets monthly; this is the
+        // APY the issuer publishes for it — never a market price differenced
+        // into one.
         apyType: "variable",
+        currentApy: rate.currentApy,
         // Exit is a secondary-market swap: always open, no lock. The 40–50 day
         // Reg S lockup applies only to PRIMARY mints, which SDP does not use.
         liquidityTerm: "instant",
@@ -196,6 +209,10 @@ export class OndoEarnClient extends StubEarnClient {
           // the issuer's own published mint address, the same bar Veda's
           // allowlist clears.
           curator: "ondo",
+          // USDY supply on Solana, from the same issuer listing: the size of
+          // the instrument on the cluster this row is fundable on, not its
+          // cross-chain total.
+          ...(rate.solanaTvlUsd === undefined ? {} : { tvlUsd: rate.solanaTvlUsd }),
           // What an integrator's compliance team asks before offering a Reg S
           // instrument, stated on the row itself (PRO-1832). Neither constraint
           // is enforced on-chain by SDP: the offering party screens its end

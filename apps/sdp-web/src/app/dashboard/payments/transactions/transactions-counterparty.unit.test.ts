@@ -1,65 +1,24 @@
 import { describe, expect, it } from "vitest";
-import {
-  getTransactionCounterpartyPresentation,
-  resolveTransactionCounterpartyReference,
-  retainTransactionCounterpartyDisplayName,
-} from "./transactions-counterparty";
+import { resolveTransactionCounterpartyReference } from "../payments-overview.utils";
 
-describe("transaction counterparty presentation", () => {
-  it("prefers a human display name and keeps the counterparty ID as secondary context", () => {
+describe("resolveTransactionCounterpartyReference", () => {
+  it("prefers a non-blank counterparty ID", () => {
     expect(
-      getTransactionCounterpartyPresentation({
-        counterpartyDisplayName: "Acme Studio",
-        counterpartyId: "cpty_1234567890",
-        destination: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+      resolveTransactionCounterpartyReference({
+        counterpartyId: " cpty_1234567890 ",
+        destination: "vendor-wallet",
       })
-    ).toEqual({
-      displayName: "Acme Studio",
-      primary: "Acme Studio",
-      reference: "cpty_1234567890",
-      secondary: "cpty_1…7890",
-    });
+    ).toBe("cpty_1234567890");
   });
 
-  it("keeps a destination address as secondary context when no counterparty ID is present", () => {
+  it("uses the source for inbound and onramp transfers", () => {
     expect(
-      getTransactionCounterpartyPresentation({
-        counterpartyDisplayName: "Northstar Labs",
-        destination: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-      })
-    ).toEqual({
-      displayName: "Northstar Labs",
-      primary: "Northstar Labs",
-      reference: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-      secondary: "8dHEsG…WRGZ",
-    });
-  });
-
-  it("falls back to the shortened reference when the API has no display name", () => {
-    expect(
-      getTransactionCounterpartyPresentation({
-        counterpartyId: "cpty_1234567890",
-      })
-    ).toEqual({
-      primary: "cpty_1…7890",
-      reference: "cpty_1234567890",
-    });
-  });
-
-  it("uses the source as the fallback counterparty for inbound transfers", () => {
-    expect(
-      getTransactionCounterpartyPresentation({
+      resolveTransactionCounterpartyReference({
         direction: "inbound",
-        source: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-        destination: "OurTreasuryWallet1111111111111111111111111111",
+        source: "sender-wallet",
+        destination: "our-wallet",
       })
-    ).toEqual({
-      primary: "8dHEsG…WRGZ",
-      reference: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-    });
-  });
-
-  it("uses the source as the fallback for an onramp without a direction", () => {
+    ).toBe("sender-wallet");
     expect(
       resolveTransactionCounterpartyReference({
         type: "onramp",
@@ -69,7 +28,7 @@ describe("transaction counterparty presentation", () => {
     ).toBe("ramp-provider-reference");
   });
 
-  it("keeps the destination fallback for outbound and offramp transfers", () => {
+  it("uses the destination for outbound and offramp transfers", () => {
     expect(
       resolveTransactionCounterpartyReference({
         direction: "outbound",
@@ -86,51 +45,17 @@ describe("transaction counterparty presentation", () => {
     ).toBe("payout-provider");
   });
 
-  it("ignores blank display names and returns an empty-state label without a reference", () => {
+  it("falls back across missing fields and ignores blank references", () => {
     expect(
-      getTransactionCounterpartyPresentation({
-        counterpartyDisplayName: "   ",
+      resolveTransactionCounterpartyReference({ direction: "inbound", destination: "our-wallet" })
+    ).toBe("our-wallet");
+    expect(
+      resolveTransactionCounterpartyReference({
+        direction: "outbound",
+        source: "our-wallet",
+        destination: "   ",
       })
-    ).toEqual({ primary: "—" });
-  });
-
-  it("retains the list display name when the detail response only contains the counterparty ID", () => {
-    expect(
-      retainTransactionCounterpartyDisplayName(
-        {
-          id: "transfer_1",
-          custodyWalletId: "cwlt_1",
-          providerWalletId: "privy_1",
-          status: "confirmed",
-          signature: null,
-          rampsMemo: {},
-          counterpartyId: "cpty_1",
-        },
-        {
-          counterpartyDisplayName: "Acme Studio",
-          counterpartyId: "cpty_1",
-        }
-      )
-    ).toMatchObject({
-      counterpartyId: "cpty_1",
-      counterpartyDisplayName: "Acme Studio",
-    });
-  });
-
-  it("prefers a display name returned by the detail endpoint over the list summary", () => {
-    expect(
-      retainTransactionCounterpartyDisplayName(
-        {
-          id: "transfer_1",
-          custodyWalletId: "cwlt_1",
-          providerWalletId: "privy_1",
-          status: "confirmed",
-          signature: null,
-          rampsMemo: {},
-          counterpartyDisplayName: "Updated Acme Studio",
-        },
-        { counterpartyDisplayName: "Acme Studio" }
-      ).counterpartyDisplayName
-    ).toBe("Updated Acme Studio");
+    ).toBe("our-wallet");
+    expect(resolveTransactionCounterpartyReference({ counterpartyId: "   " })).toBeUndefined();
   });
 });

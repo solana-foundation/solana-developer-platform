@@ -9,9 +9,13 @@ export async function GET(request: Request) {
     );
   }
 
+  // The dashboard is the one surface that legitimately renders per-customer
+  // detail, so it is the one caller that opts in to owner addresses. The API
+  // omits them by default (PRO-1908, threat model EARN-028) and refuses
+  // `includePositions` without the explicit opt-in.
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.external_wallet_positions.summary",
-    path: "/v1/earn/external-wallet/positions/summary?includePositions=true",
+    path: "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true",
   });
 }

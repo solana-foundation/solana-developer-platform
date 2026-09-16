@@ -51,6 +51,8 @@ const earnFundingWalletSchema = z.object({
   purpose: z.string().nullable(),
   status: z.enum(["active", "inactive"]),
   isRuntimeExecutionAllowed: z.boolean(),
+  custodyConfigId: z.string().optional(),
+  custodyConnectionId: z.string().optional(),
   balances: z.array(walletTokenBalanceSchema).optional(),
 });
 

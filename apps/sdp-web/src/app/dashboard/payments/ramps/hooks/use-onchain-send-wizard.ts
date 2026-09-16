@@ -195,6 +195,8 @@ export function useOnchainSendWizard({
     const wallet = liveWallets.find((candidate) => candidate.id === fields.walletId);
     return wallet === undefined ? null : wallet;
   }, [liveWallets, fields.walletId]);
+  const signingUnavailable =
+    fields.walletId !== "" && selectedWallet?.isRuntimeExecutionAllowed !== true;
   const selectedAccount = useMemo(() => {
     const account = cryptoAccounts.find((candidate) => candidate.id === fields.accountId);
     return account === undefined ? null : account;
@@ -246,14 +248,17 @@ export function useOnchainSendWizard({
     destinationAddress,
     selectedAssetBalance === null ? null : selectedAssetBalance.mint
   );
-  const canProceed = canProceedOnchainSend({
-    stepId: currentStepId,
-    fields,
-    destinationAddress,
-    exceedsBalance,
-    selectedMint: selectedAssetBalance === null ? null : selectedAssetBalance.mint,
-    readySubmission,
-  });
+  const canProceed =
+    transferResult !== null ||
+    ((currentStepId === "DESTINATION" || !signingUnavailable) &&
+      canProceedOnchainSend({
+        stepId: currentStepId,
+        fields,
+        destinationAddress,
+        exceedsBalance,
+        selectedMint: selectedAssetBalance === null ? null : selectedAssetBalance.mint,
+        readySubmission,
+      }));
 
   const handleAccountAdded = (account: CounterpartyAccount) => {
     setField("accountId", account.id);
@@ -268,6 +273,7 @@ export function useOnchainSendWizard({
   };
 
   const submitTransfer = async (submission: CreateTransferInput) => {
+    if (signingUnavailable) return;
     setSubmitting(true);
     const toastId = toast.loading(t("DashboardPayments.onchainSend.submittingTransfer"), {
       position: "bottom-right",
@@ -352,6 +358,8 @@ export function useOnchainSendWizard({
     liveWallets,
     walletsLoading,
     liveWalletsError,
+    sourceWalletHint:
+      signingUnavailable && !transferResult ? t("DashboardPayments.signingUnavailable") : null,
     cryptoAccounts,
     accountsLoading,
     counterpartyId,

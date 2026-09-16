@@ -1,13 +1,15 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import DashboardLoading from "@/app/dashboard/(home)/loading";
+import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { WORKSPACE_LOADING_RETRY_MS } from "@/lib/workspace-loading";
 
 export function WorkspaceLoadingRefresh({ returnTo }: { returnTo: string }) {
   const t = useTranslations();
+  const router = useRouter();
   const [attempt, setAttempt] = useState(0);
   const [failure, setFailure] = useState<"sync" | "access" | "service" | null>(null);
   const message =
@@ -43,7 +45,9 @@ export function WorkspaceLoadingRefresh({ returnTo }: { returnTo: string }) {
         if (controller.signal.aborted) return;
         if (result.state === "ready") {
           clearTimeout(deadline);
-          window.location.replace(returnTo);
+          // Preserve the resolved Clerk session and keep this frame visible while
+          // the destination's server layout loads, instead of restarting the app.
+          router.replace(returnTo);
           return;
         }
         reason =
@@ -60,13 +64,15 @@ export function WorkspaceLoadingRefresh({ returnTo }: { returnTo: string }) {
       clearTimeout(timeout);
       clearTimeout(deadline);
     };
-  }, [returnTo, attempt]);
+  }, [returnTo, attempt, router]);
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-6xl px-4 py-10 sm:px-8">
-      <div className="mb-8 flex min-h-12 items-center justify-between gap-4" role="status">
-        <p className="text-sm text-secondary">{t(message)}</p>
-        {failure ? (
+    <DashboardLoadingScreen
+      pathname={returnTo}
+      statusMessage={t(message)}
+      paused={failure !== null}
+      action={
+        failure ? (
           <Button
             variant="secondary"
             onClick={() => {
@@ -76,11 +82,8 @@ export function WorkspaceLoadingRefresh({ returnTo }: { returnTo: string }) {
           >
             {t("Shared.quickStart.retry")}
           </Button>
-        ) : null}
-      </div>
-      <div aria-hidden="true" className={failure ? "[&_*]:animate-none" : undefined}>
-        <DashboardLoading />
-      </div>
-    </main>
+        ) : null
+      }
+    />
   );
 }
