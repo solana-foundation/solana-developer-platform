@@ -447,7 +447,13 @@ export class CustodyRuntimeTargets {
     organizationId: string;
     projectId?: string;
     walletId: string;
+    /** Include retained address aliases when checking source-selector ambiguity. */
+    publicKey?: string;
   }): Promise<CustodyOwnedWallet | null> {
+    const selector = params.publicKey ? "(w.wallet_id = ? OR w.public_key = ?)" : "w.wallet_id = ?";
+    const selectorValues = params.publicKey
+      ? [params.walletId, params.publicKey]
+      : [params.walletId];
     const [configs, connections] = await Promise.all([
       this.db.queryMany<{
         id: string;
@@ -460,10 +466,10 @@ export class CustodyRuntimeTargets {
          JOIN custody_configs c ON c.id = w.custody_config_id
          WHERE c.organization_id = ?
            AND ${params.projectId ? "(c.project_id = ? OR c.project_id IS NULL)" : "c.project_id IS NULL"}
-           AND w.wallet_id = ?`,
+           AND ${selector}`,
         params.projectId
-          ? [params.organizationId, params.projectId, params.walletId]
-          : [params.organizationId, params.walletId]
+          ? [params.organizationId, params.projectId, ...selectorValues]
+          : [params.organizationId, ...selectorValues]
       ),
       params.projectId
         ? this.db.queryMany<{
@@ -477,8 +483,8 @@ export class CustodyRuntimeTargets {
              JOIN custody_connections c ON c.id = w.custody_connection_id
              WHERE c.organization_id = ?
                AND c.project_id = ?
-               AND w.wallet_id = ?`,
-            [params.organizationId, params.projectId, params.walletId]
+               AND ${selector}`,
+            [params.organizationId, params.projectId, ...selectorValues]
           )
         : Promise.resolve([]),
     ]);
