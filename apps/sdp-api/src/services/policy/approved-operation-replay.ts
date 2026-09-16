@@ -24,7 +24,7 @@ const capabilities = new Map<
 >();
 
 const walletOperationExecutionRequestSchema = z.object({
-  method: z.literal("POST"),
+  method: z.enum(["POST", "PATCH"]),
   path: z.string().refine((path) => path.startsWith("/v1/")),
   body: z.record(z.string(), z.unknown()),
   idempotencyKey: z.string(),
@@ -39,7 +39,7 @@ export function walletOperationExecutionRequest(
   body: Record<string, unknown>
 ): WalletOperationExecutionRequest {
   return {
-    method: "POST",
+    method: walletOperationExecutionRequestSchema.shape.method.parse(c.req.method),
     path: c.req.path,
     body,
     idempotencyKey: c.req.header?.("Idempotency-Key") ?? `approval-${crypto.randomUUID()}`,

@@ -463,6 +463,12 @@ export async function extractTokenUpdatePolicyCandidate(
     throw notFound("Token");
   }
 
+  // Mirror the handler's deploying-window refusal so a patch that can never
+  // sign is not judged (or queued for approval) first.
+  if (String(token.status) === "deploying") {
+    throw conflict("Token deployment is in progress; retry after it completes");
+  }
+
   const patch = getOnChainMetadataPatch(body);
   const emptyExtraction = {
     legs: [],
@@ -472,7 +478,9 @@ export async function extractTokenUpdatePolicyCandidate(
       tokenId: token.id,
       mintAddress: token.mintAddress,
       action: "update_metadata",
-      patchKeys: Object.keys(patch),
+      // The changed values, not just the keys: an approver deciding on a
+      // metadata rewrite needs to see what it changes to.
+      patch,
     },
     idempotencyKey: null,
   };
