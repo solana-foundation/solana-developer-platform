@@ -75,7 +75,6 @@ const bvnkV2CustomerStatusSchema = z.enum([
   "REJECTED",
   "TERMINATED",
 ]);
-export type BvnkCustomerV2Status = z.infer<typeof bvnkV2CustomerStatusSchema>;
 
 const bvnkV2CustomerTypeSchema = z.enum(["COMPANY", "INDIVIDUAL"]);
 const bvnkV2CustomerModelSchema = z.enum([
@@ -101,7 +100,6 @@ const bvnkV2AddressSchema = z.object({
   stateCode: z.string().optional(),
   countryCode: z.string().min(2),
 });
-export type BvnkCustomerV2Address = z.infer<typeof bvnkV2AddressSchema>;
 
 const bvnkV2TaxIdentificationSchema = z.object({
   number: z.string().min(1),
@@ -109,14 +107,11 @@ const bvnkV2TaxIdentificationSchema = z.object({
 });
 
 const bvnkV2EmploymentStatusSchema = z.enum(BVNK_EMPLOYMENT_STATUSES);
-export type BvnkCustomerV2EmploymentStatus = z.infer<typeof bvnkV2EmploymentStatusSchema>;
 
 const bvnkV2SourceOfFundsSchema = z.enum([...BVNK_SOURCE_OF_FUNDS, "GIFT", "STUDENT_LOAN_GRANT"]);
-export type BvnkCustomerV2SourceOfFunds = z.infer<typeof bvnkV2SourceOfFundsSchema>;
 
 const bvnkV2PepStatusSchema = z.enum([...BVNK_PEP_STATUSES, "STATE_OWNED"]);
 const bvnkV2IntendedUseOfAccountSchema = z.enum(BVNK_INTENDED_USES);
-export type BvnkCustomerV2IntendedUseOfAccount = z.infer<typeof bvnkV2IntendedUseOfAccountSchema>;
 
 const bvnkV2IncomeSchema = z.enum(BVNK_YEARLY_INCOMES);
 const bvnkV2IndustrySectorSchema = z.enum(BVNK_INDUSTRY_SECTORS);
@@ -152,7 +147,7 @@ const bvnkV2IndividualSchema = z.object({
 });
 export type BvnkCustomerV2Individual = z.infer<typeof bvnkV2IndividualSchema>;
 
-export type BvnkCustomerV2UseCase = z.infer<typeof bvnkV2CustomerUseCaseSchema>;
+type BvnkCustomerV2UseCase = z.infer<typeof bvnkV2CustomerUseCaseSchema>;
 
 export interface CreateBvnkCustomerV2Input {
   idempotencyKey: string;
@@ -182,7 +177,6 @@ const bvnkV2RequiredActionSchema = z.object({
   status: z.enum(["REQUIRED", "PROCESSING"]).optional(),
   target: bvnkV2RequiredActionTargetSchema.optional(),
 });
-export type BvnkCustomerV2RequiredAction = z.infer<typeof bvnkV2RequiredActionSchema>;
 const bvnkV2AuthenticatedLinkSchema = z.object({
   link: z.string().min(1),
   expiresAt: z.string().nullable(),
@@ -226,8 +220,8 @@ export const bvnkV2AgreementContentSchema = z.object({
 });
 export type BvnkAgreementContentV2 = z.infer<typeof bvnkV2AgreementContentSchema>;
 const bvnkV2AgreementActionTypeSchema = z.enum(["ACCEPT", "REJECT"]);
-export type BvnkAgreementActionTypeV2 = z.infer<typeof bvnkV2AgreementActionTypeSchema>;
-export interface BvnkAgreementActionV2 {
+type BvnkAgreementActionTypeV2 = z.infer<typeof bvnkV2AgreementActionTypeSchema>;
+interface BvnkAgreementActionV2 {
   agreementId: string;
   type: BvnkAgreementActionTypeV2;
 }
@@ -327,7 +321,6 @@ const bvnkV2PaymentInstrumentSchema = z.object({
   bankDetails: bvnkV2BankDetailsSchema,
   remittanceInformationPrefix: z.string().optional(),
 });
-export type BvnkLedgerWalletPaymentInstrumentV2 = z.infer<typeof bvnkV2PaymentInstrumentSchema>;
 export const bvnkV2LedgerWalletSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),

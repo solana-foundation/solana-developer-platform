@@ -190,7 +190,7 @@ async function buildBvnkHawkAuthorizationHeader(
     nonce,
     method,
     resource,
-    url.hostname.toLowerCase(),
+    url.hostname,
     "443",
     "",
     "",
