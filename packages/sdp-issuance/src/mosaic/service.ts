@@ -555,6 +555,7 @@ export class MosaicService {
 
   /**
    * Mint tokens to a destination address.
+   * Uses the service signer as mint authority; prepareMintTo uses options.mintAuthority.
    *
    * The SDK handles:
    * - Creating ATA if needed (idempotent)

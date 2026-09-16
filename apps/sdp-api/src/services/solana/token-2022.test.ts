@@ -12,6 +12,7 @@ const lifetime = {
 };
 const signature = Kit.signature("1".repeat(64));
 
+// Namespace spies rely on mosaic-sdk being in server.deps.inline in vitest.config.ts.
 describe("Token2022Service burn", () => {
   let authority: Kit.KeyPairSigner;
   let mint: Kit.Address;
@@ -124,6 +125,26 @@ describe("Token2022Service burn", () => {
     expect(transaction.signatures[sponsor]).toBeNull();
     expect(send).not.toHaveBeenCalled();
     expect(RpcModule.confirmTransaction).toHaveBeenCalledWith(expect.anything(), signature);
+  });
+
+  it.each(["direct", "sponsored"])("reports confirmation errors for %s burns", async (mode) => {
+    vi.mocked(RpcModule.confirmTransaction).mockResolvedValueOnce({
+      signature,
+      slot: 42n,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, { Custom: 6000n }] },
+    });
+    const service = new Token2022Service(
+      env,
+      authority,
+      mode === "sponsored" ? feePayment : undefined
+    );
+
+    await expect(
+      service.burn({ mint, source: authority.address, amount: 1.25, authority })
+    ).rejects.toThrow(new Error('Burn failed: {"InstructionError":[0,{"Custom":"6000"}]}'));
+    expect(feePayment.signAndSend).toHaveBeenCalledTimes(mode === "sponsored" ? 1 : 0);
+    expect(send).toHaveBeenCalledTimes(mode === "direct" ? 1 : 0);
   });
 
   it.each([false, true])("prepares unsigned burns with simulation=%s", async (simulate) => {

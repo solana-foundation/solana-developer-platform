@@ -116,8 +116,7 @@ export class Token2022Service {
 
   private async signAndSubmit(
     fullTx: FullTransaction,
-    sdkRpc: SolanaRpcSdkBridge<MosaicSdkRpc>,
-    failureMessage: string
+    sdkRpc: SolanaRpcSdkBridge<MosaicSdkRpc>
   ): Promise<{ signature: Signature; slot: bigint }> {
     const rpc = sdkRpc as unknown as Rpc<SolanaRpcApi>;
     if (this.feePayment) {
@@ -128,7 +127,7 @@ export class Token2022Service {
       const confirmation = await confirmTransaction(rpc, signature);
 
       if (confirmation.err) {
-        throw new Error(`${failureMessage}: ${safeStringify(confirmation.err)}`);
+        throw new Error(`Burn failed: ${safeStringify(confirmation.err)}`);
       }
 
       return {
@@ -149,7 +148,7 @@ export class Token2022Service {
     const confirmation = await confirmTransaction(rpc, signature);
 
     if (confirmation.err) {
-      throw new Error(`${failureMessage}: ${safeStringify(confirmation.err)}`);
+      throw new Error(`Burn failed: ${safeStringify(confirmation.err)}`);
     }
 
     return {
@@ -187,7 +186,7 @@ export class Token2022Service {
       feePayer
     );
 
-    const result = await this.signAndSubmit(fullTx, rpc, "Burn failed");
+    const result = await this.signAndSubmit(fullTx, rpc);
 
     return {
       signature: result.signature,

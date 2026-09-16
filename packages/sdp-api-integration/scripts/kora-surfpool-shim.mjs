@@ -251,6 +251,7 @@ function getConfig() {
         "GATEzzqxhJnsWF6vHRsgtixxSB8PaQdcqGEVTEHWiULz",
         "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
         "ComputeBudget111111111111111111111111111111",
+        "dvp34bdbcEm4f4FCUjGV4mDAkDshaQR4LkK8fdcsyZq",
       ],
       allowed_spl_paid_tokens: [],
       allowed_tokens: ["So11111111111111111111111111111111111111112"],

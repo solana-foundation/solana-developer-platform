@@ -30,7 +30,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
     await cleanupIntegrationSuite();
   });
 
-  it("creates mint using service directly", { timeout: 60000 }, async () => {
+  it("creates a custom mint through the sponsored Mosaic service", { timeout: 60000 }, async () => {
     const signer = await createOrgSigner(env as ApiTestEnv, TEST_ORG.id, TEST_PROJECT.id);
     const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
       environment: TEST_PROJECT.environment,
@@ -43,9 +43,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
       template: "custom",
       feePayer: signer,
       metadata: {
-        name: "Token2022 Direct",
-        symbol: "T2022",
-        uri: "https://example.com/token2022.json",
+        name: "Mosaic Custom Mint",
+        symbol: "MCM",
+        uri: "https://example.com/mosaic-custom-mint.json",
       },
       decimals: 6,
       mintAuthority: signer,
@@ -56,7 +56,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
     expect(result.signature).toBeTruthy();
     expect(result.slot).toBeGreaterThan(0n);
 
-    console.log(`Direct service mint: ${result.mint}`);
+    console.log(`Mosaic custom mint: ${result.mint}`);
     console.log(`Signature: ${result.signature}`);
   });
 });
