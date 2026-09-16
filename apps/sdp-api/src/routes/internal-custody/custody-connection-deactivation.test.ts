@@ -456,6 +456,102 @@ describe("custody Connection deactivation", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it.each(["invalid_state", "concurrent_change"] as const)(
+    "audits a Connection deactivation refused with %s after admission",
+    async (reasonCode) => {
+      await seedConnection("failed");
+      const db = getDb(env);
+      let expectedState = await persistedState();
+      const runTransaction = db.transaction.bind(db);
+      const refuseAfterAdmission = vi.fn();
+      vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+        expect(
+          await db.queryOne(
+            `SELECT id FROM audit_logs WHERE organization_id = ?
+             AND metadata::jsonb ->> 'auditPhase' = 'intent'
+             AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`,
+            [ORG, CONNECTION]
+          )
+        ).not.toBeNull();
+        if (reasonCode === "invalid_state") {
+          await db.execute("UPDATE custody_connections SET status = 'pending' WHERE id = ?", [
+            CONNECTION,
+          ]);
+          expectedState = await persistedState();
+          refuseAfterAdmission();
+        }
+        return runTransaction(async (tx) => {
+          if (reasonCode === "concurrent_change") {
+            const execute = tx.execute.bind(tx);
+            vi.spyOn(tx, "execute").mockImplementation(async (sql, params) => {
+              if (sql.includes("UPDATE custody_connections c")) {
+                // Exercise the guarded write's no-match result while retaining real audit writes.
+                refuseAfterAdmission();
+                return 0;
+              }
+              return execute(sql, params);
+            });
+          }
+          return callback(tx);
+        });
+      });
+
+      const response = await request();
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toEqual({
+        code: "CONFLICT",
+        message: "Provider credential installation is unavailable",
+      });
+      expect(refuseAfterAdmission).toHaveBeenCalledTimes(1);
+      expect(await persistedState()).toEqual(expectedState);
+      const audits = await db.queryMany<{ resource_id: string; audit_intent_id: string | null }>(
+        `SELECT resource_id, action, status, user_id, request_id,
+                metadata::jsonb ->> 'event' AS event,
+                metadata::jsonb ->> 'auditPhase' AS audit_phase,
+                metadata::jsonb ->> 'auditIntentId' AS audit_intent_id,
+                metadata::jsonb -> 'target' ->> 'resourceId' AS target_id,
+                metadata::jsonb ->> 'reasonCode' AS reason_code,
+                metadata::jsonb ->> 'connectionStatus' AS connection_status,
+                metadata::jsonb ->> 'projectId' AS project_id,
+                metadata::jsonb ->> 'providerCredentialId' AS credential_id
+         FROM audit_logs WHERE organization_id = ? ORDER BY ledger_sequence`,
+        [ORG]
+      );
+      expect(audits).toHaveLength(3);
+      const [intent, outcome, refusal] = audits;
+      if (!intent || !outcome || !refusal) throw new Error("Missing deactivation attempt audits");
+      for (const audit of audits) {
+        expect(audit).toMatchObject({
+          user_id: USER,
+          request_id: "req_connection_deactivation",
+        });
+      }
+      expect(intent).toMatchObject({
+        action: "maintenance",
+        audit_phase: "intent",
+        target_id: CONNECTION,
+      });
+      expect(outcome).toMatchObject({
+        action: "maintenance",
+        audit_phase: "outcome",
+        audit_intent_id: intent.resource_id,
+        event: "custody_connection_deactivation_not_committed",
+      });
+      expect(refusal).toMatchObject({
+        resource_id: CONNECTION,
+        action: "blocked_deactivation",
+        status: "failure",
+        event: "custody_connection_deactivation_blocked",
+        reason_code: reasonCode,
+        connection_status: reasonCode === "invalid_state" ? "pending" : "failed",
+        project_id: PROJECT,
+        credential_id: CREDENTIAL,
+      });
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  );
+
   it.each([
     ["unauthenticated", { authenticated: false }, 401],
     ["missing Project", { projectId: "" }, 400],

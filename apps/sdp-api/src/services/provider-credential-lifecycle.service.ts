@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { isProviderCredentialCreationInProgress } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -281,7 +282,7 @@ async function submitRotationCandidate(
           auditIntent,
           "provider_credential_rotation_submission_replayed"
         );
-      } else if (recovered.status === "creating") {
+      } else if (isProviderCredentialCreationInProgress(recovered.status)) {
         logUnresolvedAuditIntent(context, auditIntent, candidateId);
       } else if (recovered.last_failure_code === "secret_creation_abandoned") {
         await closeRejectedIntent(
@@ -349,7 +350,7 @@ async function finishGcpRotationCreation(
 ): Promise<ProviderCredentialRotationResult> {
   const c = context.c;
   const candidateId = candidate.id;
-  if (candidate.status !== "creating") {
+  if (!isProviderCredentialCreationInProgress(candidate.status)) {
     await closeRejectedIntent(
       context,
       auditIntent,

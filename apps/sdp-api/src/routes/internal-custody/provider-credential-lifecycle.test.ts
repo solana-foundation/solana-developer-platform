@@ -228,6 +228,36 @@ async function rotationFailureEvents() {
   );
 }
 
+async function lifecycleAuditAttempts(action: "submit" | "rotate" | "rollback") {
+  return getDb(env).queryMany<{
+    intent_id: string;
+    credential_id: string;
+    user_id: string;
+    request_id: string;
+    intent_event: string;
+    outcome_event: string | null;
+    outcome_status: string | null;
+    failure_code: string | null;
+  }>(
+    `SELECT intent.resource_id AS intent_id,
+            intent.metadata::jsonb -> 'target' ->> 'resourceId' AS credential_id,
+            intent.user_id, intent.request_id,
+            intent.metadata::jsonb -> 'target' -> 'metadata' ->> 'event' AS intent_event,
+            outcome.metadata::jsonb ->> 'event' AS outcome_event,
+            outcome.status AS outcome_status,
+            outcome.metadata::jsonb ->> 'failureCode' AS failure_code
+     FROM audit_logs intent
+     LEFT JOIN audit_logs outcome
+       ON outcome.organization_id = intent.organization_id
+       AND outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id
+     WHERE intent.organization_id = ?
+       AND intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+       AND intent.metadata::jsonb -> 'target' ->> 'action' = ?
+     ORDER BY intent.ledger_sequence`,
+    [ORGANIZATION_ID, action]
+  );
+}
+
 function mockGcpRotation(
   options: {
     beforeAddResponse?: () => Promise<void>;
@@ -1382,7 +1412,15 @@ describe("provider credential lifecycle", () => {
     const auditRows = await getDb(env).queryMany<{ metadata: string; user_id: string }>(
       "SELECT metadata, user_id FROM audit_logs ORDER BY ledger_sequence"
     );
-    const metadata = auditRows.map((row) => JSON.parse(row.metadata));
+    const auditMetadataSchema = z.object({
+      event: z.string().optional(),
+      fromProviderCredentialId: z.string().optional(),
+      toProviderCredentialId: z.string().optional(),
+      connectionIds: z.array(z.string()).optional(),
+      projectIds: z.array(z.string()).optional(),
+      auditIntentId: z.string().optional(),
+    });
+    const metadata = auditRows.map((row) => auditMetadataSchema.parse(JSON.parse(row.metadata)));
     expect(
       metadata.filter((row) => row.event === "provider_credential_rotation_submitted")
     ).toHaveLength(1);
@@ -1692,6 +1730,21 @@ describe("provider credential lifecycle", () => {
           secret_retention_expires_at: expect.any(String),
         }),
       ]);
+      const failedCandidate = rows[1];
+      if (!failedCandidate) throw new Error("Missing failed rotation candidate");
+      const submissionAttempts = await lifecycleAuditAttempts("submit");
+      expect(submissionAttempts).toEqual([
+        {
+          intent_id: expect.any(String),
+          credential_id: failedCandidate.id,
+          user_id: USER_ID,
+          request_id: "req_provider_credential_lifecycle",
+          intent_event: "provider_credential_rotation_submission_started",
+          outcome_event: "provider_credential_rotation_submission_failed",
+          outcome_status: "failure",
+          failure_code: null,
+        },
+      ]);
       expect(gcp.versions.size).toBe(writeFailure === "lost_response" ? 1 : 0);
       expect(await activeConnectionCredentialIds()).toEqual([
         { provider_credential_id: CREDENTIAL_ID },
@@ -1703,6 +1756,7 @@ describe("provider credential lifecycle", () => {
       ).toBe(409);
       expect(gcp.requests.filter(({ method }) => method === "POST")).toEqual(writesBeforeReplay);
       expect(gcp.requests.some(({ url }) => url.endsWith(":destroy"))).toBe(false);
+      expect(await lifecycleAuditAttempts("submit")).toEqual(submissionAttempts);
     }
   );
 
@@ -1885,6 +1939,33 @@ describe("provider credential lifecycle", () => {
       });
       expect(response.status).toBe(200);
       const { data } = credentialResponseSchema.parse(await response.json());
+      expect(await lifecycleAuditAttempts("submit")).toEqual([
+        {
+          intent_id: expect.any(String),
+          credential_id: data.providerCredential.id,
+          user_id: USER_ID,
+          request_id: "req_provider_credential_lifecycle",
+          intent_event: "provider_credential_rotation_submission_started",
+          outcome_event: "provider_credential_rotation_submitted",
+          outcome_status: "success",
+          failure_code: null,
+        },
+      ]);
+      expect(await lifecycleAuditAttempts("rotate")).toEqual([
+        {
+          intent_id: expect.any(String),
+          credential_id: data.providerCredential.id,
+          user_id: USER_ID,
+          request_id: "req_provider_credential_lifecycle",
+          intent_event: "provider_credential_rotation_started",
+          outcome_event:
+            privyStatus === 200
+              ? "provider_credential_rotated"
+              : "provider_credential_rotation_retry_unknown",
+          outcome_status: privyStatus === 200 ? "success" : "failure",
+          failure_code: privyStatus === 200 ? null : "provider_response_unknown",
+        },
+      ]);
       expect(
         await db.queryOne(
           "SELECT status, secret_version_ref, secret_retention_expires_at FROM provider_credentials WHERE id = ?",
@@ -1936,16 +2017,30 @@ describe("provider credential lifecycle", () => {
       expect(
         (await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request)).status
       ).toBe(503);
-      expect(
-        await db.queryOne(
-          "SELECT status, secret_version_ref, last_failure_code FROM provider_credentials WHERE rotated_from_provider_credential_id = ?",
-          [CREDENTIAL_ID]
-        )
-      ).toEqual({
+      const candidate = await db.queryOne<{ id: string }>(
+        "SELECT id, status, secret_version_ref, last_failure_code FROM provider_credentials WHERE rotated_from_provider_credential_id = ?",
+        [CREDENTIAL_ID]
+      );
+      if (!candidate) throw new Error("Missing uncertain rotation candidate");
+      expect(candidate).toEqual({
+        id: expect.any(String),
         status: committed ? "pending" : "creating",
         secret_version_ref: committed ? firstPersistedGcpVersionRef(gcp) : null,
         last_failure_code: null,
       });
+      const submissionAttempts = await lifecycleAuditAttempts("submit");
+      expect(submissionAttempts).toEqual([
+        {
+          intent_id: expect.any(String),
+          credential_id: candidate.id,
+          user_id: USER_ID,
+          request_id: "req_provider_credential_lifecycle",
+          intent_event: "provider_credential_rotation_submission_started",
+          outcome_event: null,
+          outcome_status: null,
+          failure_code: null,
+        },
+      ]);
       expect(await activeConnectionCredentialIds()).toEqual([
         { provider_credential_id: CREDENTIAL_ID },
         { provider_credential_id: CREDENTIAL_ID },
@@ -1957,6 +2052,7 @@ describe("provider credential lifecycle", () => {
       );
       expect(replay.status).toBe(committed ? 200 : 503);
       expect(gcp.requests.filter(({ url }) => url.endsWith(":addVersion"))).toHaveLength(1);
+      expect(await lifecycleAuditAttempts("submit")).toEqual(submissionAttempts);
     }
   );
 
@@ -1976,17 +2072,35 @@ describe("provider credential lifecycle", () => {
     expect(
       (await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request)).status
     ).toBe(503);
-    expect(
-      await db.queryOne(
-        "SELECT status, secret_version_ref FROM provider_credentials WHERE rotated_from_provider_credential_id = ?",
-        [CREDENTIAL_ID]
-      )
-    ).toEqual({ status: "creating", secret_version_ref: null });
+    const candidate = await db.queryOne<{ id: string }>(
+      "SELECT id, status, secret_version_ref FROM provider_credentials WHERE rotated_from_provider_credential_id = ?",
+      [CREDENTIAL_ID]
+    );
+    if (!candidate) throw new Error("Missing creating rotation candidate");
+    expect(candidate).toEqual({
+      id: expect.any(String),
+      status: "creating",
+      secret_version_ref: null,
+    });
+    const submissionAttempts = await lifecycleAuditAttempts("submit");
+    expect(submissionAttempts).toEqual([
+      {
+        intent_id: expect.any(String),
+        credential_id: candidate.id,
+        user_id: USER_ID,
+        request_id: "req_provider_credential_lifecycle",
+        intent_event: "provider_credential_rotation_submission_started",
+        outcome_event: null,
+        outcome_status: null,
+        failure_code: null,
+      },
+    ]);
     expect(
       (await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request)).status
     ).toBe(503);
     expect(gcp.requests.filter(({ method }) => method === "POST")).toEqual([]);
     expect(gcp.versions.size).toBe(0);
+    expect(await lifecycleAuditAttempts("submit")).toEqual(submissionAttempts);
     expect(await activeConnectionCredentialIds()).toEqual([
       { provider_credential_id: CREDENTIAL_ID },
       { provider_credential_id: CREDENTIAL_ID },
@@ -3231,47 +3345,66 @@ describe("provider credential lifecycle", () => {
     expect(providerFetch).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the active version unchanged when rollback Provider state is uncertain", async () => {
-    const providerFetch = vi
-      .fn()
-      .mockResolvedValueOnce(Response.json({ data: [] }))
-      .mockResolvedValueOnce(new Response(null, { status: 503 }));
-    vi.stubGlobal("fetch", providerFetch);
-    const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
-      method: "POST",
-      key: "rotate-before-uncertain-rollback",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
-    });
-    const rotatedBody = (await rotated.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+  it.each([
+    { failureCode: "credential_storage_unavailable", providerStatus: 200, httpStatus: 500 },
+    { failureCode: "invalid_credentials", providerStatus: 401, httpStatus: 409 },
+    { failureCode: "provider_account_mismatch", providerStatus: 200, httpStatus: 409 },
+    { failureCode: "provider_response_unknown", providerStatus: 503, httpStatus: 503 },
+  ])(
+    "audits rollback $failureCode without changing the active version",
+    async ({ failureCode, providerStatus, httpStatus }) => {
+      const providerFetch = vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ data: [] }))
+        .mockResolvedValueOnce(Response.json({ data: [] }, { status: providerStatus }));
+      vi.stubGlobal("fetch", providerFetch);
+      const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+        method: "POST",
+        key: `rotate-before-rollback-${failureCode}`,
+        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      });
+      expect(rotated.status).toBe(200);
+      const currentId = credentialResponseSchema.parse(await rotated.json()).data.providerCredential
+        .id;
+      const db = getDb(env);
+      if (failureCode === "credential_storage_unavailable") {
+        await db.execute(
+          "UPDATE provider_credentials SET encrypted_secret_payload = ? WHERE id = ?",
+          ["unreadable-rollback-secret", CREDENTIAL_ID]
+        );
+      } else if (failureCode === "provider_account_mismatch") {
+        await db.execute(
+          "UPDATE custody_connections SET provider_account_fingerprint = ? WHERE provider_credential_id = ?",
+          [await getPrivyProviderAccountFingerprint("other-privy-account"), currentId]
+        );
+      }
+      const before = await db.queryMany("SELECT * FROM provider_credentials ORDER BY id");
 
-    const response = await lifecycleRequest(
-      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback`,
-      { method: "POST" }
-    );
+      const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback`, {
+        method: "POST",
+      });
 
-    expect(response.status).toBe(503);
-    expect(
-      await getDb(env).queryMany(
-        `SELECT status, user_id, metadata::jsonb ->> 'failureCode' AS failure_code
-       FROM audit_logs WHERE action = 'rollback'
-         AND metadata::jsonb ->> 'event' = 'provider_credential_rollback_failed'`
-      )
-    ).toEqual([
-      {
-        status: "failure",
-        user_id: USER_ID,
-        failure_code: "provider_response_unknown",
-      },
-    ]);
-    expect(
-      await getDb(env).queryMany<{ provider_credential_id: string }>(
-        "SELECT provider_credential_id FROM custody_connections ORDER BY id"
-      )
-    ).toEqual([
-      { provider_credential_id: rotatedBody.data.providerCredential.id },
-      { provider_credential_id: rotatedBody.data.providerCredential.id },
-    ]);
-  });
+      expect(response.status).toBe(httpStatus);
+      expect(await lifecycleAuditAttempts("rollback")).toEqual([
+        {
+          intent_id: expect.any(String),
+          credential_id: CREDENTIAL_ID,
+          user_id: USER_ID,
+          request_id: "req_provider_credential_lifecycle",
+          intent_event: "provider_credential_rollback_started",
+          outcome_event: "provider_credential_rollback_failed",
+          outcome_status: "failure",
+          failure_code: failureCode,
+        },
+      ]);
+      expect(await db.queryMany("SELECT * FROM provider_credentials ORDER BY id")).toEqual(before);
+      expect(await activeConnectionCredentialIds()).toEqual([
+        { provider_credential_id: currentId },
+        { provider_credential_id: currentId },
+      ]);
+      expect(providerFetch).toHaveBeenCalledTimes(
+        failureCode === "credential_storage_unavailable" ? 1 : 2
+      );
+    }
+  );
 });

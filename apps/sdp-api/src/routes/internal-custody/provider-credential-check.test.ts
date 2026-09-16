@@ -665,16 +665,19 @@ describe("exact Custody Connection installation routes", () => {
       connection_status: "checking",
       last_check_status: "running",
     });
-    const audits = await db.queryMany<{ resource_id: string; metadata: Record<string, unknown> }>(
-      `SELECT resource_id, metadata::jsonb AS metadata FROM audit_logs WHERE organization_id = ?`,
+    const audits = await db.queryMany<{ resource_id: string; audit_phase: string }>(
+      `SELECT resource_id, metadata::jsonb ->> 'auditPhase' AS audit_phase
+       FROM audit_logs WHERE organization_id = ?`,
       [ORGANIZATION_ID]
     );
     expect(audits).toHaveLength(1);
-    expect(audits[0]?.metadata).toMatchObject({ auditPhase: "intent" });
+    const [intent] = audits;
+    if (!intent) throw new Error("Expected the unresolved installation audit intent");
+    expect(intent).toEqual({ resource_id: expect.any(String), audit_phase: "intent" });
     expect(logger).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "sdp_api_credential_installation_audit_unresolved",
-        auditIntentId: audits[0]?.resource_id,
+        auditIntentId: intent.resource_id,
         connectionId: CONNECTION_ID,
         providerCredentialId: CREDENTIAL_ID,
         reasonCode: "completion_outcome_unknown",
@@ -766,35 +769,47 @@ describe("exact Custody Connection installation routes", () => {
       user_id: string;
       request_id: string;
       status: string;
-      metadata: Record<string, unknown>;
+      metadata: string;
+      audit_phase: string;
+      audit_intent_id: string | null;
+      target_resource_id: string | null;
+      target_credential_id: string | null;
+      target_project_id: string | null;
+      event: string | null;
+      failure_code: string | null;
     }>(
-      `SELECT resource_id, user_id, request_id, status, metadata::jsonb AS metadata FROM audit_logs
-        WHERE organization_id = ? ORDER BY ledger_sequence`,
+      `SELECT resource_id, user_id, request_id, status, metadata,
+              metadata::jsonb ->> 'auditPhase' AS audit_phase,
+              metadata::jsonb ->> 'auditIntentId' AS audit_intent_id,
+              metadata::jsonb -> 'target' ->> 'resourceId' AS target_resource_id,
+              metadata::jsonb -> 'target' -> 'metadata' ->> 'providerCredentialId' AS target_credential_id,
+              metadata::jsonb -> 'target' -> 'metadata' ->> 'projectId' AS target_project_id,
+              metadata::jsonb ->> 'event' AS event,
+              metadata::jsonb ->> 'failureCode' AS failure_code
+       FROM audit_logs WHERE organization_id = ? ORDER BY ledger_sequence`,
       [ORGANIZATION_ID]
     );
     expect(audits).toHaveLength(2);
-    expect(audits[0]).toMatchObject({
+    const [intent, outcome] = audits;
+    if (!intent || !outcome) throw new Error("Expected installation audit intent and outcome");
+    expect(intent).toMatchObject({
+      resource_id: expect.any(String),
       user_id: USER_ID,
       request_id: "req_provider_credential_installation",
-      metadata: {
-        auditPhase: "intent",
-        target: {
-          resourceId: CONNECTION_ID,
-          metadata: { providerCredentialId: CREDENTIAL_ID, projectId: PROJECT_ID },
-        },
-      },
+      audit_phase: "intent",
+      target_resource_id: CONNECTION_ID,
+      target_credential_id: CREDENTIAL_ID,
+      target_project_id: PROJECT_ID,
     });
-    expect(audits[1]).toMatchObject({
+    expect(outcome).toMatchObject({
       resource_id: CONNECTION_ID,
       user_id: USER_ID,
       request_id: "req_provider_credential_installation",
       status: "failure",
-      metadata: {
-        auditPhase: "outcome",
-        auditIntentId: audits[0]?.resource_id,
-        event: "provider_credential_installation_completion_failed",
-        failureCode: "credential_storage_failed",
-      },
+      audit_phase: "outcome",
+      audit_intent_id: intent.resource_id,
+      event: "provider_credential_installation_completion_failed",
+      failure_code: "credential_storage_failed",
     });
     const serialized = JSON.stringify(audits);
     expect(serialized).not.toContain(APP_SECRET);
@@ -953,6 +968,11 @@ describe("exact Custody Connection installation routes", () => {
       [ORGANIZATION_ID]
     );
     expect(intents).toHaveLength(2);
+    const [firstIntent, secondIntent] = intents;
+    if (!firstIntent || !secondIntent) throw new Error("Expected both completion audit intents");
+    expect(firstIntent.resource_id).toEqual(expect.any(String));
+    expect(secondIntent.resource_id).toEqual(expect.any(String));
+    expect(secondIntent.resource_id).not.toBe(firstIntent.resource_id);
     expect(
       await db.queryMany(
         `SELECT status, metadata::jsonb AS metadata FROM audit_logs
@@ -962,12 +982,12 @@ describe("exact Custody Connection installation routes", () => {
     ).toMatchObject([
       {
         status: "success",
-        metadata: { auditIntentId: intents[1]?.resource_id, completionStatus: "success" },
+        metadata: { auditIntentId: secondIntent.resource_id, completionStatus: "success" },
       },
       {
         status: "failure",
         metadata: {
-          auditIntentId: intents[0]?.resource_id,
+          auditIntentId: firstIntent.resource_id,
           completionStatus: "retry_unknown",
           failureCode: "provider_response_unknown",
         },

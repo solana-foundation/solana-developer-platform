@@ -739,6 +739,10 @@ export const PROVIDER_CREDENTIAL_STATUSES = [
 ] as const;
 export type ProviderCredentialStatus = (typeof PROVIDER_CREDENTIAL_STATUSES)[number];
 
+export function isProviderCredentialCreationInProgress(status: ProviderCredentialStatus): boolean {
+  return status === "creating";
+}
+
 /**
  * Which record actually backs signing for a provider in the current scope.
  *
