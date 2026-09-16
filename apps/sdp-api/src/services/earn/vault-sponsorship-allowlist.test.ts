@@ -37,11 +37,13 @@ import { createVaultDeadline } from "./vault-deadline";
  * runs in the Kora live-smoke shard.
  */
 const HERE = dirname(fileURLToPath(import.meta.url));
+const HARNESS_COMPOSE = resolve(HERE, "../../../../../infra/kora/docker-compose.yml");
 const HARNESS_CONFIG = resolve(HERE, "../../../../../infra/kora/kora.toml");
 const SURFPOOL_SHIM = resolve(
   HERE,
   "../../../../../packages/sdp-api-integration/scripts/kora-surfpool-shim.mjs"
 );
+const LEGACY_KORA_IMAGE = "ghcr.io/solana-foundation/kora:e9bc391";
 
 const BASE58_ENTRY = /"([1-9A-HJ-NP-Za-km-z]{32,44})"/g;
 
@@ -72,6 +74,22 @@ function shimAllowedTokens(): readonly string[] {
   }
   const entries = block[1].match(BASE58_ENTRY) ?? [];
   return entries.map((entry) => entry.replaceAll('"', ""));
+}
+
+/** The image used when KORA_IMAGE does not override the local harness. */
+function harnessDefaultKoraImage(): string {
+  const source = readFileSync(HARNESS_COMPOSE, "utf8");
+  const match = /^\s*image:\s*\$\{KORA_IMAGE:-([^}]+)\}\s*$/m.exec(source);
+  if (!match?.[1]) {
+    throw new Error(`Could not find the default KORA_IMAGE in ${HARNESS_COMPOSE}`);
+  }
+  return match[1];
+}
+
+/** The effective transfer-hook policy, ignoring comments that explain its omission. */
+function harnessTransferHookPolicy(): string | undefined {
+  const source = readFileSync(HARNESS_CONFIG, "utf8");
+  return /^\s*transfer_hook_policy\s*=\s*"([^"]+)"\s*(?:#.*)?$/m.exec(source)?.[1];
 }
 
 const HARNESS_CLUSTER = "devnet" as const;
@@ -124,5 +142,21 @@ describe("Kora harness allowed_tokens covers every devnet Earn deposit mint", ()
 
   it("is mirrored verbatim by the Surfpool shim", () => {
     expect(shimAllowedTokens()).toEqual(tokens);
+  });
+});
+
+describe("Kora harness image and transfer-hook policy stay compatible", () => {
+  it("requires allow_all when the default image changes from the legacy pin", () => {
+    const image = harnessDefaultKoraImage();
+    const policy = harnessTransferHookPolicy();
+
+    if (image === LEGACY_KORA_IMAGE) {
+      expect(policy, `${LEGACY_KORA_IMAGE} rejects transfer_hook_policy`).toBeUndefined();
+      return;
+    }
+
+    expect(policy, `set transfer_hook_policy when bumping ${image} from ${LEGACY_KORA_IMAGE}`).toBe(
+      "allow_all"
+    );
   });
 });
