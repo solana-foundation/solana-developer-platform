@@ -1829,6 +1829,8 @@ describe("DvP routes", () => {
           observedAmount: null,
           frozen: null,
           outcome: "awaiting",
+          // No sweep has read this escrow's history yet.
+          transfers: [],
         });
         expect(trade.legs.b).toEqual({
           party: {
@@ -1849,6 +1851,7 @@ describe("DvP routes", () => {
           observedAmount: null,
           frozen: null,
           outcome: "awaiting",
+          transfers: [],
         });
         // The inbound shape carries neither the creator's derived kind nor the
         // funding claims — both belong to organizations that can read the row.
