@@ -13,7 +13,8 @@ import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
-import type { AppContext, WebhookProcessor } from "./processor";
+import type { Env } from "@/types/env";
+import type { WebhookProcessor } from "./processor";
 
 function readMoonpayWebhookKey(
   env: Record<string, string | undefined>,
@@ -137,12 +138,12 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, Moonpa
     return moonpayTransactionSettlementEvent(transactionData.data);
   }
 
-  async process(c: AppContext, _environment: SdpEnvironment, event: MoonpaySettlementEvent) {
+  async process(env: Env, _environment: SdpEnvironment, event: MoonpaySettlementEvent) {
     if (event.kind === "ignore") {
       getLogger().info(`[moonpay webhook] ignored event: ${event.reason}`);
       return;
     }
-    const transfer = await createSystemPaymentsRepository(c.env).setProviderReferenceIfEmpty({
+    const transfer = await createSystemPaymentsRepository(env).setProviderReferenceIfEmpty({
       provider: event.provider,
       transferId: event.transferId,
       providerReference: event.reference,
@@ -154,6 +155,6 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, Moonpa
       );
       return;
     }
-    await applyRampSettlementEvent(c.env, event);
+    await applyRampSettlementEvent(env, event);
   }
 }

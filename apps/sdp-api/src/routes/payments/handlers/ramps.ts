@@ -812,8 +812,8 @@ export async function advanceCounterpartyRequirements(
         getCryptoRailAssetLabel(input.assetRail)
       );
       const resolution = await ensureBvnkPaymentRule(
-        c,
         rampRuntime(c),
+        getCounterpartiesRepository(c),
         input.counterparty,
         input.projectId,
         customer,
@@ -1046,7 +1046,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(
         getCryptoRailAssetLabel(input.assetRail)
       );
-      const bvnkCustomer = await readBvnkCustomerLink(c, counterparty);
+      const bvnkCustomer = await readBvnkCustomerLink(c.env, counterparty);
       if (!bvnkCustomer) {
         throw counterpartyNotProvisioned("bvnk", "onramp", { customerStatus: undefined });
       }

@@ -10,6 +10,7 @@
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
+import { replayRampWebhookEvents } from "@/services/jobs/replay-ramp-webhook-events";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import type { Env } from "@/types/env";
 
@@ -24,7 +25,11 @@ export interface PendingTransfersReconciliationDeps {
 
 export function runPendingTransfersReconciliation(deps: PendingTransfersReconciliationDeps): void {
   const work = async () => {
-    await Promise.all([trackPendingTransfers(deps.env), reconcileSponsorshipBudgets(deps.env)]);
+    await Promise.all([
+      trackPendingTransfers(deps.env),
+      reconcileSponsorshipBudgets(deps.env),
+      replayRampWebhookEvents(deps.env),
+    ]);
   };
 
   // Both branches must hand bg.run() a promise — never invoke `work` eagerly,
