@@ -6,6 +6,7 @@ import { getDb } from "@/db";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { AuditService } from "@/services/audit.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
@@ -202,18 +203,65 @@ describe("Payments routes — on-chain transfers", () => {
       .first<{ metadata: string; status: string }>();
     expect(outcome?.status).toBe("success");
     const outcomeMetadata = JSON.parse(outcome?.metadata ?? "{}") as Record<string, unknown>;
-    expect(outcomeMetadata.auditPhase).toBe("outcome");
-    expect(outcomeMetadata.signature).toBe(body.data.transfer.signature);
+    expect(outcomeMetadata).toMatchObject({
+      auditPhase: "outcome",
+      signature: body.data.transfer.signature,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      tokenMint: SOL_MINT,
+      amount: "1",
+    });
+    expect(outcomeMetadata.sourceAddress).toBeTruthy();
+    expect(outcomeMetadata.slot).toBeTruthy();
 
     const intent = await getDb(env)
       .prepare(
-        `SELECT metadata FROM audit_logs
+        `SELECT resource_id, metadata FROM audit_logs
          WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
            AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
       )
       .bind(body.data.transfer.id)
-      .first<{ metadata: string }>();
+      .first<{ resource_id: string; metadata: string }>();
     expect(intent).toBeTruthy();
+    expect(outcomeMetadata.auditIntentId).toBe(intent?.resource_id);
+    const intentTarget = (
+      JSON.parse(intent?.metadata ?? "{}") as {
+        target?: { metadata?: Record<string, unknown> };
+      }
+    ).target?.metadata;
+    expect(intentTarget).toMatchObject({
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      tokenMint: SOL_MINT,
+      amount: "1",
+    });
+  });
+
+  it("settles the transfer as failed when audit-ledger admission is refused", async () => {
+    const beginSpy = vi
+      .spyOn(AuditService.prototype, "beginCritical")
+      .mockRejectedValueOnce(new Error("audit ledger unavailable"));
+
+    try {
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "1",
+        },
+        {}
+      );
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+
+      // The processing row must not survive as a replayable success: a ledger
+      // refusal settles it failed instead of stranding it.
+      const transfers = await listTransferRows();
+      expect(transfers).toHaveLength(1);
+      expect(transfers[0]?.status).toBe("failed");
+      expect(transfers[0]?.error).toContain("Audit ledger admission failed");
+    } finally {
+      beginSpy.mockRestore();
+    }
   });
 
   it("appends a failure outcome when transfer execution is refused before submission", async () => {

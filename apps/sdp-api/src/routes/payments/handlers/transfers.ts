@@ -597,7 +597,8 @@ async function settleTransferExecutionFailure(
   transfer: TransferRow,
   recorder: { submittedRow(): Promise<TransferRow | null> },
   error: unknown,
-  toPayload: (row: TransferRow) => Record<string, unknown>
+  toPayload: (row: TransferRow) => Record<string, unknown>,
+  onConcurrentChainVerdict?: (settled: TransferRow) => Promise<void>
 ): Promise<Response> {
   const submitted = await recorder.submittedRow();
   if (submitted && !isDefiniteExecutionFailure(error)) {
@@ -614,6 +615,7 @@ async function settleTransferExecutionFailure(
     })
   );
   if (settled.status !== "failed") {
+    await onConcurrentChainVerdict?.(settled);
     return success(c, toPayload(settled));
   }
   throw mapTransferExecutionError(error);
@@ -850,19 +852,33 @@ export async function createTransfer(c: AppContext) {
   // the chain; a submission whose confirmation never lands leaves the intent
   // unresolved, which is exactly the state reconciliation pages on.
   const auditService = new AuditService(getDb(c.env));
-  const auditIntent = await auditService.beginCritical(c, {
-    action: "transfer",
-    resourceType: "payment_transfer",
-    resourceId: transfer.id,
-    metadata: {
-      custodyWalletId: operation.sourceWallet.id,
-      walletId: operation.sourceWallet.walletId,
-      sourceAddress: operation.sourceWallet.publicKey,
-      destination: body.destination,
-      token: operation.token,
-      amount: operation.amount,
-    },
-  });
+  let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>>;
+  try {
+    auditIntent = await auditService.beginCritical(c, {
+      action: "transfer",
+      resourceType: "payment_transfer",
+      resourceId: transfer.id,
+      metadata: {
+        custodyWalletId: operation.sourceWallet.id,
+        walletId: operation.sourceWallet.walletId,
+        sourceAddress: operation.sourceWallet.publicKey,
+        destination: body.destination,
+        // Named tokenMint: a bare "token" key is scrubbed as a credential by
+        // the audit redaction policy, and a mint address is not a secret.
+        tokenMint: operation.token,
+        amount: operation.amount,
+      },
+    });
+  } catch (error) {
+    // Nothing was broadcast, but the processing row is already durable and an
+    // idempotent retry would replay it as if it had executed. Settle it failed
+    // so the ledger refusal cannot mint an unaudited, replayable transfer.
+    await updateTransferRecord(c, transfer, {
+      status: "failed",
+      error: "Audit ledger admission failed before execution",
+    });
+    throw error;
+  }
   try {
     if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(
@@ -913,9 +929,23 @@ export async function createTransfer(c: AppContext) {
     return success(c, { transfer: mapTransferRow(updated) });
   } catch (error) {
     try {
-      return await settleTransferExecutionFailure(c, transfer, submissionStore, error, (row) => ({
-        transfer: mapTransferRow(row),
-      }));
+      return await settleTransferExecutionFailure(
+        c,
+        transfer,
+        submissionStore,
+        error,
+        (row) => ({ transfer: mapTransferRow(row) }),
+        async (settled) => {
+          // A concurrent writer (reconciliation, a replayed submission) already
+          // proved the chain outcome; the intent resolves with that verdict
+          // instead of dangling on an operation whose result is known.
+          if (isSuccessfulPaymentTransferStatus(settled.status)) {
+            await auditService.completeCritical(c, auditIntent, {
+              metadata: { signature: settled.signature, slot: settled.slot?.toString() ?? null },
+            });
+          }
+        }
+      );
     } catch (settledError) {
       await auditService.completeCritical(c, auditIntent, {
         status: "failure",
