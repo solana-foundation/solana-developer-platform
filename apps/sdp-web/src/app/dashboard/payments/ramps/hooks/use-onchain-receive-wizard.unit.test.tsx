@@ -40,7 +40,7 @@ function wrapper({ children }: { children: ReactNode }) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
-        scopeRefreshFallback={<div>Loading workspace</div>}
+        scopeRefreshFallback={null}
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: false,
