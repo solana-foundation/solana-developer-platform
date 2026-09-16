@@ -153,10 +153,13 @@ async function performTransferUnderKey(
   try {
     outcome = await createTransfer(submission, t, idempotencyKey);
   } catch (error) {
-    // A 4xx is a definitive refusal and frees the key. A 5xx or a network
+    // A provider session always names the same payment, including after an
+    // expired login rejects a callback retry. Never release its recorded key.
+    // A 4xx for a new manual send frees the key. A 5xx or a network
     // failure keeps it: the API may have recorded the transfer before the
     // answer was lost. A 409 under our own key keeps it too.
     if (
+      !providerSession &&
       error instanceof TransferRequestError &&
       error.status >= 400 &&
       error.status < 500 &&

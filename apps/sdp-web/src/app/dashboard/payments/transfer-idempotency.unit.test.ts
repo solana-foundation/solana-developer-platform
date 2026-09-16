@@ -212,6 +212,30 @@ describe("concurrent transfer submissions", () => {
 });
 
 describe("provider session retries", () => {
+  it("retains a successful payment key across an unauthorized callback retry", async () => {
+    let unauthorized = false;
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      unauthorized
+        ? Response.json({ error: { message: "Session expired" } }, { status: 401 })
+        : Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const t: Translate = (key) => key;
+    await sendTransferUnderKey(SUBMISSION, t, "session_1");
+    unauthorized = true;
+    await expect(sendTransferUnderKey(SUBMISSION, t, "session_1")).rejects.toThrow(
+      "Session expired"
+    );
+    unauthorized = false;
+    resetTransferIdempotencyStateForTests();
+    await sendTransferUnderKey(SUBMISSION, t, "session_1");
+    const keys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
+    expect(keys[0]).toBeTruthy();
+    expect(new Set(keys).size).toBe(1);
+  });
+
   it("keeps one payment key after success and separates later sessions", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({
