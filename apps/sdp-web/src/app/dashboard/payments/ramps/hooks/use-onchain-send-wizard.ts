@@ -14,19 +14,8 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import type { CreateTransferInput } from "@/app/dashboard/payments/payments-workspace.data";
-import {
-  createTransfer,
-  fetchCounterpartyAccounts,
-  TransferRequestError,
-} from "@/app/dashboard/payments/payments-workspace.data";
-import {
-  claimTransferIdempotencyKey,
-  holdTransferIdempotencyKey,
-  isTransferKeyConflict,
-  releaseSettledTransferHold,
-  releaseTransferIdempotencyKey,
-  transferRequestFingerprint,
-} from "@/app/dashboard/payments/transfer-idempotency";
+import { fetchCounterpartyAccounts } from "@/app/dashboard/payments/payments-workspace.data";
+import { sendTransferUnderKey } from "@/app/dashboard/payments/transfer-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -294,17 +283,11 @@ export function useOnchainSendWizard({
     // Claimed BEFORE the await and durable per tab: a retry of this exact
     // payment (double press, timeout, reload) carries the SAME key, so the API
     // replays what it recorded instead of moving the money again.
-    const fingerprint = transferRequestFingerprint(submission);
-    // A hold whose approval has finished is not a hold any more: releasing it
-    // here is what keeps the next identical payment from replaying the old one.
-    await releaseSettledTransferHold(fingerprint);
-    const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
     try {
-      const outcome = await createTransfer(submission, t, idempotencyKey);
+      // Claims the key, lifts a hold whose approval has finished, holds it when
+      // one parks this payment, and retires it once the API has answered.
+      const { outcome } = await sendTransferUnderKey(submission, t);
       if (outcome.kind === "approval_pending") {
-        // The approval executor replays this request under the same key, so the
-        // key must outlive the person deciding.
-        holdTransferIdempotencyKey(fingerprint, outcome.approvalRequestId);
         setHeldApprovalRequestId(outcome.approvalRequestId);
         toast.info(t("DashboardPayments.onchainSend.approvalPendingTitle"), {
           id: toastId,
@@ -313,9 +296,6 @@ export function useOnchainSendWizard({
         });
         return;
       }
-      // The transfer row exists, so the key is spent: the next identical send is
-      // a new payment rather than a retry of this one.
-      releaseTransferIdempotencyKey(fingerprint);
       const transfer = outcome.transfer;
       setTransferResult(transfer);
       toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
@@ -326,17 +306,6 @@ export function useOnchainSendWizard({
         position: "bottom-right",
       });
     } catch (error) {
-      // A 4xx is a definitive refusal and retires the key. A 5xx or a network
-      // failure keeps it: the API may have recorded the transfer before the
-      // answer was lost. A 409 under our own key keeps it too.
-      if (
-        error instanceof TransferRequestError &&
-        error.status >= 400 &&
-        error.status < 500 &&
-        !isTransferKeyConflict(error.status)
-      ) {
-        releaseTransferIdempotencyKey(fingerprint);
-      }
       toast.error(t("DashboardPayments.onchainSend.transferFailed"), {
         id: toastId,
         description:

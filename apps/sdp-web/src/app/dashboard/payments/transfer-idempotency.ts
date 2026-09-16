@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  APPROVAL_REQUEST_STATUSES,
+  canReleaseApprovalPaymentKey,
+  WALLET_OPERATION_STATUSES,
+} from "@sdp/types";
 import { z } from "zod";
 import {
   createPaymentIdempotencyStore,
@@ -25,10 +30,13 @@ import {
  */
 
 const store = createPaymentIdempotencyStore("sdp:payments:transfer:idempotency:v1");
+type TransferSendResult = { outcome: CreateTransferOutcome; fingerprint: string };
+const pendingSends = new Map<string, Promise<TransferSendResult>>();
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
 export function resetTransferIdempotencyStateForTests(): void {
   store.resetForTests();
+  pendingSends.clear();
 }
 
 /**
@@ -56,14 +64,11 @@ export function holdTransferIdempotencyKey(fingerprint: string, approvalRequestI
   store.hold(fingerprint, approvalRequestId);
 }
 
-/** A decided approval: its request will not execute again under the held key. */
-const SETTLED_APPROVAL_STATUSES = new Set(["rejected", "canceled", "expired", "failed"]);
-
 const approvalStatusSchema = z.object({
   data: z.object({
     approvalRequest: z.looseObject({
-      status: z.string().min(1),
-      operation: z.looseObject({ status: z.string().min(1) }).optional(),
+      status: z.enum(APPROVAL_REQUEST_STATUSES),
+      operation: z.looseObject({ status: z.enum(WALLET_OPERATION_STATUSES) }).optional(),
     }),
   }),
 });
@@ -106,10 +111,7 @@ export async function releaseSettledTransferHold(fingerprint: string): Promise<v
     return;
   }
   const { status, operation } = parsed.data.data.approvalRequest;
-  const finished =
-    SETTLED_APPROVAL_STATUSES.has(status) ||
-    (status === "approved" && operation?.status !== undefined && operation.status !== "executing");
-  if (finished) {
+  if (canReleaseApprovalPaymentKey(status, operation?.status)) {
     store.release(fingerprint);
   }
 }
@@ -134,16 +136,19 @@ export function isTransferKeyConflict(status: number): boolean {
  *
  * @param submission - The payment.
  * @param t - Translator, for the API's refusal message.
- * @returns What the API answered, and the fingerprint, so a caller that keeps
- *   going (a widget mid-flow) can release the key itself.
+ * @returns What the API answered, and the fingerprint of the payment.
  */
-export async function sendTransferUnderKey(
+async function performTransferUnderKey(
   submission: CreateTransferInput,
-  t: Translate
-): Promise<{ outcome: CreateTransferOutcome; fingerprint: string }> {
-  const fingerprint = transferRequestFingerprint(submission);
-  await releaseSettledTransferHold(fingerprint);
+  t: Translate,
+  fingerprint: string,
+  providerSession: boolean
+): Promise<TransferSendResult> {
+  if (!providerSession) await releaseSettledTransferHold(fingerprint);
   const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
+  // A provider may repeat its signature callback after a lost event response.
+  // Its session still names the same payment, even after the transfer lands.
+  if (providerSession) store.hold(fingerprint);
   let outcome: CreateTransferOutcome;
   try {
     outcome = await createTransfer(submission, t, idempotencyKey);
@@ -162,7 +167,36 @@ export async function sendTransferUnderKey(
     throw error;
   }
   if (outcome.kind === "approval_pending") {
+    // The approval executor replays this request under the same key, so the key
+    // outlives the person deciding.
     holdTransferIdempotencyKey(fingerprint, outcome.approvalRequestId);
+  } else if (!providerSession) {
+    // The transfer row exists, so the key is spent: the next identical send is a
+    // new payment rather than a retry of this one.
+    releaseTransferIdempotencyKey(fingerprint);
   }
   return { outcome, fingerprint };
+}
+
+/** Joins simultaneous submissions before either can release or claim a held key. */
+export function sendTransferUnderKey(
+  submission: CreateTransferInput,
+  t: Translate,
+  providerSessionId?: string
+): Promise<TransferSendResult> {
+  const payment = transferRequestFingerprint(submission);
+  const fingerprint =
+    providerSessionId === undefined ? payment : JSON.stringify([providerSessionId, payment]);
+  const pending = pendingSends.get(fingerprint);
+  if (pending) return pending;
+  const send = performTransferUnderKey(
+    submission,
+    t,
+    fingerprint,
+    providerSessionId !== undefined
+  ).finally(() => {
+    if (pendingSends.get(fingerprint) === send) pendingSends.delete(fingerprint);
+  });
+  pendingSends.set(fingerprint, send);
+  return send;
 }

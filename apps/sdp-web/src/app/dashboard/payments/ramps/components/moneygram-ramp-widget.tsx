@@ -3,14 +3,9 @@
 import type { MoneygramRampEvent, PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
-import { address } from "@solana/kit";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { postMoneygramRampEvent } from "@/app/dashboard/payments/payments-workspace.data";
-import {
-  releaseTransferIdempotencyKey,
-  sendTransferUnderKey,
-} from "@/app/dashboard/payments/transfer-idempotency";
 import { useTranslations } from "@/i18n/provider";
 import { MONEYGRAM_SDK_URL } from "@/lib/moneygram-sdk";
 import {
@@ -22,6 +17,7 @@ import {
   buildOnrampTransactionPrefill,
   type MoneygramTransactionPrefill,
 } from "./moneygram-prefill";
+import { signMoneygramTransfer } from "./moneygram-sign-transaction";
 
 const SESSION_REFRESH_MS = 50 * 60 * 1000;
 
@@ -208,55 +204,17 @@ export function MoneygramRampWidget({
             direction === "onramp"
               ? buildOnrampTransactionPrefill(cryptoAmount, cryptoAsset)
               : buildOfframpTransactionPrefill(fiatCurrency, cryptoAsset, cryptoAmount),
-          onSignTransaction: async (tx) => {
-            if (tx.chain !== "solana" || tx.asset !== cryptoAsset) {
-              throw new Error(
-                t("DashboardPayments.ramps.unsupportedMoneygramTransaction", {
-                  asset: tx.asset,
-                  chain: tx.chain,
-                })
-              );
-            }
-            if (!sourceTokenMint) {
-              throw new Error(t("DashboardPayments.ramps.sourceWalletNoUsdc"));
-            }
-            const submission = {
-              sourceCustodyWalletId: sourceWalletId,
-              destination: tx.to,
-              token: address(sourceTokenMint),
-              amount: tx.amount,
-              ...(tx.memo ? { memo: tx.memo } : {}),
-            };
-            // The widget can ask to sign again while an approval still holds the
-            // first attempt, and without a key each attempt is a new payment:
-            // approve two of them and the money goes out twice.
-            const { outcome, fingerprint } = await sendTransferUnderKey(submission, t);
-            // MoneyGram needs a signature now; an approval answers later, so the
-            // widget is told plainly that nothing was sent rather than "failed".
-            if (outcome.kind === "approval_pending") {
-              // The key is held, so a second attempt joins that payment.
-              throw new Error(t("DashboardPayments.ramps.transferHeldForApproval"));
-            }
-            releaseTransferIdempotencyKey(fingerprint);
-            const transfer = outcome.transfer;
-            if (!transfer.signature) {
-              throw new Error(
-                t("DashboardPayments.ramps.transferSignatureMissing", {
-                  status: transfer.status,
-                })
-              );
-            }
-            signedTransferIdRef.current = transfer.id;
-            await postMoneygramRampEvent(
-              {
-                kind: "signed",
-                sessionId,
-                cryptoTransferId: transfer.id,
+          onSignTransaction: async (tx) =>
+            signMoneygramTransfer(tx, {
+              cryptoAsset,
+              sessionId,
+              sourceWalletId,
+              sourceTokenMint,
+              onSigned: (transferId) => {
+                signedTransferIdRef.current = transferId;
               },
-              t
-            );
-            return transfer.signature;
-          },
+              t,
+            }),
           onComplete: (transaction) => {
             if (direction === "onramp") {
               post({
