@@ -185,11 +185,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     act(() => rendered.result.current.setField("fullName", "Ada Lovelace"));
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = rendered.result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "",
-        fiatCurrency: "USD",
-      });
+      submitPromise = rendered.result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     await release("POST", COLLECT_ACCOUNT);
     await submitPromise;
@@ -229,11 +232,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     expect(result.current.isComplete).toBe(true);
 
     act(() => {
-      void result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "",
-        fiatCurrency: "USD",
-      });
+      void result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     const reuseRequest = await release("POST", READY_US_ADVANCE);
     expect(reuseRequest.body).toMatchObject({
@@ -252,11 +258,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
 
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "",
-        fiatCurrency: "USD",
-      });
+      submitPromise = result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     await release("POST", COLLECT_ACCOUNT);
     await submitPromise;
@@ -275,11 +284,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
 
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "",
-        fiatCurrency: "USD",
-      });
+      submitPromise = result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     await release("POST", READY_US_ADVANCE);
     await submitPromise;
@@ -306,11 +318,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     act(() => result.current.setField("destinationCountry", "US"));
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "",
-        fiatCurrency: "USD",
-      });
+      submitPromise = result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     expect(result.current.isAdvancing).toBe(true);
 
@@ -330,11 +345,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     act(() => result.current.setField("destinationCountry", "US"));
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "",
-        fiatCurrency: "USD",
-      });
+      submitPromise = result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     await release("POST", READY_US_ADVANCE);
     await submitPromise;
@@ -351,11 +369,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     act(() => result.current.setField("paymentRails", "SPEI"));
     act(() => result.current.setField("bankAccount.clabe", "002010077777777771"));
     act(() => {
-      void result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "",
-        fiatCurrency: "USD",
-      });
+      void result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     const newAccountRequest = await release("POST", READY_US_ADVANCE);
     expect(newAccountRequest.body).not.toHaveProperty("providerAccountId");
@@ -391,11 +412,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
 
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = rendered.result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "wlt_behavior",
-        fiatCurrency: "USD",
-      });
+      submitPromise = rendered.result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "wlt_behavior",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     await release("POST", provisioning);
     await submitPromise;
@@ -451,11 +475,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
 
     let firstSubmit: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      firstSubmit = rendered.result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "wlt_behavior",
-        fiatCurrency: "USD",
-      });
+      firstSubmit = rendered.result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "wlt_behavior",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     await release("POST", provisioning);
     await firstSubmit;
@@ -468,11 +495,14 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     // advance's cached ready verdict must not answer for it.
     let secondSubmit: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      secondSubmit = rendered.result.current.submitRequirements({
-        assetRail: "usdc.solana",
-        destinationCustodyWalletId: "wlt_behavior",
-        fiatCurrency: "USD",
-      });
+      secondSubmit = rendered.result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "wlt_behavior",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
     });
     await release("POST", provisioning);
     await secondSubmit;

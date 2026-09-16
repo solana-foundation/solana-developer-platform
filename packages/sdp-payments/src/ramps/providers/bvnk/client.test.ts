@@ -71,7 +71,7 @@ const customerSummary = {
   reference: "customer-reference",
   status: "PENDING",
   type: "INDIVIDUAL",
-  model: "EMBEDDED_BVNK_MANAGED",
+  model: "EMBEDDED",
   useCase: "STABLECOIN_PAYOUTS",
 };
 
@@ -117,7 +117,7 @@ describe("BvnkRampClient v2 customer surfaces", () => {
       (error: unknown) => {
         assert.equal(error instanceof SdpPaymentsError, true);
         if (!(error instanceof SdpPaymentsError)) return false;
-        assert.equal(error.message, "BVNK request failed with status 400");
+        assert.equal(error.message, "BVNK request failed with status 400: Validation failed");
         assert.deepEqual(error.details, {
           errors: { "individual.birthCountryCode": "Required" },
         });
@@ -160,48 +160,6 @@ describe("BvnkRampClient v2 customer surfaces", () => {
       }
     );
   });
-
-  it("creates a v3 contact with PII in the request body and a deterministic key from the caller", async () => {
-    const { requests } = queueFetch(respond({ contactId: "contact-id" }, 201));
-
-    const result = await new BvnkRampClient().createContactV3(runtimeContext, {
-      idempotencyKey: "contact-key",
-      entity: {
-        type: "INDIVIDUAL",
-        relationshipType: "SELF_OWNED",
-        firstName: "Jane",
-        lastName: "Doe",
-        dateOfBirth: "1984-06-30",
-        address: {
-          addressLine1: "1 Main Street",
-          city: "Austin",
-          postalCode: "78701",
-          country: "US",
-          region: "TX",
-        },
-      },
-    });
-
-    assert.deepEqual(result, { contactId: "contact-id" });
-    assert.equal(new URL(requests[0].url).pathname, "/platform/v3/contacts");
-    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "contact-key");
-    assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
-      entity: {
-        type: "INDIVIDUAL",
-        relationshipType: "SELF_OWNED",
-        firstName: "Jane",
-        lastName: "Doe",
-        dateOfBirth: "1984-06-30",
-        address: {
-          addressLine1: "1 Main Street",
-          city: "Austin",
-          postalCode: "78701",
-          country: "US",
-          region: "TX",
-        },
-      },
-    });
-  });
 });
 
 describe("BvnkRampClient v2 agreement surfaces", () => {
@@ -230,7 +188,6 @@ describe("BvnkRampClient v2 agreement surfaces", () => {
   it("gets agreement content", async () => {
     const response = {
       downloadUrl: "https://files.example/agreement.pdf",
-      filename: "agreement.pdf",
       expiresAt: null,
     };
     queueFetch(respond(response));

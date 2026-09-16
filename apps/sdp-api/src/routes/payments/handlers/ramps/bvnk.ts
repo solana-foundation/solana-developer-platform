@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type {
@@ -8,12 +9,8 @@ import type {
   BvnkLedgerWalletV2,
 } from "@sdp/payments/ramps/providers/bvnk/client";
 import {
-  buildBvnkContactRequest,
   buildBvnkCustomerRequest,
-  bvnkOfframpAccountType,
-  bvnkOfframpFields,
-  bvnkOnrampFields,
-  isBvnkOfframpCurrency,
+  parseBvnkResidenceCountry,
 } from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import {
   type BvnkCustomerResolution,
@@ -41,12 +38,19 @@ import {
   readBvnkOnrampPaymentRuleState,
   readBvnkWallets,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  bvnkOfframpAccountType,
+  bvnkOfframpFields,
+  bvnkOnrampFields,
+  isBvnkOfframpCurrency,
+} from "@sdp/payments/ramps/providers/bvnk/requirements";
 import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type {
   BvnkBankFundingDetails,
   BvnkPaymentRampInstruction,
+  CountryCode,
   CryptoRailId,
   PaymentRampQuote,
 } from "@sdp/types";
@@ -65,13 +69,21 @@ import type {
 import {
   type BvnkCustomerProviderAccountMetadata,
   bvnkCustomerProviderAccountMetadataSchema,
+  type CounterpartyProviderAccountRow,
+  type CounterpartyProviderAccountsRepository,
 } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
-import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  counterpartyNotProvisioned,
+  internalError,
+  providerUnavailable,
+} from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
@@ -414,6 +426,59 @@ export type BvnkCustomerEnsureResult =
   | { requirements: CounterpartyRequirements };
 
 /**
+ * Builds the agreement-consent requirement for the pending agreements. Document
+ * URLs are presigned per response and never persisted.
+ *
+ * @param c - Request context used for JIT agreement content URLs.
+ * @param direction - Ramp direction used in the requirement response.
+ * @param agreements - Pending agreements awaiting consent.
+ * @returns The agreement-required requirement with JIT document URLs.
+ */
+async function bvnkAgreementRequired(
+  c: AppContext,
+  direction: RampDirection,
+  agreements: readonly { id: string; name: string; description: string }[]
+): Promise<CounterpartyRequirements> {
+  return {
+    provider: "bvnk",
+    direction,
+    status: "customer_agreement_required",
+    agreements: await Promise.all(
+      agreements.map(async (agreement) => {
+        const content = await RAMP_PROVIDER_CLIENTS.bvnk.getAgreementContentV2(rampRuntime(c), {
+          id: agreement.id,
+        });
+        return {
+          id: agreement.id,
+          name: agreement.name,
+          description: agreement.description,
+          downloadUrl: content.downloadUrl,
+        };
+      })
+    ),
+  };
+}
+
+/**
+ * Builds the collect-counterparty requirement for a residence country.
+ *
+ * @param direction - Ramp direction used in the requirement response.
+ * @param residenceCountryCode - Tax-residence country the fields were minted for.
+ * @returns The collect-counterparty requirement with the residence fields.
+ */
+export function bvnkCollectCounterparty(
+  direction: RampDirection,
+  residenceCountryCode: CountryCode
+): CounterpartyRequirements {
+  return {
+    provider: "bvnk",
+    direction,
+    status: "collect_counterparty",
+    fields: bvnkOnrampFields(residenceCountryCode),
+  };
+}
+
+/**
  * Builds agreement requirements from a BVNK working set.
  *
  * @param c - Request context used for provider access.
@@ -427,24 +492,28 @@ async function bvnkAgreementDetails(
   agreements: BvnkAgreementsV2
 ): Promise<CounterpartyRequirements> {
   const pending = agreements.agreements.filter((agreement) => agreement.status !== "ACCEPTED");
-  const agreementDetails = await Promise.all(
-    pending.map(async (agreement) => {
-      const content = await RAMP_PROVIDER_CLIENTS.bvnk.getAgreementContentV2(rampRuntime(c), {
-        id: agreement.id,
-      });
-      return {
-        id: agreement.id,
-        filename: content.filename,
-        downloadUrl: content.downloadUrl,
-      };
-    })
-  );
-  return {
-    provider: "bvnk",
+  return bvnkAgreementRequired(
+    c,
     direction,
-    status: "customer_agreement_required",
-    agreements: agreementDetails,
-  };
+    pending.map((agreement) => ({
+      id: agreement.id,
+      name: agreement.name,
+      description: agreement.description,
+    }))
+  );
+}
+
+/**
+ * @param metadata - Stored BVNK customer-link metadata.
+ * @returns The residence country the link was minted for.
+ * @throws When the link predates residence-first onboarding.
+ */
+function requireBvnkResidenceCountry(metadata: BvnkCustomerProviderAccountMetadata): CountryCode {
+  const residenceCountryCode = metadata.residenceCountryCode;
+  if (residenceCountryCode === undefined) {
+    throw internalError("BVNK customer-link metadata is missing residence country.");
+  }
+  return residenceCountryCode;
 }
 
 type BvnkAgreementEntries = NonNullable<
@@ -459,63 +528,85 @@ type BvnkAgreementEntries = NonNullable<
  * @param metadata - Stored BVNK customer-link metadata.
  * @returns The next stored agreement requirement, or null when customer resolution may continue.
  */
-export async function bvnkCustomerRequirementsFromMetadata(
-  c: AppContext,
-  direction: RampDirection,
+export type BvnkStoredStage =
+  | { kind: "agreements_pending"; agreements: { id: string; name: string; description: string }[] }
+  | { kind: "collect_counterparty"; residenceCountryCode: CountryCode };
+
+/**
+ * Reads the pre-customer stage recorded on the BVNK customer-link row without
+ * any provider call, so callers can gate or branch on it before deciding
+ * whether the stage is actually presented to the client.
+ *
+ * @param metadata - Stored BVNK customer-link metadata.
+ * @returns The pending agreements, the collect step, or null once the customer exists.
+ */
+export function bvnkStoredStage(
   metadata: BvnkCustomerProviderAccountMetadata
-): Promise<CounterpartyRequirements | null> {
+): BvnkStoredStage | null {
   const agreements = metadata.agreements;
-  if (!agreements) {
+  if (agreements === undefined) {
     return null;
   }
-  const entries = Object.entries(agreements.entries);
-  const pending = entries.filter(([, entry]) => entry.status.toUpperCase() !== "ACCEPTED");
+  const pending = Object.entries(agreements.entries)
+    .filter(([, entry]) => entry.status.toUpperCase() !== "ACCEPTED")
+    .map(([id, entry]) => ({ id, name: entry.name, description: entry.description }));
   if (pending.length > 0) {
-    if (metadata.status === undefined) {
-      return {
-        provider: "bvnk",
-        direction,
-        status: "customer_pending_agreement_acceptance",
-      };
-    }
-    const details = await Promise.all(
-      pending.map(async ([id]) => {
-        const content = await RAMP_PROVIDER_CLIENTS.bvnk.getAgreementContentV2(rampRuntime(c), {
-          id,
-        });
-        return {
-          id,
-          filename: content.filename,
-          downloadUrl: content.downloadUrl,
-        };
-      })
-    );
-    return {
-      provider: "bvnk",
-      direction,
-      status: "customer_agreement_required",
-      agreements: details,
-    };
+    return { kind: "agreements_pending", agreements: pending };
   }
   if (metadata.status === undefined) {
     return {
-      provider: "bvnk",
-      direction,
-      status: "collect_counterparty",
-      fields: bvnkOnrampFields(),
+      kind: "collect_counterparty",
+      residenceCountryCode: requireBvnkResidenceCountry(metadata),
     };
   }
   return null;
 }
 
 /**
- * Persists a BVNK agreement relay before customer creation.
+ * Presents a stored stage to the client; the agreement step mints its
+ * presigned document URLs here and nowhere earlier.
+ *
+ * @param c - Request context used for JIT agreement content URLs.
+ * @param direction - Ramp direction used in the requirement response.
+ * @param stage - Stored stage from {@link bvnkStoredStage}.
+ * @returns The client-facing requirement for the stage.
+ */
+export function presentBvnkStoredStage(
+  c: AppContext,
+  direction: RampDirection,
+  stage: BvnkStoredStage
+): Promise<CounterpartyRequirements> {
+  switch (stage.kind) {
+    case "agreements_pending":
+      return bvnkAgreementRequired(c, direction, stage.agreements);
+    case "collect_counterparty":
+      return Promise.resolve(bvnkCollectCounterparty(direction, stage.residenceCountryCode));
+    default: {
+      const exhaustive: never = stage;
+      throw internalError(`Unhandled BVNK stored stage: ${String(exhaustive)}`);
+    }
+  }
+}
+
+export async function bvnkCustomerRequirementsFromMetadata(
+  c: AppContext,
+  direction: RampDirection,
+  metadata: BvnkCustomerProviderAccountMetadata
+): Promise<CounterpartyRequirements | null> {
+  const stage = bvnkStoredStage(metadata);
+  return stage === null ? null : presentBvnkStoredStage(c, direction, stage);
+}
+
+/**
+ * Persists the BVNK customer link at agreement mint, before any PII besides
+ * the residence country is known.
  *
  * @param c - Request context used for repository access.
  * @param counterparty - Counterparty receiving the BVNK customer link.
  * @param projectId - Project that owns the counterparty.
  * @param workingSetId - BVNK agreements working-set id (the v2 customer UUID space).
  * @param entries - Required agreement state to persist.
+ * @param residenceCountryCode - Residence country the agreements were minted for.
  * @returns Nothing.
  */
 async function persistBvnkAgreementState(
@@ -523,7 +614,8 @@ async function persistBvnkAgreementState(
   counterparty: CounterpartyRow,
   projectId: string,
   workingSetId: string,
-  entries: BvnkAgreementEntries
+  entries: BvnkAgreementEntries,
+  residenceCountryCode: CountryCode
 ): Promise<void> {
   await getCounterpartiesRepository(c).upsertBvnkCustomerProviderData({
     counterpartyId: counterparty.id,
@@ -531,13 +623,14 @@ async function persistBvnkAgreementState(
     projectId,
     customer: {
       customerReference: workingSetId,
-      agreements: { relayedAt: new Date().toISOString(), entries },
+      residenceCountryCode,
+      agreements: { entries },
     },
   });
 }
 
 /**
- * Creates the BVNK contact and customer after agreement confirmation.
+ * Creates the BVNK customer after agreement confirmation.
  *
  * @param c - Request context used for persistence.
  * @param input - Provider inputs and transient customer data.
@@ -552,13 +645,8 @@ async function createBvnkCustomer(
     projectId: string;
     reference: string;
     individual: BvnkCustomerV2Individual;
-    collectedData: CollectedFieldData;
   }
 ): Promise<{ customer: BvnkCustomerResolution }> {
-  const contact = await input.client.createContactV3(input.ctx, {
-    idempotencyKey: (await hashString(`bvnk-contact:${input.counterparty.id}`)).slice(0, 36),
-    entity: buildBvnkContactRequest(input.collectedData),
-  });
   const created = await input.client.createCustomerV2(input.ctx, {
     idempotencyKey: (await hashString(`bvnk-customer:${input.counterparty.id}`)).slice(0, 36),
     useCase: "FIAT",
@@ -581,8 +669,8 @@ async function createBvnkCustomer(
     counterpartyId: input.counterparty.id,
     provider: "bvnk",
     id: existing.id,
-    set: { status: created.status, contactId: contact.contactId },
-    unset: [],
+    set: { status: created.status },
+    unset: ["residenceCountryCode"],
   });
   if (!updated) {
     throw internalError("BVNK customer status update escaped its tenant scope.");
@@ -624,13 +712,98 @@ export async function readBvnkCustomerLink(
 }
 
 /**
+ * Accepts every stored pending agreement and consumes the action response as
+ * BVNK's authoritative per-agreement answer (probe Q1d/Q4.1): a per-item
+ * `status: "ACCEPTED"` confirms the agreement so the customer create may
+ * proceed immediately; a per-item `error` fails the consent advance.
+ *
+ * @param c - Request context used for provider and repository access.
+ * @param input - Link row, stored working set, and the pending agreement ids to accept.
+ * @returns The collect-counterparty requirement for the accepted working set.
+ */
+async function acceptBvnkAgreements(
+  c: AppContext,
+  input: {
+    accounts: CounterpartyProviderAccountsRepository;
+    counterparty: CounterpartyRow;
+    projectId: string;
+    direction: RampDirection;
+    existing: CounterpartyProviderAccountRow;
+    metadata: BvnkCustomerProviderAccountMetadata;
+    pendingIds: readonly string[];
+  }
+): Promise<{ requirements: CounterpartyRequirements }> {
+  const agreements = input.metadata.agreements;
+  if (agreements === undefined) {
+    throw internalError("BVNK customer-link metadata is missing agreement state.");
+  }
+  const results = await RAMP_PROVIDER_CLIENTS.bvnk.respondAgreementsV2(rampRuntime(c), {
+    idempotencyKey: randomUUID(),
+    reference: buildBvnkCustomerExternalReference(input.counterparty.id),
+    actions: input.pendingIds.map((agreementId) => ({ agreementId, type: "ACCEPT" })),
+  });
+  const entries = { ...agreements.entries };
+  const respondedAt = new Date().toISOString();
+  const respondedIds = new Set<string>();
+  for (const item of results.content) {
+    respondedIds.add(item.agreementId);
+    if (item.error !== undefined) {
+      getLogger().warn(
+        {
+          counterparty_id: input.counterparty.id,
+          agreement_id: item.agreementId,
+          provider_error_code: item.error.code,
+          provider_error_message: item.error.message,
+        },
+        "[bvnk agreements] BVNK rejected an agreement action"
+      );
+      throw providerUnavailable("BVNK rejected an agreement action.");
+    }
+    if (item.status !== "ACCEPTED") {
+      throw internalError("BVNK agreement action response did not confirm acceptance.");
+    }
+    const entry = entries[item.agreementId];
+    if (entry === undefined) {
+      throw internalError(
+        "BVNK agreement action response named an agreement outside the stored working set."
+      );
+    }
+    entries[item.agreementId] = { ...entry, status: "ACCEPTED", respondedAt };
+  }
+  for (const agreementId of input.pendingIds) {
+    if (!respondedIds.has(agreementId)) {
+      throw internalError("BVNK agreement action response omitted a stored pending agreement.");
+    }
+  }
+  const updated = await input.accounts.patchAccountMetadata({
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "bvnk",
+    id: input.existing.id,
+    set: { agreements: { ...agreements, entries } },
+    unset: [],
+  });
+  if (!updated) {
+    throw internalError("BVNK agreement acceptance escaped its tenant scope.");
+  }
+  return {
+    requirements: bvnkCollectCounterparty(
+      input.direction,
+      requireBvnkResidenceCountry(input.metadata)
+    ),
+  };
+}
+
+/**
  * Creates or refreshes the BVNK v2 customer using transient collected PII.
  *
  * @param c - Request context used for provider and repository access.
  * @param counterparty - Counterparty whose provider state is resolved.
  * @param projectId - Project that owns the counterparty.
  * @param direction - Ramp direction used when returning an intermediate requirement.
- * @param collectedData - Flattened PII fields, never persisted.
+ * @param collectedData - Residence country on the first step; the full PII pack
+ * once agreements are accepted. Never persisted.
  * @param agreementConsent - Accepts every pending agreement in the working set when true.
  * @returns A refreshed customer or the next agreement requirement.
  */
@@ -657,20 +830,30 @@ export async function ensureBvnkCustomer(
 
   if (existing) {
     const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(existing.metadata);
-    const storedRequirements = await bvnkCustomerRequirementsFromMetadata(c, direction, metadata);
-    if (storedRequirements) {
-      if (storedRequirements.status === "collect_counterparty" && collectedData !== undefined) {
+    const stage = bvnkStoredStage(metadata);
+    if (stage !== null) {
+      if (stage.kind === "collect_counterparty" && collectedData !== undefined) {
         return createBvnkCustomer(c, {
           client,
           ctx,
           counterparty,
           projectId,
-          reference: existing.provider_customer_reference,
-          individual: buildBvnkCustomerRequest(collectedData),
-          collectedData,
+          reference: buildBvnkCustomerExternalReference(counterparty.id),
+          individual: buildBvnkCustomerRequest(collectedData, stage.residenceCountryCode),
         });
       }
-      return { requirements: storedRequirements };
+      if (stage.kind === "agreements_pending" && agreementConsent !== undefined) {
+        return acceptBvnkAgreements(c, {
+          accounts,
+          counterparty,
+          projectId,
+          direction,
+          existing,
+          metadata,
+          pendingIds: stage.agreements.map((agreement) => agreement.id),
+        });
+      }
+      return { requirements: await presentBvnkStoredStage(c, direction, stage) };
     }
     if (metadata.status === undefined) {
       throw internalError("BVNK customer-link metadata is missing agreement state.");
@@ -694,67 +877,42 @@ export async function ensureBvnkCustomer(
   }
 
   if (collectedData === undefined) {
-    throw badRequest("collectedData with BVNK individual details is required.");
+    throw badRequest("collectedData with the BVNK residence country is required.");
   }
-  const individual = buildBvnkCustomerRequest(collectedData);
+  const residenceCountry = parseBvnkResidenceCountry(collectedData);
   const reference = buildBvnkCustomerExternalReference(counterparty.id);
-  const taxResidenceCountryCode = individual.taxIdentification?.taxResidenceCountryCode;
-  if (taxResidenceCountryCode === undefined) {
-    throw internalError("BVNK customer request is missing tax residence country.");
-  }
   const agreements = await client.createAgreementsV2(ctx, {
     idempotencyKey: (await hashString(`bvnk-agreements:${counterparty.id}`)).slice(0, 36),
     reference,
     useCase: "FIAT",
     customerType: "INDIVIDUAL",
-    countryCode: taxResidenceCountryCode,
+    countryCode: residenceCountry,
   });
-  const pending = agreements.agreements.filter((agreement) => agreement.status !== "ACCEPTED");
-  if (pending.length > 0 && agreementConsent === undefined) {
-    return { requirements: await bvnkAgreementDetails(c, direction, agreements) };
-  }
-  if (pending.length > 0) {
-    await client.respondAgreementsV2(ctx, {
-      idempotencyKey: (await hashString(`bvnk-agreement-response:${counterparty.id}`)).slice(0, 36),
-      reference,
-      actions: pending.map((agreement) => ({ agreementId: agreement.id, type: "ACCEPT" })),
-    });
-    // Relay responses never confirm acceptance: relayed agreements seed as
-    // PENDING and only the agreements status-change webhook (or the PRO-1837
-    // reconciler) flips them to ACCEPTED. Working-set statuses read from
-    // BVNK before the relay keep their value — that read is reconcile
-    // authority, the action response is not.
-    const entries: BvnkAgreementEntries = Object.fromEntries(
-      agreements.agreements
-        .filter((agreement) => !agreement.declinable)
-        .map((agreement) => [
-          agreement.id,
-          { status: agreement.status === "ACCEPTED" ? "ACCEPTED" : "PENDING" },
-        ])
-    );
-    await persistBvnkAgreementState(c, counterparty, projectId, agreements.id, entries);
-    return {
-      requirements: {
-        provider: "bvnk",
-        direction,
-        status: "customer_pending_agreement_acceptance",
-      },
-    };
-  }
   const entries: BvnkAgreementEntries = Object.fromEntries(
     agreements.agreements
       .filter((agreement) => !agreement.declinable)
-      .map((agreement) => [agreement.id, { status: agreement.status }])
+      .map((agreement) => [
+        agreement.id,
+        {
+          status: agreement.status,
+          name: agreement.name,
+          description: agreement.description,
+        },
+      ])
   );
-  await persistBvnkAgreementState(c, counterparty, projectId, agreements.id, entries);
-  return {
-    requirements: {
-      provider: "bvnk",
-      direction,
-      status: "collect_counterparty",
-      fields: bvnkOnrampFields(),
-    },
-  };
+  await persistBvnkAgreementState(
+    c,
+    counterparty,
+    projectId,
+    agreements.id,
+    entries,
+    residenceCountry
+  );
+  const pending = agreements.agreements.filter((agreement) => agreement.status !== "ACCEPTED");
+  if (pending.length > 0) {
+    return { requirements: await bvnkAgreementDetails(c, direction, agreements) };
+  }
+  return { requirements: bvnkCollectCounterparty(direction, residenceCountry) };
 }
 
 /**

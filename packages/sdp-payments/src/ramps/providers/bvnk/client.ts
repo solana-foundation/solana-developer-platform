@@ -60,6 +60,15 @@ import {
   buildBvnkOfframpReference,
   normalizeBvnkCurrencyAndNetwork,
 } from "./provider-data";
+import {
+  BVNK_EMPLOYMENT_STATUSES,
+  BVNK_EXPECTED_VOLUME_CURRENCIES,
+  BVNK_INDUSTRY_SECTORS,
+  BVNK_INTENDED_USES,
+  BVNK_PEP_STATUSES,
+  BVNK_SOURCE_OF_FUNDS,
+  BVNK_YEARLY_INCOMES,
+} from "./requirements";
 
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
 const BVNK_SANDBOX_API_URL = "https://api.sandbox.bvnk.com";
@@ -242,15 +251,38 @@ function mapBvnkErrorStatus(
 }
 
 const bvnkErrorEnvelopeSchema = z.object({
+  code: z.string().optional(),
+  message: z.string().optional(),
   details: z.object({ errors: z.unknown() }).optional(),
 });
+type BvnkErrorEnvelopeParse = ReturnType<typeof bvnkErrorEnvelopeSchema.safeParse>;
 
-function parseBvnkValidationDetails(payload: unknown): Record<string, unknown> | undefined {
-  const result = bvnkErrorEnvelopeSchema.safeParse(payload);
-  if (!result.success || result.data.details === undefined) {
+/**
+ * Appends BVNK's error code and message to the status-only failure message so the
+ * caller can tell an idempotency conflict from a bound reference or a validation error.
+ *
+ * @param status - HTTP status BVNK returned.
+ * @param envelope - Parsed BVNK error envelope, when the body was JSON.
+ * @returns The failure message, enriched when BVNK supplied a code or message.
+ */
+function describeBvnkFailure(status: number, envelope: BvnkErrorEnvelopeParse): string {
+  const base = `BVNK request failed with status ${status}`;
+  if (!envelope.success) {
+    return base;
+  }
+  const parts = [envelope.data.code, envelope.data.message].filter(
+    (part): part is string => part !== undefined
+  );
+  return parts.length === 0 ? base : `${base}: ${parts.join(" ")}`;
+}
+
+function parseBvnkValidationDetails(
+  envelope: BvnkErrorEnvelopeParse
+): Record<string, unknown> | undefined {
+  if (!envelope.success || envelope.data.details === undefined) {
     return undefined;
   }
-  return { errors: result.data.details.errors };
+  return { errors: envelope.data.details.errors };
 }
 
 const bvnkChannelAddressSchema = z.object({
@@ -503,6 +535,7 @@ export type BvnkCustomerV2Status = z.infer<typeof bvnkV2CustomerStatusSchema>;
 
 const bvnkV2CustomerTypeSchema = z.enum(["COMPANY", "INDIVIDUAL"]);
 const bvnkV2CustomerModelSchema = z.enum([
+  "EMBEDDED",
   "RELIANCE",
   "CUSTOMER_VIRTUAL_ACCOUNTS",
   "EMBEDDED_BVNK_MANAGED",
@@ -531,99 +564,22 @@ const bvnkV2TaxIdentificationSchema = z.object({
   taxResidenceCountryCode: z.string().min(2),
 });
 
-const bvnkV2EmploymentStatusSchema = z.enum(["SALARIED", "SELF_EMPLOYED", "UNEMPLOYED", "RETIRED"]);
+const bvnkV2EmploymentStatusSchema = z.enum(BVNK_EMPLOYMENT_STATUSES);
 export type BvnkCustomerV2EmploymentStatus = z.infer<typeof bvnkV2EmploymentStatusSchema>;
 
-const bvnkV2SourceOfFundsSchema = z.enum([
-  "SALARY",
-  "PENSION",
-  "SAVINGS",
-  "SELF_EMPLOYMENT",
-  "CRYPTO_TRADING",
-  "GAMBLING",
-  "REAL_ESTATE",
-  "GIFT",
-  "STUDENT_LOAN_GRANT",
-]);
+const bvnkV2SourceOfFundsSchema = z.enum([...BVNK_SOURCE_OF_FUNDS, "GIFT", "STUDENT_LOAN_GRANT"]);
 export type BvnkCustomerV2SourceOfFunds = z.infer<typeof bvnkV2SourceOfFundsSchema>;
 
-const bvnkV2PepStatusSchema = z.enum([
-  "NOT_PEP",
-  "FORMER_PEP_2_YEARS",
-  "FORMER_PEP_OLDER",
-  "DOMESTIC_PEP",
-  "FOREIGN_PEP",
-  "CLOSE_ASSOCIATES",
-  "FAMILY_MEMBERS",
-  "STATE_OWNED",
-]);
-const bvnkV2IntendedUseOfAccountSchema = z.enum([
-  "TRANSFERS_OWN_WALLET",
-  "TRANSFERS_FAMILY_FRIENDS",
-  "INVESTMENTS",
-  "GOODS_SERVICES",
-  "DONATIONS",
-]);
+const bvnkV2PepStatusSchema = z.enum([...BVNK_PEP_STATUSES, "STATE_OWNED"]);
+const bvnkV2IntendedUseOfAccountSchema = z.enum(BVNK_INTENDED_USES);
 export type BvnkCustomerV2IntendedUseOfAccount = z.infer<typeof bvnkV2IntendedUseOfAccountSchema>;
 
-const bvnkV2IncomeSchema = z.enum([
-  "INCOME_0_TO_50K",
-  "INCOME_50K_TO_100K",
-  "INCOME_100K_TO_250K",
-  "INCOME_250K_TO_500K",
-  "INCOME_500K_TO_750K",
-  "INCOME_750K_TO_1M",
-  "INCOME_ABOVE_1M",
-]);
-const bvnkV2IndustrySectorSchema = z.enum([
-  "INVESTMENT",
-  "HEDGE_FUND",
-  "MONEY_SERVICE_BUSINESS",
-  "STO_ISSUER",
-  "PRECIOUS_METALS",
-  "NON_PROFIT",
-  "REGISTERED_INVESTMENT_ADVISOR",
-  "AGRICULTURE_FORESTRY_FISHING_HUNTING",
-  "MINING",
-  "UTILITIES",
-  "CONSTRUCTION",
-  "MANUFACTURING",
-  "WHOLESALE_TRADE",
-  "RETAIL_TRADE",
-  "TRANSPORTATION_WAREHOUSING",
-  "INFORMATION",
-  "FINANCE_INSURANCE",
-  "REAL_ESTATE_RENTAL_LEASING",
-  "PROFESSIONAL_SCIENTIFIC_TECHNICAL_SERVICES",
-  "MANAGEMENT_OF_COMPANIES_ENTERPRISES",
-  "ADMINISTRATIVE_SUPPORT_WASTE_MANAGEMENT_REMEDIATION_SERVICES",
-  "EDUCATIONAL_SERVICES",
-  "HEALTH_CARE_SOCIAL_ASSISTANCE",
-  "ARTS_ENTERTAINMENT_RECREATION",
-  "ACCOMMODATION_FOOD_SERVICES",
-  "OTHER_SERVICES",
-  "PUBLIC_ADMINISTRATION",
-  "NOT_CLASSIFIED",
-  "ADULT_ENTERTAINMENT",
-  "AUCTIONS",
-  "AUTOMOBILES",
-  "BLOCKCHAIN",
-  "CRYPTO",
-  "DRUGS",
-  "EXPORT_IMPORT",
-  "E_COMMERCE",
-  "FINANCIAL_INSTITUTION",
-  "GAMBLING",
-  "INSURANCE",
-  "MARKET_MAKER",
-  "SHELL_BANK",
-  "TRAVEL_TRANSPORT",
-  "WEAPONS",
-]);
+const bvnkV2IncomeSchema = z.enum(BVNK_YEARLY_INCOMES);
+const bvnkV2IndustrySectorSchema = z.enum(BVNK_INDUSTRY_SECTORS);
 
 const bvnkV2ExpectedMonthlyVolumeSchema = z.object({
   amount: z.union([z.string().min(1), z.number().finite()]),
-  currency: z.string().min(1),
+  currency: z.enum(BVNK_EXPECTED_VOLUME_CURRENCIES),
 });
 export const bvnkV2CddSchema = z.object({
   employmentStatus: bvnkV2EmploymentStatusSchema,
@@ -646,8 +602,8 @@ const bvnkV2IndividualSchema = z.object({
   description: z.string().optional(),
   placeOfBirth: z.string().optional(),
   documentNumber: z.string().optional(),
-  nationality: z.string().min(2).optional(),
-  taxIdentification: bvnkV2TaxIdentificationSchema.optional(),
+  nationality: z.string().min(2),
+  taxIdentification: bvnkV2TaxIdentificationSchema,
   cdd: bvnkV2CddSchema.optional(),
 });
 export type BvnkCustomerV2Individual = z.infer<typeof bvnkV2IndividualSchema>;
@@ -658,29 +614,7 @@ export interface CreateBvnkCustomerV2Input {
   idempotencyKey: string;
   useCase: BvnkCustomerV2UseCase;
   reference?: string;
-  model?: "RELIANCE";
   individual: BvnkCustomerV2Individual;
-}
-
-const bvnkV3ContactSchema = z.object({ contactId: z.string().min(1) });
-export type BvnkContactV3 = z.infer<typeof bvnkV3ContactSchema>;
-
-export interface CreateBvnkContactV3Input {
-  idempotencyKey: string;
-  entity: {
-    type: "INDIVIDUAL";
-    relationshipType: "SELF_OWNED";
-    firstName: string;
-    lastName: string;
-    dateOfBirth: string;
-    address: {
-      addressLine1: string;
-      city: string;
-      region?: string;
-      postalCode: string;
-      country: string;
-    };
-  };
 }
 
 const bvnkV2RequiredActionTargetSchema = z.object({
@@ -707,7 +641,7 @@ const bvnkV2RequiredActionSchema = z.object({
 export type BvnkCustomerV2RequiredAction = z.infer<typeof bvnkV2RequiredActionSchema>;
 const bvnkV2AuthenticatedLinkSchema = z.object({
   link: z.string().min(1),
-  expiresAt: z.string().min(1),
+  expiresAt: z.string().nullable(),
 });
 const bvnkV2CustomerSummarySchema = z.object({
   id: z.string().min(1),
@@ -724,7 +658,6 @@ export type BvnkCustomerV2 = z.infer<typeof bvnkV2CustomerSummarySchema>;
 const bvnkV2CustomerDetailSchema = bvnkV2CustomerSummarySchema.extend({
   authenticatedLink: bvnkV2AuthenticatedLinkSchema,
   requiredActions: z.array(bvnkV2RequiredActionSchema),
-  individual: bvnkV2IndividualSchema.optional(),
 });
 export type BvnkCustomerV2Detail = z.infer<typeof bvnkV2CustomerDetailSchema>;
 
@@ -733,8 +666,8 @@ const bvnkV2AgreementSchema = z.object({
   id: z.string().min(1),
   status: bvnkV2AgreementStatusSchema,
   declinable: z.boolean(),
-  name: z.string().optional(),
-  description: z.string().optional(),
+  name: z.string().min(1),
+  description: z.string().min(1),
 });
 const bvnkV2AgreementsResponseSchema = z.object({
   id: z.string().min(1),
@@ -746,7 +679,6 @@ export type BvnkAgreementsV2 = z.infer<typeof bvnkV2AgreementsResponseSchema>;
 const bvnkV2AgreementContentSchema = z.object({
   downloadUrl: z.string().min(1),
   expiresAt: z.string().nullable().optional(),
-  filename: z.string().min(1),
 });
 export type BvnkAgreementContentV2 = z.infer<typeof bvnkV2AgreementContentSchema>;
 const bvnkV2AgreementActionTypeSchema = z.enum(["ACCEPT", "REJECT"]);
@@ -767,10 +699,12 @@ export interface RespondBvnkAgreementsV2Input {
   reference: string;
   actions: BvnkAgreementActionV2[];
 }
+// BVNK has no discriminator field on action results, so the success and error
+// arms cannot be a discriminated union; both may appear in one response.
 const bvnkV2AgreementActionResultSchema = z.object({
   agreementId: z.string().min(1),
   status: z.enum(["ACCEPTED", "REJECTED"]).optional(),
-  error: z.string().optional(),
+  error: z.object({ code: z.string().min(1), message: z.string().min(1) }).optional(),
 });
 const bvnkV2PageableSchema = z
   .object({ pageNumber: z.number().int(), pageSize: z.number().int() })
@@ -904,10 +838,10 @@ export class BvnkRampClient implements RampProvider {
     });
 
     if (!response.ok) {
-      const message = `BVNK request failed with status ${response.status}`;
-      throw mapBvnkErrorStatus(response.status, message, {
+      const envelope = bvnkErrorEnvelopeSchema.safeParse(parsed);
+      throw mapBvnkErrorStatus(response.status, describeBvnkFailure(response.status, envelope), {
         edgeBlocked: isEdgeBlockBody(parsed, raw),
-        details: response.status === 400 ? parseBvnkValidationDetails(parsed) : undefined,
+        details: response.status === 400 ? parseBvnkValidationDetails(envelope) : undefined,
       });
     }
 
@@ -989,31 +923,10 @@ export class BvnkRampClient implements RampProvider {
       body: {
         useCase: input.useCase,
         ...(input.reference === undefined ? {} : { reference: input.reference }),
-        ...(input.model === undefined ? {} : { model: input.model }),
         individual: input.individual,
       },
     });
     return bvnkV2CustomerSummarySchema.parse(response);
-  }
-
-  /**
-   * Creates the BVNK v3 travel-rule contact for an individual customer.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - Contact data and a deterministic idempotency key. The entity contains PII and is never logged.
-   * @returns The BVNK contact identifier.
-   */
-  async createContactV3(
-    { env, mode }: RampRuntimeContext,
-    input: CreateBvnkContactV3Input
-  ): Promise<BvnkContactV3> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(config, "/platform/v3/contacts", {
-      method: "POST",
-      headers: { "Idempotency-Key": input.idempotencyKey },
-      body: { entity: input.entity },
-    });
-    return bvnkV3ContactSchema.parse(response);
   }
 
   /**
@@ -1066,7 +979,7 @@ export class BvnkRampClient implements RampProvider {
    *
    * @param ctx - Runtime provider credentials and environment.
    * @param input - Agreement id.
-   * @returns The agreement download URL, filename, and optional expiry.
+   * @returns The agreement download URL and optional expiry.
    */
   async getAgreementContentV2(
     { env, mode }: RampRuntimeContext,

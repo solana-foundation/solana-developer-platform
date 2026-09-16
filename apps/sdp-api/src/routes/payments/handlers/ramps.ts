@@ -1,9 +1,5 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import {
-  bvnkOfframpFields,
-  isBvnkOfframpCurrency,
-} from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import type {
   BvnkCustomerResolution,
   BvnkPaymentRuleResolution,
@@ -20,6 +16,10 @@ import {
   readBvnkOfframpWallet,
   readBvnkOnrampPaymentRuleState,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  bvnkOfframpFields,
+  isBvnkOfframpCurrency,
+} from "@sdp/payments/ramps/providers/bvnk/requirements";
 import {
   lightsparkCollectAccountRequirements,
   lightsparkOfframpReady,
