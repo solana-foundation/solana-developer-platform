@@ -199,6 +199,36 @@ describe("DvpTradeDetailWorkspace", () => {
     };
     const REFUND_IN = { ...DEPOSIT, signature: "sig_redeposit", slot: "422" };
 
+    it("starts with the latest five transfers and reveals earlier history in order", () => {
+      const transfers = Array.from({ length: 12 }, (_, index) => ({
+        ...DEPOSIT,
+        signature: `sig_${index}`,
+        slot: String(420 + index),
+      }));
+      const value = trade({
+        status: "settled",
+        legs: {
+          a: testLeg({ funding: FUNDED, outcome: "delivered", transfers }),
+          b: testLeg({ funding: FUNDED, outcome: "delivered" }),
+        },
+      });
+      const { container } = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+        </I18nProvider>
+      );
+      const page = within(container);
+      const links = () => page.getAllByRole("link", { name: "View transaction" });
+      expect(links()).toHaveLength(5);
+      expect(links()[0].getAttribute("href")).toContain("tx/sig_7?");
+      fireEvent.click(page.getByRole("button", { name: "Show earlier transfers (7)" }));
+      expect(links()).toHaveLength(10);
+      fireEvent.click(page.getByRole("button", { name: "Show earlier transfers (2)" }));
+      expect(links()).toHaveLength(12);
+      expect(links()[0].getAttribute("href")).toContain("tx/sig_0?");
+      expect(page.queryByRole("button", { name: /Show earlier transfers/ })).toBeNull();
+    });
+
     // The API names each movement; the card says what it was and links it.
     it("labels each movement by its kind, with each transaction linked", () => {
       const html = renderDetail(

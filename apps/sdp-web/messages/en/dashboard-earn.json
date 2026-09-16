@@ -483,6 +483,7 @@
       "transferRefund": "Refunded",
       "transferWithdrawal": "Withdrawn",
       "transfersLabel": "Transfers",
+      "showEarlierTransfers": "Show earlier transfers ({count})",
       "txClose": "Settlement transaction",
       "txCreate": "Create transaction",
       "txFunding": "Funding transaction",

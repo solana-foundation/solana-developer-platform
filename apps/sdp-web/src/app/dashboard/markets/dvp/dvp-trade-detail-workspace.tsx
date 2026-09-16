@@ -393,12 +393,27 @@ function LegTransferList({
   leg: DvpTradeLeg;
   transfers: readonly DvpLegTransfer[];
 }) {
+  const t = useTranslations();
+  const [visibleCount, setVisibleCount] = useState(5);
+  const earlierCount = Math.max(0, transfers.length - visibleCount);
   return (
-    <ul className="flex flex-col">
-      {transfers.map((transfer) => (
-        <LegTransferRow cluster={cluster} key={transfer.signature} leg={leg} transfer={transfer} />
-      ))}
-    </ul>
+    <div className="space-y-2">
+      {earlierCount > 0 ? (
+        <Button variant="ghost" size="sm" onClick={() => setVisibleCount((count) => count + 5)}>
+          {t("DashboardMarkets.dvp.showEarlierTransfers", { count: earlierCount })}
+        </Button>
+      ) : null}
+      <ul className="flex flex-col">
+        {transfers.slice(-visibleCount).map((transfer) => (
+          <LegTransferRow
+            cluster={cluster}
+            key={transfer.signature}
+            leg={leg}
+            transfer={transfer}
+          />
+        ))}
+      </ul>
+    </div>
   );
 }
 
