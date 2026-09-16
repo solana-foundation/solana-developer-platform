@@ -12,6 +12,29 @@ import type { DvpCreateForm, DvpPartySlot } from "./use-dvp-create-form";
 
 /** The Token-2022 extension kind the API names when SDP cannot move a mint (`UNSUPPORTED_MINT_EXTENSIONS`). */
 const TRANSFER_HOOK_EXTENSION = "TransferHook";
+/** What the API calls a mint it could not decode. */
+const UNREADABLE_MINT_REASON = "unreadable extension data";
+
+/**
+ * Why this mint cannot be traded, in the terms the reader can act on: a hook is
+ * named for what it costs, an extension the program refuses is named as it is,
+ * and a mint SDP could not read says so rather than naming an extension.
+ */
+function refusedMintWarning(
+  blockedBy: string | null,
+  t: ReturnType<typeof useTranslations>
+): string {
+  if (blockedBy === null) {
+    return t("DashboardMarkets.dvp.mintRefusedUnnamed");
+  }
+  if (blockedBy === TRANSFER_HOOK_EXTENSION) {
+    return t("DashboardMarkets.dvp.mintRefusedTransferHook");
+  }
+  if (blockedBy === UNREADABLE_MINT_REASON) {
+    return t("DashboardMarkets.dvp.mintRefusedUnreadable");
+  }
+  return t("DashboardMarkets.dvp.mintRefusedExtension", { extension: blockedBy });
+}
 
 /**
  * One side's fields: the party picker on its own row, then the amount and mint.
@@ -44,12 +67,7 @@ function LegRow({
   // program itself refuses are named as they are.
   let mintWarning: string | null = null;
   if (leg.ineligible) {
-    mintWarning =
-      leg.blockedBy === null
-        ? t("DashboardMarkets.dvp.mintRefusedUnnamed")
-        : leg.blockedBy === TRANSFER_HOOK_EXTENSION
-          ? t("DashboardMarkets.dvp.mintRefusedTransferHook")
-          : t("DashboardMarkets.dvp.mintRefusedExtension", { extension: leg.blockedBy });
+    mintWarning = refusedMintWarning(leg.blockedBy, t);
   } else if (leg.token === null && leg.pasted.notFound) {
     mintWarning = t("DashboardMarkets.dvp.mintNotFound");
   }

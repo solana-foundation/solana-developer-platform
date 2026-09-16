@@ -93,9 +93,15 @@ export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): 
   // answer for a PREVIOUS address is not a slightly stale answer, it is a
   // different token, and reading its decimals scales the amount by the wrong
   // power of ten.
+  const inspectedAddress = token?.mint ?? custom.trim();
+  // The inspection answers for the mint chosen NOW. Until it does, the leg is
+  // unresolved even for a listed token whose decimals are already known: its
+  // eligibility is not, and a form that is ready before the answer lands lets
+  // a transfer-hook mint through to the API's refusal instead of the field's.
+  const inspectionMatchesInput = pasted.address === inspectedAddress;
   const pastedMatchesInput = pasted.address === custom.trim();
   const pastedMint = pastedMatchesInput ? pasted.mint : null;
-  const pendingLookup = token === null && (pasted.loading || !pastedMatchesInput);
+  const pendingLookup = inspectedAddress !== "" && (pasted.loading || !inspectionMatchesInput);
 
   // A listed mint carries its decimals. A pasted one is read from the chain by
   // `usePastedMint`.
@@ -112,8 +118,10 @@ export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): 
   // and submit is blocked rather than a quantity guessed.
   const decimals = token?.decimals ?? pastedMint?.decimals ?? null;
 
-  // Only an answer for the mint chosen now can rule it out.
-  const inspected = pasted.address === (token?.mint ?? custom.trim()) ? pasted.mint : null;
+  // Only an answer for the mint chosen now can rule it out. A lookup that
+  // FAILED leaves this null: the create API refuses the same mints, so a
+  // reachable form beats blocking every trade on one unavailable RPC read.
+  const inspected = inspectionMatchesInput ? pasted.mint : null;
   const ineligible = inspected !== null && !inspected.eligible;
   const resolved = decimals != null ? toBaseUnits(amount, decimals) : null;
   const baseUnits = resolved?.ok ? resolved.baseUnits : null;

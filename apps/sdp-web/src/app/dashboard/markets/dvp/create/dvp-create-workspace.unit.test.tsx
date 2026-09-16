@@ -11,7 +11,7 @@
 
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import type { DvpCreateContext } from "./dvp-create.data";
@@ -133,14 +133,45 @@ function fillAmounts() {
  * until the step is complete, so navigating IS the assertion that the step can
  * be satisfied.
  */
-function advanceToReview() {
+async function advanceToReview() {
   fillPartyA();
   fillPartyB(PARTY_B);
   fillAssetMint();
   fillCashMint();
   fillAmounts();
+  // Both mints are inspected for eligibility, so Continue is disabled until
+  // those answers land, the same wait a person sees.
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /continue/i }).hasAttribute("disabled")).toBe(false)
+  );
   fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 }
+
+/**
+ * Every chosen mint is inspected, listed ones included, and the form waits for
+ * that answer. Unless a test says otherwise, the mint comes back eligible.
+ */
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          mint: {
+            decimals: 6,
+            name: "Test Bond",
+            symbol: "TBOND",
+            tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+            eligible: true,
+            blockedBy: null,
+          },
+        },
+      }),
+    })
+  );
+});
 
 afterEach(() => {
   cleanup();
@@ -191,7 +222,7 @@ describe("DvpCreateWorkspace", () => {
     expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
   });
 
-  it("trims a pasted address so surrounding whitespace never blocks Continue", () => {
+  it("trims a pasted address so surrounding whitespace never blocks Continue", async () => {
     renderForm();
     fillPartyA();
     fillPartyB(`  ${PARTY_B}  `);
@@ -200,25 +231,29 @@ describe("DvpCreateWorkspace", () => {
     fillAmounts();
 
     expect(screen.queryByText("Not a valid Solana address")).toBeNull();
-    expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", false);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", false)
+    );
   });
 
-  it("clears a filled slot when its mode changes", () => {
+  it("clears a filled slot when its mode changes", async () => {
     renderForm();
     fillPartyA();
     fillPartyB(PARTY_B);
     fillAssetMint();
     fillCashMint();
     fillAmounts();
-    expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", false);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", false)
+    );
 
     pickMode(SELLER_ROW, /^sdp wallet$/i);
     expect(screen.getByRole("button", { name: /continue/i })).toHaveProperty("disabled", true);
   });
 
-  it("reaches review once every stage is answered, and only then offers Create", () => {
+  it("reaches review once every stage is answered, and only then offers Create", async () => {
     renderForm();
-    advanceToReview();
+    await advanceToReview();
 
     expect(screen.getByRole("button", { name: /create trade/i })).toBeTruthy();
   });

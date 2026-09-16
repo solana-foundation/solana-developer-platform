@@ -24,7 +24,9 @@ const DEBOUNCE_MS = 350;
 
 /** The mint inspection's answer, as far as the form reads it. */
 const pastedMintSchema = z.object({
-  decimals: z.number().int().nonnegative(),
+  // Null when the mint exists but SDP could not decode it, which also makes it
+  // ineligible: without a scale no amount on this leg has a meaning.
+  decimals: z.number().int().nonnegative().nullable(),
   name: z.string().nullable(),
   symbol: z.string().nullable(),
   tokenProgram: z.string().min(1),

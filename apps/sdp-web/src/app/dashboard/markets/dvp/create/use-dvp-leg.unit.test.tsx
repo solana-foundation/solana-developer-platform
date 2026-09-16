@@ -88,9 +88,10 @@ describe("a pasted leg whose lookup has not caught up", () => {
     expect(result.current.baseUnits).toBe("1000000000");
   });
 
-  // A listed token carries its own decimals and never waits on a lookup.
-  it("never waits when the mint came from the list", () => {
-    pastedState.current = { address: "", loading: true, notFound: false, mint: null };
+  // A listed token carries its own decimals, so it never waits for a scale.
+  // It does wait for its eligibility answer, which the block below covers.
+  it("keeps a listed token's own decimals while its answer is outstanding", () => {
+    pastedState.current = { address: MINT_A, loading: true, notFound: false, mint: null };
     const { result } = renderHook(() =>
       useDvpLeg(
         [
@@ -106,7 +107,7 @@ describe("a pasted leg whose lookup has not caught up", () => {
       )
     );
 
-    expect(result.current.pendingLookup).toBe(false);
+    expect(result.current.decimals).toBe(6);
   });
 });
 
@@ -149,6 +150,36 @@ describe("a leg on a mint create would refuse", () => {
 
     expect(result.current.ineligible).toBe(false);
     expect(result.current.blockedBy).toBeNull();
+  });
+
+  // Its decimals are known, but its eligibility is not, and a form that is
+  // ready before that answer lands lets a refused mint reach the API instead
+  // of the field.
+  it("waits for a listed token's eligibility answer", () => {
+    pastedState.current = { address: MINT_A, loading: true, notFound: false, mint: null };
+    const { result } = renderHook(() => useDvpLeg([LISTED], true));
+
+    expect(result.current.pendingLookup).toBe(true);
+  });
+
+  it("stops waiting once the listed token's answer arrives", () => {
+    pastedState.current = {
+      address: MINT_A,
+      loading: false,
+      notFound: false,
+      mint: {
+        decimals: 6,
+        symbol: null,
+        name: null,
+        tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+        eligible: true,
+        blockedBy: null,
+      },
+    };
+    const { result } = renderHook(() => useDvpLeg([LISTED], true));
+
+    expect(result.current.pendingLookup).toBe(false);
+    expect(result.current.ineligible).toBe(false);
   });
 
   // Unread is not refused. The API still refuses at create, so the field makes
