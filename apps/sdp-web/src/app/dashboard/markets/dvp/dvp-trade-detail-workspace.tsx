@@ -456,7 +456,11 @@ function LegCard({
   const { chip, held, percent, receiving, target } = legCardFigures(leg);
 
   return (
-    <section className="flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5">
+    // Side by side, the two cards share row tracks (subgrid), so a taller row in
+    // one — the signing hint, a token name, an escrow box — never shifts the
+    // other. Spacing stays on the rows' own margins; the parent's row gap is
+    // zeroed at md so the shared tracks add none of their own.
+    <section className="flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5 md:row-span-5 md:grid md:grid-rows-subgrid">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <h3 className="flex flex-wrap items-center gap-x-2 font-medium text-base text-primary leading-6">
           {t(side === "a" ? "DashboardMarkets.dvp.legA" : "DashboardMarkets.dvp.legB")}
@@ -472,12 +476,20 @@ function LegCard({
             </span>
           ) : null}
         </h3>
-        <span className="text-sm text-tertiary">
+        <span className="flex flex-col items-end text-sm text-tertiary">
           {leg.party.wallet || leg.party.counterparty ? (
             <PartyLink party={leg.party} />
           ) : (
             holderLabel(t, side)
           )}
+          {/* Next to the party, not the button: the restriction belongs to the
+              wallet, and the disabled button already says the action is off. */}
+          {(action !== undefined || reclaim !== undefined) &&
+          leg.party.actionWallet?.isRuntimeExecutionAllowed !== true ? (
+            <span className="text-warning text-xs">
+              {t("DashboardCustody.signingDisabledTitle")}
+            </span>
+          ) : null}
         </span>
       </div>
 
@@ -552,10 +564,11 @@ function ChainValueCell({ value, href }: { value: string; href: string }) {
 /** The link to a party's own page, when it is a wallet or a registered counterparty. */
 function PartyLink({ party }: { party: DvpPartyRef }) {
   const t = useTranslations();
-  if (party.wallet) {
+  const wallet = party.actionWallet ?? party.wallet;
+  if (wallet) {
     return (
-      <EntityLink href={`/dashboard/wallets/${encodeURIComponent(party.wallet.id)}`}>
-        {party.wallet.name === null ? t("DashboardMarkets.dvp.partySdpWallet") : party.wallet.name}
+      <EntityLink href={`/dashboard/wallets/${encodeURIComponent(wallet.id)}`}>
+        {wallet.name === null ? t("DashboardMarkets.dvp.partySdpWallet") : wallet.name}
       </EntityLink>
     );
   }
@@ -907,15 +920,20 @@ export function DvpTradeDetailWorkspace({
     if (!canFundLeg(trade.legs[side], trade.status)) {
       return undefined;
     }
+    const wallet = trade.legs[side].party.actionWallet;
     const funding = pending.has(`fund:${side}`);
     /* Clicked, not held. Funding moves your leg into the trade's own escrow,
        which is a step forward rather than something to walk back; hold is
        reserved for destroying something (HOO-1230). */
     return (
       <Button
-        disabled={funding}
+        disabled={funding || wallet?.isRuntimeExecutionAllowed !== true}
         iconLeft={funding ? <Loader2Icon aria-hidden className="animate-spin" /> : undefined}
-        onClick={() => act("fund", { side, symbol: trade.legs[side].symbol })}
+        onClick={() => {
+          if (wallet?.isRuntimeExecutionAllowed === true) {
+            void act("fund", { side, walletId: wallet.id, symbol: trade.legs[side].symbol });
+          }
+        }}
         type="button"
       >
         {t(funding ? "DashboardMarkets.dvp.actionFunding" : "DashboardMarkets.dvp.actionFund")}
@@ -925,14 +943,19 @@ export function DvpTradeDetailWorkspace({
 
   // Small and in the footer, not beside Fund: it walks a deposit back rather
   // than moving the trade forward, and a funded trade reads as ready to settle.
-  const reclaimActionFor = (side: DvpTradeSide): ReactNode =>
-    canReclaimLeg(trade.legs[side], trade.status) ? (
+  const reclaimActionFor = (side: DvpTradeSide): ReactNode => {
+    const wallet = trade.legs[side].party.actionWallet;
+    return canReclaimLeg(trade.legs[side], trade.status) ? (
       <button
         className="text-[11px] text-secondary leading-4 underline-offset-2 hover:text-primary hover:underline disabled:pointer-events-none disabled:opacity-40"
         // Any action in flight, not only this leg's: a reclaim racing a settle
         // or cancel can only make one of them fail.
-        disabled={pending.size > 0}
-        onClick={() => act("reclaim", { side, symbol: trade.legs[side].symbol })}
+        disabled={pending.size > 0 || wallet?.isRuntimeExecutionAllowed !== true}
+        onClick={() => {
+          if (wallet?.isRuntimeExecutionAllowed === true) {
+            void act("reclaim", { side, walletId: wallet.id, symbol: trade.legs[side].symbol });
+          }
+        }}
         type="button"
       >
         {t(
@@ -942,6 +965,7 @@ export function DvpTradeDetailWorkspace({
         )}
       </button>
     ) : undefined;
+  };
 
   // Your leg first, whichever it is. With no custodied leg (agent) or both
   // custodied (bilateral) the trade's own asset-then-cash order stays.
@@ -986,7 +1010,7 @@ export function DvpTradeDetailWorkspace({
             <span aria-hidden className="hidden h-px flex-1 bg-border-subtle sm:block" />
             <ExchangeSummary trade={trade} />
           </div>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 grid gap-4 md:grid-cols-2 md:gap-y-0">
             {sides.map((side) => (
               <LegCard
                 action={fundActionFor(side)}

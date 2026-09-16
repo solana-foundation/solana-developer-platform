@@ -192,7 +192,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Update wallet policy",
     operationId: "updatePaymentWalletPolicy",
     description:
-      "Updates payment policy rules for a custody wallet, activating a new control-profile revision. Supply expectedRevisionId to reject the update with 409 when another update has activated a revision since the policy was read. Wallet provisioning and default selection remain in /v1/wallets.",
+      "Updates payment policy rules for a custody wallet, activating a new control-profile revision. API keys must hold the api_admin role; a key with a lesser role receives 403 even when it has the write permissions. Supply expectedRevisionId to reject the update with 409 when another update has activated a revision since the policy was read. Wallet provisioning and default selection remain in /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

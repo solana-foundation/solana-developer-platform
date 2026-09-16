@@ -34,7 +34,13 @@ import {
   extractForceBurnPolicyCandidate,
   prepareForceBurn,
 } from "./handlers/force-burn";
-import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
+import {
+  extractFreezePolicyCandidate,
+  extractUnfreezePolicyCandidate,
+  freezeAccount,
+  listFrozenAccounts,
+  unfreezeAccount,
+} from "./handlers/freeze";
 import { enrollHolder, enrollHolderSchema, listHolders } from "./handlers/holders";
 import { serveTokenMetadata } from "./handlers/metadata";
 import {
@@ -44,7 +50,12 @@ import {
   findMintIdempotentKeyReplay,
   prepareMint,
 } from "./handlers/mint";
-import { pauseToken, unpauseToken } from "./handlers/pause";
+import {
+  extractPausePolicyCandidate,
+  extractUnpausePolicyCandidate,
+  pauseToken,
+  unpauseToken,
+} from "./handlers/pause";
 import { executeSeize, extractSeizePolicyCandidate, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
@@ -249,12 +260,14 @@ issuance.post(
   "/tokens/:tokenId/pause",
   requirePermissions("tokens:admin"),
   validateBody(pauseTokenSchema),
+  policyGate({ extract: extractPausePolicyCandidate }),
   pauseToken
 );
 issuance.post(
   "/tokens/:tokenId/unpause",
   requirePermissions("tokens:admin"),
   validateBody(pauseTokenSchema),
+  policyGate({ extract: extractUnpausePolicyCandidate }),
   unpauseToken
 );
 
@@ -263,12 +276,14 @@ issuance.post(
   "/tokens/:tokenId/freeze",
   requirePermissions("tokens:admin"),
   validateBody(freezeSchema),
+  policyGate({ extract: extractFreezePolicyCandidate }),
   freezeAccount
 );
 issuance.post(
   "/tokens/:tokenId/unfreeze",
   requirePermissions("tokens:admin"),
   validateBody(unfreezeSchema),
+  policyGate({ extract: extractUnfreezePolicyCandidate }),
   unfreezeAccount
 );
 issuance.get("/tokens/:tokenId/frozen", requirePermissions("tokens:read"), listFrozenAccounts);

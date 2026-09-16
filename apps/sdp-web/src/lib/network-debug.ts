@@ -200,9 +200,3 @@ export function formatNetworkDebugPayloadValue(value: string): string {
     return value;
   }
 }
-
-export function formatNetworkDebugMetaSummary(entry: NetworkDebugEntry): string {
-  const sep = " \u00B7 ";
-  const duration = entry.durationMs === undefined ? "pending" : `${entry.durationMs}ms`;
-  return `${entry.method}${sep}${duration}`;
-}

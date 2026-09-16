@@ -352,8 +352,8 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       if (params.customer.verificationStatus !== undefined) {
         metadata.verificationStatus = params.customer.verificationStatus;
       }
-      if (params.customer.contactId !== undefined) {
-        metadata.contactId = params.customer.contactId;
+      if (params.customer.residenceCountryCode !== undefined) {
+        metadata.residenceCountryCode = params.customer.residenceCountryCode;
       }
       if (params.customer.agreements !== undefined) {
         metadata.agreements = params.customer.agreements;

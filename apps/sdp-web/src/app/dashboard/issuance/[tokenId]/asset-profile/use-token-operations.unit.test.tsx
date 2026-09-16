@@ -24,7 +24,9 @@ vi.mock("../use-token-action-runner", () => ({
 }));
 vi.mock("./use-token-operation-data", () => ({
   useTokenOperationData: () => ({
-    authorityWallets: [{ id: "cwlt_test", walletId: "wal_test", publicKey: source }],
+    authorityWallets: [
+      { id: "cwlt_test", walletId: "wal_test", isRuntimeExecutionAllowed: true, publicKey: source },
+    ],
     authorityWalletsLoading: false,
     authorityWalletsError: null,
     allowlistEntries: [],
@@ -78,7 +80,6 @@ function renderOperations(overrides: Partial<Token> = {}) {
     () =>
       useTokenOperations({
         token: { ...token, ...overrides },
-        shouldLoadSupportingData: true,
         shouldLoadAuthorityWallets: true,
         canManageTokenAdmin: true,
       }),

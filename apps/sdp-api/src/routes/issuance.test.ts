@@ -11,6 +11,7 @@ import type { Address } from "@sdp/solana/address";
 import type { CachedApiKey } from "@sdp/types";
 import { address, createNoopSigner, getBase58Decoder } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
+import * as TokenAclSdk from "@solana/token-acl-sdk";
 import * as Token2022 from "@solana-program/token-2022";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -51,6 +52,9 @@ import { seedCachedApiKey } from "@/test/mocks/kv";
 // Copy the immutable ESM namespace so tests can spy on SDK reads while preserving real exports.
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
+}));
+vi.mock("@solana/token-acl-sdk", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@solana/token-acl-sdk")>()),
 }));
 
 // Check if running in mock mode (no RPC access)
@@ -753,6 +757,350 @@ describe("Issuance Routes", () => {
         .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
         .first<{ count: number }>();
       expect(operationCount).toEqual({ count: 1 });
+    });
+
+    it("dry-runs a freeze against current policy even when the key matches a settled transaction", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_freeze_dry_run_replay",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_freeze_dry_run_replay",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        freezeAuthority: policyMintAuthority,
+      });
+      const aclSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      const targetSpy = vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+        tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
+        isInitialized: true,
+        isFrozen: false,
+        balance: 0n,
+        uiBalance: 0,
+      } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
+      const idempotencyKey = "issuance-freeze-dry-run-replay";
+      const body = { accountAddress: TEST_SOLANA_ADDRESSES.wallet1 };
+      const idempotency = buildIdempotencyMetadata(idempotencyKey, {
+        tokenId: token.id,
+        operation: "freeze",
+        mode: "execute",
+        params: { ...body, signingCustodyWalletId: wallet.custodyWalletId },
+      });
+      await seedIssuanceTransaction({
+        id: "ttx_freeze_dry_run_replay",
+        tokenId: token.id,
+        type: "freeze",
+        status: "confirmed",
+        custodyWalletId: wallet.custodyWalletId,
+        idempotencyKey,
+        idempotencyFingerprint: idempotency.idempotencyFingerprint,
+        signature: "sig_freeze_dry_run_replay",
+        slot: 20,
+        params: { accountAddress: TEST_SOLANA_ADDRESSES.wallet2 },
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-freeze-dry-run", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/freeze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Idempotency-Key": idempotencyKey,
+              "Dry-Run": "true",
+            },
+            body: JSON.stringify(body),
+          },
+          env
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ data: { decision: "deny" } });
+      } finally {
+        aclSpy.mockRestore();
+        targetSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied freeze before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_freeze_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_freeze_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        freezeAuthority: policyMintAuthority,
+      });
+      const aclSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      const targetSpy = vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+        tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
+        isInitialized: true,
+        isFrozen: false,
+        balance: 0n,
+        uiBalance: 0,
+      } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-freeze", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/freeze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_freeze_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        aclSpy.mockRestore();
+        targetSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied unfreeze before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_unfreeze_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_unfreeze_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        freezeAuthority: policyMintAuthority,
+      });
+      const aclSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      const targetSpy = vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+        tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
+        isInitialized: true,
+        isFrozen: true,
+        balance: 0n,
+        uiBalance: 0,
+      } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-unfreeze", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/unfreeze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_unfreeze_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        aclSpy.mockRestore();
+        targetSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied pause before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_pause_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_pause_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+      });
+      const inspectSpy = vi.spyOn(MosaicSdk, "inspectToken").mockResolvedValue({
+        authorities: { pausableAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof MosaicSdk.inspectToken>>);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-pause", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/pause`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({}),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_pause_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        inspectSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied unpause before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_unpause_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_unpause_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        status: "paused",
+      });
+      const inspectSpy = vi.spyOn(MosaicSdk, "inspectToken").mockResolvedValue({
+        authorities: { pausableAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof MosaicSdk.inspectToken>>);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-unpause", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/unpause`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({}),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_unpause_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        inspectSpy.mockRestore();
+      }
     });
 
     it("stops a denied seize before signer and issuance side effects", async () => {
@@ -1684,6 +2032,78 @@ describe("Issuance Routes", () => {
             frozenAccount: {
               accountAddress: TEST_SOLANA_ADDRESSES.wallet2,
               signature: "sig_direct_freeze_replay",
+            },
+          },
+        });
+        expect(authoritySpy).not.toHaveBeenCalled();
+        expect(targetSpy).not.toHaveBeenCalled();
+        expect(admitSpy).not.toHaveBeenCalled();
+      } finally {
+        targetSpy.mockRestore();
+        admitSpy.mockRestore();
+      }
+    });
+
+    it("replays unfreeze from its persisted account without live target or authority lookup", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_direct_unfreeze_replay",
+        status: "revoked",
+        isFreezable: false,
+      });
+      const idempotencyKey = "direct-unfreeze-replay";
+      const body = { accountAddress: TEST_SOLANA_ADDRESSES.wallet1 };
+      const idempotency = buildIdempotencyMetadata(idempotencyKey, {
+        tokenId: token.id,
+        operation: "unfreeze",
+        mode: "execute",
+        params: {
+          ...body,
+          signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+        },
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO frozen_accounts (
+             id, token_id, account_address, reason, frozen_at, frozen_by
+           ) VALUES ('frz_direct_unfreeze_replay', ?, ?, NULL, sdp_iso_now(), ?)`
+        )
+        .bind(token.id, TEST_SOLANA_ADDRESSES.wallet2, TEST_PROJECT_API_KEY.id)
+        .run();
+      await seedIssuanceTransaction({
+        id: "ttx_direct_unfreeze_replay",
+        tokenId: token.id,
+        type: "unfreeze",
+        status: "confirmed",
+        custodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+        idempotencyKey,
+        idempotencyFingerprint: idempotency.idempotencyFingerprint,
+        signature: "sig_direct_unfreeze_replay",
+        slot: 12,
+        params: {
+          accountAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        },
+      });
+      const authoritySpy = vi.mocked(AuthorityResolution.resolveCurrentAuthorityForRole);
+      authoritySpy.mockClear();
+      const targetSpy = vi
+        .spyOn(MosaicSdk, "resolveTokenAccount")
+        .mockRejectedValue(new Error("target unavailable"));
+      const admitSpy = vi
+        .spyOn(SigningService.prototype, "admitRuntimeExecution")
+        .mockRejectedValue(new Error("runtime unavailable"));
+
+      try {
+        const replay = await app.request(
+          `/v1/issuance/tokens/${token.id}/unfreeze`,
+          { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
+          env
+        );
+        expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200);
+        expect(await replay.json()).toMatchObject({
+          data: {
+            frozenAccount: {
+              accountAddress: TEST_SOLANA_ADDRESSES.wallet2,
+              signature: "sig_direct_unfreeze_replay",
             },
           },
         });
@@ -2983,6 +3403,36 @@ describe("Issuance Routes", () => {
       expect(body.data.token.status).toBe("pending");
       expect(body.data.token.requiresAllowlist).toBe(true);
       expect(body.data.token.projectId).toBe(TEST_PROJECT.id);
+
+      const profile = await getDb(env)
+        .prepare(
+          `SELECT asset_category,
+                  asset_type,
+                  asset_type_version,
+                  issuance_metadata->'asset'->>'name' AS asset_name,
+                  issuance_metadata->'chain'->>'decimals' AS decimals,
+                  public_metadata->'asset'->>'name' AS public_name
+             FROM asset_profiles
+            WHERE token_id = ?
+              AND status = 'active'`
+        )
+        .bind(body.data.token.id)
+        .first<{
+          asset_category: string;
+          asset_type: string;
+          asset_type_version: number;
+          asset_name: string;
+          decimals: string;
+          public_name: string;
+        }>();
+      expect(profile).toEqual({
+        asset_category: "generic",
+        asset_type: "generic",
+        asset_type_version: 2,
+        asset_name: "Test Stablecoin",
+        decimals: "6",
+        public_name: "Test Stablecoin",
+      });
     });
 
     it("creates token with default decimals", async () => {

@@ -15,6 +15,7 @@ import type {
   MintValidationErrors,
 } from "./token-management-workspace.types";
 import {
+  getSignerWalletUnavailableReason,
   getTokenAmountFieldDescription,
   NON_WHITESPACE_PATTERN,
   SOLANA_ADDRESS_PATTERN,
@@ -77,12 +78,14 @@ export function TokenActionPrimaryForms({
   // destination is denylisted) without the user having to scan the form fields.
   const mintDisabledReason =
     signerUnavailableReason ||
+    getSignerWalletUnavailableReason(signerWallets, mintForm.signingWalletId, t) ||
     (signerWallets.length > 1 && !mintForm.signingWalletId
       ? t("DashboardIssuance.signer.select")
       : null) ||
     mintValidationReason;
   const burnDisabledReason =
     signerUnavailableReason ||
+    getSignerWalletUnavailableReason(signerWallets, burnForm.signingWalletId, t) ||
     (signerWallets.length > 1 && !burnForm.signingWalletId
       ? t("DashboardIssuance.signer.select")
       : null) ||

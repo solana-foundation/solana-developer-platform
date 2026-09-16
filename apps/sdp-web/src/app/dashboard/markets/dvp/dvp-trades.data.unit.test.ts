@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DVP_TRADES_PAGE_SIZE,
+  fetchDvpInboundTrades,
   fetchDvpTrade,
   fetchDvpTrades,
   isNotFound,
@@ -198,6 +199,42 @@ describe("isNotFound", () => {
  * a render exception and a server error page.
  */
 describe("a malformed but successful response", () => {
+  it.each([
+    { id: "", name: "Treasury", isRuntimeExecutionAllowed: true },
+    { id: "cw_1", name: { label: "Treasury" }, isRuntimeExecutionAllowed: true },
+    { id: "cw_1", name: null, isRuntimeExecutionAllowed: "true" },
+    { id: "cw_1", name: null },
+  ])("rejects an invalid action wallet on every trade read: %j", async (actionWallet) => {
+    const trade = tradeFixture({
+      yourSide: "a",
+      legs: { a: { party: { actionWallet } }, b: {} },
+    });
+    const request = vi.fn(async () => Response.json({ data: { trade, trades: [trade] } }));
+    const detail = await fetchDvpTrade(request, "dvp_1");
+    expect(detail.trade).toBeNull();
+    expect(detail.error).toBeTruthy();
+    expect((await fetchDvpTrades(request, UNFILTERED_DVP_TRADES)).trades).toEqual([]);
+    expect(await fetchDvpInboundTrades(request)).toEqual([]);
+  });
+
+  it.each([
+    null,
+    { id: "cw_config", name: "Treasury", isRuntimeExecutionAllowed: true },
+    { id: "cw_connection", name: null, isRuntimeExecutionAllowed: false },
+  ])("preserves a valid or unavailable action wallet: %j", async (actionWallet) => {
+    const trade = tradeFixture({ yourSide: "a", legs: { a: { party: { actionWallet } }, b: {} } });
+    const request = vi.fn(async () => Response.json({ data: { trade, trades: [trade] } }));
+    expect((await fetchDvpTrade(request, "dvp_1")).trade?.legs.a.party.actionWallet).toEqual(
+      actionWallet
+    );
+    expect(
+      (await fetchDvpTrades(request, UNFILTERED_DVP_TRADES)).trades[0].legs.a.party.actionWallet
+    ).toEqual(actionWallet);
+    expect((await fetchDvpInboundTrades(request))[0].legs.a.party.actionWallet).toEqual(
+      actionWallet
+    );
+  });
+
   it.each([
     ["an empty object", {}],
     ["no legs", { id: "dvp_1", status: "created" }],

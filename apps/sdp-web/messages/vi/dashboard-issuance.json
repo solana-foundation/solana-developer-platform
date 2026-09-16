@@ -757,7 +757,8 @@
       "recipientApprovalAutomatic": "Tự động thêm nếu cần",
       "pauseImpactWarning": "Điều này ảnh hưởng đến mọi holder: họ sẽ không gửi được Token này hay thanh toán bằng nó. Việc tạo Token mới cũng sẽ bị chặn sau khi xác nhận tạm dừng.",
       "unpauseImpactWarning": "Khi xác nhận, điều này sẽ gỡ tạm dừng trên toàn Token. Holder đủ điều kiện có thể gửi Token này và thanh toán trở lại, và Wallet được ủy quyền có thể tạo Token mới. Hãy chắc chắn rằng lý do tạm dừng đã được giải quyết.",
-      "requiredSignerAmbiguous": "Có nhiều hơn một Wallet được kiểm soát khớp với signer bắt buộc. Hãy giải quyết xung đột Wallet trước khi thử lại."
+      "requiredSignerAmbiguous": "Có nhiều hơn một Wallet được kiểm soát khớp với signer bắt buộc. Hãy giải quyết xung đột Wallet trước khi thử lại.",
+      "signingUnavailable": "Ký đã bị tắt cho Wallet này."
     },
     "forms": {
       "saveMetadata": "Lưu Metadata",

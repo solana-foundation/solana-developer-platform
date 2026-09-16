@@ -7,7 +7,8 @@ import { AppError, badRequest } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
-import type { AppContext, WebhookProcessor } from "./processor";
+import type { Env } from "@/types/env";
+import type { WebhookProcessor } from "./processor";
 
 const lightsparkEventTypeSchema = z.enum([
   "OUTGOING_PAYMENT.PENDING",
@@ -345,7 +346,7 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<string, Ramp
     return parseLightsparkEvent(payload);
   }
 
-  async process(c: AppContext, _environment: SdpEnvironment, event: RampSettlementEvent) {
+  async process(env: Env, _environment: SdpEnvironment, event: RampSettlementEvent) {
     if (event.kind === "ignore") {
       getLogger().info(`[lightspark webhook] ignored event: ${event.reason}`);
       return;
@@ -353,6 +354,6 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<string, Ramp
     // Correlation lives in the settlement service: every identifier the event
     // carries (description transfer id, Grid transaction id, Grid quote id)
     // must agree on one transfer before anything settles.
-    await applyRampSettlementEvent(c.env, event);
+    await applyRampSettlementEvent(env, event);
   }
 }

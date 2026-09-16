@@ -116,6 +116,7 @@ src/
 │   ├── burn.test.ts
 │   ├── custody-local.test.ts
 │   ├── deploy.test.ts
+│   ├── dvp-settlement.test.ts
 │   ├── freeze.test.ts
 │   ├── issuance-crud.test.ts
 │   ├── issuance-execute.test.ts
@@ -124,10 +125,10 @@ src/
 │   ├── kora.test.ts
 │   ├── mint.test.ts
 │   ├── mosaic-abl.test.ts
+│   ├── mosaic-custom-mint.test.ts
 │   ├── mosaic-templates.test.ts
 │   ├── mosaic-token-acl.test.ts
-│   ├── payments-wallet-scope.test.ts
-│   └── token2022.test.ts
+│   └── payments-wallet-scope.test.ts
 └── setup.ts
 ```
 

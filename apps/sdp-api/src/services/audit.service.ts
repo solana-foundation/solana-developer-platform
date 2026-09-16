@@ -37,6 +37,8 @@ export const AUDIT_ACTIONS = [
   "update_authority",
   "pause",
   "unpause",
+  // Money movement actions
+  "transfer",
   // Transaction actions
   "submit",
   "submit_failed",
@@ -90,6 +92,7 @@ export type ResourceType =
   | "custody_connection"
   | "earn_movement"
   | "payment_request"
+  | "payment_transfer"
   | "audit_ledger";
 
 export interface AuditLogEntry {

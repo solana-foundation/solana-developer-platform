@@ -29,6 +29,8 @@ const context: DvpCreateContext = {
       id: "cwlt_1",
       address: PARTY_A,
       label: "Treasury",
+      custodyConfigId: "cc_config",
+      isRuntimeExecutionAllowed: true,
       balances: [],
     },
   ],

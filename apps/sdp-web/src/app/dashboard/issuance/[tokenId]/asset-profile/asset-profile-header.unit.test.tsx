@@ -82,7 +82,6 @@ function render(
         isPending={false}
         {...overrides}
         onCopyAddress={noop}
-        onCopyTokenId={noop}
         onDeploy={noop}
         onUnpause={noop}
       />

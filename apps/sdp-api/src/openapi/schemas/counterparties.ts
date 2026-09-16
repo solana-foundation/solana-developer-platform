@@ -115,6 +115,21 @@ const requirementCountryFieldSchema = z.object({
   key: z.string(),
   label: z.string(),
   required: z.boolean(),
+  options: withOpenApi(z.array(z.string()).optional(), {
+    description:
+      "Subset of country codes the client may offer; absent means every supported country.",
+  }),
+});
+
+const requirementCurrencyFieldSchema = z.object({
+  kind: z.literal("currency"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+  options: withOpenApi(z.array(z.string()).optional(), {
+    description:
+      "Subset of fiat currencies the client may offer; absent means every supported currency.",
+  }),
 });
 
 const requirementDateFieldSchema = z.object({
@@ -129,6 +144,7 @@ const requirementFieldSchema = z.discriminatedUnion("kind", [
   requirementTextFieldSchema,
   requirementSelectFieldSchema,
   requirementCountryFieldSchema,
+  requirementCurrencyFieldSchema,
   requirementDateFieldSchema,
   z.object({
     kind: z.literal("address"),
@@ -140,6 +156,7 @@ const requirementFieldSchema = z.discriminatedUnion("kind", [
         requirementTextFieldSchema,
         requirementSelectFieldSchema,
         requirementCountryFieldSchema,
+        requirementCurrencyFieldSchema,
         requirementDateFieldSchema,
       ])
     ),
@@ -221,6 +238,12 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("collect_counterparty_residence"),
+      fields: z.array(requirementFieldSchema),
+    }),
+    z.object({
+      ...requirementBase,
       provider: z.literal("lightspark"),
       status: z.literal("collect_account"),
       payout: payoutRequirementTreeSchema,
@@ -248,16 +271,16 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       status: z.literal("customer_agreement_required"),
       agreements: z.array(
         z.object({
-          id: z.string(),
-          filename: z.string(),
-          downloadUrl: z.url(),
+          id: withOpenApi(z.string(), { description: "BVNK agreement id." }),
+          name: withOpenApi(z.string(), { description: "Agreement display name." }),
+          description: withOpenApi(z.string(), {
+            description: "Agreement summary text.",
+          }),
+          downloadUrl: withOpenApi(z.url(), {
+            description: "Agreement text URL, minted JIT per response and never persisted.",
+          }),
         })
       ),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("bvnk"),
-      status: z.literal("customer_pending_agreement_acceptance"),
     }),
     z.object({
       ...requirementBase,

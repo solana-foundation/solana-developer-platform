@@ -665,6 +665,10 @@ importers:
         version: 6.0.3
 
   packages/sdp-helius-rings:
+    dependencies:
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
     devDependencies:
       vitest:
         specifier: 4.1.11

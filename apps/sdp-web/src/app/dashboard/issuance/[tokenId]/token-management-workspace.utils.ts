@@ -2,17 +2,14 @@ import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/t
 import type { AppLocale } from "@/i18n/config";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { formatDisplayLabel } from "@/lib/utils";
 import { type AccessControlMode, getTokenAccessControlMode } from "../access-control.utils";
 import type {
   ActionExecutionInput,
   ActionExecutionResult,
-  AdminAction,
   AllowlistFormState,
   AuthorityFormState,
   BurnFormState,
   BurnValidationErrors,
-  ExtensionRow,
   ForceBurnFormState,
   ForceBurnValidationErrors,
   FreezeFormState,
@@ -23,7 +20,6 @@ import type {
   PermissionRow,
   SeizeFormState,
   SeizeValidationErrors,
-  TokenManagementTab,
 } from "./token-management-workspace.types";
 
 export const SOLANA_ADDRESS_PATTERN = "[1-9A-HJ-NP-Za-km-z]{32,44}";
@@ -251,14 +247,6 @@ export function formatActivityTimestamp(
   }
 
   return formatDate(value, locale);
-}
-
-export function stringifyBody(body: unknown): string {
-  try {
-    return JSON.stringify(body, null, 2);
-  } catch {
-    return String(body);
-  }
 }
 
 export function asOptionalString(value: string): string | undefined {
@@ -812,6 +800,19 @@ export function findWalletByCustodyWalletId(
   return authorityWallets.find((wallet) => wallet.id === custodyWalletId) ?? null;
 }
 
+export function getSignerWalletUnavailableReason(
+  wallets: PaymentsDashboardWallet[],
+  custodyWalletId: string | null | undefined,
+  t: Translate
+): string | null {
+  if (!custodyWalletId) return null;
+  const wallet = findWalletByCustodyWalletId(wallets, custodyWalletId);
+  if (!wallet) return t("DashboardIssuance.management.requiredSignerNotControlled");
+  return wallet.isRuntimeExecutionAllowed === true
+    ? null
+    : t("DashboardIssuance.management.signingUnavailable");
+}
+
 export function findWalletByPublicKey(
   authorityWallets: PaymentsDashboardWallet[],
   publicKey: string | null | undefined
@@ -888,7 +889,11 @@ export function getSignerSelectionForAction({
     return {
       wallets: availableWallets,
       defaultWalletId: (preferredWallet ?? availableWallets[0]).id,
-      unavailableReason: null,
+      unavailableReason: availableWallets.some(
+        (wallet) => wallet.isRuntimeExecutionAllowed === true
+      )
+        ? null
+        : t("DashboardIssuance.management.signingUnavailable"),
     };
   }
 
@@ -899,7 +904,11 @@ export function getSignerSelectionForAction({
     return {
       wallets: availableWallets,
       defaultWalletId: hasDuplicateAddress ? "" : availableWallets[0].id,
-      unavailableReason: null,
+      unavailableReason: availableWallets.some(
+        (wallet) => wallet.isRuntimeExecutionAllowed === true
+      )
+        ? null
+        : t("DashboardIssuance.management.signingUnavailable"),
     };
   }
 
@@ -973,7 +982,9 @@ export function getSignerSelectionForAction({
   return {
     wallets: matchedWallets,
     defaultWalletId: matchedWallets.length === 1 ? matchedWallets[0].id : "",
-    unavailableReason: null,
+    unavailableReason: matchedWallets.some((wallet) => wallet.isRuntimeExecutionAllowed === true)
+      ? null
+      : t("DashboardIssuance.management.signingUnavailable"),
   };
 }
 
@@ -1313,130 +1324,4 @@ export function getForceBurnValidationReason(args: {
 }): string | null {
   const errors = getForceBurnValidationErrors(args);
   return getFirstValidationError(errors.source, errors.amount);
-}
-
-export function getExtensionRows(token: Token, t: Translate): ExtensionRow[] {
-  const configuredExtensionRows: ExtensionRow[] = [];
-  const controlListCopy = getControlListCopy(getTokenAccessControlMode(token), t);
-
-  if (token.extensions?.defaultAccountState) {
-    configuredExtensionRows.push({
-      id: "default-account-state",
-      title: t("DashboardIssuance.management.defaultAccountState"),
-      helper: t("DashboardIssuance.management.defaultAccountStateHelper"),
-      value: formatDisplayLabel(token.extensions.defaultAccountState),
-    });
-  }
-
-  if (token.extensions?.transferFee) {
-    configuredExtensionRows.push({
-      id: "transfer-fee",
-      title: t("DashboardIssuance.management.transferFee"),
-      helper: t("DashboardIssuance.management.transferFeeHelper"),
-      value: t("DashboardIssuance.management.configured"),
-    });
-  }
-
-  if (token.extensions?.scaledUiAmount) {
-    configuredExtensionRows.push({
-      id: "scaled-ui",
-      title: t("DashboardIssuance.management.scaledUiAmount"),
-      helper: t("DashboardIssuance.management.scaledUiAmountHelper"),
-      value: t("DashboardIssuance.management.configured"),
-    });
-  }
-
-  if (token.extensions?.transferHook) {
-    configuredExtensionRows.push({
-      id: "transfer-hook",
-      title: t("DashboardIssuance.management.transferHook"),
-      helper: t("DashboardIssuance.management.transferHookHelper"),
-      value: t("DashboardIssuance.management.configured"),
-    });
-  }
-
-  if (token.extensions?.interestBearing) {
-    configuredExtensionRows.push({
-      id: "interest-bearing",
-      title: t("DashboardIssuance.management.interestBearing"),
-      helper: t("DashboardIssuance.management.interestBearingHelper"),
-      value: t("DashboardIssuance.management.configured"),
-    });
-  }
-
-  if (token.extensions?.nonTransferable) {
-    configuredExtensionRows.push({
-      id: "non-transferable",
-      title: t("DashboardIssuance.management.nonTransferable"),
-      helper: t("DashboardIssuance.management.nonTransferableHelper"),
-      value: t("DashboardIssuance.management.enabled"),
-    });
-  }
-
-  return [
-    {
-      id: "template",
-      title: t("DashboardIssuance.management.template"),
-      helper: t("DashboardIssuance.management.templateHelper"),
-      value: formatDisplayLabel(token.template),
-    },
-    ...(controlListCopy
-      ? [
-          {
-            id: "control-list",
-            title: controlListCopy.label,
-            helper: controlListCopy.extensionHelper,
-            value: t("DashboardIssuance.management.enabled"),
-          } satisfies ExtensionRow,
-        ]
-      : []),
-    {
-      id: "mintable",
-      title: t("DashboardIssuance.management.mintable"),
-      helper: t("DashboardIssuance.management.mintableHelper"),
-      value: token.isMintable
-        ? t("DashboardIssuance.management.enabled")
-        : t("DashboardIssuance.management.disabled"),
-    },
-    {
-      id: "freezable",
-      title: t("DashboardIssuance.management.freezable"),
-      helper: t("DashboardIssuance.management.freezableHelper"),
-      value: token.isFreezable
-        ? t("DashboardIssuance.management.enabled")
-        : t("DashboardIssuance.management.disabled"),
-    },
-    ...configuredExtensionRows,
-  ];
-}
-
-export function getTabForAction(action: AdminAction): TokenManagementTab {
-  switch (action) {
-    case "authority":
-      return "permissions";
-    case "allowlist":
-    case "freeze":
-    case "pause":
-    case "seize":
-    case "force-burn":
-      return "compliance";
-    case "update-metadata":
-      return "metadata";
-    case "mint":
-    case "burn":
-      return "fund-management";
-  }
-}
-
-export function getDefaultActionForTab(tab: TokenManagementTab): AdminAction | null {
-  switch (tab) {
-    case "compliance":
-      return "allowlist";
-    case "metadata":
-      return "update-metadata";
-    case "fund-management":
-      return "mint";
-    default:
-      return null;
-  }
 }
