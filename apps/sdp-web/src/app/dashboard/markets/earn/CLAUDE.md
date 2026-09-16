@@ -181,9 +181,12 @@ program create still sends the body `requestId` form.
   freely navigable reference tabs (client setup, deposits, reads, withdraw).
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
-  a warning callout, because the module they document carries a secret API key.
-  Do not imply that catalogue, preview, or unsigned build access always needs
-  that key; the public guide documents their keyless tier.
+  an info callout that links to the API keys page (a Developer key includes
+  earn:read and earn:write), because the module they document carries a secret
+  API key. The module needs only the strategy id and that key: no strategy
+  object, no `sourceTokenMint` on a direct deposit. Do not imply that catalogue,
+  preview, or unsigned build access always needs the key; the public guide
+  documents their keyless tier.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is

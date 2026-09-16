@@ -305,6 +305,9 @@ jobs:
         with:
           name: vitest-api-shard-${{ matrix.shard }}
           path: apps/sdp-api/.vitest-reports/blob-${{ matrix.shard }}-8.json
+          # A rerun of failed shards must replace the first attempt's blob, or the
+          # merge step below keeps re-reporting failures the rerun already fixed.
+          overwrite: true
           include-hidden-files: true
           if-no-files-found: error
 

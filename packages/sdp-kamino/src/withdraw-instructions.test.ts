@@ -182,6 +182,21 @@ describe("buildShareAccountConsolidation", () => {
     );
   });
 
+  it("reports a short balance in whole share units, not base units", async () => {
+    await expect(
+      buildShareAccountConsolidation({
+        requestedBaseUnits: 100_000_000n,
+        shareMint: address("So11111111111111111111111111111111111111112"),
+        shareDecimals: 6,
+        owner: createNoopSigner(address("11111111111111111111111111111112")),
+        accounts: [{ address: address("11111111111111111111111111111113"), amount: 10_000_000n }],
+      })
+    ).rejects.toMatchObject({
+      code: "INVALID_AMOUNT",
+      message: "Kamino wallet holds 10 shares, below the requested 100.",
+    });
+  });
+
   it("consolidates a split maximum-u64 position before its atomic guard", async () => {
     const owner = createNoopSigner(address("11111111111111111111111111111112"));
     const mint = address("So11111111111111111111111111111111111111112");
