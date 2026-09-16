@@ -171,7 +171,7 @@ const MODULE_METADATA = [
     name: "@sdp/helius-rings",
     directory: "packages/sdp-helius-rings",
     purpose: "Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet).",
-    allowedDependencies: [],
+    allowedDependencies: ["@sdp/types"],
   },
   {
     name: "@sdp/helius-rings-sdk",

@@ -19,7 +19,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CopyIcon,
-  DownloadIcon,
   ExternalLinkIcon,
   HashIcon,
   LoaderCircleIcon,
@@ -48,7 +47,6 @@ import {
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { downloadResponseBlob } from "@/lib/download";
 import { explorerTxUrl } from "@/lib/explorer";
 import {
   getRampProviderLabel,
@@ -61,9 +59,9 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import {
   formatDisplayAmount,
+  formatPaymentTransferType,
   formatTimestamp,
   resolveTransferFlow,
-  resolveTransferTypeLabel,
   shortenAddress,
   statusMessageKey,
 } from "../payments-overview.utils";
@@ -388,7 +386,7 @@ function TransferTableRow({
             {isInbound ? <BanknoteArrowDownIcon /> : <BanknoteArrowUpIcon />}
           </span>
           <span className="text-sm font-medium text-primary">
-            {resolveTransferTypeLabel(transfer.type, t)}
+            {formatPaymentTransferType(transfer.type, t)}
           </span>
         </div>
       </td>
@@ -457,11 +455,9 @@ function FilterChip({
 }
 
 function CounterpartyTransactions({
-  counterpartyId,
   transfers,
   counterpartyName,
 }: {
-  counterpartyId: string;
   transfers: PaymentTransferSummary[];
   counterpartyName: string;
 }) {
@@ -501,8 +497,6 @@ function CounterpartyTransactions({
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState<RampProviderId | null>(null);
   const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
-  const [csvDownloading, setCsvDownloading] = useState(false);
-  const [csvError, setCsvError] = useState<string | null>(null);
 
   const availableTypes = useMemo(() => {
     const types = new Set<string>();
@@ -539,41 +533,6 @@ function CounterpartyTransactions({
   );
 
   const showFilters = availableTypes.length > 1 || availableProviders.length > 1;
-  const exportHref = useMemo(() => {
-    const query = new URLSearchParams({ counterparty: counterpartyId });
-    if (typeFilter) query.set("type", typeFilter);
-    if (providerFilter) query.set("provider", providerFilter);
-    return `/api/dashboard/payments/transactions/export?${query.toString()}`;
-  }, [counterpartyId, providerFilter, typeFilter]);
-
-  const downloadCsv = async () => {
-    if (csvDownloading) return;
-    setCsvDownloading(true);
-    setCsvError(null);
-
-    try {
-      const response = await fetch(exportHref);
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as {
-          error?: { message?: string };
-        };
-        throw new Error(
-          body.error?.message ?? t("DashboardPayments.transactions.downloadCsvFailed")
-        );
-      }
-
-      await downloadResponseBlob(response, "sdp-transactions.csv");
-    } catch (error) {
-      setCsvError(
-        error instanceof Error
-          ? error.message
-          : t("DashboardPayments.transactions.downloadCsvFailed")
-      );
-    } finally {
-      setCsvDownloading(false);
-    }
-  };
-
   return (
     <section className="space-y-3">
       {transfers.length === 0 ? (
@@ -599,7 +558,7 @@ function CounterpartyTransactions({
                         active={typeFilter === type}
                         onClick={() => setTypeFilter(type)}
                       >
-                        {resolveTransferTypeLabel(type, t)}
+                        {formatPaymentTransferType(type, t)}
                       </FilterChip>
                     ))}
                   </>
@@ -628,22 +587,7 @@ function CounterpartyTransactions({
             ) : (
               <span />
             )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={csvDownloading}
-              iconLeft={
-                csvDownloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />
-              }
-              onClick={downloadCsv}
-            >
-              {csvDownloading
-                ? t("DashboardPayments.transactions.downloadingCsv")
-                : t("DashboardPayments.transactions.downloadCsv")}
-            </Button>
           </div>
-          {csvError ? <p className="text-xs text-error">{csvError}</p> : null}
 
           <div className="overflow-x-auto rounded-lg border border-border-default bg-surface-raised">
             <table className="w-full min-w-[760px] table-fixed border-collapse">
@@ -802,7 +746,7 @@ function TransferDetailModal({
         <div className="flex items-start justify-between gap-4 pr-8">
           <div className="space-y-1">
             <h2 className="text-xl font-medium tracking-tight text-primary">
-              {resolveTransferTypeLabel(transfer.type, t)}
+              {formatPaymentTransferType(transfer.type, t)}
             </h2>
             {transfer.createdAt ? (
               <p className="text-sm text-secondary">{formatTimestamp(transfer.createdAt, t)}</p>
@@ -1112,7 +1056,6 @@ export function CounterpartyDetailWorkspace({
 
         {activeTab === "transactions" ? (
           <CounterpartyTransactions
-            counterpartyId={counterparty.id}
             transfers={initialTransfers}
             counterpartyName={counterparty.displayName}
           />
