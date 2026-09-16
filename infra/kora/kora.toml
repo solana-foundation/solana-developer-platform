@@ -46,6 +46,7 @@ allowed_programs = [
     "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",   # Memo Program
     "AddressLookupTab1e1111111111111111111111111",   # Address Lookup Table
     "ComputeBudget111111111111111111111111111111",   # Compute Budget
+    "ZkE1Gama1Proof11111111111111111111111111111",   # ZK ElGamal Proof (confidential transfers)
 
     # ── Earn provider programs ──────────────────────────────────────────────
     # Sponsored Earn vault execution: SDP compiles a provider's instructions
