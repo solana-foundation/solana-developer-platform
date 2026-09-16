@@ -117,6 +117,13 @@ const requirementCountryFieldSchema = z.object({
   required: z.boolean(),
 });
 
+const requirementCurrencyFieldSchema = z.object({
+  kind: z.literal("currency"),
+  key: z.string(),
+  label: z.string(),
+  required: z.boolean(),
+});
+
 const requirementDateFieldSchema = z.object({
   kind: z.literal("date"),
   key: z.string(),
@@ -129,6 +136,7 @@ const requirementFieldSchema = z.discriminatedUnion("kind", [
   requirementTextFieldSchema,
   requirementSelectFieldSchema,
   requirementCountryFieldSchema,
+  requirementCurrencyFieldSchema,
   requirementDateFieldSchema,
   z.object({
     kind: z.literal("address"),
@@ -140,6 +148,7 @@ const requirementFieldSchema = z.discriminatedUnion("kind", [
         requirementTextFieldSchema,
         requirementSelectFieldSchema,
         requirementCountryFieldSchema,
+        requirementCurrencyFieldSchema,
         requirementDateFieldSchema,
       ])
     ),
