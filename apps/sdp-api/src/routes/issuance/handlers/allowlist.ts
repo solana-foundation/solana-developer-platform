@@ -7,7 +7,6 @@ import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
-import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
@@ -17,7 +16,7 @@ import {
   beginApprovedWalletOperationEffect,
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 
 import type { Env } from "@/types/env";
 import {
@@ -290,7 +289,7 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
     // a crash between them must leave either both or neither, so recovery can
     // retry instead of paging for manual reconciliation.
     let { entry } = await runApprovedWalletOperationEffectTransaction(c, (db) =>
-      new TokenService(db, getRequestTenantScope(c)).addAllowlistEntry({
+      getTenantTokenService(c, db).addAllowlistEntry({
         tokenId,
         address: body.address,
         addedBy: auth.id,
@@ -432,7 +431,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
       // Database-only removal: the fence and the revoke are one transaction,
       // so a crash between them cannot strand a fenced-but-unapplied effect.
       await runApprovedWalletOperationEffectTransaction(c, (db) =>
-        new TokenService(db, getRequestTenantScope(c)).revokeAllowlistEntry(entryId)
+        getTenantTokenService(c, db).revokeAllowlistEntry(entryId)
       );
     }
     authoritativeEffectCompleted = true;
