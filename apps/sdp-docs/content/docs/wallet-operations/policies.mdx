@@ -142,6 +142,11 @@ Family values with no current public operation type are valid policy values, but
 | `issuance_force_burn_execute` | `issuance` | Force-burns tokens from a holder account. |
 | `issuance_seize_execute` | `issuance` | Seizes tokens into the issuer-controlled destination. |
 | `issuance_update_authority_execute` | `issuance` | Changes a token authority using the current authority wallet. |
+| `issuance_freeze_execute` | `issuance` | Freezes a holder token account using the freeze authority wallet. |
+| `issuance_unfreeze_execute` | `issuance` | Thaws a frozen holder token account using the freeze authority wallet. |
+| `issuance_pause_execute` | `issuance` | Pauses all token transfers using the pause authority wallet. |
+| `issuance_unpause_execute` | `issuance` | Resumes token transfers using the pause authority wallet. |
+| `issuance_metadata_update_execute` | `issuance` | Rewrites on-chain token metadata using the metadata authority wallet. |
 | `earn_vault_deposit` | `program` | Deposits custody-wallet assets into a supported non-custodial Earn vault. |
 | `recurring_payment_create` | `payment` | Creates a recurring payment schedule. |
 | `recurring_payment_update` | `payment` | Updates a recurring payment schedule. |
