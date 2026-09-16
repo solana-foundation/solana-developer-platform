@@ -918,7 +918,7 @@ All endpoints live under `/v1/earn`. Every code sample uses one Solana SDK, `@so
 | Submit signed transactions through SDP | No | Yes, `earn:write` |
 | Track movements, positions, balances, and earnings | No | Yes, `earn:read` |
 
-Keyless requests use the deployment's environment (the development deployment is Solana devnet) and create no record: the response carries no `movementId`, and you sign, broadcast, and track the transaction yourself. Keyed requests carry your project and environment, can name a `feePayer`, and can be submitted to SDP, which records the movement before broadcast and reconciles it to a terminal state.
+Keyless requests use the deployment's environment (the preview deployment is Solana devnet) and create no record: the response carries no `movementId`, and you sign, broadcast, and track the transaction yourself. Keyed requests carry your project and environment, can name a `feePayer`, and can be submitted to SDP, which records the movement before broadcast and reconciles it to a terminal state.
 
 **The key.** Create a Developer API key for your project in the dashboard; that role includes `earn:read` and `earn:write`. Start in sandbox, which runs on devnet. A strategy is depositable when `fundable` is `true` and `status` is `active`.
 
@@ -927,7 +927,7 @@ Keyless requests use the deployment's environment (the development deployment is
 List the catalogue and build a deposit with nothing but a strategy id and the customer's funded devnet wallet:
 
 ```bash
-export SDP_API_URL=https://api-dev.solana.com
+export SDP_API_URL=https://api-preview.solana.com
 
 curl --fail-with-body --silent --show-error "$SDP_API_URL/v1/earn/strategies"
 
