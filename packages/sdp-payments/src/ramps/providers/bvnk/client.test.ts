@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "../../../errors";
 import type { RampRuntimeContext } from "../../types";
-import { BvnkRampClient, type CreateBvnkCustomerV2Input } from "./client";
+import { BvnkRampClient } from "./client";
+import type { CreateBvnkCustomerV2Input } from "./schemas";
 
 const runtimeContext = {
   env: {

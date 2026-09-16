@@ -7,7 +7,6 @@ import type {
 import { badRequest, unsupportedCounterparty } from "../../../errors";
 import { parseCollectedFields, readyCounterparty } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
-import { type BvnkCustomerV2Individual, bvnkV2CddSchema } from "./client";
 import {
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
@@ -19,6 +18,7 @@ import {
   bvnkOnrampFields,
   isBvnkOfframpCurrency,
 } from "./requirements";
+import { type BvnkCustomerV2Individual, bvnkV2CddSchema } from "./schemas";
 
 function collectedString(data: Record<string, unknown>, key: string): string {
   const value = data[key];
