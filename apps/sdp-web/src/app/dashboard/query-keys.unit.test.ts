@@ -42,7 +42,6 @@ const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
   [custodyQueryKeys.walletPolicyRevisions({ walletId: "wal_2" }), ["wal_2"]],
   [issuanceQueryKeys.tokens({ query: DEFAULT_ISSUANCE_LIST_QUERY }), [DEFAULT_ISSUANCE_LIST_QUERY]],
   [issuanceQueryKeys.authorityWallets({ tokenId: "token_1" }), ["token_1"]],
-  [issuanceQueryKeys.supportingData({ tokenId: "token_2" }), ["token_2"]],
   [earnQueryKeys.programDeposits({ programId: "prg_1" }), ["prg_1"]],
   [earnQueryKeys.strategies({ cluster: "devnet" }), ["devnet"]],
   [earnQueryKeys.vaultDeposit({ movementId: "mov_1" }), ["mov_1"]],

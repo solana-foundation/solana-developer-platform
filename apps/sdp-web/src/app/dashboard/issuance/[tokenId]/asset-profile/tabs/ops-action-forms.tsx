@@ -63,9 +63,6 @@ export function OpsActionForms({
       allowlistForm={ops.allowlistForm}
       setAllowlistForm={ops.setAllowlistForm}
       tokenId={token.id}
-      enableControlListSearch
-      allowlistEntries={ops.allowlistEntries}
-      allowlistError={ops.allowlistError}
       controlListLabel={ops.controlListCopy?.label ?? null}
       controlListDescription={ops.controlListCopy?.description ?? null}
       controlListAddActionLabel={

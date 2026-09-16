@@ -80,7 +80,6 @@ function renderOperations(overrides: Partial<Token> = {}) {
     () =>
       useTokenOperations({
         token: { ...token, ...overrides },
-        shouldLoadSupportingData: true,
         shouldLoadAuthorityWallets: true,
         canManageTokenAdmin: true,
       }),

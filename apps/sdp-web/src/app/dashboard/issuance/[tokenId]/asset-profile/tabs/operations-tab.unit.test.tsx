@@ -60,6 +60,9 @@ function makeOps(overrides: Partial<TokenOperations> = {}): TokenOperations {
     showControlList: true,
     effectivePauseDisabledReason: null,
     effectiveFreezeDisabledReason: null,
+    frozenAccountsError: null,
+    frozenAccountsLoading: false,
+    frozenAccountsTotal: 2,
     operationAvailability: { mint: null, burn: null, seize: null, "force-burn": null },
     lockSupplyRemaining: "7500000",
     lockSupplyDisabledReason: null,
@@ -83,7 +86,6 @@ function render(input: Token = token, overrides: Partial<TokenOperations> = {}, 
           canManageTokenAdmin={admin}
           isPending={false}
           onCopyAddress={vi.fn()}
-          onCopyTokenId={vi.fn()}
           onDeploy={vi.fn()}
           onUnpause={vi.fn()}
         />
@@ -107,6 +109,8 @@ describe("simplified token operations", () => {
     expect(html).toContain("Blocked recipients");
     expect(html).toContain("Pause transfers");
     expect(html).toContain("Freeze a balance");
+    expect(html).toContain('data-testid="frozen-accounts-summary-card"');
+    expect(html).toContain("2 accounts");
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('aria-hidden="true" inert=""');
     expect(html).not.toContain('data-slot="card"');
@@ -145,6 +149,7 @@ describe("simplified token operations", () => {
     expect(html).not.toContain("No transfer controls are enabled");
     expect(html).not.toContain(">Transfers</h3>");
     expect(html).not.toContain("Recovery &amp; permanent changes");
+    expect(html).toContain('data-testid="frozen-accounts-summary-card"');
   });
 
   it("shows capability blockers alongside the operation", () => {
