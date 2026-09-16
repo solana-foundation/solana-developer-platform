@@ -800,7 +800,7 @@ describe("DvpTradeRepository (postgres)", () => {
       });
       await repo.claimClose("dvp_expired_closing", {
         action: "settle",
-        signature: signatureOf(9),
+        signature: CLOSE_SIGNATURE,
         expiryHeight: "100",
       });
 
