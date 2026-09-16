@@ -120,6 +120,7 @@ async function renderControlList(
   const view = render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
+        scopeRefreshFallback={<div>Loading workspace</div>}
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: true,
