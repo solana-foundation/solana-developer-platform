@@ -1,5 +1,6 @@
 "use client";
 
+import { z } from "zod";
 import {
   createPaymentIdempotencyStore,
   isIdempotencyKeyConflict,
@@ -45,8 +46,66 @@ export function claimTransferIdempotencyKey(fingerprint: string): string {
 }
 
 /** Pin the key while an approval holds the payment; the approval can take hours. */
-export function holdTransferIdempotencyKey(fingerprint: string): void {
-  store.hold(fingerprint);
+export function holdTransferIdempotencyKey(fingerprint: string, approvalRequestId: string): void {
+  store.hold(fingerprint, approvalRequestId);
+}
+
+/** A decided approval: its request will not execute again under the held key. */
+const SETTLED_APPROVAL_STATUSES = new Set(["rejected", "canceled", "expired", "failed"]);
+
+const approvalStatusSchema = z.object({
+  data: z.object({
+    approvalRequest: z.looseObject({
+      status: z.string().min(1),
+      operation: z.looseObject({ status: z.string().min(1) }).optional(),
+    }),
+  }),
+});
+
+/**
+ * Lifts the hold once the approval that caused it has finished, so the next
+ * identical payment is a new payment rather than a replay of the old one.
+ *
+ * A held key is pinned for as long as its approval can still execute, because
+ * the executor replays the original request under it. Once the approval is
+ * rejected, cancelled, expired, or approved and finished executing, that is no
+ * longer true, and keeping the key would answer a genuinely new payment with
+ * the old transfer.
+ *
+ * Anything unreadable leaves the hold in place: keeping a key too long costs a
+ * replay the API reports, and dropping one too early costs a second payment.
+ *
+ * @param fingerprint - What makes two sends the same payment.
+ */
+export async function releaseSettledTransferHold(fingerprint: string): Promise<void> {
+  const approvalRequestId = store.heldApproval(fingerprint);
+  if (approvalRequestId === null) {
+    return;
+  }
+  let body: unknown;
+  try {
+    const response = await fetch(
+      `/api/dashboard/approval-requests/${encodeURIComponent(approvalRequestId)}`,
+      { cache: "no-store" }
+    );
+    if (!response.ok) {
+      return;
+    }
+    body = await response.json();
+  } catch {
+    return;
+  }
+  const parsed = approvalStatusSchema.safeParse(body);
+  if (!parsed.success) {
+    return;
+  }
+  const { status, operation } = parsed.data.data.approvalRequest;
+  const finished =
+    SETTLED_APPROVAL_STATUSES.has(status) ||
+    (status === "approved" && operation?.status !== undefined && operation.status !== "executing");
+  if (finished) {
+    store.release(fingerprint);
+  }
 }
 
 /** Retire the key once the API recorded the transfer or refused it with a 4xx. */

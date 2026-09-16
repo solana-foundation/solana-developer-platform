@@ -31,8 +31,9 @@ import { z } from "zod";
  * - HELD entries (a policy approval is pending on the key) never expire and
  *   are never evicted: the approval executor replays the original request
  *   with this exact key, so a resubmit under the same key is answered as a
- *   replay of what the approval recorded, while keeping it too long costs at
- *   most a replay the API reports honestly.
+ *   replay of what the approval recorded. A held entry carries the approval it
+ *   waits on, so once that approval is decided the hold can be lifted and the
+ *   next identical payment is a new one rather than a replay of the old.
  */
 
 /**
@@ -54,6 +55,8 @@ const storedEntrySchema = z.object({
   createdAt: z.number().finite(),
   /** `null` = held by a live approval: no expiry while the tab lives. */
   expiresAt: z.union([z.number().finite(), z.null()]).optional(),
+  /** The approval holding it, so the hold can be lifted once that approval ends. */
+  approvalRequestId: z.string().min(1).optional(),
 });
 
 type StoredEntry = z.infer<typeof storedEntrySchema>;
@@ -113,7 +116,9 @@ export interface PaymentIdempotencyStore {
    * replay when its execution carries the same key. Letting the key lapse
    * instead would mint a fresh one, and a fresh key is a second payment.
    */
-  hold(fingerprint: string): void;
+  hold(fingerprint: string, approvalRequestId?: string): void;
+  /** The approval a held key waits on, or null when this request holds none. */
+  heldApproval(fingerprint: string): string | null;
   /**
    * Retire a key once the API has ANSWERED for it: a recorded payment (any
    * terminal or processing status: the row exists, replays are safe) or a
@@ -208,14 +213,22 @@ export function createPaymentIdempotencyStore(storeKey: string): PaymentIdempote
       ]);
       return key;
     },
-    hold(fingerprint) {
+    hold(fingerprint, approvalRequestId) {
       const entries = readEntries();
       const held = entries.find((entry) => entry.id === fingerprint);
       if (!held) return;
       writeEntries([
         ...entries.filter((entry) => entry.id !== fingerprint),
-        { ...held, expiresAt: null },
+        {
+          ...held,
+          expiresAt: null,
+          ...(approvalRequestId === undefined ? {} : { approvalRequestId }),
+        },
       ]);
+    },
+    heldApproval(fingerprint) {
+      const held = readEntries().find((entry) => entry.id === fingerprint);
+      return held !== undefined && isHeldEntry(held) ? (held.approvalRequestId ?? null) : null;
     },
     release(fingerprint) {
       const entries = readEntries();

@@ -7,9 +7,19 @@ import { address } from "@solana/kit";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  type CreateTransferOutcome,
   createTransfer,
   postMoneygramRampEvent,
+  TransferRequestError,
 } from "@/app/dashboard/payments/payments-workspace.data";
+import {
+  claimTransferIdempotencyKey,
+  holdTransferIdempotencyKey,
+  isTransferKeyConflict,
+  releaseSettledTransferHold,
+  releaseTransferIdempotencyKey,
+  transferRequestFingerprint,
+} from "@/app/dashboard/payments/transfer-idempotency";
 import { useTranslations } from "@/i18n/provider";
 import { MONEYGRAM_SDK_URL } from "@/lib/moneygram-sdk";
 import {
@@ -219,22 +229,44 @@ export function MoneygramRampWidget({
             if (!sourceTokenMint) {
               throw new Error(t("DashboardPayments.ramps.sourceWalletNoUsdc"));
             }
-            const outcome = await createTransfer(
-              {
-                sourceCustodyWalletId: sourceWalletId,
-                destination: tx.to,
-                token: address(sourceTokenMint),
-                amount: tx.amount,
-                ...(tx.memo ? { memo: tx.memo } : {}),
-              },
-              t,
-              null
-            );
+            const submission = {
+              sourceCustodyWalletId: sourceWalletId,
+              destination: tx.to,
+              token: address(sourceTokenMint),
+              amount: tx.amount,
+              ...(tx.memo ? { memo: tx.memo } : {}),
+            };
+            // The widget can ask to sign again while an approval still holds the
+            // first attempt, and without a key each attempt is a new payment:
+            // approve two of them and the money goes out twice.
+            const fingerprint = transferRequestFingerprint(submission);
+            // An approval that has since been decided no longer holds this key,
+            // and a genuinely new payment must not be answered with the old one.
+            await releaseSettledTransferHold(fingerprint);
+            const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
+            let outcome: CreateTransferOutcome;
+            try {
+              outcome = await createTransfer(submission, t, idempotencyKey);
+            } catch (error) {
+              if (
+                error instanceof TransferRequestError &&
+                error.status >= 400 &&
+                error.status < 500 &&
+                !isTransferKeyConflict(error.status)
+              ) {
+                releaseTransferIdempotencyKey(fingerprint);
+              }
+              throw error;
+            }
             // MoneyGram needs a signature now; an approval answers later, so the
             // widget is told plainly that nothing was sent rather than "failed".
             if (outcome.kind === "approval_pending") {
+              // The approval executor replays this request under the same key,
+              // so a second attempt joins that payment instead of making one.
+              holdTransferIdempotencyKey(fingerprint, outcome.approvalRequestId);
               throw new Error(t("DashboardPayments.ramps.transferHeldForApproval"));
             }
+            releaseTransferIdempotencyKey(fingerprint);
             const transfer = outcome.transfer;
             if (!transfer.signature) {
               throw new Error(

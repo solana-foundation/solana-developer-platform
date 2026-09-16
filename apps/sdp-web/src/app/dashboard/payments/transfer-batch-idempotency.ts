@@ -87,6 +87,8 @@ export function claimTransferBatchIdempotencyKey(fingerprint: string): string {
  * must outlive the human deciding.
  */
 export function holdTransferBatchIdempotencyKey(fingerprint: string): void {
+  // The batch 202 names no approval request, so this hold carries none: it
+  // lasts the tab, as before. Single transfers do record theirs.
   store.hold(fingerprint);
 }
 

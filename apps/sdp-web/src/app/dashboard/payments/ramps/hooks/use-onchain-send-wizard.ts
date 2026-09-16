@@ -23,6 +23,7 @@ import {
   claimTransferIdempotencyKey,
   holdTransferIdempotencyKey,
   isTransferKeyConflict,
+  releaseSettledTransferHold,
   releaseTransferIdempotencyKey,
   transferRequestFingerprint,
 } from "@/app/dashboard/payments/transfer-idempotency";
@@ -294,13 +295,16 @@ export function useOnchainSendWizard({
     // payment (double press, timeout, reload) carries the SAME key, so the API
     // replays what it recorded instead of moving the money again.
     const fingerprint = transferRequestFingerprint(submission);
+    // A hold whose approval has finished is not a hold any more: releasing it
+    // here is what keeps the next identical payment from replaying the old one.
+    await releaseSettledTransferHold(fingerprint);
     const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
     try {
       const outcome = await createTransfer(submission, t, idempotencyKey);
       if (outcome.kind === "approval_pending") {
         // The approval executor replays this request under the same key, so the
         // key must outlive the person deciding.
-        holdTransferIdempotencyKey(fingerprint);
+        holdTransferIdempotencyKey(fingerprint, outcome.approvalRequestId);
         setHeldApprovalRequestId(outcome.approvalRequestId);
         toast.info(t("DashboardPayments.onchainSend.approvalPendingTitle"), {
           id: toastId,
