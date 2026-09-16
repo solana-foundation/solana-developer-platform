@@ -259,6 +259,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               },
                               {
                                 "properties": {
+                                  "key": {
+                                    "type": "string",
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "currency",
+                                    ],
+                                    "type": "string",
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                  },
+                                  "required": {
+                                    "type": "boolean",
+                                  },
+                                },
+                                "required": [
+                                  "kind",
+                                  "key",
+                                  "label",
+                                  "required",
+                                ],
+                                "type": "object",
+                              },
+                              {
+                                "properties": {
                                   "before": {
                                     "type": "string",
                                   },
@@ -387,6 +413,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                             "kind": {
                                               "enum": [
                                                 "country",
+                                              ],
+                                              "type": "string",
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                            },
+                                            "required": {
+                                              "type": "boolean",
+                                            },
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "key",
+                                            "label",
+                                            "required",
+                                          ],
+                                          "type": "object",
+                                        },
+                                        {
+                                          "properties": {
+                                            "key": {
+                                              "type": "string",
+                                            },
+                                            "kind": {
+                                              "enum": [
+                                                "currency",
                                               ],
                                               "type": "string",
                                             },
@@ -631,6 +683,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         },
                         {
                           "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "currency",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
                             "before": {
                               "type": "string",
                             },
@@ -759,6 +837,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                       "kind": {
                                         "enum": [
                                           "country",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "currency",
                                         ],
                                         "type": "string",
                                       },
@@ -996,6 +1100,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         },
                         {
                           "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "currency",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
                             "before": {
                               "type": "string",
                             },
@@ -1124,6 +1254,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                       "kind": {
                                         "enum": [
                                           "country",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "currency",
                                         ],
                                         "type": "string",
                                       },
@@ -1355,6 +1511,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         },
                         {
                           "properties": {
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "currency",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
                             "before": {
                               "type": "string",
                             },
@@ -1483,6 +1665,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                       "kind": {
                                         "enum": [
                                           "country",
+                                        ],
+                                        "type": "string",
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                      },
+                                      "required": {
+                                        "type": "boolean",
+                                      },
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "key",
+                                      "label",
+                                      "required",
+                                    ],
+                                    "type": "object",
+                                  },
+                                  {
+                                    "properties": {
+                                      "key": {
+                                        "type": "string",
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "currency",
                                         ],
                                         "type": "string",
                                       },
@@ -1773,6 +1981,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               },
                               {
                                 "properties": {
+                                  "key": {
+                                    "type": "string",
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "currency",
+                                    ],
+                                    "type": "string",
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                  },
+                                  "required": {
+                                    "type": "boolean",
+                                  },
+                                },
+                                "required": [
+                                  "kind",
+                                  "key",
+                                  "label",
+                                  "required",
+                                ],
+                                "type": "object",
+                              },
+                              {
+                                "properties": {
                                   "before": {
                                     "type": "string",
                                   },
@@ -1901,6 +2135,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                             "kind": {
                                               "enum": [
                                                 "country",
+                                              ],
+                                              "type": "string",
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                            },
+                                            "required": {
+                                              "type": "boolean",
+                                            },
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "key",
+                                            "label",
+                                            "required",
+                                          ],
+                                          "type": "object",
+                                        },
+                                        {
+                                          "properties": {
+                                            "key": {
+                                              "type": "string",
+                                            },
+                                            "kind": {
+                                              "enum": [
+                                                "currency",
                                               ],
                                               "type": "string",
                                             },

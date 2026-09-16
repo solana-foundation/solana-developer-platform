@@ -35,6 +35,12 @@ export type RequirementField =
       required: boolean;
     }
   | {
+      kind: "currency";
+      key: string;
+      label: string;
+      required: boolean;
+    }
+  | {
       kind: "date";
       key: string;
       label: string;

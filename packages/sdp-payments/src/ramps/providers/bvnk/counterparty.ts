@@ -8,7 +8,6 @@ import {
   type CountryCode,
   isCountryCode,
 } from "@sdp/types";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
@@ -17,6 +16,7 @@ import type {
 import { badRequest, unsupportedCounterparty } from "../../../errors";
 import {
   countryField,
+  currencyField,
   dateField,
   enumOptions,
   parseCollectedFields,
@@ -147,11 +147,10 @@ const BVNK_ONRAMP_BASE_FIELDS: RequirementField[] = [
     pattern: "^\\d+(\\.\\d{1,2})?$",
     placeholder: "1000",
   }),
-  selectField({
+  currencyField({
     key: "cdd.expectedMonthlyVolume.currency",
     label: "Expected monthly volume currency",
     required: true,
-    options: enumOptions(RAMP_FIAT_CURRENCIES),
   }),
 ];
 
