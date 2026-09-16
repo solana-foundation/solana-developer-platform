@@ -35,6 +35,7 @@ export function DetailsTab({
     ],
     [t("DashboardIssuance.assetDetails.descriptionLabel"), form.draft.description],
     [t("DashboardIssuance.assetDetails.website"), form.draft.website],
+    [t("DashboardIssuance.forms.uri"), form.draft.metadataUri],
   ].filter(([, value]) => value);
   return (
     <div className="space-y-4">
@@ -210,6 +211,14 @@ function EditableDetailsTab({ token, form }: { token: Token; form: AssetProfileF
             onChange={(value) => updateDraft({ imageUrl: value })}
             placeholder={t("DashboardIssuance.assetDetails.logoPlaceholder")}
             error={fieldError("imageUrl")}
+          />
+          <TextField
+            label={t("DashboardIssuance.forms.uri")}
+            disabled={saving}
+            value={draft.metadataUri}
+            onChange={(value) => updateDraft({ metadataUri: value })}
+            placeholder={t("DashboardIssuance.assetDetails.websitePlaceholder")}
+            error={fieldError("metadataUri")}
           />
         </div>
       </section>

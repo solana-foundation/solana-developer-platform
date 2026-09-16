@@ -2,7 +2,7 @@
 
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { type LucideIcon, Plus, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
@@ -70,9 +70,10 @@ export function TextField({
   error?: string;
 }) {
   const t = useTranslations();
+  const fieldId = useId();
   return (
     <div className="grid gap-1.5">
-      <Label>
+      <Label htmlFor={fieldId}>
         {label}
         {required ? (
           <>
@@ -85,6 +86,7 @@ export function TextField({
         ) : null}
       </Label>
       <Input
+        id={fieldId}
         type={type}
         disabled={disabled}
         value={value}

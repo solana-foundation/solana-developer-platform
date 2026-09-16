@@ -1,7 +1,7 @@
 "use client";
 
 import type { PaymentsDashboardWallet, Token } from "@sdp/types";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -28,7 +28,6 @@ import {
   getBurnValidationReason,
   getControlListCopy,
   getExplorerHref,
-  getExtensionRows,
   getForceBurnValidationErrors,
   getForceBurnValidationReason,
   getLockSupplyDisabledReason,
@@ -49,18 +48,14 @@ import { useTokenOperationData } from "./use-token-operation-data";
 /**
  * The operational core of token management (deploy, mint, burn, seize,
  * force-burn, authorities, pause, freeze, allowlist, supply refresh) for the
- * asset-profile workspace. Mirrors the handler wiring of the legacy
- * TokenManagementWorkspace against the same API endpoints and shared utils —
- * the monolith itself is intentionally untouched.
+ * asset-profile workspace, using the issuance API endpoints and shared utils.
  */
 export function useTokenOperations({
   token,
-  shouldLoadSupportingData,
   shouldLoadAuthorityWallets,
   canManageTokenAdmin,
 }: {
   token: Token;
-  shouldLoadSupportingData: boolean;
   shouldLoadAuthorityWallets: boolean;
   canManageTokenAdmin: boolean;
 }) {
@@ -88,9 +83,7 @@ export function useTokenOperations({
   const [allowlistForm, setAllowlistForm] = useState(createInitialAllowlistForm);
   // Lock-supply has its own modal state rather than joining FundManagementModalAction:
   // it composes two endpoint calls instead of mapping to one, it must keep the modal
-  // open across submission to offer a retry, and it exists only on this workspace —
-  // widening the shared union would force dead entries into the legacy workspace and
-  // the playground deep-links.
+  // open across submission to offer a retry, and it exists only on this workspace.
   const [lockSupplyModalOpen, setLockSupplyModalOpen] = useState(false);
   const [lockSupplyForm, setLockSupplyForm] = useState({
     destination: "",
@@ -111,25 +104,14 @@ export function useTokenOperations({
     authorityWalletsFetchError,
     authorityWalletsError,
     authorityWalletsLoading,
-    supportingDataLoading,
-    transactions,
-    transactionsError,
-    transactionsTotal,
-    transactionsHasMore,
     allowlistEntries,
-    allowlistError,
-    allowlistTotal,
-    allowlistHasMore,
-    frozenAccounts,
     frozenAccountsError,
+    frozenAccountsLoading,
     frozenAccountsTotal,
-    frozenAccountsHasMore,
     revalidateAfterSuccess,
   } = useTokenOperationData({
     token,
     shouldLoadAuthorityWallets,
-    shouldLoadSupportingData,
-    showControlList,
   });
   const {
     isPending,
@@ -189,7 +171,6 @@ export function useTokenOperations({
     canManageTokenAdmin,
     t,
   });
-  const extensionRows = useMemo(() => getExtensionRows(token, t), [token, t]);
   const metadataSignerSelection = withWalletLoadError(
     getSignerSelectionForAction({
       action: "metadata",
@@ -1175,23 +1156,13 @@ export function useTokenOperations({
     authorityWallets,
     authorityWalletsError,
     authorityWalletsLoading,
-    supportingDataLoading,
-    transactions,
-    transactionsError,
-    transactionsTotal,
-    transactionsHasMore,
     allowlistEntries,
-    allowlistError,
-    allowlistTotal,
-    allowlistHasMore,
-    frozenAccounts,
     frozenAccountsError,
+    frozenAccountsLoading,
     frozenAccountsTotal,
-    frozenAccountsHasMore,
     // rows
     permissionRows,
     authoritySummary,
-    extensionRows,
     displayedMintAuthority,
     // form state
     mintForm,

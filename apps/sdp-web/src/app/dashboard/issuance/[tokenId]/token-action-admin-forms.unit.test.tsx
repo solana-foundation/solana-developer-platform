@@ -38,14 +38,19 @@ vi.mock("next/navigation", () => ({
 
 const fetchMock = vi.fn<typeof fetch>();
 const allowlistUrl = "/api/dashboard/issuance/tokens/tok_test/allowlist";
+let labelsRequestError: string | null = null;
 
 beforeEach(() => {
   localStorage.clear();
+  labelsRequestError = null;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input, init) => {
     if (init?.method !== "GET") throw new Error(`Unexpected method: ${init?.method}`);
     switch (input) {
       case `${allowlistUrl}/labels`:
+        if (labelsRequestError) {
+          return Response.json({ error: labelsRequestError }, { status: 500 });
+        }
         return Response.json({ labels: ["Blocked address"], total: 26 });
       case `${allowlistUrl}?page=1&pageSize=25`:
         return Response.json({ data: [entry], total: 26, page: 1, pageSize: 25, hasMore: true });
@@ -73,7 +78,6 @@ beforeEach(() => {
 });
 
 async function renderControlList(
-  enableControlListSearch: boolean,
   signerUnavailableReason: string | null,
   overrides: Partial<ComponentProps<typeof TokenActionAdminForms>> = {}
 ) {
@@ -91,9 +95,6 @@ async function renderControlList(
     allowlistForm: { address: entry.address, label: "Recipient" },
     setAllowlistForm: vi.fn(),
     tokenId: entry.tokenId,
-    enableControlListSearch,
-    allowlistEntries: [entry],
-    allowlistError: null,
     controlListLabel: "Blocked recipients",
     controlListDescription: null,
     controlListAddActionLabel: "Block recipient",
@@ -154,10 +155,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe.each([false, true])("control-list signing availability (search=%s)", (searchable) => {
+describe("control-list signing availability", () => {
+  it("shows a count error instead of a false zero while keeping entries visible", async () => {
+    labelsRequestError = "Could not load entry count.";
+    await renderControlList(null);
+    expect(screen.getByText(labelsRequestError)).toBeTruthy();
+    expect(screen.queryByText("0 entries")).toBeNull();
+    expect(screen.getByText(entry.address)).toBeTruthy();
+  });
+
   it("blocks add/remove and form submission while keeping the list readable", async () => {
     const reason = "Signing is disabled for this wallet.";
-    const { container, props } = await renderControlList(searchable, reason);
+    const { container, props } = await renderControlList(reason);
     const add = screen.getByRole<HTMLButtonElement>("button", { name: "Block recipient" });
     const remove = screen.getByRole<HTMLButtonElement>("button", { name: /remove/i });
     expect(add.disabled).toBe(true);
@@ -171,32 +180,30 @@ describe.each([false, true])("control-list signing availability (search=%s)", (s
     fireEvent.submit(form);
     expect(props.onAddAllowlist).not.toHaveBeenCalled();
     expect(props.onRemoveAllowlist).not.toHaveBeenCalled();
-    if (searchable) {
-      const search = screen.getByPlaceholderText<HTMLInputElement>(/Search Blocked recipients/);
-      expect(search.disabled).toBe(false);
-      expect(screen.getByRole("combobox").textContent).toContain("All labels");
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${allowlistUrl}/labels`,
-        expect.objectContaining({ method: "GET" })
-      );
-      fireEvent.click(screen.getByRole("button", { name: /next page/i }));
-      await screen.findByText("Second page");
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${allowlistUrl}?page=2&pageSize=25`,
-        expect.objectContaining({ method: "GET" })
-      );
-      fireEvent.change(search, { target: { value: "recipient" } });
-      await screen.findByText("Search result");
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${allowlistUrl}?page=1&pageSize=25&search=recipient`,
-        expect.objectContaining({ method: "GET" })
-      );
-      await waitFor(() =>
-        expect(screen.getByRole<HTMLButtonElement>("button", { name: /next page/i }).disabled).toBe(
-          true
-        )
-      );
-    }
+    const search = screen.getByPlaceholderText<HTMLInputElement>(/Search Blocked recipients/);
+    expect(search.disabled).toBe(false);
+    expect(screen.getByRole("combobox").textContent).toContain("All labels");
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${allowlistUrl}/labels`,
+      expect.objectContaining({ method: "GET" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: /next page/i }));
+    await screen.findByText("Second page");
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${allowlistUrl}?page=2&pageSize=25`,
+      expect.objectContaining({ method: "GET" })
+    );
+    fireEvent.change(search, { target: { value: "recipient" } });
+    await screen.findByText("Search result");
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${allowlistUrl}?page=1&pageSize=25&search=recipient`,
+      expect.objectContaining({ method: "GET" })
+    );
+    await waitFor(() =>
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: /next page/i }).disabled).toBe(
+        true
+      )
+    );
   });
 
   it("shows the list signer and reads its runtime restriction as a warning", async () => {
@@ -208,7 +215,7 @@ describe.each([false, true])("control-list signing availability (search=%s)", (s
       isRuntimeExecutionAllowed: false,
     };
     const reason = "Signing is disabled for this wallet.";
-    await renderControlList(searchable, reason, {
+    await renderControlList(reason, {
       signerWallets: [signer],
       defaultSignerWalletId: signer.id,
     });
@@ -229,7 +236,7 @@ describe.each([false, true])("control-list signing availability (search=%s)", (s
   });
 
   it("keeps mutation actions usable when no signer restriction applies", async () => {
-    const { props } = await renderControlList(searchable, null);
+    const { props } = await renderControlList(null);
     const add = screen.getByRole<HTMLButtonElement>("button", { name: "Block recipient" });
     const remove = screen.getByRole<HTMLButtonElement>("button", { name: /remove/i });
     expect(add.disabled).toBe(false);
@@ -241,7 +248,7 @@ describe.each([false, true])("control-list signing availability (search=%s)", (s
   });
 
   it("leaves multiple signers to the action confirmation instead of showing a dead picker", async () => {
-    const { props } = await renderControlList(searchable, null, {
+    const { props } = await renderControlList(null, {
       signerWallets: [
         {
           id: "cw_config",
@@ -260,7 +267,7 @@ describe.each([false, true])("control-list signing availability (search=%s)", (s
       ],
       defaultSignerWalletId: "",
     });
-    expect(screen.queryAllByRole("combobox")).toHaveLength(searchable ? 1 : 0);
+    expect(screen.queryAllByRole("combobox")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Block recipient" }));
     expect(props.onAddAllowlist).toHaveBeenCalledOnce();
     expect(props.onSignerWalletIdChange).not.toHaveBeenCalled();

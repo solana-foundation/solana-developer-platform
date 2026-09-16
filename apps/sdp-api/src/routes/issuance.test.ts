@@ -3403,6 +3403,36 @@ describe("Issuance Routes", () => {
       expect(body.data.token.status).toBe("pending");
       expect(body.data.token.requiresAllowlist).toBe(true);
       expect(body.data.token.projectId).toBe(TEST_PROJECT.id);
+
+      const profile = await getDb(env)
+        .prepare(
+          `SELECT asset_category,
+                  asset_type,
+                  asset_type_version,
+                  issuance_metadata->'asset'->>'name' AS asset_name,
+                  issuance_metadata->'chain'->>'decimals' AS decimals,
+                  public_metadata->'asset'->>'name' AS public_name
+             FROM asset_profiles
+            WHERE token_id = ?
+              AND status = 'active'`
+        )
+        .bind(body.data.token.id)
+        .first<{
+          asset_category: string;
+          asset_type: string;
+          asset_type_version: number;
+          asset_name: string;
+          decimals: string;
+          public_name: string;
+        }>();
+      expect(profile).toEqual({
+        asset_category: "generic",
+        asset_type: "generic",
+        asset_type_version: 2,
+        asset_name: "Test Stablecoin",
+        decimals: "6",
+        public_name: "Test Stablecoin",
+      });
     });
 
     it("creates token with default decimals", async () => {

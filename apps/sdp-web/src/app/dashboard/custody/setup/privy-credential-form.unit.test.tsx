@@ -116,11 +116,6 @@ describe("PrivyCredentialForm", () => {
             fetcher={walletRead}
           />
           <Inventory
-            cacheKey={issuanceQueryKeys.supportingData({ tokenId: "token" })}
-            name="issuance-supporting"
-            fetcher={walletRead}
-          />
-          <Inventory
             cacheKey={paymentsQueryKeys.createTransfer()}
             name="command"
             fetcher={command}
@@ -143,7 +138,6 @@ describe("PrivyCredentialForm", () => {
     );
     expect(screen.getByTestId("earn").textContent).toBe("New Connection wallet");
     expect(screen.getByTestId("issuance").textContent).toBe("New Connection wallet");
-    expect(screen.getByTestId("issuance-supporting").textContent).toBe("New Connection wallet");
     expect(screen.getByTestId("other-project").textContent).toBe("Previous data");
     expect(screen.getByTestId("command").textContent).toBe("Previous data");
     expect(otherProjectRead).not.toHaveBeenCalled();
