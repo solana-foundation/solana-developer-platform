@@ -73,8 +73,14 @@ const transferRowSchema = z.object({
   block_time: z.string().regex(/^\d+$/).nullable(),
   fee_payer: z.string(),
   finalized: z.boolean(),
-  // BIGINT, carried as text like every other u64-shaped value here.
-  sequence: z.union([z.string().regex(/^\d+$/), z.bigint().transform(String)]),
+  // BIGINT. The driver hands it back as a number, a bigint or text depending on
+  // the column's width and its own settings, so all three are read as the
+  // integer they are and carried as text like every other u64-shaped value.
+  sequence: z.union([
+    z.string().regex(/^\d+$/),
+    z.bigint().transform(String),
+    z.number().int().nonnegative().transform(String),
+  ]),
 });
 
 const scanRowSchema = z.object({
