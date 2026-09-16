@@ -267,10 +267,11 @@ export function createVaultExposureReader(options: {
  * SDP-wide exposure is a cross-tenant fact: under the request's tenant
  * identity row-level security would hide every other organization's deposits
  * and the cap would only ever see the caller's own. The aggregate widens its
- * own read in SQL (`earn_vault_deposit_exposure`, migration 0101, registered
- * in tenant-isolation-coverage.test.ts), so the same figure comes back on a
- * pooled connection and inside a tenant-stamped ledger transaction. It
- * collapses into one number; no other tenant's row reaches the caller.
+ * own read in SQL (`earn_vault_deposit_exposure`, migration 0101: a
+ * transaction-local set_config that the function restores before returning),
+ * so the same figure comes back on a pooled connection and inside a
+ * tenant-stamped ledger transaction. It collapses into one number; no other
+ * tenant's row reaches the caller, and the caller's identity is untouched.
  */
 const ledgerSum: ExposureSum = (db, key) =>
   createPostgresEarnMovementsRepository(db).sumVaultDepositExposure(key);

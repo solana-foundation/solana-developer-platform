@@ -28,17 +28,6 @@ const SHARED_TABLES: Record<string, string> = {
     "system webhook inbox; rows are persisted before tenant resolution and only system jobs read them",
 };
 
-/**
- * Functions that widen their own read to a privileged isolation identity via a
- * function-level SET. Each is a cross-tenant fact by definition and collapses
- * to a figure no tenant row can leak through; a new one needs a reason here.
- */
-const IDENTITY_SETTING_FUNCTIONS: Record<string, string> = {
-  earn_vault_deposit_exposure:
-    "ADR 0004 vault exposure cap: SDP-wide deposits into one vault, summed across " +
-    "organizations inside the ledger write's own transaction (0101)",
-};
-
 interface TableSecurityRow {
   table_name: string;
   row_security: boolean;
@@ -90,12 +79,15 @@ describe("tenant isolation coverage", () => {
     expect(ownerRights).toEqual([]);
   });
 
-  it("lets only registered functions set the isolation identity for themselves", async () => {
-    // A function-level `SET app.tenant_isolation_identity` runs its body as a
-    // privileged identity regardless of the caller's. That is the one way a
-    // tenant-stamped transaction can read across organizations, so every
-    // function that does it is registered above with a reason, and the
-    // registry cannot go stale either.
+  it("lets no function carry a function-level SET of an app.* parameter", async () => {
+    // `CREATE FUNCTION ... SET app.tenant_isolation_identity = 'system'` is
+    // stored in proconfig, and Postgres only lets a SUPERUSER (or a role
+    // granted SET ON PARAMETER) store a SET on a custom parameter. Cloud SQL
+    // never hands out either, so such a migration passes here as the
+    // superuser and then fails on stage/prod with "permission denied to set
+    // parameter" (migration 0101, 2026-09-16). A function that must widen its
+    // read stamps set_config() transaction-locally and restores the caller's
+    // identity itself, as 0101 does.
     const rows = await env.db.queryMany<{ function_name: string; config: string[] | null }>(
       `SELECT p.proname AS function_name, p.proconfig AS config
        FROM pg_proc p
@@ -103,13 +95,11 @@ describe("tenant isolation coverage", () => {
        WHERE n.nspname = 'public' AND p.proconfig IS NOT NULL
        ORDER BY p.proname`
     );
-    const identitySetting = rows
-      .filter((row) =>
-        (row.config ?? []).some((entry) => entry.startsWith("app.tenant_isolation_identity="))
-      )
+    const appParameterSetting = rows
+      .filter((row) => (row.config ?? []).some((entry) => entry.startsWith("app.")))
       .map((row) => row.function_name);
 
-    expect(identitySetting).toEqual(Object.keys(IDENTITY_SETTING_FUNCTIONS).sort());
+    expect(appParameterSetting).toEqual([]);
   });
 
   it("keeps the shared-table registry free of stale entries", async () => {

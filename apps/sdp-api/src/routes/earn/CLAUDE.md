@@ -539,9 +539,11 @@ organization's own custody wallets.
     (`earnVaultDepositWriteLockKey`) and re-checks the idempotency replay
     under it (a same-key twin that committed while this write waited is a
     replay, never a 409), then the hook re-reads the aggregate on the SAME
-    connection (`earn_vault_deposit_exposure`, migration 0101, a SQL function
-    that widens its own read to the system identity and is registered in
-    `tenant-isolation-coverage.test.ts`), and refuses with the same 409; a
+    connection (`earn_vault_deposit_exposure`, migration 0101, a plpgsql
+    function that stamps the system identity with a transaction-local
+    `set_config` and restores the caller's before returning; never a
+    function-level `SET`, which Cloud SQL cannot apply, and which
+    `tenant-isolation-coverage.test.ts` rejects), and refuses with the same 409; a
     refusal rolls the write back with nothing recorded or broadcast. Events
     carry `stage: "preview" | "admission" | "ledger_write"`. Pinned by
     `services/earn/vault-exposure.ledger-gate.test.ts` (a real two-transaction
