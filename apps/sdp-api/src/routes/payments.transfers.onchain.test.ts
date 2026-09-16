@@ -180,6 +180,68 @@ describe("Payments routes — on-chain transfers", () => {
     expect(row.signature).toBeTruthy();
   });
 
+  it("appends a tamper-evident audit intent and outcome for an executed transfer", async () => {
+    const res = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      {}
+    );
+    expect(res.status).toBe(200);
+    const body = await readTransferResponse(res);
+
+    const outcome = await getDb(env)
+      .prepare(
+        `SELECT metadata, status FROM audit_logs
+         WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
+      )
+      .bind(body.data.transfer.id)
+      .first<{ metadata: string; status: string }>();
+    expect(outcome?.status).toBe("success");
+    const outcomeMetadata = JSON.parse(outcome?.metadata ?? "{}") as Record<string, unknown>;
+    expect(outcomeMetadata.auditPhase).toBe("outcome");
+    expect(outcomeMetadata.signature).toBe(body.data.transfer.signature);
+
+    const intent = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM audit_logs
+         WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
+           AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
+      )
+      .bind(body.data.transfer.id)
+      .first<{ metadata: string }>();
+    expect(intent).toBeTruthy();
+  });
+
+  it("appends a failure outcome when transfer execution is refused before submission", async () => {
+    createOrgSignerForCustodyWalletMock.mockRejectedValueOnce(new Error("signer unavailable"));
+
+    const res = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      {}
+    );
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+
+    const outcome = await getDb(env)
+      .prepare(
+        `SELECT status, metadata FROM audit_logs
+         WHERE action = 'transfer' AND resource_type = 'payment_transfer'
+         ORDER BY ledger_sequence DESC LIMIT 1`
+      )
+      .first<{ status: string; metadata: string }>();
+    expect(outcome?.status).toBe("failure");
+    expect(JSON.parse(outcome?.metadata ?? "{}").auditPhase).toBe("outcome");
+  });
+
   it("uses the existing off-ramp row for its on-chain deposit", async () => {
     const transferId = generatePaymentTransferId();
     const repository = createPostgresPaymentsRepository(

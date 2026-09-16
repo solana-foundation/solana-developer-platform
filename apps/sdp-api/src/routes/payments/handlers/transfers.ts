@@ -22,6 +22,7 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
+import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   generatePaymentTransferId,
@@ -65,6 +66,7 @@ import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletAuthorizationForPermissions,
 } from "@/services/api-key-scope.service";
+import { AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
   isNativePaymentToken,
@@ -844,6 +846,23 @@ export async function createTransfer(c: AppContext) {
   }
 
   const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
+  // The tamper-evident ledger admits the movement before any bytes can reach
+  // the chain; a submission whose confirmation never lands leaves the intent
+  // unresolved, which is exactly the state reconciliation pages on.
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "transfer",
+    resourceType: "payment_transfer",
+    resourceId: transfer.id,
+    metadata: {
+      custodyWalletId: operation.sourceWallet.id,
+      walletId: operation.sourceWallet.walletId,
+      sourceAddress: operation.sourceWallet.publicKey,
+      destination: body.destination,
+      token: operation.token,
+      amount: operation.amount,
+    },
+  });
   try {
     if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(
@@ -862,6 +881,9 @@ export async function createTransfer(c: AppContext) {
           error: null,
         })
       );
+      await auditService.completeCritical(c, auditIntent, {
+        metadata: { signature: solResult.signature, slot: solResult.slot?.toString() ?? null },
+      });
       return success(c, { transfer: mapTransferRow(updated) });
     }
 
@@ -884,12 +906,23 @@ export async function createTransfer(c: AppContext) {
         error: null,
       })
     );
+    await auditService.completeCritical(c, auditIntent, {
+      metadata: { signature: result.signature, slot: result.slot?.toString() ?? null },
+    });
 
     return success(c, { transfer: mapTransferRow(updated) });
   } catch (error) {
-    return settleTransferExecutionFailure(c, transfer, submissionStore, error, (row) => ({
-      transfer: mapTransferRow(row),
-    }));
+    try {
+      return await settleTransferExecutionFailure(c, transfer, submissionStore, error, (row) => ({
+        transfer: mapTransferRow(row),
+      }));
+    } catch (settledError) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown transfer error" },
+      });
+      throw settledError;
+    }
   }
 }
 
