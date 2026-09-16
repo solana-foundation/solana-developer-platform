@@ -1,5 +1,10 @@
 import { SdpKaminoError } from "@sdp/kamino";
 import { SdpVedaError } from "@sdp/veda";
+import {
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND,
+  SolanaError,
+} from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -23,6 +28,14 @@ const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
 const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
+const getBlockHeight = vi.hoisted(() => vi.fn());
+
+// The confirmed block height the broadcast tail reads before it may call a
+// preflight blockhash refusal definitive.
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
+  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+}));
 
 // `prependSwapLegToVaultPlan` stays real; only the Jupiter HTTP boundary is stubbed.
 vi.mock("./jupiter-swap.service", async (importOriginal) => ({
@@ -139,6 +152,25 @@ async function seedWallet(): Promise<void> {
   ]);
 }
 
+/** The RPC's own refusal when preflight does not recognize the blockhash. */
+function preflightBlockhashNotFound(): SolanaError {
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    fee: null,
+    loadedAccountsDataSize: null,
+    loadedAddresses: null,
+    logs: [],
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+    cause: new SolanaError(SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND),
+  });
+}
+
 async function tableCount(table: "earn_positions" | "earn_movements") {
   const row = await getDb(env)
     .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
@@ -163,6 +195,8 @@ beforeEach(async () => {
     lastValidBlockHeight: "12345",
   });
   broadcastVaultTransaction.mockResolvedValue(undefined);
+  // Inside the stubbed signature's window (lastValidBlockHeight 12345).
+  getBlockHeight.mockResolvedValue(12_000n);
 });
 
 afterEach(() => {
@@ -620,6 +654,44 @@ describe("depositIntoVault — signed persistence boundary", () => {
     const result = await depositIntoVault(env, depositInput());
 
     expect(result.movement).toMatchObject({ status: "requested", signature: "sig_original" });
+  });
+
+  it("fails a signed intent at once when preflight proves its blockhash expired", async () => {
+    broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
+    getBlockHeight.mockResolvedValue(12_346n);
+
+    const result = await depositIntoVault(env, depositInput());
+
+    expect(result.movement).toMatchObject({
+      status: "failed",
+      signature: "sig_original",
+      failure_reason: "Transaction blockhash expired before confirmation",
+    });
+    const persisted = await getDb(env)
+      .prepare("SELECT status FROM earn_movements WHERE id = ?")
+      .bind(result.movement.id)
+      .first<{ status: string }>();
+    expect(persisted?.status).toBe("failed");
+  });
+
+  it("keeps a preflight blockhash refusal reconcilable while its window is open", async () => {
+    // A too-NEW blockhash draws the same preflight answer from a lagging
+    // node; the reconciler's rebroadcast is what lands it.
+    broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
+    getBlockHeight.mockResolvedValue(12_345n);
+
+    const result = await depositIntoVault(env, depositInput());
+
+    expect(result.movement).toMatchObject({ status: "requested", failure_reason: null });
+  });
+
+  it("leaves a preflight blockhash refusal reconcilable when the height is unreadable", async () => {
+    broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
+    getBlockHeight.mockRejectedValue(new Error("rpc unreachable"));
+
+    const result = await depositIntoVault(env, depositInput());
+
+    expect(result.movement).toMatchObject({ status: "requested", failure_reason: null });
   });
 
   it("returns a matching terminal CAS winner after broadcast", async () => {

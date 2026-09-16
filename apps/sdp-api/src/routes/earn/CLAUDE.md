@@ -154,6 +154,13 @@ balance with a live one.
     curated vault's name. `HIDDEN_STRATEGY_TERMS` is name-based only because it
     can exclusively REMOVE rows; the same trick pointed the other way would be an
     admission hole.
+  - **`VAULT_EXPOSURE_CAPS` sits beside them but is NOT curation** (ADR 0004
+    layer 1, PRO-1934): it is the SDP-wide exposure ceiling per vault, in
+    deposit-token units, enforced at deposit ADMISSION rather than at browse
+    (`services/earn/vault-exposure.ts`). Same cluster-and-address keying as the
+    lists above. An ABSENT entry gets `DEFAULT_VAULT_EXPOSURE_CAP`; an explicit
+    `null` is uncapped and must read as a deliberate, commented exception in
+    review.
   - None of these is entitlement and none is `fundable`. The sync keeps STORING
     everything a provider reports, so the DB stays a truthful inventory and
     un-curating is a deploy rather than an hour's wait. None is an allocation
@@ -492,10 +499,47 @@ organization's own custody wallets.
     a silent replay, and writes nothing.
   - Gate order: schema → strategy resolution → provider/environment capability
     → provider-specific production floor → deposit-style check → surfacing → entitlement →
-    **catalogue admission** → wallet. `assertStrategyDepositable`
-    (`handlers/admission.ts`) is shared with the custodial path and asserts
-    `status = 'active'` plus `isClusterFundableInEnvironment`; without it a
-    `paused` row — an operator's deliberate stop — stayed fundable by id.
+    **catalogue admission** → **vault exposure cap** → wallet.
+    `assertStrategyDepositable` (`handlers/admission.ts`) is shared with the
+    custodial path and asserts `status = 'active'` plus
+    `isClusterFundableInEnvironment`; without it a `paused` row (an
+    operator's deliberate stop) stayed fundable by id. The cap
+    (`assertVaultDepositAdmissible(c, strategy, amount)`, last because it is
+    the one gate that reads the ledger) is ADR 0004 layer 1: SDP-wide money
+    into this vault across every organization, from `earn_movements`
+    (`sumVaultDepositExposure`, non-failed deposits, in-flight included, under
+    the system database identity because the sum is cross-tenant by
+    definition), plus the amount, against
+    `min(maxAbsolute, tvlUsd * bps / 10000)` from `VAULT_EXPOSURE_CAPS`.
+    Refuses with a typed **409 `VAULT_EXPOSURE_CAP`** only when
+    `EARN_VOLUME_CAPS_ENFORCED` is truthy; otherwise (shadow mode, the
+    default) it only emits `sdp_api_earn_volume_cap_evaluated` with
+    `would_block`. An unreadable exposure is a 503 in BOTH modes. Two
+    honesty notes: withdrawals are ledgered in SHARES, so the figure is gross
+    inflow (never subtracts exits, so it errs toward refusing); and it is
+    token units against a USD TVL, which is dollar-for-dollar only because V1
+    vaults are stablecoins. Previews read a 30s in-process cache; the
+    ADMISSION always reads the ledger fresh and folds the admitted amount back
+    into the cache, so an enforced verdict is never decided on a stale figure.
+    **The cap is decided twice for ledgered deposits.** Admission is the early
+    half and cannot see a deposit admitted a moment earlier whose row has not
+    landed, so the ledger write decides again: `ledgerVaultExposureGate`
+    (`services/earn/vault-exposure.ts`) is the `admit` hook both
+    `createSignedVaultDepositIntent` and
+    `createSignedExternalWalletDepositIntent` run inside their transaction.
+    The ledger first takes a per-vault `pg_advisory_xact_lock`
+    (`earnVaultDepositWriteLockKey`) and re-checks the idempotency replay
+    under it (a same-key twin that committed while this write waited is a
+    replay, never a 409), then the hook re-reads the aggregate on the SAME
+    connection (`earn_vault_deposit_exposure`, migration 0101, a SQL function
+    that widens its own read to the system identity and is registered in
+    `tenant-isolation-coverage.test.ts`), and refuses with the same 409; a
+    refusal rolls the write back with nothing recorded or broadcast. Events
+    carry `stage: "preview" | "admission" | "ledger_write"`. Pinned by
+    `services/earn/vault-exposure.ledger-gate.test.ts` (a real two-transaction
+    race on Postgres).
+    An anonymous build has no SDP submit or durable movement row, so it receives
+    only the admission decision and is outside the ledgered exposure figure.
   - Wallet binding takes **`earn:write`**, not `wallets:read`. A read-only
     binding must not be able to spend. Note this is the first `earn:*` scope
     asserted on a BINDING: a selected-scope key provisioned only with
@@ -604,12 +648,19 @@ organization's own custody wallets.
   its `earn:read` scope, then the handler applies the environment fail-close
   (`isVaultDirectDepositEnabled`, 403), catalogue row (404), deposit style
   (400), `assertEarnProviderSurfaced`, authenticated provider availability,
-  admission (`assertStrategyDepositable`), then capability
-  (`supportsVaultDepositQuote`, 501 for a provider that cannot quote). An
-  anonymous preview has no entitlement or tenant lookup. A vault that will not
-  take the deposit answers 200 with
+  admission (`assertStrategyDepositable`), the vault exposure cap evaluated
+  WITHOUT throwing (`checkVaultExposure`; an unreadable exposure still 503s),
+  then capability (`supportsVaultDepositQuote`, 501 for a provider that cannot
+  quote). An anonymous preview has no entitlement or tenant lookup, but still
+  evaluates the platform-wide cap. A vault that will not take the deposit
+  answers 200 with
   `blockingIssues` in the provider's own words; an unusable amount maps through
   the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
+  An ENFORCED cap block is appended to `blockingIssues` as
+  `{ code: "VAULT_EXPOSURE_CAP" }` after the provider's own, so a partner's
+  existing handler covers both; in shadow mode the preview deliberately
+  reports nothing (the deposit would land, and a preview that says otherwise
+  is a lie) and only the evaluated event records `would_block`.
   The response also carries `feeSponsored` — sponsorship INTENT
   (`isEarnVaultSponsorshipEnabled` against the environment's cluster, the same
   gate `resolveVaultSponsorship` applies at execution). The withdrawal preview
@@ -941,13 +992,16 @@ after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
 - `POST /external-wallet/deposit-transactions`: **build + simulate + compile,
   never sign.** Body `{strategyId, ownerAddress, feePayer?, amount,
   minSharesOut?}`. Both tiers enforce environment capability, production
-  floor, surfacing, and catalogue admission. Entitlement runs only when a
-  credential supplied a tenant. The provider plan is built for the OWNER and
-  returned with `{transactionId, transaction, sponsored}`. Authenticated
-  builds persist `earn_external_wallet_transactions` so a later submit can
-  prove byte equality. Anonymous builds write nothing and set
-  `sponsored: false`; the caller broadcasts and tracks the transaction itself.
-  No idempotency key is accepted because a build moves no money and expires.
+  floor, surfacing, catalogue admission, and the vault exposure cap through
+  the same `assertVaultDepositAdmissible` function as the custody path.
+  Entitlement runs only when a credential supplied a tenant. The provider plan
+  is built for the OWNER and returned with
+  `{transactionId, transaction, sponsored}`. Authenticated builds persist
+  `earn_external_wallet_transactions` so a later submit can prove byte
+  equality and repeat the cap decision under the ledger lock. Anonymous builds
+  write nothing and set `sponsored: false`; the caller broadcasts and tracks
+  the transaction itself, so only the build-time cap check is possible. No
+  idempotency key is accepted because a build moves no money and expires.
 - **`feePayer`: the partner pays (keyed builds only).** Optional; committed at
   BUILD time (it lives in the message bytes, so the submit's message equality
   makes a swapped fee payer a refused submit, never a substitution). One
@@ -1020,6 +1074,19 @@ after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
   fingerprint includes the build id, so a key reused against a REBUILT
   transaction conflicts rather than silently replaying (and a rebuilt
   transaction is also how a different `feePayer` conflicts).
+  - **Expired builds are refused before anything is recorded**: after the
+    replay short-circuit and before signature verification, the submit reads
+    the confirmed block height and answers `409 TRANSACTION_EXPIRED` when it is
+    past the build's `last_valid_block_height` (no movement row, build left
+    unconsumed; a consumed build still answers its consumption conflict, and a
+    failed height read falls through rather than refusing).
+  - **A preflight `BlockhashNotFound` past the window fails the movement at
+    once**: `broadcastRecordedVaultMovement` (shared with the custody path)
+    moves `requested → failed` with the reconciler's exact reason string when
+    preflight refused the blockhash AND the confirmed height is past the row's
+    window; the response then carries `status: "failed"`. Every other broadcast
+    error, including that refusal while the window is still open (preflight
+    can lag the blockhash's commitment), stays `requested` for the reconciler.
 - `POST /external-wallet/withdrawal-previews`: the exit QUOTE
   (`supportsVaultWithdrawQuote`, 501 without it): what redeeming the shares
   would pay from the vault's live accounting, from which the partner derives
@@ -1037,9 +1104,13 @@ after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
   build; anonymous builds require the owner as payer and persist nothing.
   `minAmountOut` is optional only when the provider has no withdrawal slippage
   policy. A keyed floor is stored in the build table's shared
-  `min_shares_out` column; direction disambiguates its unit.
-- `POST /external-wallet/withdrawals`: the keyed submit, mirrored. An
-  anonymous build cannot be submitted because no tenant build row exists.
+  `min_shares_out` column; direction disambiguates its unit. A floor the
+  provider's plan does not encode (Kamino's kvault withdraw takes only a share
+  amount, so `plan.accepted.minAmountOut` is absent) is a **400**, never
+  stored: recording it would claim a protection nothing on chain enforces.
+- `POST /external-wallet/withdrawals`: the keyed submit, mirrored, including
+  the `409 TRANSACTION_EXPIRED` pre-record refusal. An anonymous build cannot
+  be submitted because no tenant build row exists.
 - **NO policyGate and no `wallets:read`, deliberately** — this is not the
   vault-deposit cautionary tale repeating. Wallet policy governs the org's own
   custody and stands between a request and `createOrgSigner`; these routes
@@ -1061,10 +1132,16 @@ after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
 The keyed per-owner READS (PRO-1772) close the loop the money routes open. All
 three take `earn:read` only. They take no `wallets:read` (end-user wallets carry no custody
 bindings, same as the position reads) and NO provider gate (ADR 0002: they
-report on money that already moved). All 404 an owner the exact project has
-never claimed a position for (`hasExternalWalletPositionOwner` — existence and
-ownership collapse to one answer), and none of them is reachable through
-`GET /movements`, whose vault arm requires a custody-wallet match an
+report on money that already moved). **None of them 404 an owner**: a wallet
+with nothing in the project's scope (never deposited, fully exited, or claimed
+by another organization) answers 200 with the empty shape (`positions: []`,
+`movements: []`, `positionCount: 0` + `totalsByToken: []`). A partner's balance
+screen must render for a brand-new customer, and every query is already
+org/project/environment scoped, so a foreign claim is the same empty bytes as
+no claim (nothing leaks that the content would not). The old
+`hasExternalWalletPositionOwner` gate is gone; only the path-addressed retired
+shapes and the movement-by-id detail still 404. None of the three is reachable
+through `GET /movements`, whose vault arm requires a custody-wallet match an
 owner-signed row can never satisfy
 (`idx_earn_movements_external_wallet_owner`, migration 0073, serves all
 three).
@@ -1094,7 +1171,13 @@ retired path-addressed shapes (`positions/:ownerAddress`,
 
 - `GET /external-wallet/movements?ownerAddress=…` — **DB ledger list**, one
   owner's activity newest first in ledger vocabulary, keyset-paged, with
-  `direction`/`status` equality filters.
+  `direction`/`status` equality filters. Every movement carries two views of
+  the same quantity: `amount`/`denomination` is the on-chain quantity exactly
+  as recorded (token for a deposit, SHARES for a withdrawal), and
+  `tokenMint`/`tokenAmount` is the deposit-token view a feed renders in (the
+  position's token mint via `listPositionTokenMints`; the deposit amount, or a
+  withdrawal's `token_amount_settled` once finalized, null before that or when
+  the payout was never observed). Neither replaces the other.
 - `GET /external-wallet/movements/:movementId` — the poll that makes the
   submit's record-before-broadcast answerable on this surface: a scoped,
   fail-soft read-through of the movement's exact Solana signature (the same
@@ -1110,29 +1193,52 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   POST-only and never appears on reads.
 - `GET /external-wallet/earnings?ownerAddress=…` — **DB ledger + live chain**,
   balance and total earned per deposit token. `earned` = live `currentValue`
+  plus `totalWithdrawn` (Σ observed token payouts of finalized withdrawals)
   minus `totalDeposited` (Σ finalized SDP deposits), stated ONLY when exact and
   never coerced to zero; otherwise absent with a named
   `earnedUnavailableReason`: `live_value_unavailable` (hydration failed),
   `movements_pending` (a movement is still settling, so chain and ledger
-  describe different moments), or `withdrawals_not_valued` (exits are ledgered
-  in SHARES — 0070 pins `payout_token` NULL for vault rows — so once money has
-  gone out no exact token-denominated figure exists; recording the observed
-  token payout at settlement is the follow-up that would close this).
-  Token-level `earned` is computed as Σlive − Σdeposited, which equals the
-  per-position sum, and is withheld whenever ANY contributing position cannot
-  state it — never partial. **Figures cover CURRENTLY HELD positions only**: a
-  fully exited position drops out entirely — its deposits leave
-  `totalDeposited` along with its unvalued withdrawal — because consuming its
-  history would report `withdrawals_not_valued` forever after any full exit,
-  while the open positions' earned is perfectly exact. The exited history
-  stays on the movements list; pinned by the closed-vault test in
+  describe different moments), or `withdrawals_not_valued` (a finalized
+  withdrawal on a held position has NO observed payout, so `totalWithdrawn`
+  is incomplete). Exits are still ledgered in SHARES (0070 pins `payout_token`
+  NULL for vault rows); the deposit-token payout is a SETTLE-TIME observation
+  (`earn_movements.token_amount_settled`, migration 0103): when a withdrawal
+  reaches `finalized`, `vault-movement-reconciliation.service.ts` fetches the
+  landed transaction (`getTransaction`, jsonParsed) and records the receiving
+  wallet's post-minus-pre balance of the position's token mint
+  (`tokenBalanceDelta` in `@sdp/rpc/solana`), formatted at the mint's
+  decimals. A failed read, missing meta, or non-positive delta leaves the
+  column NULL (never a guess), which is exactly what `withdrawals_not_valued`
+  now means. The sweep retries unvalued finalized withdrawals
+  (`repairUnvaluedWithdrawalPayouts`: 25 per tick, 15-minute spacing, rows
+  settled within 14 days); older rows and rows finalized before 0103 stay NULL
+  and keep reporting it. The
+  same settlement hook reads the holding live for that one vault and owner and
+  stamps `closed_at` when shares are "0" (`closeVaultPositionIfEmpty`, fail-soft;
+  a later deposit transition re-opens it), for external-wallet AND custody
+  rows (the custody wallet's public key is the withdrawal's
+  `destination_address`). The position reads run the same close
+  (`closeEmptyHydratedPositions` in `vault-position-hydration.ts`) on any
+  open holding whose live read is an exact "0", so a row exited before the
+  hook existed, or whose settlement chain read failed, retires on the next
+  read; the repository refuses while any movement on the holding is
+  unsettled. Deposits get `token_amount_settled` = their settled
+  amount by the writer.
+  Token-level `earned` is computed as Σlive + Σwithdrawn − Σdeposited, which
+  equals the per-position sum, and is withheld whenever ANY contributing
+  position cannot state it, never partial. **Figures cover CURRENTLY HELD
+  positions only**: a fully exited position drops out entirely (its deposits
+  leave `totalDeposited` along with its withdrawals), so a full exit never
+  withholds the open positions' earned. The exited history stays on the
+  movements list; pinned by the closed-vault test in
   `../earn.external-wallet-activity.test.ts`. The ADR 0002 hydration caveat
   applies at full strength: live value reads the owner's WHOLE vault balance,
   so shares acquired outside SDP inflate `earned`; documented property, not a
   bug.
-  This read does not blend sources for one figure: `totalDeposited` is ledger,
-  `currentValue` is live, and `earned` is openly their difference — that is
-  its definition, not a violation of the one-source rule.
+  This read does not blend sources for one figure: `totalDeposited` and
+  `totalWithdrawn` are ledger, `currentValue` is live, and `earned` is openly
+  their arithmetic: that is its definition, not a violation of the one-source
+  rule.
 
 One gap remains around approvals, and it is narrower than it was. An approved
 deposit or withdrawal is now fully followable — the executor writes the
@@ -1230,6 +1336,12 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   live read, so a de-registered or vault-only provider fails the list with a
   clean 503/501 instead of mid-fan-out — and once more up front for a
   `provider` filter so an empty list still 503s (see route map).
+- **The vault exposure cap** (ADR 0004 layer 1) is a money-IN gate and
+  nothing else: it lives inside `assertVaultDepositAdmissible`, which no
+  withdrawal handler calls. A vault over its cap is exit-only, the same
+  posture as `paused`. Pinned by the "AT its exposure cap" case in the
+  exit-safety describe of `../earn.vault-withdrawals.test.ts`; the deposit
+  side is `../earn.vault-exposure-cap.test.ts`.
 - **The vault exit** (`POST /vault-withdrawals`): the strongest form of the
   asymmetry — no provider gate of ANY kind, not even the credential check
   (Kamino is keyless; a credentialed vault provider's own client throws
@@ -1301,6 +1413,17 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   Events only: the check never blocks a write, and a failed figures read costs
   the pass its diff, not its write. Do not "fix" an anomaly by clamping the
   write; the alert exists so a human looks at the provider.
+- **Token-2022 deposit mints are watched, not trusted blindly** (PRO-1962).
+  Kora co-signs PYUSD and USDG movements under `transfer_hook_policy =
+  "allow_all"` (both mints keep a mutable Paxos hook authority), so the metrics
+  refresh ends by reading each Token-2022 deposit mint per cluster and emitting
+  `sdp_api_earn_deposit_mint_drift` when the hook program, hook authority or
+  permanent delegate differs from the pins in
+  `services/earn/deposit-mint-guard.ts`. Report-only. Adding a Token-2022
+  stablecoin to `EARN_DEPOSIT_TOKEN_SYMBOLS` without pinning it fails the
+  guard's unit suite; adding any deposit token without its devnet mint in
+  `infra/kora/kora.toml` `allowed_tokens` fails
+  `vault-sponsorship-allowlist.test.ts`.
 - Whole-stack local setup (ports, flags, provider credentials, entitlement,
   troubleshooting): `packages/sdp-earn/CLAUDE.md` → "Local development".
 - **Tests must not depend on which providers are surfaced today.** No registered

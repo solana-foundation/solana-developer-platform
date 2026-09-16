@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
 
 import { createApp } from "@/app";
-import { startCron } from "@/cron/runner";
+import { startCron, startEarnCatalogueBootSync } from "@/cron/runner";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { resolveAnonymousEarnEnvironment } from "@/routes/earn/environment";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
@@ -126,6 +126,7 @@ async function main(): Promise<void> {
   const app = createNodeHttpApp(createApp({ observability: noopObservability }));
   const bg = new NodeBackgroundRunner();
   const cron = startCron({ env, bg });
+  startEarnCatalogueBootSync({ env, bg });
 
   const port = resolvePort();
   const server: ServerType = serve({

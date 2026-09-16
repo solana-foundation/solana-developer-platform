@@ -429,6 +429,29 @@ export interface CreateWalletOperationInput {
   status?: WalletOperationStatus;
 }
 
+/**
+ * One rolling-window measurement over `wallet_operations`. The generic
+ * ledger every policy-gated route writes is the deliberate source, rather
+ * than a product ledger such as `earn_movements`, so the same velocity rule
+ * governs payments unchanged.
+ */
+export interface SumWalletOperationAmountsInput {
+  organizationId: string;
+  projectId: string | null;
+  /** Which identity column narrows the sum. */
+  scope: "organization" | "wallet" | "api_key";
+  custodyWalletId: string | null;
+  walletId: string;
+  apiKeyId: string | null;
+  asset: string;
+  /** Null counts every operation type. */
+  operationTypes: string[] | null;
+  /** ISO 8601 instant; rows created at or after it count. */
+  since: string;
+  /** The operation under evaluation, already inserted by enforcement; null on a dry run. */
+  excludeWalletOperationId: string | null;
+}
+
 export interface CreatePolicyEvaluationInput {
   walletOperationId: string;
   walletPolicyRevisionId?: string | null;
@@ -595,6 +618,11 @@ export interface PolicyRepository {
 
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationRow | null>;
   getWalletOperationById(walletOperationId: string): Promise<WalletOperationRow | null>;
+  /**
+   * Sum non-failed, non-canceled wallet-operation amounts for one asset in a
+   * rolling window. Returns a decimal string; "0" when nothing matched.
+   */
+  sumWalletOperationAmounts(input: SumWalletOperationAmountsInput): Promise<string>;
   updateWalletOperationStatus(
     walletOperationId: string,
     status: WalletOperationStatus

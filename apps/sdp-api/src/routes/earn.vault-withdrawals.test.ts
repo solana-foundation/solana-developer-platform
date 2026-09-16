@@ -1,4 +1,5 @@
 import { SdpEarnError } from "@sdp/earn";
+import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +16,8 @@ import app from "@/index";
 import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
+import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
@@ -45,8 +48,9 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
  * Per-test override for the withdraw-capable client, delegating to the REAL
  * registry when unset — same pattern as `earn.vault.test.ts`. The preview
  * route reaches the client directly, and the real Veda client would quote
- * against a live RPC; Kamino cases stay on the real registry, whose client
- * genuinely lacks `quoteVaultWithdrawal`, so the 501 is measured, not staged.
+ * against a live RPC. The 501 case stays on the real registry, which has no
+ * executing client for upshift, so the refusal is measured, not staged
+ * (Kamino held that role until it learned to quote).
  */
 const vaultWithdrawClientOverride = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -260,6 +264,7 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     amount_requested: "10",
     amount_settled: null,
     fee_amount: null,
+    token_amount_settled: null,
     min_shares_out: null,
     shares_out: null,
     payout_token: null,
@@ -688,6 +693,51 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
   });
 
+  it("withdraws from a vault AT its exposure cap while caps are enforced (ADR 0004)", async () => {
+    // The vault exposure cap (PRO-1934) is a money-IN gate only. This drives
+    // the vault to the platform default's ceiling (5M, absolute-only on a
+    // devnet row) with an in-flight deposit, turns enforcement on, and exits:
+    // the same vault that would now 409 a deposit must still pay out, or the
+    // cap would trap funds.
+    const originalCapsEnforced = env.EARN_VOLUME_CAPS_ENFORCED;
+    env.EARN_VOLUME_CAPS_ENFORCED = "true";
+    try {
+      await seedAuth();
+      const positionId = await seedPosition();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO earn_movements (
+             id, organization_id, project_id, environment, provider,
+             execution_model, direction, position_id, status,
+             denomination, amount_requested, custody_wallet_id, vault_address,
+             source_address, destination_address, signature, signed_transaction,
+             last_valid_block_height, request_id, idempotency_fingerprint
+           ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', 'deposit', ?, 'submitted',
+                     ?, '5000000', ?, ?, ?, ?, 'sig_at_cap_deposit', 'AQ==', '12345', ?, 'fp_at_cap')`
+        )
+        .bind(
+          `earn_movement_${crypto.randomUUID()}`,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          positionId,
+          USDC_MINT,
+          CUSTODY_WALLET_ID,
+          VAULT,
+          WALLET_ADDRESS,
+          VAULT,
+          crypto.randomUUID()
+        )
+        .run();
+
+      const res = await postVaultWithdrawal({ positionId, shares: "10" });
+
+      expect(res.status).toBe(200);
+      expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+    } finally {
+      env.EARN_VOLUME_CAPS_ENFORCED = originalCapsEnforced;
+    }
+  });
+
   it("withdraws in PRODUCTION even while vault deposits are environment-closed there", async () => {
     // The deposit route fail-closes production; an exit must work wherever a
     // position exists, or the fail-close itself would trap funds.
@@ -1069,15 +1119,22 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
     });
   });
 
-  it("answers 501 for a provider that cannot quote, measured against the real client", async () => {
+  it("answers 501 for a provider that cannot quote, measured against the real registry", async () => {
     await seedAuth();
-    const positionId = await seedPosition({ provider: "kamino" });
+    const positionId = await seedPosition({ provider: "upshift" });
 
     const res = await postVaultWithdrawalPreview({ positionId, shares: "5" });
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  /** The real Kamino client, as the registry builds it, now clears the exit-quote guard. */
+  it("measures the real Kamino client as withdrawal-quote capable", () => {
+    const client = resolveEarnExecutionClient(env, "kamino", createVaultDeadline());
+    if (!client) throw new Error("the registry must build a Kamino client");
+    expect(supportsVaultWithdrawQuote(client)).toBe(true);
   });
 
   it("answers 404 for a position this workspace cannot see", async () => {

@@ -2,6 +2,7 @@
 
 import type { ListProjectsResponse } from "@sdp/types";
 import { cookies } from "next/headers";
+import { resolveProjectFromList } from "./dashboard-project-selection";
 import { retryProjectBootstrap } from "./project-bootstrap-retry";
 import {
   PROJECT_COOKIE_NAME,
@@ -61,11 +62,7 @@ export async function reconcileProjectCookieAction(): Promise<boolean> {
 
   const store = await cookies();
   const current = store.get(PROJECT_COOKIE_NAME)?.value ?? null;
-  const next =
-    projects.find((p) => p.id === current) ??
-    projects.find((p) => p.slug === "default-sandbox") ??
-    projects[0] ??
-    null;
+  const next = resolveProjectFromList(projects, current, { fallbackToFirstProject: true });
   if (next) {
     const { userId, orgId } = await getSdpAuth();
     if (!userId || !orgId) return false;

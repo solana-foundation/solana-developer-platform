@@ -15,6 +15,7 @@ import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-sp
 import { runWithSystemDatabaseIdentity } from "@/db";
 import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { noopObservability, type Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
@@ -25,6 +26,7 @@ import {
   EARN_CATALOGUE_SYNC_CRON,
   EARN_CATALOGUE_SYNC_MONITOR,
   runEarnCatalogueSync,
+  runEarnCatalogueSyncIfDue,
 } from "./earn-catalogue-sync";
 import {
   EARN_METRICS_REFRESH_CRON,
@@ -106,6 +108,38 @@ function withCheckinMargin(observability: Observability): Observability {
         ...options,
       }),
   };
+}
+
+/**
+ * One catalogue sync at process start, in EVERY deployment mode.
+ *
+ * Deliberately outside `startCron`: a managed Cloud Run service skips in-process
+ * scheduling (`K_SERVICE`), yet a fresh managed database would otherwise serve
+ * "No strategies available" until the separately scheduled job's first tick.
+ * The slotted entry point keeps this idempotent across replicas and restarts:
+ * whoever boots first inside the hour syncs, everyone else finds the slot held
+ * and skips, and the managed job's own tick skips the same way. No
+ * observability on purpose: the scheduled task and the job own the monitor
+ * slugs, and an off-schedule check-in would only confuse them.
+ */
+export function startEarnCatalogueBootSync(deps: Pick<CronDeps, "env" | "bg">): void {
+  if (!isEarnEnabled(deps.env)) return;
+  // The background runner absorbs tracked rejections by design, and this path
+  // carries no Sentry monitor, so an infrastructure failure here (Redis, the
+  // sync deadline, a provider outage) must be logged or a fresh database stays
+  // empty in silence until the scheduled sync retries. Same structured shape
+  // as the tick events, so Loki can alert on the name.
+  deps.bg.run(
+    runWithSystemDatabaseIdentity("boot:earn-catalogue-sync", () =>
+      runEarnCatalogueSyncIfDue(deps.env)
+    ).catch((error: unknown) => {
+      logEvent("error", {
+        event: "sdp_api_earn_catalogue_boot_sync_failed",
+        ...describeError(error),
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+    })
+  );
 }
 
 export function startCron(deps: CronDeps): CronHandle | null {
