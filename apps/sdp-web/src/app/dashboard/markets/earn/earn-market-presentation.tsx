@@ -1,15 +1,12 @@
 "use client";
 
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
-import { type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import { TokenMark } from "@/components/token-mark";
+import { type EarnStrategy, type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { ExternalLinkIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/i18n/provider";
-import {
-  type EarnDepositAvailabilityLabels,
-  earnDepositAvailabilityLabel,
-  earnProviderLabel,
-} from "./earn-format";
+import { explorerTxUrl } from "@/lib/explorer";
+import { type EarnDepositAvailabilityLabels, earnDepositAvailabilityLabel } from "./earn-format";
 import type { EarnVaultDepositAvailability } from "./earn-surfacing";
 
 export interface EarnStrategyAsset {
@@ -72,6 +69,32 @@ export function shortenMarketAddress(value: string): string {
 }
 
 /**
+ * The one transaction row both vault modals render: the signature shortened,
+ * the cluster's explorer one click away. The cluster comes resolved from the
+ * caller — a deposit reads it off the strategy, a withdrawal off the
+ * environment.
+ */
+export function TransactionLink({
+  signature,
+  cluster,
+}: {
+  signature: string;
+  cluster: SolanaCluster;
+}) {
+  return (
+    <a
+      className="inline-flex items-center gap-1 text-secondary underline decoration-border-strong underline-offset-4 transition-colors hover:text-primary"
+      href={explorerTxUrl(signature, cluster)}
+      rel="noreferrer"
+      target="_blank"
+    >
+      {shortenMarketAddress(signature)}
+      <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
+    </a>
+  );
+}
+
+/**
  * One badge for the deposit-availability verdict, shared by the two catalogue
  * surfaces (the Treasury strategies table and the Earn Program builder) so the
  * mapping from `earnVaultDepositAvailability` to copy exists exactly once per
@@ -96,31 +119,5 @@ export function EarnDepositAvailabilityBadge({
     <Badge variant={availability === "available" ? "default" : "outline"}>
       {earnDepositAvailabilityLabel(availability, labels, strategy, t)}
     </Badge>
-  );
-}
-
-/** One strategy identity component shared by Treasury and Earn Program. */
-export function EarnStrategyIdentity({
-  showAssetMark = true,
-  strategy,
-}: {
-  showAssetMark?: boolean;
-  strategy: EarnStrategy;
-}) {
-  const asset = earnStrategyAsset(strategy);
-  return (
-    <div className="flex min-w-0 items-center gap-3">
-      {showAssetMark && asset ? (
-        <TokenMark mint={asset.mint} size="md" symbol={asset.symbol} />
-      ) : null}
-      <div className="min-w-0">
-        <p className="line-clamp-2 break-words text-sm text-primary" title={strategy.name}>
-          {strategy.name}
-        </p>
-        <p className="mt-0.5 truncate text-xs text-tertiary">
-          {[asset?.symbol, earnProviderLabel(strategy.provider)].filter(Boolean).join(" · ")}
-        </p>
-      </div>
-    </div>
   );
 }

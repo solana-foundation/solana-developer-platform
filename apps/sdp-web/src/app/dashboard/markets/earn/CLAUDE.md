@@ -586,8 +586,7 @@ browser pass on `/dashboard/markets/embedded-yield` and
   does not win; it loses to CSS source order (`.whitespace-nowrap` is emitted
   after `.whitespace-normal`), and under `table-fixed` the still-unwrapped text
   overflows into the next column. Declare wrapping and clamping on the child
-  spans, where nothing competes — that is why `EarnStrategyIdentity` clamps and
-  truncates internally. Long text wraps inside a bounded clamp or truncates with
+  spans, where nothing competes. Long text wraps inside a bounded clamp or truncates with
   a `title` carrying the full string; numbers never truncate.
 - Provider-unconfigured (503) must degrade to a quiet notice, never crash. Note
   the asymmetry: the money-in writes answer 403 even for *missing credentials*,
