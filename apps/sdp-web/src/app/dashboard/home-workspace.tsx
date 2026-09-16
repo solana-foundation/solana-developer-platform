@@ -541,6 +541,167 @@ function BalanceHero({
   );
 }
 
+function HomeActivityCard({
+  activityRows,
+  activityError,
+  activityNotice,
+  emptyActivityMessage,
+  symbolsByMint,
+  issuedTokensByMint,
+}: {
+  activityRows: HomeActivityRow[];
+  activityError: string | null;
+  activityNotice: string | null;
+  emptyActivityMessage: string;
+  symbolsByMint: Record<string, string>;
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const cluster = useSolanaCluster();
+  return (
+    <Card className="min-w-0 overflow-hidden">
+      <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <CardTitle>{t("Shared.homeWorkspace.recentTransactions")}</CardTitle>
+          {activityNotice && !activityError ? (
+            <CardDescription>{activityNotice}</CardDescription>
+          ) : (
+            <CardDescription>{t("Shared.homeWorkspace.activityDescription")}</CardDescription>
+          )}
+        </div>
+        <Button asChild variant="secondary" size="sm">
+          <Link href="/dashboard/payments">{t("Shared.homeWorkspace.seeAllPayments")}</Link>
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {activityError ? (
+          <p className="text-sm text-destructive-strong">{activityError}</p>
+        ) : activityRows.length === 0 ? (
+          <p className="text-sm text-secondary">{emptyActivityMessage}</p>
+        ) : (
+          <TooltipProvider>
+            <Table className="min-w-0 [&_table]:table-fixed">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[8rem] pl-6">{t("Shared.homeWorkspace.time")}</TableHead>
+                  <TableHead className="w-[calc(100%-8rem)] md:hidden">
+                    {t("Shared.homeWorkspace.activity")}
+                  </TableHead>
+                  {/* Wide enough for a type label plus an exception status
+                    badge ("Processing") without truncating either. */}
+                  <TableHead className="hidden w-[12rem] md:table-cell">
+                    {t("Shared.homeWorkspace.type")}
+                  </TableHead>
+                  <TableHead className="hidden w-[15rem] md:table-cell">
+                    {t("Shared.homeWorkspace.token")}
+                  </TableHead>
+                  <TableHead className="hidden w-[9rem] text-right md:table-cell">
+                    {t("Shared.homeWorkspace.amount")}
+                  </TableHead>
+                  <TableHead className="hidden pr-6 md:table-cell">
+                    {t("Shared.homeWorkspace.address")}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {activityRows.map((row) => {
+                  const timeLabel = formatRelativeTime(row.createdAt, locale);
+                  const createdAtDate = new Date(row.createdAt);
+                  const timeTooltip = Number.isNaN(createdAtDate.getTime())
+                    ? null
+                    : new Intl.DateTimeFormat(locale, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(createdAtDate);
+                  // `row.token` is already resolved, but only against issued
+                  // tokens — anything else arrives as a shortened mint. Re-resolve
+                  // from the mint using the balance symbols before falling back.
+                  const tokenSymbol =
+                    resolveTransferTokenLabel(row.tokenMint, symbolsByMint) ?? row.token;
+                  const resolvedToken = row.tokenMint
+                    ? resolveTokenByMint(row.tokenMint, issuedTokensByMint, tokenSymbol)
+                    : null;
+                  const amountLabel =
+                    row.amount === "—" ? "—" : formatDisplayAmount(row.amount, "", locale).trim();
+                  const mobileAmountLabel =
+                    row.amount === "—" ? "—" : formatDisplayAmount(row.amount, tokenSymbol, locale);
+                  return (
+                    <TableRow key={row.id}>
+                      <TableCell className="pl-6 text-secondary">
+                        {timeTooltip ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="capitalize">{timeLabel}</span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              {timeTooltip}
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          timeLabel
+                        )}
+                      </TableCell>
+                      <TableCell className="min-w-0 md:hidden">
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <ActivityCategoryMark sourceKind={row.sourceKind} />
+                            <div className="truncate font-medium">{row.type}</div>
+                            <ActivityStatusBadge status={row.status} />
+                          </div>
+                          <div className="mt-1 truncate text-xs text-tertiary">
+                            {mobileAmountLabel}
+                          </div>
+                          <ActivityAddress
+                            row={row}
+                            cluster={cluster}
+                            className="mt-1 truncate font-mono text-xs text-tertiary"
+                          />
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden font-medium md:table-cell">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <ActivityCategoryMark sourceKind={row.sourceKind} />
+                          <span className="truncate">{row.type}</span>
+                          <ActivityStatusBadge status={row.status} />
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden text-secondary md:table-cell">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <TokenMark
+                            mint={resolvedToken ? resolvedToken.mint : null}
+                            symbol={tokenSymbol}
+                            logoUrl={resolvedToken?.metadataImageUrl}
+                            size="xs"
+                          />
+                          <span className="flex min-w-0 items-baseline gap-2">
+                            <TruncatedTableText value={tokenSymbol} className="truncate" />
+                            {resolvedToken?.tokenId ? (
+                              <Badge variant="outline" className="shrink-0">
+                                {t("Shared.SharedComponents.sdpMintedToken")}
+                              </Badge>
+                            ) : null}
+                          </span>
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden text-right text-secondary tabular-nums md:table-cell">
+                        <div className="truncate">{amountLabel}</div>
+                      </TableCell>
+                      <TableCell className="hidden pr-6 font-mono text-xs text-secondary md:table-cell">
+                        <ActivityAddress row={row} cluster={cluster} className="truncate" />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TooltipProvider>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function HomeWorkspace({
   totalBalance,
   totalBalanceError,
@@ -551,7 +712,6 @@ export function HomeWorkspace({
 }: HomeWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const cluster = useSolanaCluster();
   const { dashboardAccess, flags } = useDashboardWorkspace();
   const quickStartPending = useHomeQuickStartPending();
   const custodyEnabled = flags.custody;
@@ -634,151 +794,14 @@ export function HomeWorkspace({
 
       <SectionEntry delay={0.08}>
         <div className="space-y-4">
-          <Card className="min-w-0 overflow-hidden">
-            <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <CardTitle>{t("Shared.homeWorkspace.recentTransactions")}</CardTitle>
-                {activityNotice && !activityError ? (
-                  <CardDescription>{activityNotice}</CardDescription>
-                ) : (
-                  <CardDescription>{t("Shared.homeWorkspace.activityDescription")}</CardDescription>
-                )}
-              </div>
-              <Button asChild variant="secondary" size="sm">
-                <Link href="/dashboard/payments">{t("Shared.homeWorkspace.seeAllPayments")}</Link>
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {activityError ? (
-                <p className="text-sm text-destructive-strong">{activityError}</p>
-              ) : activityRows.length === 0 ? (
-                <p className="text-sm text-secondary">{emptyActivityMessage}</p>
-              ) : (
-                <TooltipProvider>
-                  <Table className="min-w-0 [&_table]:table-fixed">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[8rem] pl-6">
-                          {t("Shared.homeWorkspace.time")}
-                        </TableHead>
-                        <TableHead className="w-[calc(100%-8rem)] md:hidden">
-                          {t("Shared.homeWorkspace.activity")}
-                        </TableHead>
-                        {/* Wide enough for a type label plus an exception status
-                            badge ("Processing") without truncating either. */}
-                        <TableHead className="hidden w-[12rem] md:table-cell">
-                          {t("Shared.homeWorkspace.type")}
-                        </TableHead>
-                        <TableHead className="hidden w-[15rem] md:table-cell">
-                          {t("Shared.homeWorkspace.token")}
-                        </TableHead>
-                        <TableHead className="hidden w-[9rem] text-right md:table-cell">
-                          {t("Shared.homeWorkspace.amount")}
-                        </TableHead>
-                        <TableHead className="hidden pr-6 md:table-cell">
-                          {t("Shared.homeWorkspace.address")}
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {activityRows.map((row) => {
-                        const timeLabel = formatRelativeTime(row.createdAt, locale);
-                        const createdAtDate = new Date(row.createdAt);
-                        const timeTooltip = Number.isNaN(createdAtDate.getTime())
-                          ? null
-                          : new Intl.DateTimeFormat(locale, {
-                              dateStyle: "medium",
-                              timeStyle: "short",
-                            }).format(createdAtDate);
-                        // `row.token` is already resolved, but only against issued
-                        // tokens — anything else arrives as a shortened mint. Re-resolve
-                        // from the mint using the balance symbols before falling back.
-                        const tokenSymbol =
-                          resolveTransferTokenLabel(row.tokenMint, symbolsByMint) ?? row.token;
-                        const resolvedToken = row.tokenMint
-                          ? resolveTokenByMint(row.tokenMint, issuedTokensByMint, tokenSymbol)
-                          : null;
-                        const amountLabel =
-                          row.amount === "—"
-                            ? "—"
-                            : formatDisplayAmount(row.amount, "", locale).trim();
-                        const mobileAmountLabel =
-                          row.amount === "—"
-                            ? "—"
-                            : formatDisplayAmount(row.amount, tokenSymbol, locale);
-                        return (
-                          <TableRow key={row.id}>
-                            <TableCell className="pl-6 text-secondary">
-                              {timeTooltip ? (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span className="capitalize">{timeLabel}</span>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="top" className="text-xs">
-                                    {timeTooltip}
-                                  </TooltipContent>
-                                </Tooltip>
-                              ) : (
-                                timeLabel
-                              )}
-                            </TableCell>
-                            <TableCell className="min-w-0 md:hidden">
-                              <div className="min-w-0">
-                                <div className="flex min-w-0 items-center gap-2">
-                                  <ActivityCategoryMark sourceKind={row.sourceKind} />
-                                  <div className="truncate font-medium">{row.type}</div>
-                                  <ActivityStatusBadge status={row.status} />
-                                </div>
-                                <div className="mt-1 truncate text-xs text-tertiary">
-                                  {mobileAmountLabel}
-                                </div>
-                                <ActivityAddress
-                                  row={row}
-                                  cluster={cluster}
-                                  className="mt-1 truncate font-mono text-xs text-tertiary"
-                                />
-                              </div>
-                            </TableCell>
-                            <TableCell className="hidden font-medium md:table-cell">
-                              <span className="flex min-w-0 items-center gap-2">
-                                <ActivityCategoryMark sourceKind={row.sourceKind} />
-                                <span className="truncate">{row.type}</span>
-                                <ActivityStatusBadge status={row.status} />
-                              </span>
-                            </TableCell>
-                            <TableCell className="hidden text-secondary md:table-cell">
-                              <span className="flex min-w-0 items-center gap-2">
-                                <TokenMark
-                                  mint={resolvedToken ? resolvedToken.mint : null}
-                                  symbol={tokenSymbol}
-                                  logoUrl={resolvedToken?.metadataImageUrl}
-                                  size="xs"
-                                />
-                                <span className="flex min-w-0 items-baseline gap-2">
-                                  <TruncatedTableText value={tokenSymbol} className="truncate" />
-                                  {resolvedToken?.tokenId ? (
-                                    <Badge variant="outline" className="shrink-0">
-                                      {t("Shared.SharedComponents.sdpMintedToken")}
-                                    </Badge>
-                                  ) : null}
-                                </span>
-                              </span>
-                            </TableCell>
-                            <TableCell className="hidden text-right text-secondary tabular-nums md:table-cell">
-                              <div className="truncate">{amountLabel}</div>
-                            </TableCell>
-                            <TableCell className="hidden pr-6 font-mono text-xs text-secondary md:table-cell">
-                              <ActivityAddress row={row} cluster={cluster} className="truncate" />
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TooltipProvider>
-              )}
-            </CardContent>
-          </Card>
+          <HomeActivityCard
+            activityRows={activityRows}
+            activityError={activityError}
+            activityNotice={activityNotice}
+            emptyActivityMessage={emptyActivityMessage}
+            symbolsByMint={symbolsByMint}
+            issuedTokensByMint={issuedTokensByMint}
+          />
         </div>
       </SectionEntry>
     </div>
