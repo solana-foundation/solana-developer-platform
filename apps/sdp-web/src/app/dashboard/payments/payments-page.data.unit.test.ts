@@ -261,6 +261,20 @@ describe("fetchDashboardPaymentTransfersForWallets deadline", () => {
     expect(result.data).toHaveLength(2);
   });
 
+  // Nothing can say how many wallets are missing when the list of them failed.
+  it("reports unknown coverage when the wallet list itself failed", async () => {
+    const request = vi.fn(async () => transfersResponse([]));
+
+    const result = await fetchDashboardPaymentTransfersForWallets(
+      request,
+      { ok: false, error: "wallets unavailable" },
+      20,
+      withDeadline
+    );
+
+    expect(result.walletsNotLoaded).toBeNull();
+  });
+
   it("waits on every wallet when the caller sets no deadline", async () => {
     vi.useFakeTimers();
     let answerSlowWallet: (() => void) | undefined;

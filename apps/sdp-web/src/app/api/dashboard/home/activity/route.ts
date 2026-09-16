@@ -43,7 +43,7 @@ export async function GET(request: Request) {
       : t("Shared.homeWorkspace.paymentsActivityUnavailable");
     // A wallet that did not answer in time is missing from the list, not empty.
     const transfersPartial =
-      transfersResult.ok && transfersResult.walletsNotLoaded > 0
+      transfersResult.ok && transfersResult.walletsNotLoaded !== 0
         ? t("Shared.homeWorkspace.somePaymentsActivityUnavailable")
         : null;
     const issuanceActivityError = issuanceActivityResult.ok

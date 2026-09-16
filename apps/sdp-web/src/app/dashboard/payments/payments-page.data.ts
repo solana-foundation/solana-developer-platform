@@ -273,7 +273,12 @@ export const WALLET_TRANSFERS_DEADLINE_MS = 2_500;
  * same as having no transfers, so a caller must say the list is partial.
  */
 export type DashboardPaymentTransfersResult = FetchResult<PaymentTransferSummary[]> & {
-  walletsNotLoaded: number;
+  /**
+   * How many wallets are missing from the list, or null when even the wallet
+   * list failed, so how many exist is unknown. Zero is the only value that says
+   * the list is complete; a caller that shows a total reads it that way.
+   */
+  walletsNotLoaded: number | null;
 };
 
 /**
@@ -329,7 +334,13 @@ export async function fetchDashboardPaymentTransfersForWallets(
   options: DashboardPaymentTransfersOptions = {}
 ): Promise<DashboardPaymentTransfersResult> {
   if (!walletsResult.ok || (walletsResult.data?.length ?? 0) === 0) {
-    return { ...(await fetchPaymentTransfers(request, pageSize)), walletsNotLoaded: 0 };
+    // Without the wallet list this is only the persisted history: the observed
+    // transfers are read per wallet, so a failed wallet read leaves a list
+    // whose completeness is unknown rather than a complete one.
+    return {
+      ...(await fetchPaymentTransfers(request, pageSize)),
+      walletsNotLoaded: walletsResult.ok ? 0 : null,
+    };
   }
 
   const observedAddresses = new Set<string>();

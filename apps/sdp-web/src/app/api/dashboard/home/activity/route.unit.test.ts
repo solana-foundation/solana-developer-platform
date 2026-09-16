@@ -129,6 +129,24 @@ describe("GET /api/dashboard/home/activity feature gates", () => {
     expect(body.data.activityError).toBe("Shared.homeWorkspace.paymentsActivityUnavailable");
   });
 
+  // The wallet list itself failed, so this is persisted history only and how
+  // many wallets are missing is unknown. Reporting a total would understate it.
+  it("says the list is partial and hides the volume when the wallet list failed", async () => {
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: [{ id: "transfer_1" }],
+      walletsNotLoaded: null,
+    });
+    mocks.buildHomeActivityRows.mockReturnValueOnce([{ id: "transfer_1", sourceKind: "payment" }]);
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(body.data.activityNotice).toBe("Shared.homeWorkspace.somePaymentsActivityUnavailable");
+    expect(body.data.todaysVolume).toBeNull();
+    expect(body.data.todaysVolumeError).toBe("Shared.homeWorkspace.paymentsActivityUnavailable");
+  });
+
   it("reports today's volume when every wallet loaded", async () => {
     mocks.computeTodaysVolume.mockReturnValueOnce(125);
 
