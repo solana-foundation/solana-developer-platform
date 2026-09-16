@@ -145,13 +145,15 @@ describe("DvpLegTransferRepository", () => {
 
     const listed = (await repo.listForTrades([TRADE_ID])).get(TRADE_ID);
 
-    expect(listed?.a).toEqual([transfer()]);
-    expect(listed?.b).toEqual([transfer({ side: "b" })]);
+    expect(listed?.a).toEqual([{ ...transfer(), sequence: "1" }]);
+    expect(listed?.b).toEqual([{ ...transfer({ side: "b" }), sequence: "1" }]);
   });
 
-  it("lists each trade's legs oldest first, and an empty pair for a trade with none", async () => {
-    await repo.record(transfer({ signature: sig(2), slot: "1000", direction: "out" }));
+  // The reconciler walks each escrow oldest first, so the recording order is
+  // the chain's order and the list follows it.
+  it("lists each trade's legs in history order, and an empty pair for a trade with none", async () => {
     await repo.record(transfer({ signature: sig(3), slot: "999" }));
+    await repo.record(transfer({ signature: sig(2), slot: "1000", direction: "out" }));
 
     const listed = await repo.listForTrades([TRADE_ID, OTHER_TRADE_ID]);
 
@@ -327,7 +329,9 @@ describe("DvpLegTransferRepository", () => {
 
       // Row-level security matches nothing for the tenant, so both writes are
       // no-ops rather than errors; the row is exactly as the system wrote it.
-      expect(await repo.listForLeg(TRADE_ID, "a")).toEqual([transfer({ finalized: false })]);
+      expect(await repo.listForLeg(TRADE_ID, "a")).toEqual([
+        { ...transfer({ finalized: false }), sequence: "1" },
+      ]);
     });
   });
 });

@@ -1270,8 +1270,9 @@ describe("DvP routes", () => {
       await getDb(env)
         .prepare(
           `INSERT INTO dvp_leg_transfers
-             (trade_id, side, signature, direction, amount, slot, block_time, fee_payer, finalized)
-           VALUES ('dvp_full', 'a', ?, 'in', '1000', '420', '1789000000', ?, true)`
+             (trade_id, side, signature, direction, amount, slot, block_time, fee_payer, finalized,
+              sequence)
+           VALUES ('dvp_full', 'a', ?, 'in', '1000', '420', '1789000000', ?, true, 1)`
         )
         .bind(FUNDING_TRANSFER_SIGNATURE, PARTY_A_ADDRESS)
         .run();
