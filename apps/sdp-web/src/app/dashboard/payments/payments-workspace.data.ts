@@ -64,7 +64,7 @@ export interface PaymentWalletBalancesSnapshot {
 }
 
 export type RiskTone = "green" | "yellow" | "red" | "neutral";
-type Translate = (key: MessageKey, values?: TranslationValues) => string;
+export type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export function toProviderLabel(value: string): string {
   const labels: Record<string, string> = {

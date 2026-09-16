@@ -147,6 +147,31 @@ function OfframpFooterActionButton({
   }
 }
 
+/**
+ * Where the provider's own onboarding has got to, as the footer reads it: a
+ * verification the person still has to open, or a wait on the provider. Only
+ * the steps that host onboarding consult it.
+ */
+function offrampOnboardingState(wizard: OfframpWizard): {
+  verificationUrl: string | undefined;
+  verificationPending: boolean;
+} {
+  const onOnboardingStep =
+    wizard.currentStepId === "COMPLETE" || wizard.currentStepId === "REQUIREMENTS";
+  if (!onOnboardingStep) {
+    return { verificationUrl: undefined, verificationPending: false };
+  }
+  const status = wizard.onboarding?.status;
+  return {
+    verificationUrl:
+      status === "customer_verification_required" ? wizard.onboarding?.verificationUrl : undefined,
+    verificationPending:
+      status === "customer_verifying" ||
+      status === "customer_funding_account_provisioning" ||
+      status === "funding_account_provisioning",
+  };
+}
+
 export function OfframpRail({
   wallets,
   walletsError,
@@ -178,17 +203,7 @@ export function OfframpRail({
   const cancelable = liveTransferState?.cancelable === true;
   const hosted = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const footerAction = offrampFooterAction(wizard);
-  const onOnboardingStep =
-    wizard.currentStepId === "COMPLETE" || wizard.currentStepId === "REQUIREMENTS";
-  const verificationUrl =
-    onOnboardingStep && wizard.onboarding?.status === "customer_verification_required"
-      ? wizard.onboarding.verificationUrl
-      : undefined;
-  const verificationPending =
-    onOnboardingStep &&
-    (wizard.onboarding?.status === "customer_verifying" ||
-      wizard.onboarding?.status === "customer_funding_account_provisioning" ||
-      wizard.onboarding?.status === "funding_account_provisioning");
+  const { verificationUrl, verificationPending } = offrampOnboardingState(wizard);
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}

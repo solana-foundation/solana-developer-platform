@@ -5,7 +5,13 @@ import {
   createPaymentIdempotencyStore,
   isIdempotencyKeyConflict,
 } from "./payment-idempotency-store";
-import type { CreateTransferInput } from "./payments-workspace.data";
+import {
+  type CreateTransferInput,
+  type CreateTransferOutcome,
+  createTransfer,
+  type Translate,
+  TransferRequestError,
+} from "./payments-workspace.data";
 
 /**
  * Browser-side durability for a single transfer's IDEMPOTENCY KEY.
@@ -116,4 +122,47 @@ export function releaseTransferIdempotencyKey(fingerprint: string): void {
 /** A 409 under our own key is the one 4xx that must keep it. */
 export function isTransferKeyConflict(status: number): boolean {
   return isIdempotencyKeyConflict(status);
+}
+
+/**
+ * Sends one transfer under the key that makes a retry a retry.
+ *
+ * Every caller needs the same four steps in the same order, and each one exists
+ * because of a way one payment becomes two: lift a hold whose approval has
+ * finished, claim the key before the request goes out, keep the key when an
+ * approval parks the payment, and retire it once the API has answered.
+ *
+ * @param submission - The payment.
+ * @param t - Translator, for the API's refusal message.
+ * @returns What the API answered, and the fingerprint, so a caller that keeps
+ *   going (a widget mid-flow) can release the key itself.
+ */
+export async function sendTransferUnderKey(
+  submission: CreateTransferInput,
+  t: Translate
+): Promise<{ outcome: CreateTransferOutcome; fingerprint: string }> {
+  const fingerprint = transferRequestFingerprint(submission);
+  await releaseSettledTransferHold(fingerprint);
+  const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
+  let outcome: CreateTransferOutcome;
+  try {
+    outcome = await createTransfer(submission, t, idempotencyKey);
+  } catch (error) {
+    // A 4xx is a definitive refusal and frees the key. A 5xx or a network
+    // failure keeps it: the API may have recorded the transfer before the
+    // answer was lost. A 409 under our own key keeps it too.
+    if (
+      error instanceof TransferRequestError &&
+      error.status >= 400 &&
+      error.status < 500 &&
+      !isTransferKeyConflict(error.status)
+    ) {
+      releaseTransferIdempotencyKey(fingerprint);
+    }
+    throw error;
+  }
+  if (outcome.kind === "approval_pending") {
+    holdTransferIdempotencyKey(fingerprint, outcome.approvalRequestId);
+  }
+  return { outcome, fingerprint };
 }
