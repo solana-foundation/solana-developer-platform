@@ -128,10 +128,21 @@ describe("inspectDvpMint", () => {
       await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toBeNull();
     });
 
-    it("returns null when the data does not decode as a mint", async () => {
+    // Not "nothing is there": SDP cannot rule a transfer hook out of a mint it
+    // cannot read, so create refuses it and the form is told the same reason.
+    it("reports an undecodable token-2022 mint as ineligible, not missing", async () => {
       const rpc = rpcReturning({ owner: TOKEN_2022, data: "AAAA" });
 
-      await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toBeNull();
+      await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toEqual({
+        mint: ATD_MINT,
+        tokenProgram: TOKEN_2022,
+        // Unknown, never zero: without a scale the form converts no amount.
+        decimals: null,
+        name: null,
+        symbol: null,
+        eligible: false,
+        blockedBy: "unreadable extension data",
+      });
     });
   });
 });

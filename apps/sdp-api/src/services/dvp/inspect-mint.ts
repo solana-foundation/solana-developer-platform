@@ -16,6 +16,7 @@
 
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
+import { fetchEncodedAccount } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { fetchMaybeMint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { BLOCKED_MINT_EXTENSIONS, UNSUPPORTED_MINT_EXTENSIONS } from "./mints";
@@ -24,7 +25,8 @@ export interface DvpMintInspection {
   mint: string;
   /** The program that actually owns the mint, never the caller's claim. */
   tokenProgram: string;
-  decimals: number;
+  /** Null when the mint exists but its data could not be decoded. */
+  decimals: number | null;
   /** From the Token-2022 metadata extension, when the mint carries one inline. */
   name: string | null;
   symbol: string | null;
@@ -38,6 +40,45 @@ export interface DvpMintInspection {
    * described, so the form can say which one without parsing prose.
    */
   blockedBy: string | null;
+}
+
+/** The reason a mint SDP cannot decode is refused, as the form renders it. */
+export const UNREADABLE_MINT_REASON = "unreadable extension data";
+
+/**
+ * An inspection for an address a token program owns but SDP cannot decode.
+ *
+ * @param rpc - Solana RPC for the trade's cluster.
+ * @param mint - The mint address.
+ * @returns An ineligible inspection, or null when nothing readable is there.
+ */
+async function unreadableMintInspection(
+  rpc: SolanaRpc,
+  mint: Address
+): Promise<DvpMintInspection | null> {
+  let account: Awaited<ReturnType<typeof fetchEncodedAccount>>;
+  try {
+    account = await fetchEncodedAccount(rpc, mint);
+  } catch {
+    return null;
+  }
+  if (!account.exists) {
+    return null;
+  }
+  const owner = account.programAddress;
+  if (owner !== TOKEN_PROGRAM_ADDRESS && owner !== TOKEN_2022_PROGRAM_ADDRESS) {
+    return null;
+  }
+  return {
+    mint,
+    tokenProgram: owner,
+    // Unknown, not zero: without a scale the form refuses to convert an amount.
+    decimals: null,
+    name: null,
+    symbol: null,
+    eligible: false,
+    blockedBy: UNREADABLE_MINT_REASON,
+  };
 }
 
 /**
@@ -59,7 +100,11 @@ export async function inspectDvpMint(
   try {
     account = await fetchMaybeMint(rpc, mint);
   } catch {
-    return null;
+    // Owned by a token program but undecodable: the account is there, so this
+    // is not "nothing at that address". SDP cannot rule a transfer hook out of
+    // a mint it cannot read, and create refuses it for that reason, so the
+    // form is told the same thing rather than being told the token is missing.
+    return unreadableMintInspection(rpc, mint);
   }
 
   if (!account.exists) {
