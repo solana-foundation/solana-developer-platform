@@ -1,3 +1,4 @@
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
   findAssociatedTokenPda,
@@ -90,9 +91,11 @@ export async function buildShareAccountConsolidation(input: {
     );
   }
   if (input.requestedBaseUnits > totalBaseUnits) {
+    // Reads in whole share units: the API surfaces this sentence to the caller.
     throw new SdpKaminoError(
       "INVALID_AMOUNT",
-      `Kamino wallet holds ${totalBaseUnits} share base units, below the requested ${input.requestedBaseUnits}.`
+      `Kamino wallet holds ${formatDecimalAmount(totalBaseUnits, input.shareDecimals)} shares, ` +
+        `below the requested ${formatDecimalAmount(input.requestedBaseUnits, input.shareDecimals)}.`
     );
   }
 

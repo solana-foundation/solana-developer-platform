@@ -1,7 +1,10 @@
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { logEvent } from "@/runtime/money-path-events";
-import { reconcileEarnVaultMovementBatch } from "@/services/earn/vault-movement-reconciliation.service";
+import {
+  reconcileEarnVaultMovementBatch,
+  repairUnvaluedWithdrawalPayouts,
+} from "@/services/earn/vault-movement-reconciliation.service";
 import type { Env } from "@/types/env";
 
 const OUTBOX_BATCH_SIZE = 256;
@@ -43,6 +46,9 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const movements = await ledger.claimUnsettledVaultMovements(OUTBOX_BATCH_SIZE);
   const stats = await reconcileEarnVaultMovementBatch(env, movements);
+  // Second chance for withdrawal payouts the settlement could not observe; a
+  // failed history read must not understate `totalWithdrawn` forever.
+  const payoutRepair = await repairUnvaluedWithdrawalPayouts(env);
   const backlogStats = await ledger.getUnsettledVaultMovementStats();
 
   // Per-movement failures count toward the verdict too, not just chain reads:
@@ -51,7 +57,11 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   // reporting that batch as an ok tick is the same EARN-006 silence this job
   // exists to close. Same posture as the sponsorship reconciler, which emits
   // its tick and then throws an AggregateError when any item failed.
-  const failures = stats.statusReadFailures + stats.blockHeightReadFailures + stats.movementErrors;
+  const failures =
+    stats.statusReadFailures +
+    stats.blockHeightReadFailures +
+    stats.movementErrors +
+    payoutRepair.errors;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_reconciliation_tick",
     claimed: stats.claimed,
@@ -75,13 +85,18 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     // total, so a stuck withdrawal is visible without disaggregating.
     oldest_withdrawal_age_seconds: ageInSeconds(backlogStats.oldestWithdrawalCreatedAt),
     batch_saturated: movements.length === OUTBOX_BATCH_SIZE,
+    payout_repair_claimed: payoutRepair.claimed,
+    payout_repair_repaired: payoutRepair.repaired,
+    payout_repair_unobserved: payoutRepair.unobserved,
+    payout_repair_errors: payoutRepair.errors,
   });
 
   if (failures > 0) {
     throw new Error(
       `Earn vault reconciliation failed ` +
         `(${stats.statusReadFailures} status-read, ${stats.blockHeightReadFailures} block-height, ` +
-        `${stats.movementErrors} per-movement failures) over ${stats.claimed} claimed movements`
+        `${stats.movementErrors} per-movement failures, ${payoutRepair.errors} payout-repair failures) ` +
+        `over ${stats.claimed} claimed movements`
     );
   }
 }

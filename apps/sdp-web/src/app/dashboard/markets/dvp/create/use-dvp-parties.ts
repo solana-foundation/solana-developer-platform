@@ -46,12 +46,6 @@ export type DvpPartySlotMode = DvpPartySlot["mode"];
 
 export { partySlotSchema };
 
-/** The two slots together, as the parties step validates them. */
-export const partiesStepSchema = z.object({
-  partyA: partySlotSchema,
-  partyB: partySlotSchema,
-});
-
 /** One party on the wire: the exact union the create endpoint takes. */
 export type DvpPartyRef =
   | { walletId: string }

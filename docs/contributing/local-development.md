@@ -60,6 +60,8 @@ pnpm --filter @sdp/api db:postgres:bootstrap
 pnpm dev
 ```
 
+To work on Earn (Treasury and Embedded Yield), also set `MARKETS_ENABLED=true` and `EARN_ENABLED=true` in both `apps/sdp-api/.env.local` and `apps/sdp-web/.env.local`. The API syncs the strategy catalogue once at start-up and hourly after that.
+
 Useful local URLs:
 
 | Service | URL |

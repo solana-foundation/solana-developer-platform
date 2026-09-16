@@ -1,7 +1,9 @@
 import {
   supportsPortfolioWallets,
+  supportsVaultDepositQuote,
   supportsVaultDirect,
   supportsVaultWithdraw,
+  supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
 import { type Address, address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   buildKaminoWithdrawPlan: vi.fn(),
   createKaminoRpc: vi.fn(),
   discoverKaminoPositionVaults: vi.fn(),
+  quoteKaminoDeposit: vi.fn(),
+  quoteKaminoWithdraw: vi.fn(),
   readKaminoPosition: vi.fn(),
 }));
 
@@ -30,6 +34,8 @@ vi.mock("./sdk", () => ({
   buildKaminoDepositPlan: mocks.buildKaminoDepositPlan,
   buildKaminoWithdrawPlan: mocks.buildKaminoWithdrawPlan,
   discoverKaminoPositionVaults: mocks.discoverKaminoPositionVaults,
+  quoteKaminoDeposit: mocks.quoteKaminoDeposit,
+  quoteKaminoWithdraw: mocks.quoteKaminoWithdraw,
   readKaminoPosition: mocks.readKaminoPosition,
 }));
 
@@ -96,6 +102,61 @@ describe("KaminoVaultDirectClient capabilities", () => {
       lookupTables: [SHARE_MINT],
       accepted: { shares: "2" },
     });
+  });
+
+  /** Both quote guards narrow onto this client, so the preview routes no longer 501. */
+  it("reports both quote capabilities", () => {
+    expect(supportsVaultDepositQuote(client)).toBe(true);
+    expect(supportsVaultWithdrawQuote(client)).toBe(true);
+  });
+
+  it("prices the deposit quote against one slot and maps it to the Earn contract", async () => {
+    const resolvedRpcUrl = "https://devnet.example.invalid";
+    const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
+    const slot = 789n;
+    const getSlotSend = vi.fn().mockResolvedValue(slot);
+    mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+    const issues = [{ code: "DEPOSIT_CAP_EXCEEDED", message: "Cap exceeded" }];
+    mocks.quoteKaminoDeposit.mockResolvedValue({ sharesOut: "0.999", shareDecimals: 6, issues });
+    const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
+
+    const quote = await probe.quoteVaultDeposit(
+      { env: {}, environment: "sandbox" },
+      { providerReference: vault, amount: "1" }
+    );
+
+    expect(mocks.createKaminoRpc).toHaveBeenCalledWith(resolvedRpcUrl);
+    expect(getSlotSend).toHaveBeenCalledOnce();
+    expect(mocks.quoteKaminoDeposit).toHaveBeenCalledWith(
+      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+      { vault: address(vault), amount: "1", slot },
+      expect.any(Function)
+    );
+    expect(quote).toEqual({ sharesOut: "0.999", shareDecimals: 6, blockingIssues: issues });
+  });
+
+  it("prices the withdrawal quote against one slot and maps it to the Earn contract", async () => {
+    const resolvedRpcUrl = "https://devnet.example.invalid";
+    const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
+    const slot = 790n;
+    const getSlotSend = vi.fn().mockResolvedValue(slot);
+    mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+    const issues = [{ code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY", message: "Short" }];
+    mocks.quoteKaminoWithdraw.mockResolvedValue({ assetsOut: "4.997", assetDecimals: 6, issues });
+    const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
+
+    const quote = await probe.quoteVaultWithdrawal(
+      { env: {}, environment: "sandbox" },
+      { providerReference: vault, shares: "5" }
+    );
+
+    expect(getSlotSend).toHaveBeenCalledOnce();
+    expect(mocks.quoteKaminoWithdraw).toHaveBeenCalledWith(
+      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+      { vault: address(vault), shares: "5", slot },
+      expect.any(Function)
+    );
+    expect(quote).toEqual({ assetsOut: "4.997", assetDecimals: 6, blockingIssues: issues });
   });
 
   /**

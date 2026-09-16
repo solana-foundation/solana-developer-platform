@@ -45,6 +45,8 @@ import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { reportFigureAnomalies } from "@/services/earn/catalogue-anomaly";
+import { guardDepositMints } from "@/services/earn/deposit-mint-guard";
+import { earnClusterFor } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 
 export const EARN_METRICS_REFRESH_MONITOR = "sdp-api-refresh-earn-metrics";
@@ -139,6 +141,15 @@ export async function refreshEarnStrategyMetrics(env: Env): Promise<void> {
       }
       await refreshProviderMetrics(repo, client, { env: providerEnv, environment });
     }
+  }
+
+  // Deposit-mint extension guard (PRO-1962) rides this pass because its cadence
+  // is the point: Kora co-signs PYUSD and USDG movements under
+  // `transfer_hook_policy = "allow_all"`, so a hook program appearing on either
+  // mint should reach a human within minutes, not at the next hourly sync. A
+  // handful of account reads per cluster; report-only, never throws.
+  for (const environment of REFRESHED_ENVIRONMENTS) {
+    await guardDepositMints(env, earnClusterFor(environment));
   }
 }
 

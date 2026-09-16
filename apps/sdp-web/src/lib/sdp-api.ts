@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
+import { resolveProjectFromList } from "./dashboard-project-selection";
 import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -177,14 +178,79 @@ export interface SdpApiClient {
   fetch: <T>(path: string, options?: RequestInit) => Promise<T>;
 }
 
-/**
- * Reads the selected project id from the project cookie. Route handlers that
- * build a project-scoped client outside `proxyToSdpApi` check this first so a
- * missing selection surfaces as a 400 instead of a thrown 500.
- */
-const getRequestSelectedProjectId = cache(async (): Promise<string | undefined> => {
+// Keyed by token so the layout's bootstrap list and the project resolution below
+// share one request-cached read: both hand in the same request-bound token.
+const fetchRequestProjects = cache(async (token: string): Promise<Project[]> => {
+  const client = assembleSdpApiClient(
+    createSdpApiRequest(token, null, {
+      traceId: `web_${crypto.randomUUID().replaceAll("-", "")}`,
+      source: "dashboard.projects.bootstrap",
+    })
+  );
+  const response = await client.fetch<ListProjectsResponse>("/v1/projects");
+  return response.projects;
+});
+
+const getRequestProjects = cache(
+  async (): Promise<Project[]> => await fetchRequestProjects(await getRequestClerkToken())
+);
+
+export function listSdpProjects(): Promise<Project[]> {
+  return getRequestProjects();
+}
+
+const getRequestProjectCookie = cache(async (): Promise<string | undefined> => {
   const jar = await cookies();
   return jar.get(PROJECT_COOKIE_NAME)?.value;
+});
+
+/**
+ * The project every request-scoped client sends as `x-project-id`, resolved
+ * through the same chain the dashboard layout renders with: the cookie's project
+ * while this organization still lists it, else the default sandbox. A stale
+ * cookie (two local stacks sharing `localhost`, an archived project, a revoked
+ * membership) used to go upstream verbatim and come back as a 403 that every
+ * project-scoped page rethrew into the error boundary, while the shell beside it
+ * had already fallen back to the sandbox.
+ *
+ * Takes the caller's already-acquired token rather than minting its own, so one
+ * request still mints exactly one. The list is the request-cached `/v1/projects`
+ * read the layout already performed, so page renders pay nothing extra; a BFF
+ * route handler without that warm cache pays one list call. If the list cannot be
+ * loaded there is nothing to validate against, so the cookie's word stands,
+ * exactly as the layout treats a failed load as non-authoritative. Nothing here
+ * writes the cookie back: cookies cannot be set during a render, and the
+ * workspace context's client-side repair effect already does that once the
+ * layout flags the mismatch.
+ */
+const resolveRequestProjectId = cache(async (token: string): Promise<string | undefined> => {
+  const cookieProjectId = await getRequestProjectCookie();
+  let projects: Project[];
+  try {
+    projects = await fetchRequestProjects(token);
+  } catch {
+    return cookieProjectId;
+  }
+  if (!Array.isArray(projects)) {
+    return cookieProjectId;
+  }
+  return resolveProjectFromList(projects, cookieProjectId)?.id;
+});
+
+/**
+ * Route handlers that build a project-scoped client outside `proxyToSdpApi`
+ * check this first so a missing selection surfaces as a 400 instead of a thrown
+ * 500. Without a request-bound token there is no list to validate against, so an
+ * unauthenticated caller still reads the raw cookie, as before.
+ */
+const getRequestSelectedProjectId = cache(async (): Promise<string | undefined> => {
+  let token: string;
+  try {
+    token = await getRequestClerkToken();
+  } catch {
+    return getRequestProjectCookie();
+  }
+  return resolveRequestProjectId(token);
 });
 
 export function getSelectedProjectId(): Promise<string | undefined> {
@@ -225,13 +291,10 @@ export async function createRequestScopedSdpApiClients({
   organizationClient: SdpApiClient;
   projectClient: SdpApiClient | null;
 }> {
-  // Only the token half ever duplicated work. `getSelectedProjectId` is a thin wrapper
-  // over `getRequestSelectedProjectId`, so branching on `getToken` here called the same
-  // function either way and read as though the project lookup were duplicated too.
-  const [token, projectId] = await Promise.all([
-    getToken ? acquireClerkToken(getToken) : getRequestClerkToken(),
-    getRequestSelectedProjectId(),
-  ]);
+  // The project resolution validates the cookie against this organization's project
+  // list, so it needs the token first: sequential on purpose, and one mint either way.
+  const token = getToken ? await acquireClerkToken(getToken) : await getRequestClerkToken();
+  const projectId = await resolveRequestProjectId(token);
 
   return {
     organizationClient: assembleSdpApiClient(
@@ -251,21 +314,6 @@ async function buildSdpApiClient(
   return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
 }
 
-const getRequestProjects = cache(async (): Promise<Project[]> => {
-  const client = assembleSdpApiClient(
-    createSdpApiRequest(await getRequestClerkToken(), null, {
-      traceId: `web_${crypto.randomUUID().replaceAll("-", "")}`,
-      source: "dashboard.projects.bootstrap",
-    })
-  );
-  const response = await client.fetch<ListProjectsResponse>("/v1/projects");
-  return response.projects;
-});
-
-export function listSdpProjects(): Promise<Project[]> {
-  return getRequestProjects();
-}
-
 /**
  * Creates an org-scoped client from an explicit bearer token, for the proxy
  * middleware where Clerk's request-bound `auth()` helper is unavailable.
@@ -275,15 +323,14 @@ export function createTokenSdpApiClient(token: string): SdpApiClient {
 }
 
 /**
- * Creates a project-scoped SDP API client. Throws when the project cookie is
- * missing; project selection is established by the dashboard proxy before
- * rendering. Org-scoped endpoints go through `createOrgSdpApiClient` instead.
+ * Creates a project-scoped SDP API client for the project the layout renders
+ * with (see `getRequestSelectedProjectId`). Throws only when nothing resolves:
+ * no cookie and no sandbox, or an organization with no projects at all.
+ * Org-scoped endpoints go through `createOrgSdpApiClient` instead.
  */
 export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
-  const [token, projectId] = await Promise.all([
-    getRequestClerkToken(),
-    getRequestSelectedProjectId(),
-  ]);
+  const token = await getRequestClerkToken();
+  const projectId = await resolveRequestProjectId(token);
   if (!projectId) {
     throw new Error("Selected project required");
   }

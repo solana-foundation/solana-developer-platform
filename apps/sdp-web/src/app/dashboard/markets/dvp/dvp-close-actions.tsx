@@ -20,7 +20,7 @@ import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
 import type { DvpTrade } from "./dvp-trade";
-import { canCancelDvpTrade } from "./dvp-trade";
+import { canCancelDvpTrade, dvpTimestampToIso } from "./dvp-trade";
 import type { DvpPendingAction } from "./use-dvp-trade-actions";
 
 /** Shown in place of a button's icon while its request is out. */
@@ -67,10 +67,7 @@ export function DvpCloseActions({
                 <span className="text-tertiary" suppressHydrationWarning>
                   {" "}
                   {t("DashboardMarkets.dvp.settleTooEarly", {
-                    when: formatTimestamp(
-                      new Date(Number(trade.earliestSettlementTimestamp) * 1000).toISOString(),
-                      t
-                    ),
+                    when: formatTimestamp(dvpTimestampToIso(trade.earliestSettlementTimestamp), t),
                   })}
                 </span>
               ) : null}

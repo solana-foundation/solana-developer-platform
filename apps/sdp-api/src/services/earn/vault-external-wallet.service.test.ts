@@ -8,6 +8,9 @@ import {
   getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransaction,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND,
+  SolanaError,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -33,6 +36,14 @@ const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const fetchJupiterSwapLeg = vi.hoisted(() => vi.fn());
 const readOwnerMintBalance = vi.hoisted(() => vi.fn());
+const getBlockHeight = vi.hoisted(() => vi.fn());
+
+// The one chain read the submit makes itself: the confirmed block height that
+// gates the pre-record expiry refusal (and the post-broadcast expiry verdict).
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
+  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+}));
 
 // `prependSwapLegToVaultPlan` stays REAL — instruction ordering is part of
 // what the swap-funded cases prove. Only the Jupiter HTTP boundary is stubbed.
@@ -238,6 +249,32 @@ function anonymousWithdrawalInput(): ExternalWalletWithdrawalBuildInput {
   };
 }
 
+/** The RPC's own refusal when preflight does not recognize the blockhash. */
+function preflightBlockhashNotFound(): SolanaError {
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    fee: null,
+    loadedAccountsDataSize: null,
+    loadedAddresses: null,
+    logs: [],
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+    cause: new SolanaError(SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND),
+  });
+}
+
+async function countRows(table: "earn_movements" | "earn_external_wallet_transactions") {
+  const row = await getDb(env)
+    .prepare(`SELECT COUNT(*)::int AS rows FROM ${table}`)
+    .first<{ rows: number }>();
+  return row?.rows ?? 0;
+}
+
 /** Unwrap the atomic build answer; swap-split cases assert on the union directly. */
 async function buildDepositRow(
   input: ExternalWalletDepositBuildInput
@@ -303,6 +340,8 @@ beforeEach(async () => {
     },
   }));
   broadcastVaultTransaction.mockResolvedValue(undefined);
+  // Well inside the stubbed build window (lastValidBlockHeight 361).
+  getBlockHeight.mockResolvedValue(100n);
 });
 
 describe("buildExternalWalletDepositTransaction", () => {
@@ -846,6 +885,96 @@ describe("submitExternalWalletDeposit", () => {
     expect(result.movement.signature).not.toBeNull();
     expect(result.movement.signed_transaction).not.toBeNull();
   });
+
+  it("refuses an expired build with 409 TRANSACTION_EXPIRED before recording anything", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+    getBlockHeight.mockResolvedValue(362n);
+
+    await expect(submitDeposit(built, signed, crypto.randomUUID())).rejects.toMatchObject({
+      code: "TRANSACTION_EXPIRED",
+      statusCode: 409,
+      message: expect.stringContaining("Build a new transaction"),
+    });
+
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    expect(await countRows("earn_movements")).toBe(0);
+    const row = await getDb(env)
+      .prepare(
+        "SELECT movement_id, consumed_at FROM earn_external_wallet_transactions WHERE id = ?"
+      )
+      .bind(built.id)
+      .first<{ movement_id: string | null; consumed_at: string | null }>();
+    expect(row).toEqual({ movement_id: null, consumed_at: null });
+
+    // The window is inclusive of its last valid height, and the refusal
+    // consumed nothing: the same signed bytes still submit there.
+    getBlockHeight.mockResolvedValue(361n);
+    const result = await submitDeposit(built, signed, crypto.randomUUID());
+    expect(result.movement.status).toBe("submitted");
+  });
+
+  it("answers a replay from the ledger after the build's blockhash expired", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+    const requestId = crypto.randomUUID();
+    const first = await submitDeposit(built, signed, requestId);
+
+    getBlockHeight.mockResolvedValue(10_000n);
+    const replay = await submitDeposit(built, signed, requestId);
+
+    expect(replay.replayed).toBe(true);
+    expect(replay.movement.id).toBe(first.movement.id);
+    // A replay is a durable read; no chain call decides it.
+    expect(getBlockHeight).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refuse when the block height cannot be read", async () => {
+    getBlockHeight.mockRejectedValue(new Error("rpc unreachable"));
+    const built = await buildDepositRow(depositInput());
+    const result = await submitDeposit(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+    expect(result.movement.status).toBe("submitted");
+  });
+
+  it("fails the movement at once when preflight proves the blockhash expired", async () => {
+    broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
+    // Open at the pre-record check, closed by the time the refusal is examined.
+    getBlockHeight.mockResolvedValueOnce(361n).mockResolvedValueOnce(362n);
+    const built = await buildDepositRow(depositInput());
+    const result = await submitDeposit(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    expect(result.replayed).toBe(false);
+    expect(result.movement.status).toBe("failed");
+    expect(result.movement.failure_reason).toBe(
+      "Transaction blockhash expired before confirmation"
+    );
+    const persisted = await getDb(env)
+      .prepare("SELECT status FROM earn_movements WHERE id = ?")
+      .bind(result.movement.id)
+      .first<{ status: string }>();
+    expect(persisted?.status).toBe("failed");
+  });
+
+  it("keeps a preflight blockhash refusal reconcilable while the window is open", async () => {
+    broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
+    const built = await buildDepositRow(depositInput());
+    const result = await submitDeposit(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    expect(result.movement.status).toBe("requested");
+    expect(result.movement.failure_reason).toBeNull();
+  });
 });
 
 describe("partner fee payer (caller-provided)", () => {
@@ -1098,6 +1227,56 @@ describe("external-wallet withdrawals", () => {
       expect.objectContaining({ shares: "10", minAmountOut: "9.5" })
     );
     expect(built.min_shares_out).toBe("9.5");
+  });
+
+  it("refuses a floor the provider's exit plan cannot enforce, persisting nothing", async () => {
+    const positionId = await seedExternalWalletPosition();
+    // The default plan reports shares only, the way Kamino's kvault exit does.
+    await expect(
+      buildExternalWalletWithdrawalTransaction(
+        env,
+        withdrawalInput(positionId, { minAmountOut: "9.5" })
+      )
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("minAmountOut is not supported for kamino exits"),
+    });
+    expect(simulateVaultPlan).not.toHaveBeenCalled();
+    expect(await countRows("earn_external_wallet_transactions")).toBe(0);
+  });
+
+  it("fails closed when the plan echoes a floor other than the one requested", async () => {
+    const positionId = await seedExternalWalletPosition();
+    buildVaultWithdrawal.mockResolvedValue(
+      withdrawalPlan({ accepted: { shares: "10", minAmountOut: "9.0" } })
+    );
+    await expect(
+      buildExternalWalletWithdrawalTransaction(
+        env,
+        withdrawalInput(positionId, { minAmountOut: "9.5" })
+      )
+    ).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    expect(simulateVaultPlan).not.toHaveBeenCalled();
+  });
+
+  it("refuses an expired exit build before recording anything", async () => {
+    const positionId = await seedExternalWalletPosition();
+    const built = await buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId));
+    getBlockHeight.mockResolvedValue(362n);
+
+    await expect(
+      submitExternalWalletWithdrawal(env, {
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        transactionId: built.id,
+        signedTransaction: await signBuiltTransaction(built),
+        requestId: crypto.randomUUID(),
+        userId: USER,
+      })
+    ).rejects.toMatchObject({ code: "TRANSACTION_EXPIRED", statusCode: 409 });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    expect(await countRows("earn_movements")).toBe(0);
   });
 
   it("answers 501 when the provider cannot build an exit", async () => {

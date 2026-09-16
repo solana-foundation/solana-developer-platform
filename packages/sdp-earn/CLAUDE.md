@@ -69,9 +69,13 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
   `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
-  ids and `allow_create_account = true`, so the harness needs no edit (deployed
-  devnet Kora carries the same allowlist since sdp-infra#64, asserted by the
-  `Kora / Live Smoke` shard on secret-bearing CI runs). Its
+  ids, every devnet Earn deposit mint in `allowed_tokens` (wSOL first) and
+  `allow_create_account = true`, so the harness needs no edit (deployed devnet
+  Kora carries the same allowlist and token set since sdp-infra#64 and
+  PRO-1962, asserted by the `Kora / Live Smoke` shard on secret-bearing CI
+  runs). The harness image (e9bc391) has no `transfer_hook_policy`; the
+  deployed f0377c0 configs set it to `allow_all` so sign-only PYUSD/USDG
+  movements pass, see the comment in the toml before bumping the image. Its
   `SIGNER_PRIVATE_KEY` does need devnet SOL, because it pays the fee AND the
   share-ATA rent for real. The flag fails CLOSED, so a value
   the wrapper drops looks like "sponsorship silently did nothing" rather than an
@@ -101,11 +105,12 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 
 ### 4. Get catalogue data — live provider sync
 
-With sandbox provider credentials set and both flags on, the hourly
-catalogue-sync cron populates `earn_strategies` from live provider sources. It
-fires on the hour, so a freshly started API has an empty catalogue until a live
-pass succeeds. This is intentional: the sync is the only admitting writer and
-every row must pass the provider's declared-support checks.
+With sandbox provider credentials set and both flags on, the catalogue-sync
+cron populates `earn_strategies` from live provider sources. It runs once at
+API boot (through the slotted `runEarnCatalogueSyncIfDue`, so restarts inside
+the hour skip) and then on the hour, so a freshly started API lists strategies
+within seconds of coming up. The sync is the only admitting writer and every
+row must pass the provider's declared-support checks.
 
 See README.md → "Catalogue data" for cadence and failure behaviour. A database
 still holding `seed-demo-` rows from the removed `db:seed:earn` needs a one-time
@@ -464,10 +469,11 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
   `resolveEarnProviderClient` — DB provider ids are open strings and MUST be
   resolved through this, never direct-indexed.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, live
-  metrics, vault-direct (deposit + read) and vault-withdraw. All are
-  method-presence guards in capabilities.ts and a provider may implement any
-  subset — Kamino has live metrics, vault-direct and vault-withdraw
-  (PRO-1702); Veda has vault-direct and vault-withdraw (instant redemption
+  metrics, vault-direct (deposit + read), vault-withdraw, and the two live
+  quotes (deposit and withdrawal previews). All are method-presence guards in
+  capabilities.ts and a provider may implement any subset. Kamino has live
+  metrics, vault-direct, vault-withdraw (PRO-1702) and both quotes
+  (`@sdp/kamino`); Veda has vault-direct and vault-withdraw (instant redemption
   only — the queued exit waits on its own capability, see
   `docs/decisions/0003-veda-vault-withdrawals.md`). A deposit-only provider's
   exit route answers 501, which is a statement about SDP's plumbing rather
