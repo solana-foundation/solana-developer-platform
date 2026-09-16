@@ -7,6 +7,7 @@ import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
@@ -14,8 +15,10 @@ import { AuditService } from "@/services/audit.service";
 import {
   assertApprovedWalletOperationCustodyWallet,
   beginApprovedWalletOperationEffect,
+  runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
-import type { TokenService } from "@/services/token.service";
+import { TokenService } from "@/services/token.service";
+
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -283,14 +286,18 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
         )
       : null;
 
-    await beginApprovedWalletOperationEffect(c);
-    let { entry } = await tokenService.addAllowlistEntry({
-      tokenId,
-      address: body.address,
-      addedBy: auth.id,
-      label: body.label,
-      initialStatus: token.ablListAddress ? "pending" : "active",
-    });
+    // The effect fence and the first durable allowlist row commit together:
+    // a crash between them must leave either both or neither, so recovery can
+    // retry instead of paging for manual reconciliation.
+    let { entry } = await runApprovedWalletOperationEffectTransaction(c, (db) =>
+      new TokenService(db, getRequestTenantScope(c)).addAllowlistEntry({
+        tokenId,
+        address: body.address,
+        addedBy: auth.id,
+        label: body.label,
+        initialStatus: token.ablListAddress ? "pending" : "active",
+      })
+    );
 
     const auditService = new AuditService(getDb(c.env));
     if (list && authorityWallet) {
@@ -407,12 +414,12 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   let authoritativeEffectCompleted = false;
 
   try {
-    await beginApprovedWalletOperationEffect(c);
     // For on-chain lists, confirm authoritative removal before publishing the
     // final DB state. The helper reconciles ambiguous submission errors by
     // reading membership, so a timeout that landed still completes, while a
     // definite failure leaves the entry accurately active and safely retryable.
     if (list && authorityWallet) {
+      await beginApprovedWalletOperationEffect(c);
       await removeExistingAllowlistEntryOnChain({
         c,
         signer: authorityWallet.signer,
@@ -420,9 +427,14 @@ export const removeAllowlistEntry = async (c: AppContext) => {
         wallet: assertValidAddress(entry.address, "address"),
       });
       authoritativeEffectCompleted = true;
+      await tokenService.revokeAllowlistEntry(entryId);
+    } else {
+      // Database-only removal: the fence and the revoke are one transaction,
+      // so a crash between them cannot strand a fenced-but-unapplied effect.
+      await runApprovedWalletOperationEffectTransaction(c, (db) =>
+        new TokenService(db, getRequestTenantScope(c)).revokeAllowlistEntry(entryId)
+      );
     }
-
-    await tokenService.revokeAllowlistEntry(entryId);
     authoritativeEffectCompleted = true;
     await auditService.completeCritical(c, auditIntent);
 
