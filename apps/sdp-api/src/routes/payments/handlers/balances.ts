@@ -404,6 +404,27 @@ export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWa
   const body = c.req.valid("json");
 
   const now = new Date().toISOString();
+  // Wallet policies gate money movement, so rewriting one is itself an
+  // auditable security-control change. The hash-chained ledger seals entries
+  // with a session-locked post-commit action and cannot run inside the policy
+  // transaction, so the rewrite is bracketed intent/outcome instead: a
+  // refused intent aborts before anything commits, and a crash between commit
+  // and outcome leaves an unresolved intent the verification gate pages on —
+  // the change can never be both active and absent from the ledger without a
+  // trace. The mutable revision row's commitMessage is caller-authored prose;
+  // these entries are what attribution rests on.
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "update",
+    resourceType: "custody_wallet",
+    resourceId: wallet.id,
+    metadata: {
+      action: "update_wallet_policy",
+      walletId: wallet.walletId,
+      defaultAction: body.defaultAction,
+      ruleCount: body.rules.length,
+    },
+  });
   const controlProfile = await getDb(c.env).transaction(async (tx) => {
     // Serializes per-wallet updates. Locking the profile alone is not enough:
     // a wallet without one has no row to lock, so concurrent first writes
@@ -445,26 +466,11 @@ export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWa
     return await readWalletControlProfileSummaryInTransaction(tx, wallet.id);
   });
 
-  // Wallet policies gate money movement, so rewriting one is itself an
-  // auditable security-control change. The hash-chained ledger seals entries
-  // with a session-locked post-commit action and refuses to run inside an
-  // outer transaction, so this entry follows the commit; the write is awaited
-  // and uncaught, so a refused entry fails the request loudly instead of
-  // reporting an unattributed rewrite as success. The mutable revision row's
-  // commitMessage is caller-authored prose; this entry is what attribution
-  // rests on.
-  await new AuditService(getDb(c.env)).log(c, {
-    action: "update",
-    resourceType: "custody_wallet",
-    resourceId: wallet.id,
+  await auditService.completeCritical(c, auditIntent, {
     metadata: {
-      action: "update_wallet_policy",
-      walletId: wallet.walletId,
       profileId: controlProfile?.id ?? null,
       revisionId: controlProfile?.revisionId ?? null,
       revisionNumber: controlProfile?.revisionNumber ?? null,
-      defaultAction: body.defaultAction,
-      ruleCount: body.rules.length,
     },
   });
 

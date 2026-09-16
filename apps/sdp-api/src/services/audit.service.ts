@@ -452,6 +452,72 @@ export class AuditService {
   }
 
   /**
+   * `beginCritical` for callers without an HTTP context (webhook- or
+   * job-driven effects). Shares the fail-closed system write path, so a
+   * refused intent aborts the effect it would have admitted.
+   */
+  async beginCriticalSystem(entry: SystemAuditLogEntry): Promise<AuditIntent> {
+    const intentId = `aint_${crypto.randomUUID()}`;
+    await this.logSystem({
+      organizationId: entry.organizationId,
+      requestId: entry.requestId,
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: intentId,
+      metadata: {
+        auditPhase: "intent",
+        target: {
+          action: entry.action,
+          resourceType: entry.resourceType,
+          resourceId: entry.resourceId ?? null,
+          metadata: entry.metadata ? scrubAuditMetadata(entry.metadata) : null,
+        },
+      },
+      status: "success",
+    });
+    return { id: intentId, entry };
+  }
+
+  /**
+   * `completeCritical` for system callers: best-effort like its request-path
+   * twin — the durable intent, not the outcome write, is the guarantee.
+   */
+  async completeCriticalSystem(
+    intent: AuditIntent,
+    outcome: Partial<
+      Pick<AuditLogEntry, "action" | "resourceType" | "resourceId" | "metadata" | "status">
+    > = {}
+  ): Promise<boolean> {
+    try {
+      await this.logSystem({
+        ...intent.entry,
+        ...outcome,
+        metadata: {
+          ...intent.entry.metadata,
+          ...outcome.metadata,
+          auditPhase: "outcome",
+          auditIntentId: intent.id,
+        },
+        status: outcome.status ?? "success",
+      });
+      return true;
+    } catch (error) {
+      getLogger().error(
+        {
+          event: "audit_critical_outcome_persistence_failed",
+          auditIntentId: intent.id,
+          targetAction: intent.entry.action,
+          targetResourceType: intent.entry.resourceType,
+          targetResourceId: intent.entry.resourceId ?? null,
+          error,
+        },
+        "Critical operation outcome was not persisted; durable audit intent requires reconciliation"
+      );
+      return false;
+    }
+  }
+
+  /**
    * Append the outcome for a previously admitted critical operation.
    *
    * A failed outcome insert is deliberately not rethrown: the provider action
