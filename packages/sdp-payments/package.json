@@ -99,6 +99,11 @@
       "import": "./src/ramps/providers/bvnk/requirements.ts",
       "default": "./src/ramps/providers/bvnk/requirements.ts"
     },
+    "./ramps/providers/bvnk/schemas": {
+      "types": "./src/ramps/providers/bvnk/schemas.ts",
+      "import": "./src/ramps/providers/bvnk/schemas.ts",
+      "default": "./src/ramps/providers/bvnk/schemas.ts"
+    },
     "./ramps/providers/coinbase/client": {
       "types": "./src/ramps/providers/coinbase/client.ts",
       "import": "./src/ramps/providers/coinbase/client.ts",

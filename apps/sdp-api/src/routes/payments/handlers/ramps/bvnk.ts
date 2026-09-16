@@ -1,13 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import type {
-  BvnkAgreementsV2,
-  BvnkCustomerV2Individual,
-  BvnkLedgerWalletProfilesV2,
-  BvnkLedgerWalletProfileV2,
-  BvnkLedgerWalletV2,
-} from "@sdp/payments/ramps/providers/bvnk/client";
 import {
   buildBvnkCustomerRequest,
   parseBvnkResidenceCountry,
@@ -44,6 +37,13 @@ import {
   bvnkOnrampFields,
   isBvnkOfframpCurrency,
 } from "@sdp/payments/ramps/providers/bvnk/requirements";
+import type {
+  BvnkAgreementsV2,
+  BvnkCustomerV2Individual,
+  BvnkLedgerWalletProfilesV2,
+  BvnkLedgerWalletProfileV2,
+  BvnkLedgerWalletV2,
+} from "@sdp/payments/ramps/providers/bvnk/schemas";
 import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
