@@ -1,6 +1,10 @@
 import { hashString } from "@sdp/payments/hash";
 import { buildBvnkCustomerRequest } from "@sdp/payments/ramps/providers/bvnk/counterparty";
-import { buildBvnkCustomerExternalReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  buildBvnkCustomerExternalReference,
+  buildBvnkOnrampPaymentRuleKey,
+  readBvnkOnrampPaymentRuleState,
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
   BVNK_RESIDENCE_FIELDS,
   BVNK_US_MTL_STATES,
@@ -1630,6 +1634,24 @@ describe("Counterparties Routes", () => {
         expect(after?.metadata).toEqual({
           status: "PENDING",
           verificationStatus: "pending",
+        });
+        const row = await getDb(env)
+          .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+          .bind(counterparty.id)
+          .first<{ provider_data: Record<string, unknown> }>();
+        if (row === null) {
+          throw new Error("counterparty row missing");
+        }
+        expect(
+          readBvnkOnrampPaymentRuleState(
+            row.provider_data,
+            buildBvnkOnrampPaymentRuleKey("USD", "USDC", "SOLANA", TEST_CP_WALLET_PUBLIC_KEY)
+          ).request
+        ).toEqual({
+          fiatCurrency: "USD",
+          currency: "USDC",
+          network: "SOLANA",
+          destinationWalletAddress: TEST_CP_WALLET_PUBLIC_KEY,
         });
       } finally {
         fetchSpy.mockRestore();

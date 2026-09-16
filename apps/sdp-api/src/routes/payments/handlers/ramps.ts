@@ -755,18 +755,18 @@ export async function advanceCounterpartyRequirements(
         return customerResult.requirements;
       }
       const customer = customerResult.customer;
-      if (!isBvnkCustomerVerified(customer.status)) {
-        return bvnkCustomerVerificationRequirements(
-          c,
-          {
-            counterparty: input.counterparty,
-            projectId: input.projectId,
-            direction: input.direction,
-          },
-          customer
-        );
-      }
       if (input.direction === "offramp") {
+        if (!isBvnkCustomerVerified(customer.status)) {
+          return bvnkCustomerVerificationRequirements(
+            c,
+            {
+              counterparty: input.counterparty,
+              projectId: input.projectId,
+              direction: input.direction,
+            },
+            customer
+          );
+        }
         if (!isBvnkOfframpCurrency(input.fiatCurrency)) {
           throw internalError(`BVNK off-ramp currency was not validated: ${input.fiatCurrency}.`);
         }
@@ -826,6 +826,8 @@ export async function advanceCounterpartyRequirements(
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(
         getCryptoRailAssetLabel(input.assetRail)
       );
+      // The rule request is persisted before the KYC gate so the VERIFIED webhook
+      // can provision the wallet without waiting for another advance.
       const resolution = await ensureBvnkPaymentRule(
         rampRuntime(c),
         getCounterpartiesRepository(c),
@@ -834,7 +836,7 @@ export async function advanceCounterpartyRequirements(
         customer,
         { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency }
       );
-      if (resolution.onboardingStatus === "verification_required") {
+      if (!isBvnkCustomerVerified(resolution.customer.status)) {
         return bvnkCustomerVerificationRequirements(
           c,
           {
