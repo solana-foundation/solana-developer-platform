@@ -2,6 +2,8 @@
 
 import {
   ArrowDownIcon,
+  CircleArrowDownIcon,
+  KeyRoundIcon,
   LandmarkIcon,
   ShieldCheckIcon,
   TrendingUpIcon,
@@ -186,6 +188,33 @@ Authorization: Bearer <project-api-key>
           </code>{" "}
           signs it, submits it, and polls until it is finalized.
         </p>
+        <p className="mt-6 text-sm font-semibold text-foreground">
+          Bring your own signing infrastructure — or easily use one of ours.
+        </p>
+        <div className="mt-3 space-y-3">
+          <div className="rounded-xl border border-foreground/10 bg-background p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <KeyRoundIcon className="size-4 shrink-0 text-success" />
+              Already support stables? Perfect.
+            </p>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              Bring your own signing infrastructure: SDP builds the transaction,
+              your existing keys sign it, and your users keep whatever custody
+              setup they already have.
+            </p>
+          </div>
+          <div className="rounded-xl border border-foreground/10 bg-background p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <CircleArrowDownIcon className="size-4 shrink-0 text-success" />
+              Don&rsquo;t support stables or crypto yet?
+            </p>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              SDP can handle it: on-ramp your users from fiat into stablecoins,
+              and provision wallets through self-custody solutions SDP
+              integrates with — no crypto stack required.
+            </p>
+          </div>
+        </div>
       </div>
     </StepLayout>
   );
