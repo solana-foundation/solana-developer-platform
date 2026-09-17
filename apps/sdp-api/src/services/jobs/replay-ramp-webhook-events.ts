@@ -65,14 +65,15 @@ export async function applyStoredRampWebhookEvent(
   const events = createPostgresRampWebhookEventsRepository(getDb(env));
   if (!isWebhookRampProvider(row.provider)) {
     // Unreachable while inserts come from the registry; a row from a retired
-    // provider parks immediately rather than burning replay attempts.
+    // provider parks immediately rather than burning replay attempts. NOT
+    // terminal: a later release can restore the processor, and the deploy
+    // re-arm should hand the row to it.
     await events.recordFailure({
       id: row.id,
       error: `no webhook processor for provider ${row.provider}`,
       attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       appRevision: currentAppRevision(env),
-      terminal: true,
     });
     return false;
   }
