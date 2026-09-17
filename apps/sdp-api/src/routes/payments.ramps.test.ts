@@ -1435,7 +1435,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    expect((await res.json()).data).toMatchObject({
       provider: "bvnk",
       direction: "onramp",
       status: "unsupported",
@@ -1464,7 +1464,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    expect((await res.json()).data).toMatchObject({
       provider: "bvnk",
       direction: "offramp",
       status: "unsupported",
@@ -1482,7 +1482,7 @@ describe("Payments routes — ramps", () => {
     expect(res.status).toBe(200);
     // Off-ramp requirements are exactly the shared contact collect step; there
     // is no bank-field collect anymore (withdraw-to-bank is deferred).
-    expect(await res.json()).toMatchObject({
+    expect((await res.json()).data).toMatchObject({
       provider: "bvnk",
       direction: "offramp",
       status: "collect",
@@ -1515,7 +1515,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    expect((await res.json()).data).toMatchObject({
       provider: "bvnk",
       direction: "offramp",
       status: "provisioning",
@@ -1534,7 +1534,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    expect((await res.json()).data).toMatchObject({
       provider: "bvnk",
       direction: "offramp",
       status: "ready",
@@ -1592,7 +1592,7 @@ describe("Payments routes — ramps", () => {
 
     // The wallet was created but the status webhook has not flipped it active.
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    expect((await res.json()).data).toMatchObject({
       provider: "bvnk",
       direction: "offramp",
       status: "provisioning",
@@ -1666,7 +1666,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    expect((await res.json()).data).toMatchObject({
       provider: "bvnk",
       direction: "offramp",
       status: "ready",

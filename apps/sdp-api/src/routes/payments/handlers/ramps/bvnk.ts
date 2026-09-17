@@ -57,7 +57,6 @@ import {
   providerUnavailable,
 } from "@/lib/errors";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
@@ -192,6 +191,11 @@ async function ensureBvnkWalletProvisioned(
         throw internalError("BVNK wallet claim raced into a vanished reservation.");
       }
     });
+  }
+  // The race loser adopts the winner's already-bound row; creating another
+  // BVNK wallet would mint an orphan and cost an unnecessary provider call.
+  if (claim.external_account_reference !== null) {
+    return claim;
   }
   const walletProfile = selectBvnkWalletProfile(
     await client.listLedgerWalletProfilesV2(ctx, { currency: fiatCurrency }),
