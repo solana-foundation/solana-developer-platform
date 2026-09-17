@@ -166,7 +166,7 @@ describe("BvnkRampClient v3 contact surfaces", () => {
     });
   });
 
-  it("lists contacts by the description query and returns the content array", async () => {
+  it("lists contacts by the description query and returns the page with its pagination metadata", async () => {
     const { requests } = queueFetch(
       respond({ content: [contact], pageable: { pageNumber: 0, pageSize: 5 }, hasNext: false })
     );
@@ -174,13 +174,19 @@ describe("BvnkRampClient v3 contact surfaces", () => {
     const result = await new BvnkRampClient().listContactsV3(runtimeContext, {
       q: "cpty_123e4567-e89b-12d3-a456-426614174000",
       pageSize: 5,
+      pageNumber: 0,
     });
 
-    assert.deepEqual(result, [contact]);
+    assert.deepEqual(result, {
+      content: [contact],
+      pageable: { pageNumber: 0, pageSize: 5 },
+      hasNext: false,
+    });
     const url = new URL(requests[0].url);
     assert.equal(url.pathname, "/platform/v3/contacts");
     assert.equal(url.searchParams.get("q"), "cpty_123e4567-e89b-12d3-a456-426614174000");
     assert.equal(url.searchParams.get("pageSize"), "5");
+    assert.equal(url.searchParams.get("pageNumber"), "0");
   });
 });
 
@@ -197,7 +203,9 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
       profileId: "fiat:usd:profile",
     });
 
-    assert.deepEqual(result, wallet);
+    // The raw wire balance is numeric; the client converts it to a decimal
+    // string at the boundary, so the typed result carries the converted value.
+    assert.deepEqual(result, { ...wallet, balance: { amount: "0", currency: "USD" } });
     assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "wallet-key");
     const body = JSON.parse(String(requests[0].init.body)) as Record<string, unknown>;
     assert.equal(body.customerId, undefined);
@@ -333,6 +341,7 @@ describe("BvnkRampClient response parsing", () => {
         new BvnkRampClient().listContactsV3(runtimeContext, {
           q: "cpty_123e4567-e89b-12d3-a456-426614174000",
           pageSize: 5,
+          pageNumber: 0,
         }),
       (error: unknown) => {
         assert.equal(error instanceof SdpPaymentsError, true);

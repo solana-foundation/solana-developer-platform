@@ -345,6 +345,17 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     throw notFound("Counterparty");
   }
 
+  let destinationWalletAddress: string | undefined;
+  if (query.data.direction === "onramp") {
+    const scope = await resolveScope(c);
+    const destinationWallet = resolveWalletByCustodyWalletId(
+      scope.wallets,
+      query.data.destinationCustodyWalletId
+    );
+    assertPaymentWalletExactAccess(c, destinationWallet.id, []);
+    destinationWalletAddress = destinationWallet.publicKey;
+  }
+
   if (query.data.provider === "mural" && readMuralOrganization(counterparty.provider_data).id) {
     return success(
       c,
@@ -390,13 +401,9 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   }
 
   if (query.data.direction === "onramp") {
-    const scope = await resolveScope(c);
-    const destinationWallet = resolveWalletByCustodyWalletId(
-      scope.wallets,
-      query.data.destinationCustodyWalletId
-    );
-    assertPaymentWalletExactAccess(c, destinationWallet.id, []);
-    const destinationWalletAddress = destinationWallet.publicKey;
+    if (destinationWalletAddress === undefined) {
+      throw internalError("Onramp destination wallet address was not resolved.");
+    }
     const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
       mapToCounterparty(counterparty),
       {

@@ -1,6 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { reconcileBvnkOnrampExpiry } from "@/cron/bvnk-onramp-expiry";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
 import { closeDatabasePools } from "@/db/client";
@@ -8,6 +7,7 @@ import { currentDatabaseIdentity } from "@/db/identity";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { logEvent } from "@/runtime/money-path-events";
+import { reconcileBvnkOnrampExpiry } from "@/services/jobs/bvnk-onramp-expiry";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
@@ -64,7 +64,10 @@ vi.mock("@/cron/earn-vault-movements", () => ({
 
 vi.mock("@/cron/bvnk-onramp-expiry", () => ({
   BVNK_ONRAMP_EXPIRY_MONITOR: "sdp-api-bvnk-onramp-expiry",
-  reconcileBvnkOnrampExpiry: vi.fn(async () => {}),
+}));
+
+vi.mock("@/services/jobs/bvnk-onramp-expiry", () => ({
+  reconcileBvnkOnrampExpiry: vi.fn(async () => ({ expired: 0, deactivated: 0, failed: 0 })),
 }));
 
 // Literal constants keep the heavy service graph behind pending-transfers out
@@ -224,6 +227,9 @@ describe("runCronJob", () => {
     vi.mocked(trackPendingDeposits).mockReset().mockResolvedValue(undefined);
     vi.mocked(trackPendingWithdrawals).mockReset().mockResolvedValue(undefined);
     vi.mocked(reconcileEarnVaultMovements).mockReset().mockResolvedValue(undefined);
+    vi.mocked(reconcileBvnkOnrampExpiry)
+      .mockReset()
+      .mockResolvedValue({ expired: 0, deactivated: 0, failed: 0 });
     vi.mocked(detectOrphanedEarnSplitSwaps).mockReset().mockResolvedValue(undefined);
     vi.mocked(reconcileDvpTrades).mockReset().mockResolvedValue(undefined);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
@@ -578,6 +584,7 @@ describe("runCronJob", () => {
       .mocked(logEvent)
       .mock.calls.filter(([, payload]) => payload.event === "sdp_cron_run");
     expect(runs.map(([, payload]) => payload.monitor).sort()).toEqual([
+      "sdp-api-managed-bvnk-onramp-expiry",
       "sdp-api-managed-cleanup-provider-credential-secrets",
       "sdp-api-managed-collect-recurring-payments",
       "sdp-api-managed-detect-orphaned-earn-split-swaps",

@@ -5,6 +5,17 @@ import type {
   BvnkRuleListEntry,
 } from "./schemas";
 
+/**
+ * The raw BVNK wire shape for a v2 ledger wallet, before the client converts
+ * the numeric balance into a decimal string. Fixtures for HTTP responses must
+ * model this shape — `balance.amount` is a number and `paymentInstruments`
+ * is a required array — or the tightened schema rejects the body as
+ * malformed.
+ */
+export type BvnkLedgerWalletWire = Omit<BvnkLedgerWalletV2, "balance"> & {
+  balance: { amount: number; currency: string };
+};
+
 export function bvnkContactV3(overrides?: Partial<BvnkContactV3>): BvnkContactV3 {
   return {
     id: "a3700c37-3f46-4766-b0db-3250b073fd9c",
@@ -21,12 +32,12 @@ export function bvnkContactV3(overrides?: Partial<BvnkContactV3>): BvnkContactV3
   } satisfies BvnkContactV3;
 }
 
-export function bvnkLedgerWallet(overrides?: Partial<BvnkLedgerWalletV2>): BvnkLedgerWalletV2 {
+export function bvnkLedgerWallet(overrides?: Partial<BvnkLedgerWalletWire>): BvnkLedgerWalletWire {
   return {
     id: "wallet-id",
     name: "USD Wallet",
     status: "ACTIVE",
-    balance: { amount: "10.00", currency: "USD" },
+    balance: { amount: 0, currency: "USD" },
     paymentInstruments: [
       {
         type: "FIAT",
@@ -41,7 +52,7 @@ export function bvnkLedgerWallet(overrides?: Partial<BvnkLedgerWalletV2>): BvnkL
       },
     ],
     ...overrides,
-  } satisfies BvnkLedgerWalletV2;
+  } satisfies BvnkLedgerWalletWire;
 }
 
 export function bvnkWalletProfilesResponse(

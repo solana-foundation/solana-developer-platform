@@ -11,6 +11,7 @@ import {
   isBvnkWalletActive,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type {
+  BvnkContactV3,
   BvnkLedgerWalletProfilesV2,
   BvnkLedgerWalletProfileV2,
   BvnkLedgerWalletV2,
@@ -43,7 +44,7 @@ import type {
 } from "@sdp/types/ramp-requirements";
 import { asTransactionalClient, getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import { createSystemTransactionalPaymentsRepository } from "@/db/repositories";
+import { createPostgresPaymentsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
@@ -55,6 +56,8 @@ import {
   internalError,
   providerUnavailable,
 } from "@/lib/errors";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
@@ -592,8 +595,25 @@ export async function advanceBvnkContact(
   let contactId: string;
   let createdThisRequest = false;
   if (claim.preExisted) {
-    const contacts = await client.listContactsV3(ctx, { q: input.counterparty.id, pageSize: 5 });
-    const matches = contacts.filter((contact) => contact.description === input.counterparty.id);
+    const pageSize = 50;
+    const maxPages = 10;
+    const matches: BvnkContactV3[] = [];
+    for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
+      const page = await client.listContactsV3(ctx, {
+        q: input.counterparty.id,
+        pageSize,
+        pageNumber,
+      });
+      matches.push(
+        ...page.content.filter((contact) => contact.description === input.counterparty.id)
+      );
+      if (!page.hasNext) {
+        break;
+      }
+      if (pageNumber === maxPages - 1) {
+        throw providerUnavailable("BVNK contact search did not converge");
+      }
+    }
     if (matches.length > 1) {
       throw providerUnavailable(
         `BVNK contact lookup for ${input.counterparty.id} is ambiguous (${matches
@@ -758,7 +778,7 @@ export async function bvnkOnrampQuote(
   try {
     transfer = await getDb(c.env).transaction(async (transaction) => {
       const db = asTransactionalClient(transaction);
-      const txPayments = createSystemTransactionalPaymentsRepository(db);
+      const txPayments = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
       const created = await txPayments.createTransfer({
         id: transferId,
         organizationId,

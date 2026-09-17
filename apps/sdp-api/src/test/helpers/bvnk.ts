@@ -10,6 +10,42 @@ export const TEST_BVNK_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
 
 export const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
 
+export const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
+
+/** The BVNK v3 contact id the on-ramp quote path binds into payment rules. */
+export const TEST_BVNK_CONTACT_ID = "contact_created_1";
+
+/**
+ * A full BVNK v3 contact as `getContactV3` returns it. The rule path reads
+ * `contact.entity.type` to build the THIRD_PARTY rule entity, so the fixture
+ * must carry the entity block (not the legacy top-level identity lanes).
+ */
+export function mockBvnkContact(
+  overrides?: Partial<Record<string, unknown>>
+): Record<string, unknown> {
+  return {
+    id: TEST_BVNK_CONTACT_ID,
+    description: "cpty_123e4567-e89b-12d3-a456-426614174000",
+    entity: {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      dateOfBirth: "1815-12-10",
+      address: {
+        addressLine1: "1 Analytical Engine Way",
+        city: "Austin",
+        postalCode: "78701",
+        country: "US",
+        stateCode: "TX",
+      },
+    },
+    createdAt: "2026-06-28T00:00:00.000Z",
+    updatedAt: "2026-06-28T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 export interface BvnkSandboxEnvValues {
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;

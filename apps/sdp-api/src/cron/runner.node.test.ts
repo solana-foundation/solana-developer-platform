@@ -8,6 +8,7 @@ import {
   APPROVED_WALLET_OPERATIONS_CRON,
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
+import { BVNK_ONRAMP_EXPIRY_CRON } from "./bvnk-onramp-expiry";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "./dvp-trades";
 import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSyncIfDue } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";
@@ -188,7 +189,7 @@ describe("startCron", () => {
   // proof-of-life no-ops, so every configuration schedules all 15 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 14;
+  const ALL_TASKS = 15;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -206,19 +207,20 @@ describe("startCron", () => {
     startCron({ env: {} as Env, bg: makeBg() });
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
-    expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
-    expect(scheduleMock.mock.calls[2][0]).toBe(REVOKED_API_KEY_CACHE_CRON);
-    expect(scheduleMock.mock.calls[3][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
-    expect(scheduleMock.mock.calls[4][0]).toBe(PENDING_DEPOSITS_CRON);
-    expect(scheduleMock.mock.calls[5][0]).toBe(PENDING_WITHDRAWALS_CRON);
-    expect(scheduleMock.mock.calls[6][0]).toBe(RINGS_INDEXING_CRON);
-    expect(scheduleMock.mock.calls[7][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
-    expect(scheduleMock.mock.calls[8][0]).toBe(EARN_METRICS_REFRESH_CRON);
-    expect(scheduleMock.mock.calls[9][0]).toBe(SECRET_RETIREMENTS_CRON);
-    expect(scheduleMock.mock.calls[10][0]).toBe(PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON);
-    expect(scheduleMock.mock.calls[11][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
-    expect(scheduleMock.mock.calls[12][0]).toBe(DVP_TRADES_CRON);
-    expect(scheduleMock.mock.calls[13][0]).toBe(EARN_SPLIT_SWAPS_CRON);
+    expect(scheduleMock.mock.calls[1][0]).toBe(BVNK_ONRAMP_EXPIRY_CRON);
+    expect(scheduleMock.mock.calls[2][0]).toBe(PENDING_TRANSFERS_CRON);
+    expect(scheduleMock.mock.calls[3][0]).toBe(REVOKED_API_KEY_CACHE_CRON);
+    expect(scheduleMock.mock.calls[4][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
+    expect(scheduleMock.mock.calls[5][0]).toBe(PENDING_DEPOSITS_CRON);
+    expect(scheduleMock.mock.calls[6][0]).toBe(PENDING_WITHDRAWALS_CRON);
+    expect(scheduleMock.mock.calls[7][0]).toBe(RINGS_INDEXING_CRON);
+    expect(scheduleMock.mock.calls[8][0]).toBe(EARN_CATALOGUE_SYNC_CRON);
+    expect(scheduleMock.mock.calls[9][0]).toBe(EARN_METRICS_REFRESH_CRON);
+    expect(scheduleMock.mock.calls[10][0]).toBe(SECRET_RETIREMENTS_CRON);
+    expect(scheduleMock.mock.calls[11][0]).toBe(PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON);
+    expect(scheduleMock.mock.calls[12][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
+    expect(scheduleMock.mock.calls[13][0]).toBe(DVP_TRADES_CRON);
+    expect(scheduleMock.mock.calls[14][0]).toBe(EARN_SPLIT_SWAPS_CRON);
   });
 
   it("always schedules revoked API key cache reconciliation", () => {
@@ -247,7 +249,7 @@ describe("startCron", () => {
     const observability = makeObservability();
     startCron({ env, bg, observability });
 
-    (scheduleMock.mock.calls[9][1] as () => void)();
+    (scheduleMock.mock.calls[10][1] as () => void)();
     const passed = vi.mocked(runSecretRetirements).mock.calls[0][0].observability;
     expect(passed).toBeDefined();
     expect(passed).not.toBe(observability);
@@ -271,7 +273,7 @@ describe("startCron", () => {
     vi.mocked(observability.withMonitor).mockImplementation((_slug, fn) => fn());
     startCron({ env: {} as Env, bg, observability });
 
-    (scheduleMock.mock.calls[9][1] as () => void)();
+    (scheduleMock.mock.calls[10][1] as () => void)();
     const passed = vi.mocked(runSecretRetirements).mock.calls[0][0].observability;
     await passed?.withMonitor("sdp-api-retire-secrets", async () => undefined, {
       schedule: { type: "crontab", value: "*/5 * * * *" },
@@ -316,7 +318,7 @@ describe("startCron", () => {
     });
     startCron({ env: SELF_HOSTED_NO_PROFILES, bg, observability });
 
-    (scheduleMock.mock.calls[10][1] as () => void)();
+    (scheduleMock.mock.calls[11][1] as () => void)();
 
     expect(runProviderCredentialSecretCleanup).toHaveBeenCalledExactlyOnceWith({
       env: SELF_HOSTED_NO_PROFILES,
@@ -338,7 +340,7 @@ describe("startCron", () => {
     });
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
-    expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
+    expect(scheduleMock.mock.calls[2][0]).toBe(PENDING_TRANSFERS_CRON);
   });
 
   // Recurring payments are an always-on product surface: collection schedules
@@ -347,7 +349,7 @@ describe("startCron", () => {
     startCron({ env: {} as Env, bg: makeBg() });
 
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
-    expect(scheduleMock.mock.calls[3][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
+    expect(scheduleMock.mock.calls[4][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
   });
 
   it("schedules deposit + withdrawal reconcilers when private channels are enabled", () => {
@@ -380,7 +382,7 @@ describe("startCron", () => {
     const bg = makeBg();
     startCron({ env: {} as Env, bg });
 
-    (scheduleMock.mock.calls[4][1] as () => void)();
+    (scheduleMock.mock.calls[5][1] as () => void)();
     expect(runPendingDepositsReconciliation).not.toHaveBeenCalled();
     expect(bg.run).toHaveBeenCalledTimes(1);
     await vi.mocked(bg.run).mock.calls[0][0];
@@ -399,7 +401,7 @@ describe("startCron", () => {
     const bg = makeBg();
     startCron({ env: {} as Env, bg });
 
-    (scheduleMock.mock.calls[8][1] as () => void)();
+    (scheduleMock.mock.calls[9][1] as () => void)();
     expect(bg.run).toHaveBeenCalledTimes(1);
     await vi.mocked(bg.run).mock.calls[0][0];
 
@@ -454,7 +456,7 @@ describe("startCron", () => {
     const env = {} as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
-    const tick = scheduleMock.mock.calls[1][1] as () => void;
+    const tick = scheduleMock.mock.calls[2][1] as () => void;
     tick();
     expect(runPendingTransfersReconciliation).toHaveBeenCalledWith({
       env,
@@ -485,7 +487,7 @@ describe("startCron", () => {
     // Indexed rather than `.at(-1)`: this asserts the vault-movement task
     // specifically, and taking whatever happens to be registered last silently
     // retargets the assertion the moment another task is appended.
-    const tick = scheduleMock.mock.calls[11][1] as () => void;
+    const tick = scheduleMock.mock.calls[12][1] as () => void;
     tick();
     expect(runEarnVaultMovementsReconciliation).toHaveBeenCalledWith({
       env,
@@ -502,7 +504,7 @@ describe("startCron", () => {
     });
     startCron({ env, bg });
 
-    (scheduleMock.mock.calls[12][1] as () => void)();
+    (scheduleMock.mock.calls[13][1] as () => void)();
 
     expect(runDvpTradeReconciliation).toHaveBeenCalledExactlyOnceWith({
       env,
@@ -517,7 +519,7 @@ describe("startCron", () => {
     const observability = makeObservability();
     startCron({ env, bg, observability });
     // recovery, transfers, revoked-key cache, recurring — recurring is fourth.
-    const tick = scheduleMock.mock.calls[3][1] as () => void;
+    const tick = scheduleMock.mock.calls[4][1] as () => void;
     tick();
     expect(runRecurringPaymentsCollection).toHaveBeenCalledWith({
       env,
@@ -530,7 +532,7 @@ describe("startCron", () => {
     const bg = makeBg();
     const env = {} as Env;
     startCron({ env, bg });
-    const tick = scheduleMock.mock.calls[1][1] as () => void;
+    const tick = scheduleMock.mock.calls[2][1] as () => void;
     tick();
     expect(runPendingTransfersReconciliation).toHaveBeenCalledWith({
       env,
@@ -569,7 +571,7 @@ describe("startCron", () => {
     const env = {} as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
-    const tick = scheduleMock.mock.calls[6][1] as () => void;
+    const tick = scheduleMock.mock.calls[7][1] as () => void;
     tick();
     expect(runRingsIndexingPoll).toHaveBeenCalledWith({
       env,

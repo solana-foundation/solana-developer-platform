@@ -306,6 +306,8 @@
       "receiveTitle": "Receive funds onchain"
     },
     "bvnk": {
+      "provisioningTitle": "Setting up your BVNK account",
+      "provisioningDescription": "Almost there — we're getting your BVNK account ready. Your instructions will appear here in a moment.",
       "readyTitle": "Preparing your instructions",
       "readyDescription": "Your funding account is ready — fetching your details now.",
       "simulateDeposit": "Simulate Deposit",

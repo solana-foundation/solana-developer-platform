@@ -46,6 +46,7 @@ import {
 import {
   type BvnkChannelAddress,
   type BvnkChannelResponse,
+  type BvnkContactsV3ListResponse,
   type BvnkContactV3,
   type BvnkLedgerWalletProfilesV2,
   type BvnkLedgerWalletV2,
@@ -335,26 +336,27 @@ export class BvnkRampClient implements RampProvider {
   }
 
   /**
-   * Lists v3 contacts matching a search query. The counterparty id is stored
-   * as the contact description, so listing by that id is the crash-recovery
-   * lookup for an interrupted contact creation.
+   * Lists one page of v3 contacts matching a search query. The counterparty
+   * id is stored as the contact description, so listing by that id is the
+   * crash-recovery lookup for an interrupted contact creation. The caller
+   * follows `hasNext` pages and fails closed when the search does not
+   * converge, so a page boundary can never hide an existing contact.
    *
    * @param ctx - Runtime provider credentials and environment.
-   * @param input - Search query and page size.
-   * @returns The matching contacts in page order.
+   * @param input - Search query, page size, and zero-based page number.
+   * @returns The page of matching contacts plus its pagination metadata.
    */
   async listContactsV3(
     { env, mode }: RampRuntimeContext,
-    input: { q: string; pageSize: number }
-  ): Promise<BvnkContactV3[]> {
+    input: { q: string; pageSize: number; pageNumber: number }
+  ): Promise<BvnkContactsV3ListResponse> {
     const config = readBvnkConfig(env, mode);
     const response = await this.request(
       config,
-      `/platform/v3/contacts?q=${encodeURIComponent(input.q)}&pageSize=${input.pageSize}`,
+      `/platform/v3/contacts?q=${encodeURIComponent(input.q)}&pageSize=${input.pageSize}&pageNumber=${input.pageNumber}`,
       { method: "GET" }
     );
-    const parsed = parseBvnkResponse(bvnkContactsV3ListResponseSchema, response);
-    return parsed.content;
+    return parseBvnkResponse(bvnkContactsV3ListResponseSchema, response);
   }
 
   /**
@@ -424,7 +426,10 @@ export class BvnkRampClient implements RampProvider {
   /**
    * Lists the payment rules applied to a wallet. The Direct model recovers a
    * transfer whose rule was created but never CAS'd onto the row by adopting
-   * the active rule whose reference matches `sdp_onramp_<transfer_id>`.
+   * the active rule whose reference matches `sdp_onramp_<transfer_id>`; the
+   * per-key provisioning path likewise adopts the ACTIVE rule whose reference
+   * matches the deterministic rule reference for the funding key, so an
+   * interrupted create never strands a duplicate.
    *
    * @param ctx - Runtime provider credentials and environment.
    * @param input - BVNK wallet id to list rules for.

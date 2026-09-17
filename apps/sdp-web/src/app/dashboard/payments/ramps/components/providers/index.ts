@@ -21,15 +21,11 @@ export interface OnboardingCopy {
   iconClassName: string;
 }
 
-type BvnkRequirements = Extract<CounterpartyRequirements, { provider: "bvnk" }>;
 type LightsparkRequirements = Extract<CounterpartyRequirements, { provider: "lightspark" }>;
 type MuralRequirements = Extract<CounterpartyRequirements, { provider: "mural" }>;
 type ReadyRequirement = Extract<CounterpartyRequirements, { status: "ready" }>;
 
-export type BvnkOnboardingPanelStatus = Exclude<
-  BvnkRequirements["status"] | ReadyRequirement["status"],
-  "collect" | "provisioning" | "unsupported"
->;
+export type BvnkOnboardingPanelStatus = "provisioning" | "ready";
 export type LightsparkOnboardingPanelStatus = Exclude<
   LightsparkRequirements["status"] | ReadyRequirement["status"],
   | "collect"
@@ -62,6 +58,7 @@ type PanelOnboardingRequirements =
   | MuralPanelOnboardingRequirements;
 
 const BVNK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> = new Set([
+  "provisioning",
   "ready",
 ]);
 
