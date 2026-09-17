@@ -33,6 +33,7 @@ import {
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { logEvent } from "@/runtime/money-path-events";
 import { type AppContext, rampRuntime } from "../../context";
+import { providerCustomerReferenceSchema } from "@/db/repositories/counterparty-provider-account.repository";
 
 /**
  * Merges a Lightspark provider-data patch under the counterparty row lock.
@@ -109,7 +110,7 @@ export async function ensureLightsparkCustomer(
     provider: "lightspark",
   });
   if (existing) {
-    return { customerId: existing.provider_customer_reference };
+    return { customerId: providerCustomerReferenceSchema.parse(existing.provider_customer_reference) };
   }
 
   const customer = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateCustomer(

@@ -6,6 +6,7 @@ import {
 } from "@sdp/types";
 import { z } from "zod";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import { providerCustomerReferenceSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -173,6 +174,6 @@ function mapCustomerLink(
   return {
     kind: "customer_link",
     provider: row.provider,
-    providerCustomerReference: row.provider_customer_reference,
+    providerCustomerReference: providerCustomerReferenceSchema.parse(row.provider_customer_reference),
   } satisfies CounterpartyProviderCustomerLink;
 }

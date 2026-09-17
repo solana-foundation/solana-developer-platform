@@ -152,6 +152,7 @@ import {
   rampQuoteExpiryProviderData,
 } from "./ramps/quote-binding";
 import { stripeOnrampQuote } from "./ramps/stripe";
+import { providerCustomerReferenceSchema } from "@/db/repositories/counterparty-provider-account.repository";
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];
@@ -721,7 +722,7 @@ export async function advanceCounterpartyRequirements(
           })
         ).contactId;
       } else {
-        contactId = link.provider_customer_reference;
+        contactId = providerCustomerReferenceSchema.parse(link.provider_customer_reference);
       }
       if (input.direction === "offramp") {
         if (!isBvnkOfframpCurrency(input.fiatCurrency)) {

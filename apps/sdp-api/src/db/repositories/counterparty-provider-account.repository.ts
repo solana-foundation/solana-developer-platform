@@ -22,13 +22,16 @@ export function counterpartyProviderAccountUuid(id: string): string {
   return match[1];
 }
 
+/** Provider-side identity reference an active `customer_link` row always carries; pending claims hold NULL until the provider object exists. */
+export const providerCustomerReferenceSchema = z.string().min(1);
+
 export const counterpartyProviderAccountRowSchema = z.object({
   id: z.string(),
   organization_id: z.string(),
   project_id: z.string(),
   counterparty_id: z.string(),
   provider: z.enum(RAMP_PROVIDERS),
-  provider_customer_reference: z.string(),
+  provider_customer_reference: z.string().nullable(),
   kind: z.enum(["customer_link", "payout_account", "funding_wallet", "merchant_wallet"]),
   external_account_reference: z.string().nullable(),
   fiat_currency: z.string().nullable(),

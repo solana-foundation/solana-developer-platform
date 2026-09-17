@@ -345,7 +345,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
         cryptoToken: getCryptoRailAssetLabel(query.data.assetRail),
         fiatCurrency: query.data.fiatCurrency,
         destinationWalletAddress,
-        ...(providerAccount === null
+        ...(providerAccount === null || providerAccount.provider_customer_reference === null
           ? {}
           : { providerCustomerReference: providerAccount.provider_customer_reference }),
       }
@@ -367,7 +367,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
             destinationCountry: query.data.destinationCountry,
           }
         : {}),
-      ...(providerAccount === null
+      ...(providerAccount === null || providerAccount.provider_customer_reference === null
         ? {}
         : { providerCustomerReference: providerAccount.provider_customer_reference }),
     }
@@ -432,7 +432,7 @@ export const submitCounterpartyRequirements = async (
         ? { cryptoRail: input.assetRail }
         : {}),
       ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
-      ...(providerAccount === null
+      ...(providerAccount === null || providerAccount.provider_customer_reference === null
         ? {}
         : { providerCustomerReference: providerAccount.provider_customer_reference }),
       ...("collectedData" in input ? { collectedData: input.collectedData } : {}),

@@ -6,6 +6,7 @@ import type {
 } from "@sdp/payments/ramps/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import { providerCustomerReferenceSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError, serviceUnavailable } from "@/lib/errors";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -117,7 +118,7 @@ function groupProviderAccounts(
         counterpartyId: row.counterparty_id,
         provider: row.provider,
         fiatCurrency: row.fiat_currency,
-        providerCustomerReference: row.provider_customer_reference,
+        providerCustomerReference: providerCustomerReferenceSchema.parse(row.provider_customer_reference),
         rowIds: new Set([row.id]),
       });
       continue;
