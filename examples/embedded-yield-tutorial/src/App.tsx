@@ -156,7 +156,25 @@ function CustodySection() {
 
 function ConfigureSection() {
   return (
-    <StepLayout id="configure" visual={<DashboardPreview />}>
+    <StepLayout
+      id="configure"
+      visual={
+        <div className="flex w-full max-w-xl flex-col items-stretch gap-4">
+          <DashboardPreview />
+          <pre className="overflow-x-auto rounded-xl border border-foreground/10 bg-foreground p-4 text-xs leading-relaxed text-background">
+            <code>{`POST /v1/earn/external-wallet/deposit-transactions
+Authorization: Bearer <project-api-key>
+
+{
+  "strategyId": "treasury-4.8",
+  "ownerAddress": "<customer-wallet>",
+  "amount": "12500",
+  "sourceTokenMint": "<usdc-mint>"
+}`}</code>
+          </pre>
+        </div>
+      }
+    >
       <div className="text-left">
         <Kicker index={2} label="Configure" />
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-foreground lg:text-4xl">
@@ -169,17 +187,6 @@ function ConfigureSection() {
           4.8% APY, private credit funds, and more — while SDP handles the
           on-chain plumbing.
         </p>
-        <pre className="mt-5 overflow-x-auto rounded-xl border border-foreground/10 bg-foreground p-4 text-xs leading-relaxed text-background">
-          <code>{`POST /v1/earn/external-wallet/deposit-transactions
-Authorization: Bearer <project-api-key>
-
-{
-  "strategyId": "treasury-4.8",
-  "ownerAddress": "<customer-wallet>",
-  "amount": "12500",
-  "sourceTokenMint": "<usdc-mint>"
-}`}</code>
-        </pre>
         <p className="mt-6 text-sm font-semibold text-foreground">
           Bring your own signing infrastructure — or easily use one of ours.
         </p>
