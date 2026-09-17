@@ -95,6 +95,20 @@ describe("PlaygroundApiKeySelector", () => {
     expect(view.getByTestId("selected-secret").textContent).toBe("");
   });
 
+  it("renders the key chooser as a chooser, not a second text field", () => {
+    // The control used to be a hand-rolled box with an invisible native select
+    // over it, which rendered identically to the secret field below and read as
+    // a duplicate input. Nothing asserted its role, which is how it drifted.
+    const view = render(ui());
+
+    const chooser = view.getByLabelText("Select API key");
+    expect(chooser.getAttribute("role")).toBe("combobox");
+
+    const secretInput = view.getByLabelText("API key value") as HTMLInputElement;
+    expect(secretInput.type).toBe("password");
+    expect(chooser).not.toBe(secretInput);
+  });
+
   it("does not extend secret expiry during passive rerenders", () => {
     vi.useFakeTimers();
     const storedAt = new Date("2026-09-17T00:00:00.000Z");

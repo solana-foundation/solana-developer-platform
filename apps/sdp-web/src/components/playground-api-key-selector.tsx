@@ -4,6 +4,7 @@ import { KeyRound } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectItem } from "@/components/ui/select";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { clearStoredApiKeySecret, storeApiKeySecret } from "@/lib/playground-api-keys";
@@ -30,6 +31,18 @@ function formatApiKeyLabel(name: string, keyPrefix: string): string {
   return `${name} (${formatKeyIdentifier(keyPrefix)})`;
 }
 
+/**
+ * Two controls doing two jobs: the Select says WHICH key, the field supplies its
+ * secret. They are not duplicates. The key id is the only unambiguous identity
+ * available here (prefixes are three characters of entropy and collide, which
+ * this component's own tests pin), and storage, workspace scoping and expiry all
+ * hang off it.
+ *
+ * The chooser used to be a hand-rolled box with an invisible native select laid
+ * over it, which rendered as a bordered pill identical to the field below and
+ * read as a second text input. It now uses the design-system Select, as the
+ * approvals inbox and custody policy flow already do.
+ */
 export function PlaygroundApiKeySelector() {
   const t = useTranslations();
   const {
@@ -77,44 +90,19 @@ export function PlaygroundApiKeySelector() {
 
   return (
     <div className="grid w-full min-w-[260px] gap-2 lg:max-w-[360px]">
-      <div className="relative">
-        <div className="pointer-events-none flex h-11 w-full items-center rounded-[14px] border border-border-default bg-surface-raised px-4 shadow-none">
-          <span className="flex min-w-0 items-center gap-2 pr-8">
-            <KeyRound className="h-4 w-4 text-tertiary" />
-            <span className="truncate text-left text-sm font-medium text-primary">
-              {selectedApiKey
-                ? formatApiKeyLabel(selectedApiKey.name, selectedApiKey.keyPrefix)
-                : t("Shared.SharedComponents.selectApiKey")}
-            </span>
-          </span>
-        </div>
-
-        <select
-          aria-label={t("Shared.SharedComponents.selectApiKey")}
-          className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-[14px] bg-surface-raised text-primary opacity-0"
-          value={selectedPlaygroundApiKeyId ?? playgroundApiKeys[0].id}
-          onChange={(event) => setSelectedPlaygroundApiKeyId(event.currentTarget.value)}
-        >
-          {playgroundApiKeys.map((apiKey) => (
-            <option key={apiKey.id} value={apiKey.id} className="bg-surface-raised text-primary">
-              {formatApiKeyLabel(apiKey.name, apiKey.keyPrefix)}
-            </option>
-          ))}
-        </select>
-
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 16 16"
-          className="pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2 text-muted"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.75"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="m4 6 4 4 4-4" />
-        </svg>
-      </div>
+      <Select
+        ariaLabel={t("Shared.SharedComponents.selectApiKey")}
+        size="xl"
+        iconLeft={<KeyRound className="h-4 w-4 text-tertiary" />}
+        value={selectedPlaygroundApiKeyId ?? playgroundApiKeys[0].id}
+        onValueChange={(value) => setSelectedPlaygroundApiKeyId(value ?? "")}
+      >
+        {playgroundApiKeys.map((apiKey) => (
+          <SelectItem key={apiKey.id} value={apiKey.id}>
+            {formatApiKeyLabel(apiKey.name, apiKey.keyPrefix)}
+          </SelectItem>
+        ))}
+      </Select>
       <Input
         aria-label={t("Shared.SharedComponents.apiKeyValue")}
         autoComplete="new-password"
