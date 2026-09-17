@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { YieldMovement, YieldPosition, YieldStrategy } from "../src/types";
+import { ApiRequestError } from "./http";
 import {
   earnedFromLedger,
   pickSavingsStrategy,
@@ -149,6 +150,18 @@ describe("amount to shares", () => {
       "up to 6 decimal places"
     );
     expect(() => sharesForAmount("1", position({}))).toThrow("still updating");
+  });
+
+  it("rejects client-input amounts as 400s, not server faults", () => {
+    expect(() => sharesForAmount("88.01", live)).toThrow(ApiRequestError);
+    expect(() => sharesForAmount("0.0000001", live)).toThrow(ApiRequestError);
+    expect(() => sharesForAmount("1", position({}))).toThrow(ApiRequestError);
+    expect(() => sharesForAmount("0.000001", live)).toThrow(ApiRequestError);
+    try {
+      sharesForAmount("88.01", live);
+    } catch (caught) {
+      expect(caught).toMatchObject({ status: 400, code: "INVALID_REQUEST" });
+    }
   });
 });
 
