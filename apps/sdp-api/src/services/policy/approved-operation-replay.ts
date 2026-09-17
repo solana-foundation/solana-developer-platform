@@ -24,7 +24,7 @@ const capabilities = new Map<
 >();
 
 const walletOperationExecutionRequestSchema = z.object({
-  method: z.enum(["POST", "DELETE"]),
+  method: z.enum(["POST", "PATCH", "DELETE"]),
   path: z.string().refine((path) => path.startsWith("/v1/")),
   body: z.record(z.string(), z.unknown()),
   idempotencyKey: z.string(),
@@ -341,7 +341,7 @@ export async function executeApprovedWalletOperation(
       new Request(`http://approved-operation.internal${request.path}`, {
         method: request.method,
         headers,
-        body: request.method === "POST" ? JSON.stringify(request.body) : undefined,
+        body: request.method === "DELETE" ? undefined : JSON.stringify(request.body),
         signal: heartbeat.signal,
       }),
       env

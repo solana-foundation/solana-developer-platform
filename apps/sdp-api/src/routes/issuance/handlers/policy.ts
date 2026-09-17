@@ -30,6 +30,7 @@ type IssuancePolicyOperationType = Extract<
   | "issuance_deploy_execute"
   | "issuance_force_burn_execute"
   | "issuance_freeze_execute"
+  | "issuance_metadata_update_execute"
   | "issuance_mint_execute"
   | "issuance_pause_execute"
   | "issuance_seize_execute"
