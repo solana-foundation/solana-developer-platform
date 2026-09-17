@@ -2,9 +2,9 @@
 
 import {
   ArrowDownIcon,
-  BriefcaseIcon,
   LandmarkIcon,
   ShieldCheckIcon,
+  TrendingUpIcon,
   ZapIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -205,25 +205,28 @@ function EarnSection() {
           the strategies the company surfaced in step 2.
         </p>
         <p className="mt-4 leading-relaxed text-muted-foreground">
-          Fast-forward 30 days: yield from treasuries and private credit accrues
-          daily, and the balance chart ticks up and to the right. Positions,
-          earnings, and the full movement history are all readable back from the
-          Embedded Yield API.
+          Fast-forward 30 days: yield accrues daily as the vault lends its USDC
+          through Kamino&rsquo;s lending markets,* and the balance chart ticks
+          up and to the right. Positions, earnings, and the full movement
+          history are all readable back from the Embedded Yield API.
         </p>
         <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
           <div className="flex items-start gap-2.5 rounded-xl border border-foreground/10 bg-background p-3">
             <LandmarkIcon className="mt-0.5 size-4 shrink-0 text-success" />
             <span className="text-foreground/80">
-              Tokenized treasuries + private credit
+              USDC into Kamino lending markets
             </span>
           </div>
           <div className="flex items-start gap-2.5 rounded-xl border border-foreground/10 bg-background p-3">
-            <BriefcaseIcon className="mt-0.5 size-4 shrink-0 text-success" />
-            <span className="text-foreground/80">
-              Blended earn rate · 8.43% APY
-            </span>
+            <TrendingUpIcon className="mt-0.5 size-4 shrink-0 text-success" />
+            <span className="text-foreground/80">Vault APY · 8.43%</span>
           </div>
         </div>
+        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+          *This tutorial uses the Kamino Institutional Commodity Yield strategy
+          as its example — other strategies may have other ultimate sources of
+          yield.
+        </p>
       </div>
     </StepLayout>
   );

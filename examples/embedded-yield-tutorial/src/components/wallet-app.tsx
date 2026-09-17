@@ -231,8 +231,8 @@ export function EarnScreen({
               Yield turned on
             </p>
             <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-              Your USDC now earns from tokenized treasuries and private credit
-              via SDP Embedded Yield.
+              Your USDC now earns through Kamino's lending markets via SDP
+              Embedded Yield.
             </p>
           </div>
         ) : null}
