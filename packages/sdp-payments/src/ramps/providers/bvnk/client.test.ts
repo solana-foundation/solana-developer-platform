@@ -258,6 +258,56 @@ describe("BvnkRampClient payment rule surfaces", () => {
     assert.equal(requests.length, 1);
   });
 
+  it("accepts the live rule-list shape with null crypto tags and entity address lanes", async () => {
+    // Run-2 live shape: the rule list answers `cryptoAddresses.tag` with an
+    // explicit null, and the beneficiary entity address carries null
+    // region/postCode lanes (the entity itself is opaque to the schema).
+    queueFetch(
+      respond([
+        {
+          id: "3cf0c422-0d12-4ee1-b8c1-374ba46dd1d7",
+          reference: "sdp_onramp_xfr_f25153ad-8e89-4e75-b704-7df0892000ee",
+          trigger: "payment:payin:fiat",
+          status: "ACTIVE",
+          originator: { currency: "USD", walletId: "a:26091771755632:tWM7sxS:1" },
+          beneficiary: {
+            currency: "USDC",
+            entity: {
+              type: "INDIVIDUAL",
+              firstName: "E2E",
+              lastName: "Direct",
+              address: {
+                addressLine1: "1 Test Street",
+                city: "London",
+                region: null,
+                postCode: null,
+                country: "GB",
+              },
+            },
+            cryptoAddresses: {
+              network: "SOLANA",
+              addresses: ["Bc5KeH3tnGoKipEZUAHug5NrGqmJFJscSZ1jZNg8W1q2"],
+              tag: null,
+            },
+          },
+        },
+      ])
+    );
+
+    const result = await new BvnkRampClient().listOnrampRulesByWallet(runtimeContext, {
+      walletId: "a:1:wallet:1",
+    });
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].id, "3cf0c422-0d12-4ee1-b8c1-374ba46dd1d7");
+    assert.equal(result[0].status, "ACTIVE");
+    // The null tag is normalized away; the destination addresses survive.
+    assert.equal(result[0].beneficiary?.cryptoAddresses?.tag, undefined);
+    assert.deepEqual(result[0].beneficiary?.cryptoAddresses?.addresses, [
+      "Bc5KeH3tnGoKipEZUAHug5NrGqmJFJscSZ1jZNg8W1q2",
+    ]);
+  });
+
   it("deactivates a payment rule with the DEACTIVATE action body", async () => {
     const { requests } = queueFetch(new Response(null, { status: 204 }));
     const ruleId = "98c0bb03-567f-11f0-b26e-6b1848874a27";

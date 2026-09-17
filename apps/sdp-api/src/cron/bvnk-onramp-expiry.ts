@@ -3,13 +3,13 @@ import { bvnkOnrampTransferProviderDataSchema } from "@sdp/payments/ramps/provid
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { BVNK_ONRAMP_QUOTE_TTL_HOURS, type SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
-import type { CounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories";
+import type { CounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { internalError } from "@/lib/errors";
 import { resolveBvnkOnrampRule } from "@/routes/payments/handlers/ramps/bvnk";
-import { getLogger } from "@/runtime/logger";
 import type { BackgroundRunner } from "@/runtime/background";
+import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 
@@ -133,20 +133,12 @@ export async function reconcileBvnkOnrampExpiry(env: Env): Promise<void> {
       );
       continue;
     }
-    await getDb(env)
-      .prepare(
-        `UPDATE payment_transfers
-         SET provider_data = jsonb_set(
-               provider_data,
-               '{bvnk,ruleStatus}',
-               '"DEACTIVATED"',
-               true
-             ),
-             updated_at = sdp_iso_now()
-         WHERE id = ?`
-      )
-      .bind(transfer.id)
-      .run();
+    await payments.markBvnkOnrampRuleDeactivated({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      updatedAt: new Date().toISOString(),
+    });
   }
 }
 

@@ -22,6 +22,7 @@ const mockPayments = vi.hoisted(() => ({
   getInFlightBvnkOnrampTransferByFundingWallet: vi.fn(),
   findInFlightTransferByBvnkRuleId: vi.fn(),
   bindBvnkOnrampRule: vi.fn(),
+  updateTransferStatusGuarded: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -221,7 +222,11 @@ const BOUND_RULE_PROVIDER_DATA = {
 };
 
 /** A BVNK rule-list entry, shaped like `BvnkRuleListEntry`. */
-function ruleEntry(id: string, reference: string, status = "ACTIVE"): {
+function ruleEntry(
+  id: string,
+  reference: string,
+  status = "ACTIVE"
+): {
   id: string;
   reference: string;
   status: string;
@@ -909,8 +914,7 @@ describe("bvnkOnrampQuote", () => {
 
     expect(result.quote.id.startsWith("bvnk_onramp_")).toBe(true);
     const instruction = result.quote.paymentInstructions.find(
-      (item): item is Extract<typeof item, { kind: "fiat_funding" }> =>
-        item.kind === "fiat_funding"
+      (item): item is Extract<typeof item, { kind: "fiat_funding" }> => item.kind === "fiat_funding"
     );
     expect(instruction?.fundingWalletId).toBe(WALLET_ID);
     expect(instruction?.bankAccount).toMatchObject({ accountNumber: "900473221558" });
@@ -941,5 +945,38 @@ describe("bvnkOnrampQuote", () => {
     expect(listLedgerWalletProfilesV2).not.toHaveBeenCalled();
     expect(listOnrampRulesByWallet).not.toHaveBeenCalled();
     expect(createOnrampRule).not.toHaveBeenCalled();
+  });
+
+  it("marks the claimed transfer failed with the error when rule creation throws, freeing the funding lock", async () => {
+    mockPayments.updateTransferStatusGuarded.mockResolvedValue(transferRow({ status: "failed" }));
+    createOnrampRule.mockRejectedValueOnce(new Error("BVNK rule create exploded"));
+
+    let caught: unknown;
+    try {
+      await bvnkOnrampQuote(fakeContext(), onrampRequest());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    // The row is CAS'd awaiting_payment → failed with the recorded error so the
+    // funding-wallet lock frees immediately instead of waiting for the expiry cron.
+    expect(mockPayments.updateTransferStatusGuarded).toHaveBeenCalledWith({
+      transferId: TRANSFER_ID,
+      organizationId: "org_test",
+      projectId: PROJECT_ID,
+      fromStatuses: ["awaiting_payment"],
+      toStatus: "failed",
+      error: "BVNK rule create exploded",
+      updatedAt: expect.any(String),
+    });
+
+    // The failed row no longer holds the corridor, so a retried quote runs clean.
+    mockPayments.createTransfer.mockClear();
+    mockPayments.bindBvnkOnrampRule.mockClear();
+    const next = await bvnkOnrampQuote(fakeContext(), onrampRequest());
+    expect(next.transferId).toBe(TRANSFER_ID);
+    expect(mockPayments.createTransfer).toHaveBeenCalledTimes(1);
+    expect(mockPayments.bindBvnkOnrampRule).toHaveBeenCalledTimes(1);
   });
 });

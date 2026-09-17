@@ -6,17 +6,17 @@ import {
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { bvnkOnrampTransferProviderDataSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import {
-  NON_TERMINAL_RAMP_TRANSFER_STATUSES,
-  type SdpEnvironment,
-} from "@sdp/types";
+import { NON_TERMINAL_RAMP_TRANSFER_STATUSES, type SdpEnvironment } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { buildInClause } from "@/db/postgres-utils";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
+import {
+  createSystemCounterpartiesRepository,
+  createSystemPaymentsRepository,
+} from "@/db/repositories";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
-import { createSystemCounterpartiesRepository, createSystemPaymentsRepository } from "@/db/repositories";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { resolveBvnkOnrampRule } from "@/routes/payments/handlers/ramps/bvnk";
@@ -149,10 +149,15 @@ async function handleBvnkPaymentCryptoStatusChange(
     return;
   }
   try {
-    await RAMP_PROVIDER_CLIENTS.bvnk.deactivateOnrampRule(
-      webhookRampContext(env, environment),
-      { ruleId: bvnk.ruleId }
-    );
+    await RAMP_PROVIDER_CLIENTS.bvnk.deactivateOnrampRule(webhookRampContext(env, environment), {
+      ruleId: bvnk.ruleId,
+    });
+    await payments.markBvnkOnrampRuleDeactivated({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      updatedAt: new Date().toISOString(),
+    });
   } catch (error) {
     getLogger().error(
       `sdp_api_bvnk_rule_deactivate_failed rule=${bvnk.ruleId} transfer=${transfer.id} error=${

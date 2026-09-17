@@ -174,29 +174,42 @@ const bvnkNullableString = z
   .optional();
 
 const bvnkRuleCryptoAddressesSchema = z.object({
-  network: z.string().optional(),
-  addresses: z.array(z.string()).optional(),
-  tag: z.string().optional(),
+  network: bvnkNullableString,
+  addresses: z
+    .array(z.string())
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional(),
+  tag: bvnkNullableString,
 });
 
 const bvnkRuleOriginatorSchema = z.object({
-  currency: z.string().optional(),
-  walletId: z.string().optional(),
+  currency: bvnkNullableString,
+  walletId: bvnkNullableString,
 });
 
 const bvnkRuleBeneficiarySchema = z.object({
-  currency: z.string().optional(),
+  currency: bvnkNullableString,
   entity: z.unknown().optional(),
-  cryptoAddresses: bvnkRuleCryptoAddressesSchema.optional(),
+  cryptoAddresses: bvnkRuleCryptoAddressesSchema
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional(),
 });
 
 const bvnkRuleListEntrySchema = z.object({
   id: z.string().min(1),
-  reference: z.string().optional(),
-  trigger: z.string().optional(),
+  reference: bvnkNullableString,
+  trigger: bvnkNullableString,
   status: z.string().min(1),
-  originator: bvnkRuleOriginatorSchema.optional(),
-  beneficiary: bvnkRuleBeneficiarySchema.optional(),
+  originator: bvnkRuleOriginatorSchema
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional(),
+  beneficiary: bvnkRuleBeneficiarySchema
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional(),
 });
 
 /** BVNK `GET /payment/v1/rules/{walletId}` response — an array of `PaymentRuleResponse`. */

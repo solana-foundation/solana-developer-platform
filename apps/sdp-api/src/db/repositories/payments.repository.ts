@@ -334,6 +334,21 @@ export interface PaymentsRepository {
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
   /**
+   * Records a successful BVNK rule deactivation on the transfer's
+   * provider_data (`bvnk.ruleStatus = DEACTIVATED`), a no-op when the status
+   * is already DEACTIVATED. Shared by the completion webhook and the expiry
+   * cron so the stale-ruleStatus failure mode has one write path.
+   *
+   * @param input - Tenant scope, transfer id, and the write timestamp.
+   * @returns The updated transfer, or null when the row is already marked.
+   */
+  markBvnkOnrampRuleDeactivated(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
    * Atomically binds a provider-owned reference to a provider transfer selected
    * by SDP's internal correlation ID. Replays with the same reference succeed;
    * a different occupied reference is never overwritten.

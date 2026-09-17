@@ -792,6 +792,34 @@ export function createPostgresPaymentsRepository(
       return row ? mapTransferRow(row) : null;
     },
 
+    async markBvnkOnrampRuleDeactivated(input) {
+      const row = await db
+        .prepare(
+          `WITH pt AS (
+           UPDATE payment_transfers
+           SET provider_data = jsonb_set(
+                 provider_data,
+                 '{bvnk,ruleStatus}',
+                 '"DEACTIVATED"',
+                 true
+               ),
+               updated_at = ?
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+             AND provider = 'bvnk'
+             AND type = 'onramp'
+             AND provider_data->'bvnk'->>'ruleStatus' IS DISTINCT FROM 'DEACTIVATED'
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
+        )
+        .bind(input.updatedAt, input.transferId, input.organizationId, input.projectId)
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
     async setProviderReferenceIfEmpty(input) {
       const clauses = ["id = ?", "provider = ?"];
       const values: unknown[] = [input.transferId, input.provider];

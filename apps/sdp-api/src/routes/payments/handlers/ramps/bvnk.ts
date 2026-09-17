@@ -6,11 +6,12 @@ import {
   bvnkOfframpFields,
   isBvnkOfframpCurrency,
 } from "@sdp/payments/ramps/providers/bvnk/counterparty";
+import { isBvnkFiatCurrency } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import {
-  type BvnkOfframpBeneficiary,
-  type BvnkOfframpWallet,
   type BvnkCryptoCurrency,
   type BvnkNetwork,
+  type BvnkOfframpBeneficiary,
+  type BvnkOfframpWallet,
   buildBvnkOfframpWalletName,
   buildBvnkOnrampRuleReference,
   buildBvnkOnrampWalletName,
@@ -23,12 +24,6 @@ import {
   readBvnkOfframpWallet,
   readBvnkOfframpWallets,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import {
-  bvnkOfframpAccountType,
-  bvnkOfframpFields,
-  isBvnkOfframpCurrency,
-} from "@sdp/payments/ramps/providers/bvnk/counterparty";
-import { isBvnkFiatCurrency } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import type {
   BvnkLedgerWalletProfilesV2,
   BvnkLedgerWalletProfileV2,
@@ -64,10 +59,10 @@ import type {
 import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
-import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createSystemTransactionalPaymentsRepository } from "@/db/repositories";
+import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type {
   PaymentsRepository,
   PaymentTransferRow,
@@ -364,9 +359,7 @@ export async function resolveBvnkOnrampRule(
   }
   const reference = buildBvnkOnrampRuleReference(transfer.id);
   const rules = await client.listOnrampRulesByWallet(ctx, { walletId });
-  const matches = rules.filter(
-    (rule) => rule.status === "ACTIVE" && rule.reference === reference
-  );
+  const matches = rules.filter((rule) => rule.status === "ACTIVE" && rule.reference === reference);
   if (matches.length > 1) {
     throw providerUnavailable(
       `BVNK on-ramp rules for transfer ${transfer.id} are ambiguous (${matches
@@ -1070,22 +1063,37 @@ export async function bvnkOnrampQuote(
     }
     throw conflict("Another BVNK on-ramp quote raced into this funding account; retry.");
   }
-  const rule = await resolveBvnkOnrampRule(
-    payments,
-    ctx,
-    transfer,
-    walletRow.external_account_reference,
-    {
-      counterparty,
-      contactId: link.provider_customer_reference,
-      currency,
-      network,
-      destinationWalletAddress,
+  let rule: BvnkOnrampRuleState;
+  let bankAccount: BvnkBankFundingDetails;
+  try {
+    rule = await resolveBvnkOnrampRule(
+      payments,
+      ctx,
+      transfer,
+      walletRow.external_account_reference,
+      {
+        counterparty,
+        contactId: link.provider_customer_reference,
+        currency,
+        network,
+        destinationWalletAddress,
+      }
+    );
+    bankAccount = bvnkWalletBankAccount(wallet, transfer.id);
+    if (bankAccount.accountNumber === undefined) {
+      throw providerUnavailable("BVNK funding wallet has no fiat payment instrument to fund.");
     }
-  );
-  const bankAccount = bvnkWalletBankAccount(wallet, transfer.id);
-  if (bankAccount.accountNumber === undefined) {
-    throw providerUnavailable("BVNK funding wallet has no fiat payment instrument to fund.");
+  } catch (error) {
+    await payments.updateTransferStatusGuarded({
+      transferId: transfer.id,
+      organizationId,
+      projectId,
+      fromStatuses: ["awaiting_payment"],
+      toStatus: "failed",
+      error: error instanceof Error ? error.message : String(error),
+      updatedAt: new Date().toISOString(),
+    });
+    throw error;
   }
   const instruction: BvnkPaymentRampInstruction = {
     provider: "bvnk",
