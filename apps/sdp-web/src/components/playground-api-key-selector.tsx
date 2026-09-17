@@ -3,8 +3,11 @@
 import { KeyRound } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { clearStoredApiKeySecret, storeApiKeySecret } from "@/lib/playground-api-keys";
+import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
 
 function formatKeyIdentifier(keyPrefix: string): string {
   const trimmed = keyPrefix.trim();
@@ -38,6 +41,30 @@ export function PlaygroundApiKeySelector() {
   const selectedApiKey =
     playgroundApiKeys.find((apiKey) => apiKey.id === selectedPlaygroundApiKeyId) ??
     playgroundApiKeys[0];
+  const selectedSecret = usePlaygroundApiKeySecret({
+    apiKeyId: selectedApiKey?.id,
+    keyPrefix: selectedApiKey?.keyPrefix,
+  });
+
+  const updateSelectedSecret = (value: string) => {
+    if (!selectedApiKey) {
+      return;
+    }
+
+    if (!value.trim()) {
+      clearStoredApiKeySecret({
+        apiKeyId: selectedApiKey.id,
+        keyPrefix: selectedApiKey.keyPrefix,
+      });
+      return;
+    }
+
+    storeApiKeySecret({
+      value,
+      apiKeyId: selectedApiKey.id,
+      keyPrefix: selectedApiKey.keyPrefix,
+    });
+  };
 
   if (playgroundApiKeys.length === 0) {
     if (!dashboardAccess.capabilities.canManageApiKeys) {
@@ -52,7 +79,7 @@ export function PlaygroundApiKeySelector() {
   }
 
   return (
-    <div className="w-full min-w-[260px] lg:max-w-[360px]">
+    <div className="grid w-full min-w-[260px] gap-2 lg:max-w-[360px]">
       <div className="relative">
         <div className="pointer-events-none flex h-11 w-full items-center rounded-[14px] border border-border-default bg-surface-raised px-4 shadow-none">
           <span className="flex min-w-0 items-center gap-2 pr-8">
@@ -91,6 +118,16 @@ export function PlaygroundApiKeySelector() {
           <path d="m4 6 4 4 4-4" />
         </svg>
       </div>
+      <Input
+        aria-label={t("Shared.SharedComponents.apiKeyValue")}
+        autoComplete="off"
+        className="h-11 rounded-[14px]"
+        onChange={(event) => updateSelectedSecret(event.currentTarget.value)}
+        placeholder={t("Shared.SharedComponents.apiKeySecretPlaceholder")}
+        spellCheck={false}
+        type="password"
+        value={selectedSecret ?? ""}
+      />
     </div>
   );
 }

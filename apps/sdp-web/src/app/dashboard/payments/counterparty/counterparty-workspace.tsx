@@ -48,7 +48,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
 import { cn } from "@/lib/utils";
 import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
@@ -123,15 +123,10 @@ export function CounterpartyWorkspace({
     [apiKeys, selectedPlaygroundApiKeyId]
   );
 
-  const playgroundApiKeyValue = useMemo(() => {
-    if (!selectedPlaygroundApiKey) return "";
-    return (
-      getStoredApiKeySecret({
-        apiKeyId: selectedPlaygroundApiKey.id,
-        keyPrefix: selectedPlaygroundApiKey.keyPrefix,
-      }) ?? ""
-    );
-  }, [selectedPlaygroundApiKey]);
+  const playgroundApiKeyValue = usePlaygroundApiKeySecret({
+    apiKeyId: selectedPlaygroundApiKey?.id,
+    keyPrefix: selectedPlaygroundApiKey?.keyPrefix,
+  });
 
   const playgroundCounterparties = useMemo<CounterpartyPlaygroundView[]>(
     () => counterparties.map((cp) => ({ id: cp.id, displayName: cp.displayName })),
@@ -343,7 +338,7 @@ export function CounterpartyWorkspace({
             content: (
               <CounterpartyPlayground
                 apiBaseUrl={apiBaseUrl}
-                apiKeyValue={playgroundApiKeyValue}
+                apiKeyValue={playgroundApiKeyValue ?? ""}
                 hasActiveApiKeys={apiKeys.length > 0}
                 counterparties={playgroundCounterparties}
               />

@@ -585,6 +585,13 @@ export function ApiPlaygroundShell({
     const normalizedApiKey = normalizeApiKeyInput(apiKeyValue);
     const hasApiKey = Boolean(normalizedApiKey);
 
+    if (!hasApiKey) {
+      setExecuteError(t("Shared.SharedComponents.apiKeySecretRequired"));
+      setMobileSection("output");
+      setActivePanel("response");
+      return;
+    }
+
     if (hasApiKey && !isValidSdpApiKey(normalizedApiKey)) {
       setExecuteError(t("Shared.SharedComponents.invalidApiKeyFormat"));
       setActivePanel("response");

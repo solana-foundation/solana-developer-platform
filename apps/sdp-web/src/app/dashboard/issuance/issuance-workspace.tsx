@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
+import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
 import { cn } from "@/lib/utils";
 import { IssuanceFilterPopover } from "./issuance-filter-popover";
 import { IssuanceLegacyOverview } from "./issuance-legacy-overview";
@@ -378,21 +378,12 @@ function useIssuancePlaygroundKey({
 
   const selectedPlaygroundApiKey =
     apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null;
-  const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
-  const playgroundApiKeyValue = useMemo(() => {
-    if (!selectedPlaygroundApiKey) {
-      return "";
-    }
+  const playgroundApiKeyValue = usePlaygroundApiKeySecret({
+    apiKeyId: selectedPlaygroundApiKey?.id,
+    keyPrefix: selectedPlaygroundApiKey?.keyPrefix,
+  });
 
-    const stored = getStoredApiKeySecret({
-      apiKeyId: selectedPlaygroundApiKey.id,
-      keyPrefix: selectedPlaygroundApiKeyPrefix,
-    });
-
-    return stored ?? "";
-  }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
-
-  return playgroundApiKeyValue;
+  return playgroundApiKeyValue ?? "";
 }
 
 export function IssuanceWorkspace({
