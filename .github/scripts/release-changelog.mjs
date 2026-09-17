@@ -85,36 +85,48 @@ function revertTarget(commit, commits) {
 }
 
 function buildVisibility(commits) {
+  const targetOf = new Map();
   const revertersOf = new Map();
   for (const commit of commits) {
     const target = revertTarget(commit, commits);
     if (target) {
+      targetOf.set(commit.sha, target);
       revertersOf.set(target.sha, [...(revertersOf.get(target.sha) ?? []), commit]);
     }
   }
 
-  const visible = new Map();
-  const isVisible = (commit, seen) => {
-    const cached = visible.get(commit.sha);
+  // A revert only takes effect if nothing standing reverted it in turn, so this
+  // has to recurse down the chain rather than read one level.
+  const cache = new Map();
+  const isEffective = (commit, seen) => {
+    const cached = cache.get(commit.sha);
     if (cached !== undefined) {
       return cached;
     }
     if (seen.has(commit.sha)) {
-      // A cycle cannot describe a real history; show the commit rather than
-      // silently dropping it.
+      // A cycle cannot describe a real history. Treat it as standing rather than
+      // silently dropping the commit.
       return true;
     }
     seen.add(commit.sha);
-    const standing = (revertersOf.get(commit.sha) ?? []).some((reverter) =>
-      isVisible(reverter, seen)
+    const undone = (revertersOf.get(commit.sha) ?? []).some((reverter) =>
+      isEffective(reverter, seen)
     );
     seen.delete(commit.sha);
-    const result = !standing;
-    visible.set(commit.sha, result);
+    const result = !undone;
+    cache.set(commit.sha, result);
     return result;
   };
 
-  return (commit) => isVisible(commit, new Set());
+  return (commit) => {
+    if (!isEffective(commit, new Set())) {
+      return false;
+    }
+    // A revert of something added in this same range reports no net change
+    // between the two tags: the pair cancels. A revert of an earlier release
+    // does change what users have, so it stands and is listed.
+    return !targetOf.has(commit.sha);
+  };
 }
 
 export function buildSectionMarkdown(repo, version, previousTag, commits) {
