@@ -1,4 +1,4 @@
-import dashboardShot from "@/assets/sdp-embedded-yield-dashboard.jpg";
+import Image from "next/image";
 
 /**
  * Step 2 visual: the real SDP Embedded Yield dashboard page inside a faux
@@ -18,11 +18,12 @@ export function DashboardShot() {
             localhost:3000/dashboard/markets/embedded-yield
           </span>
         </div>
-        <img
-          src={dashboardShot}
+        <Image
+          src="/sdp-embedded-yield-dashboard.jpg"
           alt="SDP dashboard, Embedded Yield page listing Earn strategies and positions"
-          className="block w-full"
-          loading="lazy"
+          width={1333}
+          height={871}
+          className="block h-auto w-full"
         />
       </div>
       <figcaption className="mt-3 text-center text-xs text-muted-foreground">

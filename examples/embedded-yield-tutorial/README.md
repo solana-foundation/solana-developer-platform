@@ -6,9 +6,9 @@ A standalone, interactive guide page for [`examples/embedded-yield-bank`](../emb
 2. **Configure** — the real SDP Embedded Yield dashboard (screenshot) where the wallet team selects which Earn strategies to surface. The strategies are backed by real-world assets (RWAs) like tokenized treasuries and private credit, and the customer's stablecoins move with one API request.
 3. **Earn** — the same faux phone with an "Earn 4.8%" button on the USDC balance. The button presses itself, a confirmation shows the stablecoins are now earning, and a fast-forwarded 30-day simulation accrues yield with a balance chart rising up and to the right.
 
-There is no server, environment configuration, or chain access involved — it is a pure front-end page.
+It is a pure front-end [Next.js](https://nextjs.org) app — no environment configuration, API keys, or chain access involved — so it deploys to Vercel as-is.
 
-## Run it
+## Run it locally
 
 From the repository root:
 
@@ -24,6 +24,13 @@ pnpm -C examples/embedded-yield-tutorial dev
 ```
 
 Then open `http://127.0.0.1:4175`.
+
+## Deploy to Vercel
+
+1. Import this repository into Vercel.
+2. Set the project root directory to `examples/embedded-yield-tutorial`. Vercel detects Next.js automatically.
+3. No environment variables are required.
+4. Deploy.
 
 ## Checks
 

@@ -9,16 +9,17 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 4175",
-    "build": "tsc -b && vite build",
+    "dev": "next dev --hostname 127.0.0.1 --port 4175",
+    "build": "next build --webpack",
     "lint": "biome check .",
+    "start": "next start --hostname 127.0.0.1 --port 4175",
     "test": "vitest run",
-    "typecheck": "tsc -b --pretty false",
-    "preview": "vite preview --host 127.0.0.1 --port 4175"
+    "typecheck": "tsc --noEmit --pretty false"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.2.8",
     "lucide-react": "1.35.0",
+    "next": "16.3.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "@tailwindcss/postcss": "4.3.3",
@@ -30,7 +31,6 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "typescript": "6.0.3",
-    "vite": "7.3.6",
     "vitest": "4.1.11"
   }
 }
