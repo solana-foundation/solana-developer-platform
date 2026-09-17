@@ -26,8 +26,8 @@ import {
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
 import {
+  explicitClusterRpcUrl,
   getSolanaConfig,
-  resolveClusterRpcUrl,
   resolveDefaultCluster,
   resolveSolanaRpcProviderUrls,
 } from "./config";
@@ -238,25 +238,25 @@ export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
 }
 
 /**
- * An RPC client for `cluster` on a process that may serve both clusters. The
- * process default cluster keeps the full failover client `createRpc` builds;
- * the other cluster gets its explicit override (`resolveClusterRpcUrl`) and
- * throws when none is configured, so a caller never silently reads or prices
- * against the wrong chain.
+ * An RPC client for `cluster` on a process that may serve both clusters. An
+ * explicit `SOLANA_<CLUSTER>_RPC_URL` wins for any cluster, the default
+ * cluster included, so a pinned private endpoint is used for every read of
+ * that cluster (Earn execution and sponsorship reconciliation must observe the
+ * same chain). Without one, the process default cluster keeps the full
+ * failover client `createRpc` builds, and the other cluster throws, so a
+ * caller never silently reads or prices against the wrong chain.
  */
 export function createClusterRpc(
   env: RpcEnv,
   cluster: "devnet" | "mainnet-beta",
   options?: Omit<RpcClientOptions, "rpcUrl">
 ): SolanaRpc {
+  const rpcUrl = explicitClusterRpcUrl(env, cluster);
+  if (rpcUrl) return createRpc(env, { ...options, rpcUrl });
   if (cluster === resolveDefaultCluster(env)) return createRpc(env, options);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  if (!rpcUrl) {
-    throw new Error(
-      `No RPC endpoint is configured for ${cluster}: set SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL`
-    );
-  }
-  return createRpc(env, { ...options, rpcUrl });
+  throw new Error(
+    `No RPC endpoint is configured for ${cluster}: set SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL`
+  );
 }
 
 /** Build the standard SDP Solana client around a caller-owned egress transport. */

@@ -177,9 +177,23 @@ export function getSolanaConfig(env: RpcEnv): SolanaConfig {
  * so callers fail closed instead of building against the wrong chain.
  */
 export function resolveClusterRpcUrl(env: RpcEnv, cluster: "devnet" | "mainnet-beta"): string {
-  const perCluster = cluster === "devnet" ? env.SOLANA_DEVNET_RPC_URL : env.SOLANA_MAINNET_RPC_URL;
-  if (typeof perCluster === "string" && perCluster.trim() !== "") return perCluster.trim();
-
+  const explicit = explicitClusterRpcUrl(env, cluster);
+  if (explicit) return explicit;
   if (resolveDefaultCluster(env) !== cluster) return "";
   return resolveDefaultSolanaRpcUrl(env)?.trim() ?? "";
+}
+
+/**
+ * The operator's explicit endpoint for `cluster` (`SOLANA_DEVNET_RPC_URL` /
+ * `SOLANA_MAINNET_RPC_URL`), or undefined. It wins for the default cluster too:
+ * an operator who pins a private or isolated endpoint for a cluster means every
+ * read of that cluster, not only the ones the process default cannot serve.
+ */
+export function explicitClusterRpcUrl(
+  env: Pick<RpcEnv, "SOLANA_DEVNET_RPC_URL" | "SOLANA_MAINNET_RPC_URL">,
+  cluster: "devnet" | "mainnet-beta"
+): string | undefined {
+  const value = cluster === "devnet" ? env.SOLANA_DEVNET_RPC_URL : env.SOLANA_MAINNET_RPC_URL;
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
