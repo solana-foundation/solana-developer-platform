@@ -75,24 +75,24 @@ function Hero() {
   );
 }
 
-function StepLayout({
+function StepSection({
   id,
   children,
-  visual,
+  mobileVisual,
 }: {
   id: string;
   children: ReactNode;
-  visual: ReactNode;
+  mobileVisual: ReactNode;
 }) {
   return (
     <section
       id={id}
       data-step={id}
-      className="mx-auto grid max-w-6xl scroll-mt-16 items-center gap-12 px-6 py-16 lg:min-h-[92vh] lg:grid-cols-2 lg:gap-8 lg:py-10"
+      className="mx-auto flex max-w-6xl scroll-mt-20 flex-col justify-center px-6 py-16 lg:min-h-screen lg:py-24"
     >
       <Reveal className="max-w-xl">{children}</Reveal>
-      <Reveal delay={120} className="flex justify-center lg:justify-end">
-        {visual}
+      <Reveal delay={120} className="mt-12 flex justify-center lg:hidden">
+        {mobileVisual}
       </Reveal>
     </section>
   );
@@ -108,9 +108,9 @@ function Kicker({ index, label }: { index: number; label: string }) {
 
 function CustodySection() {
   return (
-    <StepLayout
+    <StepSection
       id="custody"
-      visual={
+      mobileVisual={
         <PhoneFrame>
           <CustodyScreen />
         </PhoneFrame>
@@ -142,19 +142,16 @@ function CustodySection() {
           re-built as a faux phone.
         </p>
       </div>
-    </StepLayout>
+    </StepSection>
   );
 }
 
-function ConfigureSection() {
+function ConfigureVisual() {
   return (
-    <StepLayout
-      id="configure"
-      visual={
-        <div className="flex w-full max-w-xl flex-col items-stretch gap-4">
-          <DashboardPreview />
-          <pre className="overflow-x-auto rounded-xl border border-foreground/10 bg-foreground p-4 text-xs leading-relaxed text-background">
-            <code>{`POST /v1/earn/external-wallet/deposit-transactions
+    <div className="flex w-full max-w-xl flex-col items-stretch gap-4">
+      <DashboardPreview />
+      <pre className="overflow-x-auto rounded-xl border border-foreground/10 bg-foreground p-4 text-xs leading-relaxed text-background">
+        <code>{`POST /v1/earn/external-wallet/deposit-transactions
 Authorization: Bearer <project-api-key>
 
 {
@@ -163,10 +160,24 @@ Authorization: Bearer <project-api-key>
   "amount": "12500",
   "sourceTokenMint": "<usdc-mint>"
 }`}</code>
-          </pre>
-        </div>
-      }
-    >
+      </pre>
+    </div>
+  );
+}
+
+const STEP_VISUALS: Record<string, ReactNode> = {
+  custody: (
+    <PhoneFrame>
+      <CustodyScreen />
+    </PhoneFrame>
+  ),
+  configure: <ConfigureVisual />,
+  earn: <EarnDemo />,
+};
+
+function ConfigureSection() {
+  return (
+    <StepSection id="configure" mobileVisual={<ConfigureVisual />}>
       <div className="text-left">
         <Kicker index={2} label="Configure" />
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-foreground lg:text-4xl">
@@ -205,13 +216,13 @@ Authorization: Bearer <project-api-key>
           </div>
         </div>
       </div>
-    </StepLayout>
+    </StepSection>
   );
 }
 
 function EarnSection() {
   return (
-    <StepLayout id="earn" visual={<EarnDemo />}>
+    <StepSection id="earn" mobileVisual={<EarnDemo />}>
       <div className="text-left">
         <Kicker index={3} label="Earn" />
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-foreground lg:text-4xl">
@@ -243,7 +254,7 @@ function EarnSection() {
           as its example — many other strategies are available too.
         </p>
       </div>
-    </StepLayout>
+    </StepSection>
   );
 }
 
@@ -350,6 +361,25 @@ function StrategiesSection() {
   );
 }
 
+function StepsScroller({ activeId }: { activeId: string }) {
+  return (
+    <div className="relative mx-auto max-w-6xl lg:grid lg:grid-cols-2 lg:gap-8">
+      <div>
+        <CustodySection />
+        <ConfigureSection />
+        <EarnSection />
+      </div>
+      <div className="hidden lg:col-start-2 lg:row-start-1 lg:block">
+        <div className="sticky top-20 flex min-h-[70vh] items-center">
+          <div key={activeId} className="animate-step-swap w-full px-6">
+            {STEP_VISUALS[activeId]}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [activeId, setActiveId] = useState(STEPS[0].id);
 
@@ -376,9 +406,7 @@ export function App() {
       <StepNav activeId={activeId} />
       <main>
         <Hero />
-        <CustodySection />
-        <ConfigureSection />
-        <EarnSection />
+        <StepsScroller activeId={activeId} />
         <StrategiesSection />
       </main>
       <footer className="border-t border-foreground/10 px-6 py-10">

@@ -54,6 +54,22 @@
   animation: reveal-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Swap animation for the sticky scrollytelling rail. */
+@keyframes step-swap {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-step-swap {
+  animation: step-swap 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* Toast card that pops in when yield is confirmed. */
 @keyframes toast-in {
   from {
