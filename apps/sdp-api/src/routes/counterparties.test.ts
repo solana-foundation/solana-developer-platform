@@ -1182,6 +1182,65 @@ describe("Counterparties Routes", () => {
       }
     });
 
+    it("reads back a stored COUNTERPARTY_VERIFIED status on a BVNK customer link", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_verified" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const rowId = `counterparty_provider_account_${crypto.randomUUID()}`;
+      await getDb(env)
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+            id, organization_id, project_id, counterparty_id, provider,
+            provider_customer_reference, kind, status, provider_status, metadata
+          ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', 'active', ?, ?)`
+        )
+        .bind(
+          rowId,
+          TEST_ORG.id,
+          TEST_PROJECT_ID,
+          counterparty.id,
+          "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+          "COUNTERPARTY_VERIFIED",
+          {
+            status: "VERIFIED",
+            residenceCountryCode: "US",
+            session: { reference: BVNK_SESSION_REFERENCE, agreements: [] },
+          }
+        )
+        .run();
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.accounts).toEqual([
+        {
+          id: rowId,
+          provider: "bvnk",
+          kind: "customer_link",
+          fiatCurrency: null,
+          destinationCountry: null,
+          paymentRail: null,
+          status: "active",
+          providerStatus: "COUNTERPARTY_VERIFIED",
+          createdAt: expect.any(String),
+          customerLink: {
+            provider: "bvnk",
+            id: rowId,
+            providerCustomerReference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+            status: "active",
+            providerStatus: "COUNTERPARTY_VERIFIED",
+            createdAt: expect.any(String),
+            residenceCountryCode: "US",
+            agreements: [],
+          },
+        },
+      ]);
+    });
+
     it("mints the session from a claimed row whose crash left it unminted", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_claimed" });
       expect(created.status).toBe(201);
@@ -1611,7 +1670,7 @@ describe("Counterparties Routes", () => {
           env
         );
         expect(response.status).toBe(200);
-        expect((await response.json()).data.status).toBe("counterparty_collect");
+        expect((await response.json()).data.status).toBe("collect_counterparty");
         expect(fetchSpy).toHaveBeenCalledTimes(0);
         const row = await repository.getProviderAccount({
           organizationId: TEST_ORG.id,
