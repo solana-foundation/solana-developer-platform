@@ -1097,14 +1097,16 @@ describe("Counterparties Routes", () => {
         expect(requests).toEqual(["/platform/v1/customers/agreement/sessions"]);
         const row = await getDb(env)
           .prepare(
-            `SELECT provider_customer_reference, metadata, status FROM counterparty_provider_accounts
+            `SELECT id, provider_customer_reference, metadata, status, created_at FROM counterparty_provider_accounts
              WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
           )
           .bind(counterparty.id)
           .first<{
+            id: string;
             provider_customer_reference: string;
             metadata: Record<string, unknown>;
             status: string;
+            created_at: string;
           }>();
         if (!row) {
           throw new Error("Expected BVNK customer-link row");
@@ -1119,6 +1121,45 @@ describe("Counterparties Routes", () => {
             reference: BVNK_SESSION_REFERENCE,
             agreements: [BVNK_STORED_AGREEMENT],
           },
+        });
+        const accountsResponse = await app.request(
+          `/v1/counterparties/${counterparty.id}/provider-accounts`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
+        expect(accountsResponse.status).toBe(200);
+        expect((await accountsResponse.json()).data).toEqual({
+          accounts: [
+            {
+              id: row.id,
+              provider: "bvnk",
+              kind: "customer_link",
+              fiatCurrency: null,
+              destinationCountry: null,
+              paymentRail: null,
+              status: "active",
+              providerStatus: null,
+              createdAt: row.created_at,
+              customerLink: {
+                provider: "bvnk",
+                id: row.id,
+                providerCustomerReference: null,
+                status: "active",
+                providerStatus: "PENDING_AGREEMENT",
+                createdAt: row.created_at,
+                residenceCountryCode: "US",
+                agreements: [
+                  {
+                    name: BVNK_STORED_AGREEMENT.name,
+                    displayName: BVNK_STORED_AGREEMENT.displayName,
+                    url: BVNK_STORED_AGREEMENT.url,
+                    privacyPolicyUrl: BVNK_STORED_AGREEMENT.privacyPolicyUrl,
+                    signedAt: null,
+                  },
+                ],
+              },
+            },
+          ],
         });
       } finally {
         fetchSpy.mockRestore();
@@ -1210,6 +1251,54 @@ describe("Counterparties Routes", () => {
             agreements: [BVNK_STORED_AGREEMENT],
             signedAt: expect.any(String),
           },
+        });
+        const linked = await repository.getProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: counterparty.id,
+          provider: "bvnk",
+        });
+        if (!linked) {
+          throw new Error("Expected BVNK customer-link row");
+        }
+        const accountsResponse = await app.request(
+          `/v1/counterparties/${counterparty.id}/provider-accounts`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
+        expect(accountsResponse.status).toBe(200);
+        expect((await accountsResponse.json()).data).toEqual({
+          accounts: [
+            {
+              id: linked.id,
+              provider: "bvnk",
+              kind: "customer_link",
+              fiatCurrency: null,
+              destinationCountry: null,
+              paymentRail: null,
+              status: "active",
+              providerStatus: null,
+              createdAt: linked.created_at,
+              customerLink: {
+                provider: "bvnk",
+                id: linked.id,
+                providerCustomerReference: null,
+                status: "active",
+                providerStatus: "PENDING_DETAILS",
+                createdAt: linked.created_at,
+                residenceCountryCode: "US",
+                agreements: [
+                  {
+                    name: BVNK_STORED_AGREEMENT.name,
+                    displayName: BVNK_STORED_AGREEMENT.displayName,
+                    url: BVNK_STORED_AGREEMENT.url,
+                    privacyPolicyUrl: BVNK_STORED_AGREEMENT.privacyPolicyUrl,
+                    signedAt: expect.any(String),
+                  },
+                ],
+              },
+            },
+          ],
         });
       } finally {
         fetchSpy.mockRestore();
@@ -1487,6 +1576,51 @@ describe("Counterparties Routes", () => {
         expect(after?.metadata).toEqual({
           status: "INFO_REQUIRED",
           verificationStatus: "init",
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            signedAt: expect.any(String),
+            agreements: [BVNK_STORED_AGREEMENT],
+          },
+        });
+        const accountsResponse = await app.request(
+          `/v1/counterparties/${counterparty.id}/provider-accounts`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
+        expect(accountsResponse.status).toBe(200);
+        expect((await accountsResponse.json()).data).toEqual({
+          accounts: [
+            {
+              id: after?.id,
+              provider: "bvnk",
+              kind: "customer_link",
+              fiatCurrency: null,
+              destinationCountry: null,
+              paymentRail: null,
+              status: "active",
+              providerStatus: after?.provider_status,
+              createdAt: after?.created_at,
+              customerLink: {
+                provider: "bvnk",
+                id: after?.id,
+                providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+                status: "active",
+                providerStatus: "INFO_REQUIRED",
+                createdAt: after?.created_at,
+                residenceCountryCode: "US",
+                agreements: [
+                  {
+                    name: BVNK_STORED_AGREEMENT.name,
+                    displayName: BVNK_STORED_AGREEMENT.displayName,
+                    url: BVNK_STORED_AGREEMENT.url,
+                    privacyPolicyUrl: BVNK_STORED_AGREEMENT.privacyPolicyUrl,
+                    signedAt: expect.any(String),
+                  },
+                ],
+              },
+            },
+          ],
         });
       } finally {
         fetchSpy.mockRestore();
@@ -1602,6 +1736,12 @@ describe("Counterparties Routes", () => {
         expect(after?.metadata).toEqual({
           status: "PENDING",
           verificationStatus: "pending",
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            signedAt: expect.any(String),
+            agreements: [BVNK_STORED_AGREEMENT],
+          },
         });
       } finally {
         fetchSpy.mockRestore();
@@ -1853,6 +1993,7 @@ describe("Counterparties Routes", () => {
             accountNumberLast4: "6789",
             paymentRails: ["ACH", "WIRE"],
             customerLink: {
+              provider: "lightspark",
               id: customerLink.id,
               providerCustomerReference: "Customer:owner",
               status: "active",
@@ -1871,6 +2012,7 @@ describe("Counterparties Routes", () => {
             providerStatus: null,
             createdAt: "2026-01-02T00:00:00.000Z",
             customerLink: {
+              provider: "lightspark",
               id: customerLink.id,
               providerCustomerReference: "Customer:owner",
               status: "active",
@@ -1955,6 +2097,7 @@ describe("Counterparties Routes", () => {
             providerStatus: null,
             createdAt: customerLink.created_at,
             customerLink: {
+              provider: "lightspark",
               id: customerLink.id,
               providerCustomerReference: "Customer:link_only",
               status: "active",

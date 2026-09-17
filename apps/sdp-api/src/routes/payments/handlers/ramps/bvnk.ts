@@ -593,14 +593,14 @@ async function persistBvnkAgreementSession(
 
 /**
  * Moves the v1 customer reference onto the customer-link row with a
- * compare-and-swap against the stored pre-customer alias, replacing the
- * pre-customer metadata with `{status}`. A lost CAS means a concurrent create
+ * compare-and-swap against the stored pre-customer alias, keeping the
+ * residence country and signed session and adding `status`. A lost CAS means a concurrent create
  * already assigned the reference, so the row is re-read: the concurrent
  * assignment of the same reference converges, anything else is an internal
  * error.
  *
  * @param c - Request context used for repository access.
- * @param input - Tenant scope, row id, the alias to swap from, and the v1 customer.
+ * @param input - Tenant scope, row id, the alias to swap from, the pre-customer metadata to keep, and the v1 customer.
  * @returns The customer resolution carried by the link row.
  */
 async function assignBvnkCustomerLink(
@@ -610,6 +610,7 @@ async function assignBvnkCustomerLink(
     projectId: string;
     providerAccountId: string;
     fromProviderCustomerReference: string;
+    metadata: BvnkCustomerProviderAccountMetadata;
     customer: { customerReference: string; status: string };
   }
 ): Promise<BvnkCustomerResolution> {
@@ -622,7 +623,7 @@ async function assignBvnkCustomerLink(
     id: input.providerAccountId,
     fromProviderCustomerReference: input.fromProviderCustomerReference,
     providerCustomerReference: input.customer.customerReference,
-    metadata: { status: input.customer.status },
+    metadata: { ...input.metadata, status: input.customer.status },
   });
   if (assigned !== null) {
     getLogger().info(
@@ -684,6 +685,7 @@ async function createBvnkCustomer(
     sessionReference: string;
     individual: BvnkCustomerIndividual;
     providerAccountId: string;
+    metadata: BvnkCustomerProviderAccountMetadata;
   }
 ): Promise<{ customer: BvnkCustomerResolution }> {
   const created = await input.client.createCustomer(input.ctx, {
@@ -697,6 +699,7 @@ async function createBvnkCustomer(
     projectId: input.projectId,
     providerAccountId: input.providerAccountId,
     fromProviderCustomerReference: input.reference,
+    metadata: input.metadata,
     customer: { customerReference: created.reference, status: created.status },
   });
   return { customer };
@@ -841,6 +844,7 @@ export async function ensureBvnkCustomer(
           sessionReference: stage.sessionReference,
           individual: buildBvnkCustomerRequest(collectedData, stage.residenceCountryCode),
           providerAccountId: existing.id,
+          metadata,
         });
       }
       if (stage.kind === "agreements_pending" && agreementConsent !== undefined) {
