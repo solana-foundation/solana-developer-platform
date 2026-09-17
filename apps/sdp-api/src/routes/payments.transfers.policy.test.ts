@@ -12,6 +12,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { walletApprovalRequestResponseSchema } from "@/openapi/schemas/custody";
 import { walletPolicyResponseSchema } from "@/openapi/schemas/payments";
 import { SigningService } from "@/services/domain/signing.service";
+import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -1208,17 +1209,32 @@ describe("Payments routes — transfer policy", () => {
   });
   // An off-ramp deposit held for approval sends nothing. Approving it replays
   // the send, which still requires the provider sale to be waiting for this
-  // exact deposit: a sale the provider failed in the meantime gets no funds.
+  // exact deposit. The provider's own events can move the sale in between.
   it.each([
     {
-      providerStatus: "awaiting_payment",
-      operationStatus: "completed",
+      name: "still awaiting this deposit",
+      event: null,
+      executionError: null,
       transferStatus: "settling",
     },
-    { providerStatus: "failed", operationStatus: "failed", transferStatus: "failed" },
+    {
+      name: "failed by the provider",
+      event: { kind: "failed", error: "Deposit timeout" },
+      executionError: "Ramp transfer is no longer awaiting payment (status: failed)",
+      transferStatus: "failed",
+    },
+    {
+      name: "moved to a new deposit address",
+      event: {
+        kind: "awaiting_payment",
+        cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet3, amount: "1" },
+      },
+      executionError: "Transfer does not match the off-ramp deposit instruction",
+      transferStatus: "awaiting_payment",
+    },
   ] as const)(
-    "approves a held off-ramp deposit while the sale is $providerStatus",
-    async ({ providerStatus, operationStatus, transferStatus }) => {
+    "approves a held off-ramp deposit whose sale was $name",
+    async ({ event, executionError, transferStatus }) => {
       const sessionId = "ses_offramp_deposit_approver";
       const approverUserId = "usr_offramp_deposit_approver";
       await getDb(env).batch([
@@ -1307,12 +1323,13 @@ describe("Payments routes — transfer policy", () => {
         signature: null,
       });
 
-      if (providerStatus === "failed") {
-        // The provider's failure webhook lands before anyone approves.
-        await getDb(env)
-          .prepare("UPDATE payment_transfers SET status = 'failed' WHERE id = ?")
-          .bind(transferId)
-          .run();
+      if (event !== null) {
+        // The provider's webhook lands before anyone approves.
+        await applyRampSettlementEvent(env, {
+          provider: "moonpay",
+          reference: "moonpay-held-deposit",
+          ...event,
+        });
       }
 
       const approved = await app.request(
@@ -1327,19 +1344,19 @@ describe("Payments routes — transfer policy", () => {
       const approvedBody = walletApprovalHttpResponseSchema.parse(await approved.json());
       expect(approvedBody.data.approvalRequest).toMatchObject({
         status: "approved",
-        operation: { status: operationStatus },
+        operation: {
+          status: executionError === null ? "completed" : "failed",
+          executionError,
+        },
       });
 
       const row = await readTransferRow(transferId);
-      expect(row?.status).toBe(transferStatus);
-      if (providerStatus === "failed") {
-        expect(row?.signature).toBeNull();
-        expect(approvedBody.data.approvalRequest.operation.executionError).toBe(
-          "Ramp transfer is no longer awaiting payment (status: failed)"
-        );
+      expect(row.status).toBe(transferStatus);
+      if (executionError === null) {
+        expect(row.signature).toBeTruthy();
+        expect(row.destination_address).toBe(TEST_SOLANA_ADDRESSES.wallet2);
       } else {
-        expect(row?.signature).toBeTruthy();
-        expect(row?.destination_address).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+        expect(row.signature).toBeNull();
       }
     }
   );
