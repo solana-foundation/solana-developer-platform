@@ -99,7 +99,7 @@ export function kaminoAllocationsByWeight(
     });
 }
 
-export type KaminoDisclosureRow =
+type KaminoDisclosureRow =
   | { kind: "market"; reserve: string; marketName: string; pct: string }
   | { kind: "idle"; pct: string };
 

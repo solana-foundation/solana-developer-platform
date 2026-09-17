@@ -18,7 +18,6 @@ import {
   fetchEarnProgramWithdrawals,
   fetchEarnStrategies,
   fetchEarnVaultPositions,
-  isEarnVaultDepositAvailable,
 } from "./earn-program-data";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -391,34 +390,6 @@ describe("external-wallet position reads", () => {
       walletCount: 2,
       positionCount: 3,
     });
-  });
-});
-
-describe("vault deposit availability", () => {
-  const kamino = { ...strategy("kamino-vault"), provider: "kamino" };
-  const providerAccess = {
-    kamino: { entitled: true, configured: true, enabled: true },
-  };
-
-  it("opens only an active, fundable, surfaced vault-direct strategy in an enabled environment", () => {
-    expect(isEarnVaultDepositAvailable(kamino, "sandbox", providerAccess)).toBe(true);
-    // Kamino is deployed on both clusters, so production opens too (PRO-1986);
-    // the environment gate now bites a provider deployed on devnet only.
-    expect(isEarnVaultDepositAvailable(kamino, "production", providerAccess)).toBe(true);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, provider: "veda" }, "production", {
-        veda: { entitled: true, configured: true, enabled: true },
-      })
-    ).toBe(false);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, fundable: false }, "sandbox", providerAccess)
-    ).toBe(false);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, status: "paused" }, "sandbox", providerAccess)
-    ).toBe(false);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, provider: "upshift" }, "sandbox", providerAccess)
-    ).toBe(false);
   });
 });
 

@@ -54,6 +54,7 @@ import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import {
   type EarnDepositAvailabilityLabels,
   earnProviderLabel,
+  formatProviderAmount,
   formatUsd,
 } from "../earn/earn-format";
 import {
@@ -61,7 +62,6 @@ import {
   earnMintAsset,
   earnStrategyAsset,
   earnStrategyReferenceKey,
-  formatProviderAmount,
   formatProviderApy,
   shortenMarketAddress,
   sumDecimalStrings,
@@ -913,17 +913,16 @@ function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
 
 function StrategyDepositAction({
   availability,
-  environment,
   onDeposit,
+  sandboxMainnet,
   strategy,
 }: {
   availability: EarnVaultDepositAvailability;
-  environment: SdpEnvironment;
   onDeposit: (strategy: EarnStrategy) => void;
+  sandboxMainnet: boolean;
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
-  const sandboxMainnet = environment === "sandbox" && strategy.hostCluster === "mainnet-beta";
   const canDeposit = availability === "available" && !sandboxMainnet;
   const button = (
     <Button
@@ -1093,8 +1092,8 @@ function StrategyTable({
                     )}
                     <StrategyDepositAction
                       availability={availability}
-                      environment={environment}
                       onDeposit={onDeposit}
+                      sandboxMainnet={sandboxMainnet}
                       strategy={strategy}
                     />
                   </div>
@@ -1777,6 +1776,9 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
   } = props;
   const t = useTranslations();
 
+  // A failed positions read hides the rows rather than hinting at a portfolio.
+  const readablePositions = positionsError ? undefined : positions;
+
   return (
     <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
       <TreasuryAllocationCard
@@ -1797,7 +1799,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         error={positionsError}
         isLoading={positionsLoading}
         onWithdraw={onWithdrawPosition}
-        positions={positionsError ? undefined : positions}
+        positions={readablePositions}
         unrecordedShareMints={allocation.unrecordedShareMints}
         wallets={activeWallets}
         withdrawals={vaultWithdrawals}
@@ -1813,7 +1815,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         mainnetLoading={mainnetCatalogueLoading}
         onDeposit={onDeposit}
         onRefresh={onRefresh}
-        positions={positionsError ? undefined : positions}
+        positions={readablePositions}
         providerAccess={providerAccess}
         strategies={catalogueStrategies}
         unrecordedShareMints={allocation.unrecordedShareMints}

@@ -45,29 +45,15 @@ import { earnQueryKeys } from "./earn-query-key";
 import {
   EARN_PROGRAM_CREATE_PROVIDER,
   EARN_PROGRAM_CREATION_ENABLED,
-  isEarnVaultDepositAvailable,
   SURFACED_CUSTODIAL_EARN_PROVIDERS,
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "./earn-surfacing";
 
 export type {
-  EarnExternalWalletPosition,
-  EarnExternalWalletPositionSummary,
-  EarnExternalWalletPositionSummaryResponse,
-  EarnExternalWalletPositionsPage,
   EarnProgram,
-  EarnProgramWithdrawalPreviewResponse,
-  EarnProgramWithdrawalRecord,
-  EarnProgramWithdrawalResponse,
   EarnVaultDeposit,
   EarnVaultDepositRecord,
-  EarnVaultDepositRequest,
-  EarnVaultPosition,
-  EarnVaultPositionsPage,
   EarnVaultWithdrawal,
-  EarnVaultWithdrawalRequest,
-  ListEarnProgramsResponse,
-  ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
 
 /**
@@ -98,7 +84,6 @@ export type {
 export {
   EARN_PROGRAM_CREATE_PROVIDER,
   EARN_PROGRAM_CREATION_ENABLED,
-  isEarnVaultDepositAvailable,
   SURFACED_CUSTODIAL_EARN_PROVIDERS,
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 };

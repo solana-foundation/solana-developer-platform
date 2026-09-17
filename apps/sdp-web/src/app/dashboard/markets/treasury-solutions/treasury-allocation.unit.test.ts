@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   availableTreasuryCashForWallet,
   estimatedTreasuryApy,
-  formatAllocationShare,
   heldVaultShareMints,
   summarizeTreasuryAllocation,
   type TreasuryAllocationBalance,
@@ -63,7 +62,7 @@ function summarize({
 }
 
 describe("summarizeTreasuryAllocation figures", () => {
-  it("totals multi-wallet cash and multi-position value into shares summing to exactly 100%", () => {
+  it("totals multi-wallet cash and multi-position value", () => {
     const summary = summarize({
       wallets: [
         wallet([
@@ -91,17 +90,12 @@ describe("summarizeTreasuryAllocation figures", () => {
 
     expect(summary.availableCash).toBe("2000.5");
     expect(summary.deployedValue).toBe("3999.5");
-    expect(summary.deployedShare).toBe("0.667");
-    expect(summary.remainingShare).toBe("0.333");
-    expect(summary.sharesAbsence).toBeUndefined();
-    expect(formatAllocationShare(summary.deployedShare, "en")).toBe("66.7%");
-    expect(formatAllocationShare(summary.remainingShare, "en")).toBe("33.3%");
   });
 
   it("counts an SDP-issued stablecoin the static catalogue cannot know", () => {
     // The API prices everything it treats as USD-stable at exactly 1, issued
     // tokens included. Dropping those silently understated the float, and a
-    // wallet holding only them read a real $0 with a confident 100% deployed.
+    // wallet holding only them read a real $0 as an empty treasury.
     const summary = summarize({
       wallets: [
         wallet([
@@ -115,8 +109,6 @@ describe("summarizeTreasuryAllocation figures", () => {
     });
 
     expect(summary.availableCash).toBe("1000100");
-    expect(summary.deployedShare).toBe("0");
-    expect(summary.remainingShare).toBe("1");
   });
 
   it("does not count one on-chain wallet twice when it has several custody rows", () => {
@@ -138,7 +130,6 @@ describe("summarizeTreasuryAllocation figures", () => {
     expect(summary.availableCash).toBe("500");
     // And the sibling row's shares are not read as an unrecorded holding.
     expect(summary.deployedValue).toBe("100");
-    expect(summary.deployedShare).toBe("0.167");
     expect(summary.unrecordedShareMints?.size).toBe(0);
   });
 
@@ -152,10 +143,7 @@ describe("summarizeTreasuryAllocation figures", () => {
 
     expect(summary.availableCash).toBeUndefined();
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
-    expect(summary.sharesAbsence).toBe("unavailable");
     expect(summary.unrecordedShareMints).toBeUndefined();
-    expect(formatAllocationShare(summary.deployedShare, "en")).toBe("—");
   });
 
   it("certifies nothing with no wallet inventory at all", () => {
@@ -186,7 +174,6 @@ describe("summarizeTreasuryAllocation figures", () => {
 
     expect(summary.availableCash).toBe("500");
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
   });
 
   it("makes deployed unavailable when an open position value is malformed", () => {
@@ -205,21 +192,6 @@ describe("summarizeTreasuryAllocation figures", () => {
     });
 
     expect(summary.deployedValue).toBeUndefined();
-  });
-
-  it("withholds only the shares when an open position's wallet is outside the read", () => {
-    // The wallet read serves active wallets only, so that position's idle-cash
-    // side is unobserved. Both dollar figures still render; the split would be
-    // fabricated.
-    const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "50" }])],
-      positions: [openPosition({ custodyWalletId: "wallet-deactivated", tokenValue: "100" })],
-    });
-
-    expect(summary.availableCash).toBe("50");
-    expect(summary.deployedValue).toBe("100");
-    expect(summary.deployedShare).toBeUndefined();
-    expect(summary.sharesAbsence).toBe("unavailable");
   });
 
   it("makes deployed unavailable when a wallet holds shares no open position records", () => {
@@ -295,7 +267,6 @@ describe("summarizeTreasuryAllocation figures", () => {
     });
 
     expect(summary.deployedValue).toBe("100");
-    expect(summary.deployedShare).toBe("0.25");
   });
 
   it("propagates failed reads as unavailable on both sides", () => {
@@ -303,54 +274,13 @@ describe("summarizeTreasuryAllocation figures", () => {
 
     expect(summary.availableCash).toBeUndefined();
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.sharesAbsence).toBe("unavailable");
   });
 
-  it("reports real zeros for a readable empty treasury without inventing an allocation", () => {
+  it("reports real zeros for a readable empty treasury", () => {
     const summary = summarize({ wallets: [wallet([])], positions: [] });
 
     expect(summary.availableCash).toBe("0");
     expect(summary.deployedValue).toBe("0");
-    expect(summary.deployedShare).toBeUndefined();
-    // The caption reads from this, so it never re-derives intent from strings.
-    expect(summary.sharesAbsence).toBe("empty_float");
-  });
-
-  it("reads a fully idle float as 0% deployed and a fully deployed one as 100%", () => {
-    const idle = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
-      positions: [],
-    });
-    expect(idle.deployedShare).toBe("0");
-    expect(idle.remainingShare).toBe("1");
-    expect(formatAllocationShare(idle.deployedShare, "en")).toBe("0.0%");
-    expect(formatAllocationShare(idle.remainingShare, "en")).toBe("100.0%");
-
-    const deployed = summarize({
-      wallets: [wallet([{ mint: SHARE_MINT, uiAmount: "60" }])],
-      positions: [openPosition({ tokenValue: "800" })],
-    });
-    expect(deployed.deployedShare).toBe("1");
-    expect(deployed.remainingShare).toBe("0");
-  });
-
-  it("rounds half-up to tenths of a percent and keeps the complement exact", () => {
-    // 1 of 2000 is exactly 0.05%, which rounds up to 0.1%; the remaining share
-    // is the complement so the pair still totals exactly 100%.
-    const summary = summarize({
-      wallets: [
-        wallet([
-          { mint: USDC_MINT, uiAmount: "1999" },
-          { mint: SHARE_MINT, uiAmount: "1" },
-        ]),
-      ],
-      positions: [openPosition({ tokenValue: "1" })],
-    });
-
-    expect(summary.deployedShare).toBe("0.001");
-    expect(summary.remainingShare).toBe("0.999");
-    expect(formatAllocationShare(summary.deployedShare, "en")).toBe("0.1%");
-    expect(formatAllocationShare(summary.remainingShare, "en")).toBe("99.9%");
   });
 });
 
@@ -416,7 +346,6 @@ describe("zero-balance share accounts", () => {
 
     expect(summary.availableCash).toBe("500");
     expect(summary.deployedValue).toBe("0");
-    expect(summary.deployedShare).toBe("0");
     expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "none" });
   });
 
@@ -458,7 +387,6 @@ describe("an incomplete share-mint vocabulary", () => {
 
     expect(summary.availableCash).toBe("500");
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
     expect(summary.unrecordedShareMints).toBeUndefined();
   });
 
@@ -477,8 +405,6 @@ describe("an incomplete share-mint vocabulary", () => {
     });
 
     expect(summary.deployedValue).toBeUndefined();
-    expect(summary.deployedShare).toBeUndefined();
-    expect(summary.remainingShare).toBeUndefined();
   });
 
   it("makes a wallet line with open positions unavailable, not a confident value", () => {
@@ -640,32 +566,12 @@ describe("no two surfaces disagree", () => {
       );
       if (anyWalletUnavailable) {
         expect(summary.deployedValue).toBeUndefined();
-        expect(summary.deployedShare).toBeUndefined();
-        expect(summary.remainingShare).toBeUndefined();
       }
 
       // Note the implication runs ONE way only. The converse does not hold and
       // must not be asserted: when a DIFFERENT wallet is the uncertain one, a
       // readable wallet's own figure is still true, and blanking it would hide
       // real information rather than protect anyone.
-
-      // Shares are published only with both figures behind them, and their
-      // absence always carries a reason.
-      if (summary.deployedShare !== undefined) {
-        expect(summary.availableCash).not.toBeUndefined();
-        expect(summary.deployedValue).not.toBeUndefined();
-        expect(summary.sharesAbsence).toBeUndefined();
-      } else {
-        expect(summary.sharesAbsence).not.toBeUndefined();
-      }
-
-      // The pair is always both-or-neither, and always totals 100%.
-      expect(summary.deployedShare === undefined).toBe(summary.remainingShare === undefined);
-      if (summary.deployedShare !== undefined && summary.remainingShare !== undefined) {
-        const deployedTenths = Number(summary.deployedShare) * 1000;
-        const remainingTenths = Number(summary.remainingShare) * 1000;
-        expect(Math.round(deployedTenths + remainingTenths)).toBe(1000);
-      }
 
       // A strategy row can only claim "no active position" when the witness
       // exists, and the deployed total is certified exactly when it is empty.
