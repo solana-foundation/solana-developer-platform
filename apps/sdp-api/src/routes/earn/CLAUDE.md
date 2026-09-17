@@ -610,7 +610,7 @@ organization's own custody wallets.
     `isEarnVaultSponsorshipEnabled` therefore takes the cluster and answers
     from CONFIGURATION: the flag, plus a Kora for that cluster
     (`isFeePaymentConfiguredForCluster`, @sdp/payments): `KORA_RPC_URL` serves
-    the `SOLANA_NETWORK` cluster, `KORA_MAINNET_RPC_URL` / `KORA_DEVNET_RPC_URL`
+    the `SOLANA_NETWORK` cluster, `KORA_RPC_URL_MAINNET` / `KORA_RPC_URL_DEVNET`
     the other. The movement's cluster rides `SponsorshipScope.cluster`, so the
     matching Kora signs, the matching budget network is charged and the fee is
     priced on the matching RPC (`createClusterRpc`). Opening mainnet is wiring

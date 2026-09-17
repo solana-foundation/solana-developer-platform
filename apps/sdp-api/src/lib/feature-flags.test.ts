@@ -180,7 +180,7 @@ describe("isEarnVaultSponsorshipEnabled", () => {
   it("sponsors only the clusters that have a paymaster", () => {
     expect(isEarnVaultSponsorshipEnabled(devnetOnly, "devnet")).toBe(true);
     expect(isEarnVaultSponsorshipEnabled(devnetOnly, "mainnet-beta")).toBe(false);
-    const both = { ...devnetOnly, KORA_MAINNET_RPC_URL: "https://kora-mainnet.example" } as Env;
+    const both = { ...devnetOnly, KORA_RPC_URL_MAINNET: "https://kora-mainnet.example" } as Env;
     expect(isEarnVaultSponsorshipEnabled(both, "mainnet-beta")).toBe(true);
   });
 

@@ -90,7 +90,7 @@ export function isEarnEnabled(env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED">
  * Which clusters are sponsored is CONFIGURATION, not a list in code: the flag
  * must be on AND the deployment must have a fee payer for the cluster
  * (`isFeePaymentConfiguredForCluster`: `KORA_RPC_URL` for the process network,
- * `KORA_MAINNET_RPC_URL` / `KORA_DEVNET_RPC_URL` for the other). Opening
+ * `KORA_RPC_URL_MAINNET` / `KORA_RPC_URL_DEVNET` for the other). Opening
  * mainnet is therefore wiring the mainnet Kora into the deployment, after its
  * `fee_payer_policy` is opened and `sbp_mainnet_global` is enabled (PRO-1738);
  * closing it is removing that wiring, with no code change either way.

@@ -82,7 +82,7 @@ describe("resolveVaultSponsorship", () => {
     const { env, input } = scope({
       SOLANA_NETWORK: "devnet",
       KORA_RPC_URL: "https://kora-devnet",
-      KORA_MAINNET_RPC_URL: "https://kora-mainnet",
+      KORA_RPC_URL_MAINNET: "https://kora-mainnet",
     });
 
     const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });

@@ -70,7 +70,7 @@ export interface KoraEndpoint {
  * One API process serves both clusters (a sandbox project is devnet, a
  * production project is mainnet-beta) and each cluster has its OWN Kora with
  * its own signer, policy and credentials, so the endpoint is selected by the
- * transaction's cluster, never by the process default. `KORA_<CLUSTER>_*` is
+ * transaction's cluster, never by the process default. `KORA_*_<CLUSTER>` is
  * explicit and wins; the unsuffixed trio (`KORA_RPC_URL` and friends) serves
  * only the cluster `SOLANA_NETWORK` names. A cluster with neither answers null
  * so callers fail closed to wallet-pays rather than signing through the wrong
@@ -85,14 +85,14 @@ export function resolveKoraEndpoint(
   const perCluster =
     cluster === "mainnet-beta"
       ? {
-          rpcUrl: env.KORA_MAINNET_RPC_URL,
-          apiKey: env.KORA_MAINNET_API_KEY,
-          identityTokenAudience: env.KORA_MAINNET_CLOUD_RUN_AUDIENCE,
+          rpcUrl: env.KORA_RPC_URL_MAINNET,
+          apiKey: env.KORA_API_KEY_MAINNET,
+          identityTokenAudience: env.KORA_CLOUD_RUN_AUDIENCE_MAINNET,
         }
       : {
-          rpcUrl: env.KORA_DEVNET_RPC_URL,
-          apiKey: env.KORA_DEVNET_API_KEY,
-          identityTokenAudience: env.KORA_DEVNET_CLOUD_RUN_AUDIENCE,
+          rpcUrl: env.KORA_RPC_URL_DEVNET,
+          apiKey: env.KORA_API_KEY_DEVNET,
+          identityTokenAudience: env.KORA_CLOUD_RUN_AUDIENCE_DEVNET,
         };
   const explicit = perCluster.rpcUrl?.trim();
   if (explicit) {
@@ -163,7 +163,7 @@ export function createKoraAdapter(
   const endpoint = resolveKoraEndpoint(env, cluster);
   if (!endpoint) {
     throw new FeePaymentError(
-      `Kora is not configured for ${cluster}: set KORA_RPC_URL for the process network or a KORA_<CLUSTER>_RPC_URL override`,
+      `Kora is not configured for ${cluster}: set KORA_RPC_URL for the process network or a KORA_RPC_URL_<CLUSTER> override`,
       "PROVIDER_NOT_AVAILABLE"
     );
   }

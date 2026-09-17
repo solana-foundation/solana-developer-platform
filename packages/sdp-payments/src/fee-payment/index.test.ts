@@ -13,7 +13,7 @@ import type { FeePaymentEnv } from "./port";
  * One API process serves both clusters, and each cluster has its own Kora with
  * its own signer, policy and credentials. These pin the selection rule: the
  * unsuffixed trio serves only the process's `SOLANA_NETWORK` cluster, a
- * `KORA_<CLUSTER>_*` trio serves its cluster explicitly and borrows nothing,
+ * `KORA_*_<CLUSTER>` trio serves its cluster explicitly and borrows nothing,
  * and a cluster with neither answers null so callers fall back to wallet-pays.
  */
 describe("resolveKoraEndpoint", () => {
@@ -46,8 +46,8 @@ describe("resolveKoraEndpoint", () => {
   it("serves a per-cluster trio on its own, never borrowing the default's key or audience", () => {
     const env: FeePaymentEnv = {
       ...devnetDefault,
-      KORA_MAINNET_RPC_URL: " https://kora-mainnet.example ",
-      KORA_MAINNET_API_KEY: "mainnet-key",
+      KORA_RPC_URL_MAINNET: " https://kora-mainnet.example ",
+      KORA_API_KEY_MAINNET: "mainnet-key",
     };
     assert.deepEqual(resolveKoraEndpoint(env, "mainnet-beta"), {
       rpcUrl: "https://kora-mainnet.example",
@@ -60,7 +60,7 @@ describe("resolveKoraEndpoint", () => {
   it("lets a per-cluster trio override the default cluster too", () => {
     const env: FeePaymentEnv = {
       ...devnetDefault,
-      KORA_DEVNET_RPC_URL: "https://kora-devnet-2.example",
+      KORA_RPC_URL_DEVNET: "https://kora-devnet-2.example",
     };
     assert.deepEqual(resolveKoraEndpoint(env, "devnet"), {
       rpcUrl: "https://kora-devnet-2.example",
@@ -109,7 +109,7 @@ describe("createFeePaymentAdapter", () => {
     const env: FeePaymentEnv = {
       SOLANA_NETWORK: "devnet",
       KORA_RPC_URL: "https://kora-devnet.example",
-      KORA_MAINNET_RPC_URL: "https://kora-mainnet.example",
+      KORA_RPC_URL_MAINNET: "https://kora-mainnet.example",
     };
     assert.equal(createFeePaymentAdapter(env, "sdp:v1:test", "mainnet-beta").providerId, "kora");
     assert.equal(createFeePaymentAdapter(env, "sdp:v1:test").providerId, "kora");

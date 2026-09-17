@@ -219,12 +219,12 @@ export interface Env {
   KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
   /** Per-cluster Kora endpoints for a process sponsoring on both clusters (see @sdp/payments `resolveKoraEndpoint`). */
-  KORA_DEVNET_RPC_URL?: string;
-  KORA_DEVNET_API_KEY?: string;
-  KORA_DEVNET_CLOUD_RUN_AUDIENCE?: string;
-  KORA_MAINNET_RPC_URL?: string;
-  KORA_MAINNET_API_KEY?: string;
-  KORA_MAINNET_CLOUD_RUN_AUDIENCE?: string;
+  KORA_RPC_URL_DEVNET?: string;
+  KORA_API_KEY_DEVNET?: string;
+  KORA_CLOUD_RUN_AUDIENCE_DEVNET?: string;
+  KORA_RPC_URL_MAINNET?: string;
+  KORA_API_KEY_MAINNET?: string;
+  KORA_CLOUD_RUN_AUDIENCE_MAINNET?: string;
   KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
