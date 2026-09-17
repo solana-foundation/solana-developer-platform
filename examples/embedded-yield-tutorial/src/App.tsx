@@ -129,8 +129,7 @@ function CustodySection() {
         </h2>
         <p className="mt-4 leading-relaxed text-muted-foreground">
           Northstar is a small fintech with a consumer Wallet app. Customers
-          hold dollars, euros, and the USDC stablecoin side by side — nothing on
-          this screen touches a blockchain yet.
+          hold dollars, euros, and the USDC stablecoin side by side.
         </p>
         <ul className="mt-5 space-y-2.5 text-sm">
           {[
