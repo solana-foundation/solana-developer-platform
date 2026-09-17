@@ -1,7 +1,10 @@
 import { createHmac, createSign, generateKeyPairSync } from "node:crypto";
 import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import { buildBvnkOfframpReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  buildBvnkOfframpReference,
+  buildBvnkOnrampRuleReference,
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -1216,7 +1219,12 @@ describe("BVNK ramp webhook", () => {
       .mockResolvedValue(undefined);
 
     const res = await sendBvnkWebhook(
-      bvnkCryptoStatusChangeEvent({ type: "OUT", status: "COMPLETED", walletId: WALLET_ID })
+      bvnkCryptoStatusChangeEvent({
+        type: "OUT",
+        status: "COMPLETED",
+        walletId: WALLET_ID,
+        reference: buildBvnkOnrampRuleReference("pt_bvnk_webhook_terminal"),
+      })
     );
 
     expect(res.status).toBe(200);
@@ -1248,7 +1256,12 @@ describe("BVNK ramp webhook", () => {
       .mockRejectedValue(new Error("bvnk unreachable"));
 
     const res = await sendBvnkWebhook(
-      bvnkCryptoStatusChangeEvent({ type: "OUT", status: "COMPLETED", walletId: WALLET_ID })
+      bvnkCryptoStatusChangeEvent({
+        type: "OUT",
+        status: "COMPLETED",
+        walletId: WALLET_ID,
+        reference: buildBvnkOnrampRuleReference("pt_bvnk_webhook_terminal_failed"),
+      })
     );
 
     // sdp_api_bvnk_rule_deactivate_failed is logged and the terminal state

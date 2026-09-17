@@ -1,5 +1,7 @@
 DELETE FROM counterparty_provider_accounts WHERE provider = 'bvnk' AND kind = 'funding_wallet';
 
+UPDATE counterparty_provider_accounts SET kind = 'virtual_funding_wallet' WHERE kind = 'funding_wallet';
+
 ALTER TABLE counterparty_provider_accounts
     DROP CONSTRAINT counterparty_provider_accounts_kind_check,
     ADD CONSTRAINT counterparty_provider_accounts_kind_check
@@ -21,8 +23,6 @@ ALTER TABLE counterparty_provider_accounts
                 AND fiat_currency IS NOT NULL
                 AND destination_country IS NULL)
         );
-
-UPDATE counterparty_provider_accounts SET kind = 'virtual_funding_wallet' WHERE kind = 'funding_wallet';
 
 DROP INDEX IF EXISTS counterparty_provider_accounts_active_funding_wallet_unique;
 

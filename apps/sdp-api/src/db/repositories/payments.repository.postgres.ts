@@ -555,12 +555,19 @@ export function createPostgresPaymentsRepository(
 
     async updateTransferStatusGuarded(input) {
       assertScope(input);
+      const extraClauses = ["id = ?", "status = ANY(?)"];
+      const extraValues: unknown[] = [input.transferId, [...input.fromStatuses]];
+      if (input.providerDataNullPath !== undefined) {
+        extraClauses.push(
+          `provider_data#>>'{${input.providerDataNullPath.map((key) => `"${key}"`).join(",")}}' IS NULL`
+        );
+      }
       const scope = buildTransferScopeWhere({
         organizationId: input.organizationId,
         projectId: input.projectId,
         includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: ["id = ?", "status = ANY(?)"],
-        extraValues: [input.transferId, [...input.fromStatuses]],
+        extraClauses,
+        extraValues,
       });
 
       const assignments = ["status = ?", "updated_at = ?"];
@@ -750,6 +757,21 @@ export function createPostgresPaymentsRepository(
              AND pt.provider_data->'bvnk'->>'fundingWalletAccountId' = ?`
         )
         .bind([...RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT], fundingWalletAccountId)
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async findBvnkOnrampTransferByAppliedPayinId({ appliedPayinId }) {
+      const row = await db
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
+           WHERE pt.provider = 'bvnk'
+             AND pt.type = 'onramp'
+             AND pt.provider_data->'bvnk'->>'appliedPayinId' = ?`
+        )
+        .bind(appliedPayinId)
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;

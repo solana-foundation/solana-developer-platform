@@ -29,6 +29,7 @@ export const bvnkOnrampTransferProviderDataSchema = z.object({
     ruleStatus: z.string().min(1).optional(),
     creditedFiatAmount: z.string().min(1).optional(),
     appliedPayinId: z.string().min(1).optional(),
+    appliedCryptoEventId: z.string().min(1).optional(),
   }),
 });
 export type BvnkOnrampTransferProviderData = z.infer<typeof bvnkOnrampTransferProviderDataSchema>;

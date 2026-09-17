@@ -283,6 +283,13 @@ export function isBvnkOnrampInFlightStatus(
   return RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT.some((candidate) => candidate === status);
 }
 
+/** The terminal BVNK on-ramp statuses whose payment rule must still be swept (deactivated) once the transfer can no longer hold the funding wallet rule. */
+export const RAMP_TRANSFER_STATUS_BVNK_RULE_CLEANUP = [
+  "completed",
+  "expired",
+  "failed",
+] as const satisfies readonly PaymentTransferStatus[];
+
 /** Hours an awaiting_payment BVNK on-ramp transfer keeps its quote before the expiry job abandons it. */
 export const BVNK_ONRAMP_QUOTE_TTL_HOURS = 24;
 

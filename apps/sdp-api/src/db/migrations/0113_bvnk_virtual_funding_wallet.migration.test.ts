@@ -132,7 +132,7 @@ describe("0113 bvnk virtual funding wallet", () => {
     expect(constraints.rows).toHaveLength(2);
     for (const constraint of constraints.rows) {
       expect(constraint.def).toContain("virtual_funding_wallet");
-      expect(constraint.def).not.toContain("funding_wallet");
+      expect(constraint.def).not.toContain("'funding_wallet'");
     }
 
     const indexes = await client.query<{ indexname: string }>(
