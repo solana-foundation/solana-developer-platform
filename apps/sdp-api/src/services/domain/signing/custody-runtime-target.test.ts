@@ -1395,8 +1395,6 @@ function createConfigAdapterFactory(signerAddress = CONFIG_PUBLIC_KEY) {
   const adapter = {
     providerId: "privy",
     getPublicKey: vi.fn().mockResolvedValue(CONFIG_PUBLIC_KEY),
-    sign: vi.fn().mockResolvedValue({ status: "completed", signatures: new Map() }),
-    requiresApproval: vi.fn().mockReturnValue(false),
     getTransactionSigner: vi.fn().mockResolvedValue({
       address: signerAddress,
       signTransactions: vi.fn(),

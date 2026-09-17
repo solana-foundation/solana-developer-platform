@@ -245,7 +245,7 @@
       "unknownStrategyDescription": "The selected strategy is no longer in the live catalogue for this project. Return to Embedded Yield and choose another strategy.",
       "unavailableStrategyTitle": "Strategy deposits unavailable",
       "unavailableStrategyDescription": "This strategy is inactive, unsupported for Embedded Yield buttons, or unavailable on the selected project's cluster.",
-      "unavailableEnvironmentDescription": "New Embedded Yield vault deposits are sandbox-only until vault positions are surfaced in the production portfolio.",
+      "unavailableEnvironmentDescription": "This provider accepts new vault deposits from Sandbox projects only. Switch to a Sandbox project to integrate it.",
       "unavailableClusterDescription": "This strategy runs on a different network from this project. Switch to a project on that network to integrate it.",
       "unavailableEnvironmentProductionDescription": "This provider accepts new vault deposits from Production projects only. Switch to a Production project to integrate it.",
       "unavailableAccessDescription": "Provider access could not be verified for this organization, so the strategy cannot be configured safely.",

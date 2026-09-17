@@ -1,4 +1,5 @@
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
+import { CRYPTO_RAIL_ASSET_LABELS } from "@sdp/types/payment-rails";
 import { z } from "zod";
 import type { BvnkEntityType, BvnkRuleEntity } from "./provider-data";
 import {
@@ -13,6 +14,37 @@ import {
 
 export const bvnkEstimateFiatCurrencySchema = z.enum(RAMP_FIAT_CURRENCIES);
 
+export const bvnkEstimateFeeCurrencySchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .pipe(z.union([bvnkEstimateFiatCurrencySchema, z.enum(Object.values(CRYPTO_RAIL_ASSET_LABELS))]));
+
+export const bvnkComplianceDetailsSchema = z.object({
+  partyDetails: z.array(z.record(z.string(), z.unknown())).min(1),
+});
+export type BvnkComplianceInput = z.infer<typeof bvnkComplianceDetailsSchema>;
+
+export const bvnkSandboxPayinCurrencySchema = z.enum(["USD", "EUR"]);
+export type BvnkSandboxPayinCurrency = z.infer<typeof bvnkSandboxPayinCurrencySchema>;
+
+export const bvnkOfframpQuoteInputSchema = z.object({
+  fiatCurrency: bvnkEstimateFiatCurrencySchema,
+  paymentTransferId: z.string().min(1),
+  bvnkOfframpWalletId: z.string().min(1),
+  externalCustomerId: z.string().min(1),
+  bvnkCompliance: bvnkComplianceDetailsSchema,
+});
+
+export const bvnkOnrampTransferProviderDataSchema = z.object({
+  bvnk: z.object({
+    ruleId: z.string().min(1),
+    ruleStatus: z.string().min(1).optional(),
+    fundingWalletId: z.string().min(1),
+  }),
+});
+export type BvnkOnrampTransferProviderData = z.infer<typeof bvnkOnrampTransferProviderDataSchema>;
+
 export const bvnkErrorEnvelopeSchema = z.object({
   code: z.string().optional(),
   message: z.string().optional(),
@@ -21,41 +53,51 @@ export const bvnkErrorEnvelopeSchema = z.object({
 export type BvnkErrorEnvelopeParse = ReturnType<typeof bvnkErrorEnvelopeSchema.safeParse>;
 
 const bvnkChannelAddressSchema = z.object({
-  network: z.string().optional(),
-  address: z.string().optional(),
-  uri: z.string().optional(),
+  network: z.string().trim().toUpperCase(),
+  address: z.string().min(1),
 });
 export const bvnkChannelResponseSchema = z.object({
-  uuid: z.string().optional(),
-  reference: z.string().optional(),
-  status: z.string().optional(),
-  address: z.string().optional(),
-  network: z.string().optional(),
+  uuid: z.string().min(1),
+  address: z.string().min(1),
+  network: z.string().trim().toUpperCase(),
   alternatives: z.array(bvnkChannelAddressSchema).optional(),
 });
 export type BvnkChannelAddress = z.infer<typeof bvnkChannelAddressSchema>;
 export type BvnkChannelResponse = z.infer<typeof bvnkChannelResponseSchema>;
 
-export const bvnkPayoutEstimateResponseSchema = z.object({
-  walletCurrency: z.string(),
-  walletRequiredAmount: z.number(),
-  paidCurrency: z.string(),
-  paidRequiredAmount: z.number(),
-  feeCurrency: z.string(),
-  feePredictedAmount: z.number(),
-  networkFeeCurrency: z.string(),
-  networkFeePredictedAmount: z.number(),
-  totalWalletAmount: z.number(),
-  exchangeRate: z.number(),
-});
+export const bvnkPayoutEstimateResponseSchema = z
+  .object({
+    walletCurrency: z.string(),
+    walletRequiredAmount: z.number().positive(),
+    paidCurrency: z.string(),
+    paidRequiredAmount: z.number().positive(),
+    feeCurrency: bvnkEstimateFeeCurrencySchema,
+    feePredictedAmount: z.number().nonnegative(),
+    networkFeeCurrency: bvnkEstimateFeeCurrencySchema,
+    networkFeePredictedAmount: z.number().nonnegative(),
+    totalWalletAmount: z.number(),
+    exchangeRate: z.number(),
+  })
+  .refine(
+    (estimate) =>
+      estimate.feePredictedAmount === 0 ||
+      estimate.networkFeePredictedAmount === 0 ||
+      estimate.feeCurrency === estimate.networkFeeCurrency,
+    { message: "BVNK returned fees in multiple currencies for this estimate" }
+  );
 export type BvnkPayoutEstimateResponse = z.infer<typeof bvnkPayoutEstimateResponseSchema>;
 
 export const bvnkQuoteEstimateResponseSchema = z.object({
-  amountIn: z.number(),
-  amountOut: z.number(),
+  amountIn: z.number().positive(),
+  amountOut: z.number().positive(),
   acceptanceExpiryDate: z.number(),
-  payInMethod: z.object({ settlementCurrency: z.string() }),
-  fees: z.object({ value: z.object({ service: z.number(), processing: z.number() }) }),
+  payInMethod: z.object({ settlementCurrency: bvnkEstimateFeeCurrencySchema }),
+  fees: z.object({
+    value: z.object({
+      service: z.number().nonnegative(),
+      processing: z.number().nonnegative(),
+    }),
+  }),
 });
 
 export interface CreateBvnkOnrampRuleInput {
@@ -67,13 +109,19 @@ export interface CreateBvnkOnrampRuleInput {
   entity: BvnkRuleEntity;
 }
 
-const bvnkV2CustomerStatusSchema = z.enum([
+export const bvnkV2CustomerStatusSchema = z.enum([
   "INFO_REQUIRED",
   "PENDING",
   "ACTIONS_REQUIRED",
   "VERIFIED",
   "REJECTED",
   "TERMINATED",
+]);
+/** Customer webhooks also report terminal success as COMPLETED or APPROVED, which the v2 customer API never returns. */
+export const bvnkCustomerWebhookStatusSchema = z.enum([
+  ...bvnkV2CustomerStatusSchema.options,
+  "COMPLETED",
+  "APPROVED",
 ]);
 
 const bvnkV2CustomerTypeSchema = z.enum(["COMPANY", "INDIVIDUAL"]);
@@ -334,11 +382,8 @@ export const bvnkV2LedgerWalletSchema = z.object({
 export type BvnkLedgerWalletV2 = z.infer<typeof bvnkV2LedgerWalletSchema>;
 
 export const bvnkRuleResponseSchema = z.object({
-  id: z.string().optional(),
-  reference: z.string().optional(),
-  status: z.string().optional(),
-  originator: z
-    .object({ currency: z.string().optional(), walletId: z.string().optional() })
-    .optional(),
+  id: z.string().min(1),
+  reference: z.string().min(1),
+  status: z.string().min(1),
 });
 export type BvnkRuleResponse = z.infer<typeof bvnkRuleResponseSchema>;

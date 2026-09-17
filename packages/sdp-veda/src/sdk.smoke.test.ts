@@ -26,9 +26,9 @@ import type { VedaRuntime } from "./types";
  * Run it INSIDE the toolchain container, like every other node command in this
  * repository, and against DEVNET. Nothing here signs or submits — it builds an
  * unsigned plan and reads state — but Veda's own integration checklist requires
- * their separate approval for any value-moving mainnet test, and Veda's entry
- * in `EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` is sandbox-only for the
- * same reason.
+ * their separate approval for any value-moving mainnet test, and
+ * `VEDA_DEPLOYMENTS["mainnet-beta"]` stays null for the same reason, which is
+ * what keeps Veda sandbox-only in `EARN_PROVIDER_DEPLOYED_CLUSTERS`.
  *
  * What this proves that the offline tests cannot: the deployment validates, the
  * vault's PDAs derive as the SDK expects, a deposit plan actually builds against

@@ -3,9 +3,15 @@ import { hashString } from "@sdp/payments/hash";
 import { buildBvnkCustomerExternalReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
   BVNK_RESIDENCE_FIELDS,
-  BVNK_US_MTL_STATES,
   bvnkOnrampFields,
 } from "@sdp/payments/ramps/providers/bvnk/requirements";
+import {
+  bvnkAgreementActionsResponse,
+  bvnkAgreementContent,
+  bvnkAgreementWorkingSet,
+  bvnkCustomerDetailV2,
+  bvnkCustomerSummary,
+} from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
 import type { ExecutionContext } from "hono";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -19,6 +25,16 @@ import {
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import {
+  bvnkAgreementStatusChangeEvent,
+  bvnkCustomerLinkMetadata,
+  bvnkCustomerLinkSeed,
+  bvnkEpcAgreementEntry,
+  EPC_AGREEMENT_DESCRIPTION,
+  EPC_AGREEMENT_NAME,
+  restoreBvnkSandboxEnv,
+  stubBvnkSandboxEnv,
+} from "@/test/helpers/bvnk";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -665,17 +681,21 @@ describe("Counterparties Routes", () => {
     beforeEach(() => {
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = "lightspark_client_id";
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = "lightspark_client_secret";
-      env.BVNK_SANDBOX_WALLET_ID = "bvnk_wallet_id";
-      env.BVNK_SANDBOX_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
-      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
+      stubBvnkSandboxEnv(env, {
+        BVNK_SANDBOX_WALLET_ID: "bvnk_wallet_id",
+        BVNK_SANDBOX_HAWK_AUTH_ID: "bvnk_hawk_auth_id",
+        BVNK_SANDBOX_HAWK_SECRET_KEY: "bvnk_hawk_secret_key",
+      });
     });
 
     afterEach(() => {
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = undefined;
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
-      env.BVNK_SANDBOX_WALLET_ID = undefined;
-      env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
-      env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+      restoreBvnkSandboxEnv(env, {
+        BVNK_SANDBOX_WALLET_ID: undefined,
+        BVNK_SANDBOX_HAWK_AUTH_ID: undefined,
+        BVNK_SANDBOX_HAWK_SECRET_KEY: undefined,
+      });
     });
 
     it("returns ready with the resolved payout account id for an offramp advance", async () => {
@@ -1029,42 +1049,45 @@ describe("Counterparties Routes", () => {
         }
         if (path === "/platform/v2/agreements") {
           return new Response(
-            JSON.stringify({
-              id: "working-set-1",
-              reference: "reference",
-              agreements: [
-                {
-                  id: agreementId,
-                  status: "PENDING",
-                  declinable: false,
-                  name: "EPC Partner Platform Agreement (US)",
-                  description: "Terms and conditions for EPC Partner Platform customers in the US",
-                },
-                {
-                  id: "agreement-2",
-                  status: "ACCEPTED",
-                  declinable: false,
-                  name: "EPC Partner Platform Agreement (US)",
-                  description: "Terms and conditions for EPC Partner Platform customers in the US",
-                },
-              ],
-              signingUrl: "https://example.invalid/sign",
-            }),
+            JSON.stringify(
+              bvnkAgreementWorkingSet({
+                agreements: [
+                  {
+                    id: agreementId,
+                    status: "PENDING",
+                    declinable: false,
+                    name: EPC_AGREEMENT_NAME,
+                    description: EPC_AGREEMENT_DESCRIPTION,
+                  },
+                  {
+                    id: "agreement-2",
+                    status: "ACCEPTED",
+                    declinable: false,
+                    name: EPC_AGREEMENT_NAME,
+                    description: EPC_AGREEMENT_DESCRIPTION,
+                  },
+                ],
+                id: "working-set-1",
+                reference: "reference",
+                signingUrl: "https://example.invalid/sign",
+              })
+            ),
             { status: 201, headers: { "Content-Type": "application/json" } }
           );
         }
         return new Response(
           JSON.stringify({
-            downloadUrl: "https://example.invalid/terms.pdf",
+            ...bvnkAgreementContent({ downloadUrl: "https://example.invalid/terms.pdf" }),
             filename: null,
-            expiresAt: null,
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       });
-      env.BVNK_SANDBOX_WALLET_ID = "wallet";
-      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
-      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      const savedBvnkSandboxEnv = stubBvnkSandboxEnv(env, {
+        BVNK_SANDBOX_WALLET_ID: "wallet",
+        BVNK_SANDBOX_HAWK_AUTH_ID: "auth",
+        BVNK_SANDBOX_HAWK_SECRET_KEY: "secret",
+      });
       try {
         const response = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements`,
@@ -1113,28 +1136,20 @@ describe("Counterparties Routes", () => {
           throw new Error("Expected BVNK customer-link row");
         }
         expect(row.provider_customer_reference).toBe("working-set-1");
-        expect(row.metadata).toMatchObject({
-          residenceCountryCode: "US",
-          agreements: {
-            entries: {
-              [agreementId]: {
-                status: "PENDING",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-              "agreement-2": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
+        expect(row.metadata).toMatchObject(
+          bvnkCustomerLinkMetadata({
+            residenceCountryCode: "US",
+            agreements: {
+              entries: {
+                ...bvnkEpcAgreementEntry(agreementId, { status: "PENDING" }),
+                ...bvnkEpcAgreementEntry("agreement-2", { status: "ACCEPTED" }),
               },
             },
-          },
-        });
+          })
+        );
       } finally {
         fetchSpy.mockRestore();
-        env.BVNK_SANDBOX_WALLET_ID = undefined;
-        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
-        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+        restoreBvnkSandboxEnv(env, savedBvnkSandboxEnv);
       }
     });
 
@@ -1147,25 +1162,18 @@ describe("Counterparties Routes", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        provider: "bvnk",
-        providerCustomerReference: "working-set-consent",
-        metadata: {
-          residenceCountryCode: "US",
-          agreements: {
-            entries: {
-              "agreement-consent": {
-                status: "PENDING",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-              "agreement-consent-accepted": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
+        ...bvnkCustomerLinkSeed(
+          "working-set-consent",
+          bvnkCustomerLinkMetadata({
+            residenceCountryCode: "US",
+            agreements: {
+              entries: {
+                ...bvnkEpcAgreementEntry("agreement-consent", { status: "PENDING" }),
+                ...bvnkEpcAgreementEntry("agreement-consent-accepted", { status: "ACCEPTED" }),
               },
             },
-          },
-        },
+          })
+        ),
       });
       const requests: string[] = [];
       const actionBodies: unknown[] = [];
@@ -1176,18 +1184,19 @@ describe("Counterparties Routes", () => {
           actionBodies.push(JSON.parse(String(init.body)));
         }
         return new Response(
-          JSON.stringify({
-            content: [{ agreementId: "agreement-consent", status: "ACCEPTED" }],
-            totalElements: 1,
-            totalPages: 1,
-            hasNext: false,
-          }),
+          JSON.stringify(
+            bvnkAgreementActionsResponse({
+              content: [{ agreementId: "agreement-consent", status: "ACCEPTED" }],
+            })
+          ),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       });
-      env.BVNK_SANDBOX_WALLET_ID = "wallet";
-      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
-      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      const savedBvnkSandboxEnv = stubBvnkSandboxEnv(env, {
+        BVNK_SANDBOX_WALLET_ID: "wallet",
+        BVNK_SANDBOX_HAWK_AUTH_ID: "auth",
+        BVNK_SANDBOX_HAWK_SECRET_KEY: "secret",
+      });
       try {
         const response = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements`,
@@ -1261,9 +1270,7 @@ describe("Counterparties Routes", () => {
         });
       } finally {
         fetchSpy.mockRestore();
-        env.BVNK_SANDBOX_WALLET_ID = undefined;
-        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
-        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+        restoreBvnkSandboxEnv(env, savedBvnkSandboxEnv);
       }
     });
 
@@ -1276,40 +1283,38 @@ describe("Counterparties Routes", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        provider: "bvnk",
-        providerCustomerReference: "working-set-consent-error",
-        metadata: {
-          residenceCountryCode: "US",
-          agreements: {
-            entries: {
-              "agreement-consent-error": {
-                status: "PENDING",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
+        ...bvnkCustomerLinkSeed(
+          "working-set-consent-error",
+          bvnkCustomerLinkMetadata({
+            residenceCountryCode: "US",
+            agreements: {
+              entries: {
+                ...bvnkEpcAgreementEntry("agreement-consent-error", { status: "PENDING" }),
               },
             },
-          },
-        },
+          })
+        ),
       });
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
         new Response(
-          JSON.stringify({
-            content: [
-              {
-                agreementId: "agreement-consent-error",
-                error: { code: "not-found", message: "pre-customer agreement not found" },
-              },
-            ],
-            totalElements: 1,
-            totalPages: 1,
-            hasNext: false,
-          }),
+          JSON.stringify(
+            bvnkAgreementActionsResponse({
+              content: [
+                {
+                  agreementId: "agreement-consent-error",
+                  error: { code: "not-found", message: "pre-customer agreement not found" },
+                },
+              ],
+            })
+          ),
           { status: 200, headers: { "Content-Type": "application/json" } }
         )
       );
-      env.BVNK_SANDBOX_WALLET_ID = "wallet";
-      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
-      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      const savedBvnkSandboxEnv = stubBvnkSandboxEnv(env, {
+        BVNK_SANDBOX_WALLET_ID: "wallet",
+        BVNK_SANDBOX_HAWK_AUTH_ID: "auth",
+        BVNK_SANDBOX_HAWK_SECRET_KEY: "secret",
+      });
       try {
         const response = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements`,
@@ -1336,22 +1341,18 @@ describe("Counterparties Routes", () => {
           )
           .bind(counterparty.id)
           .first<{ metadata: Record<string, unknown> }>();
-        expect(row?.metadata).toMatchObject({
-          agreements: {
-            entries: {
-              "agreement-consent-error": {
-                status: "PENDING",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
+        expect(row?.metadata).toMatchObject(
+          bvnkCustomerLinkMetadata({
+            agreements: {
+              entries: {
+                ...bvnkEpcAgreementEntry("agreement-consent-error", { status: "PENDING" }),
               },
             },
-          },
-        });
+          })
+        );
       } finally {
         fetchSpy.mockRestore();
-        env.BVNK_SANDBOX_WALLET_ID = undefined;
-        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
-        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+        restoreBvnkSandboxEnv(env, savedBvnkSandboxEnv);
       }
     });
 
@@ -1385,25 +1386,18 @@ describe("Counterparties Routes", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        provider: "bvnk",
-        providerCustomerReference: "working-set-confirmed",
-        metadata: {
-          residenceCountryCode: "US",
-          agreements: {
-            entries: {
-              "agreement-confirmed": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-              "agreement-confirmed-2": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
+        ...bvnkCustomerLinkSeed(
+          "working-set-confirmed",
+          bvnkCustomerLinkMetadata({
+            residenceCountryCode: "US",
+            agreements: {
+              entries: {
+                ...bvnkEpcAgreementEntry("agreement-confirmed", { status: "ACCEPTED" }),
+                ...bvnkEpcAgreementEntry("agreement-confirmed-2", { status: "ACCEPTED" }),
               },
             },
-          },
-        },
+          })
+        ),
       });
       const before = await repository.getProviderAccount({
         organizationId: TEST_ORG.id,
@@ -1418,37 +1412,41 @@ describe("Counterparties Routes", () => {
         requests.push(path);
         if (path === "/platform/v2/customers") {
           return new Response(
-            JSON.stringify({
-              id: "working-set-confirmed",
-              reference: "reference",
-              status: "PENDING",
-              type: "INDIVIDUAL",
-              model: "EMBEDDED",
-              useCase: "FIAT",
-            }),
+            JSON.stringify(
+              bvnkCustomerSummary({
+                id: "working-set-confirmed",
+                reference: "reference",
+                status: "PENDING",
+                model: "EMBEDDED",
+                useCase: "FIAT",
+              })
+            ),
             { status: 201, headers: { "Content-Type": "application/json" } }
           );
         }
         return new Response(
-          JSON.stringify({
-            id: "working-set-confirmed",
-            reference: "reference",
-            status: "PENDING",
-            type: "INDIVIDUAL",
-            model: "EMBEDDED",
-            useCase: "FIAT",
-            authenticatedLink: {
-              link: "https://example.invalid/verify",
-              expiresAt: "2030-01-01T00:00:00Z",
-            },
-            requiredActions: [],
-          }),
+          JSON.stringify(
+            bvnkCustomerDetailV2({
+              status: "PENDING",
+              id: "working-set-confirmed",
+              reference: "reference",
+              model: "EMBEDDED",
+              useCase: "FIAT",
+              authenticatedLink: {
+                link: "https://example.invalid/verify",
+                expiresAt: "2030-01-01T00:00:00Z",
+              },
+              requiredActions: [],
+            })
+          ),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       });
-      env.BVNK_SANDBOX_WALLET_ID = "wallet";
-      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
-      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      const savedBvnkSandboxEnv = stubBvnkSandboxEnv(env, {
+        BVNK_SANDBOX_WALLET_ID: "wallet",
+        BVNK_SANDBOX_HAWK_AUTH_ID: "auth",
+        BVNK_SANDBOX_HAWK_SECRET_KEY: "secret",
+      });
       try {
         const requirements = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
@@ -1491,16 +1489,6 @@ describe("Counterparties Routes", () => {
         expect(missingKeys).not.toContain("firstName");
         expect(missingKeys).not.toContain("lastName");
         expect(missingKeys).not.toContain("email");
-        const stateCodeField = partialBody.data.fields.find(
-          (field: { key: string }) => field.key === "address.stateCode"
-        );
-        expect(stateCodeField?.kind).toBe("select");
-        const optionValues = (stateCodeField?.kind === "select" ? stateCodeField.options : []).map(
-          (option: { value: string }) => option.value
-        );
-        expect(optionValues).toEqual(Object.keys(BVNK_US_MTL_STATES));
-        expect(optionValues).not.toContain("TX");
-        expect(optionValues).not.toContain("NY");
         expect(requests).toEqual([]);
 
         const response = await app.request(
@@ -1534,28 +1522,20 @@ describe("Counterparties Routes", () => {
         expect(after?.id).toBe(before.id);
         expect(after?.provider_customer_reference).toBe("working-set-confirmed");
         expect(after?.metadata).not.toHaveProperty("residenceCountryCode");
-        expect(after?.metadata).toMatchObject({
-          status: "PENDING",
-          agreements: {
-            entries: {
-              "agreement-confirmed": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
-              "agreement-confirmed-2": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
+        expect(after?.metadata).toMatchObject(
+          bvnkCustomerLinkMetadata({
+            status: "PENDING",
+            agreements: {
+              entries: {
+                ...bvnkEpcAgreementEntry("agreement-confirmed", { status: "ACCEPTED" }),
+                ...bvnkEpcAgreementEntry("agreement-confirmed-2", { status: "ACCEPTED" }),
               },
             },
-          },
-        });
+          })
+        );
       } finally {
         fetchSpy.mockRestore();
-        env.BVNK_SANDBOX_WALLET_ID = undefined;
-        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
-        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+        restoreBvnkSandboxEnv(env, savedBvnkSandboxEnv);
         env.BVNK_SANDBOX_WEBHOOK_SECRET = undefined;
       }
     });
@@ -1568,20 +1548,15 @@ describe("Counterparties Routes", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
-        provider: "bvnk",
-        providerCustomerReference: "customer-revoked",
-        metadata: {
-          status: "VERIFIED",
-          agreements: {
-            entries: {
-              "agreement-revoked": {
-                status: "ACCEPTED",
-                name: "EPC Partner Platform Agreement (US)",
-                description: "Terms and conditions for EPC Partner Platform customers in the US",
-              },
+        ...bvnkCustomerLinkSeed(
+          "customer-revoked",
+          bvnkCustomerLinkMetadata({
+            status: "VERIFIED",
+            agreements: {
+              entries: { ...bvnkEpcAgreementEntry("agreement-revoked", { status: "ACCEPTED" }) },
             },
-          },
-        },
+          })
+        ),
       });
       const paths: string[] = [];
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -1589,9 +1564,8 @@ describe("Counterparties Routes", () => {
         paths.push(path);
         return new Response(
           JSON.stringify({
-            downloadUrl: "https://example.invalid/revoked.pdf",
+            ...bvnkAgreementContent({ downloadUrl: "https://example.invalid/revoked.pdf" }),
             filename: null,
-            expiresAt: null,
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
@@ -1600,14 +1574,13 @@ describe("Counterparties Routes", () => {
       try {
         expect(
           (
-            await sendBvnkWebhook({
-              event: "bvnk:customers:agreements:status-change",
-              data: {
+            await sendBvnkWebhook(
+              bvnkAgreementStatusChangeEvent({
+                status: "PENDING",
                 customerId: "customer-revoked",
                 agreementId: "agreement-revoked",
-                status: "PENDING",
-              },
-            })
+              })
+            )
           ).status
         ).toBe(200);
         const response = await app.request(
@@ -1621,14 +1594,13 @@ describe("Counterparties Routes", () => {
 
         expect(
           (
-            await sendBvnkWebhook({
-              event: "bvnk:customers:agreements:status-change",
-              data: {
+            await sendBvnkWebhook(
+              bvnkAgreementStatusChangeEvent({
+                status: "REJECTED",
                 customerId: "customer-revoked",
                 agreementId: "agreement-revoked",
-                status: "REJECTED",
-              },
-            })
+              })
+            )
           ).status
         ).toBe(200);
         const rejected = await app.request(

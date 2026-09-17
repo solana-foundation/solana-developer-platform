@@ -32,6 +32,7 @@ import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/th
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { clearStoredApiKeySecrets } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
 
 // The sidebar footer: one profile row that carries the signed-in identity and
@@ -122,7 +123,13 @@ export function SidebarUserMenu({
           <UserRoundIcon className="size-4 shrink-0 text-secondary" />
           {t("Shared.dashboardShell.manageAccount")}
         </DropdownMenuItem>
-        <DropdownMenuItem className="gap-2.5" onSelect={() => void signOut()}>
+        <DropdownMenuItem
+          className="gap-2.5"
+          onSelect={() => {
+            clearStoredApiKeySecrets();
+            void signOut();
+          }}
+        >
           <LogOutIcon className="size-4 shrink-0 text-secondary" />
           {t("Shared.dashboardShell.signOut")}
         </DropdownMenuItem>

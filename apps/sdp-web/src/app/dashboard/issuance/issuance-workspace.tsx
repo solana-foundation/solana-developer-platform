@@ -21,7 +21,6 @@ import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
 import { IssuanceFilterPopover } from "./issuance-filter-popover";
 import { IssuanceLegacyOverview } from "./issuance-legacy-overview";
@@ -346,7 +345,7 @@ function IssuanceResults({
   );
 }
 
-function useIssuancePlaygroundKey({
+function useIssuancePlaygroundKeyId({
   apiKeys,
   isPlaygroundTab,
 }: {
@@ -376,23 +375,7 @@ function useIssuancePlaygroundKey({
     return () => globalThis.clearTimeout(timeoutId);
   }, [isPlaygroundTab]);
 
-  const selectedPlaygroundApiKey =
-    apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null;
-  const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
-  const playgroundApiKeyValue = useMemo(() => {
-    if (!selectedPlaygroundApiKey) {
-      return "";
-    }
-
-    const stored = getStoredApiKeySecret({
-      apiKeyId: selectedPlaygroundApiKey.id,
-      keyPrefix: selectedPlaygroundApiKeyPrefix,
-    });
-
-    return stored ?? "";
-  }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
-
-  return playgroundApiKeyValue;
+  return apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId)?.id ?? null;
 }
 
 export function IssuanceWorkspace({
@@ -446,7 +429,7 @@ export function IssuanceWorkspace({
     router.push(CREATE_DRAFT_PATH);
   };
 
-  const playgroundApiKeyValue = useIssuancePlaygroundKey({ apiKeys, isPlaygroundTab });
+  const playgroundApiKeyId = useIssuancePlaygroundKeyId({ apiKeys, isPlaygroundTab });
 
   // Template options for the filter popover. Sourced from the project-wide facet
   // counts rather than the loaded rows, so the choices don't shrink to whatever
@@ -465,7 +448,7 @@ export function IssuanceWorkspace({
   const playgroundContent = (
     <IssuancePlayground
       apiBaseUrl={apiBaseUrl}
-      apiKeyValue={playgroundApiKeyValue}
+      apiKeyId={playgroundApiKeyId}
       hasActiveApiKeys={apiKeys.length > 0}
       templates={templates}
       templatesError={templatesError}
