@@ -1,11 +1,6 @@
 import "server-only";
 
-import type {
-  TokenEarnings,
-  YieldMovement,
-  YieldPosition,
-  YieldStrategy,
-} from "../src/types";
+import type { YieldMovement, YieldPosition, YieldStrategy } from "../src/types";
 import type { DemoConfig } from "./env";
 
 interface SdpErrorEnvelope {
@@ -15,8 +10,7 @@ interface SdpErrorEnvelope {
   };
 }
 
-interface Page<T> {
-  positions: T[];
+interface Page {
   hasMore: boolean;
   nextCursor: string | null;
 }
@@ -53,12 +47,20 @@ interface WithdrawalBuildResult {
 export class SdpApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
+  /** Seconds to wait before retrying, when SDP says so (429). */
+  readonly retryAfterSeconds: number | undefined;
 
-  constructor(status: number, code: string | undefined, message: string) {
+  constructor(
+    status: number,
+    code: string | undefined,
+    message: string,
+    retryAfterSeconds?: number
+  ) {
     super(message);
     this.name = "SdpApiError";
     this.status = status;
     this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -171,48 +173,53 @@ export class EmbeddedYieldClient {
     return data.withdrawal;
   }
 
-  async listActivity(ownerAddress: string): Promise<YieldMovement[]> {
-    return this.allowUnknownOwner(async () => {
-      const query = new URLSearchParams({ ownerAddress, limit: "20" });
-      const data = await this.request<{ movements: YieldMovement[] }>(
-        `/v1/earn/external-wallet/movements?${query}`
-      );
-      return data.movements;
-    }, []);
+  /** Every recorded movement for the wallet, newest first, across all pages. */
+  async listMovements(ownerAddress: string): Promise<YieldMovement[]> {
+    return this.allowUnknownOwner(
+      () =>
+        this.collectPages<YieldMovement>(
+          "/v1/earn/external-wallet/movements",
+          "movements",
+          ownerAddress
+        ),
+      []
+    );
   }
 
+  /** Open positions for the wallet. SDP omits a position once it is closed. */
   async listPositions(ownerAddress: string): Promise<YieldPosition[]> {
-    return this.allowUnknownOwner(async () => {
-      const positions: YieldPosition[] = [];
-      let cursor: string | undefined;
-      let hasMore = true;
-
-      while (hasMore) {
-        const query = new URLSearchParams({ ownerAddress, limit: "100" });
-        if (cursor) query.set("before", cursor);
-        const data = await this.request<Page<YieldPosition>>(
-          `/v1/earn/external-wallet/positions?${query}`
-        );
-        positions.push(...data.positions);
-        hasMore = data.hasMore;
-        if (!hasMore) break;
-        if (!data.nextCursor || data.nextCursor === cursor) {
-          throw new Error("SDP positions cursor did not advance");
-        }
-        cursor = data.nextCursor;
-      }
-      return positions;
-    }, []);
+    return this.allowUnknownOwner(
+      () =>
+        this.collectPages<YieldPosition>(
+          "/v1/earn/external-wallet/positions",
+          "positions",
+          ownerAddress
+        ),
+      []
+    );
   }
 
-  async getEarnings(ownerAddress: string): Promise<TokenEarnings[]> {
-    return this.allowUnknownOwner(async () => {
-      const query = new URLSearchParams({ ownerAddress });
-      const data = await this.request<{
-        earnings: { totalsByToken: TokenEarnings[] };
-      }>(`/v1/earn/external-wallet/earnings?${query}`);
-      return data.earnings.totalsByToken;
-    }, []);
+  private async collectPages<T>(
+    path: string,
+    key: "movements" | "positions",
+    ownerAddress: string
+  ): Promise<T[]> {
+    const items: T[] = [];
+    let cursor: string | undefined;
+
+    while (true) {
+      const query = new URLSearchParams({ ownerAddress, limit: "100" });
+      if (cursor) query.set("before", cursor);
+      const data = await this.request<Page & Record<typeof key, T[]>>(
+        `${path}?${query}`
+      );
+      items.push(...data[key]);
+      if (!data.hasMore) return items;
+      if (!data.nextCursor || data.nextCursor === cursor) {
+        throw new Error(`SDP ${key} cursor did not advance`);
+      }
+      cursor = data.nextCursor;
+    }
   }
 
   private async allowUnknownOwner<T>(
@@ -261,7 +268,13 @@ export class EmbeddedYieldClient {
       const code = payload?.error?.code;
       const message =
         payload?.error?.message ?? `SDP request failed with ${response.status}`;
-      throw new SdpApiError(response.status, code, message);
+      const retryAfter = Number(response.headers.get("retry-after"));
+      throw new SdpApiError(
+        response.status,
+        code,
+        message,
+        Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined
+      );
     }
     if (!payload || payload.data === undefined)
       throw new Error("SDP returned an invalid response");
