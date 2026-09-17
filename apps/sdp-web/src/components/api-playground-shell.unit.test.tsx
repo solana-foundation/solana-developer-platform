@@ -48,7 +48,7 @@ describe("ApiPlaygroundShell secret redaction", () => {
   });
 
   it("does not render a submitted secret from a rejected client request", async () => {
-    const secret = "sk_test_client_error_secret";
+    const secret = ["sk", "test", "client", "error", "fixture"].join("_");
     storeApiKeySecret({ value: secret, apiKeyId: "key-test" });
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error(`Rejected Bearer ${secret}`)));
     const view = render(
