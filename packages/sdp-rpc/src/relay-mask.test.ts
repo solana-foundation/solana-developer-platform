@@ -14,10 +14,10 @@ describe("maskEndpoint", () => {
     );
   });
 
-  it("keeps ordinary path vocabulary", () => {
+  it("keeps ordinary path vocabulary, including long digit-free network names", () => {
     assert.equal(
-      maskEndpoint("https://rpc.example.com/v2/solana-mainnet", env),
-      "https://rpc.example.com/v2/solana-mainnet"
+      maskEndpoint("https://rpc.example.com/v2/solana-mainnet-beta", env),
+      "https://rpc.example.com/v2/solana-mainnet-beta"
     );
   });
 
