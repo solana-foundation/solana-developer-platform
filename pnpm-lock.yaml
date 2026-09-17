@@ -603,9 +603,6 @@ importers:
       '@solana/signers':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/transactions':
-        specifier: 'catalog:'
-        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       jose:
         specifier: 6.2.10
         version: 6.2.10
