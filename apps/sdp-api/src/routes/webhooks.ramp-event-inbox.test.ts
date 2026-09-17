@@ -274,7 +274,7 @@ describe("Ramp webhook event inbox", () => {
       .bind(
         fromOldDeploy.id,
         fromNullRevision.id,
-        env.K_REVISION ?? "local",
+        env.API_VERSION ?? "local",
         fromOldDeploy.id,
         fromNullRevision.id,
         fromCurrentDeploy.id
