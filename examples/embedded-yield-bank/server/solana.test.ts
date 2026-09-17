@@ -15,7 +15,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { signTransaction } from "./solana.ts";
+import { signTransaction } from "./solana";
 
 const blockhash = getBase58Codec().decode(
   new Uint8Array(32).fill(1)

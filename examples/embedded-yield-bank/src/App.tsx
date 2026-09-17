@@ -1,3 +1,5 @@
+"use client";
+
 import { AlertCircleIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,7 +14,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Toaster } from "@/components/ui/sonner";
 import { createDeposit, createWithdrawal, getDashboard } from "@/lib/api";
+import {
+  isPendingMovement,
+  type MovementPolling,
+  reconcileMovementPolling,
+  startMovementPolling,
+} from "@/lib/movements";
 import type { DashboardData } from "@/types";
 
 export function App() {
@@ -20,40 +29,56 @@ export function App() {
   const [error, setError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [movementPolling, setMovementPolling] = useState<MovementPolling>();
+  const movementPollingRef = useRef<MovementPolling | undefined>(undefined);
   const requestId = useRef(0);
 
-  const refresh = useCallback(async (background = false) => {
-    const id = ++requestId.current;
-    if (background) setRefreshing(true);
-    try {
-      const next = await getDashboard();
-      if (id !== requestId.current) return;
-      setData(next);
-      setError(undefined);
-    } catch (caught) {
-      if (id !== requestId.current) return;
-      setError(
-        caught instanceof Error ? caught.message : "Unable to load the demo"
-      );
-    } finally {
-      if (id === requestId.current) setRefreshing(false);
-    }
+  const updateMovementPolling = useCallback((next?: MovementPolling) => {
+    movementPollingRef.current = next;
+    setMovementPolling(next);
   }, []);
+
+  const refresh = useCallback(
+    async (background = false) => {
+      const id = ++requestId.current;
+      if (background) setRefreshing(true);
+      try {
+        const next = await getDashboard();
+        if (id !== requestId.current) return;
+        setData(next);
+        const reconciliation = reconcileMovementPolling(
+          movementPollingRef.current,
+          next.movements
+        );
+        updateMovementPolling(reconciliation.polling);
+        if (reconciliation.timedOut) {
+          toast.warning("Settlement is taking longer than expected", {
+            id: "settlement-timeout",
+            description: "Automatic refresh paused. Refresh to check again.",
+          });
+        }
+        setError(undefined);
+      } catch (caught) {
+        if (id !== requestId.current) return;
+        setError(
+          caught instanceof Error ? caught.message : "Unable to load the demo"
+        );
+      } finally {
+        if (id === requestId.current) setRefreshing(false);
+      }
+    },
+    [updateMovementPolling]
+  );
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   useEffect(() => {
-    if (
-      !data?.movements.some(
-        (movement) => !["finalized", "failed"].includes(movement.status)
-      )
-    )
-      return;
+    if (!movementPolling) return;
     const timer = window.setInterval(() => void refresh(true), 4_000);
     return () => window.clearInterval(timer);
-  }, [data?.movements, refresh]);
+  }, [movementPolling, refresh]);
 
   async function runMovement(
     label: "Deposit" | "Withdrawal",
@@ -66,6 +91,14 @@ export function App() {
       if (result.movement.status === "failed") {
         throw new Error(
           result.movement.failureReason ?? `${label} failed on devnet`
+        );
+      }
+      if (isPendingMovement(result.movement)) {
+        updateMovementPolling(
+          startMovementPolling(
+            movementPollingRef.current,
+            result.movement.movementId
+          )
         );
       }
       toast.success(
@@ -94,28 +127,31 @@ export function App() {
   }
 
   return (
-    <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
-      <BankSidebar />
-      <div className="min-w-0 flex-1 lg:p-1">
-        <MobileHeader />
-        <main className="min-h-[calc(100svh-57px)] bg-background lg:h-full lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-foreground/5">
-          {!data && !error ? <DashboardSkeleton /> : null}
-          {error && !data ? (
-            <SetupError message={error} onRetry={() => void refresh()} />
-          ) : null}
-          {data ? (
-            <OverviewDashboard
-              data={data}
-              refreshing={refreshing}
-              busy={busy}
-              onRefresh={() => void refresh(true)}
-              onDeposit={handleDeposit}
-              onWithdraw={handleWithdrawal}
-            />
-          ) : null}
-        </main>
+    <>
+      <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
+        <BankSidebar />
+        <div className="min-w-0 flex-1 lg:p-1">
+          <MobileHeader />
+          <main className="min-h-[calc(100svh-57px)] bg-background lg:h-full lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-foreground/5">
+            {!data && !error ? <DashboardSkeleton /> : null}
+            {error && !data ? (
+              <SetupError message={error} onRetry={() => void refresh()} />
+            ) : null}
+            {data ? (
+              <OverviewDashboard
+                data={data}
+                refreshing={refreshing}
+                busy={busy}
+                onRefresh={() => void refresh(true)}
+                onDeposit={handleDeposit}
+                onWithdraw={handleWithdrawal}
+              />
+            ) : null}
+          </main>
+        </div>
       </div>
-    </div>
+      <Toaster richColors position="bottom-right" />
+    </>
   );
 }
 
@@ -144,8 +180,8 @@ function SetupError({
             {message}
           </p>
           <p className="text-sm text-muted-foreground">
-            Add the four values in <code>.env</code>, start the local SDP API,
-            then retry. The example README contains the complete runbook.
+            Check the server environment and SDP endpoint, then retry. The
+            example README contains the complete local and Vercel runbooks.
           </p>
           <Button type="button" className="w-fit" onClick={onRetry}>
             <RefreshCwIcon data-icon="inline-start" />

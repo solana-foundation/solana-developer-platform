@@ -1,3 +1,5 @@
+import "server-only";
+
 import { getBase58Codec } from "@solana/codecs";
 import { createKeyPairSignerFromBytes, type KeyPairSigner } from "@solana/kit";
 import { z } from "zod";
@@ -10,10 +12,6 @@ const configSchema = z.object({
     .min(1, "DEMO_WALLET_PRIVATE_KEY is required"),
   DEMO_FEE_PAYER_PRIVATE_KEY: z.string().min(1).optional(),
   SOLANA_RPC_URL: z.url().default("https://api.devnet.solana.com"),
-  DEMO_API_PORT: z.coerce.number().int().min(1).max(65_535).default(4174),
-  NORTHSTAR_DEMO_SESSION_TOKEN: z
-    .string()
-    .min(32, "Start Northstar with its documented pnpm command"),
 });
 
 export type DemoConfig = z.infer<typeof configSchema>;
@@ -28,7 +26,7 @@ export function getConfig(): DemoConfig {
   const result = configSchema.safeParse(process.env);
   if (!result.success) {
     const messages = result.error.issues
-      .map((issue) => issue.message)
+      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
       .join("; ");
     throw new Error(`Invalid demo configuration: ${messages}`);
   }
