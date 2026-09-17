@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { DashboardShot } from "@/components/dashboard-shot";
+import { DashboardPreview } from "@/components/dashboard-preview";
 import { EarnDemo } from "@/components/earn-demo";
 import { PhoneFrame } from "@/components/phone-frame";
 import { Reveal } from "@/components/reveal";
@@ -154,7 +154,7 @@ function CustodySection() {
 
 function ConfigureSection() {
   return (
-    <StepLayout id="configure" visual={<DashboardShot />}>
+    <StepLayout id="configure" visual={<DashboardPreview />}>
       <div className="text-left">
         <Kicker index={2} label="Configure" />
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-foreground lg:text-4xl">
