@@ -195,9 +195,11 @@ export function sharesForAmount(
     position.withdrawableShares === undefined ||
     position.tokenValue === undefined
   ) {
+    // Missing valuation fields are provider state, not malformed client
+    // input, so report a retryable 503 instead of a client-correcting 400.
     throw new ApiRequestError(
-      400,
-      "INVALID_REQUEST",
+      503,
+      "VALUATION_UNAVAILABLE",
       "Savings balance is still updating; refresh and try again"
     );
   }
