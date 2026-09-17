@@ -4,12 +4,14 @@ import {
   DEFAULT_ISSUANCE_LIST_QUERY,
   getIssuanceListResultSetKey,
   hasActiveIssuanceListFilters,
+  InvalidIssuanceSearchEncodingError,
   ISSUANCE_DEFAULT_PAGE_SIZE,
   ISSUANCE_MAX_PAGE,
   ISSUANCE_MAX_PAGE_SIZE,
   type IssuanceListQuery,
   isSameIssuanceListQuery,
   parseIssuanceListQuery,
+  parseIssuanceListRequestQuery,
   toIssuanceListRequestParams,
   toIssuanceListUrlParams,
   toIssuanceTokensApiParams,
@@ -172,7 +174,22 @@ describe("toIssuanceListUrlParams", () => {
       pageSize: 48,
     });
     const params = toIssuanceListRequestParams(original);
-    expect(parseIssuanceListQuery(params)).toEqual(original);
+    expect(parseIssuanceListRequestQuery(params)).toEqual(original);
+  });
+
+  it("encodes SQL-shaped unicode searches for the browser-to-BFF request", () => {
+    const search = "qa-no-match-' OR 1=1 -- 🚀";
+    const params = toIssuanceListRequestParams(query({ search }));
+
+    expect(params.has("search")).toBe(false);
+    expect(params.get("searchEncoded")).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(parseIssuanceListRequestQuery(params).search).toBe(search);
+  });
+
+  it("rejects malformed encoded searches instead of widening them to an unfiltered list", () => {
+    expect(() =>
+      parseIssuanceListRequestQuery(new URLSearchParams({ searchEncoded: "%%%invalid%%%" }))
+    ).toThrow(InvalidIssuanceSearchEncodingError);
   });
 });
 

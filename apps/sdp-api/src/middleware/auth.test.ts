@@ -3,10 +3,12 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
+import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { requireAdminApiKeyRole } from "@/middleware/auth";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import {
   TEST_API_KEY,
@@ -20,6 +22,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 describe("Auth Middleware", () => {
   let validKeyHash: string;
@@ -571,6 +574,62 @@ describe("Auth Middleware", () => {
       );
       expect(unresolved.status).toBe(200);
       expect(await createKVStoreSet(env).apiKeys.get(`key:${validKeyHash}`, "json")).toBeNull();
+    });
+  });
+
+  describe("requireAdminApiKeyRole", () => {
+    function gatedApp(actor: { apiKey?: { role: string }; session?: { permissions: string[] } }) {
+      const gated = new Hono<{ Bindings: Env }>();
+      gated.use("*", async (c, next) => {
+        if (actor.apiKey) {
+          // SAFETY: the gate reads only `role` from the cached key.
+          c.set("apiKey", actor.apiKey as never);
+        }
+        if (actor.session) {
+          // SAFETY: grantedPermissions reads only `permissions` from the session.
+          c.set("session", actor.session as never);
+        }
+        await next();
+      });
+      gated.onError((error, c) =>
+        c.json({ error: error instanceof Error ? error.message : "unknown" }, 403)
+      );
+      gated.put("/gated", requireAdminApiKeyRole(), (c) => c.json({ ok: true }));
+      return gated;
+    }
+
+    it("refuses a non-admin API key", async () => {
+      const res = await gatedApp({ apiKey: { role: "api_developer" } }).request(
+        "/gated",
+        { method: "PUT" },
+        env
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("allows an api_admin API key", async () => {
+      const res = await gatedApp({ apiKey: { role: "api_admin" } }).request(
+        "/gated",
+        { method: "PUT" },
+        env
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it("refuses a dashboard session without org:admin", async () => {
+      // An org member holds wallets:write and payments:write, which used to be
+      // enough to author the wallet policies that gate money movement.
+      const res = await gatedApp({
+        session: { permissions: ["wallets:write", "payments:write", "api-keys:write"] },
+      }).request("/gated", { method: "PUT" }, env);
+      expect(res.status).toBe(403);
+    });
+
+    it("allows a dashboard session holding org:admin", async () => {
+      const res = await gatedApp({
+        session: { permissions: ["org:admin", "wallets:write", "payments:write"] },
+      }).request("/gated", { method: "PUT" }, env);
+      expect(res.status).toBe(200);
     });
   });
 

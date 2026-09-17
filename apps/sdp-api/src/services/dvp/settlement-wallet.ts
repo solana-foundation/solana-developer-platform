@@ -14,6 +14,7 @@
  */
 
 import { type Address, address } from "@solana/kit";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
@@ -47,11 +48,13 @@ interface Scope {
  * race is a worse failure mode than leaving an unused one behind.
  *
  * @param env - API process environment.
+ * @param auditContext - Authenticated initiating request for wallet creation audit.
  * @param scope - Organization and project the trade belongs to.
  * @returns The settlement wallet's record id and address.
  */
 export async function getOrCreateDvpSettlementWallet(
   env: Env,
+  auditContext: Context<{ Bindings: Env }>,
   scope: Scope
 ): Promise<DvpSettlementWallet> {
   const existing = await readSettlementWallet(env, scope);
@@ -73,6 +76,8 @@ export async function getOrCreateDvpSettlementWallet(
   }
 
   const provisioned = await provisionApiKeyWallet(getDb(env), env, {
+    auditContext,
+    creationReason: "dvp_settlement_authority",
     organizationId: scope.organizationId,
     projectId: scope.projectId,
     // Both, and they are NOT the same argument. `projectId` scopes the custody
