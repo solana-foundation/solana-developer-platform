@@ -552,9 +552,13 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     expect(rendered.result.current.isComplete).toBe(false);
 
     act(() => rendered.result.current.toggleAgreement("bvnk_platform_agreement", true));
+    act(() => rendered.result.current.toggleAgreement("bvnk_privacy_policy", true));
+    act(() => rendered.result.current.toggleAgreement("bvnk_privacy_policy:privacy-policy", true));
     expect(rendered.result.current.isComplete).toBe(false);
 
-    act(() => rendered.result.current.toggleAgreement("bvnk_privacy_policy", true));
+    act(() =>
+      rendered.result.current.toggleAgreement("bvnk_platform_agreement:privacy-policy", true)
+    );
     expect(rendered.result.current.isComplete).toBe(true);
 
     act(() => rendered.result.current.toggleAgreement("bvnk_platform_agreement", false));

@@ -181,6 +181,20 @@ export interface AdvanceRequirementsPayload {
 /** Advance kinds select the submission body: collected field data, or a pure consent flag. */
 export type AdvanceRequirementsKind = "collected" | "consent";
 
+/**
+ * Consent keys one pending agreement requires: the agreement text and its
+ * privacy policy are acknowledged separately, so each gets its own key.
+ *
+ * @param agreement - Pending agreement from the requirements answer.
+ * @returns The two consent keys the step gate expects for this agreement.
+ */
+export function bvnkAgreementConsentKeys(agreement: { name: string }): {
+  agreement: string;
+  privacyPolicy: string;
+} {
+  return { agreement: agreement.name, privacyPolicy: `${agreement.name}:privacy-policy` };
+}
+
 type CounterpartyRequirementsAdvanceBody =
   | (AdvanceRequirementsPayload & {
       collectedData: CollectedFieldData;
@@ -358,19 +372,19 @@ export interface CounterpartyRequirementsState {
     | Extract<CounterpartyRequirements, { status: "counterparty_collect_agreement" }>["agreements"]
     | null;
   /**
-   * Names of the agreements the user has consented to for the current corridor,
-   * matched against `pendingAgreements` by name; cleared whenever the corridor
-   * changes so consent never leaks across subjects.
+   * Consent keys (see `bvnkAgreementConsentKeys`) the user has ticked for the
+   * current corridor; cleared whenever the corridor changes so consent never
+   * leaks across subjects.
    */
   acceptedAgreements: readonly string[];
   /**
-   * Records or withdraws consent for one agreement by name; the step gate
-   * releases only once every pending agreement is accepted.
+   * Records or withdraws one consent key; the step gate releases only once
+   * every pending agreement has both of its keys accepted.
    *
-   * @param name - The agreement name from the requirements answer.
-   * @param accepted - Whether the user checked (true) or unchecked (false) the agreement.
+   * @param key - A consent key from `bvnkAgreementConsentKeys`.
+   * @param accepted - Whether the user checked (true) or unchecked (false) it.
    */
-  toggleAgreement: (name: string, accepted: boolean) => void;
+  toggleAgreement: (key: string, accepted: boolean) => void;
 }
 
 /**
@@ -439,9 +453,9 @@ export function useCounterpartyRequirements(
     setAdvanceRecord(null);
     setCollectRecord(null);
   }
-  const toggleAgreement = useCallback((name: string, accepted: boolean) => {
+  const toggleAgreement = useCallback((key: string, accepted: boolean) => {
     setAcceptedAgreements((previous) =>
-      accepted ? [...previous, name] : previous.filter((acceptedName) => acceptedName !== name)
+      accepted ? [...previous, key] : previous.filter((acceptedKey) => acceptedKey !== key)
     );
   }, []);
   const advance =
@@ -589,7 +603,13 @@ export function useCounterpartyRequirements(
       : null;
   const allAgreementsAccepted =
     pendingAgreements !== null &&
-    pendingAgreements.every((agreement) => acceptedAgreements.includes(agreement.name));
+    pendingAgreements.every((agreement) => {
+      const keys = bvnkAgreementConsentKeys(agreement);
+      return (
+        acceptedAgreements.includes(keys.agreement) &&
+        acceptedAgreements.includes(keys.privacyPolicy)
+      );
+    });
   const freshTree = payoutTreeOf(data);
   const payout = freshTree !== null ? freshTree : payoutTreeOf(requirementsData);
   const fields = useMemo<RequirementField[]>(() => {

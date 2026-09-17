@@ -19,10 +19,10 @@ const agreements: Extract<
     privacyPolicyUrl: "https://www.bvnk.com/privacy-policy",
   },
   {
-    name: "privacy_policy",
-    displayName: "Privacy Policy",
-    description: "Privacy Policy",
-    url: "https://www.bvnk.com/privacy-policy",
+    name: "fee_schedule",
+    displayName: "Fee Schedule",
+    description: "Fee Schedule",
+    url: "https://help.bvnk.com/en/articles/fee-schedule",
     privacyPolicyUrl: "https://www.bvnk.com/privacy-policy",
   },
 ];
@@ -43,21 +43,25 @@ function renderConsent(onToggle: (name: string, accepted: boolean) => void) {
 describe("BvnkAgreementConsent", () => {
   afterEach(cleanup);
 
-  it("renders one checklist row per agreement", () => {
+  it("renders an agreement row and a privacy-policy row per agreement", () => {
     renderConsent(() => {});
 
-    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
     expect(screen.getByRole("button", { name: "Platform Agreement" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Privacy Policy" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Fee Schedule" })).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "privacy policy" })).toHaveLength(2);
   });
 
-  it("reports a checkbox click as consent for that agreement", () => {
+  it("reports each checkbox as its own consent key", () => {
     const onToggle = vi.fn();
     renderConsent(onToggle);
 
-    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[0]);
+    fireEvent.click(checkboxes[1]);
 
     expect(onToggle).toHaveBeenCalledWith("platform_agreement", true);
+    expect(onToggle).toHaveBeenCalledWith("platform_agreement:privacy-policy", true);
   });
 
   it("does not toggle consent when an inline link is clicked", () => {

@@ -5,6 +5,7 @@ import { CheckIcon, ShieldCheckIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { openBvnkCustomerLink } from "@/lib/trusted-ramp-destinations";
+import { bvnkAgreementConsentKeys } from "../hooks/use-counterparty-requirements";
 
 type PendingAgreements = Extract<
   CounterpartyRequirements,
@@ -33,13 +34,56 @@ function AgreementLink({ url, children }: { url: string; children: ReactNode }) 
 }
 
 /**
- * Renders BVNK's agreement consent as a checklist: one row per required
- * agreement with an animated checkbox and inline agreement/privacy-policy
- * links. Consent is recorded per agreement in the requirements hook; the
- * wizard's primary action submits once every agreement is checked.
+ * One consent row: a visually hidden native checkbox, its animated box, and
+ * the consent sentence.
  *
- * @param props - Pending agreements, the names already accepted, the toggle
- *   callback, and whether the checkboxes are disabled (advance in flight).
+ * @param props - Checked state, disabled flag, change handler, and the sentence.
+ * @returns The row.
+ */
+function ConsentRow({
+  checked,
+  disabled,
+  onChange,
+  children,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onChange: (accepted: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <li>
+      <label className="group flex cursor-pointer items-start gap-3 py-1.5 text-left has-disabled:cursor-default">
+        <input
+          type="checkbox"
+          className="peer sr-only"
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.currentTarget.checked)}
+        />
+        <span
+          aria-hidden="true"
+          className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border border-[var(--input-border-idle)] transition-colors duration-150 peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:shadow-[0_0_0_2px_var(--input-focus-ring)] motion-reduce:transition-none"
+        >
+          <CheckIcon className="size-3.5 scale-50 text-on-primary opacity-0 transition duration-150 ease-out motion-reduce:transition-none group-has-checked:scale-100 group-has-checked:opacity-100" />
+        </span>
+        <span className="text-sm leading-relaxed text-tertiary transition-colors duration-150 group-has-checked:text-primary">
+          {children}
+        </span>
+      </label>
+    </li>
+  );
+}
+
+/**
+ * Renders BVNK's agreement consent as a checklist: two rows per required
+ * agreement, one for the agreement text and one for its privacy policy, each
+ * with an animated checkbox and an inline link. Consent is recorded per key in
+ * the requirements hook; the wizard's primary action submits once every row
+ * is checked.
+ *
+ * @param props - Pending agreements, the consent keys already accepted, the
+ *   toggle callback, and whether the checkboxes are disabled (advance in flight).
  * @returns The consent checklist.
  */
 export function BvnkAgreementConsent({
@@ -50,7 +94,7 @@ export function BvnkAgreementConsent({
 }: {
   agreements: PendingAgreements;
   acceptedAgreements: readonly string[];
-  onToggle: (name: string, accepted: boolean) => void;
+  onToggle: (key: string, accepted: boolean) => void;
   disabled: boolean;
 }) {
   const t = useTranslations();
@@ -63,37 +107,32 @@ export function BvnkAgreementConsent({
       <p className="max-w-md text-sm leading-relaxed text-tertiary">
         {t("DashboardPayments.bvnk.agreementRequiredDescription")}
       </p>
-      <ul className="flex w-full max-w-md flex-col gap-3">
-        {agreements.map((agreement) => {
-          const accepted = acceptedAgreements.includes(agreement.name);
-          return (
-            <li key={agreement.name}>
-              <label className="group flex cursor-pointer items-start gap-3 rounded-2xl border border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] px-4 py-3 text-left transition-colors duration-150 has-checked:border-[var(--input-border-focus)] has-disabled:cursor-default motion-reduce:transition-none">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  checked={accepted}
-                  disabled={disabled}
-                  onChange={(event) => onToggle(agreement.name, event.currentTarget.checked)}
-                />
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border border-[var(--input-border-idle)] transition-colors duration-150 peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:shadow-[0_0_0_2px_var(--input-focus-ring)]"
-                >
-                  <CheckIcon className="size-3.5 scale-50 text-on-primary opacity-0 transition duration-150 ease-out motion-reduce:transition-none group-has-checked:scale-100 group-has-checked:opacity-100" />
-                </span>
-                <span className="text-sm leading-relaxed text-tertiary transition-colors duration-150 group-has-checked:text-primary">
-                  {t("DashboardPayments.bvnk.agreementConsentPrefix")}{" "}
-                  <AgreementLink url={agreement.url}>{agreement.displayName}</AgreementLink>{" "}
-                  {t("DashboardPayments.bvnk.agreementConsentJoin")}{" "}
-                  <AgreementLink url={agreement.privacyPolicyUrl}>
-                    {t("DashboardPayments.bvnk.privacyPolicy")}
-                  </AgreementLink>
-                  .
-                </span>
-              </label>
-            </li>
-          );
+      <ul className="flex w-full max-w-md flex-col">
+        {agreements.flatMap((agreement) => {
+          const keys = bvnkAgreementConsentKeys(agreement);
+          return [
+            <ConsentRow
+              key={keys.agreement}
+              checked={acceptedAgreements.includes(keys.agreement)}
+              disabled={disabled}
+              onChange={(accepted) => onToggle(keys.agreement, accepted)}
+            >
+              {t("DashboardPayments.bvnk.agreementConsentPrefix")}{" "}
+              <AgreementLink url={agreement.url}>{agreement.displayName}</AgreementLink>.
+            </ConsentRow>,
+            <ConsentRow
+              key={keys.privacyPolicy}
+              checked={acceptedAgreements.includes(keys.privacyPolicy)}
+              disabled={disabled}
+              onChange={(accepted) => onToggle(keys.privacyPolicy, accepted)}
+            >
+              {t("DashboardPayments.bvnk.agreementConsentPrefix")}{" "}
+              <AgreementLink url={agreement.privacyPolicyUrl}>
+                {t("DashboardPayments.bvnk.privacyPolicy")}
+              </AgreementLink>
+              .
+            </ConsentRow>,
+          ];
         })}
       </ul>
     </div>
