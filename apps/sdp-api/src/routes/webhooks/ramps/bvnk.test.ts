@@ -1,7 +1,6 @@
 import { buildBvnkOnrampWalletName } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { describe, expect, it } from "vitest";
 import {
-  bvnkAgreementStatusChangeEvent,
   bvnkChannelTransactionEvent,
   bvnkCustomerStatusChangeEvent,
   bvnkPayinStatusChangeEvent,
@@ -54,37 +53,6 @@ describe("BvnkWebhookProcessor.parse", () => {
       event: "bvnk:platform:customer:update",
       data: { reference: "cp_123e4567e89b12d3a456426614174000" },
     });
-  });
-
-  it("parses an agreement status-change webhook", () => {
-    const processor = new BvnkWebhookProcessor();
-
-    expect(
-      processor.parse(
-        bvnkAgreementStatusChangeEvent({
-          status: "ACCEPTED",
-          respondedAt: "2026-09-02T00:00:00.000Z",
-        })
-      )
-    ).toEqual({
-      event: "bvnk:customers:agreements:status-change",
-      data: {
-        customerId: "customer_1",
-        agreementId: "agreement_1",
-        status: "ACCEPTED",
-        respondedAt: "2026-09-02T00:00:00.000Z",
-      },
-    });
-  });
-
-  it.each(["customerId", "agreementId"])("rejects an agreement event missing %s", (field) => {
-    const processor = new BvnkWebhookProcessor();
-    const data = bvnkAgreementStatusChangeEvent().data;
-    delete data[field as keyof typeof data];
-
-    expect(() =>
-      processor.parse({ event: "bvnk:customers:agreements:status-change", data })
-    ).toThrow(/failed validation/);
   });
 
   it("parses a ledger wallet status-change webhook", () => {

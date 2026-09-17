@@ -31,7 +31,7 @@ export type BvnkOnboardingPanelStatus = Exclude<
   | "collect"
   | "collect_counterparty"
   | "collect_counterparty_residence"
-  | "customer_agreement_required"
+  | "counterparty_collect_agreement"
   | "unsupported"
 >;
 export type LightsparkOnboardingPanelStatus = Exclude<

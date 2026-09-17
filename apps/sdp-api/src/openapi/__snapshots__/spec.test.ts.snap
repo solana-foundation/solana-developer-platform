@@ -2969,25 +2969,31 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                           "description": "Agreement summary text.",
                           "type": "string",
                         },
-                        "downloadUrl": {
-                          "description": "Agreement text URL, minted JIT per response and never persisted.",
-                          "format": "uri",
-                          "type": "string",
-                        },
-                        "id": {
-                          "description": "BVNK agreement id.",
+                        "displayName": {
+                          "description": "Agreement display name.",
                           "type": "string",
                         },
                         "name": {
-                          "description": "Agreement display name.",
+                          "description": "BVNK agreement identifier (v1 agreements have no id).",
+                          "type": "string",
+                        },
+                        "privacyPolicyUrl": {
+                          "description": "Privacy policy URL, stored statically on the customer link.",
+                          "format": "uri",
+                          "type": "string",
+                        },
+                        "url": {
+                          "description": "Agreement text URL, stored statically on the customer link.",
+                          "format": "uri",
                           "type": "string",
                         },
                       },
                       "required": [
-                        "id",
                         "name",
+                        "displayName",
                         "description",
-                        "downloadUrl",
+                        "url",
+                        "privacyPolicyUrl",
                       ],
                       "type": "object",
                     },
@@ -3010,7 +3016,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   },
                   "status": {
                     "enum": [
-                      "customer_agreement_required",
+                      "counterparty_collect_agreement",
                     ],
                     "type": "string",
                   },

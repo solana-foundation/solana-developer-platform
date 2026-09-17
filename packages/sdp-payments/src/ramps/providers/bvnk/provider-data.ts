@@ -91,8 +91,6 @@ export function normalizeBvnkCurrencyAndNetwork(value: string): BvnkCurrencyNetw
   );
 }
 
-export type BvnkVerificationStatus = "init" | "pending" | "completed" | "failed";
-
 /**
  * Builds BVNK's `Idempotency-Key` header for fiat wallet creation.
  *
@@ -201,7 +199,7 @@ export interface BvnkCustomerResolution {
   externalReference?: string;
   customerReference?: string;
   status?: string;
-  verificationStatus?: BvnkVerificationStatus;
+  verificationStatus?: string;
 }
 
 /**
