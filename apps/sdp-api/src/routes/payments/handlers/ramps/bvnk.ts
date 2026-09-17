@@ -43,6 +43,7 @@ import type {
   BvnkLedgerWalletProfilesV2,
   BvnkLedgerWalletProfileV2,
   BvnkLedgerWalletV2,
+  BvnkOnrampTransferProviderData,
 } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
@@ -1019,7 +1020,7 @@ export async function ensureBvnkPaymentRule(
         customerIdentifier: customer.customerReference,
       },
     });
-    entry = { ...entry, ruleId: rule.id ?? entry.ruleId, ruleStatus: rule.status };
+    entry = { ...entry, ruleId: rule.id, ruleStatus: rule.status };
     await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
   }
 
@@ -1037,12 +1038,7 @@ export async function bvnkOnrampQuote(
     customer: BvnkCustomerResolution;
     paymentRule: BvnkOnrampRequestSpec;
   }
-): Promise<{
-  quote: BvnkOnrampQuote;
-  transferProviderData: {
-    bvnk: { ruleId: string; ruleStatus?: string; fundingWalletId?: string };
-  };
-}> {
+): Promise<{ quote: BvnkOnrampQuote; transferProviderData: BvnkOnrampTransferProviderData }> {
   const { currency, network, destinationWalletAddress, fiatCurrency } = input.paymentRule;
   const providerData = input.counterparty.provider_data;
   const customer = input.customer;
@@ -1057,6 +1053,7 @@ export async function bvnkOnrampQuote(
   if (
     !isBvnkCustomerVerified(customer.status) ||
     !entry.ruleId ||
+    !entry.walletId ||
     !entry.bankAccount?.accountNumber
   ) {
     throw counterpartyNotProvisioned("bvnk", "onramp", { customerStatus: customer.status });
@@ -1086,7 +1083,7 @@ export async function bvnkOnrampQuote(
       bvnk: {
         ruleId: entry.ruleId,
         ...(entry.ruleStatus ? { ruleStatus: entry.ruleStatus } : {}),
-        ...(entry.walletId ? { fundingWalletId: entry.walletId } : {}),
+        fundingWalletId: entry.walletId,
       },
     },
   };
