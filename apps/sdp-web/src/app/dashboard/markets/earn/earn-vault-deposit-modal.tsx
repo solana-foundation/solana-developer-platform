@@ -28,7 +28,12 @@ import {
   walletDisplayName,
 } from "./deposit/earn-funding-wallets";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals, MAX_AMOUNT_LENGTH, parseUnsignedDecimal } from "./earn-decimal";
+import {
+  compareUnsignedDecimals,
+  isPositiveDecimal,
+  MAX_AMOUNT_LENGTH,
+  parseUnsignedDecimal,
+} from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
 import {
@@ -86,7 +91,7 @@ export function validateVaultDepositAmount(
   decimals: number | undefined
 ): VaultDepositAmountValidation {
   const amount = parseUnsignedDecimal(value, { maxLength: MAX_AMOUNT_LENGTH });
-  if (!amount || compareUnsignedDecimals(amount.canonical, "0") !== 1) {
+  if (!amount || !isPositiveDecimal(amount.canonical)) {
     return { kind: "invalid" };
   }
   if (decimals === undefined) return { kind: "unknown_scale" };
@@ -1080,7 +1085,7 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
                 submitting ||
                 !selectedWallet ||
                 selectedWalletBalance === undefined ||
-                compareUnsignedDecimals(selectedWalletBalance, "0") !== 1
+                !isPositiveDecimal(selectedWalletBalance)
               }
               label={t("DashboardEarn.vaultWithdraw.max")}
               onClick={onMax}

@@ -20,7 +20,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { BASE58_ADDRESS_PATTERN } from "../base58-address";
-import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
+import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import {
   createEarnWithdrawal,
@@ -37,11 +37,7 @@ export const compareUsdDecimals = compareUnsignedDecimals;
 
 export function isPositiveUsdAmount(value: string): boolean {
   const amount = parseUnsignedDecimal(value, { trim: false });
-  return (
-    amount !== undefined &&
-    decimalScale(value) <= 6 &&
-    compareUnsignedDecimals(amount.canonical, "0") === 1
-  );
+  return amount !== undefined && decimalScale(value) <= 6 && isPositiveDecimal(amount.canonical);
 }
 
 export function withdrawalRequestSignature(
