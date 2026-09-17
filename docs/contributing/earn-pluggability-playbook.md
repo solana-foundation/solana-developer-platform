@@ -583,10 +583,11 @@ provider adds:
    changing programs confirm it actually ran (or run
    `pnpm kora:devnet:test`). The mainnet toml has no live check, so keep it
    correct by hand. That is
-   future-proofing rather than live exposure: Earn sponsorship is
-   cluster-gated to devnet (`EARN_VAULT_SPONSORSHIP_CLUSTERS` in
-   `apps/sdp-api/src/lib/feature-flags.ts`), and extending live coverage to
-   mainnet belongs with the PRO-1736 opening. Miss an allowlist and Kora
+   future-proofing rather than live exposure: Earn sponsors a cluster only
+   when the deployment has a Kora for it (`isEarnVaultSponsorshipEnabled` in
+   `apps/sdp-api/src/lib/feature-flags.ts` reads the configured endpoints),
+   and no deployment wires the mainnet Kora yet; extending live coverage to
+   mainnet belongs with the PRO-1738 opening. Miss an allowlist and Kora
    rejects the whole sponsored transaction at request time. Embedded Yield's
    caller-provided `feePayer` does not use Kora: the provider plan must accept
    that address as its `rentPayer`, the partner and owner both sign, and submit

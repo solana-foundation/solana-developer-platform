@@ -1,6 +1,9 @@
 import { address } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import type { SponsorshipReconciliationReservation } from "@/db/repositories/sponsorship-budget.repository";
+import type {
+  SponsorshipBudgetPolicy,
+  SponsorshipReconciliationReservation,
+} from "@/db/repositories/sponsorship-budget.repository";
 import type { Env } from "@/types/env";
 import { sponsorshipProviderConfigFingerprint } from "../sponsorship-budget.service";
 import {
@@ -95,6 +98,23 @@ function reservation(
   };
 }
 
+/**
+ * Every tick now runs one pass per network, so a mock must answer the way the
+ * real repository does: keyed on the network the pass asks about. The devnet
+ * fixtures below belong to devnet; mainnet has nothing outstanding and an
+ * enabled, untripped policy unless a test says otherwise.
+ */
+function answerGlobalPolicy(
+  repository: { getGlobalPolicy: ReturnType<typeof vi.fn> },
+  devnetPolicy: SponsorshipBudgetPolicy | null
+) {
+  repository.getGlobalPolicy.mockImplementation(async (network: string) =>
+    network === "devnet"
+      ? devnetPolicy
+      : devnetPolicy && { ...devnetPolicy, network: "mainnet", enabled: true, updatedBy: "test" }
+  );
+}
+
 function harness(candidate: SponsorshipReconciliationReservation) {
   const breakerPolicy = {
     id: "global",
@@ -111,18 +131,21 @@ function harness(candidate: SponsorshipReconciliationReservation) {
     updatedAt: "2026-08-03T10:00:00.000Z",
   };
   const repository = {
-    listReconciliationCandidates: vi.fn().mockResolvedValue([candidate]),
+    listReconciliationCandidates: vi.fn(async (network: string) =>
+      network === candidate.network ? [candidate] : []
+    ),
     recordReconciliationMiss: vi.fn().mockResolvedValue(true),
     settleReservation: vi.fn().mockResolvedValue(true),
     markChargedUnknown: vi.fn().mockResolvedValue(true),
     getReservation: vi.fn().mockResolvedValue(null),
-    getGlobalPolicy: vi.fn().mockResolvedValue({ ...breakerPolicy, enabled: true }),
+    getGlobalPolicy: vi.fn(),
     tripGlobalBreaker: vi.fn().mockResolvedValue(breakerPolicy),
     resumeGlobalBreaker: vi.fn().mockResolvedValue(null),
     recordProviderConfigFailure: vi.fn().mockResolvedValue(1),
     resetProviderConfigFailures: vi.fn().mockResolvedValue(undefined),
     markRedisSettled: vi.fn().mockResolvedValue(true),
   };
+  answerGlobalPolicy(repository, { ...breakerPolicy, enabled: true });
   const budgetRedis = {
     settle: vi.fn().mockResolvedValue(0),
     syncPolicy: vi.fn().mockResolvedValue(undefined),
@@ -150,6 +173,67 @@ function harness(candidate: SponsorshipReconciliationReservation) {
 }
 
 describe("reconcileSponsorshipBudgets", () => {
+  it("runs one pass per network every tick, whether or not a paymaster is wired", async () => {
+    // Reservations outlive configuration: a mainnet reservation made while a
+    // mainnet Kora was wired must still be settled after it is unwired, so no
+    // network is skipped. A network with nothing outstanding exits early.
+    const { repository, budgetRedis, getTransaction, isBlockhashValid } = harness(reservation());
+    repository.listReconciliationCandidates.mockResolvedValue([]);
+    const deps = {
+      repository,
+      budgetRedis,
+      getTransaction,
+      isBlockhashValid,
+      getProviderConfiguration: vi.fn().mockResolvedValue(PROVIDER_CONFIGURATION),
+      now: () => new Date("2026-08-03T10:05:00.000Z"),
+      sleep: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await reconcileSponsorshipBudgets(
+      { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
+      deps
+    );
+
+    expect(repository.listReconciliationCandidates.mock.calls.map(([network]) => network)).toEqual([
+      "devnet",
+      "mainnet",
+    ]);
+    expect(deps.getProviderConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("reports a network with outstanding reservations but no readable paymaster as a failed pass", async () => {
+    // Devnet settles normally; mainnet still has a reservation but its Kora is
+    // gone, so its pass fails loudly and counts a config failure instead of
+    // leaving the reservation and its budget locked in silence.
+    const { repository, budgetRedis, getTransaction, isBlockhashValid } = harness(reservation());
+    repository.listReconciliationCandidates.mockImplementation(async (network: string) =>
+      network === "mainnet" ? [reservation({ id: "reservation_mainnet", network: "mainnet" })] : []
+    );
+    const getProviderConfiguration = vi.fn(async (cluster: string) => {
+      if (cluster === "mainnet-beta") throw new Error("Kora is not configured for mainnet-beta");
+      return PROVIDER_CONFIGURATION;
+    });
+
+    await expect(
+      reconcileSponsorshipBudgets(
+        { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
+        {
+          repository,
+          budgetRedis,
+          getTransaction,
+          isBlockhashValid,
+          getProviderConfiguration,
+          now: () => new Date("2026-08-03T10:05:00.000Z"),
+          sleep: vi.fn().mockResolvedValue(undefined),
+        }
+      )
+    ).rejects.toThrow("Kora security configuration is unavailable");
+
+    expect(getProviderConfiguration).toHaveBeenCalledWith("mainnet-beta");
+    expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("mainnet");
+    expect(repository.settleReservation).not.toHaveBeenCalled();
+  });
+
   it("retries terminal rows whose durable Redis settlement is incomplete", async () => {
     const candidate = reservation({
       status: "committed",
@@ -523,7 +607,7 @@ describe("reconcileSponsorshipBudgets", () => {
   it("auto-resumes a config-unavailability breaker trip once the config is readable", async () => {
     const { repository, budgetRedis, run } = harness(reservation());
     repository.listReconciliationCandidates.mockResolvedValue([]);
-    repository.getGlobalPolicy.mockResolvedValue(trippedPolicy());
+    answerGlobalPolicy(repository, trippedPolicy());
     const resumedPolicy = trippedPolicy({ enabled: true, version: 3 });
     repository.resumeGlobalBreaker.mockResolvedValue(resumedPolicy);
 
@@ -540,7 +624,8 @@ describe("reconcileSponsorshipBudgets", () => {
   it("does not auto-resume a policy disabled by an operator", async () => {
     const { repository, run } = harness(reservation());
     repository.listReconciliationCandidates.mockResolvedValue([]);
-    repository.getGlobalPolicy.mockResolvedValue(
+    answerGlobalPolicy(
+      repository,
       trippedPolicy({ updatedBy: "operator:oncall", updateReason: "manual kill" })
     );
 
@@ -552,7 +637,8 @@ describe("reconcileSponsorshipBudgets", () => {
   it("does not auto-resume an integrity breaker trip", async () => {
     const { repository, run } = harness(reservation());
     repository.listReconciliationCandidates.mockResolvedValue([]);
-    repository.getGlobalPolicy.mockResolvedValue(
+    answerGlobalPolicy(
+      repository,
       trippedPolicy({ updateReason: "Actual sponsorship spend 9 exceeded reservation 5" })
     );
 
@@ -564,7 +650,7 @@ describe("reconcileSponsorshipBudgets", () => {
   it("keeps the breaker down without re-tripping when the recovery probe fails", async () => {
     const { repository, budgetRedis, getTransaction } = harness(reservation());
     repository.listReconciliationCandidates.mockResolvedValue([]);
-    repository.getGlobalPolicy.mockResolvedValue(trippedPolicy());
+    answerGlobalPolicy(repository, trippedPolicy());
 
     await expect(
       reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
@@ -586,7 +672,7 @@ describe("reconcileSponsorshipBudgets", () => {
     const { repository, run } = harness(
       reservation({ status: "committed", actualLamports: 3, redisSettledAt: null })
     );
-    repository.getGlobalPolicy.mockResolvedValue(trippedPolicy());
+    answerGlobalPolicy(repository, trippedPolicy());
     const resumedPolicy = trippedPolicy({ enabled: true, version: 3 });
     repository.resumeGlobalBreaker.mockResolvedValue(resumedPolicy);
 

@@ -5,7 +5,7 @@ import {
   resolveFeePaymentProvider,
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
-import type { ProjectEnvironment } from "@sdp/types";
+import type { ProjectEnvironment, SolanaCluster } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -29,6 +29,15 @@ export interface SponsorshipScope {
     type: SponsorshipActorType;
     id: string;
   };
+  /**
+   * The cluster the sponsored transaction executes on. Selects the Kora
+   * endpoint, the budget policies and the network-fee RPC. Omitted means the
+   * process default (`SOLANA_NETWORK`), which is what every flow that builds
+   * against the process RPC wants; a flow that builds per cluster (Earn vault
+   * movements) MUST pass the movement's cluster or a mainnet transaction is
+   * signed by the devnet paymaster and charged to the devnet budget.
+   */
+  cluster?: SolanaCluster;
 }
 
 export interface OwnedSignedSubmission {
@@ -135,7 +144,7 @@ export function createSponsorshipFeePayment(
 ): SponsorshipFeePayment {
   const provider = instrumentVendorPort(
     resolveFeePaymentProvider(env),
-    createFeePaymentAdapter(env, buildKoraUserId(scope))
+    createFeePaymentAdapter(env, buildKoraUserId(scope), scope.cluster)
   );
   return isSelfHostedDeployment(env)
     ? withOwnedSubmissionLifecycle(provider)
@@ -144,11 +153,12 @@ export function createSponsorshipFeePayment(
 
 /** Read Kora security configuration through the same owned construction boundary. */
 export async function getManagedSponsorshipProviderConfiguration(
-  env: Env
+  env: Env,
+  cluster?: SolanaCluster
 ): Promise<SponsorshipProviderConfiguration> {
   const provider = instrumentVendorPort(
     resolveFeePaymentProvider(env),
-    createFeePaymentAdapter(env, "sdp:v1:system:sponsorship-reconciliation")
+    createFeePaymentAdapter(env, "sdp:v1:system:sponsorship-reconciliation", cluster)
   );
   if (!provider.getSponsorshipConfiguration) {
     throw new FeePaymentError(
@@ -213,6 +223,7 @@ export async function createProjectSponsorshipFeePayment(
     organizationId: string;
     projectId: string;
     actor: SponsorshipScope["actor"];
+    cluster?: SolanaCluster;
   }
 ): Promise<SponsorshipFeePayment> {
   const project = await new ProjectService(getDb(env)).getProject(input.projectId);
@@ -225,5 +236,6 @@ export async function createProjectSponsorshipFeePayment(
     organizationId: project.organizationId,
     projectId: project.id,
     actor: input.actor,
+    cluster: input.cluster,
   });
 }

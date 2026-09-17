@@ -144,17 +144,56 @@ export function resolveSolanaRpcProviderUrls(env: RpcEnv): string[] {
   return [...new Set(ordered.map((provider) => provider.url))];
 }
 
+/** The cluster this process's single-cluster configuration (`SOLANA_NETWORK`) serves. */
+export function resolveDefaultCluster(
+  env: Pick<RpcEnv, "SOLANA_NETWORK">
+): "devnet" | "mainnet-beta" {
+  return env.SOLANA_NETWORK ?? "devnet";
+}
+
 export function resolveDefaultSolanaRpcUrl(env: RpcEnv): string | null {
   return resolveSolanaRpcProviderUrls(env)[0] ?? null;
 }
 
 export function getSolanaConfig(env: RpcEnv): SolanaConfig {
   const rpcUrl = resolveDefaultSolanaRpcUrl(env);
-  const network = env.SOLANA_NETWORK ?? "devnet";
+  const network = resolveDefaultCluster(env);
 
   if (!rpcUrl) {
     throw new Error("No Solana RPC endpoint is configured");
   }
 
   return { rpcUrl, network };
+}
+
+/**
+ * The RPC endpoint for `cluster`, on a process that may serve BOTH clusters at
+ * once (a sandbox project is devnet, a production project is mainnet-beta).
+ *
+ * `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL` are explicit overrides and
+ * always win. Without one, the canonical default (`resolveDefaultSolanaRpcUrl`,
+ * with its managed-provider selection and key expansion) is safe ONLY for the
+ * cluster the process names in `SOLANA_NETWORK`; the other cluster answers `""`
+ * so callers fail closed instead of building against the wrong chain.
+ */
+export function resolveClusterRpcUrl(env: RpcEnv, cluster: "devnet" | "mainnet-beta"): string {
+  const explicit = explicitClusterRpcUrl(env, cluster);
+  if (explicit) return explicit;
+  if (resolveDefaultCluster(env) !== cluster) return "";
+  return resolveDefaultSolanaRpcUrl(env)?.trim() ?? "";
+}
+
+/**
+ * The operator's explicit endpoint for `cluster` (`SOLANA_DEVNET_RPC_URL` /
+ * `SOLANA_MAINNET_RPC_URL`), or undefined. It wins for the default cluster too:
+ * an operator who pins a private or isolated endpoint for a cluster means every
+ * read of that cluster, not only the ones the process default cannot serve.
+ */
+export function explicitClusterRpcUrl(
+  env: Pick<RpcEnv, "SOLANA_DEVNET_RPC_URL" | "SOLANA_MAINNET_RPC_URL">,
+  cluster: "devnet" | "mainnet-beta"
+): string | undefined {
+  const value = cluster === "devnet" ? env.SOLANA_DEVNET_RPC_URL : env.SOLANA_MAINNET_RPC_URL;
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
