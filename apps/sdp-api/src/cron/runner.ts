@@ -209,8 +209,6 @@ export function startCron(deps: CronDeps): CronHandle | null {
     )
   );
 
-  // Abandoned BVNK on-ramp quotes expire and their payment rules are
-  // deactivated; unconditional like its sibling sweeps.
   tasks.push(
     scheduleSystemTask(
       BVNK_ONRAMP_EXPIRY_CRON,
