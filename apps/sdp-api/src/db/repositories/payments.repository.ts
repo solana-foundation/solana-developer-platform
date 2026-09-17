@@ -288,6 +288,52 @@ export interface PaymentsRepository {
     params: GetTransferByProviderReferenceInput
   ): Promise<PaymentTransferRow | null>;
   /**
+   * Reads the in-flight BVNK on-ramp transfer bound to a payment rule, when
+   * one exists. A transfer is in flight while its funding wallet rule is
+   * still held: awaiting payment or settling. The rule id lives on
+   * `provider_data.bvnk.ruleId`, so the lookup needs no wallet id.
+   *
+   * @param params - Tenant scope and the BVNK payment rule id.
+   * @returns The matching in-flight transfer, or null when none exists.
+   */
+  findInFlightTransferByBvnkRuleId(params: {
+    ruleId: string;
+    organizationId: string;
+    projectId: string | null;
+  }): Promise<PaymentTransferRow | null>;
+  /**
+   * Reads the single in-flight BVNK on-ramp transfer bound to a virtual
+   * funding wallet, if one exists. A transfer is in flight while it still
+   * holds the funding wallet's payment rule: awaiting payment or settling.
+   * System-level: the funding wallet row id alone decides the match, so the
+   * lookup serves webhook payloads that carry no tenant identity.
+   *
+   * @param params - The `counterparty_provider_accounts` row id of the
+   * virtual funding wallet.
+   * @returns The matching in-flight transfer, or null when none exists.
+   */
+  getInFlightBvnkOnrampTransferByFundingWallet(params: {
+    fundingWalletAccountId: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
+   * Binds the BVNK payment rule to an on-ramp transfer via a
+   * compare-and-swap that matches only while no rule is bound yet, so a
+   * retry after a crash between rule creation and this write can never
+   * overwrite a rule another attempt already bound. The bvnk object is
+   * merged, preserving the funding wallet reference.
+   *
+   * @param input - Tenant scope, transfer id, and the BVNK rule to bind.
+   * @returns The updated transfer, or null when the CAS missed.
+   */
+  bindBvnkOnrampRule(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    ruleId: string;
+    ruleStatus: string;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
    * Atomically binds a provider-owned reference to a provider transfer selected
    * by SDP's internal correlation ID. Replays with the same reference succeed;
    * a different occupied reference is never overwritten.

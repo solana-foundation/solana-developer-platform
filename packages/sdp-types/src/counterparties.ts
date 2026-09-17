@@ -1,5 +1,6 @@
 import type { Country, CountryCode } from "./countries";
 import type { RampProviderId } from "./provider-access";
+import type { BvnkProviderAccountLiveState } from "./payments";
 
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
 export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];
@@ -118,6 +119,12 @@ export interface CounterpartyProviderAccount {
   accountNumberLast4?: string;
   paymentRails?: string[];
   customerLink?: CounterpartyProviderCustomerLink;
+  /**
+   * Just-in-time provider state for the row, fetched from BVNK at request
+   * time and never persisted or cached across requests. Present only for
+   * corridors BVNK serves live.
+   */
+  live?: BvnkProviderAccountLiveState;
 }
 
 export interface CounterpartyProviderCustomerLink {
@@ -129,7 +136,7 @@ export interface CounterpartyProviderCustomerLink {
 export type CounterpartyProviderAccountKind =
   | "customer_link"
   | "payout_account"
-  | "funding_wallet"
+  | "virtual_funding_wallet"
   | "merchant_wallet";
 
 export interface ListCounterpartyProviderAccountsResponse {

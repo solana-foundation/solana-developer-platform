@@ -10,6 +10,10 @@
  */
 
 import { type ScheduledTask, schedule } from "node-cron";
+import {
+  BVNK_ONRAMP_EXPIRY_CRON,
+  runBvnkOnrampExpiryReconciliation,
+} from "@/cron/bvnk-onramp-expiry";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
 import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-split-swaps";
 import { runWithSystemDatabaseIdentity } from "@/db";
@@ -202,6 +206,16 @@ export function startCron(deps: CronDeps): CronHandle | null {
       APPROVED_WALLET_OPERATIONS_CRON,
       "cron:approved-wallet-operations",
       runApprovedWalletOperationRecovery
+    )
+  );
+
+  // Abandoned BVNK on-ramp quotes expire and their payment rules are
+  // deactivated; unconditional like its sibling sweeps.
+  tasks.push(
+    scheduleSystemTask(
+      BVNK_ONRAMP_EXPIRY_CRON,
+      "cron:bvnk-onramp-expiry",
+      runBvnkOnrampExpiryReconciliation
     )
   );
 

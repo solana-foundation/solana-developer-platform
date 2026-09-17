@@ -57,6 +57,7 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import {
+  formatCurrencyAmount,
   formatDisplayAmount,
   formatPaymentTransferType,
   formatTimestamp,
@@ -175,6 +176,7 @@ interface ProviderAccountGroup {
   provider: RampProviderId;
   customerLink: CounterpartyProviderAccount | undefined;
   payoutAccounts: CounterpartyProviderAccount[];
+  fundingWallets: CounterpartyProviderAccount[];
 }
 
 /**
@@ -189,7 +191,12 @@ function groupProviderAccounts(accounts: CounterpartyProviderAccount[]): Provide
   for (const account of accounts) {
     let group = groups.get(account.provider);
     if (group === undefined) {
-      group = { provider: account.provider, customerLink: undefined, payoutAccounts: [] };
+      group = {
+        provider: account.provider,
+        customerLink: undefined,
+        payoutAccounts: [],
+        fundingWallets: [],
+      };
       groups.set(account.provider, group);
     }
     if (account.kind === "customer_link") {
@@ -197,6 +204,9 @@ function groupProviderAccounts(accounts: CounterpartyProviderAccount[]): Provide
     }
     if (account.kind === "payout_account") {
       group.payoutAccounts.push(account);
+    }
+    if (account.kind === "virtual_funding_wallet") {
+      group.fundingWallets.push(account);
     }
   }
   return [...groups.values()];
@@ -219,11 +229,101 @@ function CustomerLinkRow() {
   );
 }
 
+function FundingWalletRow({ account }: { account: CounterpartyProviderAccount }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const [open, setOpen] = useState(false);
+  const live = account.live;
+  const title = `${t("DashboardPayments.counterparty.providerAccountFunding")} · ${
+    account.fiatCurrency ?? ""
+  }`;
+  if (live === undefined) {
+    return (
+      <div className="flex items-center border-t border-border-default px-4 py-2.5 text-sm">
+        <span className="truncate text-sm text-primary">{title}</span>
+      </div>
+    );
+  }
+  if (live.state === "unavailable") {
+    return (
+      <div className="border-t border-border-default px-4 py-2.5 text-sm">
+        <span className="truncate text-sm text-primary">{title}</span>
+        <p className="mt-1 text-xs text-tertiary">
+          {live.code}: {live.message}
+        </p>
+      </div>
+    );
+  }
+  const instrument = live.paymentInstruments[0];
+  return (
+    <div className="border-t border-border-default px-4 py-2.5 text-sm">
+      {instrument === undefined ? (
+        <span className="truncate text-sm text-primary">
+          {title} · {formatCurrencyAmount(live.balance.amount, locale)}
+        </span>
+      ) : (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <ChevronDownIcon
+            className={cn(
+              "size-4 shrink-0 text-secondary transition-transform",
+              !open && "-rotate-90"
+            )}
+          />
+          <span className="truncate text-sm text-primary">
+            {title} · {formatCurrencyAmount(live.balance.amount, locale)}
+          </span>
+        </button>
+      )}
+      {live.activeRule !== undefined && live.activeRule !== null ? (
+        <p className="mt-1 pl-6 text-xs text-tertiary">
+          {t("DashboardPayments.counterparty.providerAccountRuleActive")} →{" "}
+          {shortenAddress(live.activeRule.destinationAddress)} ·{" "}
+          {live.activeRule.cryptoCurrency}
+          {live.activeRule.transferId === null ? null : ` · ${live.activeRule.transferId}`}
+        </p>
+      ) : (
+        <p className="mt-1 pl-6 text-xs text-tertiary">
+          {t("DashboardPayments.counterparty.providerAccountNoActiveRule")}
+        </p>
+      )}
+      {open && instrument !== undefined ? (
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 pl-6 text-xs">
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountAccountHolder")}
+          </dt>
+          <dd className="text-primary">{instrument.accountHolderName}</dd>
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountNumber")}
+          </dt>
+          <dd className="text-primary">{instrument.accountNumber}</dd>
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountBank")}
+          </dt>
+          <dd className="text-primary">{instrument.bankDetails?.name ?? "—"}</dd>
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountRouting")}
+          </dt>
+          <dd className="text-primary">{instrument.bankDetails?.bic ?? "—"}</dd>
+        </dl>
+      ) : null}
+    </div>
+  );
+}
+
 function ProviderAccountCard({ group }: { group: ProviderAccountGroup }) {
   const t = useTranslations();
   const [open, setOpen] = useState(true);
   const { provider, customerLink, payoutAccounts } = group;
-  const expandable = payoutAccounts.length > 0 || RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
+  const fundingWallets = group.fundingWallets;
+  const expandable =
+    payoutAccounts.length > 0 ||
+    fundingWallets.length > 0 ||
+    RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
   const headers = [
     t("DashboardPayments.counterparty.providerAccountCorridor"),
     t("DashboardPayments.counterparty.providerAccountRail"),
@@ -275,6 +375,9 @@ function ProviderAccountCard({ group }: { group: ProviderAccountGroup }) {
         )}
       </div>
       {customerLink !== undefined ? <CustomerLinkRow /> : null}
+      {fundingWallets.map((wallet) => (
+        <FundingWalletRow key={wallet.id} account={wallet} />
+      ))}
       {expandable && open ? (
         payoutAccounts.length === 0 ? (
           <p className="border-t border-border-default px-4 py-3 text-sm text-tertiary">

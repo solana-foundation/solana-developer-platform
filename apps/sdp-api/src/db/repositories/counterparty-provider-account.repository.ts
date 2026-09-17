@@ -1,10 +1,4 @@
-import {
-  BVNK_CRYPTO_CURRENCIES,
-  BVNK_NETWORKS,
-  type BvnkOnrampRequestSpec,
-} from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { internalError } from "@/lib/errors";
@@ -32,7 +26,7 @@ export const counterpartyProviderAccountRowSchema = z.object({
   counterparty_id: z.string(),
   provider: z.enum(RAMP_PROVIDERS),
   provider_customer_reference: z.string().nullable(),
-  kind: z.enum(["customer_link", "payout_account", "funding_wallet", "merchant_wallet"]),
+  kind: z.enum(["customer_link", "payout_account", "virtual_funding_wallet", "merchant_wallet"]),
   external_account_reference: z.string().nullable(),
   fiat_currency: z.string().nullable(),
   destination_country: z.enum(COUNTRY_CODES).nullable(),
@@ -46,20 +40,7 @@ export const counterpartyProviderAccountRowSchema = z.object({
 export type CounterpartyProviderAccountRow = z.infer<typeof counterpartyProviderAccountRowSchema>;
 export type CounterpartyProviderAccountKind = CounterpartyProviderAccountRow["kind"];
 
-const bvnkOnrampRequestSpecSchema = z.object({
-  currency: z.enum(BVNK_CRYPTO_CURRENCIES),
-  network: z.enum(BVNK_NETWORKS),
-  destinationWalletAddress: z.string(),
-  fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
-}) satisfies z.ZodType<BvnkOnrampRequestSpec>;
-
-export const bvnkFundingWalletMetadataSchema = z.object({
-  onrampKey: z.string(),
-  ruleId: z.string().optional(),
-  ruleStatus: z.string().optional(),
-  walletName: z.string().optional(),
-  request: bvnkOnrampRequestSpecSchema.optional(),
-});
+export const bvnkFundingWalletMetadataSchema = z.strictObject({});
 export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadataSchema>;
 
 export const bvnkCustomerLinkMetadataSchema = z.strictObject({});
@@ -104,13 +85,28 @@ export interface GetAccountByKindAndCurrencyInput extends GetCounterpartyProvide
   fiatCurrency: string;
 }
 
-export interface GetFundingWalletByOnrampKeyInput extends GetCounterpartyProviderAccountInput {
-  onrampKey: string;
+export interface GetVirtualFundingWalletInput extends GetCounterpartyProviderAccountInput {
+  fiatCurrency: string;
 }
 
-export interface GetFundingWalletByExternalAccountReferenceInput {
+export interface GetProviderAccountByExternalReferenceInput {
   provider: RampProviderId;
   externalAccountReference: string;
+}
+
+export interface InsertPendingVirtualFundingWalletInput extends GetCounterpartyProviderAccountInput {
+  fiatCurrency: string;
+}
+
+export interface CompleteVirtualFundingWalletReferenceInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  externalAccountReference: string;
+  providerStatus: string;
+}
+
+export interface UpdateVirtualFundingWalletStatusInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  providerStatus: string;
 }
 
 export interface CompleteCustomerLinkInput extends GetCounterpartyProviderAccountInput {
@@ -145,7 +141,7 @@ export type InsertProviderResourceAccountInput = InsertProviderResourceAccountBa
         paymentRail?: string;
       }
     | {
-        kind: "funding_wallet" | "merchant_wallet";
+        kind: "virtual_funding_wallet" | "merchant_wallet";
         destinationCountry?: never;
         paymentRail?: never;
       }
@@ -221,25 +217,58 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Reads an active BVNK funding wallet by its on-ramp key.
+   * Reads the virtual funding wallet for one (counterparty, fiat) corridor.
    *
-   * @param input - Tenant scope, counterparty, provider, and on-ramp key.
-   * @returns The active funding-wallet row, or null when none exists.
+   * @param input - Tenant scope, counterparty, provider, and fiat currency.
+   * @returns The corridor's virtual funding wallet row at any status, or null when none exists.
    */
-  getFundingWalletByOnrampKey(
-    input: GetFundingWalletByOnrampKeyInput
+  getVirtualFundingWallet(
+    input: GetVirtualFundingWalletInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Reads an active funding wallet by its provider-side external account
-   * reference (the BVNK wallet id). System-scoped because webhook payloads
-   * carry no tenant identity; the row supplies the tenant scope.
+   * Reads a provider-account row of any kind by its provider-side external
+   * account reference (the BVNK wallet id). System-scoped because webhook
+   * payloads carry no tenant identity; the row supplies the tenant scope.
    *
    * @param input - Provider and the external account reference to resolve.
-   * @returns The active funding-wallet row, or null when none exists.
+   * @returns The matching row of any kind and status, or null when none exists.
    */
-  getFundingWalletByExternalAccountReference(
-    input: GetFundingWalletByExternalAccountReferenceInput
+  getProviderAccountByExternalReference(
+    input: GetProviderAccountByExternalReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Inserts the unbound virtual funding wallet row for a corridor before the
+   * BVNK wallet create; the unique active-corridor index makes the first
+   * provisioner win.
+   *
+   * @param input - Tenant scope, counterparty, provider, and fiat currency.
+   * @returns The inserted row with a null external account reference.
+   */
+  insertPendingVirtualFundingWallet(
+    input: InsertPendingVirtualFundingWalletInput
+  ): Promise<CounterpartyProviderAccountRow>;
+
+  /**
+   * Binds the created BVNK wallet id onto the unbound virtual funding wallet row.
+   *
+   * @param input - Tenant scope plus the row id, BVNK wallet id, and provider status.
+   * @returns The bound row, or null when the reservation was lost underneath the assignment.
+   */
+  completeVirtualFundingWalletReference(
+    input: CompleteVirtualFundingWalletReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Flips a virtual funding wallet row active with the wallet-status webhook's
+   * provider status; stores nothing else.
+   *
+   * @param input - Tenant scope plus the row id and provider status.
+   * @returns The updated row, or null when the row is gone or out of scope.
+   */
+  updateVirtualFundingWalletStatus(
+    input: UpdateVirtualFundingWalletStatusInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
@@ -331,9 +360,10 @@ export interface CounterpartyProviderAccountsRepository {
   listExternalAccounts(input: ListExternalAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
 
   /**
-   * Lists all payout-account and customer-link rows for one counterparty.
-   * Corridor filters apply to payout accounts only; customer links carry no
-   * corridor and are always included for the matching providers.
+   * Lists all payout-account, virtual funding wallet, and customer-link rows
+   * for one counterparty. Corridor filters apply to corridor rows only;
+   * customer links carry no corridor and are always included for the
+   * matching providers.
    *
    * @param input - Tenant, project, counterparty, and optional corridor filters.
    * @returns Active and archived rows in creation order.

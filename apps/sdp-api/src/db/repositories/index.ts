@@ -41,7 +41,6 @@ export type {
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
-  GetFundingWalletByOnrampKeyInput,
   InsertPendingExternalAccountInput,
   InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,

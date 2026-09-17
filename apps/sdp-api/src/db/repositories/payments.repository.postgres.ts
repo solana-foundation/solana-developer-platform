@@ -1,6 +1,7 @@
 import {
   type PaymentTransactionKind,
   type PaymentTransferStatus,
+  RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT,
   tokenFilterAliases,
 } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
@@ -707,6 +708,87 @@ export function createPostgresPaymentsRepository(
            FROM payment_transfers pt WHERE ${scope.where}`
         )
         .bind(...scope.values)
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async findInFlightTransferByBvnkRuleId(params) {
+      assertScope(params);
+      const scope = buildTransferScopeWhere({
+        organizationId: params.organizationId,
+        projectId: params.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        tableAlias: "pt",
+        extraClauses: [
+          "pt.provider = ?",
+          "pt.status = ANY(?)",
+          "pt.provider_data->'bvnk'->>'ruleId' = ?",
+        ],
+        extraValues: ["bvnk", [...RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT], params.ruleId],
+      });
+
+      const row = await db
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt WHERE ${scope.where}`
+        )
+        .bind(...scope.values)
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async getInFlightBvnkOnrampTransferByFundingWallet({ fundingWalletAccountId }) {
+      const row = await db
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
+           WHERE pt.provider = 'bvnk'
+             AND pt.direction = 'onramp'
+             AND pt.status = ANY(?)
+             AND pt.provider_data->'bvnk'->>'fundingWalletAccountId' = ?
+           ORDER BY pt.created_at ASC, pt.id ASC
+           LIMIT 1`
+        )
+        .bind([...RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT], fundingWalletAccountId)
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async bindBvnkOnrampRule(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "provider = 'bvnk'",
+          "type = 'onramp'",
+          "provider_data->'bvnk'->>'ruleId' IS NULL",
+        ],
+        extraValues: [input.transferId],
+      });
+      const row = await db
+        .prepare(
+          `WITH pt AS (
+           UPDATE payment_transfers
+           SET provider_data = provider_data || jsonb_build_object(
+                 'bvnk', COALESCE(provider_data->'bvnk', '{}'::jsonb) || ?::jsonb
+               ),
+               updated_at = ?
+           WHERE ${scope.where}
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
+        )
+        .bind(
+          JSON.stringify({ ruleId: input.ruleId, ruleStatus: input.ruleStatus }),
+          input.updatedAt,
+          ...scope.values
+        )
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;

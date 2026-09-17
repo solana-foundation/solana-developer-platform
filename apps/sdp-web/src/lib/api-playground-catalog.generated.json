@@ -7672,6 +7672,36 @@
                   "providerStatus": "ACTIVE",
                   "createdAt": "2025-01-01T00:00:00.000Z",
                   "providerCustomerReference": "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3"
+                },
+                "live": {
+                  "state": "ok",
+                  "balance": {
+                    "amount": "1000.50",
+                    "currency": "USD"
+                  },
+                  "paymentInstruments": [
+                    {
+                      "type": "FIAT",
+                      "accountHolderName": "Jane Doe",
+                      "accountNumber": "123456789",
+                      "remittanceInformationPrefix": "REF-123",
+                      "bankDetails": {
+                        "name": "Example Bank",
+                        "bic": "EXAMPLEUS",
+                        "nid": {
+                          "value": "021000021",
+                          "type": "ROUTING_NUMBER"
+                        }
+                      }
+                    }
+                  ],
+                  "activeRule": {
+                    "id": "rule_example",
+                    "status": "ACTIVE",
+                    "destinationAddress": "So11111111111111111111111111111111111111112",
+                    "cryptoCurrency": "USDC",
+                    "transferId": "xfr_example"
+                  }
                 }
               }
             ]

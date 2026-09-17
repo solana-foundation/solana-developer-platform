@@ -1,5 +1,4 @@
 import {
-  type BvnkOnrampRequestSpec,
   buildBvnkOnrampWalletName,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { BvnkOnrampTransferProviderData } from "@sdp/payments/ramps/providers/bvnk/schemas";
@@ -52,9 +51,8 @@ export function restoreBvnkSandboxEnv(env: Env, saved: BvnkSandboxEnvSnapshot): 
   env.BVNK_SANDBOX_WALLET_ID = saved.BVNK_SANDBOX_WALLET_ID;
 }
 
-const ONRAMP_KEY = "USD:USDC_SOLANA:dest";
-
-const ONRAMP_WALLET_NAME = buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY);
+/** Display-only on-ramp wallet name in `sdp:onramp:<counterparty>:<fiat>` format. */
+export const ONRAMP_WALLET_NAME = buildBvnkOnrampWalletName("cpty_123", "USD");
 
 /**
  * The raw webhook payload shapes SDP handles, as typed by
@@ -68,14 +66,14 @@ type BvnkWalletStatusChangeData = Extract<
   { event: "ledger:v2:wallet:status-change" }
 >["data"];
 
-export function bvnkWalletStatusChangeEvent(overrides?: Partial<BvnkWalletStatusChangeData>): {
-  event: "ledger:v2:wallet:status-change";
-  data: BvnkWalletStatusChangeData;
-} {
+export function bvnkWalletStatusChangeEvent(
+  overrides?: Partial<BvnkWalletStatusChangeData> & { event?: "ledger:v2:wallet:status-change" | "bvnk:ledger:wallet:create" }
+): Extract<BvnkWebhookInput, { event: "ledger:v2:wallet:status-change" | "bvnk:ledger:wallet:create" }> {
+  const { event, ...dataOverrides } = overrides === undefined ? {} : overrides;
   return {
-    event: "ledger:v2:wallet:status-change",
+    event: event ?? "ledger:v2:wallet:status-change",
     data: {
-      name: ONRAMP_WALLET_NAME,
+      id: TEST_BVNK_WALLET_ID,
       status: "ACTIVE",
       paymentInstruments: [
         {
@@ -84,7 +82,7 @@ export function bvnkWalletStatusChangeEvent(overrides?: Partial<BvnkWalletStatus
           bankDetails: { bic: "LEADUS49XXX", name: "LEAD BANK" },
         },
       ],
-      ...overrides,
+      ...dataOverrides,
     },
   };
 }
@@ -106,6 +104,28 @@ export function bvnkPayinStatusChangeEvent(overrides?: Partial<BvnkPayinStatusCh
       amount: { value: 100 },
       beneficiary: { walletId: "a:1:wallet:1" },
       uuid: "payin_1",
+      ...overrides,
+    },
+  };
+}
+
+type BvnkCryptoStatusChangeData = Extract<
+  BvnkWebhookInput,
+  { event: "bvnk:payment:crypto:status-change" }
+>["data"];
+
+export function bvnkCryptoStatusChangeEvent(overrides?: Partial<BvnkCryptoStatusChangeData>): {
+  event: "bvnk:payment:crypto:status-change";
+  data: BvnkCryptoStatusChangeData;
+} {
+  return {
+    event: "bvnk:payment:crypto:status-change",
+    data: {
+      status: "COMPLETED",
+      type: "OUT",
+      uuid: "crypto_1",
+      walletId: TEST_BVNK_WALLET_ID,
+      reference: "sdp_onramp_xfr_00000000-0000-4000-8000-000000000000",
       ...overrides,
     },
   };
@@ -165,27 +185,13 @@ export function bvnkChannelTransactionEvent(
   };
 }
 
-export function bvnkOnrampRequest(
-  overrides?: Partial<BvnkOnrampRequestSpec>
-): BvnkOnrampRequestSpec {
-  return {
-    fiatCurrency: "USD",
-    currency: "USDC",
-    network: "SOLANA",
-    destinationWalletAddress: "dest",
-    ...overrides,
-  };
-}
-
 export function bvnkTransferProviderData(
-  ruleId: string,
-  fundingWalletId: string,
+  fundingWalletAccountId: string,
   overrides?: Partial<BvnkOnrampTransferProviderData["bvnk"]>
 ): BvnkOnrampTransferProviderData {
   return {
     bvnk: {
-      ruleId,
-      fundingWalletId,
+      fundingWalletAccountId,
       ...overrides,
     },
   };
@@ -204,27 +210,11 @@ export interface BvnkOfframpProviderData {
   >;
 }
 
-export type BvnkOnrampProviderData = {
-  bvnk: {
-    wallets?: Record<string, Record<string, unknown>>;
-    offramp?: BvnkOfframpProviderData;
-  };
-};
-
 export function bvnkOnrampProviderDataSeed(input: {
-  wallets?: Record<string, unknown>;
   offramp?: BvnkOfframpProviderData;
-  onrampKey?: string;
-}): BvnkOnrampProviderData {
+}): { bvnk: { offramp?: BvnkOfframpProviderData } } {
   return {
     bvnk: {
-      ...(input.wallets === undefined
-        ? {}
-        : {
-            wallets: {
-              [input.onrampKey === undefined ? ONRAMP_KEY : input.onrampKey]: input.wallets,
-            },
-          }),
       ...(input.offramp === undefined ? {} : { offramp: input.offramp }),
     },
   };

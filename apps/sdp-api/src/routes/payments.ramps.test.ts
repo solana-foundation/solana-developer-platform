@@ -1196,6 +1196,129 @@ describe("Payments routes — ramps", () => {
     expect(body.error.code).toBe("CONFLICT");
   });
 
+  it("rejects a BVNK on-ramp quote with fiat outside the sandbox set before any BVNK call", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "customer_gbp_onramp" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const res = await app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `*** ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "bvnk",
+          counterpartyId,
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
+          fiatCurrency: "GBP",
+          fiatAmount: "100.00",
+        }),
+      },
+      env
+    );
+
+    // BVNK only surfaces USD/EUR corridors (BVNK_SANDBOX_FIAT_CURRENCIES), so
+    // any other fiat is refused before the provider is ever reached.
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("UNSUPPORTED_CORRIDOR");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("rejects a BVNK off-ramp quote with fiat outside the sandbox set before any BVNK call", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "customer_gbp_offramp" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `*** ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "bvnk",
+          counterpartyId,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
+          fiatCurrency: "GBP",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("UNSUPPORTED_CORRIDOR");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("returns unsupported for BVNK on-ramp requirements with fiat outside the sandbox set", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "customer_gbp_req_onramp" });
+
+    const res = await app.request(
+      `/v1/counterparties/${counterpartyId}/requirements`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `*** ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "bvnk",
+          direction: "onramp",
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          fiatCurrency: "GBP",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      provider: "bvnk",
+      direction: "onramp",
+      status: "unsupported",
+    });
+  });
+
+  it("returns unsupported for BVNK off-ramp requirements with fiat outside the sandbox set", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "customer_gbp_req_offramp" });
+
+    const res = await app.request(
+      `/v1/counterparties/${counterpartyId}/requirements`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `*** ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "bvnk",
+          direction: "offramp",
+          assetRail: "usdc.solana",
+          fiatCurrency: "GBP",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      provider: "bvnk",
+      direction: "offramp",
+      status: "unsupported",
+    });
+  });
+
   async function seedRampTransfer(input: {
     id: string;
     provider: string;

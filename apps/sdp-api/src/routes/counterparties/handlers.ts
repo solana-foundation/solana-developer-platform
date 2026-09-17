@@ -1,10 +1,8 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { BVNK_SANDBOX_FIAT_CURRENCIES } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import {
-  buildBvnkOnrampPaymentRuleKey,
   isBvnkWalletActive,
-  normalizeBvnkCurrencyAndNetwork,
   readBvnkOfframpWallet,
-  readBvnkOnrampPaymentRuleState,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
@@ -283,20 +281,29 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     provider: query.data.provider,
   });
 
-  if (query.data.provider === "bvnk" && providerAccount === null) {
-    return success(c, bvnkCollectRequirements(query.data.direction, counterparty.entity_type));
-  }
-
-  if (query.data.provider === "bvnk" && query.data.direction === "offramp") {
-    const wallet = readBvnkOfframpWallet(counterparty.provider_data, query.data.fiatCurrency);
-    if (wallet !== undefined && isBvnkWalletActive(wallet.status)) {
-      return success(c, readyCounterparty("bvnk", query.data.direction));
+  if (query.data.provider === "bvnk") {
+    if (!BVNK_SANDBOX_FIAT_CURRENCIES.some((currency) => currency === query.data.fiatCurrency)) {
+      return success(c, {
+        provider: "bvnk",
+        direction: query.data.direction,
+        status: "unsupported",
+        reason: `BVNK does not support ${query.data.fiatCurrency} in this environment.`,
+      });
     }
-    return success(c, {
-      provider: "bvnk",
-      direction: query.data.direction,
-      status: "provisioning",
-    });
+    if (providerAccount === null) {
+      return success(c, bvnkCollectRequirements(query.data.direction, counterparty.entity_type));
+    }
+    if (query.data.direction === "offramp") {
+      const wallet = readBvnkOfframpWallet(counterparty.provider_data, query.data.fiatCurrency);
+      if (wallet !== undefined && isBvnkWalletActive(wallet.status)) {
+        return success(c, readyCounterparty("bvnk", query.data.direction));
+      }
+      return success(c, {
+        provider: "bvnk",
+        direction: query.data.direction,
+        status: "provisioning",
+      });
+    }
   }
 
   let payoutAccounts: PayoutRequirementAccount[] | undefined;
@@ -323,17 +330,20 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     assertPaymentWalletExactAccess(c, destinationWallet.id, []);
     const destinationWalletAddress = destinationWallet.publicKey;
     if (query.data.provider === "bvnk") {
-      const { currency, network } = normalizeBvnkCurrencyAndNetwork(
-        getCryptoRailAssetLabel(query.data.assetRail)
-      );
-      const key = buildBvnkOnrampPaymentRuleKey(
-        query.data.fiatCurrency,
-        currency,
-        network,
-        destinationWalletAddress
-      );
-      const entry = readBvnkOnrampPaymentRuleState(counterparty.provider_data, key);
-      if (entry.ruleId && entry.bankAccount?.accountNumber) {
+      const walletRow = await createPostgresCounterpartyProviderAccountsRepository(
+        getDb(c.env)
+      ).getVirtualFundingWallet({
+        organizationId: auth.organizationId,
+        projectId,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: query.data.fiatCurrency,
+      });
+      if (
+        walletRow !== null &&
+        walletRow.external_account_reference !== null &&
+        isBvnkWalletActive(walletRow.provider_status ?? "")
+      ) {
         return success(c, readyCounterparty("bvnk", query.data.direction));
       }
       return success(c, {

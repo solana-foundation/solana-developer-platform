@@ -28,7 +28,7 @@ import { z } from "zod";
 import type { LightsparkPurposeOfPayment } from "./providers/lightspark/provider-data";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
 
-export type { BvnkPaymentRuleResolution, BvnkRuleEntity } from "./providers/bvnk/provider-data";
+export type { BvnkRuleEntity } from "./providers/bvnk/provider-data";
 export type { LightsparkCustomerResolution } from "./providers/lightspark/client";
 export type {
   MuralAccountResolution,

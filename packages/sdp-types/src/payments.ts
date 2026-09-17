@@ -267,6 +267,25 @@ export const FUNDABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
   (status) => RAMP_TRANSFER_STATUS_FUNDABLE[status]
 );
 
+/** BVNK on-ramp transfer statuses that still hold the funding wallet's payment rule. */
+export const RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT = [
+  "awaiting_payment",
+  "settling",
+] as const satisfies readonly PaymentTransferStatus[];
+
+export type BvnkOnrampInFlightTransferStatus =
+  (typeof RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT)[number];
+
+/** Reports whether a BVNK on-ramp transfer still holds the funding wallet's payment rule. */
+export function isBvnkOnrampInFlightStatus(
+  status: PaymentTransferStatus
+): status is BvnkOnrampInFlightTransferStatus {
+  return RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT.some((candidate) => candidate === status);
+}
+
+/** Hours an awaiting_payment BVNK on-ramp transfer keeps its quote before the expiry job abandons it. */
+export const BVNK_ONRAMP_QUOTE_TTL_HOURS = 24;
+
 /** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */
 export const ONCHAIN_TRANSFER_STATUSES = [
   "pending",
@@ -1191,6 +1210,74 @@ export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampIn
 }
 
 export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
+
+/** A BVNK fiat ledger payment instrument, as reported by the wallet V2 API. */
+export const bvnkPaymentInstrumentSchema = z.object({
+  type: z.literal("FIAT"),
+  accountHolderName: z.string(),
+  accountNumber: z.string(),
+  remittanceInformationPrefix: z.string().optional(),
+  bankDetails: z
+    .object({
+      name: z.string(),
+      bic: z.string(),
+      address: z
+        .object({
+          addressLine1: z.string().optional(),
+          addressLine2: z.string().optional(),
+          city: z.string().optional(),
+          country: z.string().optional(),
+          stateCode: z.string().optional(),
+          postCode: z.string().optional(),
+          fullAddress: z.string().optional(),
+        })
+        .optional(),
+      nid: z
+        .object({
+          value: z.string(),
+          type: z.enum(["ROUTING_NUMBER", "SORT_CODE", "OTHER"]),
+        })
+        .optional(),
+    })
+    .optional(),
+});
+export type BvnkPaymentInstrument = z.infer<typeof bvnkPaymentInstrumentSchema>;
+
+/** The ACTIVE payment rule on a BVNK funding wallet, when one exists. */
+export const bvnkProviderAccountActiveRuleSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  destinationAddress: z.string(),
+  cryptoCurrency: z.string(),
+  /** The in-flight transfer whose rule this is, resolved by rule id; null when it matches no transfer. */
+  transferId: z.string().nullable(),
+});
+export type BvnkProviderAccountActiveRule = z.infer<typeof bvnkProviderAccountActiveRuleSchema>;
+
+/**
+ * Live provider-side state for a BVNK provider-account row, fetched JIT per
+ * request and never persisted: the virtual wallet's balance and payment
+ * instruments plus its active payment rule, or an unavailable marker when
+ * the provider read fails.
+ */
+export const bvnkProviderAccountLiveStateSchema = z.discriminatedUnion("state", [
+  z.object({
+    state: z.literal("ok"),
+    balance: z.object({
+      /** Available balance as a decimal string. */
+      amount: z.string(),
+      currency: z.string(),
+    }),
+    paymentInstruments: bvnkPaymentInstrumentSchema.array(),
+    activeRule: bvnkProviderAccountActiveRuleSchema.optional().nullable(),
+  }),
+  z.object({
+    state: z.literal("unavailable"),
+    code: z.string(),
+    message: z.string(),
+  }),
+]);
+export type BvnkProviderAccountLiveState = z.infer<typeof bvnkProviderAccountLiveStateSchema>;
 
 export const MURAL_SANDBOX_PAYIN_CURRENCIES = ["USD", "MXN", "BRL", "ARS"] as const;
 export type MuralSandboxPayinCurrency = (typeof MURAL_SANDBOX_PAYIN_CURRENCIES)[number];

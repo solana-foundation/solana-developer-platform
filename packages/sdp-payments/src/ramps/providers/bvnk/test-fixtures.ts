@@ -1,4 +1,9 @@
-import type { BvnkContactV3, BvnkLedgerWalletProfilesV2, BvnkLedgerWalletV2 } from "./schemas";
+import type {
+  BvnkContactV3,
+  BvnkLedgerWalletProfilesV2,
+  BvnkLedgerWalletV2,
+  BvnkRuleListEntry,
+} from "./schemas";
 
 export function bvnkContactV3(overrides?: Partial<BvnkContactV3>): BvnkContactV3 {
   return {
@@ -48,4 +53,19 @@ export function bvnkWalletProfilesResponse(
     hasNext: false,
     ...overrides,
   } satisfies BvnkLedgerWalletProfilesV2;
+}
+
+export function bvnkRuleListEntry(overrides?: Partial<BvnkRuleListEntry>): BvnkRuleListEntry {
+  return {
+    id: "98c0bb03-567f-11f0-b26e-6b1848874a27",
+    reference: "sdp_onramp_xfr_123e4567-e89b-12d3-a456-426614174000",
+    trigger: "payment:payin:fiat",
+    status: "ACTIVE",
+    originator: { currency: "USD", walletId: "acc:22041242429000:3MPpU:0" },
+    beneficiary: {
+      currency: "USDC",
+      cryptoAddresses: { network: "SOLANA", addresses: ["dest-address"] },
+    },
+    ...overrides,
+  } satisfies BvnkRuleListEntry;
 }

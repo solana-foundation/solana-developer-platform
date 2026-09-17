@@ -1,7 +1,6 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
-import { bvnkOnrampRequest } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -186,10 +185,10 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       counterpartyId: counterparty.id,
       provider: "bvnk",
       providerCustomerReference: "bvnk_customer_resource",
-      kind: "funding_wallet",
+      kind: "virtual_funding_wallet",
       fiatCurrency: "USD",
       externalAccountReference: "wallet_resource_1",
-      metadata: { onrampKey: "USD:USDC_SOLANA:dest", request: bvnkOnrampRequest() },
+      metadata: {},
     });
     const merchantWallet = await repository.insertProviderResourceAccount({
       organizationId: TEST_ORG.id,
@@ -214,35 +213,38 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       })
     ).toMatchObject({ id: merchantWallet.id, kind: "merchant_wallet" });
     expect(
-      await repository.getFundingWalletByOnrampKey({
+      await repository.getAccountByKindAndCurrency({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
         provider: "bvnk",
-        onrampKey: "USD:USDC_SOLANA:dest",
+        kind: "virtual_funding_wallet",
+        fiatCurrency: "USD",
       })
-    ).toMatchObject({ id: fundingWallet.id, kind: "funding_wallet" });
+    ).toMatchObject({ id: fundingWallet.id, kind: "virtual_funding_wallet" });
+    expect(
+      await repository.getVirtualFundingWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: "USD",
+      })
+    ).toMatchObject({ id: fundingWallet.id, kind: "virtual_funding_wallet", metadata: {} });
 
-    const updated = await repository.patchAccountMetadata({
+    const unchanged = await repository.patchAccountMetadata({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "bvnk",
       id: fundingWallet.id,
-      set: { ruleStatus: "ACTIVE" },
+      set: {},
       unset: [],
     });
-    expect(updated?.metadata).toEqual({
-      onrampKey: "USD:USDC_SOLANA:dest",
-      ruleStatus: "ACTIVE",
-      request: {
-        fiatCurrency: "USD",
-        currency: "USDC",
-        network: "SOLANA",
-        destinationWalletAddress: "dest",
-      },
-    });
+    expect(unchanged?.metadata).toEqual({});
 
+    // The virtual funding wallet's metadata is a strict empty object: any key
+    // is rejected by its row-kind schema, rule state lives on the transfer.
     await expect(
       repository.patchAccountMetadata({
         organizationId: TEST_ORG.id,
@@ -250,22 +252,158 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
         provider: "bvnk",
         id: fundingWallet.id,
-        set: {},
-        unset: ["onrampKey"],
+        set: { ruleStatus: "ACTIVE" },
+        unset: [],
       })
     ).rejects.toThrow();
     expect(
-      await repository.getFundingWalletByOnrampKey({
+      await repository.getVirtualFundingWallet({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
         provider: "bvnk",
-        onrampKey: "USD:USDC_SOLANA:dest",
+        fiatCurrency: "USD",
       })
-    ).toMatchObject({
-      id: fundingWallet.id,
-      metadata: { onrampKey: "USD:USDC_SOLANA:dest", ruleStatus: "ACTIVE" },
+    ).toMatchObject({ id: fundingWallet.id, metadata: {} });
+  });
+
+  it("returns the virtual funding wallet for a corridor at any status", async () => {
+    const counterparty = await seedCounterparty("cpacc_corridor_wallet");
+    const wallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_corridor",
+      kind: "virtual_funding_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "wallet_corridor_1",
+      metadata: {},
     });
+    expect(
+      await repository.getVirtualFundingWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: "USD",
+      })
+    ).toMatchObject({ id: wallet.id });
+
+    // The corridor read carries no status filter: an archived wallet is still
+    // the corridor's row and stays resolvable.
+    await getDb(env)
+      .prepare("UPDATE counterparty_provider_accounts SET status = 'archived' WHERE id = ?")
+      .bind(wallet.id)
+      .run();
+    expect(
+      await repository.getVirtualFundingWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: "USD",
+      })
+    ).toMatchObject({ id: wallet.id, status: "archived" });
+
+    expect(
+      await repository.getVirtualFundingWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: "GBP",
+      })
+    ).toBeNull();
+  });
+
+  it("resolves provider accounts of any kind by external account reference", async () => {
+    const counterparty = await seedCounterparty("cpacc_external_reference");
+    const customer = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_external_ref",
+    });
+    const fundingWallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: customer.provider_customer_reference,
+      kind: "virtual_funding_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "a:25031472839104:funding:1",
+      metadata: {},
+    });
+    const merchantWallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: customer.provider_customer_reference,
+      kind: "merchant_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "a:25031472839104:merchant:1",
+      metadata: {},
+    });
+    const payout = await repository.insertPendingExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: customer.provider_customer_reference,
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "ACH",
+    });
+    await repository.completeExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: payout.id,
+      externalAccountReference: "ExternalAccount:webhook_payout",
+      providerStatus: "ACTIVE",
+    });
+
+    expect(
+      await repository.getProviderAccountByExternalReference({
+        provider: "bvnk",
+        externalAccountReference: "a:25031472839104:funding:1",
+      })
+    ).toMatchObject({ id: fundingWallet.id, kind: "virtual_funding_wallet" });
+    expect(
+      await repository.getProviderAccountByExternalReference({
+        provider: "bvnk",
+        externalAccountReference: "a:25031472839104:merchant:1",
+      })
+    ).toMatchObject({ id: merchantWallet.id, kind: "merchant_wallet" });
+    expect(
+      await repository.getProviderAccountByExternalReference({
+        provider: "bvnk",
+        externalAccountReference: "ExternalAccount:webhook_payout",
+      })
+    ).toMatchObject({ id: payout.id, kind: "payout_account" });
+
+    await getDb(env)
+      .prepare("UPDATE counterparty_provider_accounts SET status = 'archived' WHERE id = ?")
+      .bind(merchantWallet.id)
+      .run();
+    expect(
+      await repository.getProviderAccountByExternalReference({
+        provider: "bvnk",
+        externalAccountReference: "a:25031472839104:merchant:1",
+      })
+    ).toMatchObject({ id: merchantWallet.id, status: "archived" });
+
+    expect(
+      await repository.getProviderAccountByExternalReference({
+        provider: "bvnk",
+        externalAccountReference: "a:unknown:wallet:1",
+      })
+    ).toBeNull();
   });
 
   it("lists customer links but keeps them out of corridor reads", async () => {
@@ -503,6 +641,17 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       destinationCountry: "US",
       paymentRail: "ACH",
     });
+    const wallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_list",
+      kind: "virtual_funding_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "wallet_list_1",
+      metadata: {},
+    });
     const gbp = await repository.insertPendingExternalAccount({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
@@ -532,6 +681,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     ).toEqual([
       expect.objectContaining({ id: customer.id, kind: "customer_link" }),
       usd,
+      expect.objectContaining({ id: wallet.id, kind: "virtual_funding_wallet" }),
       expect.objectContaining({ id: gbp.id, status: "archived" }),
     ]);
     expect(

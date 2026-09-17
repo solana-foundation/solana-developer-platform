@@ -3,16 +3,10 @@ import { describe, it } from "node:test";
 import { buildBvnkThirdPartyRuleEntity } from "./counterparty";
 import {
   buildBvnkOfframpWalletName,
-  buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
   buildBvnkWalletIdempotencyKey,
-  parseBvnkOfframpWalletName,
-  parseBvnkOnrampPaymentRuleKey,
-  parseBvnkOnrampWalletName,
 } from "./provider-data";
 import type { BvnkContactV3 } from "./schemas";
-
-const ONRAMP_KEY = "USD:USDC_SOLANA:dest";
 
 function bvnkContactV3Fixture(id: string, entity: BvnkContactV3["entity"]): BvnkContactV3 {
   return {
@@ -141,90 +135,27 @@ describe("buildBvnkThirdPartyRuleEntity", () => {
   });
 });
 
-describe("parseBvnkOfframpWalletName", () => {
-  it("round-trips an SDP off-ramp wallet name", () => {
-    assert.deepEqual(parseBvnkOfframpWalletName(buildBvnkOfframpWalletName("USD", "cpty_123")), {
-      namespace: "sdp",
-      direction: "offramp",
-      fiatCurrency: "USD",
-      counterpartyId: "cpty_123",
-    });
+describe("BVNK wallet names", () => {
+  it("builds the display-only on-ramp wallet name from the counterparty id and fiat currency", () => {
+    assert.equal(buildBvnkOnrampWalletName("cpty_123", "USD"), "sdp:onramp:cpty_123:USD");
+    assert.equal(buildBvnkOnrampWalletName("cpty_456", "EUR"), "sdp:onramp:cpty_456:EUR");
   });
 
-  it("rejects malformed wallet names", () => {
-    assert.throws(() => parseBvnkOfframpWalletName("sdp:onramp:USD:cpty_123"), {
-      message: /Malformed BVNK off-ramp wallet name/,
-    });
-    assert.throws(() => parseBvnkOfframpWalletName("sdp:offramp:NOTFIAT:cpty_123"), {
-      message: /Malformed BVNK off-ramp wallet name/,
-    });
-    assert.throws(() => parseBvnkOfframpWalletName("sdp:offramp:USD:cpty_123:extra"), {
-      message: /Malformed BVNK off-ramp wallet name/,
-    });
-  });
-});
-
-describe("parseBvnkOnrampWalletName", () => {
-  it("round-trips an SDP on-ramp wallet name", () => {
-    const walletName = buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY);
-
-    assert.equal(walletName, "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest");
-    assert.deepEqual(parseBvnkOnrampWalletName(walletName), {
-      namespace: "sdp",
-      direction: "onramp",
-      counterpartyId: "cpty_123",
-      onrampKey: ONRAMP_KEY,
-    });
-  });
-
-  it("rejects wallet names with malformed payment rule keys", () => {
-    assert.throws(() => parseBvnkOnrampWalletName("sdp:onramp:cpty_123:USD:USDC_NOPE:dest"), {
-      message: /Malformed BVNK on-ramp wallet name/,
-    });
+  it("builds the display-only off-ramp wallet name from the counterparty id and fiat currency", () => {
+    assert.equal(buildBvnkOfframpWalletName("cpty_123", "USD"), "sdp:offramp:cpty_123:USD");
+    assert.equal(buildBvnkOfframpWalletName("cpty_456", "EUR"), "sdp:offramp:cpty_456:EUR");
   });
 });
 
 describe("buildBvnkWalletIdempotencyKey", () => {
-  it("hashes the BVNK wallet name to a stable 36-character key", async () => {
-    const walletName = buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY);
+  it("hashes the provider-account row id to a stable 36-character key", async () => {
+    const providerAccountRowId = "counterparty_provider_account_123e4567-e89b-12d3-a456-426614174000";
 
-    const key = await buildBvnkWalletIdempotencyKey(walletName);
+    const key = await buildBvnkWalletIdempotencyKey(providerAccountRowId);
 
     assert.match(key, /^[a-f0-9]{36}$/);
     assert.equal(key.length, 36);
-    assert.equal(await buildBvnkWalletIdempotencyKey(walletName), key);
-    assert.notEqual(await buildBvnkWalletIdempotencyKey(`${walletName}:changed`), key);
-  });
-});
-
-describe("BVNK on-ramp payment rule key", () => {
-  it("builds and parses the payment rule key", () => {
-    const key = buildBvnkOnrampPaymentRuleKey("USD", "USDC", "SOLANA", "dest");
-
-    assert.equal(key, ONRAMP_KEY);
-    assert.deepEqual(parseBvnkOnrampPaymentRuleKey(key), {
-      fiatCurrency: "USD",
-      cryptoCurrency: "USDC",
-      cryptoNetwork: "SOLANA",
-      destinationWalletAddress: "dest",
-    });
-  });
-
-  it("rejects non-Solana crypto networks", () => {
-    assert.throws(() => parseBvnkOnrampPaymentRuleKey("USD:BCH_BITCOIN_CASH:dest"), {
-      message: /Malformed BVNK on-ramp payment rule key/,
-    });
-  });
-
-  it("rejects malformed payment rule keys", () => {
-    assert.throws(() => parseBvnkOnrampPaymentRuleKey("USD:USDC_SOLANA"), {
-      message: /Malformed BVNK on-ramp payment rule key/,
-    });
-    assert.throws(() => parseBvnkOnrampPaymentRuleKey("USD:USDC_NOT_A_NETWORK:dest"), {
-      message: /Malformed BVNK on-ramp payment rule key/,
-    });
-    assert.throws(() => parseBvnkOnrampPaymentRuleKey("NOPE:USDC_SOLANA:dest"), {
-      message: /Malformed BVNK on-ramp payment rule key/,
-    });
+    assert.equal(await buildBvnkWalletIdempotencyKey(providerAccountRowId), key);
+    assert.notEqual(await buildBvnkWalletIdempotencyKey(`${providerAccountRowId}:changed`), key);
   });
 });

@@ -1,9 +1,7 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import {
-  bvnkOfframpFields,
-  isBvnkOfframpCurrency,
-} from "@sdp/payments/ramps/providers/bvnk/counterparty";
+import { bvnkOfframpFields } from "@sdp/payments/ramps/providers/bvnk/counterparty";
+import { BVNK_SANDBOX_FIAT_CURRENCIES } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import {
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
@@ -63,7 +61,6 @@ import {
 } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
-import { providerCustomerReferenceSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import {
   generatePaymentTransferId,
   type PaymentTransferRow,
@@ -130,8 +127,7 @@ import {
   createPendingBvnkOfframpTransfer,
   ensureBvnkOfframpBeneficiary,
   ensureBvnkOfframpWallet,
-  ensureBvnkPaymentRule,
-  requestProvisioningAudit,
+  ensureBvnkVirtualFundingWallet,
 } from "./ramps/bvnk";
 import {
   ensureLightsparkCustomer,
@@ -153,6 +149,13 @@ import {
   rampQuoteExpiryProviderData,
 } from "./ramps/quote-binding";
 import { stripeOnrampQuote } from "./ramps/stripe";
+
+/** Type guard for the single BVNK sandbox fiat set, shared by both ramp directions. */
+function isBvnkSandboxFiatCurrency(
+  value: string
+): value is (typeof BVNK_SANDBOX_FIAT_CURRENCIES)[number] {
+  return BVNK_SANDBOX_FIAT_CURRENCIES.some((currency) => currency === value);
+}
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];
@@ -693,12 +696,12 @@ export async function advanceCounterpartyRequirements(
     case "lightspark":
       return advanceLightsparkRequirements(c, input);
     case "bvnk": {
-      if (input.direction === "offramp" && !isBvnkOfframpCurrency(input.fiatCurrency)) {
+      if (!isBvnkSandboxFiatCurrency(input.fiatCurrency)) {
         return {
           provider: "bvnk",
           direction: input.direction,
           status: "unsupported",
-          reason: `BVNK off-ramp does not support payouts in ${input.fiatCurrency}.`,
+          reason: `BVNK does not support ${input.fiatCurrency} for ${input.direction}.`,
         };
       }
       const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
@@ -709,25 +712,17 @@ export async function advanceCounterpartyRequirements(
         provider: "bvnk" as const,
       };
       const link = await accounts.getProviderAccount(scope);
-      let contactId: string;
       if (link === null) {
         if (input.collectedData === undefined) {
           return bvnkCollectRequirements(input.direction, input.counterparty.entity_type);
         }
-        contactId = (
-          await advanceBvnkContact(c, {
-            counterparty: input.counterparty,
-            projectId: input.projectId,
-            collectedData: input.collectedData,
-          })
-        ).contactId;
-      } else {
-        contactId = providerCustomerReferenceSchema.parse(link.provider_customer_reference);
+        await advanceBvnkContact(c, {
+          counterparty: input.counterparty,
+          projectId: input.projectId,
+          collectedData: input.collectedData,
+        });
       }
       if (input.direction === "offramp") {
-        if (!isBvnkOfframpCurrency(input.fiatCurrency)) {
-          throw internalError(`BVNK off-ramp currency was not validated: ${input.fiatCurrency}.`);
-        }
         const fiatCurrency = input.fiatCurrency;
         const beneficiary = latestBvnkOfframpBeneficiary(
           input.counterparty.provider_data,
@@ -770,26 +765,14 @@ export async function advanceCounterpartyRequirements(
         }
         return readyCounterparty("bvnk", input.direction);
       }
-      const walletScope = await resolveScope(c);
-      const destinationWallet = resolveWalletByCustodyWalletId(
-        walletScope.wallets,
-        input.destinationCustodyWalletId
-      );
-      assertPaymentWalletExactAccess(c, destinationWallet.id, []);
-      const destinationWalletAddress = destinationWallet.publicKey;
-      const { currency, network } = normalizeBvnkCurrencyAndNetwork(
-        getCryptoRailAssetLabel(input.assetRail)
-      );
-      const resolution = await ensureBvnkPaymentRule(
+      const wallet = await ensureBvnkVirtualFundingWallet(
+        c,
         rampRuntime(c),
-        getCounterpartiesRepository(c),
         input.counterparty,
         input.projectId,
-        contactId,
-        { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency },
-        requestProvisioningAudit(c, input.counterparty)
+        input.fiatCurrency
       );
-      if (resolution.onboardingStatus === "provisioning") {
+      if (!isBvnkWalletActive(wallet.provider_status ?? undefined)) {
         return { provider: "bvnk", direction: input.direction, status: "provisioning" };
       }
       return readyCounterparty("bvnk", input.direction);
@@ -1008,28 +991,23 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       const { currency, network } = normalizeBvnkCurrencyAndNetwork(
         getCryptoRailAssetLabel(input.assetRail)
       );
-      const link = await createPostgresCounterpartyProviderAccountsRepository(
-        getDb(c.env)
-      ).getProviderAccount({
-        organizationId: scope.auth.organizationId,
-        projectId,
-        counterpartyId: counterparty.id,
-        provider: "bvnk",
-      });
-      if (link === null || !link.provider_customer_reference) {
-        throw counterpartyNotProvisioned("bvnk", "onramp");
-      }
       const bvnkResult = await bvnkOnrampQuote(c, {
         counterparty,
-        paymentRule: {
-          currency,
-          network,
-          fiatCurrency: input.fiatCurrency,
-          destinationWalletAddress,
-        },
+        organizationId: scope.auth.organizationId,
+        projectId,
+        destinationCustodyWalletId: destinationWallet.id,
+        destinationWalletId: destinationWallet.walletId,
+        destinationWalletAddress,
+        transferId: reservedTransferId,
+        assetRail: input.assetRail,
+        currency,
+        network,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        rampsMemo: input.rampsMemo,
       });
       quote = bvnkResult.quote;
-      transferProviderData = bvnkResult.transferProviderData;
+      precreatedTransferId = bvnkResult.transferId;
       break;
     }
     case "mural": {
@@ -1255,6 +1233,9 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
     case "bvnk": {
       if (!input.fiatCurrency) {
         throw badRequest("fiatCurrency is required for BVNK off-ramp.");
+      }
+      if (!isBvnkSandboxFiatCurrency(input.fiatCurrency)) {
+        throw badRequest(`BVNK off-ramp does not support payouts in ${input.fiatCurrency}.`);
       }
       const beneficiary = latestBvnkOfframpBeneficiary(
         counterparty.provider_data,
@@ -1524,8 +1505,24 @@ export async function simulateSandboxTransfer(
       if (transfer.fiat_amount === null || transfer.fiat_currency === null) {
         throw internalError("BVNK on-ramp transfer has no fiat amount.");
       }
+      const fundingWallet = await createPostgresCounterpartyProviderAccountsRepository(
+        getDb(c.env)
+      ).getVirtualFundingWallet({
+        organizationId: scope.auth.organizationId,
+        projectId,
+        counterpartyId: transfer.counterparty_id,
+        provider: "bvnk",
+        fiatCurrency: transfer.fiat_currency,
+      });
+      if (
+        fundingWallet === null ||
+        fundingWallet.id !== providerData.data.bvnk.fundingWalletAccountId ||
+        fundingWallet.external_account_reference === null
+      ) {
+        throw internalError("BVNK on-ramp transfer has no bound funding wallet.");
+      }
       transaction = await RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), {
-        walletId: providerData.data.bvnk.fundingWalletId,
+        walletId: fundingWallet.external_account_reference,
         amount: toNumberAmount(transfer.fiat_amount),
         currency: transfer.fiat_currency,
         originatorName: counterparty.display_name,

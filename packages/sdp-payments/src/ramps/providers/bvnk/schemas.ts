@@ -24,9 +24,10 @@ export const bvnkOfframpQuoteInputSchema = z.object({
 
 export const bvnkOnrampTransferProviderDataSchema = z.object({
   bvnk: z.object({
-    ruleId: z.string().min(1),
+    fundingWalletAccountId: z.string().min(1),
+    ruleId: z.string().min(1).optional(),
     ruleStatus: z.string().min(1).optional(),
-    fundingWalletId: z.string().min(1),
+    creditedFiatAmount: z.string().min(1).optional(),
   }),
 });
 export type BvnkOnrampTransferProviderData = z.infer<typeof bvnkOnrampTransferProviderDataSchema>;
@@ -167,6 +168,41 @@ const bvnkNullableString = z
   .nullish()
   .transform((value) => value ?? undefined)
   .optional();
+
+const bvnkRuleCryptoAddressesSchema = z.object({
+  network: z.string().optional(),
+  addresses: z.array(z.string()).optional(),
+  tag: z.string().optional(),
+});
+
+const bvnkRuleOriginatorSchema = z.object({
+  currency: z.string().optional(),
+  walletId: z.string().optional(),
+});
+
+const bvnkRuleBeneficiarySchema = z.object({
+  currency: z.string().optional(),
+  entity: z.unknown().optional(),
+  cryptoAddresses: bvnkRuleCryptoAddressesSchema.optional(),
+});
+
+const bvnkRuleListEntrySchema = z.object({
+  id: z.string().min(1),
+  reference: z.string().optional(),
+  trigger: z.string().optional(),
+  status: z.string().min(1),
+  originator: bvnkRuleOriginatorSchema.optional(),
+  beneficiary: bvnkRuleBeneficiarySchema.optional(),
+});
+
+/** BVNK `GET /payment/v1/rules/{walletId}` response — an array of `PaymentRuleResponse`. */
+export const bvnkRuleListResponseSchema = z.array(bvnkRuleListEntrySchema);
+export type BvnkRuleListEntry = z.infer<typeof bvnkRuleListEntrySchema>;
+
+export const bvnkRuleActionRequestSchema = z.object({
+  type: z.enum(["ACTIVATE", "DEACTIVATE"]),
+});
+export type BvnkRuleActionRequest = z.infer<typeof bvnkRuleActionRequestSchema>;
 
 const bvnkContactV3AddressSchema = z.object({
   addressLine1: z.string().min(1),

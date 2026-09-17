@@ -9,8 +9,11 @@ import type {
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
-  GetFundingWalletByExternalAccountReferenceInput,
-  GetFundingWalletByOnrampKeyInput,
+  CompleteVirtualFundingWalletReferenceInput,
+  GetProviderAccountByExternalReferenceInput,
+  GetVirtualFundingWalletInput,
+  InsertPendingVirtualFundingWalletInput,
+  UpdateVirtualFundingWalletStatusInput,
   InsertPendingExternalAccountInput,
   InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,
@@ -41,7 +44,7 @@ function assertProviderAccountMetadata(
   provider: CounterpartyProviderAccountRow["provider"],
   metadata: Record<string, unknown>
 ): void {
-  if (kind === "funding_wallet" && provider === "bvnk") {
+  if (kind === "virtual_funding_wallet" && provider === "bvnk") {
     bvnkFundingWalletMetadataSchema.parse(metadata);
   }
   if (kind === "customer_link" && provider === "bvnk") {
@@ -154,7 +157,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return row === null ? null : parseProviderAccountRow(row);
     },
 
-    async getFundingWalletByOnrampKey(input: GetFundingWalletByOnrampKeyInput) {
+    async getVirtualFundingWallet(input: GetVirtualFundingWalletInput) {
       const row = await db
         .prepare(
           `SELECT * FROM counterparty_provider_accounts
@@ -162,35 +165,119 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND project_id = ?
              AND counterparty_id = ?
              AND provider = ?
-             AND kind = 'funding_wallet'
-             AND metadata->>'onrampKey' = ?
-             AND status = 'active'`
+             AND kind = 'virtual_funding_wallet'
+             AND fiat_currency = ?
+           ORDER BY (status = 'archived') ASC, created_at ASC
+           LIMIT 1`
         )
         .bind(
           input.organizationId,
           input.projectId,
           input.counterpartyId,
           input.provider,
-          input.onrampKey
+          input.fiatCurrency
         )
         .first<Record<string, unknown>>();
 
       return row === null ? null : parseProviderAccountRow(row);
     },
 
-    async getFundingWalletByExternalAccountReference(
-      input: GetFundingWalletByExternalAccountReferenceInput
+    async getProviderAccountByExternalReference(
+      input: GetProviderAccountByExternalReferenceInput
     ) {
       const row = await db
         .prepare(
           `SELECT * FROM counterparty_provider_accounts
            WHERE provider = ?
-             AND kind = 'funding_wallet'
              AND external_account_reference = ?
-             AND status = 'active'
            LIMIT 1`
         )
         .bind(input.provider, input.externalAccountReference)
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async insertPendingVirtualFundingWallet(input: InsertPendingVirtualFundingWalletInput) {
+      const row = await db
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+             id, organization_id, project_id, counterparty_id, provider,
+             provider_customer_reference, kind, fiat_currency, status
+           ) VALUES (?, ?, ?, ?, ?, NULL, 'virtual_funding_wallet', ?, 'active')
+           RETURNING *`
+        )
+        .bind(
+          generateCounterpartyProviderAccountId(),
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.fiatCurrency
+        )
+        .first<Record<string, unknown>>();
+
+      if (row === null) {
+        throw internalError("Virtual funding-wallet claim escaped its tenant scope.");
+      }
+      return parseProviderAccountRow(row);
+    },
+
+    async completeVirtualFundingWalletReference(
+      input: CompleteVirtualFundingWalletReferenceInput
+    ) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET external_account_reference = ?,
+               provider_status = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'virtual_funding_wallet'
+             AND external_account_reference IS NULL
+           RETURNING *`
+        )
+        .bind(
+          input.externalAccountReference,
+          input.providerStatus,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async updateVirtualFundingWalletStatus(input: UpdateVirtualFundingWalletStatusInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET status = 'active',
+               provider_status = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'virtual_funding_wallet'
+           RETURNING *`
+        )
+        .bind(
+          input.providerStatus,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
         .first<Record<string, unknown>>();
 
       return row === null ? null : parseProviderAccountRow(row);
@@ -267,9 +354,6 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     },
 
     async insertProviderResourceAccount(input: InsertProviderResourceAccountInput) {
-      // The onramp-key unique index and lookup are expression-based; a row
-      // missing metadata.onrampKey would commit but be unreachable and
-      // un-deduplicated, so the shape is enforced before the write.
       assertProviderAccountMetadata(input.kind, input.provider, input.metadata);
       const row = await db
         .prepare(
@@ -304,13 +388,8 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     },
 
     async patchAccountMetadata(input: PatchAccountMetadataInput) {
-      // Patch semantics (top-level shallow merge + explicit key deletion)
-      // keep callers from clobbering sibling keys such as a funding
-      // wallet's onrampKey. The row is locked for the read-merge-write and
-      // the merged blob is validated against the row kind's schema BEFORE
-      // the UPDATE — an invalid blob would otherwise persist while
-      // escaping the expression-based unique index and the onramp-key
-      // lookup.
+      // The row is locked for the read-merge-write and the merged blob is
+      // validated against the row kind's schema BEFORE the UPDATE.
       return db.transaction(async (tx) => {
         const current = await tx
           .prepare(
@@ -440,7 +519,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         "organization_id = ?",
         "project_id = ?",
         "counterparty_id = ?",
-        "kind IN ('payout_account', 'customer_link')",
+        "kind IN ('payout_account', 'virtual_funding_wallet', 'customer_link')",
         "status IN ('active', 'archived')",
       ];
       const bindings: string[] = [input.organizationId, input.projectId, input.counterpartyId];

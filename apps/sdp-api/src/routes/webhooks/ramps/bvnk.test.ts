@@ -1,52 +1,50 @@
-import { buildBvnkOnrampWalletName } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { describe, expect, it } from "vitest";
 import {
   bvnkChannelTransactionEvent,
+  bvnkCryptoStatusChangeEvent,
   bvnkPayinStatusChangeEvent,
   bvnkWalletStatusChangeEvent,
 } from "@/test/helpers/bvnk";
 import { BvnkWebhookProcessor } from "./bvnk";
 
-const ONRAMP_KEY = "USD:USDC_SOLANA:dest";
-
 describe("BvnkWebhookProcessor.parse", () => {
-  it("parses a ledger wallet status-change webhook", () => {
+  it("parses a ledger wallet status-change webhook resolved by wallet id", () => {
     const processor = new BvnkWebhookProcessor();
 
     expect(
-      processor.parse(
-        bvnkWalletStatusChangeEvent({
-          name: buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY),
-        })
-      )
-    ).toEqual({
+      processor.parse(bvnkWalletStatusChangeEvent({ id: "a:1:wallet:1", status: "ACTIVE" }))
+    ).toMatchObject({
       event: "ledger:v2:wallet:status-change",
       data: {
-        name: "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest",
+        id: "a:1:wallet:1",
         status: "ACTIVE",
-        bankAccount: { accountNumber: "900473221558", code: "LEADUS49XXX", bankName: "LEAD BANK" },
       },
     });
   });
 
-  it("parses BVNK wallet create webhooks with walletName", () => {
+  it("parses a BVNK wallet create webhook with data.id", () => {
     const processor = new BvnkWebhookProcessor();
 
     expect(
       processor.parse({
         event: "bvnk:ledger:wallet:create",
         data: {
-          walletName: buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY),
+          id: "a:1:wallet:created",
           status: "COMPLETED",
-          ledgers: [{ accountNumber: "900368997705", code: "101019644" }],
+          paymentInstruments: [
+            {
+              type: "FIAT",
+              accountNumber: "900368997705",
+              bankDetails: { bic: "101019644", name: "BVNK Bank" },
+            },
+          ],
         },
       })
-    ).toEqual({
+    ).toMatchObject({
       event: "bvnk:ledger:wallet:create",
       data: {
-        name: "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest",
+        id: "a:1:wallet:created",
         status: "COMPLETED",
-        bankAccount: { accountNumber: "900368997705", code: "101019644" },
       },
     });
   });
@@ -62,6 +60,18 @@ describe("BvnkWebhookProcessor.parse", () => {
         beneficiary: { walletId: "a:1:wallet:1" },
         amount: { value: "100" },
         uuid: "payin_1",
+      },
+    });
+  });
+
+  it("parses a crypto status-change webhook carrying the direction and status", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(processor.parse(bvnkCryptoStatusChangeEvent())).toMatchObject({
+      event: "bvnk:payment:crypto:status-change",
+      data: {
+        type: "OUT",
+        status: "COMPLETED",
       },
     });
   });

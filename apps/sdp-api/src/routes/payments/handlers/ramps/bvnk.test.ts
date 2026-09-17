@@ -1,11 +1,9 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import {
-  type BvnkOnrampRequestSpec,
-  buildBvnkOnrampPaymentRuleKey,
-} from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { buildBvnkOnrampRuleReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { RequirementField } from "@sdp/types/ramp-requirements";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import { env as testEnv } from "@/test/helpers/env";
 import type { AppContext } from "../../context";
 import { advanceBvnkContact, bvnkContactFields, bvnkOnrampQuote } from "./bvnk";
 
@@ -15,6 +13,14 @@ const mockAccounts = vi.hoisted(() => ({
   getPendingCustomerLink: vi.fn(),
   claimPendingCustomerLink: vi.fn(),
   completeCustomerLink: vi.fn(),
+  getProviderAccount: vi.fn(),
+  getVirtualFundingWallet: vi.fn(),
+}));
+
+const mockPayments = vi.hoisted(() => ({
+  createTransfer: vi.fn(),
+  getInFlightBvnkOnrampTransferByFundingWallet: vi.fn(),
+  bindBvnkOnrampRule: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -26,13 +32,32 @@ vi.mock("@/db", () => ({
 vi.mock("@/db/repositories/counterparty-provider-account.repository.postgres", () => ({
   createPostgresCounterpartyProviderAccountsRepository: () => mockAccounts,
 }));
+// The handler reaches the payments repository through three doors — the
+// request context, the transaction client, and the system constructor — and
+// every one of them hands back the same mock object.
+vi.mock("@/db/repositories", () => ({
+  createPaymentsRepository: () => mockPayments,
+  createSystemPaymentsRepository: () => mockPayments,
+  createSystemTransactionalPaymentsRepository: () => mockPayments,
+}));
+vi.mock("@/routes/payments/context", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/routes/payments/context")>()),
+  getPaymentsRepository: () => mockPayments,
+}));
 
 const COUNTERPARTY_ID = "cpty_123e4567-e89b-12d3-a456-426614174000";
 const PROJECT_ID = "prj_test";
 const CONTACT_ID = "contact_created_1";
 
+/** The virtual funding wallet CPA row id; the transfer's lock key. */
+const FUNDING_ACCOUNT_ID = "counterparty_provider_account_funding_usd";
+const WALLET_ID = "a:1:wallet:1";
+const TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174000";
+const DESTINATION_WALLET_ADDRESS = "J4t4M6zJH3M6ewN9pmRUpMt2EMWXXCFPYvnrD9ck9EEi";
+
 function fakeContext(): AppContext {
   return {
+    env: testEnv,
     get: (key: string) => (key === "apiKey" ? { environment: "sandbox" } : undefined),
   } as unknown as AppContext;
 }
@@ -81,6 +106,51 @@ function pendingCustomerLinkRow(): Record<string, unknown> {
   };
 }
 
+/** The active per-counterparty customer-link row the quote resolves first. */
+function customerLinkRow(): Record<string, unknown> {
+  return {
+    id: "counterparty_provider_account_contact",
+    organization_id: "org_test",
+    project_id: PROJECT_ID,
+    counterparty_id: COUNTERPARTY_ID,
+    provider: "bvnk",
+    provider_customer_reference: CONTACT_ID,
+    kind: "customer_link",
+    external_account_reference: null,
+    fiat_currency: null,
+    destination_country: null,
+    payment_rail: null,
+    provider_status: null,
+    status: "active",
+    metadata: {},
+    created_at: "2026-06-28T00:00:00.000Z",
+    updated_at: "2026-06-28T00:00:00.000Z",
+  };
+}
+
+/** The per-(counterparty, fiat) virtual funding wallet row, keyed by wallet id. */
+function fundingWalletRow(overrides?: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: FUNDING_ACCOUNT_ID,
+    organization_id: "org_test",
+    project_id: PROJECT_ID,
+    counterparty_id: COUNTERPARTY_ID,
+    provider: "bvnk",
+    provider_customer_reference: "",
+    kind: "virtual_funding_wallet",
+    external_account_reference: WALLET_ID,
+    fiat_currency: "USD",
+    destination_country: null,
+    payment_rail: null,
+    provider_status: "ACTIVE",
+    status: "active",
+    metadata: {},
+    created_at: "2026-06-28T00:00:00.000Z",
+    updated_at: "2026-06-28T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 function bvnkContact(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
     id: CONTACT_ID,
@@ -125,31 +195,69 @@ const COMPANY_COLLECTED = {
   "address.country": "GB",
 };
 
-function counterpartyWithBvnkRule(ruleId: string): CounterpartyRow {
-  const destinationWalletAddress = "J4t4M6zJH3M6ewN9pmRUpMt2EMWXXCFPYvnrD9ck9EEi";
-  const paymentRuleKey = buildBvnkOnrampPaymentRuleKey(
-    "USD",
-    "USDC",
-    "SOLANA",
-    destinationWalletAddress
-  );
-
+function transferRow(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
-    ...counterpartyRow(),
-    display_name: "BVNK Test Counterparty",
-    provider_data: {
-      bvnk: {
-        wallets: {
-          [paymentRuleKey]: {
-            walletId: "wallet_bvnk_123",
-            walletStatus: "ACTIVE",
-            ruleId,
-            ruleStatus: "ACTIVE",
-            bankAccount: { accountNumber: "000123456789", bankName: "BVNK Bank" },
-          },
-        },
+    id: TRANSFER_ID,
+    organization_id: "org_test",
+    project_id: PROJECT_ID,
+    counterparty_id: COUNTERPARTY_ID,
+    status: "awaiting_payment",
+    provider: "bvnk",
+    provider_data: { bvnk: { fundingWalletAccountId: FUNDING_ACCOUNT_ID } },
+    ...overrides,
+  };
+}
+
+/** A BVNK rule-list entry, shaped like `BvnkRuleListEntry`. */
+function ruleEntry(id: string, reference: string, status = "ACTIVE"): {
+  id: string;
+  reference: string;
+  status: string;
+} {
+  return { id, reference, status };
+}
+
+/** The quote input, as the on-ramp quote route builds it. */
+function onrampRequest(
+  overrides: Partial<Parameters<typeof bvnkOnrampQuote>[1]> = {}
+): Parameters<typeof bvnkOnrampQuote>[1] {
+  return {
+    counterparty: counterpartyRow(),
+    organizationId: "org_test",
+    projectId: PROJECT_ID,
+    destinationCustodyWalletId: "cwlt_quote_destination",
+    destinationWalletId: "wallet_quote_destination",
+    destinationWalletAddress: DESTINATION_WALLET_ADDRESS,
+    transferId: TRANSFER_ID,
+    assetRail: "usdc.solana",
+    currency: "USDC",
+    network: "SOLANA",
+    fiatCurrency: "USD",
+    fiatAmount: "100.00",
+    rampsMemo: undefined,
+    ...overrides,
+  };
+}
+
+function uniqueViolationError(): Error & { code: string } {
+  return Object.assign(new Error("duplicate key value violates unique constraint"), {
+    code: "23505",
+  });
+}
+
+function bvnkLedgerWallet(status = "ACTIVE"): Record<string, unknown> {
+  return {
+    id: WALLET_ID,
+    name: `sdp:onramp:${COUNTERPARTY_ID}:USD`,
+    status,
+    paymentInstruments: [
+      {
+        type: "FIAT",
+        accountHolderName: "SDP",
+        accountNumber: "900473221558",
+        bankDetails: { bic: "LEADUS49XXX", name: "LEAD BANK" },
       },
-    },
+    ],
   };
 }
 
@@ -504,34 +612,287 @@ describe("advanceBvnkContact US state rule", () => {
 });
 
 describe("bvnkOnrampQuote", () => {
-  it("uses a per-transaction quote id while keeping the BVNK payment rule id in instructions", async () => {
-    const ruleId = "rule_bvnk_quote_123";
-    const counterparty = counterpartyWithBvnkRule(ruleId);
-    const input = {
-      counterparty,
-      paymentRule: {
-        currency: "USDC",
-        network: "SOLANA",
+  let createOnrampRule: ReturnType<typeof vi.spyOn>;
+  let listOnrampRulesByWallet: ReturnType<typeof vi.spyOn>;
+  let deactivateOnrampRule: ReturnType<typeof vi.spyOn>;
+  let getContactV3: ReturnType<typeof vi.spyOn>;
+  let getLedgerWalletV2: ReturnType<typeof vi.spyOn>;
+  let createLedgerWalletV2: ReturnType<typeof vi.spyOn>;
+  let listLedgerWalletProfilesV2: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAccounts.getProviderAccount.mockResolvedValue(customerLinkRow());
+    mockAccounts.getVirtualFundingWallet.mockResolvedValue(fundingWalletRow());
+    mockPayments.createTransfer.mockResolvedValue(transferRow());
+    mockPayments.getInFlightBvnkOnrampTransferByFundingWallet.mockResolvedValue(null);
+    mockPayments.bindBvnkOnrampRule.mockResolvedValue(transferRow());
+    createOnrampRule = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule");
+    listOnrampRulesByWallet = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listOnrampRulesByWallet");
+    deactivateOnrampRule = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "deactivateOnrampRule");
+    getContactV3 = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getContactV3");
+    getLedgerWalletV2 = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2");
+    createLedgerWalletV2 = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createLedgerWalletV2");
+    listLedgerWalletProfilesV2 = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listLedgerWalletProfilesV2");
+    listOnrampRulesByWallet.mockResolvedValue([]);
+    getContactV3.mockResolvedValue(bvnkContact());
+    getLedgerWalletV2.mockResolvedValue(bvnkLedgerWallet());
+    createOnrampRule.mockResolvedValue({
+      id: "rule_created_1",
+      reference: buildBvnkOnrampRuleReference(TRANSFER_ID),
+      status: "ACTIVE",
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function expectConflictNamingActiveTransfer(caught: unknown, activeTransferId: string): void {
+    expect(caught).toMatchObject({ code: "CONFLICT" });
+    const message = caught instanceof Error ? caught.message : String(caught);
+    expect(message).toContain(activeTransferId);
+  }
+
+  it("rejects a fiat outside the sandbox set before any repository or client work", async () => {
+    let caught: unknown;
+    try {
+      await bvnkOnrampQuote(fakeContext(), onrampRequest({ fiatCurrency: "GBP" }));
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({ code: "BAD_REQUEST" });
+    const message = caught instanceof Error ? caught.message : String(caught);
+    expect(message).toContain("does not support funding in GBP");
+    expect(mockAccounts.getProviderAccount).not.toHaveBeenCalled();
+    expect(mockPayments.createTransfer).not.toHaveBeenCalled();
+    expect(listOnrampRulesByWallet).not.toHaveBeenCalled();
+    expect(deactivateOnrampRule).not.toHaveBeenCalled();
+    expect(createOnrampRule).not.toHaveBeenCalled();
+    expect(getContactV3).not.toHaveBeenCalled();
+    expect(getLedgerWalletV2).not.toHaveBeenCalled();
+  });
+
+  it("claims the transfer row awaiting_payment before any provider rule work", async () => {
+    const result = await bvnkOnrampQuote(fakeContext(), onrampRequest());
+
+    expect(mockPayments.createTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: TRANSFER_ID,
+        custodyWalletId: "cwlt_quote_destination",
+        walletId: "wallet_quote_destination",
+        destinationAddress: DESTINATION_WALLET_ADDRESS,
+        type: "onramp",
+        direction: "inbound",
+        status: "awaiting_payment",
+        provider: "bvnk",
+        deliveryMode: "manual_instructions",
         fiatCurrency: "USD",
-        destinationWalletAddress: "J4t4M6zJH3M6ewN9pmRUpMt2EMWXXCFPYvnrD9ck9EEi",
-      } satisfies BvnkOnrampRequestSpec,
+        fiatAmount: "100.00",
+        providerData: { bvnk: { fundingWalletAccountId: FUNDING_ACCOUNT_ID } },
+      })
+    );
+    // The per-transfer rule is created and CAS'd onto the transfer.
+    expect(createOnrampRule).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        reference: buildBvnkOnrampRuleReference(TRANSFER_ID),
+        walletId: WALLET_ID,
+      })
+    );
+    expect(mockPayments.bindBvnkOnrampRule).toHaveBeenCalledWith(
+      expect.objectContaining({ transferId: TRANSFER_ID, ruleId: "rule_created_1" })
+    );
+    expect(result.transferId).toBe(TRANSFER_ID);
+  });
+
+  it("maps a unique-index race on the second transfer insert to a 409 naming the active transfer", async () => {
+    const firstTransferId = TRANSFER_ID;
+    const racingTransferId = "xfr_aaaaaaaa-1111-2222-3333-444444444444";
+    mockPayments.createTransfer
+      .mockResolvedValueOnce(transferRow({ id: firstTransferId }))
+      .mockRejectedValueOnce(uniqueViolationError());
+    mockPayments.getInFlightBvnkOnrampTransferByFundingWallet.mockResolvedValue(
+      transferRow({ id: firstTransferId })
+    );
+
+    await bvnkOnrampQuote(fakeContext(), onrampRequest({ transferId: firstTransferId }));
+    // Snapshot the first quote's provider work so the conflicted attempt can
+    // be proven to add none of its own.
+    const ruleWorkAfterFirstQuote = {
+      list: listOnrampRulesByWallet.mock.calls.length,
+      deactivate: deactivateOnrampRule.mock.calls.length,
+      create: createOnrampRule.mock.calls.length,
+      contact: getContactV3.mock.calls.length,
+      bind: mockPayments.bindBvnkOnrampRule.mock.calls.length,
     };
 
-    const first = await bvnkOnrampQuote(fakeContext(), input);
-    const second = await bvnkOnrampQuote(fakeContext(), input);
+    let caught: unknown;
+    try {
+      await bvnkOnrampQuote(fakeContext(), onrampRequest({ transferId: racingTransferId }));
+    } catch (error) {
+      caught = error;
+    }
+    // The losing insert maps to a 409 that names the transfer already holding
+    // the queue slot — the active transfer, not the loser.
+    expectConflictNamingActiveTransfer(caught, firstTransferId);
+    // The conflicted attempt performs no rule management at all.
+    expect(listOnrampRulesByWallet.mock.calls.length).toBe(ruleWorkAfterFirstQuote.list);
+    expect(deactivateOnrampRule.mock.calls.length).toBe(ruleWorkAfterFirstQuote.deactivate);
+    expect(createOnrampRule.mock.calls.length).toBe(ruleWorkAfterFirstQuote.create);
+    expect(getContactV3.mock.calls.length).toBe(ruleWorkAfterFirstQuote.contact);
+    expect(mockPayments.bindBvnkOnrampRule.mock.calls.length).toBe(ruleWorkAfterFirstQuote.bind);
+  });
 
-    expect(first.quote.id).not.toBe(ruleId);
-    expect(second.quote.id).not.toBe(ruleId);
-    expect(second.quote.id).not.toBe(first.quote.id);
-    expect(first.quote.id.startsWith("bvnk_onramp_")).toBe(true);
-
-    const instruction = first.quote.paymentInstructions.find(
-      (item) => item.kind === "fiat_funding"
+  it("rejects a second quote blocked by an in-flight transfer before any rule work, even for a different destination", async () => {
+    const activeTransferId = "xfr_bbbbbbbb-1111-2222-3333-444444444444";
+    mockPayments.createTransfer.mockRejectedValue(uniqueViolationError());
+    mockPayments.getInFlightBvnkOnrampTransferByFundingWallet.mockResolvedValue(
+      transferRow({ id: activeTransferId })
     );
-    expect(instruction?.ruleId).toBe(ruleId);
-    expect(instruction?.fundingWalletId).toBe("wallet_bvnk_123");
-    expect(first.transferProviderData).toEqual({
-      bvnk: { ruleId, ruleStatus: "ACTIVE", fundingWalletId: "wallet_bvnk_123" },
+
+    let caught: unknown;
+    try {
+      await bvnkOnrampQuote(
+        fakeContext(),
+        onrampRequest({
+          transferId: "xfr_cccccccc-1111-2222-3333-444444444444",
+          destinationWalletAddress: "8vBU6DHCv5K71VQcwvw8fHmRFJ5xgD7J6BpkMGRc2pw3",
+        })
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expectConflictNamingActiveTransfer(caught, activeTransferId);
+    // The wallet-status refresh may reach BVNK, but the lock check fires
+    // before any rule listing, deactivation, creation, or binding.
+    expect(listOnrampRulesByWallet).not.toHaveBeenCalled();
+    expect(deactivateOnrampRule).not.toHaveBeenCalled();
+    expect(createOnrampRule).not.toHaveBeenCalled();
+    expect(getContactV3).not.toHaveBeenCalled();
+    expect(mockPayments.bindBvnkOnrampRule).not.toHaveBeenCalled();
+  });
+
+  it("adopts the wallet's single ACTIVE rule matching the transfer reference after a crash before the CAS", async () => {
+    // The transfer exists without a rule (crash between rule create and CAS);
+    // recovery lists the wallet's rules and adopts the one whose reference
+    // equals sdp_onramp_<transfer id> instead of creating another rule.
+    const recoveredRuleId = "rule_recovered_1";
+    listOnrampRulesByWallet.mockResolvedValue([
+      ruleEntry(recoveredRuleId, buildBvnkOnrampRuleReference(TRANSFER_ID)),
+    ]);
+
+    const result = await bvnkOnrampQuote(fakeContext(), onrampRequest());
+
+    expect(createOnrampRule).not.toHaveBeenCalled();
+    expect(getContactV3).not.toHaveBeenCalled();
+    // The adopted rule is CAS'd onto the transfer with its BVNK status.
+    expect(mockPayments.bindBvnkOnrampRule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transferId: TRANSFER_ID,
+        ruleId: recoveredRuleId,
+        ruleStatus: "ACTIVE",
+      })
+    );
+    expect(result.transferId).toBe(TRANSFER_ID);
+  });
+
+  it("deactivates an ACTIVE stray rule that matches no in-flight transfer before creating its own", async () => {
+    const freshRuleId = "rule_fresh_1";
+    listOnrampRulesByWallet.mockResolvedValue([
+      ruleEntry("rule_stray_1", "sdp_onramp_xfr_deadbeef-dead-beef-dead-beefdeadbeef"),
+    ]);
+    createOnrampRule.mockResolvedValue({
+      id: freshRuleId,
+      reference: buildBvnkOnrampRuleReference(TRANSFER_ID),
+      status: "ACTIVE",
     });
+
+    const result = await bvnkOnrampQuote(fakeContext(), onrampRequest());
+
+    // Stray rules are deactivated first and never reused...
+    expect(deactivateOnrampRule).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ruleId: "rule_stray_1" })
+    );
+    expect(deactivateOnrampRule.mock.invocationCallOrder[0]).toBeLessThan(
+      createOnrampRule.mock.invocationCallOrder[0]
+    );
+    // ...then the transfer's own fresh rule is created with its reference and
+    // CAS'd onto the transfer.
+    expect(createOnrampRule).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        reference: buildBvnkOnrampRuleReference(TRANSFER_ID),
+        walletId: WALLET_ID,
+      })
+    );
+    expect(mockPayments.bindBvnkOnrampRule).toHaveBeenCalledWith(
+      expect.objectContaining({ transferId: TRANSFER_ID, ruleId: freshRuleId })
+    );
+    expect(result.transferId).toBe(TRANSFER_ID);
+  });
+
+  it("refuses to pick a rule when several ACTIVE rules match the transfer reference", async () => {
+    listOnrampRulesByWallet.mockResolvedValue([
+      ruleEntry("rule_dup_1", buildBvnkOnrampRuleReference(TRANSFER_ID)),
+      ruleEntry("rule_dup_2", buildBvnkOnrampRuleReference(TRANSFER_ID)),
+    ]);
+
+    let caught: unknown;
+    try {
+      await bvnkOnrampQuote(fakeContext(), onrampRequest());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    const message = caught instanceof Error ? caught.message : String(caught);
+    expect(message).toContain("rule_dup_1");
+    expect(message).toContain("rule_dup_2");
+    expect(createOnrampRule).not.toHaveBeenCalled();
+    expect(deactivateOnrampRule).not.toHaveBeenCalled();
+    expect(mockPayments.bindBvnkOnrampRule).not.toHaveBeenCalled();
+  });
+
+  it("builds the manual-instructions quote from the wallet's payment instruments with the transfer id as the remittance reference", async () => {
+    const result = await bvnkOnrampQuote(fakeContext(), onrampRequest());
+
+    expect(result.quote.id.startsWith("bvnk_onramp_")).toBe(true);
+    const instruction = result.quote.paymentInstructions.find(
+      (item): item is Extract<typeof item, { kind: "fiat_funding" }> =>
+        item.kind === "fiat_funding"
+    );
+    expect(instruction?.fundingWalletId).toBe(WALLET_ID);
+    expect(instruction?.bankAccount).toMatchObject({ accountNumber: "900473221558" });
+    expect(instruction?.ruleId).toBe("rule_created_1");
+    expect(JSON.stringify(instruction)).toContain(TRANSFER_ID);
+  });
+
+  it("refuses the quote until the funding wallet is active, creating no transfer", async () => {
+    // A fresh wallet stays provisioning until the wallet-status webhook flips
+    // it ACTIVE: while BVNK still reports PENDING, quoting fails closed.
+    mockAccounts.getVirtualFundingWallet.mockResolvedValue(
+      fundingWalletRow({ status: "pending", provider_status: "PENDING" })
+    );
+    getLedgerWalletV2.mockResolvedValue(bvnkLedgerWallet("PENDING"));
+
+    let caught: unknown;
+    try {
+      await bvnkOnrampQuote(fakeContext(), onrampRequest());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({ code: "CONFLICT" });
+    const message = caught instanceof Error ? caught.message : String(caught);
+    expect(message).toContain("not provisioned for bvnk onramp");
+    expect(mockPayments.createTransfer).not.toHaveBeenCalled();
+    expect(createLedgerWalletV2).not.toHaveBeenCalled();
+    expect(listLedgerWalletProfilesV2).not.toHaveBeenCalled();
+    expect(listOnrampRulesByWallet).not.toHaveBeenCalled();
+    expect(createOnrampRule).not.toHaveBeenCalled();
   });
 });

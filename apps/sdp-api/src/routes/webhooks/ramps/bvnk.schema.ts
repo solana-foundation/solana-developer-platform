@@ -1,73 +1,40 @@
-import type { BvnkBankFundingDetails } from "@sdp/types";
 import { z } from "zod";
 
 const bvnkAmountSchema = z.union([z.string().min(1), z.number().finite()]).transform(String);
 
-const bvnkFiatInstrumentsSchema = z
-  .array(
-    z.object({
-      type: z.string(),
-      accountNumber: z.string().optional(),
-      remittanceInformationPrefix: z.string().optional(),
-      bankDetails: z.object({ bic: z.string().optional(), name: z.string().optional() }).optional(),
-    })
-  )
-  .transform((instruments): BvnkBankFundingDetails | undefined => {
-    const fiat = instruments.find((instrument) => instrument.type === "FIAT");
-    if (!fiat?.accountNumber) return undefined;
-    return {
-      accountNumber: fiat.accountNumber,
-      code: fiat.bankDetails?.bic,
-      paymentReference: fiat.remittanceInformationPrefix,
-      bankName: fiat.bankDetails?.name,
-    };
-  });
-
-const bvnkLedgersSchema = z
-  .array(
-    z.object({
-      accountNumber: z.string().optional(),
-      code: z.string().optional(),
-      accountNumberFormat: z.string().optional(),
-    })
-  )
-  .transform((ledgers): BvnkBankFundingDetails | undefined => {
-    const ledger = ledgers.find((entry) => entry.accountNumber);
-    if (!ledger?.accountNumber) return undefined;
-    return {
-      accountNumber: ledger.accountNumber,
-      code: ledger.code,
-      accountNumberFormat: ledger.accountNumberFormat,
-    };
-  });
+/** LedgerWalletV2Response payment instruments; extras are tolerated, not modeled. */
+const bvnkFiatInstrumentsSchema = z.array(
+  z.object({
+    type: z.string(),
+    accountHolderName: z.string().optional(),
+    accountNumber: z.string().optional(),
+    remittanceInformationPrefix: z.string().optional(),
+    bankDetails: z
+      .object({
+        name: z.string().optional(),
+        bic: z.string().optional(),
+        nid: z.object({ value: z.string(), type: z.string().optional() }).optional(),
+      })
+      .optional(),
+  })
+);
 
 export const bvnkWebhookSchema = z.discriminatedUnion("event", [
   z.object({
     event: z.literal("ledger:v2:wallet:status-change"),
-    data: z
-      .object({
-        name: z.string().min(1),
-        status: z.string().min(1),
-        paymentInstruments: bvnkFiatInstrumentsSchema.optional(),
-      })
-      .transform(({ paymentInstruments, ...wallet }) => ({
-        ...wallet,
-        bankAccount: paymentInstruments,
-      })),
+    data: z.object({
+      id: z.string().min(1),
+      status: z.string().min(1),
+      paymentInstruments: bvnkFiatInstrumentsSchema.optional(),
+    }),
   }),
   z.object({
     event: z.literal("bvnk:ledger:wallet:create"),
-    data: z
-      .object({
-        walletName: z.string().min(1),
-        status: z.string().min(1).optional(),
-        ledgers: bvnkLedgersSchema.optional(),
-      })
-      .transform(({ walletName, ledgers, status }) => ({
-        name: walletName,
-        status,
-        bankAccount: ledgers,
-      })),
+    data: z.object({
+      id: z.string().min(1),
+      status: z.string().min(1),
+      paymentInstruments: bvnkFiatInstrumentsSchema.optional(),
+    }),
   }),
   z.object({
     event: z.literal("bvnk:payment:payin:status-change"),
@@ -77,6 +44,16 @@ export const bvnkWebhookSchema = z.discriminatedUnion("event", [
       beneficiary: z.object({ walletId: z.string().min(1) }),
       amount: z.object({ value: bvnkAmountSchema }),
       uuid: z.string().min(1),
+    }),
+  }),
+  z.object({
+    event: z.literal("bvnk:payment:crypto:status-change"),
+    data: z.object({
+      status: z.string().min(1),
+      type: z.string().min(1),
+      uuid: z.string().min(1),
+      walletId: z.string().min(1),
+      reference: z.string().optional(),
     }),
   }),
   z.object({

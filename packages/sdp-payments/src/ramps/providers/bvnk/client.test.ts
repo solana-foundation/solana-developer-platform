@@ -3,7 +3,12 @@ import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "../../../errors";
 import type { RampRuntimeContext } from "../../types";
 import { BvnkRampClient } from "./client";
-import { bvnkContactV3, bvnkLedgerWallet, bvnkWalletProfilesResponse } from "./test-fixtures";
+import {
+  bvnkContactV3,
+  bvnkLedgerWallet,
+  bvnkRuleListEntry,
+  bvnkWalletProfilesResponse,
+} from "./test-fixtures";
 
 const runtimeContext: RampRuntimeContext = {
   env: {
@@ -227,6 +232,45 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
   });
 });
 
+describe("BvnkRampClient payment rule surfaces", () => {
+  it("lists the payment rules applied to a wallet and returns the typed array", async () => {
+    const entries = [bvnkRuleListEntry()];
+    const { requests } = queueFetch(respond(entries));
+
+    const result = await new BvnkRampClient().listOnrampRulesByWallet(runtimeContext, {
+      walletId: "wallet-id",
+    });
+
+    assert.deepEqual(result, entries);
+    const request = requests[0];
+    assert.equal(request.init.method, "GET");
+    assert.equal(new URL(request.url).pathname, "/payment/v1/rules/wallet-id");
+  });
+
+  it("resolves empty rule lists for a wallet with no rules", async () => {
+    const { requests } = queueFetch(respond([]));
+
+    const result = await new BvnkRampClient().listOnrampRulesByWallet(runtimeContext, {
+      walletId: "wallet-id",
+    });
+
+    assert.deepEqual(result, []);
+    assert.equal(requests.length, 1);
+  });
+
+  it("deactivates a payment rule with the DEACTIVATE action body", async () => {
+    const { requests } = queueFetch(new Response(null, { status: 204 }));
+    const ruleId = "98c0bb03-567f-11f0-b26e-6b1848874a27";
+
+    await new BvnkRampClient().deactivateOnrampRule(runtimeContext, { ruleId });
+
+    const request = requests[0];
+    assert.equal(request.init.method, "POST");
+    assert.equal(new URL(request.url).pathname, `/payment/v1/rules/${ruleId}/actions`);
+    assert.deepEqual(JSON.parse(String(request.init.body)), { type: "DEACTIVATE" });
+  });
+});
+
 describe("BvnkRampClient response parsing", () => {
   it("treats a malformed contact list response as provider-unavailable", async () => {
     queueFetch(respond({ unexpected: "shape" }));
@@ -237,6 +281,21 @@ describe("BvnkRampClient response parsing", () => {
           q: "cpty_123e4567-e89b-12d3-a456-426614174000",
           pageSize: 5,
         }),
+      (error: unknown) => {
+        assert.equal(error instanceof SdpPaymentsError, true);
+        if (!(error instanceof SdpPaymentsError)) return false;
+        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(error.message, "BVNK response is malformed.");
+        return true;
+      }
+    );
+  });
+
+  it("treats a malformed rule list response as provider-unavailable", async () => {
+    queueFetch(respond({ not: "an array" }));
+
+    await assert.rejects(
+      () => new BvnkRampClient().listOnrampRulesByWallet(runtimeContext, { walletId: "wallet-id" }),
       (error: unknown) => {
         assert.equal(error instanceof SdpPaymentsError, true);
         if (!(error instanceof SdpPaymentsError)) return false;

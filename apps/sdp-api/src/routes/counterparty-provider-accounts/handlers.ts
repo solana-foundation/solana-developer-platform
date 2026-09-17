@@ -1,5 +1,6 @@
 import type { RampExternalAccountDetails } from "@sdp/payments/ramps/types";
 import type {
+  BvnkProviderAccountLiveState,
   CounterpartyProviderAccount,
   CounterpartyProviderCustomerLink,
   ListCounterpartyProviderAccountsResponse,
@@ -10,8 +11,11 @@ import { providerCustomerReferenceSchema } from "@/db/repositories/counterparty-
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { rampRuntime } from "@/routes/payments/context";
-import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
+import { getPaymentsRepository, rampRuntime } from "@/routes/payments/context";
+import {
+  enrichBvnkVirtualFundingWalletLive,
+  enrichCounterpartyProviderAccounts,
+} from "@/services/payments/provider-account-enrichment";
 import type { AppContext } from "../counterparties/context";
 import { getCounterpartiesRepository } from "../counterparties/context";
 import { getCounterpartyProviderAccountsRepository } from "./context";
@@ -54,9 +58,15 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     counterpartyId: counterparty.id,
     ...query.data,
   });
+  const runtime = rampRuntime(c);
   const enriched = await enrichCounterpartyProviderAccounts(
-    rampRuntime(c),
+    runtime,
     rows.filter((row) => row.kind === "payout_account")
+  );
+  const liveByRowId = await enrichBvnkVirtualFundingWalletLive(
+    runtime,
+    getPaymentsRepository(c),
+    rows
   );
 
   const rowsByProvider = new Map<
@@ -76,8 +86,12 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
   for (const providerRows of rowsByProvider.values()) {
     const customerLink = providerRows.find((row) => row.kind === "customer_link");
     const payoutRows = providerRows.filter((row) => row.kind === "payout_account");
-    if (payoutRows.length === 0 && customerLink !== undefined) {
+    const fundingRows = providerRows.filter((row) => row.kind === "virtual_funding_wallet");
+    if (payoutRows.length === 0 && fundingRows.length === 0 && customerLink !== undefined) {
       accounts.push(mapCustomerLinkAccount(customerLink));
+    }
+    for (const row of fundingRows) {
+      accounts.push(mapVirtualFundingWalletAccount(row, liveByRowId, customerLink));
     }
     for (const row of payoutRows) {
       accounts.push(mapProviderAccount(row, enriched, customerLink));
@@ -158,6 +172,43 @@ function mapProviderAccount(
     result.customerLink = mapCustomerLink(customerLink);
   }
 
+  return result;
+}
+
+/**
+ * Maps a virtual funding wallet row into the public provider-account shape,
+ * attaching the request-time live state (balance, payment instruments, active
+ * rule) when the row was enriched. Funding wallets carry no corridor data, so
+ * null currency and country are valid here.
+ *
+ * @param row - Parent-scoped virtual funding wallet row.
+ * @param live - Just-in-time live state indexed by row id.
+ * @param customerLink - The provider's customer-link row for the counterparty, when one exists.
+ * @returns Public provider-account response row.
+ */
+function mapVirtualFundingWalletAccount(
+  row: CounterpartyProviderAccountRow,
+  live: ReadonlyMap<string, BvnkProviderAccountLiveState>,
+  customerLink: CounterpartyProviderAccountRow | undefined
+): CounterpartyProviderAccount {
+  const result: CounterpartyProviderAccount = {
+    id: row.id,
+    provider: row.provider,
+    kind: row.kind,
+    fiatCurrency: row.fiat_currency,
+    destinationCountry: row.destination_country,
+    paymentRail: row.payment_rail,
+    status: row.status,
+    providerStatus: row.provider_status,
+    createdAt: row.created_at,
+  };
+  const rowLive = live.get(row.id);
+  if (rowLive !== undefined) {
+    result.live = rowLive;
+  }
+  if (customerLink !== undefined) {
+    result.customerLink = mapCustomerLink(customerLink);
+  }
   return result;
 }
 

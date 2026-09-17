@@ -578,7 +578,12 @@
       "transactions": "Transactions",
       "copyAddress": "Copy address",
       "addressCopied": "Address copied",
-      "providerAccountIdentity": "Identity · BVNK contact"
+      "providerAccountIdentity": "Identity · BVNK contact",
+      "providerAccountFunding": "Funding",
+      "providerAccountRuleActive": "Rule active",
+      "providerAccountNoActiveRule": "No active rule",
+      "providerAccountAccountHolder": "Account holder",
+      "providerAccountRouting": "Routing"
     },
     "playground": {
       "moonPay": "MoonPay",

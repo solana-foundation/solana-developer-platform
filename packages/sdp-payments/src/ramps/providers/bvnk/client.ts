@@ -50,6 +50,7 @@ import {
   type BvnkContactV3,
   type BvnkLedgerWalletProfilesV2,
   type BvnkLedgerWalletV2,
+  type BvnkRuleListEntry,
   type BvnkRuleResponse,
   type BvnkSandboxPayinCurrency,
   bvnkChannelResponseSchema,
@@ -58,6 +59,7 @@ import {
   bvnkOfframpQuoteInputSchema,
   bvnkPayoutEstimateResponseSchema,
   bvnkQuoteEstimateResponseSchema,
+  bvnkRuleListResponseSchema,
   bvnkRuleResponseSchema,
   bvnkSandboxPayinCurrencySchema,
   bvnkV2LedgerWalletSchema,
@@ -402,6 +404,47 @@ export class BvnkRampClient implements RampProvider {
       },
     });
     return parseBvnkResponse(bvnkRuleResponseSchema, response);
+  }
+
+  /**
+   * Lists the payment rules applied to a wallet. The Direct model recovers a
+   * transfer whose rule was created but never CAS'd onto the row by adopting
+   * the active rule whose reference matches `sdp_onramp_<transfer_id>`.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - BVNK wallet id to list rules for.
+   * @returns The wallet's payment rules in BVNK order.
+   */
+  async listOnrampRulesByWallet(
+    { env, mode }: RampRuntimeContext,
+    input: { walletId: string }
+  ): Promise<BvnkRuleListEntry[]> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(
+      config,
+      `/payment/v1/rules/${encodeURIComponent(input.walletId)}`,
+      { method: "GET" }
+    );
+    return parseBvnkResponse(bvnkRuleListResponseSchema, response);
+  }
+
+  /**
+   * Deactivates a payment rule. Deactivated rules cannot be reactivated, so a
+   * fresh rule is created per on-ramp transfer.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - BVNK rule id to deactivate.
+   * @returns Resolves when BVNK confirms the deactivation (204).
+   */
+  async deactivateOnrampRule(
+    { env, mode }: RampRuntimeContext,
+    input: { ruleId: string }
+  ): Promise<void> {
+    const config = readBvnkConfig(env, mode);
+    await this.request(config, `/payment/v1/rules/${encodeURIComponent(input.ruleId)}/actions`, {
+      method: "POST",
+      body: { type: "DEACTIVATE" },
+    });
   }
 
   async simulatePayin(
