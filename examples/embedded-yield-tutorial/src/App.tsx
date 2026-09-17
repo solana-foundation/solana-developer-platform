@@ -201,7 +201,7 @@ function EarnSection() {
         </h2>
         <p className="mt-4 leading-relaxed text-muted-foreground">
           Back in the Wallet app, the customer&rsquo;s USDC now shows an
-          &ldquo;Earn 4.8%&rdquo; button. One tap opts their stablecoins into
+          &ldquo;Earn 7.8%&rdquo; button. One tap opts their stablecoins into
           the strategies the company surfaced in step 2.
         </p>
         <p className="mt-4 leading-relaxed text-muted-foreground">
@@ -214,12 +214,14 @@ function EarnSection() {
           <div className="flex items-start gap-2.5 rounded-xl border border-foreground/10 bg-background p-3">
             <LandmarkIcon className="mt-0.5 size-4 shrink-0 text-success" />
             <span className="text-foreground/80">
-              Tokenized treasuries · ~4.8% APY
+              Tokenized treasuries + private credit
             </span>
           </div>
           <div className="flex items-start gap-2.5 rounded-xl border border-foreground/10 bg-background p-3">
             <BriefcaseIcon className="mt-0.5 size-4 shrink-0 text-success" />
-            <span className="text-foreground/80">Private credit funds</span>
+            <span className="text-foreground/80">
+              Blended earn rate · 7.8% APY
+            </span>
           </div>
         </div>
       </div>

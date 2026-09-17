@@ -1,5 +1,5 @@
 /** Annual percentage yield surfaced on the demo's "Earn" button. */
-export const EARN_APY = 0.048;
+export const EARN_APY = 0.078;
 
 /** Fast-forward horizon shown in the balance chart, in days. */
 export const EARN_DAYS = 30;

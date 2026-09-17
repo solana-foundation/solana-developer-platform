@@ -12,8 +12,9 @@ describe("balanceAfterDays", () => {
 
   it("approximates continuously compounded growth after a year", () => {
     const balance = balanceAfterDays(1_000, EARN_APY, 365);
-    expect(balance).toBeGreaterThan(1_049);
-    expect(balance).toBeLessThan(1_050);
+    const continuouslyCompounded = 1_000 * Math.exp(EARN_APY);
+    expect(balance).toBeGreaterThan(continuouslyCompounded - 1);
+    expect(balance).toBeLessThan(continuouslyCompounded + 1);
   });
 
   it("supports fractional days for the animation sweep", () => {
@@ -39,7 +40,8 @@ describe("yieldSeries", () => {
   it("grows roughly one twelfth of the APY over 30 days", () => {
     const series = yieldSeries(12_500, EARN_APY, 30);
     const growth = (series[30] - series[0]) / series[0];
-    expect(growth).toBeGreaterThan(0.0035);
-    expect(growth).toBeLessThan(0.0045);
+    const monthly = EARN_APY / 12;
+    expect(growth).toBeGreaterThan(monthly * 0.9);
+    expect(growth).toBeLessThan(monthly * 1.1);
   });
 });
