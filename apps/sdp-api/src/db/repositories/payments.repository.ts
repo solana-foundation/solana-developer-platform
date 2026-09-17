@@ -236,6 +236,12 @@ export interface PaymentsRepository {
     amount?: string | null;
     fiatAmount?: string | null;
     providerData?: Record<string, unknown>;
+    /**
+     * Optional JSON path keys (e.g. ["bvnk","appliedPayinId"]) whose value must
+     * be absent/null for the statement to match, putting a webhook event's
+     * idempotency claim in the same UPDATE as the status transition.
+     */
+    providerDataNullPath?: readonly string[];
     error?: string | null;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
@@ -314,6 +320,18 @@ export interface PaymentsRepository {
    */
   getInFlightBvnkOnrampTransferByFundingWallet(params: {
     fundingWalletAccountId: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
+   * Reads any BVNK on-ramp transfer that already applied the given pay-in
+   * event uuid, regardless of status, so a replayed webhook can be
+   * acknowledged without resolving a newer transfer. System-level: the uuid
+   * alone decides the match.
+   *
+   * @param params - The pay-in event uuid BVNK delivered.
+   * @returns The matching transfer, or null when no transfer applied it yet.
+   */
+  findBvnkOnrampTransferByAppliedPayinId(params: {
+    appliedPayinId: string;
   }): Promise<PaymentTransferRow | null>;
   /**
    * Binds the BVNK payment rule to an on-ramp transfer via a

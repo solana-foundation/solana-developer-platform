@@ -1,4 +1,5 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { buildBvnkOnrampRuleReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bvnkChannelTransactionEvent,
@@ -10,14 +11,31 @@ import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { BvnkWebhookProcessor } from "./bvnk";
 
+const loggerMocks = vi.hoisted(() => ({
+  trace: vi.fn(),
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  fatal: vi.fn(),
+  child: vi.fn(),
+}));
+
+vi.mock("@/runtime/logger", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/runtime/logger")>()),
+  getLogger: () => loggerMocks,
+}));
+
 const mockAccounts = vi.hoisted(() => ({
   getProviderAccountByExternalReference: vi.fn(),
 }));
 
 const mockPayments = vi.hoisted(() => ({
   getInFlightBvnkOnrampTransferByFundingWallet: vi.fn(),
+  findBvnkOnrampTransferByAppliedPayinId: vi.fn(),
   updateTransferStatusGuarded: vi.fn(),
   markBvnkOnrampRuleDeactivated: vi.fn(),
+  bindBvnkOnrampRule: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -192,6 +210,12 @@ describe("BvnkWebhookProcessor.process crypto completion", () => {
       organization_id: "org_test",
       project_id: "prj_test",
     });
+    mockPayments.findBvnkOnrampTransferByAppliedPayinId.mockResolvedValue(null);
+    mockPayments.bindBvnkOnrampRule.mockResolvedValue({
+      id: TRANSFER_ID,
+      organization_id: "org_test",
+      project_id: "prj_test",
+    });
     mockPayments.getInFlightBvnkOnrampTransferByFundingWallet.mockResolvedValue({
       id: TRANSFER_ID,
       organization_id: "org_test",
@@ -223,7 +247,12 @@ describe("BvnkWebhookProcessor.process crypto completion", () => {
 
   it("completes the transfer, deactivates the rule, and writes ruleStatus DEACTIVATED back to the row", async () => {
     const processor = new BvnkWebhookProcessor();
-    const channel = processor.parse(bvnkCryptoStatusChangeEvent({ walletId: "a:1:wallet:1" }));
+    const channel = processor.parse(
+      bvnkCryptoStatusChangeEvent({
+        walletId: "a:1:wallet:1",
+        reference: buildBvnkOnrampRuleReference(TRANSFER_ID),
+      })
+    );
     if (channel.event !== "bvnk:payment:crypto:status-change") {
       throw new Error("expected crypto status-change event");
     }
@@ -235,6 +264,10 @@ describe("BvnkWebhookProcessor.process crypto completion", () => {
         transferId: TRANSFER_ID,
         fromStatuses: ["settling"],
         toStatus: "completed",
+        providerData: {
+          bvnk: expect.objectContaining({ appliedCryptoEventId: "crypto_1" }),
+        },
+        providerDataNullPath: ["bvnk", "appliedCryptoEventId"],
       })
     );
     expect(RAMP_PROVIDER_CLIENTS.bvnk.deactivateOnrampRule).toHaveBeenCalledWith(
@@ -256,7 +289,12 @@ describe("BvnkWebhookProcessor.process crypto completion", () => {
       new Error("bvnk unreachable")
     );
     const processor = new BvnkWebhookProcessor();
-    const channel = processor.parse(bvnkCryptoStatusChangeEvent({ walletId: "a:1:wallet:1" }));
+    const channel = processor.parse(
+      bvnkCryptoStatusChangeEvent({
+        walletId: "a:1:wallet:1",
+        reference: buildBvnkOnrampRuleReference(TRANSFER_ID),
+      })
+    );
     if (channel.event !== "bvnk:payment:crypto:status-change") {
       throw new Error("expected crypto status-change event");
     }
@@ -264,5 +302,161 @@ describe("BvnkWebhookProcessor.process crypto completion", () => {
     await processor.process(testEnv as Env, "sandbox", channel);
 
     expect(mockPayments.markBvnkOnrampRuleDeactivated).not.toHaveBeenCalled();
+  });
+
+  it("acks a crypto completion whose reference names a different transfer", async () => {
+    const processor = new BvnkWebhookProcessor();
+    const channel = processor.parse(
+      bvnkCryptoStatusChangeEvent({
+        walletId: "a:1:wallet:1",
+        reference: buildBvnkOnrampRuleReference("xfr_99999999-9999-4999-8999-999999999999"),
+      })
+    );
+    if (channel.event !== "bvnk:payment:crypto:status-change") {
+      throw new Error("expected crypto status-change event");
+    }
+
+    await processor.process(testEnv as Env, "sandbox", channel);
+
+    expect(mockPayments.updateTransferStatusGuarded).not.toHaveBeenCalled();
+    expect(JSON.stringify(loggerMocks.info.mock.calls)).toContain(
+      "sdp_api_bvnk_crypto_event_stale"
+    );
+  });
+});
+
+describe("BvnkWebhookProcessor.process pay-in", () => {
+  const TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174000";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAccounts.getProviderAccountByExternalReference.mockResolvedValue({
+      id: "counterparty_provider_account_funding",
+      organization_id: "org_test",
+      project_id: "prj_test",
+    });
+    mockPayments.findBvnkOnrampTransferByAppliedPayinId.mockResolvedValue(null);
+    mockPayments.getInFlightBvnkOnrampTransferByFundingWallet.mockResolvedValue({
+      id: TRANSFER_ID,
+      organization_id: "org_test",
+      project_id: "prj_test",
+      provider: "bvnk",
+      provider_data: {
+        bvnk: {
+          fundingWalletAccountId: "counterparty_provider_account_funding",
+          ruleId: "rule_bound_1",
+          ruleStatus: "ACTIVE",
+        },
+      },
+    });
+    mockPayments.updateTransferStatusGuarded.mockResolvedValue({
+      id: TRANSFER_ID,
+      status: "settling",
+    });
+    mockPayments.bindBvnkOnrampRule.mockResolvedValue({ id: TRANSFER_ID });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("acks a replayed pay-in without touching any transfer", async () => {
+    mockPayments.findBvnkOnrampTransferByAppliedPayinId.mockResolvedValue({
+      id: "xfr_already_applied",
+      organization_id: "org_test",
+      project_id: "prj_test",
+    });
+
+    const processor = new BvnkWebhookProcessor();
+    const channel = processor.parse(bvnkPayinStatusChangeEvent());
+    if (channel.event !== "bvnk:payment:payin:status-change") {
+      throw new Error("expected pay-in status-change event");
+    }
+
+    await processor.process(testEnv as Env, "sandbox", channel);
+
+    expect(mockPayments.updateTransferStatusGuarded).not.toHaveBeenCalled();
+    expect(mockAccounts.getProviderAccountByExternalReference).not.toHaveBeenCalled();
+    expect(JSON.stringify(loggerMocks.info.mock.calls)).toContain("sdp_api_bvnk_payin_replayed");
+  });
+
+  it("keeps the recovered rule bound when a crash-recovered pay-in settles the transfer", async () => {
+    mockPayments.getInFlightBvnkOnrampTransferByFundingWallet
+      .mockResolvedValueOnce({
+        id: TRANSFER_ID,
+        organization_id: "org_test",
+        project_id: "prj_test",
+        provider: "bvnk",
+        provider_data: {
+          bvnk: {
+            fundingWalletAccountId: "counterparty_provider_account_funding",
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        id: TRANSFER_ID,
+        organization_id: "org_test",
+        project_id: "prj_test",
+        provider: "bvnk",
+        provider_data: {
+          bvnk: {
+            fundingWalletAccountId: "counterparty_provider_account_funding",
+            ruleId: "rule_recovered_1",
+            ruleStatus: "ACTIVE",
+          },
+        },
+      });
+    vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listOnrampRulesByWallet").mockResolvedValue([
+      {
+        id: "rule_recovered_1",
+        reference: buildBvnkOnrampRuleReference(TRANSFER_ID),
+        status: "ACTIVE",
+      },
+    ]);
+
+    const processor = new BvnkWebhookProcessor();
+    const channel = processor.parse(bvnkPayinStatusChangeEvent({ uuid: "payin_recovery_1" }));
+    if (channel.event !== "bvnk:payment:payin:status-change") {
+      throw new Error("expected pay-in status-change event");
+    }
+
+    await processor.process(testEnv as Env, "sandbox", channel);
+
+    expect(mockPayments.updateTransferStatusGuarded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerData: {
+          bvnk: expect.objectContaining({
+            ruleId: "rule_recovered_1",
+            ruleStatus: "ACTIVE",
+            creditedFiatAmount: "100",
+            appliedPayinId: "payin_recovery_1",
+          }),
+        },
+        providerDataNullPath: ["bvnk", "appliedPayinId"],
+      })
+    );
+  });
+
+  it("writes appliedPayinId and guards on it in the settling CAS", async () => {
+    const processor = new BvnkWebhookProcessor();
+    const channel = processor.parse(bvnkPayinStatusChangeEvent());
+    if (channel.event !== "bvnk:payment:payin:status-change") {
+      throw new Error("expected pay-in status-change event");
+    }
+
+    await processor.process(testEnv as Env, "sandbox", channel);
+
+    expect(mockPayments.updateTransferStatusGuarded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerData: {
+          bvnk: expect.objectContaining({
+            ruleId: "rule_bound_1",
+            appliedPayinId: "payin_1",
+          }),
+        },
+        providerDataNullPath: ["bvnk", "appliedPayinId"],
+        fromStatuses: ["awaiting_payment"],
+      })
+    );
   });
 });

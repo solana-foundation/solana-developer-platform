@@ -198,7 +198,7 @@ describe("reconcileBvnkOnrampExpiry", () => {
     await reconcileBvnkOnrampExpiry(env);
 
     // The failure is logged under sdp_api_bvnk_rule_deactivate_failed...
-    const serialized = loggerMocks.warn.mock.calls.map((call) => JSON.stringify(call)).join("\n");
+    const serialized = loggerMocks.error.mock.calls.map((call) => JSON.stringify(call)).join("\n");
     expect(serialized).toContain("sdp_api_bvnk_rule_deactivate_failed");
 
     // ...and the transfer stays expired with its rule status unchanged, so the
@@ -265,6 +265,88 @@ describe("reconcileBvnkOnrampExpiry", () => {
     const transfer = await readTransfer("xfr_expire_ruleless");
     expect(transfer?.status).toBe("expired");
     expect(transfer?.provider_data.bvnk?.ruleStatus).toBe("DEACTIVATED");
+  });
+
+  it("deactivates the rule of a completed transfer with an ACTIVE rule on the next tick", async () => {
+    await insertTransfer({
+      id: "xfr_terminal_completed",
+      provider: "bvnk",
+      type: "onramp",
+      direction: "inbound",
+      status: "completed",
+      providerData: bvnkOnrampProviderData("rule_terminal_1", "ACTIVE"),
+      createdAt: OLD,
+    });
+    await insertTransfer({
+      id: "xfr_terminal_done",
+      provider: "bvnk",
+      type: "onramp",
+      direction: "inbound",
+      status: "completed",
+      providerData: bvnkOnrampProviderData("rule_terminal_2", "DEACTIVATED"),
+      createdAt: OLD,
+    });
+
+    await reconcileBvnkOnrampExpiry(env);
+
+    // The sweep covers terminal transfers, skipping ones already swept.
+    expect(deactivateRule).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ruleId: "rule_terminal_1" })
+    );
+    expect(deactivateRule).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ruleId: "rule_terminal_2" })
+    );
+    const transfer = await readTransfer("xfr_terminal_completed");
+    expect(transfer?.status).toBe("completed");
+    expect(transfer?.provider_data.bvnk?.ruleStatus).toBe("DEACTIVATED");
+  });
+
+  it("isolates a malformed row so the valid row is still deactivated", async () => {
+    await insertTransfer({
+      id: "xfr_legacy_shape",
+      provider: "bvnk",
+      type: "onramp",
+      direction: "inbound",
+      status: "completed",
+      providerData: { bvnk: { ruleId: "rule_legacy_1", ruleStatus: "ACTIVE" } },
+      createdAt: OLD,
+    });
+    await insertTransfer({
+      id: "xfr_malformed_row",
+      provider: "bvnk",
+      type: "onramp",
+      direction: "inbound",
+      status: "completed",
+      providerData: {
+        bvnk: { fundingWalletAccountId: "", ruleId: "rule_malformed_1", ruleStatus: "ACTIVE" },
+      },
+      createdAt: OLD,
+    });
+    await insertTransfer({
+      id: "xfr_valid_row",
+      provider: "bvnk",
+      type: "onramp",
+      direction: "inbound",
+      status: "completed",
+      providerData: bvnkOnrampProviderData("rule_valid_1", "ACTIVE"),
+      createdAt: OLD,
+    });
+
+    const outcome = await reconcileBvnkOnrampExpiry(env);
+
+    // The legacy-shaped row is excluded by the query, the malformed row fails
+    // in isolation, and the valid row is still deactivated.
+    expect(deactivateRule).toHaveBeenCalledTimes(1);
+    expect(deactivateRule).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ruleId: "rule_valid_1" })
+    );
+    const serialized = loggerMocks.error.mock.calls.map((call) => JSON.stringify(call)).join("\n");
+    expect(serialized).toContain("sdp_api_bvnk_onramp_expiry_row_failed");
+    expect(serialized).toContain("xfr_malformed_row");
+    expect(outcome).toEqual({ expired: 0, deactivated: 1, failed: 1 });
   });
 });
 

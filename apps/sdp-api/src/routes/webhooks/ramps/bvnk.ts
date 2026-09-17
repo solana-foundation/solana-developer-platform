@@ -2,6 +2,7 @@ import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   isBvnkWalletActive,
   readBvnkOfframpReference,
+  readBvnkOnrampRuleReference,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { bvnkOnrampTransferProviderDataSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
@@ -40,6 +41,16 @@ async function handleBvnkPaymentPayinStatusChange(
   if (event.data.status !== "COMPLETED") {
     return;
   }
+  const payments = createSystemPaymentsRepository(env);
+  const alreadyApplied = await payments.findBvnkOnrampTransferByAppliedPayinId({
+    appliedPayinId: event.data.uuid,
+  });
+  if (alreadyApplied !== null) {
+    getLogger().info(
+      `sdp_api_bvnk_payin_replayed payin=${event.data.uuid} transfer=${alreadyApplied.id}`
+    );
+    return;
+  }
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
   const wallet = await accounts.getProviderAccountByExternalReference({
     provider: "bvnk",
@@ -50,7 +61,6 @@ async function handleBvnkPaymentPayinStatusChange(
       `BVNK webhook wallet ${event.data.beneficiary.walletId} has no provider-account row`
     );
   }
-  const payments = createSystemPaymentsRepository(env);
   const transfer = await payments.getInFlightBvnkOnrampTransferByFundingWallet({
     fundingWalletAccountId: wallet.id,
   });
@@ -59,7 +69,7 @@ async function handleBvnkPaymentPayinStatusChange(
       `BVNK webhook payin ${event.data.uuid} has no in-flight onramp transfer for funding wallet ${wallet.id}`
     );
   }
-  const bvnk = bvnkOnrampTransferProviderDataSchema.parse(transfer.provider_data).bvnk;
+  let bvnk = bvnkOnrampTransferProviderDataSchema.parse(transfer.provider_data).bvnk;
   if (bvnk.ruleId === undefined) {
     await resolveBvnkOnrampRule(
       payments,
@@ -68,25 +78,35 @@ async function handleBvnkPaymentPayinStatusChange(
       event.data.beneficiary.walletId,
       null
     );
+    // The provider_data merge replaces the whole bvnk object, so a rule the
+    // recovery just bound is only present on a re-read of the row.
+    const refreshed = await payments.getInFlightBvnkOnrampTransferByFundingWallet({
+      fundingWalletAccountId: wallet.id,
+    });
+    if (refreshed === null || refreshed.id !== transfer.id) {
+      getLogger().warn(
+        `[bvnk webhook] pay-in ${event.data.uuid} lost the onramp transfer ${transfer.id} during rule recovery for funding wallet ${wallet.id}`
+      );
+      return;
+    }
+    bvnk = bvnkOnrampTransferProviderDataSchema.parse(refreshed.provider_data).bvnk;
   }
-  if (bvnk.appliedPayinId === event.data.uuid) {
-    getLogger().info(
-      `[bvnk webhook] pay-in ${event.data.uuid} already applied to transfer ${transfer.id}`
-    );
-    return;
-  }
-  const paymentAmount = event.data.amount.value;
   const settled = await payments.updateTransferStatusGuarded({
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
     fromStatuses: ["awaiting_payment"],
     toStatus: "settling",
-    fiatAmount: paymentAmount,
+    fiatAmount: event.data.amount.value,
     // provider_data merges shallowly, so the bvnk object is rewritten whole.
     providerData: {
-      bvnk: { ...bvnk, creditedFiatAmount: paymentAmount, appliedPayinId: event.data.uuid },
+      bvnk: {
+        ...bvnk,
+        creditedFiatAmount: event.data.amount.value,
+        appliedPayinId: event.data.uuid,
+      },
     },
+    providerDataNullPath: ["bvnk", "appliedPayinId"],
     updatedAt: new Date().toISOString(),
   });
   if (settled === null) {
@@ -125,12 +145,26 @@ async function handleBvnkPaymentCryptoStatusChange(
     );
     return;
   }
+  if (event.data.reference !== undefined) {
+    const referencedTransferId = readBvnkOnrampRuleReference(event.data.reference);
+    if (referencedTransferId !== transfer.id) {
+      getLogger().info(
+        `sdp_api_bvnk_crypto_event_stale crypto=${event.data.uuid} eventTransfer=${
+          referencedTransferId ?? "unknown"
+        } transfer=${transfer.id}`
+      );
+      return;
+    }
+  }
+  const bvnk = bvnkOnrampTransferProviderDataSchema.parse(transfer.provider_data).bvnk;
   const completed = await payments.updateTransferStatusGuarded({
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
     fromStatuses: ["settling"],
     toStatus: "completed",
+    providerData: { bvnk: { ...bvnk, appliedCryptoEventId: event.data.uuid } },
+    providerDataNullPath: ["bvnk", "appliedCryptoEventId"],
     updatedAt: new Date().toISOString(),
   });
   if (completed === null) {
@@ -139,7 +173,6 @@ async function handleBvnkPaymentCryptoStatusChange(
     );
     return;
   }
-  const bvnk = bvnkOnrampTransferProviderDataSchema.parse(transfer.provider_data).bvnk;
   if (bvnk.ruleId === undefined) {
     return;
   }

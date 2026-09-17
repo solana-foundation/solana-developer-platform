@@ -156,6 +156,27 @@ export function buildBvnkOnrampRuleReference(paymentTransferId: string): string 
   return `sdp_onramp_${paymentTransferId}`;
 }
 
+/**
+ * Parses BVNK crypto status-change `data.reference` back into the SDP transfer id.
+ *
+ * The reference is the on-ramp rule reference SDP itself mints via
+ * `buildBvnkOnrampRuleReference`, so a reference without the `sdp_onramp_`
+ * prefix belongs to a foreign payment (ack and ignore, never reject). The
+ * remainder is compared for exact equality with the resolved in-flight
+ * transfer, so no id-format validation is needed.
+ *
+ * @param reference BVNK crypto status-change reference in `sdp_onramp_<transfer_id>` format.
+ * @returns SDP payment transfer id (for example `xfr_<uuid>`), or undefined when the
+ * reference was not minted by SDP.
+ */
+export function readBvnkOnrampRuleReference(reference: string): string | undefined {
+  const prefix = "sdp_onramp_";
+  if (!reference.startsWith(prefix)) {
+    return undefined;
+  }
+  return reference.slice(prefix.length);
+}
+
 const BVNK_WALLET_ACTIVE_STATUSES = new Set(["ACTIVE", "COMPLETED"]);
 
 export function isBvnkWalletActive(status: string | null): boolean {
