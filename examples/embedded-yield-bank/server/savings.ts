@@ -13,6 +13,7 @@ import type {
   YieldPosition,
   YieldStrategy,
 } from "../src/types";
+import { ApiRequestError } from "./http";
 import { DEVNET_USDC_MINT } from "./solana";
 
 /** Every current stablecoin vault quotes in six-decimal tokens. */
@@ -129,14 +130,17 @@ export function earnedFromLedger(
   const finalized = movements.filter(
     (movement) => movement.status === "finalized"
   );
-  if (finalized.some((movement) => movement.tokenAmount === null))
-    return undefined;
+  const valued = finalized.filter(
+    (movement): movement is YieldMovement & { tokenAmount: string } =>
+      movement.tokenAmount !== null
+  );
+  if (valued.length !== finalized.length) return undefined;
   return addDecimals([
     currentValue,
-    ...finalized.map((movement) =>
+    ...valued.map((movement) =>
       movement.direction === "withdrawal"
-        ? (movement.tokenAmount as string)
-        : `-${movement.tokenAmount as string}`
+        ? movement.tokenAmount
+        : `-${movement.tokenAmount}`
     ),
   ]);
 }
@@ -178,7 +182,9 @@ export function sharesForAmount(
     !isPositiveDecimal(amount) ||
     decimalScale(amount) > SAVINGS_AMOUNT_DECIMALS
   ) {
-    throw new Error(
+    throw new ApiRequestError(
+      400,
+      "INVALID_REQUEST",
       `Enter a positive amount with up to ${SAVINGS_AMOUNT_DECIMALS} decimal places`
     );
   }
@@ -189,11 +195,21 @@ export function sharesForAmount(
     position.withdrawableShares === undefined ||
     position.tokenValue === undefined
   ) {
-    throw new Error("Savings balance is still updating; refresh and try again");
+    // Missing valuation fields are provider state, not malformed client
+    // input, so report a retryable 503 instead of a client-correcting 400.
+    throw new ApiRequestError(
+      503,
+      "VALUATION_UNAVAILABLE",
+      "Savings balance is still updating; refresh and try again"
+    );
   }
   const comparison = compareDecimals(amount, available);
   if (comparison === 1) {
-    throw new Error(`Only ${available} is available to move right now`);
+    throw new ApiRequestError(
+      400,
+      "INVALID_REQUEST",
+      `Only ${available} is available to move right now`
+    );
   }
   if (comparison === 0) return position.withdrawableShares;
 
@@ -212,7 +228,11 @@ export function sharesForAmount(
     shareDecimals
   );
   if (!isPositiveDecimal(shares)) {
-    throw new Error("That amount is too small to move");
+    throw new ApiRequestError(
+      400,
+      "INVALID_REQUEST",
+      "That amount is too small to move"
+    );
   }
   return shares;
 }

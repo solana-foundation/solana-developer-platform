@@ -82,20 +82,27 @@ export function TransferDialog({
     }
   }
 
+  const trigger = (
+    <Button
+      type="button"
+      variant={variant}
+      size="lg"
+      className="px-4"
+      disabled={Boolean(disabledReason) || busy}
+    >
+      {copy.title}
+    </Button>
+  );
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button
-          type="button"
-          variant={variant}
-          size="lg"
-          className="px-4"
-          disabled={Boolean(disabledReason) || busy}
-          title={disabledReason}
-        >
-          {copy.title}
-        </Button>
-      </DialogTrigger>
+      {disabledReason ? (
+        <span className="inline-flex" title={disabledReason}>
+          {trigger}
+        </span>
+      ) : (
+        <DialogTrigger asChild>{trigger}</DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-md">
         <form className="flex flex-col gap-6" onSubmit={submit}>
           <DialogHeader>

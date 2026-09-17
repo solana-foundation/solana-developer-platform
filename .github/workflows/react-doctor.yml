@@ -30,5 +30,6 @@ jobs:
           scope: changed
           # React apps only. The default "*" walks every workspace, so React
           # rules were re-flagging deliberate sequential awaits in @sdp/api
-          # cron code on each push.
-          project: sdp-web,sdp-docs
+          # cron code on each push. The example is a standalone workspace, so
+          # it is referenced by path instead of project name.
+          project: sdp-web,sdp-docs,examples/embedded-yield-bank

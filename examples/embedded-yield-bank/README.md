@@ -24,7 +24,7 @@ affordances for the example.
 | Northstar | SDP |
 | --- | --- |
 | Checking balance | The demo wallet's balance of the strategy's deposit token, read over RPC |
-| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first devnet strategy that is both instant-liquidity and USDC (anything else is a startup error) |
+| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first devnet strategy that is both instant-liquidity and USDC (with none qualifying, every page load fails until fixed) |
 | Savings balance and earnings | The wallet's open position in that strategy; earnings use SDP's formula (value + finalized payouts - finalized deposits) over that strategy's movements only |
 | Move to savings | Deposit preview when the strategy requires a floor, then build, server-side sign, submit |
 | Move to checking | Token amount converted to shares at the live share price, then withdrawal preview, build, sign, submit |
@@ -175,7 +175,7 @@ that Vercel exposes as `VERCEL_PROJECT_PRODUCTION_URL`.
 | `DEMO_ACCESS_PASSWORD` | Yes | HTTP Basic password protecting the page and all API routes. |
 | `DEMO_WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array Solana keypair used only by the server. Its token balance is checking. |
 | `DEMO_FEE_PAYER_PRIVATE_KEY` | No | Different funded devnet keypair that co-signs and pays network fees and account rent. |
-| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Otherwise the first devnet strategy that is both instant-liquidity and USDC; none qualifying is a startup error. |
+| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Otherwise the first devnet strategy that is both instant-liquidity and USDC; with none qualifying, every page load fails until fixed. |
 | `SOLANA_RPC_URL` | No | Devnet RPC used for direct wallet balance reads. |
 
 ## Local end-to-end notes
