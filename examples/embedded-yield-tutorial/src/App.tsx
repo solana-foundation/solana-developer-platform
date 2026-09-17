@@ -268,6 +268,18 @@ function StrategiesSection() {
       apy: "4.34%",
     },
     {
+      name: "WisdomTree Government Money Market Digital Fund",
+      provider: "WisdomTree",
+      asset: "WTGXX",
+      apy: "3.61%",
+    },
+    {
+      name: "Ondo USDY",
+      provider: "Ondo",
+      asset: "USDY",
+      apy: "3.6%",
+    },
+    {
       name: "Steakhouse USDC",
       provider: "Kamino",
       asset: "USDC",
