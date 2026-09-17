@@ -161,7 +161,9 @@ export function fieldToZod(field: RequirementField): z.ZodTypeAny {
       // Only the affirmative literal satisfies a required consent; an optional one may be left unticked,
       // which the web form sends as "" and a headless caller may send as "false" or omit.
       if (field.required) {
-        return z.literal("true", { error: `${field.documentLabel ?? field.label} must be accepted` });
+        return z.literal("true", {
+          error: `${field.documentLabel ?? field.label} must be accepted`,
+        });
       }
       return z.enum(["true", "false", ""]).optional();
     }
