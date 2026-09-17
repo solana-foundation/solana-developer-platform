@@ -7,7 +7,7 @@ import {
   isBvnkCustomerVerified,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types";
+import type { RampDirection } from "@sdp/types";
 import {
   COUNTERPARTY_ENTITY_TYPES,
   COUNTRIES,
@@ -19,7 +19,10 @@ import {
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
 } from "@sdp/types";
-import type { PayoutRequirementAccount } from "@sdp/types/ramp-requirements";
+import type {
+  CounterpartyRequirements,
+  PayoutRequirementAccount,
+} from "@sdp/types/ramp-requirements";
 import { isCollectFieldsRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
