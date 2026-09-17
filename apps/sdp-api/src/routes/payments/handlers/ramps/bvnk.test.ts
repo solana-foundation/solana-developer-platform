@@ -1161,6 +1161,24 @@ describe("bvnkOnrampQuote", () => {
     expect(createOnrampRule).not.toHaveBeenCalled();
   });
 
+  it("rejects a quote when the funding wallet row's provider status is not ACTIVE", async () => {
+    mockAccounts.getVirtualFundingWallet.mockResolvedValue(
+      fundingWalletRow({ provider_status: "INACTIVE" })
+    );
+
+    let caught: unknown;
+    try {
+      await bvnkOnrampQuote(fakeContext(), onrampRequest());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({ code: "CONFLICT" });
+    expect(getLedgerWalletV2).not.toHaveBeenCalled();
+    expect(mockPayments.createTransfer).not.toHaveBeenCalled();
+    expect(createOnrampRule).not.toHaveBeenCalled();
+  });
+
   it("marks the claimed transfer failed with the error when rule creation throws, freeing the funding lock", async () => {
     mockPayments.updateTransferStatusGuarded.mockResolvedValue(transferRow({ status: "failed" }));
     createOnrampRule.mockRejectedValueOnce(new Error("BVNK rule create exploded"));

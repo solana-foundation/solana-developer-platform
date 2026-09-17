@@ -438,11 +438,29 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       provider: "bvnk",
       id: claimed.id,
       providerStatus: "ACTIVE",
+      rowStatus: "active",
     });
     expect(active).toMatchObject({
       id: claimed.id,
       status: "active",
       provider_status: "ACTIVE",
+    });
+
+    // A BVNK TERMINATED webhook archives the row rather than leaving it
+    // active behind the provider's back.
+    const archived = await repository.updateVirtualSettlementWalletStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: claimed.id,
+      providerStatus: "TERMINATED",
+      rowStatus: "archived",
+    });
+    expect(archived).toMatchObject({
+      id: claimed.id,
+      status: "archived",
+      provider_status: "TERMINATED",
     });
 
     // The reference bind is a CAS: a second bind on the same row misses.

@@ -53,18 +53,21 @@ export const bvnkWebhookSchema = z.discriminatedUnion("event", [
       type: z.string().min(1),
       uuid: z.string().min(1),
       walletId: z.string().min(1),
+      // Reference presence is unverified against live BVNK, so a missing
+      // reference must not reject a real crypto completion; the handler
+      // correlates the transfer id only when the reference is present.
       reference: z.string().optional(),
     }),
   }),
   z.object({
     event: z.literal("bvnk:payment:channel:transaction-detected"),
-    data: z.object({ channelId: z.string().min(1), reference: z.string().optional() }),
+    data: z.object({ channelId: z.string().min(1), reference: z.string().min(1) }),
   }),
   z.object({
     event: z.literal("bvnk:payment:channel:transaction-confirmed"),
     data: z.object({
       channelId: z.string().min(1),
-      reference: z.string().optional(),
+      reference: z.string().min(1),
       walletAmount: bvnkAmountSchema,
     }),
   }),

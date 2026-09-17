@@ -133,12 +133,14 @@ export interface CompleteVirtualSettlementWalletReferenceInput
 export interface UpdateVirtualFundingWalletStatusInput extends GetCounterpartyProviderAccountInput {
   id: string;
   providerStatus: string;
+  rowStatus: "active" | "archived";
 }
 
 export interface UpdateVirtualSettlementWalletStatusInput
   extends GetCounterpartyProviderAccountInput {
   id: string;
   providerStatus: string;
+  rowStatus: "active" | "archived";
 }
 
 export interface CompleteCustomerLinkInput extends GetCounterpartyProviderAccountInput {
@@ -326,10 +328,12 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Flips a virtual funding wallet row active with the wallet-status webhook's
-   * provider status; stores nothing else.
+   * Persists every provider status the wallet-status webhook delivers for the
+   * virtual funding wallet (ACTIVE, INACTIVE, TERMINATED, ...) and sets the
+   * row's own status to the passed row status — archived when BVNK terminated
+   * the wallet, active otherwise.
    *
-   * @param input - Tenant scope plus the row id and provider status.
+   * @param input - Tenant scope plus the row id, provider status, and target row status.
    * @returns The updated row, or null when the row is gone or out of scope.
    */
   updateVirtualFundingWalletStatus(
@@ -337,10 +341,12 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Flips a virtual settlement wallet row active with the wallet-status
-   * webhook's provider status; stores nothing else.
+   * Persists every provider status the wallet-status webhook delivers for the
+   * virtual settlement wallet (ACTIVE, INACTIVE, TERMINATED, ...) and sets the
+   * row's own status to the passed row status — archived when BVNK terminated
+   * the wallet, active otherwise.
    *
-   * @param input - Tenant scope plus the row id and provider status.
+   * @param input - Tenant scope plus the row id, provider status, and target row status.
    * @returns The updated row, or null when the row is gone or out of scope.
    */
   updateVirtualSettlementWalletStatus(

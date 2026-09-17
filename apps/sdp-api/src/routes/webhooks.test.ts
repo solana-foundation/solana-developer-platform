@@ -1571,6 +1571,53 @@ describe("BVNK ramp webhook", () => {
     expect(transfer?.status).toBe("settling");
   });
 
+  it("detected channel for a different channel leaves the transfer untouched", async () => {
+    await insertBvnkOfframpTransfer({
+      id: "xfr_b1_detected",
+      status: "awaiting_payment",
+      providerReference: CHANNEL_ID,
+    });
+
+    const res = await sendBvnkWebhook(
+      bvnkChannelTransactionEvent("transaction-detected", {
+        channelId: "channel_other_1",
+        reference: "sdp_offramp_xfr_b1_detected",
+      })
+    );
+
+    // The route stores the event and acks; the channel mismatch surfaces in
+    // the background apply, which records the failure on the stored row.
+    expect(res.status).toBe(200);
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_b1_detected")
+      .first<{ status: string }>();
+    expect(transfer?.status).toBe("awaiting_payment");
+  });
+
+  it("confirmed channel for a different channel leaves the transfer untouched", async () => {
+    await insertBvnkOfframpTransfer({
+      id: "xfr_b1_confirmed",
+      status: "settling",
+      providerReference: CHANNEL_ID,
+    });
+
+    const res = await sendBvnkWebhook(
+      bvnkChannelTransactionEvent("transaction-confirmed", {
+        channelId: "channel_other_1",
+        reference: "sdp_offramp_xfr_b1_confirmed",
+        walletAmount: 4.95,
+      })
+    );
+
+    expect(res.status).toBe(200);
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_b1_confirmed")
+      .first<{ status: string }>();
+    expect(transfer?.status).toBe("settling");
+  });
+
   it("flips the virtual settlement wallet row active on a wallet status-change webhook and stores nothing else", async () => {
     await seedBvnkVirtualSettlementWallet({ status: "pending", providerStatus: "PENDING" });
 
@@ -1598,6 +1645,70 @@ describe("BVNK ramp webhook", () => {
       .bind(COUNTERPARTY_ID)
       .first<{ provider_data: Record<string, unknown> }>();
     expect(counterparty?.provider_data).toEqual({});
+  });
+
+  it("persists an INACTIVE funding wallet status without archiving the row", async () => {
+    await seedBvnkVirtualFundingWallet();
+
+    const res = await sendBvnkWebhook(
+      bvnkWalletStatusChangeEvent({ id: WALLET_ID, status: "INACTIVE" })
+    );
+
+    expect(res.status).toBe(200);
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_status FROM counterparty_provider_accounts WHERE id = ?")
+      .bind(FUNDING_ACCOUNT_ID)
+      .first<{ status: string; provider_status: string | null }>();
+    expect(row?.status).toBe("active");
+    expect(row?.provider_status).toBe("INACTIVE");
+  });
+
+  it("archives a TERMINATED settlement wallet", async () => {
+    await seedBvnkVirtualSettlementWallet();
+
+    const res = await sendBvnkWebhook(
+      bvnkWalletStatusChangeEvent({ id: SETTLEMENT_WALLET_ID, status: "TERMINATED" })
+    );
+
+    expect(res.status).toBe(200);
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_status FROM counterparty_provider_accounts WHERE id = ?")
+      .bind(SETTLEMENT_ACCOUNT_ID)
+      .first<{ status: string; provider_status: string | null }>();
+    expect(row?.status).toBe("archived");
+    expect(row?.provider_status).toBe("TERMINATED");
+  });
+
+  it("persists an INACTIVE settlement wallet status", async () => {
+    await seedBvnkVirtualSettlementWallet();
+
+    const res = await sendBvnkWebhook(
+      bvnkWalletStatusChangeEvent({ id: SETTLEMENT_WALLET_ID, status: "INACTIVE" })
+    );
+
+    expect(res.status).toBe(200);
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_status FROM counterparty_provider_accounts WHERE id = ?")
+      .bind(SETTLEMENT_ACCOUNT_ID)
+      .first<{ status: string; provider_status: string | null }>();
+    expect(row?.status).toBe("active");
+    expect(row?.provider_status).toBe("INACTIVE");
+  });
+
+  it("archives a TERMINATED funding wallet", async () => {
+    await seedBvnkVirtualFundingWallet();
+
+    const res = await sendBvnkWebhook(
+      bvnkWalletStatusChangeEvent({ id: WALLET_ID, status: "TERMINATED" })
+    );
+
+    expect(res.status).toBe(200);
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_status FROM counterparty_provider_accounts WHERE id = ?")
+      .bind(FUNDING_ACCOUNT_ID)
+      .first<{ status: string; provider_status: string | null }>();
+    expect(row?.status).toBe("archived");
+    expect(row?.provider_status).toBe("TERMINATED");
   });
 
   it("rejects a webhook with an invalid signature", async () => {

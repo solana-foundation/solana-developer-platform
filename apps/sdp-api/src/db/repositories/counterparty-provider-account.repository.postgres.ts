@@ -345,7 +345,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       const row = await db
         .prepare(
           `UPDATE counterparty_provider_accounts
-           SET status = 'active',
+           SET status = ?,
                provider_status = ?,
                updated_at = sdp_iso_now()
            WHERE id = ?
@@ -357,6 +357,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
            RETURNING *`
         )
         .bind(
+          input.rowStatus,
           input.providerStatus,
           input.id,
           input.organizationId,
@@ -373,7 +374,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       const row = await db
         .prepare(
           `UPDATE counterparty_provider_accounts
-           SET status = 'active',
+           SET status = ?,
                provider_status = ?,
                updated_at = sdp_iso_now()
            WHERE id = ?
@@ -385,6 +386,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
            RETURNING *`
         )
         .bind(
+          input.rowStatus,
           input.providerStatus,
           input.id,
           input.organizationId,

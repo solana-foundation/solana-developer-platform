@@ -731,6 +731,9 @@ export async function bvnkOnrampQuote(
   if (walletRow.external_account_reference === null) {
     throw internalError("BVNK funding wallet has no wallet id bound to its provider-account row.");
   }
+  if (!isBvnkWalletActive(walletRow.provider_status)) {
+    throw counterpartyNotProvisioned("bvnk", "onramp");
+  }
   const inFlight = await payments.getInFlightBvnkOnrampTransferByFundingWallet({
     fundingWalletAccountId: walletRow.id,
   });

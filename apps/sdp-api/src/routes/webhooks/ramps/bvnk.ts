@@ -1,6 +1,5 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
-  isBvnkWalletActive,
   readBvnkOfframpReference,
   readBvnkOnrampRuleReference,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
@@ -200,6 +199,7 @@ async function handleBvnkFundingWalletWebhook(
   wallet: CounterpartyProviderAccountRow,
   status: string
 ): Promise<void> {
+  const rowStatus = status === "TERMINATED" ? "archived" : "active";
   const updated = await createPostgresCounterpartyProviderAccountsRepository(
     getDb(env)
   ).updateVirtualFundingWalletStatus({
@@ -209,6 +209,7 @@ async function handleBvnkFundingWalletWebhook(
     provider: "bvnk",
     id: wallet.id,
     providerStatus: status,
+    rowStatus,
   });
   if (updated === null) {
     throw new TerminalRampWebhookError(
@@ -231,6 +232,7 @@ async function handleBvnkSettlementWalletWebhook(
   wallet: CounterpartyProviderAccountRow,
   status: string
 ): Promise<void> {
+  const rowStatus = status === "TERMINATED" ? "archived" : "active";
   const updated = await createPostgresCounterpartyProviderAccountsRepository(
     getDb(env)
   ).updateVirtualSettlementWalletStatus({
@@ -240,6 +242,7 @@ async function handleBvnkSettlementWalletWebhook(
     provider: "bvnk",
     id: wallet.id,
     providerStatus: status,
+    rowStatus,
   });
   if (updated === null) {
     throw new TerminalRampWebhookError(
@@ -255,14 +258,10 @@ async function applyBvnkWalletEvent(
 ): Promise<void> {
   switch (wallet.kind) {
     case "virtual_funding_wallet":
-      if (isBvnkWalletActive(data.status)) {
-        await handleBvnkFundingWalletWebhook(env, wallet, data.status);
-      }
+      await handleBvnkFundingWalletWebhook(env, wallet, data.status);
       return;
     case "virtual_settlement_wallet":
-      if (isBvnkWalletActive(data.status)) {
-        await handleBvnkSettlementWalletWebhook(env, wallet, data.status);
-      }
+      await handleBvnkSettlementWalletWebhook(env, wallet, data.status);
       return;
     default:
       getLogger().info(
@@ -311,12 +310,31 @@ function bvnkChannelTransferId(
     }
   >
 ): string | undefined {
-  const transferId =
-    event.data.reference === undefined ? undefined : readBvnkOfframpReference(event.data.reference);
+  const transferId = readBvnkOfframpReference(event.data.reference);
   if (transferId === undefined) {
     getLogger().info(`[bvnk webhook] "${event.event}" has no SDP off-ramp transfer reference`);
   }
   return transferId;
+}
+
+/**
+ * Guards a channel event against the transfer it correlates: a channel uuid
+ * BVNK reports must equal the provider reference bound to the transfer at
+ * quote time, or the event belongs to a different channel entirely.
+ *
+ * @param event - The parsed channel-transaction webhook.
+ * @param transfer - The transfer the event's reference resolved to.
+ * @throws TerminalRampWebhookError when the channel ids disagree.
+ */
+function bvnkChannelMatchesTransfer(
+  event: { data: { channelId: string } },
+  transfer: PaymentTransferRow
+): void {
+  if (event.data.channelId !== transfer.provider_reference) {
+    throw new TerminalRampWebhookError(
+      `BVNK webhook channel ${event.data.channelId} does not match transfer ${transfer.id} provider reference ${transfer.provider_reference}`
+    );
+  }
 }
 
 async function handleBvnkPaymentChannelTransactionDetected(
@@ -335,6 +353,7 @@ async function handleBvnkPaymentChannelTransactionDetected(
     );
     return;
   }
+  bvnkChannelMatchesTransfer(event, transfer);
   const settled = await payments.updateTransferStatusGuarded({
     transferId: transfer.id,
     organizationId: transfer.organization_id,
@@ -366,6 +385,7 @@ async function handleBvnkPaymentChannelTransactionConfirmed(
     );
     return;
   }
+  bvnkChannelMatchesTransfer(event, transfer);
   await settleBvnkOfframpChannel(env, transfer, event.data.walletAmount);
 }
 

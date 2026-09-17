@@ -36,6 +36,8 @@ const mockPayments = vi.hoisted(() => ({
   updateTransferStatusGuarded: vi.fn(),
   markBvnkOnrampRuleDeactivated: vi.fn(),
   bindBvnkOnrampRule: vi.fn(),
+  getBvnkOfframpTransferById: vi.fn(),
+  bindBvnkOfframpCredit: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -196,6 +198,28 @@ describe("BvnkWebhookProcessor.parse", () => {
     expect(() => processor.parse({ event: "bvnk:payment:payin:status-change" })).toThrowError(
       'BVNK webhook "bvnk:payment:payin:status-change" is missing a data object'
     );
+  });
+
+  it("rejects a detected channel event without a reference", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(() =>
+      processor.parse({
+        event: "bvnk:payment:channel:transaction-detected",
+        data: { channelId: "channel_1" },
+      })
+    ).toThrowError("failed validation");
+  });
+
+  it("rejects a confirmed channel event without a reference", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(() =>
+      processor.parse({
+        event: "bvnk:payment:channel:transaction-confirmed",
+        data: { channelId: "channel_1", walletAmount: 4.95 },
+      })
+    ).toThrowError("failed validation");
   });
 });
 
@@ -458,5 +482,79 @@ describe("BvnkWebhookProcessor.process pay-in", () => {
         fromStatuses: ["awaiting_payment"],
       })
     );
+  });
+});
+
+describe("BvnkWebhookProcessor.process channel transaction", () => {
+  const TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174000";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPayments.getBvnkOfframpTransferById.mockResolvedValue({
+      id: TRANSFER_ID,
+      organization_id: "org_test",
+      project_id: "prj_test",
+      provider_reference: "channel_correct_1",
+    });
+    mockPayments.updateTransferStatusGuarded.mockResolvedValue({
+      id: TRANSFER_ID,
+      status: "settling",
+    });
+    mockPayments.bindBvnkOfframpCredit.mockResolvedValue({
+      id: TRANSFER_ID,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("rejects a detected channel event whose channelId does not match the transfer", async () => {
+    const processor = new BvnkWebhookProcessor();
+    const channel = processor.parse(
+      bvnkChannelTransactionEvent("transaction-detected", {
+        channelId: "channel_wrong_1",
+        reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",
+      })
+    );
+    if (channel.event !== "bvnk:payment:channel:transaction-detected") {
+      throw new Error("expected detected channel event");
+    }
+
+    let thrown: unknown;
+    try {
+      await processor.process(testEnv as Env, "sandbox", channel);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("channel_wrong_1");
+    expect((thrown as Error).message).toContain(TRANSFER_ID);
+    expect(mockPayments.updateTransferStatusGuarded).not.toHaveBeenCalled();
+  });
+
+  it("rejects a confirmed channel event whose channelId does not match the transfer", async () => {
+    const processor = new BvnkWebhookProcessor();
+    const channel = processor.parse(
+      bvnkChannelTransactionEvent("transaction-confirmed", {
+        channelId: "channel_wrong_1",
+        reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",
+        walletAmount: 4.95,
+      })
+    );
+    if (channel.event !== "bvnk:payment:channel:transaction-confirmed") {
+      throw new Error("expected confirmed channel event");
+    }
+
+    let thrown: unknown;
+    try {
+      await processor.process(testEnv as Env, "sandbox", channel);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("channel_wrong_1");
+    expect((thrown as Error).message).toContain(TRANSFER_ID);
+    expect(mockPayments.bindBvnkOfframpCredit).not.toHaveBeenCalled();
   });
 });
