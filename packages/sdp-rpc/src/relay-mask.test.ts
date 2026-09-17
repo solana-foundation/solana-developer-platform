@@ -21,6 +21,13 @@ describe("maskEndpoint", () => {
     );
   });
 
+  it("masks a percent-encoded Base64-style path credential", () => {
+    assert.equal(
+      maskEndpoint("https://rpc.example.com/QWxhZGRpbjpvcGVuIHNlc2FtZQ%3D%3D", env),
+      "https://rpc.example.com/***"
+    );
+  });
+
   it("masks key-ish query parameters", () => {
     assert.equal(
       maskEndpoint("https://rpc.example.com/rpc?api-key=secret123", env),

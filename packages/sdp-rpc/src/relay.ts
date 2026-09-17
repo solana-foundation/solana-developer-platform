@@ -288,7 +288,18 @@ function collectRpcApiKeys(env: RpcEnv): string[] {
  * below only covers the platform's own keys.
  */
 function isCredentialPathSegment(segment: string): boolean {
-  return /^[A-Za-z0-9_-]{16,}$/.test(segment) && /[0-9]/.test(segment) && /[A-Za-z]/.test(segment);
+  // Percent-encoded segments decode first, so a Base64-style credential
+  // carrying +, / or = (spelled %2B/%2F/%3D in the URL) is classified by its
+  // real content instead of slipping past on the % characters.
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    // Malformed escapes classify as written.
+  }
+  return (
+    /^[A-Za-z0-9_\-+/=]{16,}$/.test(decoded) && /[0-9]/.test(decoded) && /[A-Za-z]/.test(decoded)
+  );
 }
 
 // Redact provider API keys before an endpoint is exposed to callers. The
