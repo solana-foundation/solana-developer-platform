@@ -31,9 +31,11 @@ records the movement before broadcast, and reconciles its final state.
 ## Environment selection
 
 An authenticated project determines its own environment. A keyless request
-uses the deployment's configured `SDP_ENVIRONMENT`, falling back to the
-deployment mode. Request input never selects production. This keeps catalogue
-curation and transaction construction on one operator-controlled network.
+uses an Earn-only exhaustive mapping from the deployment's validated
+`ENVIRONMENT`: `development` selects sandbox and `production` selects
+production. Unknown deployment modes fail closed. Request input never selects
+production. This keeps catalogue curation and transaction construction on one
+operator-controlled network.
 
 ## Contract ownership
 

@@ -2,7 +2,7 @@
  * Signing Service
  *
  * Domain service for managing signing operations and provider resolution.
- * Handles DB-backed config resolution (project default → org default) and async signing flows.
+ * Handles DB-backed config resolution (project default → org default) and Kit signer access.
  */
 
 import type { CustodyProvider } from "@sdp/custody";
@@ -22,27 +22,20 @@ import {
   normalizeDfnsWalletId,
   resolveDfnsNetwork,
 } from "@sdp/custody/dfns";
-import type { SigningPort, SignRequest, SignResult, SignStatus } from "@sdp/custody/signing";
+import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
 import { getBase58Codec } from "@solana/codecs";
-import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
+import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 import { getDb } from "@/db";
-import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
-import {
-  KeychainFireblocksAdapter,
-  KeychainMemoryAdapter,
-  type SigningConfigRecord,
-} from "@/services/adapters";
+import { KeychainFireblocksAdapter, type SigningConfigRecord } from "@/services/adapters";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
   assertCustodyProviderCanCreateWallet,
   assertCustodyProviderCanDeleteWallet,
-  assertCustodyProviderCanSign,
-  custodyProviderCanSign,
   shouldSetCustodyScopeDefault,
 } from "@/services/custody-provider-lifecycle.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -70,7 +63,6 @@ import {
   type CustodyConfigWallet,
   type CustodyWallet,
   type CustodyWalletLookup,
-  SigningRequestStorePg,
   type WalletPurpose,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -108,38 +100,6 @@ export interface SigningConfigStore {
     projectId: string | undefined,
     config: SigningConfiguration
   ): Promise<string>;
-}
-
-/**
- * Store interface for async signing request tracking.
- */
-export interface SigningRequestStore {
-  create(params: CreateSigningRequestParams): Promise<string>;
-  findByIdOrExternal(requestId: string): Promise<SigningRequestRecord | null>;
-  updateStatus(id: string, status: SignStatus): Promise<void>;
-}
-
-export interface CreateSigningRequestParams {
-  organizationId: string;
-  projectId: string | null;
-  custodyConfigId: string;
-  tokenTransactionId?: string | null;
-  externalRequestId: string;
-  transactionMessage: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface SigningRequestRecord {
-  id: string;
-  organizationId: string;
-  projectId: string | null;
-  custodyConfigId: string;
-  tokenTransactionId?: string | null;
-  externalRequestId: string | null;
-  status: "pending" | "completed" | "rejected" | "failed";
-  transactionMessage: string;
-  signatures: string | null;
-  metadata: string | null;
 }
 
 /**
@@ -308,7 +268,6 @@ export class SigningService {
       deactivateWalletIfNotLast: CustodyConfigStore["deactivateWalletIfNotLast"];
       reactivateWallet: CustodyConfigStore["reactivateWallet"];
     },
-    private signingStore: SigningRequestStore,
     private env: Env
   ) {
     this.runtimeTargets = new CustodyRuntimeTargets(getDb(env), env, this.providerCache);
@@ -1439,18 +1398,6 @@ export class SigningService {
   // Provider Resolution
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Get the signing adapter for an organization/project.
-   *
-   * Resolution order:
-   * 1. Scope default config (project scope if projectId provided)
-   * 2. Organization default config (fallback for project scope)
-   */
-  async getAdapter(orgId: string, projectId?: string): Promise<SigningPort> {
-    const config = await this.configStore.findActive(orgId, projectId);
-    return this.getAdapterForConfig(orgId, config);
-  }
-
   private async getAdapterForConfig(
     orgId: string,
     config: SigningConfigRecord | null
@@ -1572,23 +1519,6 @@ export class SigningService {
   }
 
   /**
-   * Get a KeyPairSigner for backward compatibility.
-   * Only works with KeychainMemoryAdapter.
-   */
-  async getKeypairSigner(orgId: string, projectId?: string): Promise<KeyPairSigner> {
-    const adapter = await this.getAdapter(orgId, projectId);
-
-    if (adapter instanceof KeychainMemoryAdapter) {
-      return adapter.getKeypairSigner();
-    }
-
-    throw new SigningError(
-      `KeyPairSigner not available for provider type: ${adapter.providerId}. Use getTransactionSigner() instead.`,
-      "INVALID_REQUEST"
-    );
-  }
-
-  /**
    * Get a transaction signer compatible with @solana/kit.
    * Works with KeychainMemoryAdapter, KeychainFireblocksAdapter, KeychainPrivyAdapter,
    * KeychainCoinbaseAdapter, KeychainParaAdapter, KeychainTurnkeyAdapter, and KeychainDfnsAdapter.
@@ -1655,117 +1585,6 @@ export class SigningService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Signing Operations
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Sign a transaction message using the configured adapter.
-   * Handles both sync (local) and async (Fireblocks) flows.
-   */
-  async sign(
-    orgId: string,
-    projectId: string | undefined,
-    request: SignRequest
-  ): Promise<SignResult> {
-    const config = await this.configStore.findActive(orgId, projectId);
-    if (!config) {
-      throw new SigningError("Custody not initialized", "NOT_FOUND");
-    }
-
-    assertCustodyProviderCanSign(config.provider);
-
-    const adapter = await this.getAdapterForConfig(orgId, config);
-    const result = await adapter.sign(request);
-
-    // Track async signing requests
-    if (result.status === "pending" && result.requestId) {
-      await this.signingStore.create({
-        organizationId: orgId,
-        projectId: projectId ?? null,
-        custodyConfigId: config.id,
-        externalRequestId: result.requestId,
-        transactionMessage: encodeBase64(request.message),
-        metadata: request.metadata,
-      });
-    }
-
-    return result;
-  }
-
-  /**
-   * Check the status of an async signing request.
-   */
-  async getSigningStatus(
-    orgId: string,
-    projectId: string | undefined,
-    requestId: string
-  ): Promise<SignStatus> {
-    const record = await this.signingStore.findByIdOrExternal(requestId);
-
-    if (!record || record.organizationId !== orgId) {
-      return { status: "failed", error: "Signing request not found" };
-    }
-
-    if (projectId !== undefined && record.projectId !== projectId) {
-      return { status: "failed", error: "Signing request not found" };
-    }
-
-    const config = await this.configStore.getById(record.custodyConfigId);
-    const configIsVisible =
-      config?.organizationId === orgId &&
-      (config.projectId === null || config.projectId === record.projectId);
-    if (!configIsVisible) {
-      return { status: "failed", error: "Signing request not found" };
-    }
-
-    // Return cached status if already resolved
-    if (record.status === "completed" && record.signatures) {
-      // Parse signatures from JSON (stored as address → base64 signature pairs)
-      const signaturesJson = parsePostgresJson<
-        Array<{
-          publicKey: string;
-          signature: string;
-        }>
-      >(record.signatures);
-      const signatures = new Map<Address, Uint8Array>();
-      for (const { publicKey, signature } of signaturesJson) {
-        signatures.set(publicKey as Address, decodeBase64(signature));
-      }
-      return { status: "completed", signatures };
-    }
-
-    if (record.status === "rejected") {
-      return { status: "rejected", reason: "Request was rejected" };
-    }
-
-    if (record.status === "failed") {
-      return { status: "failed", error: "Signing failed" };
-    }
-
-    // Use encrypted config handler to properly decrypt credentials
-    const adapter = await createAdapterFromEncryptedConfig(
-      this.env,
-      orgId,
-      config,
-      this.getCustodyCipher()
-    );
-
-    if (!adapter.getSignStatus) {
-      return { status: "pending" };
-    }
-
-    const externalId = record.externalRequestId ?? requestId;
-    const providerStatus = await adapter.getSignStatus(externalId);
-
-    // Persist resolved status
-    if (providerStatus.status !== "pending") {
-      await this.signingStore.updateStatus(record.id, providerStatus);
-    }
-
-    return providerStatus;
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // Configuration Management
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1784,13 +1603,6 @@ export class SigningService {
     this.providerCache.delete(configId);
   }
 
-  /**
-   * Get the current signing configuration.
-   */
-  async getConfiguration(orgId: string, projectId?: string): Promise<SigningConfigRecord | null> {
-    return this.configStore.findActive(orgId, projectId);
-  }
-
   async getConfigurations(orgId: string, projectId?: string): Promise<SigningConfigurationsResult> {
     const [configs, resolvedDefault] = await Promise.all([
       this.getScopeAndFallbackConfigs(orgId, projectId),
@@ -1802,72 +1614,7 @@ export class SigningService {
       defaultConfigId: resolvedDefault?.id ?? null,
     };
   }
-
-  /**
-   * Check if the current provider requires async approval.
-   */
-  async requiresApproval(orgId: string, projectId?: string): Promise<boolean> {
-    const config = await this.configStore.findActive(orgId, projectId);
-    if (!config) {
-      throw new SigningError("Custody not initialized", "NOT_FOUND");
-    }
-
-    if (!custodyProviderCanSign(config.provider)) {
-      return false;
-    }
-
-    const adapter = await this.getAdapterForConfig(orgId, config);
-    return adapter.requiresApproval();
-  }
-
-  /**
-   * Invalidate cached adapter for an org/project.
-   * Call this after key rotation or config updates to force re-resolution.
-   */
-  invalidateCache(orgId: string, projectId?: string): void {
-    // Cache keys are config IDs; resolving the current one would require I/O.
-    // Clearing the in-memory cache is safe and keeps the API behavior correct.
-    void orgId;
-    void projectId;
-    this.providerCache.clear();
-  }
-
-  /**
-   * Clear all cached adapters.
-   * Useful for testing or when multiple configs may have changed.
-   */
-  clearAllCaches(): void {
-    this.providerCache.clear();
-  }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Utilities
-// ═══════════════════════════════════════════════════════════════════════════
-
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
-function decodeBase64(base64: string): Uint8Array {
-  const normalized = base64.replace(/-/g, "+").replace(/_/g, "/");
-  const padding = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
-  const binary = atob(`${normalized}${padding}`);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-/**
- * Export the secret key bytes from a KeyPairSigner.
- * Returns the 64-byte secret key (32 private + 32 public).
- */
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Factory Function
@@ -1884,8 +1631,7 @@ function decodeBase64(base64: string): Uint8Array {
  */
 export function createSigningService(env: Env, scope?: TenantScope): SigningService {
   const configStore = new CustodyConfigStore(getDb(env), env);
-  const signingStore = new SigningRequestStorePg(getDb(env));
-  const service = new SigningService(configStore, signingStore, env);
+  const service = new SigningService(configStore, env);
 
   if (!scope) {
     return service;
@@ -1914,19 +1660,12 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
     "getWalletById",
     "createWallet",
     "deleteWallet",
-    "getAdapter",
     "getPublicKey",
-    "getKeypairSigner",
     "getTransactionSigner",
     "admitRuntimeExecution",
     "getTransactionSignerForWalletRecord",
-    "sign",
-    "getSigningStatus",
     "configureProvider",
-    "getConfiguration",
     "getConfigurations",
-    "requiresApproval",
-    "invalidateCache",
   ]);
 
   return new Proxy(service, {

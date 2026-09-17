@@ -427,6 +427,54 @@ describe("vault exposure cap: the ledger write gate", () => {
     expect((await ledgerRows()).map((row) => row.amount_requested).sort()).toEqual(["10", "90"]);
   });
 
+  it("hands the tenant-stamped transaction back with its identity intact", async () => {
+    // The aggregate widens its own read to the system identity with a
+    // transaction-local set_config (migration 0101). A leak would let every
+    // statement after it in the same ledger transaction read across
+    // organizations, so the caller's identity must come back exactly as it
+    // went in, and a tenant read right after must still be tenant-scoped.
+    await asTenant(ORG_OTHER, () =>
+      ledger().createSignedVaultDepositIntent(
+        intent("90", {
+          organizationId: ORG_OTHER,
+          projectId: PROJECT_OTHER,
+          custodyWalletId: WALLET_OTHER,
+          sourceAddress: WALLET_OTHER_PUBKEY,
+        })
+      )
+    );
+
+    const observed = await asTenant(ORG, () =>
+      getDb(env).transaction(async (transaction) => {
+        const client = asTransactionalClient(transaction);
+        const exposure = await createPostgresEarnMovementsRepository(
+          client
+        ).sumVaultDepositExposure({
+          environment: "sandbox",
+          provider: "kamino",
+          vaultAddress: VAULT,
+        });
+        const identity = await client
+          .prepare(
+            `SELECT current_setting('app.tenant_isolation_identity') AS identity,
+                    current_setting('app.tenant_isolation_organization_id') AS organization_id,
+                    current_setting('app.tenant_isolation_actor') AS actor`
+          )
+          .first<{ identity: string; organization_id: string; actor: string }>();
+        const visible = await client
+          .prepare("SELECT count(*)::int AS n FROM earn_movements WHERE vault_address = ?")
+          .bind(VAULT)
+          .first<{ n: number }>();
+        return { exposure, identity, visibleRows: Number(visible?.n ?? 0) };
+      })
+    );
+
+    expect(observed.exposure).toBe("90");
+    expect(observed.identity).toEqual({ identity: "tenant", organization_id: ORG, actor: "" });
+    // ORG's own identity is back: the other organization's row is hidden again.
+    expect(observed.visibleRows).toBe(0);
+  });
+
   it("answers a replay from its recorded row without re-deciding the cap", async () => {
     const first = intent("100");
     const created = await asTenant(ORG, () => ledger().createSignedVaultDepositIntent(first));

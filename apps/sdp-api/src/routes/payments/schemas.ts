@@ -766,11 +766,7 @@ const simulateLightsparkSandboxTransferPayloadSchema = z.object({
 });
 
 const simulateBvnkSandboxPayinPayloadSchema = z.object({
-  counterpartyId: z.string().min(1),
-  amount: z.number().positive(),
-  fiatCurrency: rampFiatCurrencySchema,
-  assetRail: onrampCryptoRailSchema,
-  destinationCustodyWalletId: z.string().min(1),
+  transferId: z.string().min(1),
 });
 
 const simulateMuralSandboxPayinPayloadSchema = z.object({

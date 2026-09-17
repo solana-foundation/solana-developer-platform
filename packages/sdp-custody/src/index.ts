@@ -8,14 +8,8 @@ export * from "./provider-wallet-ids";
 export * from "./providers";
 export {
   type FullSigningPort,
-  type GeneratedKeypair,
   isFullSigningPort,
   SigningError,
   type SigningErrorCode,
-  type SigningMetadata,
   type SigningPort,
-  type SignRequest,
-  type SignResult,
-  type SignResultStatus,
-  type SignStatus,
 } from "./signing";
