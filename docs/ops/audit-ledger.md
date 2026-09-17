@@ -78,9 +78,19 @@ For unresolved issuance intents reported in `unresolvedCriticalIntents`, first r
 
 Do not repair hashes in place. Recomputing them would destroy the evidence this control exists to preserve.
 
+### BYOK management attempts
+
+Rotation candidate submission and its subsequent validation/cutover are separate audited attempts. Installation completion, rotation completion, and rollback persist their intent after authorization and admission, before reading secrets or contacting the Provider. Failed intent persistence prevents that attempt's effects. Failed outcome persistence preserves a confirmed result and emits `audit_critical_outcome_persistence_failed`; a later step in a compound command still requires its own admission. Status reads and terminal replays require no new audit intent. A pending retry that actually checks credentials records a new attempt.
+
+Intent event metadata lives under `metadata.target.metadata`; outcomes link back through `auditIntentId`. Failure codes are allowlisted. Rotation and rollback carry the authorized source/destination Credential IDs and Connection/Project IDs; an attempted cutover is not evidence of a committed move. Never include credential payloads, tokens, or raw Provider errors in this metadata.
+
+Authorized domain refusals of Credential or Connection deactivation use action `blocked_deactivation` and events `provider_credential_deactivation_blocked` / `custody_connection_deactivation_blocked`. If that audit write fails, the original refusal and unchanged state remain, and `audit_deactivation_refusal_persistence_failed` identifies the target and safe reason. This accepts a potentially missing permanent refusal record; the operational signal is not its replacement. Verify delivery of these signals and the ledger verifier in the deployment before enabling BYOK.
+
 ### Credential lifecycle intents after an unknown COMMIT
 
 For credential rotation, rollback, and cancellation, HTTP `200` reports the observed state, not who committed the transition. If the transaction callback completed but COMMIT confirmation failed, and the intended state is visible, the request leaves its durable intent unresolved instead of recording an attributed success. An ordinary replay that did not apply the transition closes its intent as before. The verifier reports unresolved critical intents after 15 minutes.
+
+Candidate submission also retains an unresolved intent when creation cannot be reconciled. Installation completion uses `sdp_api_credential_installation_audit_unresolved` when result persistence is uncertain, including a rejected Credential whose failure-state commit may have succeeded. Reconcile these attempts against their exact Credential/Connection and transaction evidence; do not assume either a successful transition or a rollback from a failed HTTP response.
 
 1. Find the `sdp_api_credential_lifecycle_audit_unresolved` warning with `reason: commit_outcome_unknown`. Locate the intent using `organization_id` and `audit_intent_id`; correlate `request_id`, `project_id`, `operation`, and `provider_credential_id` with its nested `target`. For rollback, the credential ID identifies the restored version.
 2. Compare request logs, database transaction evidence, and other audit outcomes for the same transition. The current credential status alone cannot prove which request committed it.
