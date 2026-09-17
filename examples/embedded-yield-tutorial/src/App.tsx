@@ -180,14 +180,6 @@ Authorization: Bearer <project-api-key>
   "sourceTokenMint": "<usdc-mint>"
 }`}</code>
         </pre>
-        <p className="mt-4 leading-relaxed text-muted-foreground">
-          That single request returns a built deposit transaction for the
-          customer&rsquo;s wallet. The reference server in{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-            examples/embedded-yield-bank
-          </code>{" "}
-          signs it, submits it, and polls until it is finalized.
-        </p>
         <p className="mt-6 text-sm font-semibold text-foreground">
           Bring your own signing infrastructure — or easily use one of ours.
         </p>
