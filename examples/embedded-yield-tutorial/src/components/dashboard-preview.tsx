@@ -61,7 +61,7 @@ export function DashboardPreview() {
             <span className="size-2.5 rounded-full bg-foreground/15" />
           </span>
           <span className="flex-1 truncate rounded-md bg-foreground/5 px-3 py-1 text-xs text-muted-foreground">
-            localhost:3000/dashboard/markets/embedded-yield
+            platform.solana.com/dashboard/markets/embedded-yield
           </span>
         </div>
         <div className="bg-background p-5">

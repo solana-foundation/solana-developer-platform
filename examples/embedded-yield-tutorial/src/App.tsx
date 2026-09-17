@@ -6,7 +6,6 @@ import {
   KeyRoundIcon,
   LandmarkIcon,
   ShieldCheckIcon,
-  TrendingUpIcon,
   ZapIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -232,20 +231,18 @@ function EarnSection() {
         </p>
         <p className="mt-4 leading-relaxed text-muted-foreground">
           Fast-forward 30 days: yield accrues daily as the vault lends its USDC
-          through Kamino&rsquo;s lending markets,* and the balance chart ticks
-          up and to the right. Positions, earnings, and the full movement
-          history are all readable back from the Embedded Yield API.
+          through the Kamino Institutional Commodity Yield strategy,* and the
+          balance chart ticks up and to the right. Positions, earnings, and the
+          full movement history are all readable back from the Embedded Yield
+          API.
         </p>
-        <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-          <div className="flex items-start gap-2.5 rounded-xl border border-foreground/10 bg-background p-3">
+        <div className="mt-5 rounded-xl border border-foreground/10 bg-background p-3">
+          <div className="flex items-start gap-2.5 text-sm">
             <LandmarkIcon className="mt-0.5 size-4 shrink-0 text-success" />
             <span className="text-foreground/80">
-              USDC into Kamino lending markets
+              Yield via the Kamino Institutional Commodity Yield strategy ·
+              8.43% APY
             </span>
-          </div>
-          <div className="flex items-start gap-2.5 rounded-xl border border-foreground/10 bg-background p-3">
-            <TrendingUpIcon className="mt-0.5 size-4 shrink-0 text-success" />
-            <span className="text-foreground/80">Vault APY · 8.43%</span>
           </div>
         </div>
         <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
