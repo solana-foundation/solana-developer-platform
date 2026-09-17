@@ -75,24 +75,24 @@ function Hero() {
   );
 }
 
-function StepSection({
+function StepLayout({
   id,
   children,
-  mobileVisual,
+  visual,
 }: {
   id: string;
   children: ReactNode;
-  mobileVisual: ReactNode;
+  visual: ReactNode;
 }) {
   return (
     <section
       id={id}
       data-step={id}
-      className="mx-auto flex max-w-6xl scroll-mt-20 flex-col justify-center px-6 py-16 lg:min-h-screen lg:py-24"
+      className="mx-auto grid max-w-6xl scroll-mt-16 items-center gap-12 px-6 py-16 lg:min-h-[92vh] lg:grid-cols-2 lg:gap-8 lg:py-10"
     >
       <Reveal className="max-w-xl">{children}</Reveal>
-      <Reveal delay={120} className="mt-12 flex justify-center lg:hidden">
-        {mobileVisual}
+      <Reveal delay={120} className="flex justify-center lg:justify-end">
+        {visual}
       </Reveal>
     </section>
   );
@@ -108,9 +108,9 @@ function Kicker({ index, label }: { index: number; label: string }) {
 
 function CustodySection() {
   return (
-    <StepSection
+    <StepLayout
       id="custody"
-      mobileVisual={
+      visual={
         <PhoneFrame>
           <CustodyScreen />
         </PhoneFrame>
@@ -141,7 +141,7 @@ function CustodySection() {
           re-built as a faux phone.
         </p>
       </div>
-    </StepSection>
+    </StepLayout>
   );
 }
 
@@ -164,19 +164,9 @@ Authorization: Bearer <project-api-key>
   );
 }
 
-const STEP_VISUALS: Record<string, ReactNode> = {
-  custody: (
-    <PhoneFrame>
-      <CustodyScreen />
-    </PhoneFrame>
-  ),
-  configure: <ConfigureVisual />,
-  earn: <EarnDemo />,
-};
-
 function ConfigureSection() {
   return (
-    <StepSection id="configure" mobileVisual={<ConfigureVisual />}>
+    <StepLayout id="configure" visual={<ConfigureVisual />}>
       <div className="text-left">
         <Kicker index={2} label="Configure" />
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-foreground lg:text-4xl">
@@ -184,8 +174,8 @@ function ConfigureSection() {
         </h2>
         <p className="mt-4 leading-relaxed text-muted-foreground">
           The company opens the SDP dashboard&rsquo;s Embedded Yield page and
-          chooses which Earn strategy its customers can enter, while SDP handles
-          the on-chain plumbing.
+          chooses which Earn strategy to offer to its customers, while SDP
+          handles the on-chain plumbing.
         </p>
         <p className="mt-6 text-sm font-semibold text-foreground">
           Bring your own signing infrastructure — or easily use one of ours.
@@ -209,19 +199,19 @@ function ConfigureSection() {
             </p>
             <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
               SDP can handle it: on-ramp your users from fiat into stablecoins,
-              and provision wallets through self-custody solutions SDP
-              integrates with — no crypto stack required.
+              and provision wallets through wallet solutions SDP integrates with
+              — no crypto stack required.
             </p>
           </div>
         </div>
       </div>
-    </StepSection>
+    </StepLayout>
   );
 }
 
 function EarnSection() {
   return (
-    <StepSection id="earn" mobileVisual={<EarnDemo />}>
+    <StepLayout id="earn" visual={<EarnDemo />}>
       <div className="text-left">
         <Kicker index={3} label="Earn" />
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-foreground lg:text-4xl">
@@ -253,7 +243,7 @@ function EarnSection() {
           as its example — many other strategies are available too.
         </p>
       </div>
-    </StepSection>
+    </StepLayout>
   );
 }
 
@@ -360,25 +350,6 @@ function StrategiesSection() {
   );
 }
 
-function StepsScroller({ activeId }: { activeId: string }) {
-  return (
-    <div className="relative mx-auto max-w-6xl lg:grid lg:grid-cols-2 lg:gap-8">
-      <div>
-        <CustodySection />
-        <ConfigureSection />
-        <EarnSection />
-      </div>
-      <div className="hidden lg:col-start-2 lg:row-start-1 lg:block">
-        <div className="sticky top-20 flex min-h-[70vh] items-center">
-          <div key={activeId} className="animate-step-swap w-full px-6">
-            {STEP_VISUALS[activeId]}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function App() {
   const [activeId, setActiveId] = useState(STEPS[0].id);
 
@@ -405,7 +376,9 @@ export function App() {
       <StepNav activeId={activeId} />
       <main>
         <Hero />
-        <StepsScroller activeId={activeId} />
+        <CustodySection />
+        <ConfigureSection />
+        <EarnSection />
         <StrategiesSection />
       </main>
       <footer className="border-t border-foreground/10 px-6 py-10">
