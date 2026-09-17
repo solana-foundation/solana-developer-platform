@@ -249,7 +249,7 @@ export function EarnScreen({
             </div>
             <BalanceChart day={day} />
             <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-              Day {Math.round(day)} of 30 · yield accrues daily
+              Day {Math.round(day)} of 30 · yield accrues in real time
             </p>
           </div>
         ) : null}

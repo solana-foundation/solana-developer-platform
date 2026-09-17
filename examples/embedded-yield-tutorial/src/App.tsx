@@ -63,8 +63,8 @@ function Hero() {
           Give your customers yield with one code snippet.
         </h1>
         <p className="mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground lg:text-lg">
-          Launch a B2B2C product or B2B2B stablecoin savings product with 24/7
-          yields on the go.
+          Launch a B2B and B2C stablecoin savings product with 24/7 yields on
+          the go.
         </p>
         <p className="mt-6 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
           <ArrowDownIcon className="size-4 animate-bounce" />
