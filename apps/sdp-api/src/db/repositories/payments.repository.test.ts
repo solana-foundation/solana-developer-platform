@@ -1005,8 +1005,8 @@ describe("PaymentsRepository.getInFlightBvnkOnrampTransferByFundingWallet (postg
     await getDb(env)
       .prepare(
         `INSERT INTO counterparties
-          (id, organization_id, project_id, entity_type, display_name, email)
-         VALUES (?, ?, ?, 'individual', 'BVNK Onramp Lookup', 'onramp-lookup@example.com')
+          (id, organization_id, project_id, entity_type, display_name)
+         VALUES (?, ?, ?, 'individual', 'BVNK Onramp Lookup')
          ON CONFLICT (id) DO NOTHING`
       )
       .bind("cpty_bvnk_onramp_lookup", TEST_ORG.id, TEST_PROJECT_ID)
