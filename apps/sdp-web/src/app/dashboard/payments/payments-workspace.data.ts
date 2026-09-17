@@ -10,7 +10,6 @@ import type {
   ListCounterpartyAccountsResponse,
   ListProjectCounterpartyAccountsEnvelope,
   ListProjectCounterpartyAccountsResponse,
-  MoneygramRampEvent,
   MuralSandboxPayinCurrency,
   PaymentRampEstimateEnvelope,
   PaymentsWalletAggregateEnvelope,
@@ -711,7 +710,7 @@ export async function createTransferBatch(
 
 async function postRampEvent(
   provider: RampEventProvider,
-  event: MoneygramRampEvent | CoinbaseRampEvent,
+  event: CoinbaseRampEvent,
   t: Translate
 ): Promise<TransferRecord> {
   const response = await fetch(`/api/dashboard/payments/ramps/events/${provider}`, {
@@ -739,13 +738,6 @@ async function postRampEvent(
   }
 
   return body.data.transfer;
-}
-
-export function postMoneygramRampEvent(
-  event: MoneygramRampEvent,
-  t: Translate
-): Promise<TransferRecord> {
-  return postRampEvent("moneygram", event, t);
 }
 
 export function postCoinbaseRampEvent(

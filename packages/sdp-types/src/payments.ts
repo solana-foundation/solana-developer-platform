@@ -1404,7 +1404,7 @@ export type PaymentRampQuote =
       redirectUrl?: string;
     });
 
-export const RAMP_EVENT_PROVIDERS = ["moneygram", "coinbase"] as const;
+export const RAMP_EVENT_PROVIDERS = ["coinbase"] as const;
 export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
 
 /**
@@ -1416,31 +1416,3 @@ export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
 export type CoinbaseRampEvent =
   | { kind: "committed"; orderId: string }
   | { kind: "errored"; orderId: string; reason: string };
-
-export type MoneygramRampEvent =
-  | { kind: "signed"; sessionId: string; cryptoTransferId: string }
-  | {
-      kind: "onramp_completed";
-      sessionId: string;
-      transactionId: string;
-      status: string;
-      amount: number;
-      referenceNumber?: string;
-    }
-  | {
-      kind: "completed";
-      sessionId: string;
-      cryptoTransferId: string;
-      transactionId: string;
-      payoutAmount: number;
-      payoutStatus: string;
-      referenceNumber?: string;
-    }
-  | {
-      kind: "errored";
-      sessionId: string;
-      reason: string;
-      cryptoTransferId?: string;
-      transactionId?: string;
-    }
-  | { kind: "closed"; sessionId: string };

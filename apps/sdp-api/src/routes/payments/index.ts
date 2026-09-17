@@ -58,7 +58,6 @@ import {
   prepareSubscriptionAuthorization,
   prepareSubscriptionCollection,
   recordCoinbaseRampEvent,
-  recordMoneygramRampEvent,
   resumeRecurringPayment,
   simulateSandboxTransfer,
   updateRecurringPayment,
@@ -82,7 +81,6 @@ import {
   estimateOfframpSchema,
   estimateOnrampSchema,
   estimateTransferBatchSchema,
-  moneygramRampEventSchema,
   prepareSubscriptionAuthorizationSchema,
   prepareSubscriptionCollectionSchema,
   prepareSubscriptionLifecycleSchema,
@@ -306,12 +304,6 @@ payments.post(
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
   policyGate({ extract: extractOfframpQuotePolicyCandidate }),
   createOfframpQuote
-);
-payments.post(
-  "/ramps/moneygram/events",
-  requirePermissions("payments:write"),
-  validateBody(moneygramRampEventSchema),
-  recordMoneygramRampEvent
 );
 payments.post(
   "/ramps/coinbase/events",
