@@ -648,7 +648,11 @@ export interface PolicyRepository {
    * no readable key are absent: a user id is not an api key.
    */
   getApiKeyCreatorUserIds(apiKeyIds: readonly string[]): Promise<Map<string, string>>;
-  isApprovalGroupMember(approvalGroupId: string, userId: string): Promise<boolean>;
+  /**
+   * The groups among `approvalGroupIds` in which `userId` is an active approver,
+   * in one read. Ids naming no such group are absent.
+   */
+  listApproverGroupIds(approvalGroupIds: readonly string[], userId: string): Promise<Set<string>>;
   createPolicyEvaluation(input: CreatePolicyEvaluationInput): Promise<PolicyEvaluationRow | null>;
   listPolicyEvaluationsForOperation(walletOperationId: string): Promise<PolicyEvaluationRow[]>;
   listWalletPolicyEvaluationAudits(

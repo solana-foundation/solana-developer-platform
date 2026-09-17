@@ -147,7 +147,7 @@ interface ViewerDecision {
  *   approvers, who must be signed-in users.
  * - Any other request is decided by an organization admin.
  *
- * Group membership is read once per distinct group on the page, not per row.
+ * Group membership is read once for every group on the page.
  *
  * @param repository - Policy repository.
  * @param auth - The caller.
@@ -168,15 +168,11 @@ async function viewerDecisionCheck(
   const groupIds = [
     ...new Set(rows.flatMap((row) => (row.approval_group_id ? [row.approval_group_id] : []))),
   ];
-  const approverGroups = new Set<string>();
-  if (userId) {
-    const memberships = await Promise.all(
-      groupIds.map((groupId) => repository.isApprovalGroupMember(groupId, userId))
-    );
-    groupIds.forEach((groupId, index) => {
-      if (memberships[index]) approverGroups.add(groupId);
-    });
-  }
+  // Every group on the page in one read, not a query per group per refresh.
+  const approverGroups =
+    userId && groupIds.length > 0
+      ? await repository.listApproverGroupIds(groupIds, userId)
+      : new Set<string>();
   const isAdmin = auth.permissions.includes("org:admin") || auth.permissions.includes("*");
 
   return (row) => {

@@ -2297,24 +2297,29 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       return row ? mapWalletOperationRow(row) : null;
     },
 
-    async isApprovalGroupMember(approvalGroupId: string, userId: string) {
-      const row = await db
+    async listApproverGroupIds(approvalGroupIds: readonly string[], userId: string) {
+      const unique = [...new Set(approvalGroupIds)];
+      if (unique.length === 0) {
+        return new Set<string>();
+      }
+      // One read for every group on the page: the approvals inbox refreshes
+      // every few seconds, and a query per group multiplied with each refresh.
+      const placeholders = unique.map(() => "?").join(", ");
+      const result = await db
         .prepare(
-          `SELECT 1 AS allowed
+          `SELECT DISTINCT ag.id
            FROM approval_groups ag
            INNER JOIN approval_group_members agm ON agm.approval_group_id = ag.id
-           WHERE ag.id = ?
+           WHERE ag.id IN (${placeholders})
              AND ag.organization_id = ?
              AND ag.project_id IS NOT DISTINCT FROM ?
              AND ag.status = 'active'
              AND agm.user_id = ?
-             AND agm.role = 'approver'
-           LIMIT 1`
+             AND agm.role = 'approver'`
         )
-        .bind(approvalGroupId, scope.organizationId, scope.projectId, userId)
-        .first<{ allowed: number }>();
-
-      return row?.allowed === 1;
+        .bind(...unique, scope.organizationId, scope.projectId, userId)
+        .all<{ id: string }>();
+      return new Set(result.results.map((row) => row.id));
     },
 
     async getApiKeyCreatorUserId(apiKeyId: string) {
