@@ -49,8 +49,15 @@ export function badRequest(message?: string, details?: Record<string, unknown>):
   return new SdpPaymentsError("BAD_REQUEST", message, details);
 }
 
-export function internalError(message?: string): SdpPaymentsError {
-  return new SdpPaymentsError("INTERNAL_ERROR", message);
+export function internalError(
+  message?: string,
+  details?: Record<string, unknown>
+): SdpPaymentsError {
+  return new SdpPaymentsError("INTERNAL_ERROR", message, details);
+}
+
+export function rateLimited(message?: string): SdpPaymentsError {
+  return new SdpPaymentsError("RATE_LIMITED", message);
 }
 
 export function providerNotConfigured(message?: string): SdpPaymentsError {

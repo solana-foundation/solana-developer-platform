@@ -31,8 +31,10 @@ import {
   resolveAllowlistAuthority,
   resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
+  resolveFreezeOperationAuthority,
   resolveIssuanceWallet,
   resolveMetadataAuthority,
+  resolvePauseAuthority,
 } from "./authority-resolution";
 import { toPublicToken } from "./public-response";
 
@@ -274,19 +276,40 @@ export const getToken = async (c: AppContext) => {
     throw notFound("Token");
   }
 
-  const authorities: { allowlistAuthority?: string | null; metadataAuthority?: string | null } = {};
+  const authorities: {
+    allowlistAuthority?: string | null;
+    freezeAuthority?: string | null;
+    metadataAuthority?: string | null;
+    pauseAuthority?: string | null;
+  } = {};
   if (parsed.data.includeAllowlistAuthority === "true") {
     authorities.allowlistAuthority = token.ablListAddress
       ? await resolveAllowlistAuthority(c.env, token.ablListAddress)
       : null;
   }
+  if (parsed.data.includeFreezeAuthority === "true") {
+    authorities.freezeAuthority = await resolveFreezeOperationAuthority(c.env, token);
+  }
   if (parsed.data.includeMetadataAuthority === "true") {
     authorities.metadataAuthority = await resolveMetadataAuthority(c.env, tokenService, token);
+  }
+  if (parsed.data.includePauseAuthority === "true") {
+    authorities.pauseAuthority = token.mintAddress
+      ? await resolvePauseAuthority(c.env, token.mintAddress)
+      : (token.extensions?.pausable?.authority ?? token.mintAuthority);
   }
   return success(c, { token: toPublicToken(token), ...authorities });
 };
 
 function validateDraftOnlyUpdates(existing: Token, body: z.infer<typeof updateTokenSchema>) {
+  if (
+    body.decimals !== undefined &&
+    normalizeTemplateId(existing.template) === "stablecoin" &&
+    body.decimals !== 6
+  ) {
+    throw badRequest("Stablecoin decimals must be 6");
+  }
+
   // Access-control enforcement is baked into the mint at deploy; the flag only
   // makes sense to change while the token is still an undeployed draft.
   if (

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS idx_counterparty_provider_accounts_bvnk_session_reference ON counterparty_provider_accounts (provider, (metadata->'session'->>'reference')) WHERE kind = 'customer_link' AND status = 'active' AND metadata->'session'->>'reference' IS NOT NULL;

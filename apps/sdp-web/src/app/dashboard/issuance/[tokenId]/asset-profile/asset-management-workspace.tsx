@@ -206,6 +206,9 @@ export function AssetManagementWorkspace({
         dirty={form.dirty}
         saving={form.saving}
         errorCount={form.showErrors ? form.errorCount : 0}
+        saveDisabled={Boolean(
+          form.requiresMetadataSigner && ops.metadataSignerSelection.unavailableReason
+        )}
         onSave={async () => {
           if (await form.save()) setEditingSettings(false);
         }}

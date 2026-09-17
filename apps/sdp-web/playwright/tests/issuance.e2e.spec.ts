@@ -335,6 +335,9 @@ test.describe
       await expect(deployButton).toBeVisible();
       const successCount = await page.getByText("Deploy transaction finalized.").count();
       await deployButton.click();
+      const deployDialog = page.getByRole("dialog");
+      await expect(deployDialog.getByRole("heading", { name: "Deploy token" })).toBeVisible();
+      await deployDialog.getByRole("button", { name: "Deploy token", exact: true }).click();
       await waitForToast(page, "Deploy transaction finalized.", successCount);
       await expect
         .poll(
@@ -446,7 +449,7 @@ test.describe
         await waitForPermissionRowValue(
           page,
           rowTestId,
-          addressTail(fixtures.wallets.delegated.publicKey)
+          fixtures.wallets.delegated.label ?? addressTail(fixtures.wallets.delegated.publicKey)
         );
       }
 

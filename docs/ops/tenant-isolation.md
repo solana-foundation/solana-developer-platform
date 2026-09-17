@@ -121,3 +121,12 @@ suite (`src/db/tenant-isolation.test.ts`,
   `runWithSystemDatabaseIdentity` wrap) and extend the registry test.
 - Ad-hoc cross-tenant operational work → `runWithOperatorDatabaseAccess`
   with a real actor and reason; the audit row is the record reviewers check.
+- Cross-tenant aggregate that must run inside a tenant-stamped transaction →
+  a plpgsql function that saves the caller's identity, stamps `system` with
+  `set_config(..., true)`, runs the one query, and restores the identity
+  (`earn_vault_deposit_exposure`, migration 0101). Never a function-level
+  `SET app.* = ...` clause: Postgres only lets a superuser (or a role granted
+  `SET ON PARAMETER`) store one, Cloud SQL has neither, so it passes CI as
+  the superuser and fails on stage with `permission denied to set parameter`.
+  The coverage test rejects any function whose `proconfig` sets an `app.*`
+  parameter.

@@ -1,5 +1,4 @@
 import type { CounterpartyRow } from "@sdp/payments";
-import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { CounterpartyEntityType, CounterpartyProviderData, RampProviderId } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 import type { BvnkCustomerProviderAccountMetadata } from "./counterparty-provider-account.repository";
@@ -50,11 +49,10 @@ export interface UpsertBvnkCustomerProviderDataInput {
   counterpartyId: string;
   organizationId: string;
   projectId: string;
-  customer: Partial<
-    Pick<BvnkCustomerResolution, "customerReference" | "status" | "verificationStatus">
-  > & {
+  customer: {
+    customerReference: string;
     residenceCountryCode?: BvnkCustomerProviderAccountMetadata["residenceCountryCode"];
-    agreements?: BvnkCustomerProviderAccountMetadata["agreements"];
+    session?: BvnkCustomerProviderAccountMetadata["session"];
   };
 }
 

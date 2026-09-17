@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDecimals, floorForTolerance, formatAtoms } from "./decimal.ts";
+import { addDecimals, floorForTolerance, formatAtoms } from "./decimal";
 
 describe("Embedded Yield decimal helpers", () => {
   it("derives a quote floor without a number round-trip", () => {

@@ -10,7 +10,7 @@ import { getCategoryPresentation } from "../../create/asset-taxonomy";
 import { formatSupply, tokenStatusPresentation } from "../../issuance-token-fields";
 import { shortenAddress } from "../../wallet-identity";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
-import { formatDate } from "../token-management-workspace.utils";
+import { formatDate, isSupplyLockedOnChain } from "../token-management-workspace.utils";
 
 interface AssetProfileHeaderProps {
   token: Token;
@@ -59,6 +59,18 @@ export function AssetProfileHeader(props: AssetProfileHeaderProps) {
                 <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", status.dotClassName)} />
                 <span className="sr-only">{t("DashboardIssuance.header.statusLabel")}</span>
                 {status.label}
+              </span>
+            ),
+          },
+        ]
+      : []),
+    ...(isSupplyLockedOnChain(token)
+      ? [
+          {
+            key: "supply-locked",
+            node: (
+              <span className="inline-flex rounded-full bg-fill px-2 py-0.5 text-xs font-medium text-secondary">
+                {t("DashboardIssuance.management.supplyLocked")}
               </span>
             ),
           },

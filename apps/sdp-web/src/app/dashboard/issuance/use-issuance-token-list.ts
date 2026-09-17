@@ -253,8 +253,11 @@ export function useIssuanceTokenList({
     });
   }, [initialPage, initialQuery, writeCache]);
 
-  const tokens = data?.tokens ?? [];
-  const total = data?.total ?? 0;
+  // SWR's keepPreviousData is useful while a request is in flight, but a failed
+  // query must never leave rows from the previous query on screen. Those cards
+  // answer a different search and can make an error look like a real match.
+  const tokens = error ? [] : (data?.tokens ?? []);
+  const total = error ? 0 : (data?.total ?? 0);
   const pageCount = getPageCount(total, query.pageSize);
 
   // Which request the visible rows actually answer. `isValidating` is the signal:

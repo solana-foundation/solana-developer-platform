@@ -42,6 +42,7 @@ import {
   some,
 } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import {
   createCounterpartyAccountsRepository,
@@ -280,10 +281,15 @@ async function assertNamedDestinationsUsable(
  * Creates a DvP trade on chain and records it.
  *
  * @param env - API process environment.
+ * @param auditContext - Authenticated initiating request for wallet creation audit.
  * @param input - The trade to create.
  * @returns The persisted trade, including the escrow addresses to publish.
  */
-export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Promise<DvpTradeRow> {
+export async function createDvpTrade(
+  env: Env,
+  auditContext: Context<{ Bindings: Env }>,
+  input: CreateDvpTradeInput
+): Promise<DvpTradeRow> {
   const repository = createDvpTradeRepository(env);
 
   // Resolve BOTH parties first: the fingerprint hashes the resolved addresses.
@@ -349,7 +355,7 @@ export async function createDvpTrade(env: Env, input: CreateDvpTradeInput): Prom
   // provider. Provisioning happens on first use, so a project's very first
   // trade mints this wallet — and doing that for a request that was going to
   // 400 anyway would leave an unused provider key behind every time.
-  const settlement = await getOrCreateDvpSettlementWallet(env, {
+  const settlement = await getOrCreateDvpSettlementWallet(env, auditContext, {
     organizationId: input.organizationId,
     projectId: input.projectId,
   });

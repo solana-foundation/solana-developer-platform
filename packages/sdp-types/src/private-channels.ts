@@ -225,6 +225,24 @@ export const PRIVATE_CHANNEL_TRANSACTION_STATUSES = [
 ] as const;
 export type PrivateChannelTransferStatus = (typeof PRIVATE_CHANNEL_TRANSACTION_STATUSES)[number];
 
+export const PRIVATE_CHANNEL_DEPOSIT_TERMINAL_STATUSES = [
+  "confirmed",
+  "settled",
+  "failed",
+] as const satisfies readonly PrivateChannelTransferStatus[];
+export const PRIVATE_CHANNEL_WITHDRAWAL_TERMINAL_STATUSES = [
+  "settled",
+  "failed",
+] as const satisfies readonly PrivateChannelTransferStatus[];
+
+export function isPrivateChannelDepositTerminal(status: PrivateChannelTransferStatus): boolean {
+  return PRIVATE_CHANNEL_DEPOSIT_TERMINAL_STATUSES.some((terminal) => terminal === status);
+}
+
+export function isPrivateChannelWithdrawalTerminal(status: PrivateChannelTransferStatus): boolean {
+  return PRIVATE_CHANNEL_WITHDRAWAL_TERMINAL_STATUSES.some((terminal) => terminal === status);
+}
+
 /**
  * Read-only audit snapshot of the SPC instance parameters at intent time.
  * Never consulted by the oracle — reconciliation reads the current instance row.

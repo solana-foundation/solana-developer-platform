@@ -577,9 +577,17 @@ export const tokenResponseSchema = z
       description:
         "Live on-chain list authority. Returned only by GET token with includeAllowlistAuthority=true; null when no on-chain list is configured. This is not the token freeze authority or a signer authorization.",
     }),
+    freezeAuthority: solanaAddressSchema.nullable().optional().openapi({
+      description:
+        "Live freeze-operation authority. Returned only by GET token with includeFreezeAuthority=true. For Token ACL mints this is the mint-config controller rather than the mint's program PDA freeze authority.",
+    }),
     metadataAuthority: solanaAddressSchema.nullable().optional().openapi({
       description:
         "Metadata authority, returned only by GET token with includeMetadataAuthority=true. Read live on-chain when the token has a mint; otherwise the stored metadata authority or stored mint authority. Null when unavailable. RPC failure returns 502 without falling back to stored authority. This read does not authorize signing or change the token.",
+    }),
+    pauseAuthority: solanaAddressSchema.nullable().optional().openapi({
+      description:
+        "Live on-chain pausable authority. Returned only by GET token with includePauseAuthority=true; null when the mint has no pausable authority.",
     }),
   })
   .openapi({ description: "Token response payload." });
@@ -876,9 +884,19 @@ export const getTokenQueryOpenApiSchema = getTokenQuerySchemaBase.extend({
       "Opt in to a read-only RPC lookup of the current on-chain list authority for wallet selection. Ordinary token reads do not perform this lookup.",
     example: "true",
   }),
+  includeFreezeAuthority: withOpenApi(getTokenQuerySchemaBase.shape.includeFreezeAuthority, {
+    description:
+      "Opt in to a read-only lookup of the authority that controls freeze operations. Token ACL mints return the live mint-config controller.",
+    example: "true",
+  }),
   includeMetadataAuthority: withOpenApi(getTokenQuerySchemaBase.shape.includeMetadataAuthority, {
     description:
       "Opt in to a read-only lookup of the current metadata authority for wallet selection. Tokens with a mint use live chain state; tokens without a mint use the stored metadata authority, falling back to stored mint authority, without RPC. Ordinary token reads do not perform this lookup.",
+    example: "true",
+  }),
+  includePauseAuthority: withOpenApi(getTokenQuerySchemaBase.shape.includePauseAuthority, {
+    description:
+      "Opt in to a read-only lookup of the live Token-2022 pausable authority for wallet selection.",
     example: "true",
   }),
 });

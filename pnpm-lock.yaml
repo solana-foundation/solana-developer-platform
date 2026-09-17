@@ -603,9 +603,6 @@ importers:
       '@solana/signers':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/transactions':
-        specifier: 'catalog:'
-        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       jose:
         specifier: 6.2.10
         version: 6.2.10
@@ -961,12 +958,6 @@ importers:
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../sdp-rpc
-      '@sdp/types':
-        specifier: workspace:*
-        version: link:../sdp-types
-      '@solana-program/token-2022':
-        specifier: 'catalog:'
-        version: 0.16.1(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))(@solana/sysvars@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/zk-sdk@0.4.2)
       '@solana/addresses':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
