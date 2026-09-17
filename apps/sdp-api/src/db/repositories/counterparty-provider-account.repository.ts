@@ -209,9 +209,11 @@ export interface CounterpartyProviderAccountsRepository {
    * reference seen is canonical: a later event reporting a different customer
    * does not overwrite it — the displaced reference is appended to
    * `metadata.mismatchedReferences` so drift is observable instead of silent.
+   * Metadata is a claim with the same rule: keys already stored win, incoming
+   * keys only fill gaps, so a concurrent claim cannot change a stored value.
    *
-   * @param input - Tenant scope, counterparty, provider, and the provider-side reference.
-   * @returns The linked row, carrying the canonical reference.
+   * @param input - Tenant scope, counterparty, provider, the provider-side reference, and the claimed metadata.
+   * @returns The linked row, carrying the canonical reference and metadata.
    */
   upsertProviderAccount(
     input: UpsertCounterpartyProviderAccountInput

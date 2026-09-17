@@ -79,7 +79,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     async upsertProviderAccount(input: UpsertCounterpartyProviderAccountInput) {
       const metadataColumns = input.metadata === undefined ? "" : ", metadata";
       const metadataValues = input.metadata === undefined ? "" : ", ?";
-      const metadataUpdate = input.metadata === undefined ? "" : " || EXCLUDED.metadata";
+      const metadataClaim = input.metadata === undefined ? "" : "EXCLUDED.metadata || ";
       const row = await db
         .prepare(
           `INSERT INTO counterparty_provider_accounts (
@@ -89,7 +89,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
            DO UPDATE SET
              status = 'active',
              updated_at = sdp_iso_now(),
-             metadata = (CASE
+             metadata = ${metadataClaim}(CASE
                WHEN counterparty_provider_accounts.provider_customer_reference
                     = EXCLUDED.provider_customer_reference
                  THEN counterparty_provider_accounts.metadata
@@ -102,7 +102,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
                  coalesce(counterparty_provider_accounts.metadata -> 'mismatchedReferences', '[]'::jsonb)
                    || to_jsonb(EXCLUDED.provider_customer_reference)
                )
-               END)${metadataUpdate}
+               END)
            WHERE counterparty_provider_accounts.organization_id = EXCLUDED.organization_id
              AND counterparty_provider_accounts.project_id = EXCLUDED.project_id
            RETURNING *`

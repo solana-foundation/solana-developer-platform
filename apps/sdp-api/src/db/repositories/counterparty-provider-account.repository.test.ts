@@ -620,6 +620,30 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     expect(replacement.id).not.toBe(first.id);
   });
 
+  it("keeps the first claimed residence country on a repeat claim", async () => {
+    const counterparty = await seedCounterparty("cpacc_residence_claim");
+    const first = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "cp_cpacc_residence_claim",
+      metadata: { residenceCountryCode: "US" },
+    });
+
+    const repeat = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "cp_cpacc_residence_claim",
+      metadata: { residenceCountryCode: "GB" },
+    });
+
+    expect(repeat.id).toBe(first.id);
+    expect(repeat.metadata).toEqual({ residenceCountryCode: "US" });
+  });
+
   it("CAS-writes the minted session onto a claimed row", async () => {
     const counterparty = await seedCounterparty("cpacc_session_hit");
     const seeded = await repository.upsertProviderAccount({

@@ -78,7 +78,13 @@ import type {
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
 import { getClientIp } from "@/lib/client-ip";
-import { AppError, badRequest, counterpartyNotProvisioned, internalError } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  conflict,
+  counterpartyNotProvisioned,
+  internalError,
+} from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
@@ -576,7 +582,9 @@ export function bvnkCustomerRequirementsFromMetadata(
  * The row reservation is claimed before the provider call and the minted
  * session is CAS-written onto it, so a concurrent mint either loses the CAS
  * and converges on the winner's session, or a crash leaves a claimed row that
- * the next residence submit mints from.
+ * the next residence submit mints from. The residence country is immutable
+ * once claimed: the session is always minted for the stored country, and a
+ * submit naming a different country is rejected before any provider call.
  *
  * @param c - Request context used for provider and repository access.
  * @param input - Provider client, runtime context, counterparty, project, ramp
@@ -632,11 +640,17 @@ async function mintBvnkAgreementSession(
     throw internalError("BVNK customer-link claim produced no row.");
   }
   const claimed = bvnkCustomerProviderAccountMetadataSchema.parse(row.metadata);
+  const residenceCountry = requireBvnkResidenceCountry(claimed);
+  if (residenceCountry !== input.residenceCountry) {
+    throw conflict("BVNK residence country is already claimed for this counterparty.", {
+      residenceCountryCode: residenceCountry,
+    });
+  }
   if (claimed.session !== undefined) {
     return present(claimed, "converged");
   }
   const session = await input.client.createAgreementSession(input.ctx, {
-    countryCode: input.residenceCountry,
+    countryCode: residenceCountry,
     idempotencyKey: counterpartyProviderAccountUuid(row.id),
   });
   const assigned = await accounts.setCustomerLinkSession({

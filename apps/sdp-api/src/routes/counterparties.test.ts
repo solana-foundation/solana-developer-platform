@@ -1292,6 +1292,66 @@ describe("Counterparties Routes", () => {
       }
     });
 
+    it("rejects a residence that differs from the claimed one without calling BVNK", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_residence_conflict",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await createPostgresCounterpartiesRepository(getDb(env)).upsertBvnkCustomerProviderData({
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        customer: {
+          customerReference: buildBvnkCustomerExternalReference(counterparty.id),
+          residenceCountryCode: "GB",
+        },
+      });
+      const requests: string[] = [];
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const path = new URL(String(input)).pathname;
+        requests.push(path);
+        throw new Error(`unexpected fetch: ${path}`);
+      });
+      env.BVNK_SANDBOX_WALLET_ID = "wallet";
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      try {
+        const response = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "bvnk",
+              direction: "onramp",
+              assetRail: "usdc.solana",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
+              fiatCurrency: "USD",
+              collectedData: { "taxIdentification.taxResidenceCountryCode": "US" },
+            }),
+          },
+          env
+        );
+        expect(response.status).toBe(409);
+        expect(requests).toEqual([]);
+        const row = await createPostgresCounterpartyProviderAccountsRepository(
+          getDb(env)
+        ).getProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: counterparty.id,
+          provider: "bvnk",
+        });
+        expect(row?.metadata).toEqual({ residenceCountryCode: "GB" });
+      } finally {
+        fetchSpy.mockRestore();
+        env.BVNK_SANDBOX_WALLET_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+      }
+    });
+
     it("re-posting residence on a row that already holds a session makes no BVNK call", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_session_stored" });
       expect(created.status).toBe(201);
