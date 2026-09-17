@@ -1299,6 +1299,95 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("replays an approved allowlist removal whose envelope path carries a query string", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_allowlist_remove_approved",
+        TEST_ACTIVE_TOKEN.mintAuthority ?? TEST_SOLANA_ADDRESSES.wallet3
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_allowlist_remove_approved",
+        signingWalletId: wallet.walletId,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO token_allowlists (id, token_id, address, status, added_by)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "tal_policy_remove_approved",
+          token.id,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          "active",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [
+              {
+                id: "approve-issuance-allowlist-remove",
+                kind: "approval",
+                operationTypes: ["issuance_allowlist_remove_execute"],
+              },
+            ],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const removeFromListSpy = vi
+        .spyOn(MosaicService.prototype, "removeFromList")
+        .mockResolvedValue({ signature: "sig_allowlist_remove_approved" } as never);
+
+      try {
+        const pendingResponse = await app.request(
+          `/v1/issuance/tokens/${token.id}/allowlist/tal_policy_remove_approved?signingCustodyWalletId=${wallet.custodyWalletId}`,
+          {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Idempotency-Key": "issuance-allowlist-remove-approved-query",
+            },
+          },
+          env
+        );
+        expect(pendingResponse.status).toBe(202);
+        const pendingBody = (await pendingResponse.json()) as {
+          error: { details: { approvalRequestId: string; walletOperationId: string } };
+        };
+        const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+        const repository = createPostgresPolicyRepository(
+          getDb(env),
+          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+        );
+        await repository.updateApprovalRequestStatus({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId,
+          status: "approved",
+          operationStatus: "executing",
+          resolvedBy: TEST_PROJECT_API_KEY.id,
+        });
+
+        expect(await recoverApprovedWalletOperations(env)).toBe(1);
+        expect(await repository.getWalletOperationById(walletOperationId)).toMatchObject({
+          status: "completed",
+        });
+        expect(removeFromListSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        removeFromListSpy.mockRestore();
+      }
+    });
+
     it("stops a denied allowlist removal before signer and list mutation", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_allowlist_remove_denied",
