@@ -42,7 +42,6 @@ const partySlotSchema = z.discriminatedUnion("mode", [
 ]);
 
 export type DvpPartySlot = z.infer<typeof partySlotSchema>;
-export type DvpPartySlotMode = DvpPartySlot["mode"];
 
 export { partySlotSchema };
 

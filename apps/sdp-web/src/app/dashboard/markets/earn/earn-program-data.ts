@@ -10,14 +10,10 @@ import {
   type EarnExternalWalletPositionSummary,
   type EarnExternalWalletPositionSummaryResponse,
   type EarnExternalWalletPositionsPage,
-  type EarnPortfolioAllocationInput,
   type EarnPortfolioToken,
-  type EarnPortfolioWalletSnapshot,
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
   type EarnProgram,
-  type EarnProgramDepositsResponse,
-  type EarnProgramResponse,
   type EarnProgramWithdrawalPreviewResponse,
   type EarnProgramWithdrawalRecord,
   type EarnProgramWithdrawalResponse,
@@ -60,8 +56,6 @@ export type {
   EarnExternalWalletPositionSummaryResponse,
   EarnExternalWalletPositionsPage,
   EarnProgram,
-  EarnProgramDepositsResponse,
-  EarnProgramResponse,
   EarnProgramWithdrawalPreviewResponse,
   EarnProgramWithdrawalRecord,
   EarnProgramWithdrawalResponse,
@@ -123,11 +117,6 @@ export type EarnProgramsState =
   | { kind: "ready"; programs: readonly EarnProgram[] }
   | { kind: "unconfigured" };
 
-/** True once the read resolved AND the organization holds at least one program. */
-export function hasPrograms(state: EarnProgramsState | undefined): boolean {
-  return state?.kind === "ready" && state.programs.length > 0;
-}
-
 async function requestJson<T>(path: string): Promise<{ status: number; body: T | undefined }> {
   const response = await fetch(path);
   let body: T | undefined;
@@ -137,6 +126,20 @@ async function requestJson<T>(path: string): Promise<{ status: number; body: T |
     body = undefined;
   }
   return { status: response.status, body };
+}
+
+/**
+ * `requestJson` plus the gate every plain reader restates: anything but a 2xx
+ * carrying a parsable body is a thrown error naming the API's message, never a
+ * partial result. (The programs read cannot use this — its 503 is an outcome,
+ * not an error.)
+ */
+async function requestJsonOk<T>(path: string): Promise<T> {
+  const { status, body } = await requestJson<T>(path);
+  if (status < 200 || status >= 300 || !body) {
+    throw new Error(errorMessage(body, status));
+  }
+  return body;
 }
 
 function errorMessage(body: unknown, status: number): string {
@@ -270,91 +273,6 @@ export function earnProgramsRefreshInterval(state: EarnProgramsState | undefined
  */
 export const EARN_PROGRAM_DEDUPING_MS = 2_000;
 
-/**
- * Announce a provider operation FINISHING, once, from observed truth.
- *
- * The provider is the only authority on whether the money moved, so this
- * watches the polled wallet for a `busy → settled` transition rather than
- * reacting to what the user submitted: a withdrawal that fails still tells the
- * truth, and a rebalance the provider started by itself is announced the same
- * way. What completed is named from the activity observed BEFORE the
- * transition, since the provider drops it once the wallet settles.
- *
- * Never fires on first observation — a program that is already busy when the
- * page opens is a state, not an event — and only from the ONE caller that owns
- * the surface, since the hook it observes runs in several components.
- *
- * Snapshots are remembered PER PROGRAM ID, never as one previous wallet. With
- * several programs, a single remembered snapshot would compare whichever
- * program happened to be looked at last against a different program this pass —
- * reading a busy→settled transition that never happened and announcing money
- * that never moved.
- */
-export function useEarnWalletActivityToasts(state: EarnProgramsState | undefined) {
-  const t = useTranslations();
-  const previous = useRef<Map<string, EarnPortfolioWalletSnapshot>>(new Map());
-
-  useEffect(() => {
-    if (state?.kind !== "ready") {
-      // An unconfigured or errored interlude breaks the observation chain: by
-      // the time the read recovers, a program that was busy may have settled
-      // minutes ago, and pairing the stale snapshot with the fresh read would
-      // announce a completion nobody watched happen. Forget everything and
-      // treat recovery like a first mount, which never announces.
-      previous.current.clear();
-      return;
-    }
-
-    const seen = new Set<string>();
-    for (const program of state.programs) {
-      seen.add(program.id);
-      const wallet = program.wallet;
-      const before = previous.current.get(program.id);
-      previous.current.set(program.id, wallet);
-
-      // Nothing to compare against yet, or the wallet was never busy, or it is
-      // still busy — no completion has been observed.
-      if (before?.status !== "busy" || wallet.status === "busy") {
-        continue;
-      }
-      if (wallet.status === "failed") {
-        toast.error(t("DashboardEarn.overview.activityFailed"));
-        continue;
-      }
-      // A withdrawal is NOT announced here. This transition only says the
-      // provider stopped working — a failed or partial payout leaves the wallet
-      // exactly as idle as a settled one — so the outcome comes from
-      // `useEarnWithdrawalOutcomeToast`, which reads the withdrawal itself.
-      if (before.activity === "withdrawing") {
-        continue;
-      }
-      announceCompletion(t, before.activity);
-    }
-
-    // Drop programs that vanished, so a re-created id cannot inherit a stale
-    // snapshot and fire a transition on first sight.
-    for (const id of previous.current.keys()) {
-      if (!seen.has(id)) previous.current.delete(id);
-    }
-  }, [state, t]);
-}
-
-function announceCompletion(
-  t: ReturnType<typeof useTranslations>,
-  activity: EarnPortfolioWalletSnapshot["activity"]
-) {
-  toast.success(
-    t(
-      activity === "rebalancing"
-        ? "DashboardEarn.overview.activityRebalanceComplete"
-        : // A busy state this build does not recognize still completed; say
-          // so without claiming which operation it was, and without
-          // claiming anything about money.
-          "DashboardEarn.overview.activityComplete"
-    )
-  );
-}
-
 export function useEarnPrograms() {
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.programs(),
@@ -365,76 +283,6 @@ export function useEarnPrograms() {
     }
   );
   return { state: data, error, isLoading, refresh: () => void mutate() };
-}
-
-export interface EarnProgramWriteInput {
-  /** Weights per token group, keyed to provider yield-source ids. */
-  allocations: EarnPortfolioAllocationInput;
-  label?: string;
-  /**
-   * Client-minted UUIDv4 so a retried confirm can neither provision a second
-   * program nor apply the same strategy change twice. Must be re-minted whenever
-   * `allocations` changes — the provider conflicts on a reused key with a
-   * different payload.
-   *
-   * REQUIRED on create since PRO-1670: with several programs legal, nothing
-   * downstream can tell a retry from a genuine second program, so the API
-   * refuses a create that carries no key.
-   */
-  requestId: string;
-}
-
-/** Provision a new program. 201 on create, 200 when the provider replayed. */
-export function createEarnProgram(
-  input: EarnProgramWriteInput
-): Promise<DashboardFetchResult<{ data: EarnProgramResponse }>> {
-  if (EARN_PROGRAM_CREATE_PROVIDER === undefined) {
-    // Unreachable through the UI — every create affordance is gated on
-    // EARN_PROGRAM_CREATION_ENABLED — so this is a programming error, not a
-    // state to render. Failing loudly beats POSTing `provider: undefined` and
-    // reading the API's schema 400 as if the input were at fault.
-    return Promise.reject(new Error("No surfaced Earn provider offers programs"));
-  }
-  return dashboardFetch("/api/dashboard/markets/earn/programs", {
-    method: "POST",
-    body: { provider: EARN_PROGRAM_CREATE_PROVIDER, ...input },
-  });
-}
-
-/** Re-target an existing program's single vault in place. */
-export function retargetEarnProgram(
-  programId: string,
-  input: EarnProgramWriteInput
-): Promise<DashboardFetchResult<{ data: EarnProgramResponse }>> {
-  return dashboardFetch(programPath(programId), { method: "PUT", body: input });
-}
-
-export async function fetchEarnProgramDeposits(
-  programId: string
-): Promise<EarnProgramDepositsResponse> {
-  const { status, body } = await requestJson<{ data: EarnProgramDepositsResponse }>(
-    programPath(programId, "/deposits")
-  );
-  // No 404 branch, same reasoning as the programs read: the id always comes
-  // from a program resolved through the live list in this org+environment, so a
-  // 404 here is a broken proxy path or a scoping regression — mapping it to an
-  // empty feed would render a routing bug as "no deposits yet" on a funded
-  // program. The card's error state is the honest rendering.
-  if (status < 200 || status >= 300 || !body) {
-    throw new Error(errorMessage(body, status));
-  }
-  return body.data;
-}
-
-/** Passing no programId issues no request — the honest form of "not ready yet". */
-export function useEarnProgramDeposits(programId: string | undefined) {
-  const { data, error, isLoading } = useSWR(
-    programId ? earnQueryKeys.programDeposits({ programId }) : null,
-    () => fetchEarnProgramDeposits(programId as string),
-    // Deposits land on-chain outside the dashboard, so keep the feed fresh.
-    { refreshInterval: LIVE_FEED_REFRESH_MS }
-  );
-  return { page: data, error, isLoading };
 }
 
 /** The API caps pageSize at 100, so a full catalogue needs paging. */
@@ -462,12 +310,9 @@ export async function fetchEarnStrategies(cluster?: SolanaCluster): Promise<Earn
 
   for (let page = 1; page <= STRATEGY_PAGE_LIMIT; page += 1) {
     const clusterParam = cluster ? `&cluster=${cluster}` : "";
-    const { status, body } = await requestJson<{ data: ListEarnStrategiesResponse }>(
+    const body = await requestJsonOk<{ data: ListEarnStrategiesResponse }>(
       `/api/dashboard/markets/earn/strategies?page=${page}&pageSize=${STRATEGY_PAGE_SIZE}${clusterParam}`
     );
-    if (status < 200 || status >= 300 || !body) {
-      throw new Error(errorMessage(body, status));
-    }
 
     strategies.push(...body.data.strategies);
     if (strategies.length >= body.data.total) {
@@ -515,12 +360,9 @@ export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
     const query = new URLSearchParams({ limit: String(VAULT_POSITIONS_PAGE_SIZE) });
     if (before) query.set("before", before);
 
-    const { status, body } = await requestJson<{ data: EarnVaultPositionsPage }>(
+    const body = await requestJsonOk<{ data: EarnVaultPositionsPage }>(
       `/api/dashboard/markets/earn/vault-positions?${query}`
     );
-    if (status < 200 || status >= 300 || !body) {
-      throw new Error(errorMessage(body, status));
-    }
 
     positions.push(...body.data.positions);
     if (!body.data.hasMore) return positions;
@@ -570,12 +412,9 @@ export async function fetchEarnExternalWalletPositions(
   for (let page = 1; page <= EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT; page += 1) {
     const query = new URLSearchParams({ limit: String(EXTERNAL_WALLET_POSITIONS_PAGE_SIZE) });
     if (before) query.set("before", before);
-    const { status, body } = await requestJson<{ data: EarnExternalWalletPositionsPage }>(
+    const body = await requestJsonOk<{ data: EarnExternalWalletPositionsPage }>(
       `/api/dashboard/markets/earn/external-wallet/positions/${encodeURIComponent(ownerAddress)}?${query}`
     );
-    if (status < 200 || status >= 300 || !body) {
-      throw new Error(errorMessage(body, status));
-    }
 
     positions.push(...body.data.positions);
     if (!body.data.hasMore) return positions;
@@ -593,12 +432,9 @@ export async function fetchEarnExternalWalletPositions(
 }
 
 export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
-  const { status, body } = await requestJson<{
-    data: EarnExternalWalletPositionSummaryResponse;
-  }>("/api/dashboard/markets/earn/external-wallet/positions/summary");
-  if (status < 200 || status >= 300 || !body) {
-    throw new Error(errorMessage(body, status));
-  }
+  const body = await requestJsonOk<{ data: EarnExternalWalletPositionSummaryResponse }>(
+    "/api/dashboard/markets/earn/external-wallet/positions/summary"
+  );
   return body.data.summary;
 }
 
@@ -1452,12 +1288,9 @@ export async function fetchEarnProgramWithdrawals(
       page: String(page),
       pageSize: String(PROGRAM_WITHDRAWALS_PAGE_SIZE),
     });
-    const { status, body } = await requestJson<{ data: ListEarnProgramWithdrawalsResponse }>(
+    const body = await requestJsonOk<{ data: ListEarnProgramWithdrawalsResponse }>(
       `${programPath(programId, "/withdrawals")}?${query}`
     );
-    if (status < 200 || status >= 300 || !body) {
-      throw new Error(errorMessage(body, status));
-    }
 
     const ledgerPage = body.data;
     if (ledgerPage.page !== page || ledgerPage.pageSize !== PROGRAM_WITHDRAWALS_PAGE_SIZE) {

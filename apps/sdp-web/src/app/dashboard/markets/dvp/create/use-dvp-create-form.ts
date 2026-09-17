@@ -33,11 +33,7 @@ import {
 } from "./use-dvp-parties";
 
 export { CUSTOM } from "./use-dvp-leg";
-export {
-  type DvpPartySlot,
-  type DvpPartyWire,
-  partySlotSchema,
-} from "./use-dvp-parties";
+export type { DvpPartySlot } from "./use-dvp-parties";
 
 /** A month out at end of day, local: long enough to fund and settle, well inside the program's cap. */
 function defaultExpiry(): string {
