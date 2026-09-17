@@ -278,12 +278,23 @@ function collectRpcApiKeys(env: RpcEnv): string[] {
   return secrets.sort((a, b) => b.length - a.length);
 }
 
+/**
+ * A path segment shaped like an API credential: long, unbroken token charset.
+ * Real path vocabulary (versions, network names) stays under the length bar;
+ * Alchemy/QuickNode/Triton-style keys are 32+ characters of exactly this
+ * alphabet. Applied to every endpoint because a CUSTOMER-supplied custom
+ * endpoint carries a secret we cannot know by value — the known-key pass
+ * below only covers the platform's own keys.
+ */
+const CREDENTIAL_PATH_SEGMENT = /^[A-Za-z0-9_-]{16,}$/;
+
 // Redact provider API keys before an endpoint is exposed to callers. The
 // query-param heuristic covers keys passed as query values (Helius) and
 // customer-supplied custom endpoints whose secret we don't know. The known-key
 // redaction covers path-segment keys (Alchemy, QuickNode, Triton, Validation
-// Cloud, Nodit), which the query heuristic alone would leave in the path.
-function maskEndpoint(url: string, env: RpcEnv): string {
+// Cloud, Nodit); the path heuristic covers the same shape on endpoints whose
+// key the platform does not hold.
+export function maskEndpoint(url: string, env: RpcEnv): string {
   let masked = url;
   for (const secret of collectRpcApiKeys(env)) {
     masked = masked.replaceAll(secret, "***");
@@ -300,6 +311,10 @@ function maskEndpoint(url: string, env: RpcEnv): string {
         parsed.searchParams.set(key, "***");
       }
     }
+    parsed.pathname = parsed.pathname
+      .split("/")
+      .map((segment) => (CREDENTIAL_PATH_SEGMENT.test(segment) ? "***" : segment))
+      .join("/");
     return parsed.toString();
   } catch {
     return masked;
