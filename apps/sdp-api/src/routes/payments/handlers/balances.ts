@@ -307,35 +307,43 @@ export async function getWalletBalances(c: AppContext) {
 
   const rpc = solanaRpc.createRpc(c.env);
   const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
-  let lamports = 0n;
-  let splBalances: Awaited<ReturnType<typeof tokenAccounts.getSplTokenBalances>> = [];
 
-  try {
-    const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
-    lamports = accountInfo?.lamports ?? 0n;
-  } catch (error) {
+  const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
+    solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address),
+    tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, {
+      tokenLabelsByMint,
+    }),
+  ]);
+
+  const lamports =
+    solBalanceResult.status === "fulfilled" ? (solBalanceResult.value?.lamports ?? 0n) : 0n;
+  const splBalances = splBalancesResult.status === "fulfilled" ? splBalancesResult.value : [];
+
+  if (solBalanceResult.status === "rejected") {
     getLogger().error(
       {
         requestId: c.get("requestId"),
         walletId: wallet.walletId,
         publicKey: wallet.publicKey,
-        error: error instanceof Error ? error.message : String(error),
+        error:
+          solBalanceResult.reason instanceof Error
+            ? solBalanceResult.reason.message
+            : String(solBalanceResult.reason),
       },
       "getWalletBalances: failed to fetch SOL balance"
     );
   }
 
-  try {
-    splBalances = await tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, {
-      tokenLabelsByMint,
-    });
-  } catch (error) {
+  if (splBalancesResult.status === "rejected") {
     getLogger().error(
       {
         requestId: c.get("requestId"),
         walletId: wallet.walletId,
         publicKey: wallet.publicKey,
-        error: error instanceof Error ? error.message : String(error),
+        error:
+          splBalancesResult.reason instanceof Error
+            ? splBalancesResult.reason.message
+            : String(splBalancesResult.reason),
       },
       "getWalletBalances: failed to fetch SPL balances"
     );
