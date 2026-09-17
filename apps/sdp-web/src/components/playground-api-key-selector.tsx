@@ -117,7 +117,7 @@ export function PlaygroundApiKeySelector() {
       </div>
       <Input
         aria-label={t("Shared.SharedComponents.apiKeyValue")}
-        autoComplete="off"
+        autoComplete="new-password"
         className="h-11 rounded-[14px]"
         onChange={(event) => updateSelectedSecret(event.currentTarget.value)}
         placeholder={t("Shared.SharedComponents.apiKeySecretPlaceholder")}

@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
+import { getStoredApiKeySecret, normalizeApiKeyInput } from "@/lib/playground-api-keys";
 import { setNestedValue } from "@/lib/set-nested-value";
 import { HighlightedCode, type HighlightLanguage } from "@/lib/shiki-code";
 import { cn } from "@/lib/utils";
@@ -59,8 +59,8 @@ interface ExecutionResult {
 
 interface ApiPlaygroundShellProps {
   apiBaseUrl?: string | null;
+  apiKeyId: string | null;
   apiKeySelector?: ReactNode;
-  apiKeyValue: string;
   defaultEndpointId?: string;
   endpoints: ApiPlaygroundEndpointConfig[];
   leftMessages?: ApiPlaygroundMessage[];
@@ -410,8 +410,8 @@ const OUTPUT_PANEL_LABEL_KEYS = [
 
 export function ApiPlaygroundShell({
   apiBaseUrl,
+  apiKeyId,
   apiKeySelector,
-  apiKeyValue,
   defaultEndpointId,
   endpoints,
   leftMessages = [],
@@ -582,7 +582,7 @@ export function ApiPlaygroundShell({
       return;
     }
 
-    const normalizedApiKey = normalizeApiKeyInput(apiKeyValue);
+    const normalizedApiKey = normalizeApiKeyInput(getStoredApiKeySecret({ apiKeyId }) ?? "");
     const hasApiKey = Boolean(normalizedApiKey);
 
     if (!hasApiKey) {
@@ -620,11 +620,10 @@ export function ApiPlaygroundShell({
         status?: number;
         statusText?: string;
         body?: unknown;
-        error?: string;
       };
 
       if (!proxyResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
-        setExecuteError(envelope.error ?? t("Shared.SharedComponents.playgroundExecutionFailed"));
+        setExecuteError(t("Shared.SharedComponents.playgroundExecutionFailed"));
         setActivePanel("response");
         return;
       }
@@ -639,10 +638,8 @@ export function ApiPlaygroundShell({
       });
       setMobileSection("output");
       setActivePanel("response");
-    } catch (error) {
-      setExecuteError(
-        error instanceof Error ? error.message : t("Shared.SharedComponents.requestExecutionFailed")
-      );
+    } catch {
+      setExecuteError(t("Shared.SharedComponents.requestExecutionFailed"));
       setMobileSection("output");
       setActivePanel("response");
     } finally {

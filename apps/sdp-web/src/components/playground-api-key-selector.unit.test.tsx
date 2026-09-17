@@ -4,7 +4,11 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { clearStoredApiKeySecrets } from "@/lib/playground-api-keys";
+import {
+  clearStoredApiKeySecrets,
+  getStoredApiKeySecret,
+  PLAYGROUND_API_KEY_INACTIVITY_TIMEOUT_MS,
+} from "@/lib/playground-api-keys";
 import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
 import { PlaygroundApiKeySelector } from "./playground-api-key-selector";
 
@@ -58,12 +62,16 @@ describe("PlaygroundApiKeySelector", () => {
 
   afterEach(() => {
     cleanup();
+    clearStoredApiKeySecrets();
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
   it("attaches a pasted secret to the selected key and publishes it to the playground", () => {
     const view = render(ui());
     const secretInput = view.getByLabelText("API key value") as HTMLInputElement;
+
+    expect(secretInput.autocomplete).toBe("new-password");
 
     fireEvent.change(secretInput, { target: { value: "Bearer sk_test_session_secret" } });
 
@@ -85,5 +93,24 @@ describe("PlaygroundApiKeySelector", () => {
 
     expect(secretInput.value).toBe("");
     expect(view.getByTestId("selected-secret").textContent).toBe("");
+  });
+
+  it("does not extend secret expiry during passive rerenders", () => {
+    vi.useFakeTimers();
+    const storedAt = new Date("2026-09-17T00:00:00.000Z");
+    vi.setSystemTime(storedAt);
+    const view = render(ui());
+    const secretInput = view.getByLabelText("API key value") as HTMLInputElement;
+    fireEvent.change(secretInput, { target: { value: "sk_test_session_secret" } });
+
+    vi.setSystemTime(storedAt.getTime() + PLAYGROUND_API_KEY_INACTIVITY_TIMEOUT_MS - 1);
+    view.rerender(ui());
+    expect(secretInput.value).toBe("sk_test_session_secret");
+
+    vi.setSystemTime(storedAt.getTime() + PLAYGROUND_API_KEY_INACTIVITY_TIMEOUT_MS);
+    view.rerender(ui());
+
+    expect(secretInput.value).toBe("");
+    expect(getStoredApiKeySecret({ apiKeyId: "key_test" })).toBeNull();
   });
 });

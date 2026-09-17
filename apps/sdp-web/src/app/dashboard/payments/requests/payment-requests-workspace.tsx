@@ -67,7 +67,6 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
@@ -503,10 +502,6 @@ export function PaymentRequestsWorkspace({
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId),
     [apiKeys, selectedPlaygroundApiKeyId]
   );
-  const playgroundApiKeyValue = usePlaygroundApiKeySecret({
-    apiKeyId: selectedPlaygroundApiKey?.id,
-  });
-
   const payLink = selected ? `${window.location.origin}/pay/${selected.publicToken}` : null;
 
   const walletNameById = useMemo(
@@ -695,7 +690,7 @@ export function PaymentRequestsWorkspace({
             content: (
               <PaymentRequestsPlayground
                 apiBaseUrl={apiBaseUrl}
-                apiKeyValue={playgroundApiKeyValue ?? ""}
+                apiKeyId={selectedPlaygroundApiKey?.id ?? null}
                 hasActiveApiKeys={apiKeys.length > 0}
                 wallets={wallets}
                 tokens={tokens}

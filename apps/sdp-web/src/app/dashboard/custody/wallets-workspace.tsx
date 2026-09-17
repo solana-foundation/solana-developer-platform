@@ -12,7 +12,6 @@ import {
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
 import { cn } from "@/lib/utils";
 import type { KnownCustodyProvider } from "./provider-catalog";
 import { WalletsOverview } from "./wallets-overview";
@@ -88,10 +87,6 @@ export function WalletsWorkspace({
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
     [apiKeys, selectedPlaygroundApiKeyId]
   );
-  const playgroundApiKeyValue = usePlaygroundApiKeySecret({
-    apiKeyId: selectedPlaygroundApiKey?.id,
-  });
-
   const openWalletSetup = (provider: KnownCustodyProvider | null) => {
     const params = new URLSearchParams();
     if (provider) {
@@ -131,7 +126,7 @@ export function WalletsWorkspace({
             content: (
               <WalletsPlayground
                 apiBaseUrl={apiBaseUrl}
-                apiKeyValue={playgroundApiKeyValue ?? ""}
+                apiKeyId={selectedPlaygroundApiKey?.id ?? null}
                 connectedProviders={connectedProviders}
                 configsError={configsError}
                 hasActiveApiKeys={apiKeys.length > 0}
