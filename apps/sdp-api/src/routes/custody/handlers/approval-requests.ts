@@ -128,6 +128,9 @@ async function requesterCheck(
 
 type DecisionRefusal = "requester" | "not_group_member" | "not_admin";
 
+/** The fields of a request that decide who may approve or reject it. */
+type DecisionRow = Pick<ApprovalRequestDetailRow, "requested_by" | "approval_group_id">;
+
 interface ViewerDecision {
   isRequester: boolean;
   /** Why the caller cannot approve or reject, or null when they can. */
@@ -154,8 +157,8 @@ interface ViewerDecision {
 async function viewerDecisionCheck(
   repository: ReturnType<typeof createPolicyRepository>,
   auth: ApiKeyContext,
-  rows: readonly Pick<ApprovalRequestDetailRow, "requested_by" | "approval_group_id">[]
-): Promise<(row: Pick<ApprovalRequestDetailRow, "requested_by" | "approval_group_id">) => ViewerDecision> {
+  rows: readonly DecisionRow[]
+): Promise<(row: DecisionRow) => ViewerDecision> {
   const isRequester = await requesterCheck(
     repository,
     auth,
