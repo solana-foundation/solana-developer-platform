@@ -611,7 +611,8 @@ organization's own custody wallets.
     from CONFIGURATION: the flag, plus a Kora for that cluster
     (`isFeePaymentConfiguredForCluster`, @sdp/payments): `KORA_RPC_URL` serves
     the `SOLANA_NETWORK` cluster, `KORA_RPC_URL_MAINNET` / `KORA_RPC_URL_DEVNET`
-    the other. The movement's cluster rides `SponsorshipScope.cluster`, so the
+    the other; there is no built-in default URL. Flipping `SOLANA_NETWORK`
+    re-points the bare trio, so rewire `KORA_RPC_URL` in the same change. The movement's cluster rides `SponsorshipScope.cluster`, so the
     matching Kora signs, the matching budget network is charged and the fee is
     priced on the matching RPC (`createClusterRpc`). Opening mainnet is wiring
     the mainnet Kora in after its policy is opened and `sbp_mainnet_global`

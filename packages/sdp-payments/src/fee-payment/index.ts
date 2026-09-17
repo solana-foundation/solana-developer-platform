@@ -28,19 +28,6 @@ export { FeePaymentError } from "./port";
 export type FeePaymentProviderType = "kora" | "native";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Default URLs
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Default Kora RPC URLs by network.
- * These may need to be updated based on Solana Foundation's deployment.
- */
-const DEFAULT_KORA_URLS: Partial<Record<SolanaCluster, string>> = {
-  devnet: "https://kora-devnet.solana.com",
-  "mainnet-beta": "https://kora.solana.com",
-};
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Factory Functions
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -74,9 +61,14 @@ export interface KoraEndpoint {
  * explicit and wins; the unsuffixed trio (`KORA_RPC_URL` and friends) serves
  * only the cluster `SOLANA_NETWORK` names. A cluster with neither answers null
  * so callers fail closed to wallet-pays rather than signing through the wrong
- * paymaster. A per-cluster trio never borrows the default trio's key or
- * audience: a devnet key presented to the mainnet service is a misconfiguration
- * to surface, not paper over.
+ * paymaster. There is NO built-in default URL: a paymaster is money, and a
+ * deployment reaches one only by naming it. A per-cluster trio never borrows
+ * the default trio's key or audience: a devnet key presented to the mainnet
+ * service is a misconfiguration to surface, not paper over.
+ *
+ * Flipping `SOLANA_NETWORK` re-points the bare trio at the new cluster: a
+ * `KORA_RPC_URL` that named the devnet Kora becomes the mainnet paymaster.
+ * Rewire it in the same change (prod: HOO-717).
  */
 export function resolveKoraEndpoint(
   env: FeePaymentEnv,
@@ -104,7 +96,7 @@ export function resolveKoraEndpoint(
   }
 
   if (cluster !== defaultFeePaymentCluster(env)) return null;
-  const rpcUrl = env.KORA_RPC_URL?.trim() || DEFAULT_KORA_URLS[cluster];
+  const rpcUrl = env.KORA_RPC_URL?.trim();
   if (!rpcUrl) return null;
   return {
     rpcUrl,

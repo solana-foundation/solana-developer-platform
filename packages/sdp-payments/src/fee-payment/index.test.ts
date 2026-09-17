@@ -78,9 +78,10 @@ describe("resolveKoraEndpoint", () => {
     assert.equal(resolveKoraEndpoint(env, "devnet"), null);
   });
 
-  it("falls back to the published devnet Kora only for the default cluster", () => {
-    assert.equal(resolveKoraEndpoint({}, "devnet")?.rpcUrl, "https://kora-devnet.solana.com");
-    assert.equal(resolveKoraEndpoint({}, "mainnet-beta"), null);
+  it("has no built-in default: a deployment reaches a paymaster only by naming it", () => {
+    assert.equal(resolveKoraEndpoint({}, "devnet"), null);
+    assert.equal(resolveKoraEndpoint({ SOLANA_NETWORK: "mainnet-beta" }, "mainnet-beta"), null);
+    assert.equal(isFeePaymentConfiguredForCluster({}, "devnet"), false);
   });
 });
 

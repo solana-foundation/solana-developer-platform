@@ -16,7 +16,12 @@ const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q" as Address;
 
 function scope(env: Partial<Env> = {}) {
   return {
-    env: { EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true", ...env } as Env,
+    env: {
+      EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true",
+      SOLANA_NETWORK: "devnet",
+      KORA_RPC_URL: "https://kora-devnet.example",
+      ...env,
+    } as Env,
     input: {
       organizationId: "org_1",
       projectId: "prj_1",
