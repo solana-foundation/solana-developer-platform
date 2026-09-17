@@ -16,7 +16,10 @@ export const WALLET_OPERATION_TYPES = [
   "earn_program_withdrawal",
   "earn_vault_deposit",
   "earn_vault_withdrawal",
+  "issuance_allowlist_add_execute",
+  "issuance_allowlist_remove_execute",
   "issuance_burn_execute",
+  "issuance_deploy_execute",
   "issuance_force_burn_execute",
   "issuance_freeze_execute",
   "issuance_metadata_update_execute",
@@ -133,6 +136,29 @@ export interface AmountPolicyRule extends PolicyRuleBase {
   assets?: string[];
 }
 
+/** Whose wallet-operation history a `velocity` rule's rolling window sums. */
+export type VelocityPolicyRuleScope = "wallet" | "organization" | "api_key";
+
+/**
+ * Rolling-window volume cap. Unlike every other kind, `action` is the
+ * decision ON BREACH (default `deny`); within the limit the rule abstains.
+ * ADR 0004 layer 2 relies on that so a breached tier default yields
+ * `approval_required` rather than a refusal.
+ */
+export interface VelocityPolicyRule extends PolicyRuleBase {
+  kind: "velocity";
+  /** Whose history the window sums. Default "wallet". */
+  scope?: VelocityPolicyRuleScope;
+  /** ISO 8601 duration, e.g. "PT1H", "P1D", "P1DT12H". Required. */
+  window: string;
+  /** Decimal string in the asset's units. Required. */
+  max: string;
+  asset?: string;
+  assets?: string[];
+  /** Optional filter; absent means every operation type counts. */
+  operationTypes?: WalletOperationType[];
+}
+
 export interface ApprovalPolicyRule extends PolicyRuleBase {
   kind: "approval";
   families?: WalletOperationFamily[];
@@ -151,6 +177,7 @@ export type PolicyRule =
   | AssetPolicyRule
   | DestinationPolicyRule
   | AmountPolicyRule
+  | VelocityPolicyRule
   | ApprovalPolicyRule
   | AlwaysPolicyRule;
 

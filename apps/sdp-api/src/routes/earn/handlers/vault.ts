@@ -15,7 +15,6 @@ import {
   type EarnProviderId,
   earnDepositStyle,
   earnWithdrawSlippageFloor,
-  isVaultDirectDepositEnabled,
 } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -63,6 +62,7 @@ import {
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
+import { checkVaultExposure, vaultExposureBlockingIssue } from "@/services/earn/vault-exposure";
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
@@ -94,7 +94,11 @@ import {
   type earnVaultWithdrawalSchema,
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
-import { assertStrategyDepositable, assertVaultDepositAdmissible } from "./admission";
+import {
+  assertStrategyDepositable,
+  assertVaultDepositAdmissible,
+  assertVaultDepositEnvironmentOpen,
+} from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
@@ -152,13 +156,7 @@ export async function createEarnVaultDepositPreview(
   }
   const provider = strategy.provider;
 
-  if (!isVaultDirectDepositEnabled(environment, provider)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `Vault deposits for ${provider} are not available from a ${environment} project.`
-    );
-  }
-
+  assertVaultDepositEnvironmentOpen(environment, provider);
   assertEarnProviderSurfaced(provider);
   if (auth) {
     await assertProviderAvailable(
@@ -171,6 +169,13 @@ export async function createEarnVaultDepositPreview(
     );
   }
   assertStrategyDepositable(strategy, environment);
+  // The exposure cap, evaluated WITHOUT throwing (the deposit's 409 becomes a
+  // blocking issue here, ADR 0004 "previews are the contract"), but only after
+  // the same gates the deposit takes and before the provider is asked: a
+  // caller refused by a cheaper gate hears that reason. In shadow mode the
+  // verdict is emitted and NOT reported, so the preview never claims a block
+  // the deposit would not apply. An unreadable exposure is a 503 here too.
+  const exposure = await checkVaultExposure(c, strategy, body.amount, { environment });
 
   const deadline = createVaultDeadline();
   const client = resolveVaultDirectClient(c.env, provider, deadline);
@@ -196,11 +201,14 @@ export async function createEarnVaultDepositPreview(
     rethrowVaultProviderFailure(error);
   }
 
+  const capIssue = vaultExposureBlockingIssue(exposure);
   return success(c, {
     strategyId: strategy.id,
     sharesOut: quote.sharesOut,
     shareDecimals: quote.shareDecimals,
-    blockingIssues: quote.blockingIssues,
+    // The provider's own issues first, then SDP's platform cap in the same
+    // channel, so a partner's existing blockingIssues handling covers both.
+    blockingIssues: capIssue === null ? quote.blockingIssues : [...quote.blockingIssues, capIssue],
     // Sponsorship INTENT, for honest fee copy on the confirm step — the same
     // flag+cluster gate resolveVaultSponsorship applies at execution. A
     // swap-funded deposit forces wallet-pays regardless; the swap choice lives
@@ -397,15 +405,6 @@ export async function extractEarnVaultDepositPolicyCandidate(
     );
   }
 
-  // Jupiter is mainnet-only, while today's Kamino and Veda launch posture
-  // remains sandbox-only. Keep that distinction provider-scoped.
-  if (!isVaultDirectDepositEnabled(environment, strategy.provider)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `Vault deposits for ${strategy.provider} are not available from a ${environment} project.`
-    );
-  }
-
   // Every production deposit carries a caller-chosen share floor. The
   // dashboard derives it from a live quote and rejects stale quotes by TTL
   // (PRO-1691); the provider builder enforces the exact value on-chain.
@@ -430,6 +429,8 @@ export async function extractEarnVaultDepositPolicyCandidate(
   //
   //   shape       — a custodial provider reaching this route would silently
   //                 skip its wallet-provisioning model.
+  //   environment — capability, inside `assertVaultDepositAdmissible`: this
+  //                 project must reach the provider's deployed cluster.
   //   surfacing   — "SDP does not offer this provider", which no per-org
   //                 override can lift, and which reads differently from
   //                 entitlement. Checked first so a caller is never pointed at
@@ -441,11 +442,18 @@ export async function extractEarnVaultDepositPolicyCandidate(
   //                 an operator's deliberate stop during an exploit or depeg —
   //                 stayed fundable by id.
   //
-  // The sequence lives in handlers/admission.ts so a future second money-in
-  // caller shares it instead of re-deriving it. Money-OUT must never inherit
-  // any of these (ADR 0002): un-offering a provider closes the door in, never
-  // the door out.
-  const provider = await assertVaultDepositAdmissible(c, strategy);
+  //   exposure:     SDP-wide holdings in this vault stay under its cap (ADR
+  //                 0004 layer 1); a typed 409 when enforced, an event only in
+  //                 shadow mode. Last, because it is the one step that reads
+  //                 the ledger. The amount is the body's, which for a
+  //                 swap-funded deposit is the SOURCE stablecoin's units (a
+  //                 dollar-for-dollar approximation the cap accepts by design).
+  //
+  // The sequence lives in handlers/admission.ts so the external-wallet build
+  // shares it instead of re-deriving it. Money-OUT must never inherit any of
+  // these (ADR 0002): un-offering a provider closes the door in, never the
+  // door out.
+  const provider = await assertVaultDepositAdmissible(c, strategy, body.amount);
 
   // Swap funding, normalized before the gate so policy decides on what
   // actually leaves the wallet. A source equal to the vault's own token is a

@@ -280,7 +280,6 @@ export interface Env {
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
   BVNK_WEBHOOK_SECRET?: string;
-  BVNK_API_BASE_URL?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
@@ -316,6 +315,10 @@ export interface Env {
   // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
   // process serves both clusters and withdrawals are not environment-gated.
   EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
+  // Whether the Earn volume caps (ADR 0004) refuse deposits. Unset or false is
+  // shadow mode: evaluate and emit `sdp_api_earn_volume_cap_evaluated`, refuse
+  // nothing. See `isEarnVolumeCapsEnforced`.
+  EARN_VOLUME_CAPS_ENFORCED?: string;
 
   // Earn vault-infra provider configuration
   UPSHIFT_API_KEY?: string;

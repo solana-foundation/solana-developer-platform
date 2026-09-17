@@ -594,7 +594,14 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
 
     try {
       await runWithSystemDatabaseIdentity("http:auth", async () => {
-        const payload = await verifyClerkJwtForRequest(c, token);
+        let payload: ClerkJwtPayload;
+        try {
+          payload = await verifyClerkJwtForRequest(c, token);
+        } catch (error) {
+          throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
+            cause: error instanceof Error ? error.message : String(error),
+          });
+        }
         assertClerkTenantClaims(payload);
         const clerkContext = await buildClerkContext(c, payload);
         await enforceRateLimit(

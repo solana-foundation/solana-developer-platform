@@ -114,6 +114,37 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("useAssetProfileForm", () => {
+  it("keeps stablecoin draft decimals fixed when saving settings", async () => {
+    const pendingToken = {
+      ...token,
+      mintAddress: null,
+      status: "pending" as const,
+      deployedAt: null,
+      signingCustodyWalletId: "cwlt_metadata",
+      signingWalletId: "provider_metadata",
+    };
+    const { result } = renderHook(
+      () =>
+        useAssetProfileForm({
+          token: pendingToken,
+          assetProfile,
+          metadataSignerSelection,
+          draftWallets: [{ id: "cwlt_metadata", walletId: "provider_metadata" }],
+        }),
+      { wrapper }
+    );
+
+    act(() => result.current.updateDraft({ decimals: "9", description: "Updated" }));
+    expect(result.current.draft.decimals).toBe("6");
+    await act(() => result.current.save());
+
+    expect(mocks.updateAssetProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenPatch: expect.objectContaining({ decimals: 6 }),
+      })
+    );
+  });
+
   it("blocks a runtime-unavailable selected metadata signer without replacing it", async () => {
     const selection = {
       ...metadataSignerSelection,

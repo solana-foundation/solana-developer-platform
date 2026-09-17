@@ -706,7 +706,10 @@
       "liquidityFact": "{liquidity} thanh khoản",
       "apyFact": "{apy} APY",
       "unavailableClusterDescription": "Chiến lược này chạy trên một network khác với dự án này. Hãy chuyển sang dự án trên network đó để tích hợp.",
-      "unavailableEnvironmentProductionDescription": "Provider này chỉ nhận khoản nạp vault mới từ dự án Production. Hãy chuyển sang dự án Production để tích hợp."
+      "unavailableEnvironmentProductionDescription": "Provider này chỉ nhận khoản nạp vault mới từ dự án Production. Hãy chuyển sang dự án Production để tích hợp.",
+      "apiKeyCalloutBefore": "Bạn cần",
+      "apiKeyCalloutLink": "Developer API key",
+      "apiKeyCalloutAfter": "cho dự án này (bao gồm earn:read và earn:write). Hãy giữ nó trên máy chủ của bạn, không để trong client."
     },
     "liquidity": {
       "instant": "Tức thì",

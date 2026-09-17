@@ -438,6 +438,75 @@ describe("DvpLegFundingClaimRepository", () => {
   });
 
   /**
+   * PRO-1973. A settle or cancel runs as the trade's owner and has to see a
+   * party's leg lock in flight, or it closes the escrow under a transfer. 0110
+   * lets the owner read the rows on its own trades; nothing else crosses.
+   */
+  describe("a live leg lock, as the trade's owner sees it", () => {
+    it("sees another organization's lock on its trade", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.claim(claimInput(PARTY_A_ORG, "a", "sig_lock"))
+      );
+
+      const live = await runWithTenantDatabaseIdentity({ organizationId: AGENT_ORG }, () =>
+        repo.hasLiveClaim(TRADE_ID, 900n)
+      );
+
+      expect(live).toBe(true);
+    });
+
+    // A broadcast funding into an escrow a close has emptied fails with
+    // nothing moved, and settle reads the escrow live, so a receipt does not
+    // hold Settle back for its blockhash window.
+    it("does not count a receipt", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+      });
+
+      const live = await runWithTenantDatabaseIdentity({ organizationId: AGENT_ORG }, () =>
+        repo.hasLiveClaim(TRADE_ID, 900n)
+      );
+
+      expect(live).toBe(false);
+    });
+
+    it("does not count a lock past its last valid height", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_dead"), expiryHeight: "500" })
+      );
+
+      const [atHeight, pastHeight] = await runWithTenantDatabaseIdentity(
+        { organizationId: AGENT_ORG },
+        async () => [
+          await repo.hasLiveClaim(TRADE_ID, 500n),
+          await repo.hasLiveClaim(TRADE_ID, 501n),
+        ]
+      );
+
+      expect(atHeight).toBe(true);
+      expect(pastHeight).toBe(false);
+    });
+
+    it("still hides a lock from an organization that owns neither it nor the trade", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.claim(claimInput(PARTY_A_ORG, "a", "sig_lock"))
+      );
+
+      const seenByOtherParty = await runWithTenantDatabaseIdentity(
+        { organizationId: PARTY_B_ORG },
+        () => repo.hasLiveClaim(TRADE_ID, 900n)
+      );
+      const listedByOwner = await runWithTenantDatabaseIdentity({ organizationId: AGENT_ORG }, () =>
+        repo.listForTrade(TRADE_ID)
+      );
+
+      expect(seenByOtherParty).toBe(false);
+      expect(listedByOwner).toHaveLength(1);
+    });
+  });
+
+  /**
    * The row belongs to the funder, so ordinary tenant isolation applies and
    * nothing about this table crosses an organization. That is what lets the
    * cross-org read in 0089 stay read-only.

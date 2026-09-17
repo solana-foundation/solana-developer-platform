@@ -268,16 +268,21 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     z.object({
       ...requirementBase,
       provider: z.literal("bvnk"),
-      status: z.literal("customer_agreement_required"),
+      status: z.literal("counterparty_collect_agreement"),
       agreements: z.array(
         z.object({
-          id: withOpenApi(z.string(), { description: "BVNK agreement id." }),
-          name: withOpenApi(z.string(), { description: "Agreement display name." }),
+          name: withOpenApi(z.string(), {
+            description: "BVNK agreement identifier (v1 agreements have no id).",
+          }),
+          displayName: withOpenApi(z.string(), { description: "Agreement display name." }),
           description: withOpenApi(z.string(), {
             description: "Agreement summary text.",
           }),
-          downloadUrl: withOpenApi(z.url(), {
-            description: "Agreement text URL, minted JIT per response and never persisted.",
+          url: withOpenApi(z.url(), {
+            description: "Agreement text URL, stored statically on the customer link.",
+          }),
+          privacyPolicyUrl: withOpenApi(z.url(), {
+            description: "Privacy policy URL, stored statically on the customer link.",
           }),
         })
       ),
@@ -533,6 +538,23 @@ export const listCounterpartyAccountsQuerySchema = listCounterpartyAccountsQuery
   })
   .openapi({ description: "Counterparty account list filters." });
 
+const customerLinkBaseDocFields = {
+  id: withOpenApi(z.string(), {
+    description: "Customer-link row identifier.",
+    example: "counterparty_provider_account_customer",
+  }),
+  status: counterpartyAccountStatusSchema,
+  providerStatus: withOpenApi(z.string().nullable(), {
+    description:
+      "Provider-side customer status when known; for BVNK links before the customer exists, one of PENDING_AGREEMENT / PENDING_DETAILS.",
+    example: "ACTIVE",
+  }),
+  createdAt: withOpenApi(isoDateTimeSchema, {
+    description: "Customer-link row creation timestamp.",
+    example: "2025-01-01T00:00:00.000Z",
+  }),
+};
+
 export const counterpartyProviderAccountSchema = withOpenApi(
   z.object({
     id: withOpenApi(z.string(), {
@@ -586,29 +608,60 @@ export const counterpartyProviderAccountSchema = withOpenApi(
     }),
     customerLink: withOpenApi(
       z
-        .object({
-          id: withOpenApi(z.string(), {
-            description: "Customer-link row identifier.",
-            example: "counterparty_provider_account_customer",
+        .discriminatedUnion("provider", [
+          z.object({
+            provider: z.literal("bvnk"),
+            ...customerLinkBaseDocFields,
+            providerCustomerReference: withOpenApi(z.string().nullable(), {
+              description: "BVNK customer reference; null until the v1 customer exists.",
+              example: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+            }),
+            residenceCountryCode: withOpenApi(z.enum(COUNTRY_CODES), {
+              description: "Tax-residence country the agreement session was minted for.",
+              example: "US",
+            }),
+            agreements: withOpenApi(
+              z.array(
+                z.object({
+                  name: withOpenApi(z.string(), {
+                    description: "Agreement identifier.",
+                    example: "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
+                  }),
+                  displayName: withOpenApi(z.string(), {
+                    description: "Human-readable agreement title.",
+                    example: "Embedded US Partner Platform Customers Agreement",
+                  }),
+                  url: withOpenApi(z.string(), {
+                    description: "Agreement document URL.",
+                    example: "https://help.bvnk.com/hc/en-us/sections/example",
+                  }),
+                  privacyPolicyUrl: withOpenApi(z.string(), {
+                    description: "Privacy policy document URL.",
+                    example: "https://help.bvnk.com/hc/en-us/articles/example",
+                  }),
+                  signedAt: withOpenApi(isoDateTimeSchema.nullable(), {
+                    description:
+                      "When the counterparty signed the agreement session; null while consent is pending.",
+                    example: "2025-01-01T00:00:00.000Z",
+                  }),
+                })
+              ),
+              { description: "Agreements of the session with their signing state." }
+            ),
           }),
-          providerCustomerReference: withOpenApi(z.string(), {
-            description: "Provider-side customer identifier for the counterparty.",
-            example: "Customer:0193b2c4",
+          z.object({
+            provider: z.enum(RAMP_PROVIDERS.filter((provider) => provider !== "bvnk")),
+            ...customerLinkBaseDocFields,
+            providerCustomerReference: withOpenApi(z.string(), {
+              description: "Provider-side customer identifier for the counterparty.",
+              example: "Customer:0193b2c4",
+            }),
           }),
-          status: counterpartyAccountStatusSchema,
-          providerStatus: withOpenApi(z.string().nullable(), {
-            description: "Provider-side customer status when known.",
-            example: "ACTIVE",
-          }),
-          createdAt: withOpenApi(isoDateTimeSchema, {
-            description: "Customer-link row creation timestamp.",
-            example: "2025-01-01T00:00:00.000Z",
-          }),
-        })
+        ])
         .optional(),
       {
         description:
-          "The counterparty's provider customer link, present when the provider customer exists.",
+          "The counterparty's provider customer link, present once the provider onboarding has started.",
       }
     ),
   }),

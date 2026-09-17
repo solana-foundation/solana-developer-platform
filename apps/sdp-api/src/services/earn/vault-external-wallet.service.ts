@@ -61,6 +61,7 @@ import {
   type UnsignedVaultTransaction,
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
+import { ledgerVaultExposureGate } from "./vault-exposure";
 import {
   broadcastRecordedVaultMovement,
   isSlippageSimulationFailure,
@@ -900,6 +901,18 @@ export async function submitExternalWalletDeposit(
     label: built.label,
     requestedAmount: built.amount_requested,
     acceptedMinSharesOut: built.min_shares_out,
+    // ADR 0004 layer 1, the write-side half (see the custody deposit): the
+    // build's admission gate could not see a deposit admitted a moment
+    // earlier, so the cap is decided again here under a per-vault lock. The
+    // customer has signed; nothing has been sent. A refusal is the typed 409
+    // and records nothing, which is the ADR's direction over landing a
+    // deposit past the cap.
+    admit: ledgerVaultExposureGate(env, {
+      environment: input.environment,
+      provider: built.provider,
+      vaultAddress: built.vault_address,
+      amount: built.amount_requested,
+    }),
     signature: signed.signature,
     signedTransaction: signed.signedTransactionBase64,
     lastValidBlockHeight: built.last_valid_block_height,

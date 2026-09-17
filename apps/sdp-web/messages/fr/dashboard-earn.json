@@ -304,7 +304,10 @@
       "liquidityFact": "{liquidity} de liquidité",
       "apyFact": "{apy} APY",
       "unavailableClusterDescription": "Cette stratégie fonctionne sur un réseau différent de celui de ce projet. Passez à un projet de ce réseau pour l'intégrer.",
-      "unavailableEnvironmentProductionDescription": "Ce fournisseur n'accepte les nouveaux dépôts dans les vaults que pour les projets Production. Passez à un projet Production pour l'intégrer."
+      "unavailableEnvironmentProductionDescription": "Ce fournisseur n'accepte les nouveaux dépôts dans les vaults que pour les projets Production. Passez à un projet Production pour l'intégrer.",
+      "apiKeyCalloutBefore": "Vous avez besoin d'une",
+      "apiKeyCalloutLink": "Clé API développeur",
+      "apiKeyCalloutAfter": "pour ce projet (elle inclut earn:read et earn:write). Conservez-la sur votre serveur, jamais dans le client."
     },
     "landing": {
       "eyebrow": "Choisissez une option",

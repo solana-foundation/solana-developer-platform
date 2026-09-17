@@ -22,6 +22,7 @@ export function AssetProfileSaveBar({
   dirty,
   saving,
   errorCount,
+  saveDisabled = false,
   onSave,
   onDiscard,
   children,
@@ -30,6 +31,7 @@ export function AssetProfileSaveBar({
   dirty: boolean;
   saving: boolean;
   errorCount: number;
+  saveDisabled?: boolean;
   onSave: () => void;
   onDiscard: () => void;
   children?: ReactNode;
@@ -69,7 +71,7 @@ export function AssetProfileSaveBar({
                     type="button"
                     size="sm"
                     onClick={onSave}
-                    disabled={!dirty || saving || errorCount > 0}
+                    disabled={!dirty || saving || saveDisabled || errorCount > 0}
                   >
                     {saving ? (
                       <div className="flex items-center gap-2">

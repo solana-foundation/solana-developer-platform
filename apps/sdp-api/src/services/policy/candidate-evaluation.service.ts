@@ -1,4 +1,9 @@
-import { describeCandidateRuleCriteria, evaluateCandidatePolicies } from "@sdp/policy";
+import {
+  collectVelocityRules,
+  createVelocityLookup,
+  describeCandidateRuleCriteria,
+  evaluateCandidatePolicies,
+} from "@sdp/policy";
 import type { PolicyCandidate, PolicyDryRunResult } from "@sdp/types";
 import { createPolicyRepository } from "@/db/repositories";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
@@ -38,21 +43,34 @@ export async function dryRunPolicyCandidate(
   assertTenantClaim(scope, candidate, "dryRunPolicyCandidate");
   const store = new PostgresPolicyEnforcementStore(createPolicyRepository(env, scope), scope);
   const policies = await store.loadEffectivePolicies(candidate);
+  // Same measurement enforcement takes, minus the row it would exclude: a
+  // dry run inserts nothing, so the window is exactly the prior history.
+  const velocityRules = collectVelocityRules(policies);
+  const velocity = createVelocityLookup(
+    velocityRules.length === 0 ? [] : await store.loadVelocityObservations(candidate, velocityRules)
+  );
   const evaluation = evaluateCandidatePolicies({
     candidate,
     legs,
     walletPolicy: policies.walletPolicy,
     apiKeyPolicy: policies.apiKeyPolicy,
+    velocity,
   });
 
   return {
     decision: evaluation.decision,
     reason: evaluation.reason,
     criteria: [
-      ...describeCandidateRuleCriteria("wallet", policies.walletPolicy, candidate, legs),
+      ...describeCandidateRuleCriteria("wallet", policies.walletPolicy, candidate, legs, velocity),
       ...(policies.apiKeyPolicy === null
         ? []
-        : describeCandidateRuleCriteria("api_key", policies.apiKeyPolicy, candidate, legs)),
+        : describeCandidateRuleCriteria(
+            "api_key",
+            policies.apiKeyPolicy,
+            candidate,
+            legs,
+            velocity
+          )),
     ],
     walletPolicyRevisionId: evaluation.walletPolicyRevisionId,
     apiKeyPolicyRevisionId: evaluation.apiKeyPolicyRevisionId,

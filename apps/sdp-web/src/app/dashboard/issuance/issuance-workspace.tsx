@@ -21,7 +21,6 @@ import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
 import { IssuanceFilterPopover } from "./issuance-filter-popover";
 import { IssuanceLegacyOverview } from "./issuance-legacy-overview";
@@ -185,6 +184,7 @@ function IssuanceTokenGridCard({
   locale: ReturnType<typeof useLocale>;
 }) {
   const statusBadge = deploymentStatusBadge(getDeploymentStatus(token), t);
+  const supplyLocked = Boolean(token.mintAddress && (!token.isMintable || !token.mintAuthority));
   const smartDate = buildSmartDate(token, t, locale);
 
   return (
@@ -224,15 +224,22 @@ function IssuanceTokenGridCard({
             </h3>
           </div>
         </div>
-        <span
-          data-testid={`token-card-status-${token.id}`}
-          className={cn(
-            "inline-flex shrink-0 items-center self-start rounded-full px-2.5 py-1 text-xs font-medium capitalize",
-            statusBadge.badge
-          )}
-        >
-          {statusBadge.label}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span
+            data-testid={`token-card-status-${token.id}`}
+            className={cn(
+              "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize",
+              statusBadge.badge
+            )}
+          >
+            {statusBadge.label}
+          </span>
+          {supplyLocked ? (
+            <span className="inline-flex items-center rounded-full bg-fill px-2.5 py-1 text-xs font-medium text-secondary">
+              {t("DashboardIssuance.management.supplyLocked")}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-5 space-y-1.5">
@@ -346,7 +353,7 @@ function IssuanceResults({
   );
 }
 
-function useIssuancePlaygroundKey({
+function useIssuancePlaygroundKeyId({
   apiKeys,
   isPlaygroundTab,
 }: {
@@ -376,23 +383,7 @@ function useIssuancePlaygroundKey({
     return () => globalThis.clearTimeout(timeoutId);
   }, [isPlaygroundTab]);
 
-  const selectedPlaygroundApiKey =
-    apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null;
-  const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
-  const playgroundApiKeyValue = useMemo(() => {
-    if (!selectedPlaygroundApiKey) {
-      return "";
-    }
-
-    const stored = getStoredApiKeySecret({
-      apiKeyId: selectedPlaygroundApiKey.id,
-      keyPrefix: selectedPlaygroundApiKeyPrefix,
-    });
-
-    return stored ?? "";
-  }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
-
-  return playgroundApiKeyValue;
+  return apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId)?.id ?? null;
 }
 
 export function IssuanceWorkspace({
@@ -446,7 +437,7 @@ export function IssuanceWorkspace({
     router.push(CREATE_DRAFT_PATH);
   };
 
-  const playgroundApiKeyValue = useIssuancePlaygroundKey({ apiKeys, isPlaygroundTab });
+  const playgroundApiKeyId = useIssuancePlaygroundKeyId({ apiKeys, isPlaygroundTab });
 
   // Template options for the filter popover. Sourced from the project-wide facet
   // counts rather than the loaded rows, so the choices don't shrink to whatever
@@ -465,7 +456,7 @@ export function IssuanceWorkspace({
   const playgroundContent = (
     <IssuancePlayground
       apiBaseUrl={apiBaseUrl}
-      apiKeyValue={playgroundApiKeyValue}
+      apiKeyId={playgroundApiKeyId}
       hasActiveApiKeys={apiKeys.length > 0}
       templates={templates}
       templatesError={templatesError}

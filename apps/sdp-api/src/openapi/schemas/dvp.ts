@@ -9,6 +9,7 @@
  */
 
 import {
+  DVP_CLOSE_REFUSAL,
   DVP_LEG_OUTCOMES,
   DVP_LEG_REFUSAL,
   DVP_SETTLEMENT_AVAILABILITY,
@@ -322,6 +323,10 @@ export const dvpCloseResponseSchema = z.object({
       "settle delivers each leg to the other party; cancel refunds each leg to whoever deposited it. Both close the trade permanently.",
   }),
   signature: z.string().openapi({ description: "Signature of the closing transaction." }),
+  confirmed: z.boolean().openapi({
+    description:
+      "Whether the close is confirmed on chain. Only a confirmed close is recorded as settled or cancelled; an unconfirmed one is recorded by the reconciler once it lands.",
+  }),
 });
 
 export const dvpLegActionResponseSchema = z.object({
@@ -354,3 +359,21 @@ export const dvpLegRefusalErrorResponseSchema = z
     meta: z.object({ requestId: z.string().optional() }).optional(),
   })
   .openapi({ description: "Error response for a refused DvP leg action." });
+
+/** The error envelope settle and cancel refuse with, with the refusal code documented. */
+export const dvpCloseRefusalErrorResponseSchema = z
+  .object({
+    error: errorSchema.extend({
+      details: z
+        .object({
+          reason: z.enum(DVP_CLOSE_REFUSAL).optional().openapi({
+            description:
+              "Why this settle or cancel was refused, for a client to name in its own words. Absent on refusals that are not about the close, such as a trade that is not funded.",
+          }),
+        })
+        .catchall(z.unknown())
+        .optional(),
+    }),
+    meta: z.object({ requestId: z.string().optional() }).optional(),
+  })
+  .openapi({ description: "Error response for a refused DvP settle or cancel." });
