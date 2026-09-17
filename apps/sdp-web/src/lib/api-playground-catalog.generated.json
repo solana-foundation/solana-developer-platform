@@ -610,7 +610,8 @@
                   "requiresApproval": true,
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
                 },
-                "viewerIsRequester": false
+                "viewerIsRequester": false,
+                "viewerCanDecide": false
               }
             ]
           },
@@ -686,7 +687,8 @@
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "viewerIsRequester": false
+              "viewerIsRequester": false,
+              "viewerCanDecide": false
             }
           },
           "meta": {
@@ -761,7 +763,8 @@
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "viewerIsRequester": false
+              "viewerIsRequester": false,
+              "viewerCanDecide": false
             }
           },
           "meta": {
@@ -836,7 +839,8 @@
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "viewerIsRequester": false
+              "viewerIsRequester": false,
+              "viewerCanDecide": false
             }
           },
           "meta": {
@@ -911,7 +915,8 @@
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "viewerIsRequester": false
+              "viewerIsRequester": false,
+              "viewerCanDecide": false
             }
           },
           "meta": {
@@ -5471,6 +5476,7 @@
           {
             "key": "search",
             "label": "search",
+            "description": "Prefix match against transaction id, module id, or signature — not a substring search.",
             "required": false
           },
           {
