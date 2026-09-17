@@ -1,31 +1,30 @@
 import { assertValidAddress } from "@sdp/solana/address";
-import {
-  compareDecimalAmounts,
-  formatDecimalAmount,
-  isDecimalString,
-  parseDecimalAmount,
-  toNumberAmount,
-} from "@sdp/solana/amount";
+import { toNumberAmount } from "@sdp/solana/amount";
 import type {
   Counterparty,
   PaymentRampEstimate,
-  PaymentRampEstimateFees,
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
-import { decimalStringFromNumber, divideDecimalAmounts } from "../../../decimal";
+import { z } from "zod";
+import {
+  addDecimalAmounts,
+  compareDecimalAmounts,
+  decimalStringFromNumber,
+  divideDecimalAmounts,
+  subtractDecimalAmounts,
+} from "../../../decimal";
 import {
   badRequest,
   internalError,
   providerNotConfigured,
   providerUnavailable,
-  SdpPaymentsError,
 } from "../../../errors";
 import { hmacSha256Base64 } from "../../../hash";
 import { type ProviderRequestInit, providerFetch } from "../../fetch";
-import { isSolanaCryptoAsset, rampId, UNREPORTED_COUNTRY_SUPPORT } from "../../shared";
+import { rampId, UNREPORTED_COUNTRY_SUPPORT } from "../../shared";
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
@@ -39,46 +38,39 @@ import type {
 } from "../../types";
 import { validateBvnkCounterparty } from "./counterparty";
 import { discoverBvnkCurrencyAndRails } from "./currencies";
+import { bvnkRequestFailure, parseBvnkResponse } from "./errors";
 import {
-  type BvnkComplianceInput,
   type BvnkNetwork,
   buildBvnkOfframpReference,
   normalizeBvnkCurrencyAndNetwork,
 } from "./provider-data";
 import {
-  type BvnkAgreementActionResultsV2,
-  type BvnkAgreementContentV2,
-  type BvnkAgreementsV2,
-  type BvnkAssignedAgreementsV2,
+  type BvnkAgreementSession,
   type BvnkChannelAddress,
   type BvnkChannelResponse,
-  type BvnkCustomerV2,
-  type BvnkCustomerV2Detail,
-  type BvnkErrorEnvelopeParse,
+  type BvnkCustomer,
+  type BvnkCustomerCreated,
   type BvnkLedgerWalletProfilesV2,
   type BvnkLedgerWalletV2,
-  type BvnkPayoutEstimateResponse,
   type BvnkRuleResponse,
+  type BvnkSandboxPayinCurrency,
+  bvnkAgreementSessionSchema,
   bvnkChannelResponseSchema,
-  bvnkErrorEnvelopeSchema,
-  bvnkEstimateFiatCurrencySchema,
+  bvnkCustomerCreatedSchema,
+  bvnkCustomerSchema,
+  bvnkOfframpQuoteInputSchema,
   bvnkPayoutEstimateResponseSchema,
   bvnkQuoteEstimateResponseSchema,
   bvnkRuleResponseSchema,
-  bvnkV2AgreementActionResultsSchema,
-  bvnkV2AgreementContentSchema,
-  bvnkV2AgreementsResponseSchema,
-  bvnkV2AssignedAgreementsSchema,
-  bvnkV2CustomerDetailSchema,
-  bvnkV2CustomerSummarySchema,
+  bvnkSandboxPayinCurrencySchema,
   bvnkV2LedgerWalletSchema,
   bvnkV2WalletProfilesSchema,
-  type CreateBvnkAgreementsV2Input,
-  type CreateBvnkCustomerV2Input,
+  type CreateBvnkAgreementSessionInput,
+  type CreateBvnkCustomerInput,
   type CreateBvnkLedgerWalletV2Input,
   type CreateBvnkOnrampRuleInput,
   type ListBvnkLedgerWalletProfilesV2Input,
-  type RespondBvnkAgreementsV2Input,
+  type SignBvnkAgreementSessionInput,
 } from "./schemas";
 
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
@@ -104,19 +96,12 @@ interface BvnkSandboxBankAccount {
 // SANDBOX ONLY: synthetic originator (fiat sender) bank accounts for pay-in
 // simulations. The real buyer's funding bank is never stored; BVNK just needs
 // a format-valid account to accept the simulated deposit. Never used in prod.
-const SANDBOX_ORIGINATOR_BANK_ACCOUNTS: Record<string, BvnkSandboxBankAccount> = {
+const SANDBOX_ORIGINATOR_BANK_ACCOUNTS = {
   // biome-ignore lint/security/noSecrets: synthetic sandbox account, not a credential
   USD: { accountNumber: "000123456789", accountNumberFormat: "ABA", bankCode: "021000021" },
-};
-const SANDBOX_ORIGINATOR_BANK_ACCOUNT_FALLBACK: BvnkSandboxBankAccount = {
   // biome-ignore lint/security/noSecrets: synthetic sandbox account, not a credential
-  accountNumber: "GB29NWBK60161331926819",
-  accountNumberFormat: "IBAN",
-};
-
-function sandboxOriginatorBankAccount(currency: string): BvnkSandboxBankAccount {
-  return SANDBOX_ORIGINATOR_BANK_ACCOUNTS[currency] ?? SANDBOX_ORIGINATOR_BANK_ACCOUNT_FALLBACK;
-}
+  EUR: { accountNumber: "GB29NWBK60161331926819", accountNumberFormat: "IBAN" },
+} as const satisfies Record<BvnkSandboxPayinCurrency, BvnkSandboxBankAccount>;
 
 interface BvnkConfig {
   auth: { authId: string; secretKey: string };
@@ -141,37 +126,9 @@ function readBvnkConfig(env: Record<string, string | undefined>, mode: SdpEnviro
     );
   }
 
-  const apiBaseUrlOverride = env.BVNK_API_BASE_URL?.trim();
-  const apiBaseUrl =
-    apiBaseUrlOverride || (mode === "sandbox" ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL);
-  try {
-    new URL(apiBaseUrl);
-  } catch {
-    throw new SdpPaymentsError("INTERNAL_ERROR", "BVNK API URL configuration is invalid.");
-  }
+  const apiBaseUrl = mode === "sandbox" ? BVNK_SANDBOX_API_URL : BVNK_PRODUCTION_API_URL;
 
   return { auth: { authId, secretKey }, walletId, apiBaseUrl };
-}
-
-function buildBvnkComplianceDetails(
-  input?: BvnkComplianceInput,
-  options?: { requirePartyDetails?: boolean }
-): { partyDetails: Record<string, unknown>[] } {
-  const partyDetails = Array.isArray(input?.partyDetails)
-    ? input.partyDetails.filter(
-        (entry): entry is Record<string, unknown> =>
-          entry !== null && typeof entry === "object" && !Array.isArray(entry)
-      )
-    : [];
-
-  if (options?.requirePartyDetails && partyDetails.length === 0) {
-    throw new SdpPaymentsError(
-      "BAD_REQUEST",
-      "bvnkCompliance.partyDetails is required for BVNK off-ramp requests."
-    );
-  }
-
-  return { partyDetails };
 }
 
 async function buildBvnkHawkAuthorizationHeader(
@@ -201,170 +158,24 @@ async function buildBvnkHawkAuthorizationHeader(
   return `Hawk id="${authId}", ts="${ts}", nonce="${nonce}", mac="${mac}"`;
 }
 
-/**
- * A CloudFront/WAF edge rejection returns a non-JSON HTML body ("Request blocked",
- * "Generated by cloudfront") rather than BVNK's JSON error envelope. This means the
- * request never reached BVNK's app, so it's an availability/rate-limit issue — not a
- * credential problem — and must not be reported as a Hawk misconfiguration.
- */
-function isEdgeBlockBody(parsed: unknown, raw: string): boolean {
-  if (parsed !== undefined) return false;
-  return /cloudfront|request could not be satisfied|request blocked/i.test(raw);
-}
-
-/**
- * Normalizes a BVNK non-2xx status into an SdpPaymentsError. Auth failures point at our
- * Hawk credential configuration, rate limits surface as-is, and any 5xx is a
- * BVNK-side failure operators should investigate rather than a bad request body.
- */
-function mapBvnkErrorStatus(
-  status: number,
-  message: string,
-  options?: { edgeBlocked?: boolean; details?: Record<string, unknown> }
-): SdpPaymentsError {
-  if (options?.edgeBlocked) {
-    return providerUnavailable(
-      `BVNK request was blocked at the edge (CloudFront/WAF, status ${status}) before reaching the API. This is typically IP rate-limiting, not a credential issue; retry shortly or from a different egress.`
-    );
-  }
-  if (status === 401) {
-    return providerNotConfigured(
-      "BVNK rejected the request credentials (status 401). Check the BVNK Hawk auth configuration."
-    );
-  }
-  if (status === 403) {
-    return providerNotConfigured(
-      "BVNK request was forbidden (status 403). Check the BVNK Hawk auth/account permissions and that the API egress IP is allowlisted on the merchant account."
-    );
-  }
-  if (status === 429) {
-    return new SdpPaymentsError("RATE_LIMITED", message);
-  }
-  if (status >= 500) {
-    return new SdpPaymentsError("INTERNAL_ERROR", `BVNK request failed with status ${status}.`);
-  }
-  return badRequest(message, options?.details);
-}
-
-/**
- * Appends BVNK's error code and message to the status-only failure message so the
- * caller can tell an idempotency conflict from a bound reference or a validation error.
- *
- * @param status - HTTP status BVNK returned.
- * @param envelope - Parsed BVNK error envelope, when the body was JSON.
- * @returns The failure message, enriched when BVNK supplied a code or message.
- */
-function describeBvnkFailure(status: number, envelope: BvnkErrorEnvelopeParse): string {
-  const base = `BVNK request failed with status ${status}`;
-  if (!envelope.success) {
-    return base;
-  }
-  const parts = [envelope.data.code, envelope.data.message].filter(
-    (part): part is string => part !== undefined
-  );
-  return parts.length === 0 ? base : `${base}: ${parts.join(" ")}`;
-}
-
-function parseBvnkValidationDetails(
-  envelope: BvnkErrorEnvelopeParse
-): Record<string, unknown> | undefined {
-  if (!envelope.success || envelope.data.details === undefined) {
-    return undefined;
-  }
-  return { errors: envelope.data.details.errors };
-}
-
 /** Picks the deposit address for the requested network from the channel's primary slot or alternatives. */
 function parseBvnkChannelAddress(channel: BvnkChannelResponse, network: BvnkNetwork): string {
   const candidates: BvnkChannelAddress[] = [{ network: channel.network, address: channel.address }];
   if (channel.alternatives) {
     candidates.push(...channel.alternatives);
   }
-  const match = candidates.find(
-    (candidate) => candidate.network?.toUpperCase() === network && candidate.address
-  );
-  if (!match?.address) {
+  const match = candidates.find((candidate) => candidate.network === network);
+  if (!match) {
     throw badRequest(`BVNK channel did not return a ${network} deposit address.`);
   }
   return match.address;
 }
 
 function assertPositiveDecimalAmount(value: string, fieldName: string): string {
-  if (!isDecimalString(value) || compareDecimalAmounts(value, "0") <= 0) {
+  if (compareDecimalAmounts(value, "0") <= 0) {
     throw badRequest(`${fieldName} must be a positive amount`);
   }
   return value;
-}
-
-function parseBvnkEstimateFeeCurrency(value: string): PaymentRampEstimateFees["currency"] {
-  const normalized = value.trim().toUpperCase();
-  const fiat = bvnkEstimateFiatCurrencySchema.safeParse(normalized);
-  if (fiat.success) {
-    return fiat.data;
-  }
-  if (isSolanaCryptoAsset(normalized)) {
-    return normalized;
-  }
-  throw new SdpPaymentsError(
-    "PROVIDER_UNAVAILABLE",
-    `Unsupported BVNK estimate fee currency: ${value}`
-  );
-}
-
-function countDecimalPlaces(value: string): number {
-  if (!isDecimalString(value)) {
-    throw new SdpPaymentsError(
-      "PROVIDER_UNAVAILABLE",
-      "BVNK returned an invalid decimal estimate amount"
-    );
-  }
-  const decimalIndex = value.indexOf(".");
-  if (decimalIndex === -1) {
-    return 0;
-  }
-  return value.length - decimalIndex - 1;
-}
-
-function subtractBvnkEstimateFees(estimate: BvnkPayoutEstimateResponse): string {
-  const walletRequiredAmount = decimalStringFromNumber(estimate.walletRequiredAmount);
-  const feePredictedAmount = decimalStringFromNumber(estimate.feePredictedAmount);
-  const networkFeePredictedAmount = decimalStringFromNumber(estimate.networkFeePredictedAmount);
-  const decimals = Math.max(
-    countDecimalPlaces(walletRequiredAmount),
-    countDecimalPlaces(feePredictedAmount),
-    countDecimalPlaces(networkFeePredictedAmount)
-  );
-  const netAmount =
-    parseDecimalAmount(walletRequiredAmount, decimals) -
-    parseDecimalAmount(feePredictedAmount, decimals) -
-    parseDecimalAmount(networkFeePredictedAmount, decimals);
-  if (netAmount < 0n) {
-    throw new SdpPaymentsError(
-      "PROVIDER_UNAVAILABLE",
-      "BVNK returned estimate fees above the gross amount"
-    );
-  }
-  return formatDecimalAmount(netAmount, decimals);
-}
-
-function formatBvnkEstimateFeeTotal(estimate: BvnkPayoutEstimateResponse): string {
-  const feePredictedAmount = decimalStringFromNumber(estimate.feePredictedAmount);
-  const networkFeePredictedAmount = decimalStringFromNumber(estimate.networkFeePredictedAmount);
-  const decimals = Math.max(
-    countDecimalPlaces(feePredictedAmount),
-    countDecimalPlaces(networkFeePredictedAmount)
-  );
-  const totalFee =
-    parseDecimalAmount(feePredictedAmount, decimals) +
-    parseDecimalAmount(networkFeePredictedAmount, decimals);
-  return formatDecimalAmount(totalFee, decimals);
-}
-
-function formatBvnkNetExchangeRate(netFiatAmount: string, paidRequiredAmount: number): string {
-  if (paidRequiredAmount <= 0) {
-    throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", "BVNK returned a non-positive paid amount");
-  }
-  return divideDecimalAmounts(netFiatAmount, decimalStringFromNumber(paidRequiredAmount));
 }
 
 export class BvnkRampClient implements RampProvider {
@@ -397,14 +208,13 @@ export class BvnkRampClient implements RampProvider {
     });
 
     if (!response.ok) {
-      const envelope = bvnkErrorEnvelopeSchema.safeParse(parsed);
-      throw mapBvnkErrorStatus(response.status, describeBvnkFailure(response.status, envelope), {
-        edgeBlocked: isEdgeBlockBody(parsed, raw),
-        details: response.status === 400 ? parseBvnkValidationDetails(envelope) : undefined,
-      });
+      throw bvnkRequestFailure(response.status, raw, parsed);
     }
 
     if (parsed === undefined) {
+      if (response.status === 204) {
+        return undefined;
+      }
       throw providerUnavailable("BVNK returned an unparseable response", {
         provider: this.id,
       });
@@ -426,132 +236,98 @@ export class BvnkRampClient implements RampProvider {
   }
 
   /**
-   * Creates a v2 individual BVNK customer onboarding application.
+   * Creates a v1 agreement session for a prospective BVNK customer. The
+   * customer type and use case are fixed constants of the SDP individual on-ramp.
+   * The idempotency header is sent as best-effort provider-side dedupe — BVNK
+   * does not document it for this endpoint, so the customer-link row
+   * reservation is the authority on duplicate mints.
    *
    * @param ctx - Runtime provider credentials and environment.
-   * @param input - Customer details and an idempotency key derived deterministically from canonical SDP ids.
-   * @returns The newly created BVNK customer summary.
+   * @param input - Residence country whose agreement set the session mints, and the row-uuid idempotency key.
+   * @returns The created agreement session with its static document links.
    */
-  async createCustomerV2(
+  async createAgreementSession(
     { env, mode }: RampRuntimeContext,
-    input: CreateBvnkCustomerV2Input
-  ): Promise<BvnkCustomerV2> {
+    input: CreateBvnkAgreementSessionInput
+  ): Promise<BvnkAgreementSession> {
     const config = readBvnkConfig(env, mode);
-    const response = await this.request(config, "/platform/v2/customers", {
+    const response = await this.request(config, "/platform/v1/customers/agreement/sessions", {
       method: "POST",
-      headers: { "Idempotency-Key": input.idempotencyKey },
+      headers: { "X-Idempotency-Key": input.idempotencyKey },
       body: {
-        useCase: input.useCase,
-        ...(input.reference === undefined ? {} : { reference: input.reference }),
+        customerType: "INDIVIDUAL",
+        countryCode: input.countryCode,
+        useCase: "EMBEDDED_FIAT_ACCOUNTS",
+      },
+    });
+    return parseBvnkResponse(bvnkAgreementSessionSchema, response);
+  }
+
+  /**
+   * Signs a v1 agreement session with the consenting end-user IP. BVNK returns
+   * an empty 204, which the client treats as success with no body.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - Session reference and the consenting user's IP address.
+   * @returns Nothing.
+   */
+  async signAgreementSession(
+    { env, mode }: RampRuntimeContext,
+    input: SignBvnkAgreementSessionInput
+  ): Promise<void> {
+    const config = readBvnkConfig(env, mode);
+    await this.request(
+      config,
+      `/platform/v1/customers/agreement/sessions/${encodeURIComponent(input.reference)}`,
+      { method: "PUT", body: { status: "SIGNED", ipAddress: input.ipAddress } }
+    );
+  }
+
+  /**
+   * Creates a v1 individual BVNK customer from a signed agreement session and
+   * the collected PII pack.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - Idempotency key, the partner-supplied external reference, the
+   * signed session reference, and the individual request body.
+   * @returns The created customer reference and acknowledgment status.
+   */
+  async createCustomer(
+    { env, mode }: RampRuntimeContext,
+    input: CreateBvnkCustomerInput
+  ): Promise<BvnkCustomerCreated> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(config, "/platform/v1/customers", {
+      method: "POST",
+      headers: { "X-Idempotency-Key": input.idempotencyKey },
+      body: {
+        type: "individual",
+        externalReference: input.externalReference,
+        signedAgreementSessionReference: input.signedAgreementSessionReference,
         individual: input.individual,
       },
     });
-    return bvnkV2CustomerSummarySchema.parse(response);
+    return parseBvnkResponse(bvnkCustomerCreatedSchema, response);
   }
 
   /**
-   * Retrieves a v2 BVNK customer, including its current authenticated onboarding link.
+   * Retrieves a v1 BVNK customer, including its current verification link.
    *
    * @param ctx - Runtime provider credentials and environment.
-   * @param input - BVNK customer id.
-   * @returns The typed customer detail response, including required actions and authenticated link.
+   * @param input - BVNK customer reference (a uuid).
+   * @returns The typed customer response, including verification when present.
    */
-  async getCustomerV2(
+  async getCustomer(
     { env, mode }: RampRuntimeContext,
-    input: { id: string }
-  ): Promise<BvnkCustomerV2Detail> {
+    input: { reference: string }
+  ): Promise<BvnkCustomer> {
     const config = readBvnkConfig(env, mode);
     const response = await this.request(
       config,
-      `/platform/v2/customers/${encodeURIComponent(input.id)}`,
+      `/platform/v1/customers/${encodeURIComponent(input.reference)}`,
       { method: "GET" }
     );
-    return bvnkV2CustomerDetailSchema.parse(response);
-  }
-
-  /**
-   * Creates a v2 agreement working set for a prospective BVNK customer.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - Agreement working-set details and an idempotency key derived deterministically from canonical SDP ids.
-   * @returns The created agreement working set and signing URL.
-   */
-  async createAgreementsV2(
-    { env, mode }: RampRuntimeContext,
-    input: CreateBvnkAgreementsV2Input
-  ): Promise<BvnkAgreementsV2> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(config, "/platform/v2/agreements", {
-      method: "POST",
-      headers: { "Idempotency-Key": input.idempotencyKey },
-      body: {
-        reference: input.reference,
-        useCase: input.useCase,
-        customerType: input.customerType,
-        countryCode: input.countryCode,
-      },
-    });
-    return bvnkV2AgreementsResponseSchema.parse(response);
-  }
-
-  /**
-   * Retrieves a fresh presigned document URL for a v2 agreement.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - Agreement id.
-   * @returns The agreement download URL and optional expiry.
-   */
-  async getAgreementContentV2(
-    { env, mode }: RampRuntimeContext,
-    input: { id: string }
-  ): Promise<BvnkAgreementContentV2> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(
-      config,
-      `/platform/v2/agreements/${encodeURIComponent(input.id)}/content`,
-      { method: "GET" }
-    );
-    return bvnkV2AgreementContentSchema.parse(response);
-  }
-
-  /**
-   * Accepts or rejects agreements in a v2 agreement working set.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - Agreement actions and an idempotency key derived deterministically from canonical SDP ids.
-   * @returns Per-agreement action results from BVNK.
-   */
-  async respondAgreementsV2(
-    { env, mode }: RampRuntimeContext,
-    input: RespondBvnkAgreementsV2Input
-  ): Promise<BvnkAgreementActionResultsV2> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(config, "/platform/v2/agreements/actions", {
-      method: "POST",
-      headers: { "Idempotency-Key": input.idempotencyKey },
-      body: { reference: input.reference, actions: input.actions },
-    });
-    return bvnkV2AgreementActionResultsSchema.parse(response);
-  }
-
-  /**
-   * Lists agreements assigned to a v2 BVNK customer.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - BVNK customer id.
-   * @returns The paginated assigned-agreement response.
-   */
-  async listCustomerAgreementsV2(
-    { env, mode }: RampRuntimeContext,
-    input: { customerId: string }
-  ): Promise<BvnkAssignedAgreementsV2> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(
-      config,
-      `/platform/v2/customers/${encodeURIComponent(input.customerId)}/agreements`,
-      { method: "GET" }
-    );
-    return bvnkV2AssignedAgreementsSchema.parse(response);
+    return parseBvnkResponse(bvnkCustomerSchema, response);
   }
 
   /**
@@ -576,7 +352,7 @@ export class BvnkRampClient implements RampProvider {
         ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
       },
     });
-    return bvnkV2LedgerWalletSchema.parse(response);
+    return parseBvnkResponse(bvnkV2LedgerWalletSchema, response);
   }
 
   /**
@@ -596,7 +372,7 @@ export class BvnkRampClient implements RampProvider {
       `/ledger/v2/wallets/${encodeURIComponent(input.walletId)}`,
       { method: "GET" }
     );
-    return bvnkV2LedgerWalletSchema.parse(response);
+    return parseBvnkResponse(bvnkV2LedgerWalletSchema, response);
   }
 
   /**
@@ -620,7 +396,7 @@ export class BvnkRampClient implements RampProvider {
         ? "/ledger/v2/wallets/profiles"
         : `/ledger/v2/wallets/profiles?q=${encodeURIComponent(filters.join(" AND "))}`;
     const response = await this.request(config, path, { method: "GET" });
-    return bvnkV2WalletProfilesSchema.parse(response);
+    return parseBvnkResponse(bvnkV2WalletProfilesSchema, response);
   }
 
   async createOnrampRule(
@@ -641,7 +417,7 @@ export class BvnkRampClient implements RampProvider {
         },
       },
     });
-    return bvnkRuleResponseSchema.parse(response);
+    return parseBvnkResponse(bvnkRuleResponseSchema, response);
   }
 
   async simulatePayin(
@@ -651,22 +427,26 @@ export class BvnkRampClient implements RampProvider {
       amount: number;
       currency: string;
       originatorName: string;
-      remittanceInformation?: string;
+      remittanceInformation: string;
+      idempotencyKey: string;
     }
   ): Promise<unknown> {
+    const currency = bvnkSandboxPayinCurrencySchema.safeParse(input.currency);
+    if (!currency.success) {
+      throw badRequest("BVNK sandbox pay-in simulation supports USD and EUR only.");
+    }
     const config = readBvnkConfig(env, mode);
-    const remittanceInformation =
-      input.remittanceInformation ?? `SDP ${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
     return this.request(config, "/payment/v2/payins/simulation", {
       method: "POST",
+      headers: { "Idempotency-Key": input.idempotencyKey },
       body: {
         walletId: input.walletId,
         amount: input.amount,
-        currency: input.currency,
-        remittanceInformation,
+        currency: currency.data,
+        remittanceInformation: input.remittanceInformation,
         originator: {
           name: input.originatorName,
-          bankAccount: sandboxOriginatorBankAccount(input.currency),
+          bankAccount: SANDBOX_ORIGINATOR_BANK_ACCOUNTS[currency.data],
         },
       },
     });
@@ -693,30 +473,24 @@ export class BvnkRampClient implements RampProvider {
         payOutMethod: "wallet",
       },
     });
-    const quote = bvnkQuoteEstimateResponseSchema.parse(quoteResponse);
-    if (quote.amountOut <= 0) {
-      throw providerUnavailable("BVNK returned a non-positive converted amount");
-    }
-    const feeCurrency = parseBvnkEstimateFeeCurrency(quote.payInMethod.settlementCurrency);
+    const quote = parseBvnkResponse(bvnkQuoteEstimateResponseSchema, quoteResponse);
+    const feeCurrency = quote.payInMethod.settlementCurrency;
     if (feeCurrency !== input.fiatCurrency) {
       throw providerUnavailable("BVNK returned on-ramp fees outside the fiat pay-in currency");
     }
     const fiatAmount = decimalStringFromNumber(quote.amountIn);
+    const cryptoAmount = decimalStringFromNumber(quote.amountOut);
     const service = decimalStringFromNumber(quote.fees.value.service);
     const processing = decimalStringFromNumber(quote.fees.value.processing);
-    const feeDecimals = Math.max(countDecimalPlaces(service), countDecimalPlaces(processing));
-    const totalFee = formatDecimalAmount(
-      parseDecimalAmount(service, feeDecimals) + parseDecimalAmount(processing, feeDecimals),
-      feeDecimals
-    );
+    const totalFee = addDecimalAmounts(service, processing);
     return {
       provider: this.id,
       direction: "onramp",
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
       fiatAmount,
-      cryptoAmount: decimalStringFromNumber(quote.amountOut),
-      exchangeRate: formatBvnkNetExchangeRate(fiatAmount, quote.amountOut),
+      cryptoAmount,
+      exchangeRate: divideDecimalAmounts(fiatAmount, cryptoAmount),
       fees: {
         currency: input.fiatCurrency,
         total: totalFee,
@@ -747,48 +521,39 @@ export class BvnkRampClient implements RampProvider {
         network,
       },
     });
-    const estimate = bvnkPayoutEstimateResponseSchema.parse(estimateResponse);
-    if (
-      estimate.feePredictedAmount > 0 &&
-      estimate.networkFeePredictedAmount > 0 &&
-      estimate.feeCurrency !== estimate.networkFeeCurrency
-    ) {
-      throw new SdpPaymentsError(
-        "PROVIDER_UNAVAILABLE",
-        "BVNK returned fees in multiple currencies for this estimate"
-      );
-    }
-    const feeCurrency = parseBvnkEstimateFeeCurrency(estimate.feeCurrency);
-    const networkFeeCurrency = parseBvnkEstimateFeeCurrency(estimate.networkFeeCurrency);
+    const estimate = parseBvnkResponse(bvnkPayoutEstimateResponseSchema, estimateResponse);
+    const feeCurrency = estimate.feeCurrency;
+    const networkFeeCurrency = estimate.networkFeeCurrency;
     if (estimate.feePredictedAmount > 0 && feeCurrency !== input.fiatCurrency) {
-      throw new SdpPaymentsError(
-        "PROVIDER_UNAVAILABLE",
-        "BVNK returned provider fees outside the fiat output currency"
-      );
+      throw providerUnavailable("BVNK returned provider fees outside the fiat output currency");
     }
     if (estimate.networkFeePredictedAmount > 0 && networkFeeCurrency !== input.fiatCurrency) {
-      throw new SdpPaymentsError(
-        "PROVIDER_UNAVAILABLE",
-        "BVNK returned network fees outside the fiat output currency"
-      );
+      throw providerUnavailable("BVNK returned network fees outside the fiat output currency");
     }
     const totalFeeCurrency = estimate.feePredictedAmount > 0 ? feeCurrency : networkFeeCurrency;
-    const netFiatAmount = subtractBvnkEstimateFees(estimate);
-    const totalFee = formatBvnkEstimateFeeTotal(estimate);
+    const gross = decimalStringFromNumber(estimate.walletRequiredAmount);
+    const fee = decimalStringFromNumber(estimate.feePredictedAmount);
+    const networkFee = decimalStringFromNumber(estimate.networkFeePredictedAmount);
+    const totalFee = addDecimalAmounts(fee, networkFee);
+    if (compareDecimalAmounts(gross, totalFee) < 0) {
+      throw providerUnavailable("BVNK returned estimate fees above the gross amount");
+    }
+    const netFiatAmount = subtractDecimalAmounts(gross, totalFee);
+    const cryptoAmount = decimalStringFromNumber(estimate.paidRequiredAmount);
     return {
       provider: this.id,
       direction: "offramp",
       fiatCurrency: input.fiatCurrency,
       assetRail: input.assetRail,
       fiatAmount: netFiatAmount,
-      cryptoAmount: decimalStringFromNumber(estimate.paidRequiredAmount),
-      exchangeRate: formatBvnkNetExchangeRate(netFiatAmount, estimate.paidRequiredAmount),
+      cryptoAmount,
+      exchangeRate: divideDecimalAmounts(netFiatAmount, cryptoAmount),
       fees: {
         currency: totalFeeCurrency,
         total: totalFee,
-        provider: decimalStringFromNumber(estimate.feePredictedAmount),
+        provider: fee,
         providerCurrency: feeCurrency,
-        network: decimalStringFromNumber(estimate.networkFeePredictedAmount),
+        network: networkFee,
         networkCurrency: networkFeeCurrency,
       },
     };
@@ -798,43 +563,30 @@ export class BvnkRampClient implements RampProvider {
     { env, mode }: RampRuntimeContext,
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote> {
-    if (!input.fiatCurrency) {
-      throw badRequest("fiatCurrency is required for BVNK off-ramp.");
-    }
-    if (!input.bvnkOfframpWalletId) {
-      throw internalError("BVNK off-ramp requires a provisioned wallet id.");
+    const parsed = bvnkOfframpQuoteInputSchema.safeParse(input);
+    if (!parsed.success) {
+      throw internalError("BVNK off-ramp input is incomplete.", {
+        issues: z.flattenError(parsed.error).fieldErrors,
+      });
     }
     const config = readBvnkConfig(env, mode);
     const { currency, network } = normalizeBvnkCurrencyAndNetwork(
       getCryptoRailAssetLabel(input.assetRail)
     );
-    if (!isSolanaCryptoAsset(currency)) {
-      throw internalError(`BVNK off-ramp returned unsupported SDP crypto asset: ${currency}`);
-    }
-    const fiatCurrency = input.fiatCurrency;
-    if (!input.paymentTransferId) {
-      throw internalError("BVNK off-ramp requires an SDP payment transfer id.");
-    }
-    const reference = buildBvnkOfframpReference(input.paymentTransferId);
-    const complianceDetails = buildBvnkComplianceDetails(input.bvnkCompliance, {
-      requirePartyDetails: true,
-    });
+    const reference = buildBvnkOfframpReference(parsed.data.paymentTransferId);
 
     const channelResponse = await this.request(config, "/api/v2/channel", {
       method: "POST",
       body: {
-        walletId: input.bvnkOfframpWalletId,
+        walletId: parsed.data.bvnkOfframpWalletId,
         payCurrency: currency,
-        displayCurrency: fiatCurrency,
+        displayCurrency: parsed.data.fiatCurrency,
         reference,
-        customerId: input.externalCustomerId,
-        complianceDetails,
+        customerId: parsed.data.externalCustomerId,
+        complianceDetails: parsed.data.bvnkCompliance,
       },
     });
-    const channel = bvnkChannelResponseSchema.parse(channelResponse);
-    if (!channel.uuid) {
-      throw badRequest("BVNK channel response is missing uuid");
-    }
+    const channel = parseBvnkResponse(bvnkChannelResponseSchema, channelResponse);
     const destinationAddress = assertValidAddress(
       parseBvnkChannelAddress(channel, network),
       "BVNK channel deposit address"
@@ -849,12 +601,12 @@ export class BvnkRampClient implements RampProvider {
         {
           provider: "bvnk",
           kind: "crypto_deposit",
-          fiatCurrency,
+          fiatCurrency: parsed.data.fiatCurrency,
           cryptoCurrency: currency,
           destinationAddress,
           network,
           reference,
-          instructionsNotes: `Send ${currency} on ${network} to the deposit address. BVNK converts it to ${fiatCurrency} and pays out to the registered bank account.`,
+          instructionsNotes: `Send ${currency} on ${network} to the deposit address. BVNK converts it to ${parsed.data.fiatCurrency} and pays out to the registered bank account.`,
         },
       ],
     };

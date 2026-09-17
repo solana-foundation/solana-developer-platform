@@ -5,10 +5,8 @@
  * Para provides hosted wallets via the Para REST API.
  */
 
-import type { SolanaSigner } from "@solana/keychain-core";
 import { ParaSigner } from "@solana/keychain-para";
 import type { Address } from "@solana/kit";
-import type { SignRequest, SignResult } from "../signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainParaConfig } from "./types";
 
@@ -18,8 +16,6 @@ import type { KeychainParaConfig } from "./types";
 
 export class KeychainParaAdapter extends BaseKeychainAdapter {
   readonly providerId = "para";
-
-  protected signer!: SolanaSigner;
 
   private readonly config: KeychainParaConfig;
   private readonly signerByWalletId = new Map<string, Promise<ParaSigner>>();
@@ -34,31 +30,6 @@ export class KeychainParaAdapter extends BaseKeychainAdapter {
    */
   async getTransactionSigner(walletId?: string, _walletPublicKey?: Address): Promise<ParaSigner> {
     return this.getParaSigner(walletId);
-  }
-
-  /**
-   * Para signing is synchronous from the API perspective.
-   */
-  requiresApproval(): boolean {
-    return false;
-  }
-
-  /**
-   * Get the public key, ensuring initialization first.
-   */
-  async getPublicKey(walletId?: string): Promise<Address> {
-    const signer = await this.getParaSigner(walletId);
-    return signer.address as Address;
-  }
-
-  /**
-   * SigningPort does not specify a wallet ID; for Para, we sign with the
-   * configured default wallet.
-   */
-  async sign(request: SignRequest): Promise<SignResult> {
-    const signer = await this.getParaSigner();
-    this.signer = signer as unknown as SolanaSigner;
-    return super.sign(request);
   }
 
   private async getParaSigner(walletId?: string): Promise<ParaSigner> {

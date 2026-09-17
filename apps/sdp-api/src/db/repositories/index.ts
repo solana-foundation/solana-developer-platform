@@ -53,6 +53,7 @@ export type {
 } from "./counterparty-provider-account.repository";
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 export type {
+  DvpCloseClaim,
   DvpTradeInsert,
   DvpTradeRepository,
   DvpTradeRow,
@@ -299,6 +300,7 @@ export type {
   PolicyRepository,
   PolicyRepositoryContext,
   ReplaceApiKeyWalletPolicyBindingsInput,
+  SumWalletOperationAmountsInput,
   UpdateApprovalRequestStatusInput,
   UpsertApiKeyWalletPolicyBindingInput,
   WalletControlProfileRevisionHistoryRow,

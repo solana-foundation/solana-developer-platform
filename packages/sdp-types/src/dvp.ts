@@ -113,6 +113,8 @@ export const DVP_LEG_REFUSAL = {
    * party address, and the program accepts no other signer.
    */
   signerNotParty: "dvp_signer_not_party",
+  /** A settle or cancel is in flight on the trade, and the leg would move under it. */
+  tradeClosing: "dvp_trade_closing",
   /**
    * The leg's mint carries a transfer hook, whose extra accounts SDP does not
    * resolve, so the refund transfer would be refused by the token program.
@@ -120,3 +122,16 @@ export const DVP_LEG_REFUSAL = {
   transferHookUnsupported: "dvp_transfer_hook_unsupported",
 } as const;
 export type DvpLegRefusalReason = (typeof DVP_LEG_REFUSAL)[keyof typeof DVP_LEG_REFUSAL];
+
+/**
+ * Why a settle or cancel was refused before it was sent, as `error.details.reason`.
+ */
+export const DVP_CLOSE_REFUSAL = {
+  /** Another settle or cancel already holds the trade. */
+  closeInProgress: "dvp_close_in_progress",
+  /** A funding or reclaim of one of the legs has not landed yet. */
+  legMoving: "dvp_leg_moving",
+  /** The close reached the chain and the program refused it; nothing moved. */
+  closeFailedOnChain: "dvp_close_failed_on_chain",
+} as const;
+export type DvpCloseRefusalReason = (typeof DVP_CLOSE_REFUSAL)[keyof typeof DVP_CLOSE_REFUSAL];

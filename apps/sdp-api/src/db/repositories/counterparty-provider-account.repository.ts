@@ -3,13 +3,27 @@ import {
   BVNK_NETWORKS,
   type BvnkOnrampRequestSpec,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  bvnkSessionAgreementSchema,
+  bvnkVerificationStatusSchema,
+} from "@sdp/payments/ramps/providers/bvnk/schemas";
 import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
+import { internalError } from "@/lib/errors";
 
 export function generateCounterpartyProviderAccountId(): string {
   return `counterparty_provider_account_${crypto.randomUUID()}`;
+}
+
+/** Strips the `counterparty_provider_account_` prefix, returning the row's 36-char uuid. */
+export function counterpartyProviderAccountUuid(id: string): string {
+  const match = /^counterparty_provider_account_([0-9a-f-]{36})$/.exec(id);
+  if (match === null) {
+    throw internalError("Counterparty provider-account id is not a prefixed uuid.");
+  }
+  return match[1];
 }
 
 export const counterpartyProviderAccountRowSchema = z.object({
@@ -51,19 +65,13 @@ export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadata
 
 export const bvnkCustomerProviderAccountMetadataSchema = z.object({
   status: z.string().optional(),
-  verificationStatus: z.enum(["init", "pending", "completed", "failed"]).optional(),
+  verificationStatus: bvnkVerificationStatusSchema.optional(),
   residenceCountryCode: z.enum(COUNTRY_CODES).optional(),
-  agreements: z
+  session: z
     .object({
-      entries: z.record(
-        z.string().min(1),
-        z.object({
-          status: z.string().min(1),
-          respondedAt: z.string().datetime().optional(),
-          name: z.string().min(1),
-          description: z.string().min(1),
-        })
-      ),
+      reference: z.string().min(1),
+      signedAt: z.string().datetime().optional(),
+      agreements: z.array(bvnkSessionAgreementSchema.omit({ status: true })),
     })
     .optional(),
 });
@@ -144,8 +152,24 @@ export interface PatchAccountMetadataInput extends GetCounterpartyProviderAccoun
   unset: readonly string[];
 }
 
+export interface AssignCustomerLinkReferenceInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  /** CAS: the customer-link alias the row must still carry for the assignment to land. */
+  fromProviderCustomerReference: string;
+  /** The v1 customer reference replacing the alias. */
+  providerCustomerReference: string;
+  /** Replaces the row's metadata (the caller passes the parsed `{status}` shape). */
+  metadata: Record<string, unknown>;
+}
+
 export interface GetExternalAccountByIdInput extends GetCounterpartyProviderAccountInput {
   id: string;
+}
+
+export interface SetCustomerLinkSessionInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  /** The minted agreement session, CAS-written only while the row carries none yet. */
+  session: NonNullable<BvnkCustomerProviderAccountMetadata["session"]>;
 }
 
 export interface InsertPendingExternalAccountInput extends ListActiveExternalAccountsInput {
@@ -185,9 +209,11 @@ export interface CounterpartyProviderAccountsRepository {
    * reference seen is canonical: a later event reporting a different customer
    * does not overwrite it — the displaced reference is appended to
    * `metadata.mismatchedReferences` so drift is observable instead of silent.
+   * Metadata is a claim with the same rule: keys already stored win, incoming
+   * keys only fill gaps, so a concurrent claim cannot change a stored value.
    *
-   * @param input - Tenant scope, counterparty, provider, and the provider-side reference.
-   * @returns The linked row, carrying the canonical reference.
+   * @param input - Tenant scope, counterparty, provider, the provider-side reference, and the claimed metadata.
+   * @returns The linked row, carrying the canonical reference and metadata.
    */
   upsertProviderAccount(
     input: UpsertCounterpartyProviderAccountInput
@@ -237,6 +263,20 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
+   * Replaces the provider customer reference on a customer-link row via a
+   * compare-and-swap against the stored pre-customer alias, replacing the
+   * metadata with the caller's blob. A concurrent create that already
+   * assigned the reference makes the update match zero rows and return null
+   * instead of overwriting the newer reference.
+   *
+   * @param input - Tenant scope, row id, the alias to swap from, the v1 reference to swap to, and the replacement metadata.
+   * @returns The updated row, or null when the CAS alias is gone.
+   */
+  assignCustomerLinkReference(
+    input: AssignCustomerLinkReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
    * Lists active external accounts for one payout corridor.
    *
    * @param input - Tenant scope, counterparty, provider, currency, and country.
@@ -254,6 +294,19 @@ export interface CounterpartyProviderAccountsRepository {
    */
   getExternalAccountById(
     input: GetExternalAccountByIdInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * CAS-writes the minted agreement session onto a customer-link row. The
+   * update matches only while the row still carries no session, so a
+   * concurrent mint that stored one first makes this return null instead of
+   * overwriting it — the caller must re-read and present the winner's row.
+   *
+   * @param input - Tenant scope, row id, and the session to store.
+   * @returns The updated row, or null when a concurrent mint already stored a session.
+   */
+  setCustomerLinkSession(
+    input: SetCustomerLinkSessionInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

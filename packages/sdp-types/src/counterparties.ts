@@ -120,13 +120,52 @@ export interface CounterpartyProviderAccount {
   customerLink?: CounterpartyProviderCustomerLink;
 }
 
-export interface CounterpartyProviderCustomerLink {
+/** SDP-owned lifecycle of a BVNK customer link before BVNK's own customer status exists. */
+export const BVNK_CUSTOMER_LINK_STAGE_STATUSES = ["PENDING_AGREEMENT", "PENDING_DETAILS"] as const;
+export type BvnkCustomerLinkStageStatus = (typeof BVNK_CUSTOMER_LINK_STAGE_STATUSES)[number];
+/** Named access to the BVNK customer-link stage statuses for the read model that derives them. */
+export const BVNK_CUSTOMER_LINK_STAGE = {
+  pendingAgreement: "PENDING_AGREEMENT",
+  pendingDetails: "PENDING_DETAILS",
+} as const satisfies Record<string, BvnkCustomerLinkStageStatus>;
+
+export interface CounterpartyProviderCustomerLinkAgreement {
+  name: string;
+  displayName: string;
+  url: string;
+  privacyPolicyUrl: string;
+  /** When the counterparty signed the agreement session; null while consent is pending. */
+  signedAt: string | null;
+}
+
+interface CounterpartyProviderCustomerLinkBase {
   id: string;
-  providerCustomerReference: string;
   status: CounterpartyAccountStatus;
   providerStatus: string | null;
   createdAt: string;
 }
+
+/**
+ * BVNK customer link. The reference is null until the v1 customer exists;
+ * the residence country and agreement session are recorded at mint and kept
+ * for the life of the row.
+ */
+export interface BvnkCounterpartyProviderCustomerLink extends CounterpartyProviderCustomerLinkBase {
+  provider: "bvnk";
+  providerCustomerReference: string | null;
+  residenceCountryCode: CountryCode;
+  agreements: CounterpartyProviderCustomerLinkAgreement[];
+}
+
+export interface GenericCounterpartyProviderCustomerLink
+  extends CounterpartyProviderCustomerLinkBase {
+  provider: Exclude<RampProviderId, "bvnk">;
+  providerCustomerReference: string;
+}
+
+export type CounterpartyProviderCustomerLink =
+  | BvnkCounterpartyProviderCustomerLink
+  | GenericCounterpartyProviderCustomerLink;
 
 export type CounterpartyProviderAccountKind =
   | "customer_link"

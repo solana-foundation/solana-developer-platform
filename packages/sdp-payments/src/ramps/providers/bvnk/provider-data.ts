@@ -44,10 +44,6 @@ export interface BvnkRuleEntity {
   address?: BvnkRuleEntityAddress;
 }
 
-export interface BvnkComplianceInput {
-  partyDetails?: Record<string, unknown>[];
-}
-
 export const BVNK_NETWORKS = ["SOLANA"] as const;
 
 export type BvnkNetwork = (typeof BVNK_NETWORKS)[number];
@@ -94,8 +90,6 @@ export function normalizeBvnkCurrencyAndNetwork(value: string): BvnkCurrencyNetw
     `Unsupported BVNK cryptoToken '${value}'. SDP BVNK ramps only support Solana assets (for example: SOL, USDC_SOLANA).`
   );
 }
-
-export type BvnkVerificationStatus = "init" | "pending" | "completed" | "failed";
 
 /**
  * Builds BVNK's `Idempotency-Key` header for fiat wallet creation.
@@ -205,7 +199,7 @@ export interface BvnkCustomerResolution {
   externalReference?: string;
   customerReference?: string;
   status?: string;
-  verificationStatus?: BvnkVerificationStatus;
+  verificationStatus?: string;
 }
 
 /**
@@ -440,6 +434,26 @@ export function parseBvnkOnrampWalletName(
     throw internalError(`Malformed BVNK on-ramp wallet name: ${walletName}`);
   }
   return parsed.data;
+}
+
+/**
+ * Parses an SDP-created BVNK wallet name into its logical wallet reference.
+ *
+ * @param walletName BVNK wallet `name` value.
+ * @returns The parsed on-ramp or off-ramp wallet reference.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the name does not match the
+ * SDP BVNK wallet naming contract.
+ */
+export function parseBvnkWalletName(walletName: string): BVNKWallet {
+  const parts = walletName.split(":");
+  switch (parts[1]) {
+    case "offramp":
+      return parseBvnkOfframpWalletName(walletName);
+    case "onramp":
+      return parseBvnkOnrampWalletName(walletName);
+    default:
+      throw internalError(`Malformed BVNK wallet name: ${walletName}`);
+  }
 }
 
 export function readBvnkOfframpWallets(

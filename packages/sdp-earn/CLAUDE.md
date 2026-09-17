@@ -69,9 +69,13 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
   `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
-  ids and `allow_create_account = true`, so the harness needs no edit (deployed
-  devnet Kora carries the same allowlist since sdp-infra#64, asserted by the
-  `Kora / Live Smoke` shard on secret-bearing CI runs). Its
+  ids, every devnet Earn deposit mint in `allowed_tokens` (wSOL first) and
+  `allow_create_account = true`, so the harness needs no edit (deployed devnet
+  Kora carries the same allowlist and token set since sdp-infra#64 and
+  PRO-1962, asserted by the `Kora / Live Smoke` shard on secret-bearing CI
+  runs). The harness image (e9bc391) has no `transfer_hook_policy`; the
+  deployed f0377c0 configs set it to `allow_all` so sign-only PYUSD/USDG
+  movements pass, see the comment in the toml before bumping the image. Its
   `SIGNER_PRIVATE_KEY` does need devnet SOL, because it pays the fee AND the
   share-ATA rent for real. The flag fails CLOSED, so a value
   the wrapper drops looks like "sponsorship silently did nothing" rather than an
@@ -180,7 +184,7 @@ ADR 0002's 2026-08-14 addendum.
 | A key you minted yourself returns `strategies: []` **and** `programs: []` | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox programs, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive a provider's **production** API from a laptop. |
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Catalogue empty right after boot | sync cron runs on the hour; verify flags, provider credentials, and scheduler registration, then wait for a live pass |
-| Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; production Kamino remains `environment_unavailable` in the provider-scoped deposit-environment map |
+| Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; since PRO-1986 Kamino deposits open in production too, while Veda stays `environment_unavailable` there until PRO-1777 |
 | Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
 | Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |

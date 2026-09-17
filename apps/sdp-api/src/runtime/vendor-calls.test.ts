@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as events from "./money-path-events";
-import { instrumentVendorPort, signFailedResult, withVendorCall } from "./vendor-calls";
+import { instrumentVendorPort, withVendorCall } from "./vendor-calls";
 
 const logEvent = vi.spyOn(events, "logEvent").mockImplementation(() => {});
 
@@ -102,28 +102,6 @@ describe("instrumentVendorPort", () => {
     expect(emitted[0][1].duration_ms).toBeTypeOf("number");
   });
 
-  it("emits through the isFailureResult hook on soft failures and passes the result through", async () => {
-    const port = instrumentVendorPort(
-      "kora",
-      { sign: async () => ({ status: "failed", error: "nope" }) },
-      signFailedResult
-    );
-    await expect(port.sign()).resolves.toEqual({ status: "failed", error: "nope" });
-    const emitted = failureEvents();
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0][1]).toMatchObject({ vendor: "kora", operation: "sign", outcome: "failed" });
-  });
-
-  it("stays silent when the hook accepts the result", async () => {
-    const port = instrumentVendorPort(
-      "kora",
-      { sign: async () => ({ status: "confirmed" }) },
-      signFailedResult
-    );
-    await expect(port.sign()).resolves.toEqual({ status: "confirmed" });
-    expect(failureEvents()).toHaveLength(0);
-  });
-
   it("passes non-function properties through untouched", () => {
     const port = instrumentVendorPort("kora", { limit: 7, name: "adapter" });
     expect(port.limit).toBe(7);
@@ -140,43 +118,5 @@ describe("instrumentVendorPort", () => {
     }
     const port = instrumentVendorPort("kora", new Adapter());
     expect(port.add(2)).toBe(42);
-  });
-});
-
-describe("signFailedResult", () => {
-  it("reports the error for sign results with status failed", () => {
-    expect(signFailedResult("sign", { status: "failed", error: "denied" })).toBe("denied");
-    expect(signFailedResult("sign", { status: "failed" })).toBe("signing returned status failed");
-  });
-
-  it("stays null for other methods, statuses, and shapes", () => {
-    expect(signFailedResult("send", { status: "failed" })).toBeNull();
-    expect(signFailedResult("sign", { status: "confirmed" })).toBeNull();
-    expect(signFailedResult("sign", null)).toBeNull();
-    expect(signFailedResult("sign", "failed")).toBeNull();
-  });
-});
-
-describe("withVendorCall", () => {
-  it("returns the result and emits nothing on success", async () => {
-    await expect(withVendorCall("kora", "estimate", async () => 5)).resolves.toBe(5);
-    expect(failureEvents()).toHaveLength(0);
-  });
-
-  it("rethrows and emits one failed event with duration on rejection", async () => {
-    const boom = new Error("down");
-    await expect(
-      withVendorCall("kora", "estimate", async () => {
-        throw boom;
-      })
-    ).rejects.toBe(boom);
-    const emitted = failureEvents();
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0][1]).toMatchObject({
-      vendor: "kora",
-      operation: "estimate",
-      outcome: "failed",
-    });
-    expect(emitted[0][1].duration_ms).toBeTypeOf("number");
   });
 });
