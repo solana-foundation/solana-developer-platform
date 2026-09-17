@@ -35,6 +35,7 @@ const CAN_USE_TWO_HOLDERS = INTEGRATION_CUSTODY_PROVIDER !== "local";
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Confidential Transfers", () => {
   const request = requestWithApiKey();
   let custodyAddress = "";
+  let custodyWalletId = "";
   let deployedTokenId = "";
 
   const post = async (path: string, body: unknown) => {
@@ -50,6 +51,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Confidential Tran
     const init = await initIntegrationSuite();
     const state = await resetIntegrationState(init.apiKeyHash);
     custodyAddress = state.custodyAddress;
+    custodyWalletId = state.custodyWallet.id;
 
     // opt-in policy so no separate approve step is needed; the extension can
     // only be added at creation, never afterwards.
@@ -70,12 +72,20 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Confidential Tran
     expect(createRes.status).toBe(201);
     deployedTokenId = ((await createRes.json()) as TokenApiResponse).data.token.id;
 
-    await request(`/v1/issuance/tokens/${deployedTokenId}/deploy`, { method: "POST" });
+    const deployRes = await request(`/v1/issuance/tokens/${deployedTokenId}/deploy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
+    });
+    expect(deployRes.status).toBe(200);
 
     const mintRes = await request(`/v1/issuance/tokens/${deployedTokenId}/mint`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mint: { destination: custodyAddress, amount: "1000" } }),
+      body: JSON.stringify({
+        signingCustodyWalletId: custodyWalletId,
+        mint: { destination: custodyAddress, amount: "1000" },
+      }),
     });
     expect(mintRes.status).toBe(200);
     await mintRes.json();
@@ -147,7 +157,10 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Confidential Tran
       await request(`/v1/issuance/tokens/${deployedTokenId}/mint`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mint: { destination: recipient.publicKey, amount: "1" } }),
+        body: JSON.stringify({
+          signingCustodyWalletId: custodyWalletId,
+          mint: { destination: recipient.publicKey, amount: "1" },
+        }),
       });
 
       await post("/confidential/configure", { walletAddress: recipient.publicKey });

@@ -308,7 +308,7 @@ async function runConfidentialOperation(
   const { c, resolved, operation, params } = options;
   const { tokenService, token, auth } = resolved;
 
-  const { signer, custodyWalletId: walletId } = await resolveAuthoritySigner({
+  const { signer, providerWalletId: walletId } = await resolveAuthoritySigner({
     env: c.env,
     auth,
     requestedCustodyWalletId: options.requestedCustodyWalletId,
@@ -710,7 +710,7 @@ export const getConfidentialBalance = async (c: AppContext) => {
   // The read never signs, but decrypting needs the owner's keys — so the caller
   // must be authorized for the owner's custody wallet, and the derivation has to
   // run against that wallet rather than the org default.
-  const { custodyWalletId: walletId } = await resolveAuthorityWallet({
+  const { providerWalletId: walletId } = await resolveAuthorityWallet({
     env: c.env,
     auth: resolved.auth,
     requestedCustodyWalletId: query.data.signingCustodyWalletId,
