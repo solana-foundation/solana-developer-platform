@@ -331,7 +331,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "bvnk",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       kind: "virtual_funding_wallet",
       fiatCurrency: "USD",
       externalAccountReference: "a:25031472839104:funding:1",
@@ -342,7 +344,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "bvnk",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       kind: "merchant_wallet",
       fiatCurrency: "USD",
       externalAccountReference: "a:25031472839104:merchant:1",
@@ -353,7 +357,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "bvnk",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       fiatCurrency: "USD",
       destinationCountry: "US",
       paymentRail: "ACH",

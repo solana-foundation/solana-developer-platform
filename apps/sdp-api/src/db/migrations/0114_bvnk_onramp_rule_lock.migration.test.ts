@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import { RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT } from "@sdp/types";
+import { describe, expect, it } from "vitest";
 
 const migrationPath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -21,9 +21,7 @@ describe("0114 bvnk onramp rule lock", () => {
   });
 
   it("indexes bvnk onramp transfers by the funding wallet account id", () => {
-    expect(migrationSql).toContain(
-      "payment_transfers_bvnk_onramp_in_flight_unique"
-    );
+    expect(migrationSql).toContain("payment_transfers_bvnk_onramp_in_flight_unique");
     expect(migrationSql).toContain("provider_data->'bvnk'->>'fundingWalletAccountId'");
     expect(migrationSql).toContain("provider = 'bvnk'");
     expect(migrationSql).toContain("type = 'onramp'");

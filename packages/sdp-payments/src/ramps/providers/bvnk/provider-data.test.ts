@@ -149,7 +149,8 @@ describe("BVNK wallet names", () => {
 
 describe("buildBvnkWalletIdempotencyKey", () => {
   it("hashes the provider-account row id to a stable 36-character key", async () => {
-    const providerAccountRowId = "counterparty_provider_account_123e4567-e89b-12d3-a456-426614174000";
+    const providerAccountRowId =
+      "counterparty_provider_account_123e4567-e89b-12d3-a456-426614174000";
 
     const key = await buildBvnkWalletIdempotencyKey(providerAccountRowId);
 

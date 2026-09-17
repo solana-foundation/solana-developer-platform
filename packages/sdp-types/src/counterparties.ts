@@ -1,6 +1,6 @@
 import type { Country, CountryCode } from "./countries";
-import type { RampProviderId } from "./provider-access";
 import type { BvnkProviderAccountLiveState } from "./payments";
+import type { RampProviderId } from "./provider-access";
 
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
 export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];

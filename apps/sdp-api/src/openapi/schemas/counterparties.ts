@@ -614,18 +614,12 @@ const bvnkProviderAccountLiveSchema = withOpenApi(
         }),
         { description: "Just-in-time wallet balance." }
       ),
-      paymentInstruments: withOpenApi(
-        z.array(bvnkVirtualFundingWalletPaymentInstrumentSchema),
-        {
-          description: "Payment instruments on the wallet's virtual bank account.",
-        }
-      ),
-      activeRule: withOpenApi(
-        bvnkVirtualFundingWalletActiveRuleSchema.optional().nullable(),
-        {
-          description: "The wallet's active payment rule, when one exists.",
-        }
-      ),
+      paymentInstruments: withOpenApi(z.array(bvnkVirtualFundingWalletPaymentInstrumentSchema), {
+        description: "Payment instruments on the wallet's virtual bank account.",
+      }),
+      activeRule: withOpenApi(bvnkVirtualFundingWalletActiveRuleSchema.optional().nullable(), {
+        description: "The wallet's active payment rule, when one exists.",
+      }),
     }),
     z.object({
       state: withOpenApi(z.literal("unavailable"), {
@@ -659,12 +653,7 @@ export const counterpartyProviderAccountSchema = withOpenApi(
       example: "lightspark",
     }),
     kind: withOpenApi(
-      z.enum([
-        "customer_link",
-        "payout_account",
-        "virtual_funding_wallet",
-        "merchant_wallet",
-      ]),
+      z.enum(["customer_link", "payout_account", "virtual_funding_wallet", "merchant_wallet"]),
       {
         description: "Provider-account resource kind.",
         example: "payout_account",

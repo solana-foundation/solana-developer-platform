@@ -94,11 +94,13 @@ export interface GetProviderAccountByExternalReferenceInput {
   externalAccountReference: string;
 }
 
-export interface InsertPendingVirtualFundingWalletInput extends GetCounterpartyProviderAccountInput {
+export interface InsertPendingVirtualFundingWalletInput
+  extends GetCounterpartyProviderAccountInput {
   fiatCurrency: string;
 }
 
-export interface CompleteVirtualFundingWalletReferenceInput extends GetCounterpartyProviderAccountInput {
+export interface CompleteVirtualFundingWalletReferenceInput
+  extends GetCounterpartyProviderAccountInput {
   id: string;
   externalAccountReference: string;
   providerStatus: string;

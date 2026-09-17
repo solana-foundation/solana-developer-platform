@@ -4,23 +4,23 @@ import type {
   ArchiveExternalAccountInput,
   CompleteCustomerLinkInput,
   CompleteExternalAccountInput,
+  CompleteVirtualFundingWalletReferenceInput,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
-  CompleteVirtualFundingWalletReferenceInput,
   GetProviderAccountByExternalReferenceInput,
   GetVirtualFundingWalletInput,
-  InsertPendingVirtualFundingWalletInput,
-  UpdateVirtualFundingWalletStatusInput,
   InsertPendingExternalAccountInput,
+  InsertPendingVirtualFundingWalletInput,
   InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
   PatchAccountMetadataInput,
   UpdateExternalAccountStatusInput,
+  UpdateVirtualFundingWalletStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
@@ -182,9 +182,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return row === null ? null : parseProviderAccountRow(row);
     },
 
-    async getProviderAccountByExternalReference(
-      input: GetProviderAccountByExternalReferenceInput
-    ) {
+    async getProviderAccountByExternalReference(input: GetProviderAccountByExternalReferenceInput) {
       const row = await db
         .prepare(
           `SELECT * FROM counterparty_provider_accounts
@@ -223,9 +221,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return parseProviderAccountRow(row);
     },
 
-    async completeVirtualFundingWalletReference(
-      input: CompleteVirtualFundingWalletReferenceInput
-    ) {
+    async completeVirtualFundingWalletReference(input: CompleteVirtualFundingWalletReferenceInput) {
       const row = await db
         .prepare(
           `UPDATE counterparty_provider_accounts

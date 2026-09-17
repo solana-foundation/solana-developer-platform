@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
-import type { Env } from "@/types/env";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
 import {
   BVNK_ONRAMP_EXPIRY_CRON,
   BVNK_ONRAMP_EXPIRY_MONITOR,
@@ -198,9 +198,7 @@ describe("reconcileBvnkOnrampExpiry", () => {
     await reconcileBvnkOnrampExpiry(env);
 
     // The failure is logged under sdp_api_bvnk_rule_deactivate_failed...
-    const serialized = loggerMocks.warn.mock.calls
-      .map((call) => JSON.stringify(call))
-      .join("\n");
+    const serialized = loggerMocks.warn.mock.calls.map((call) => JSON.stringify(call)).join("\n");
     expect(serialized).toContain("sdp_api_bvnk_rule_deactivate_failed");
 
     // ...and the transfer stays expired with its rule status unchanged, so the

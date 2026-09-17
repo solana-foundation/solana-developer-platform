@@ -27,7 +27,9 @@ beforeEach(async () => {
   // to funding_wallet and the wallet-per-fiat unique index swaps back to the
   // per-onrampKey one the migration drops.
   await client.query("BEGIN");
-  await client.query("DROP INDEX counterparty_provider_accounts_active_virtual_funding_wallet_unique");
+  await client.query(
+    "DROP INDEX counterparty_provider_accounts_active_virtual_funding_wallet_unique"
+  );
   await client.query(
     `CREATE UNIQUE INDEX counterparty_provider_accounts_active_funding_wallet_unique
        ON counterparty_provider_accounts(counterparty_id, provider, (metadata->>'onrampKey'))
@@ -60,11 +62,17 @@ afterEach(async () => {
   await client.query("ROLLBACK");
 });
 
-async function seedCorridorRows(orgId: string, userId: string, projectId: string, counterpartyId: string) {
-  await client.query(
-    `INSERT INTO organizations (id, name, slug) VALUES ($1, $2, $3)`,
-    [orgId, `Org ${orgId}`, orgId]
-  );
+async function seedCorridorRows(
+  orgId: string,
+  userId: string,
+  projectId: string,
+  counterpartyId: string
+) {
+  await client.query(`INSERT INTO organizations (id, name, slug) VALUES ($1, $2, $3)`, [
+    orgId,
+    `Org ${orgId}`,
+    orgId,
+  ]);
   await client.query(`INSERT INTO users (id, email) VALUES ($1, $2)`, [
     userId,
     `owner-${userId}@example.test`,

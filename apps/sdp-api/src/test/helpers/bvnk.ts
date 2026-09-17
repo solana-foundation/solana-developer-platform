@@ -1,6 +1,4 @@
-import {
-  buildBvnkOnrampWalletName,
-} from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { buildBvnkOnrampWalletName } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { BvnkOnrampTransferProviderData } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type { z } from "zod";
 import type { bvnkWebhookSchema } from "@/routes/webhooks/ramps/bvnk.schema";
@@ -67,8 +65,13 @@ type BvnkWalletStatusChangeData = Extract<
 >["data"];
 
 export function bvnkWalletStatusChangeEvent(
-  overrides?: Partial<BvnkWalletStatusChangeData> & { event?: "ledger:v2:wallet:status-change" | "bvnk:ledger:wallet:create" }
-): Extract<BvnkWebhookInput, { event: "ledger:v2:wallet:status-change" | "bvnk:ledger:wallet:create" }> {
+  overrides?: Partial<BvnkWalletStatusChangeData> & {
+    event?: "ledger:v2:wallet:status-change" | "bvnk:ledger:wallet:create";
+  }
+): Extract<
+  BvnkWebhookInput,
+  { event: "ledger:v2:wallet:status-change" | "bvnk:ledger:wallet:create" }
+> {
   const { event, ...dataOverrides } = overrides === undefined ? {} : overrides;
   return {
     event: event ?? "ledger:v2:wallet:status-change",
@@ -210,9 +213,9 @@ export interface BvnkOfframpProviderData {
   >;
 }
 
-export function bvnkOnrampProviderDataSeed(input: {
-  offramp?: BvnkOfframpProviderData;
-}): { bvnk: { offramp?: BvnkOfframpProviderData } } {
+export function bvnkOnrampProviderDataSeed(input: { offramp?: BvnkOfframpProviderData }): {
+  bvnk: { offramp?: BvnkOfframpProviderData };
+} {
   return {
     bvnk: {
       ...(input.offramp === undefined ? {} : { offramp: input.offramp }),

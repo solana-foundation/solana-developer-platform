@@ -9,13 +9,13 @@ import type {
 } from "@sdp/payments/ramps/types";
 import type { BvnkProviderAccountLiveState } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
+import { z } from "zod";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { providerCustomerReferenceSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import type { PaymentsRepository } from "@/db/repositories/payments.repository";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError, serviceUnavailable } from "@/lib/errors";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { z } from "zod";
 
 const ENRICHMENT_GROUP_CONCURRENCY = 4;
 
@@ -226,9 +226,9 @@ async function fetchBvnkWalletLive(
     const client = RAMP_PROVIDER_CLIENTS.bvnk;
     const [wallet, rules] = await Promise.all([
       client.getLedgerWalletV2(runtime, { walletId }),
-      client.listOnrampRulesByWallet(runtime, { walletId }).then((ruleList) =>
-        z.array(liveBvnkOnrampRuleSchema).parse(ruleList)
-      ),
+      client
+        .listOnrampRulesByWallet(runtime, { walletId })
+        .then((ruleList) => z.array(liveBvnkOnrampRuleSchema).parse(ruleList)),
     ]);
     return await mapBvnkWalletLiveOk(wallet, rules, payments, row);
   } catch (error) {
@@ -272,7 +272,9 @@ async function mapBvnkWalletLiveOk(
   }
   const destinationAddress = activeRule.beneficiary?.cryptoAddresses?.addresses?.[0];
   if (destinationAddress === undefined) {
-    throw providerUnavailable("BVNK returned an active payment rule without a destination address.");
+    throw providerUnavailable(
+      "BVNK returned an active payment rule without a destination address."
+    );
   }
   const cryptoCurrency = activeRule.beneficiary?.currency;
   if (cryptoCurrency === undefined) {

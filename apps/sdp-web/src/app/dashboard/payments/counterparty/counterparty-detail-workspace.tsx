@@ -286,8 +286,7 @@ function FundingWalletRow({
       {live.activeRule !== undefined && live.activeRule !== null ? (
         <p className="mt-1 pl-6 text-xs text-tertiary">
           {t("DashboardPayments.counterparty.providerAccountRuleActive")} →{" "}
-          {shortenAddress(live.activeRule.destinationAddress)} ·{" "}
-          {live.activeRule.cryptoCurrency}
+          {shortenAddress(live.activeRule.destinationAddress)} · {live.activeRule.cryptoCurrency}
           {live.activeRule.transferId === null ? null : ` · ${live.activeRule.transferId}`}
         </p>
       ) : (
