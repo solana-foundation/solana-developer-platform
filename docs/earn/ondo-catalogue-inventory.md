@@ -48,8 +48,8 @@ depend on finding this file.
 - **Sandbox catalogue**: the PRO-1742 browse-only mirror, `fundable: false`, on
   the explicit `?cluster=mainnet-beta` opt-in. Ondo has no devnet deployment
   (verified on-chain 2026-09-02; Ondo's staging also runs on mainnet).
-- **Deposits**: production projects only
-  (`EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS.ondo`). Mainnet is
+- **Deposits**: production projects only, derived from `ONDO_DEPLOYMENTS`
+  having no devnet entry (`EARN_PROVIDER_DEPLOYED_CLUSTERS.ondo`). Mainnet is
   wallet-pays: the custody wallet needs SOL for fees and for its USDY token
   account's rent, and USDC to swap.
 - **Platform prerequisites**: `JUPITER_SWAP_API_KEY` (shared with swap-funded

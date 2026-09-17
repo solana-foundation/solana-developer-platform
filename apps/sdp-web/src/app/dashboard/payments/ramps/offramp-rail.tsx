@@ -1,6 +1,7 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types";
+import { isRampOnboardingPendingStatus } from "@sdp/types/ramp-requirements";
 import { SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -161,14 +162,13 @@ function offrampOnboardingState(wizard: OfframpWizard): {
   if (!onOnboardingStep) {
     return { verificationUrl: undefined, verificationPending: false };
   }
-  const status = wizard.onboarding?.status;
+  const onboarding = wizard.onboarding;
   return {
     verificationUrl:
-      status === "customer_verification_required" ? wizard.onboarding?.verificationUrl : undefined,
-    verificationPending:
-      status === "customer_verifying" ||
-      status === "customer_funding_account_provisioning" ||
-      status === "funding_account_provisioning",
+      onboarding?.status === "customer_verification_required"
+        ? onboarding.verificationUrl
+        : undefined,
+    verificationPending: onboarding !== null && isRampOnboardingPendingStatus(onboarding.status),
   };
 }
 

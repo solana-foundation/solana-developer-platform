@@ -7,6 +7,7 @@ import {
   isBvnkCustomerVerified,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
+import type { RampDirection } from "@sdp/types";
 import {
   COUNTERPARTY_ENTITY_TYPES,
   COUNTRIES,
@@ -18,13 +19,15 @@ import {
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
 } from "@sdp/types";
-import type { PayoutRequirementAccount } from "@sdp/types/ramp-requirements";
+import type {
+  CounterpartyRequirements,
+  PayoutRequirementAccount,
+} from "@sdp/types/ramp-requirements";
 import { isCollectFieldsRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
@@ -45,9 +48,11 @@ import {
   assertRampProviderAvailable,
 } from "@/routes/payments/handlers/ramps";
 import {
-  bvnkCollectCounterparty,
+  type BvnkStoredStage,
   bvnkCustomerRequirementsFromMetadata,
   bvnkStoredStage,
+  presentBvnkStoredStage,
+  refreshBvnkCustomerAccount,
 } from "@/routes/payments/handlers/ramps/bvnk";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
@@ -90,35 +95,6 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
 }
 
 type SubmitCounterpartyRequirementsInput = z.infer<typeof submitCounterpartyRequirementsSchema>;
-
-async function refreshBvnkCustomerAccount(
-  c: AppContext,
-  counterparty: CounterpartyRow,
-  projectId: string,
-  providerAccount: CounterpartyProviderAccountRow
-): Promise<{ customer: BvnkCustomerResolution; verificationUrl: string }> {
-  const detail = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(rampRuntime(c), {
-    id: providerAccount.provider_customer_reference,
-  });
-  const updated = await createPostgresCounterpartyProviderAccountsRepository(
-    getDb(c.env)
-  ).patchAccountMetadata({
-    organizationId: counterparty.organization_id,
-    projectId,
-    counterpartyId: counterparty.id,
-    provider: "bvnk",
-    id: providerAccount.id,
-    set: { status: detail.status },
-    unset: [],
-  });
-  if (updated === null) {
-    throw internalError("BVNK customer status update escaped its tenant scope.");
-  }
-  return {
-    customer: { customerReference: detail.id, status: detail.status },
-    verificationUrl: detail.authenticatedLink.link,
-  };
-}
 
 /**
  * Checks whether a Lightspark payout submission still needs account data.
@@ -318,27 +294,20 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   });
 
   let refreshedBvnkCustomer:
-    | { customer: BvnkCustomerResolution; verificationUrl: string }
+    | { customer: BvnkCustomerResolution; verificationUrl: string | undefined }
     | undefined;
   if (query.data.provider === "bvnk" && providerAccount !== null) {
     const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(providerAccount.metadata);
-    const storedRequirements = await bvnkCustomerRequirementsFromMetadata(
-      c,
-      query.data.direction,
-      metadata
-    );
+    const storedRequirements = bvnkCustomerRequirementsFromMetadata(query.data.direction, metadata);
     if (storedRequirements) {
       return success(c, storedRequirements);
     }
-    if (metadata.status === undefined) {
-      throw internalError("BVNK customer-link metadata is missing customer state.");
-    }
-    refreshedBvnkCustomer = await refreshBvnkCustomerAccount(
-      c,
+    refreshedBvnkCustomer = await refreshBvnkCustomerAccount(c.env, rampRuntime(c), {
       counterparty,
       projectId,
-      providerAccount
-    );
+      providerAccountId: providerAccount.id,
+      customerReference: providerAccount.provider_customer_reference,
+    });
     if (!isBvnkCustomerVerified(refreshedBvnkCustomer.customer.status)) {
       const onboardingStatus = bvnkUnverifiedOnboardingStatus(
         refreshedBvnkCustomer.customer.status
@@ -438,6 +407,36 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   return success(c, requirements);
 };
 
+/**
+ * Requirements a BVNK submit presents instead of the provider client's
+ * stage-blind validation: the stored collect form once the session is signed,
+ * or the signing wait state while consent awaits the provider's confirmation.
+ *
+ * @param direction - Ramp direction used in the requirement response.
+ * @param stage - Stored pre-customer stage of the customer-link row, or null once the customer exists.
+ * @returns The stage-derived requirement, or null when the client validation stands.
+ */
+function bvnkStoredSubmitRequirements(
+  direction: RampDirection,
+  stage: BvnkStoredStage | null
+): CounterpartyRequirements | null {
+  if (stage === null) {
+    return null;
+  }
+  switch (stage.kind) {
+    case "collect_counterparty":
+    case "agreements_submitted":
+      return presentBvnkStoredStage(direction, stage);
+    case "agreements_pending":
+    case "session_pending":
+      return null;
+    default: {
+      const exhaustive: never = stage;
+      throw internalError(`Unhandled BVNK stored stage: ${String(exhaustive)}`);
+    }
+  }
+}
+
 export const submitCounterpartyRequirements = async (
   c: ValidatedBodyContext<typeof submitCounterpartyRequirementsSchema>
 ) => {
@@ -511,12 +510,11 @@ export const submitCounterpartyRequirements = async (
     const stage = bvnkStoredStage(
       bvnkCustomerProviderAccountMetadataSchema.parse(providerAccount.metadata)
     );
-    if (stage !== null && stage.kind === "collect_counterparty") {
-      requirements = bvnkCollectCounterparty(input.direction, stage.residenceCountryCode);
+    const stored = bvnkStoredSubmitRequirements(input.direction, stage);
+    if (stored !== null) {
+      requirements = stored;
     }
-    if (stage !== null && stage.kind === "agreements_pending") {
-      gateOnCollectedFields = false;
-    }
+    gateOnCollectedFields = stage === null || stage.kind !== "agreements_pending";
   }
 
   if (requirements.status === "collect_account") {

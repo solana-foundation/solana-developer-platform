@@ -22,15 +22,23 @@ export interface TokenAuthorityWalletsData {
   // Optional only for pre-existing persisted dashboard cache entries.
   allowlistAuthority?: string | null;
   allowlistAuthorityError?: string | null;
+  freezeAuthority?: string | null;
+  freezeAuthorityError?: string | null;
   metadataAuthority?: string | null;
   metadataAuthorityError?: string | null;
+  pauseAuthority?: string | null;
+  pauseAuthorityError?: string | null;
 }
 
 const liveAuthoritiesSchema = z.object({
   allowlistAuthority: z.string().min(1).nullable(),
   allowlistAuthorityError: z.string().nullable(),
+  freezeAuthority: z.string().min(1).nullable().optional(),
+  freezeAuthorityError: z.string().nullable().optional(),
   metadataAuthority: z.string().min(1).nullable(),
   metadataAuthorityError: z.string().nullable(),
+  pauseAuthority: z.string().min(1).nullable().optional(),
+  pauseAuthorityError: z.string().nullable().optional(),
 });
 
 function getApiError(body: AuthorityWalletsEnvelope, fallback: string): string {

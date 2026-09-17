@@ -5,8 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
-import { getSignerWalletUnavailableReason } from "./token-management-workspace.utils";
+import {
+  getSignerWalletUnavailableReason,
+  isValidSolanaAddressInput,
+  SOLANA_ADDRESS_PATTERN,
+} from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";
+import { TokenValidationMessage } from "./token-validation-message";
 
 /**
  * Confirmation body for "lock supply": mint the remainder up to the configured
@@ -51,9 +56,12 @@ export function TokenLockSupplyModal({
   // "0" or an unparseable remainder both mean there is nothing to mint, so the
   // flow degenerates to a bare revoke and the destination field is irrelevant.
   const needsMint = !alreadyMinted && /[1-9]/.test(remaining);
+  const destinationInvalid =
+    needsMint && destination.trim().length > 0 && !isValidSolanaAddressInput(destination);
   const confirmDisabled =
     isPending ||
     (needsMint && destination.trim().length === 0) ||
+    destinationInvalid ||
     !signerWalletId ||
     Boolean(
       signerUnavailableReason || getSignerWalletUnavailableReason(signerWallets, signerWalletId, t)
@@ -123,7 +131,14 @@ export function TokenLockSupplyModal({
             onChange={(event) => onDestinationChange(event.currentTarget.value)}
             placeholder={t("DashboardIssuance.forms.destinationPlaceholder")}
             description={t("DashboardIssuance.management.lockSupplyDestinationHint")}
+            pattern={SOLANA_ADDRESS_PATTERN}
+            title={t("DashboardIssuance.forms.enterSolanaAddress")}
+            aria-invalid={destinationInvalid}
             disabled={isPending}
+          />
+          <TokenValidationMessage
+            message={destinationInvalid ? t("DashboardIssuance.forms.enterSolanaAddress") : null}
+            reserveSpace={false}
           />
         </div>
       ) : null}

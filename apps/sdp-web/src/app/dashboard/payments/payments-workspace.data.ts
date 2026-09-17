@@ -851,11 +851,7 @@ type SandboxTransferSimulationInput =
   | {
       provider: "bvnk";
       payload: {
-        counterpartyId: string;
-        amount: number;
-        fiatCurrency: string;
-        assetRail: CryptoRailId;
-        destinationCustodyWalletId: string;
+        transferId: string;
       };
     }
   | {

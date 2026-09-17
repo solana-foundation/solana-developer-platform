@@ -280,7 +280,6 @@ export interface Env {
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
   BVNK_WEBHOOK_SECRET?: string;
-  BVNK_API_BASE_URL?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;

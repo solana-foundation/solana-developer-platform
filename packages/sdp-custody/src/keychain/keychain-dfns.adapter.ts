@@ -4,11 +4,9 @@
  * Wraps the internal DFNS signer to implement SigningPort.
  */
 
-import type { SolanaSigner } from "@solana/keychain-core";
 import type { Address } from "@solana/kit";
 import { DFNS_PROVIDER_LABEL } from "../dfns/client";
 import { DfnsSigner } from "../dfns/signer";
-import type { SignRequest, SignResult } from "../signing";
 import { SigningError } from "../signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainDfnsConfig } from "./types";
@@ -21,8 +19,6 @@ export class KeychainDfnsAdapter extends BaseKeychainAdapter {
 
   /** Display label interpolated into signer error messages (overridden by white-label subclasses). */
   protected readonly providerLabel: string = DFNS_PROVIDER_LABEL;
-
-  protected signer!: SolanaSigner;
 
   private readonly config: KeychainDfnsConfig;
   private readonly signerByWalletId = new Map<string, Promise<DfnsSigner>>();
@@ -37,21 +33,6 @@ export class KeychainDfnsAdapter extends BaseKeychainAdapter {
    */
   async getTransactionSigner(walletId?: string, _walletPublicKey?: Address): Promise<DfnsSigner> {
     return this.getDfnsSigner(walletId);
-  }
-
-  requiresApproval(): boolean {
-    return false;
-  }
-
-  async getPublicKey(walletId?: string): Promise<Address> {
-    const signer = await this.getDfnsSigner(walletId);
-    return signer.address as Address;
-  }
-
-  async sign(request: SignRequest): Promise<SignResult> {
-    const signer = await this.getDfnsSigner();
-    this.signer = signer as unknown as SolanaSigner;
-    return super.sign(request);
   }
 
   private async getDfnsSigner(walletId?: string): Promise<DfnsSigner> {

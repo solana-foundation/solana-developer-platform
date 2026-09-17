@@ -8,7 +8,6 @@
 import { createCdpSigner } from "@solana/keychain-cdp";
 import type { SolanaSigner } from "@solana/keychain-core";
 import type { Address } from "@solana/kit";
-import type { SignRequest, SignResult } from "../signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainCoinbaseConfig } from "./types";
 
@@ -18,8 +17,6 @@ import type { KeychainCoinbaseConfig } from "./types";
 
 export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
   readonly providerId = "coinbase_cdp";
-
-  protected signer!: SolanaSigner;
 
   private readonly config: KeychainCoinbaseConfig;
   private readonly signerByWalletId = new Map<string, Promise<SolanaSigner>>();
@@ -34,31 +31,6 @@ export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
    */
   async getTransactionSigner(walletId?: string, _walletPublicKey?: Address): Promise<SolanaSigner> {
     return this.getCoinbaseSigner(walletId);
-  }
-
-  /**
-   * Coinbase signing is synchronous from the API perspective.
-   */
-  requiresApproval(): boolean {
-    return false;
-  }
-
-  /**
-   * Get the public key, ensuring initialization first.
-   */
-  async getPublicKey(walletId?: string): Promise<Address> {
-    const signer = await this.getCoinbaseSigner(walletId);
-    return signer.address as Address;
-  }
-
-  /**
-   * SigningPort does not specify a wallet ID; for Coinbase CDP, we sign with the
-   * configured default wallet.
-   */
-  async sign(request: SignRequest): Promise<SignResult> {
-    const signer = await this.getCoinbaseSigner();
-    this.signer = signer;
-    return super.sign(request);
   }
 
   private async getCoinbaseSigner(walletId?: string): Promise<SolanaSigner> {

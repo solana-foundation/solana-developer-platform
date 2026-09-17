@@ -69,6 +69,8 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
   return {
     sourceWalletHint: null,
     pendingAgreements: null,
+    acceptedAgreements: [],
+    toggleAgreement: noop,
     enabledRampProviders: ["bvnk"],
     rampProviderAccess: null,
     selectedCounterparty: null,

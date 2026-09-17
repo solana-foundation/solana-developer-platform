@@ -11,10 +11,8 @@
  */
 
 import { scrubTelemetry } from "@sdp/redaction";
-import type { SolanaSigner } from "@solana/keychain-core";
 import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
-import type { SignRequest, SignResult } from "../signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainFireblocksConfig } from "./types";
 
@@ -30,7 +28,6 @@ type FireblocksSignerDebugHooks = {
 export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
   readonly providerId = "fireblocks";
 
-  protected signer!: SolanaSigner;
   private readonly config: KeychainFireblocksConfig;
   private readonly signerByVaultAccountId = new Map<string, Promise<FireblocksSigner>>();
 
@@ -49,43 +46,6 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
     _walletPublicKey?: Address
   ): Promise<FireblocksSigner> {
     return this.getFireblocksSigner(walletId);
-  }
-
-  /**
-   * Initialize the Fireblocks signer.
-   * Must be called before any signing operations to fetch the public key.
-   */
-  async init(walletId?: string): Promise<void> {
-    await this.getFireblocksSigner(walletId);
-  }
-
-  /**
-   * Fireblocks may have approval workflows in enterprise setups.
-   * However, the Keychain signer polls until completion internally,
-   * so from our API's perspective it appears synchronous.
-   */
-  requiresApproval(): boolean {
-    // Return false since Keychain handles polling internally
-    // If we need external polling, we'd need to implement a custom flow
-    return false;
-  }
-
-  /**
-   * Get the public key, ensuring initialization first.
-   */
-  async getPublicKey(walletId?: string): Promise<Address> {
-    const signer = await this.getFireblocksSigner(walletId);
-    return signer.address as Address;
-  }
-
-  /**
-   * SigningPort does not specify a wallet ID; for Fireblocks, sign with the
-   * configured default vault.
-   */
-  async sign(request: SignRequest): Promise<SignResult> {
-    const signer = await this.getFireblocksSigner();
-    this.signer = signer as unknown as SolanaSigner;
-    return super.sign(request);
   }
 
   private getFireblocksSigner(walletId?: string): Promise<FireblocksSigner> {

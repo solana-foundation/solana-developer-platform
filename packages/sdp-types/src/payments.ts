@@ -214,6 +214,11 @@ export function isTerminalRampTransferStatus(status: PaymentTransferStatus): boo
   return RAMP_TRANSFER_STATUS_TERMINAL[status];
 }
 
+/** Ramp transfer statuses that are not terminal; a settlement or cancellation can still land. */
+export const NON_TERMINAL_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => !RAMP_TRANSFER_STATUS_TERMINAL[status]
+);
+
 /** Whether a ramp transfer in each status can still be canceled: only before the customer has funded it. */
 export const RAMP_TRANSFER_STATUS_CANCELABLE = {
   pending: true,
@@ -236,6 +241,30 @@ export function isCancelableRampTransferStatus(status: PaymentTransferStatus): b
 /** The statuses a ramp transfer can be canceled from, for status-guarded updates. */
 export const CANCELABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
   (status) => RAMP_TRANSFER_STATUS_CANCELABLE[status]
+);
+
+/** Whether a ramp transfer in each status can still be funded by a pay-in: only before it settles. */
+export const RAMP_TRANSFER_STATUS_FUNDABLE = {
+  pending: true,
+  processing: false,
+  confirmed: false,
+  finalized: false,
+  failed: false,
+  awaiting_payment: true,
+  settling: true,
+  completed: false,
+  canceled: false,
+  expired: false,
+} as const satisfies Record<PaymentTransferStatus, boolean>;
+
+/** Reports whether a ramp transfer in the given status can still receive a pay-in. */
+export function isFundableRampTransferStatus(status: PaymentTransferStatus): boolean {
+  return RAMP_TRANSFER_STATUS_FUNDABLE[status];
+}
+
+/** The statuses an on-ramp pay-in can still settle a transfer from. */
+export const FUNDABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => RAMP_TRANSFER_STATUS_FUNDABLE[status]
 );
 
 /** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */

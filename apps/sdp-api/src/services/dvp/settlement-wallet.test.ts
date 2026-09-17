@@ -8,17 +8,21 @@
  * created under the loser's wallet would be permanently unsettleable.
  */
 
+import { Context } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
 
 const provisionApiKeyWallet = vi.hoisted(() => vi.fn());
 vi.mock("@/services/api-key-wallet-provisioning.service", () => ({ provisionApiKeyWallet }));
 
 const { getOrCreateDvpSettlementWallet } = await import("./settlement-wallet");
+
+const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/dvp"), { env });
 
 const PROJECT_ID = "prj_dvp_settlement";
 const CUSTODY_CONFIG_ID = "cust_dvp_settlement";
@@ -87,7 +91,7 @@ describe("getOrCreateDvpSettlementWallet", () => {
     await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });
 
-    const wallet = await getOrCreateDvpSettlementWallet(env, scope);
+    const wallet = await getOrCreateDvpSettlementWallet(env, auditContext, scope);
 
     expect(wallet.custodyWalletId).toBe("cwlt_first");
     expect(provisionApiKeyWallet).toHaveBeenCalledTimes(1);
@@ -104,7 +108,7 @@ describe("getOrCreateDvpSettlementWallet", () => {
     await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });
 
-    await getOrCreateDvpSettlementWallet(env, scope);
+    await getOrCreateDvpSettlementWallet(env, auditContext, scope);
 
     expect(provisionApiKeyWallet).toHaveBeenCalledWith(
       expect.anything(),
@@ -112,6 +116,8 @@ describe("getOrCreateDvpSettlementWallet", () => {
       expect.objectContaining({
         projectId: scope.projectId,
         legacyConfigProjectId: scope.projectId,
+        auditContext,
+        creationReason: "dvp_settlement_authority",
       })
     );
   });
@@ -120,8 +126,8 @@ describe("getOrCreateDvpSettlementWallet", () => {
     await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });
 
-    const first = await getOrCreateDvpSettlementWallet(env, scope);
-    const second = await getOrCreateDvpSettlementWallet(env, scope);
+    const first = await getOrCreateDvpSettlementWallet(env, auditContext, scope);
+    const second = await getOrCreateDvpSettlementWallet(env, auditContext, scope);
 
     expect(second).toEqual(first);
     expect(provisionApiKeyWallet).toHaveBeenCalledTimes(1);
@@ -133,8 +139,8 @@ describe("getOrCreateDvpSettlementWallet", () => {
     await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });
 
-    await getOrCreateDvpSettlementWallet(env, scope);
-    const reread = await getOrCreateDvpSettlementWallet(env, scope);
+    await getOrCreateDvpSettlementWallet(env, auditContext, scope);
+    const reread = await getOrCreateDvpSettlementWallet(env, auditContext, scope);
 
     expect(reread.address).toBe("AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     // All three identifiers are distinct.
@@ -152,8 +158,8 @@ describe("getOrCreateDvpSettlementWallet", () => {
       .mockResolvedValueOnce({ id: "cwlt_b", walletId: "provider_b" });
 
     const [first, second] = await Promise.all([
-      getOrCreateDvpSettlementWallet(env, scope),
-      getOrCreateDvpSettlementWallet(env, scope),
+      getOrCreateDvpSettlementWallet(env, auditContext, scope),
+      getOrCreateDvpSettlementWallet(env, auditContext, scope),
     ]);
 
     expect(first.custodyWalletId).toBe(second.custodyWalletId);
@@ -173,7 +179,7 @@ describe("getOrCreateDvpSettlementWallet", () => {
   it("replaces a deactivated settlement wallet", async () => {
     await seedCustodyWallet("cwlt_dead", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_dead", walletId: "provider_dead" });
-    await getOrCreateDvpSettlementWallet(env, scope);
+    await getOrCreateDvpSettlementWallet(env, auditContext, scope);
 
     await getDb(env)
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
@@ -183,7 +189,7 @@ describe("getOrCreateDvpSettlementWallet", () => {
     await seedCustodyWallet("cwlt_new", "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_new", walletId: "provider_new" });
 
-    const replacement = await getOrCreateDvpSettlementWallet(env, scope);
+    const replacement = await getOrCreateDvpSettlementWallet(env, auditContext, scope);
 
     expect(replacement.custodyWalletId).toBe("cwlt_new");
     expect(replacement.address).toBe("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn");
@@ -204,7 +210,7 @@ describe("getOrCreateDvpSettlementWallet", () => {
     await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
     provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });
 
-    await getOrCreateDvpSettlementWallet(env, scope);
+    await getOrCreateDvpSettlementWallet(env, auditContext, scope);
 
     expect(provisionApiKeyWallet).toHaveBeenCalledWith(
       expect.anything(),

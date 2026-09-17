@@ -106,6 +106,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     isAdvancing,
     retryOnboarding,
     pendingAgreements,
+    acceptedAgreements,
+    toggleAgreement,
     memoRows,
     setMemoRows,
     sourceWalletHint,
@@ -198,7 +200,12 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     // blocker renders above STILL-ENABLED fields: the country select is the only
     // way out of a blocked corridor, so it must stay interactive.
     return pendingAgreements !== null ? (
-      <BvnkAgreementConsent agreements={pendingAgreements} />
+      <BvnkAgreementConsent
+        agreements={pendingAgreements}
+        acceptedAgreements={acceptedAgreements}
+        onToggle={toggleAgreement}
+        disabled={isAdvancing}
+      />
     ) : onboarding !== null &&
       hasOnboardingLifecycle(onboarding.provider) &&
       isOnboardingPanelStatus(onboarding) ? (

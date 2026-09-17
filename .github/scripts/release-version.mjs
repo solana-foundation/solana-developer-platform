@@ -1,4 +1,4 @@
-const nonBreakingCommitOverrides = new Set([
+export const nonBreakingCommitOverrides = new Set([
   // This merged commit retained an inaccurate BREAKING CHANGE footer. Keep the
   // immutable history intact while excluding only that commit from bump selection.
   // biome-ignore lint/security/noSecrets: Public Git commit SHA, not a secret.
@@ -15,12 +15,23 @@ function parseVersion(version) {
   return match.slice(1).map((part) => Number.parseInt(part, 10));
 }
 
+// Conventional Commits puts a breaking change in a FOOTER: a line that begins
+// with "BREAKING CHANGE:" or "BREAKING-CHANGE:". Matching the phrase anywhere in
+// the body instead means a commit that merely writes about breaking changes
+// declares itself to be one, which is not a hypothetical: the commit that added
+// breaking-change reporting to the changelog said its entry "also surfaces in a
+// BREAKING CHANGES section on top", and 0.79.0 opened by announcing that commit
+// as breaking. This flag also feeds bumpLevel, so once incrementVersion stops
+// holding breaking changes to the minor at 1.0, a stray phrase in a body would
+// ship a major on its own.
+const BREAKING_FOOTER = /^BREAKING[ -]CHANGE:/m;
+
 export function releaseCommitSemantics(subject, body = "") {
   const match = subject.match(/^([a-z]+)(?:\([^)]+\))?(!)?: .+$/i);
 
   return {
     type: match?.[1]?.toLowerCase() ?? "other",
-    breaking: Boolean(match?.[2]) || body.includes("BREAKING CHANGE"),
+    breaking: Boolean(match?.[2]) || BREAKING_FOOTER.test(body),
   };
 }
 

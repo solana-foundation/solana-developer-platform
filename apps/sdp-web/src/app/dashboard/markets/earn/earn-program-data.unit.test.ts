@@ -404,7 +404,14 @@ describe("vault deposit availability", () => {
 
   it("opens only an active, fundable, surfaced vault-direct strategy in an enabled environment", () => {
     expect(isEarnVaultDepositAvailable(kamino, "sandbox", providerAccess)).toBe(true);
-    expect(isEarnVaultDepositAvailable(kamino, "production", providerAccess)).toBe(false);
+    // Kamino is deployed on both clusters, so production opens too (PRO-1986);
+    // the environment gate now bites a provider deployed on devnet only.
+    expect(isEarnVaultDepositAvailable(kamino, "production", providerAccess)).toBe(true);
+    expect(
+      isEarnVaultDepositAvailable({ ...kamino, provider: "veda" }, "production", {
+        veda: { entitled: true, configured: true, enabled: true },
+      })
+    ).toBe(false);
     expect(
       isEarnVaultDepositAvailable({ ...kamino, fundable: false }, "sandbox", providerAccess)
     ).toBe(false);
