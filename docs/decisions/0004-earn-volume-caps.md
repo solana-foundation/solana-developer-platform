@@ -92,6 +92,17 @@ stays a small enough fraction of any vault that its customers can always leave.
   address, and inherits the CODEOWNERS gate from PRO-1869. A missing entry
   means the platform default applies; `null` means uncapped (explicit, so a
   reviewer sees it).
+- Launch note for the flag-flip runbook (PRO-1937): a vault whose catalogue
+  row reports an explicit `tvlUsd` of 0 drives the share bound to 0, so every
+  deposit into it `would_block` once `EARN_VOLUME_CAPS_ENFORCED` flips even
+  though the absolute ceiling is far away. That is the strict reading working
+  as designed, not a bug — expect `would_block` storms on explicitly zero-TVL
+  rows, and read the shadow-mode data with that in mind. A vault whose
+  metrics have not landed at all is a different case: `strategyTvlForExposure`
+  reads null, the evaluator falls back to the absolute ceiling with reason
+  `absolute_tvl_unavailable`, and no zero bound applies. Kamino rows carry a
+  TVL from catalogue admission, so a missing figure there is drift to
+  investigate, not a warm-up state.
 - Withdrawals are untouched. A vault over its cap is exit-only, same posture as
   `paused`.
 

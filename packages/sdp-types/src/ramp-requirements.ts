@@ -157,13 +157,19 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
     }
   | {
       provider: "bvnk";
-      status: "customer_agreement_required";
-      /** Agreement text is an external link; `downloadUrl` is minted JIT per response and never persisted. */
+      status: "counterparty_collect_agreement";
+      /**
+       * Agreements of the minted v1 session. The document links are the
+       * session's static help-centre URLs stored on the customer link; nothing
+       * is minted per response. `name` is the v1 agreement identifier (v1 has
+       * no id).
+       */
       agreements: {
-        id: string;
         name: string;
+        displayName: string;
         description: string;
-        downloadUrl: string;
+        url: string;
+        privacyPolicyUrl: string;
       }[];
     }
   | {
@@ -173,6 +179,7 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
       verificationUrl: string;
     }
   | { provider: "bvnk"; status: "customer_verifying" }
+  | { provider: "bvnk"; status: "counterparty_agreement_signing" }
   | { provider: "bvnk"; status: "customer_verification_failed" }
   | { provider: "bvnk"; status: "customer_funding_account_provisioning" }
   | { provider: "bvnk"; status: "customer_funding_account_provisioning_failed" }
@@ -183,6 +190,51 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "mural"; status: "customer_verification_failed" }
   | { provider: "mural"; status: "funding_account_provisioning" }
 );
+
+export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES = [
+  "terms_of_service_required",
+  "customer_verification_required",
+  "customer_verifying",
+  "counterparty_agreement_signing",
+  "customer_funding_account_provisioning",
+  "funding_account_provisioning",
+] as const satisfies readonly CounterpartyRequirements["status"][];
+
+export type CounterpartyRequirementsPollStatus =
+  (typeof COUNTERPARTY_REQUIREMENTS_POLL_STATUSES)[number];
+
+/**
+ * Whether a requirements status should continue polling its provider lifecycle.
+ *
+ * @param status - Requirements lifecycle status to classify.
+ * @returns True when the requirements request should poll for a provider transition.
+ */
+export function isCounterpartyRequirementsPollStatus(
+  status: CounterpartyRequirements["status"]
+): status is CounterpartyRequirementsPollStatus {
+  return COUNTERPARTY_REQUIREMENTS_POLL_STATUSES.some((candidate) => candidate === status);
+}
+
+export const RAMP_ONBOARDING_PENDING_STATUSES = [
+  "customer_verifying",
+  "counterparty_agreement_signing",
+  "customer_funding_account_provisioning",
+  "funding_account_provisioning",
+] as const satisfies readonly CounterpartyRequirements["status"][];
+
+export type RampOnboardingPendingStatus = (typeof RAMP_ONBOARDING_PENDING_STATUSES)[number];
+
+/**
+ * Whether a requirements status blocks ramp progression while a provider transition completes.
+ *
+ * @param status - Requirements lifecycle status to classify.
+ * @returns True when the provider transition is still pending.
+ */
+export function isRampOnboardingPendingStatus(
+  status: CounterpartyRequirements["status"]
+): status is RampOnboardingPendingStatus {
+  return RAMP_ONBOARDING_PENDING_STATUSES.some((candidate) => candidate === status);
+}
 
 /** Collect stages whose answer carries a `fields` array for the client to render. */
 export const COLLECT_FIELDS_STATUSES = [
@@ -201,7 +253,7 @@ export type CollectFieldsStatus = (typeof COLLECT_FIELDS_STATUSES)[number];
 export const COLLECT_STAGE_STATUSES = [
   ...COLLECT_FIELDS_STATUSES,
   "collect_account",
-  "customer_agreement_required",
+  "counterparty_collect_agreement",
 ] as const;
 
 export type CollectStageStatus = (typeof COLLECT_STAGE_STATUSES)[number];

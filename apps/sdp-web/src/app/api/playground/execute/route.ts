@@ -5,6 +5,29 @@ import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
 
 const PUBLIC_API_PATH_PREFIX = "/v1/";
 const INVALID_PATH_MESSAGE = "Path must start with '/v1/'";
+const REDACTED_SECRET = "[REDACTED]";
+
+function redactSecretFromString(value: string, secret: string): string {
+  return value.split(secret).join(REDACTED_SECRET);
+}
+
+function redactSecret(value: unknown, secret: string): unknown {
+  if (typeof value === "string") {
+    return redactSecretFromString(value, secret);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactSecret(entry, secret));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        redactSecretFromString(key, secret),
+        redactSecret(entry, secret),
+      ])
+    );
+  }
+  return value;
+}
 
 function normalizePublicApiPath(path: string, requestUrl: string): string | null {
   if (!path.startsWith("/")) return null;
@@ -114,7 +137,7 @@ export async function POST(request: Request) {
     });
 
     const text = await response.text();
-    const body = text
+    const rawResponseBody = text
       ? (() => {
           try {
             return JSON.parse(text) as unknown;
@@ -123,12 +146,13 @@ export async function POST(request: Request) {
           }
         })()
       : {};
+    const body = redactSecret(rawResponseBody, apiKey);
 
     const nextResponse = NextResponse.json(
       {
         ok: response.ok,
         status: response.status,
-        statusText: response.statusText,
+        statusText: redactSecretFromString(response.statusText, apiKey),
         body,
       },
       {
@@ -146,7 +170,7 @@ export async function POST(request: Request) {
     });
 
     return nextResponse;
-  } catch (error) {
+  } catch {
     const response = NextResponse.json(
       {
         error: "Playground execution failed",
@@ -160,7 +184,7 @@ export async function POST(request: Request) {
       }
     );
     logRouteResult(trace, 500, {
-      error: error instanceof Error ? error.message : "Playground execution failed",
+      error: "Playground execution failed",
     });
     return response;
   }

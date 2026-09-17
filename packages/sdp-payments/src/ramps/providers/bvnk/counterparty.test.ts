@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Counterparty, CountryCode } from "@sdp/types";
+import { SdpPaymentsError } from "../../../errors";
+import { countryField, parseCollectedFields } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
 import {
   buildBvnkCustomerRequest,
   parseBvnkResidenceCountry,
   validateBvnkCounterparty,
 } from "./counterparty";
-import { BVNK_RESIDENCE_FIELDS, bvnkOnrampFields } from "./requirements";
+import { BVNK_RESIDENCE_FIELDS, BVNK_US_MTL_STATES, bvnkOnrampFields } from "./requirements";
 
 const usCollectedData = {
   firstName: "Ada",
@@ -103,10 +105,91 @@ describe("BVNK counterparty builders", () => {
     assert.equal(gbKeys.includes("address.stateCode"), false);
     assert.equal(gbKeys.includes("taxIdentification.number"), true);
     assert.equal(gbKeys.includes("cdd.estimatedYearlyIncome"), false);
+    for (const key of gbKeys) {
+      assert.equal(usKeys.includes(key), true);
+    }
     assert.equal(
       bvnkOnrampFields("DE").some((field) => field.key === "nationality"),
       true
     );
+  });
+
+  it("nests the 40-option MTL state select inside the US address group", () => {
+    const usAddressGroup = bvnkOnrampFields("US").find((field) => field.kind === "address");
+    assert.equal(usAddressGroup?.kind, "address");
+    const stateSelect = (usAddressGroup?.kind === "address" ? usAddressGroup.fields : []).find(
+      (part) => part.key === "address.stateCode"
+    );
+    assert.equal(stateSelect?.kind, "select");
+    const optionValues = (stateSelect?.kind === "select" ? stateSelect.options : []).map(
+      (option) => option.value
+    );
+    assert.deepEqual(optionValues, Object.keys(BVNK_US_MTL_STATES));
+    assert.equal(optionValues.length, 40);
+    assert.equal(optionValues.includes("TX"), false);
+    assert.equal(optionValues.includes("NY"), false);
+  });
+
+  it("accepts an MTL state code and rejects one outside the MTL set", () => {
+    const customer = buildBvnkCustomerRequest(usCollectedData, "US");
+
+    assert.equal(customer.address.stateCode, "MO");
+    assert.throws(
+      () => buildBvnkCustomerRequest({ ...usCollectedData, "address.stateCode": "TX" }, "US"),
+      SdpPaymentsError
+    );
+    assert.throws(
+      () => buildBvnkCustomerRequest({ ...usCollectedData, "address.stateCode": "NY" }, "US"),
+      SdpPaymentsError
+    );
+  });
+
+  it("builds the EU v2 individual without US extras", () => {
+    const customer = buildBvnkCustomerRequest(
+      {
+        firstName: "Ada",
+        lastName: "Lovelace",
+        dateOfBirth: "1815-12-10",
+        email: "ada@example.com",
+        "address.addressLine1": "1 Main Street",
+        "address.city": "Berlin",
+        "address.postalCode": "10115",
+        "address.countryCode": "DE",
+        birthCountryCode: "GB",
+        nationality: "GB",
+        "cdd.employmentStatus": "SELF_EMPLOYED",
+        "cdd.sourceOfFunds": "SALARY",
+        "cdd.pepStatus": "NOT_PEP",
+        "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
+        "cdd.expectedMonthlyVolume.amount": "1000.50",
+        "cdd.expectedMonthlyVolume.currency": "EUR",
+        "taxIdentification.number": "12345678901",
+      },
+      "DE"
+    );
+
+    assert.deepEqual(customer, {
+      address: {
+        addressLine1: "1 Main Street",
+        city: "Berlin",
+        postalCode: "10115",
+        countryCode: "DE",
+      },
+      dateOfBirth: "1815-12-10",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      birthCountryCode: "GB",
+      nationality: "GB",
+      emailAddress: "ada@example.com",
+      taxIdentification: { number: "12345678901", taxResidenceCountryCode: "DE" },
+      cdd: {
+        employmentStatus: "SELF_EMPLOYED",
+        sourceOfFunds: "SALARY",
+        pepStatus: "NOT_PEP",
+        intendedUseOfAccount: "TRANSFERS_OWN_WALLET",
+        expectedMonthlyVolume: { amount: "1000.50", currency: "EUR" },
+      },
+    });
   });
 });
 
@@ -139,5 +222,26 @@ describe("validateBvnkCounterparty", () => {
       status: "collect_counterparty_residence",
       fields: BVNK_RESIDENCE_FIELDS,
     });
+  });
+});
+
+describe("country field options", () => {
+  it("validates collected values against the offered subset", () => {
+    const fields = [
+      countryField({
+        key: "taxResidenceCountryCode",
+        label: "Tax residence country",
+        required: true,
+        options: ["US", "DE"],
+      }),
+    ];
+
+    assert.deepEqual(parseCollectedFields(fields, { taxResidenceCountryCode: "DE" }, "message"), {
+      taxResidenceCountryCode: "DE",
+    });
+    assert.throws(
+      () => parseCollectedFields(fields, { taxResidenceCountryCode: "RU" }, "message"),
+      SdpPaymentsError
+    );
   });
 });

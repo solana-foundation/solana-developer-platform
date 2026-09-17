@@ -115,6 +115,13 @@ describe("API key privilege guards", () => {
     await seedCachedApiKey(env, writerHash, WRITER_CACHED);
   }
 
+  // The per-key policy routes are role-gated, so the SELF-guard behind them
+  // is only reachable by an api_admin actor.
+  async function reseedAdminActor() {
+    const writerHash = await hashString(WRITER_KEY.raw, env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, writerHash, { ...WRITER_CACHED, role: "api_admin" });
+  }
+
   it("refuses to rotate a key whose permissions exceed the actor's", async () => {
     await seedKeyRow(ADMIN_TARGET_KEY, "api_admin", null);
     await reseedActor();
@@ -490,8 +497,113 @@ describe("API key privilege guards", () => {
     expect(body.error.message).toContain("being used for this request");
   });
 
-  it("refuses a key replacing its own policy bindings", async () => {
+  it("clones the creator's policy foundation onto a key it mints", async () => {
     await reseedActor();
+    const db = getDb(env);
+    const profileId = "akcp_creator_profile";
+    const revisionId = "akcpr_creator_revision";
+    await db
+      .prepare(
+        `INSERT INTO api_key_control_profiles (id, organization_id, project_id, api_key_id, name, status, created_by)
+         VALUES (?, ?, ?, ?, ?, 'active', ?)`
+      )
+      .bind(profileId, TEST_ORG.id, TEST_PROJECT.id, WRITER_KEY.id, "creator profile", TEST_USER.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO api_key_control_profile_revisions (id, profile_id, revision_number, rules, default_action, created_by)
+         VALUES (?, ?, 1, ?::jsonb, 'deny', ?)`
+      )
+      .bind(
+        revisionId,
+        profileId,
+        JSON.stringify([{ id: "cap-transfers", kind: "always", action: "deny" }]),
+        TEST_USER.id
+      )
+      .run();
+    await db
+      .prepare("UPDATE api_key_control_profiles SET active_revision_id = ? WHERE id = ?")
+      .bind(revisionId, profileId)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO api_key_wallet_policy_bindings (id, api_key_id, binding_scope, api_key_control_profile_id)
+         VALUES (?, ?, 'all', ?)`
+      )
+      .bind("akwpol_creator_binding", WRITER_KEY.id, profileId)
+      .run();
+
+    const res = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({
+          name: "policy-bound sibling",
+          role: "api_readonly",
+          permissions: ["tokens:read"],
+          walletScope: "all",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { apiKey: { id: string } } };
+    const siblingId = body.data.apiKey.id;
+
+    // The sibling must be born under a copy of the creator's policy, not free
+    // of it — profile, active revision, rules, and binding all cloned.
+    const clonedProfile = await db
+      .prepare(`SELECT id, active_revision_id FROM api_key_control_profiles WHERE api_key_id = ?`)
+      .bind(siblingId)
+      .first<{ id: string; active_revision_id: string | null }>();
+    expect(clonedProfile).toBeTruthy();
+    expect(clonedProfile?.id).not.toBe(profileId);
+    expect(clonedProfile?.active_revision_id).toBeTruthy();
+    const clonedRevision = await db
+      .prepare(`SELECT rules, default_action FROM api_key_control_profile_revisions WHERE id = ?`)
+      .bind(clonedProfile?.active_revision_id)
+      .first<{ rules: unknown; default_action: string }>();
+    expect(clonedRevision?.default_action).toBe("deny");
+    const clonedBinding = await db
+      .prepare(
+        `SELECT api_key_control_profile_id FROM api_key_wallet_policy_bindings WHERE api_key_id = ?`
+      )
+      .bind(siblingId)
+      .first<{ api_key_control_profile_id: string | null }>();
+    expect(clonedBinding?.api_key_control_profile_id).toBe(clonedProfile?.id);
+  });
+
+  it.each([
+    ["PUT", "policy-bindings", { mode: "clear" }],
+    ["POST", "policy-profiles", { name: "sibling profile" }],
+    ["POST", "policy-profiles/prof_x/revisions", { rules: [], defaultAction: "allow" }],
+    ["POST", "policy-profiles/prof_x/revisions/rev_x/activate", undefined],
+  ] as const)(
+    "holds sibling per-key policy authoring to api_admin (%s /%s)",
+    async (method, path, body) => {
+      await seedKeyRow(READONLY_TARGET_KEY, "api_readonly", null);
+      await reseedActor();
+
+      const res = await app.request(
+        `/v1/api-keys/${READONLY_TARGET_KEY.id}/${path}`,
+        {
+          method,
+          headers: headers(),
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const responseBody = (await res.json()) as { error: { message: string } };
+      expect(responseBody.error.message).toContain("api_admin");
+    }
+  );
+
+  it("refuses a key replacing its own policy bindings", async () => {
+    await reseedAdminActor();
     const res = await app.request(
       `/v1/api-keys/${WRITER_KEY.id}/policy-bindings`,
       {
@@ -508,7 +620,7 @@ describe("API key privilege guards", () => {
   });
 
   it("refuses a key creating a control profile for itself", async () => {
-    await reseedActor();
+    await reseedAdminActor();
     const res = await app.request(
       `/v1/api-keys/${WRITER_KEY.id}/policy-profiles`,
       {
@@ -525,7 +637,7 @@ describe("API key privilege guards", () => {
   });
 
   it("refuses a key writing a control-profile revision for itself", async () => {
-    await reseedActor();
+    await reseedAdminActor();
     const res = await app.request(
       `/v1/api-keys/${WRITER_KEY.id}/policy-profiles/prof_self/revisions`,
       {
@@ -542,7 +654,7 @@ describe("API key privilege guards", () => {
   });
 
   it("refuses a key activating a control-profile revision for itself", async () => {
-    await reseedActor();
+    await reseedAdminActor();
     const res = await app.request(
       `/v1/api-keys/${WRITER_KEY.id}/policy-profiles/prof_self/revisions/rev_self/activate`,
       {

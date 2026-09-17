@@ -5,10 +5,8 @@
  * Privy provides hosted wallet custody via the Privy Wallet API.
  */
 
-import type { SolanaSigner } from "@solana/keychain-core";
 import { PrivySigner } from "@solana/keychain-privy";
 import type { Address } from "@solana/kit";
-import type { SignRequest, SignResult } from "../signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainPrivyConfig } from "./types";
 
@@ -18,8 +16,6 @@ import type { KeychainPrivyConfig } from "./types";
 
 export class KeychainPrivyAdapter extends BaseKeychainAdapter {
   readonly providerId = "privy";
-
-  protected signer!: SolanaSigner;
 
   private readonly config: KeychainPrivyConfig;
   private readonly signerByWalletId = new Map<string, Promise<PrivySigner>>();
@@ -34,31 +30,6 @@ export class KeychainPrivyAdapter extends BaseKeychainAdapter {
    */
   async getTransactionSigner(walletId?: string, _walletPublicKey?: Address): Promise<PrivySigner> {
     return this.getPrivySigner(walletId);
-  }
-
-  /**
-   * Privy signing is synchronous from the API perspective.
-   */
-  requiresApproval(): boolean {
-    return false;
-  }
-
-  /**
-   * Get the public key, ensuring initialization first.
-   */
-  async getPublicKey(walletId?: string): Promise<Address> {
-    const signer = await this.getPrivySigner(walletId);
-    return signer.address as Address;
-  }
-
-  /**
-   * SigningPort does not specify a wallet ID; for Privy, we always sign with the
-   * configured default wallet.
-   */
-  async sign(request: SignRequest): Promise<SignResult> {
-    const signer = await this.getPrivySigner();
-    this.signer = signer as unknown as SolanaSigner;
-    return super.sign(request);
   }
 
   private async getPrivySigner(walletId?: string): Promise<PrivySigner> {

@@ -2,14 +2,18 @@
 
 import { Badge } from "@solana/design-system/badge";
 import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, Dispatch, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { normalizeApiKeyInput } from "@/lib/playground-api-keys";
+import {
+  getStoredApiKeySecret,
+  isValidSdpApiKey,
+  normalizeApiKeyInput,
+} from "@/lib/playground-api-keys";
 import { setNestedValue } from "@/lib/set-nested-value";
 import { HighlightedCode, type HighlightLanguage } from "@/lib/shiki-code";
 import { cn } from "@/lib/utils";
@@ -59,8 +63,8 @@ interface ExecutionResult {
 
 interface ApiPlaygroundShellProps {
   apiBaseUrl?: string | null;
+  apiKeyId: string | null;
   apiKeySelector?: ReactNode;
-  apiKeyValue: string;
   defaultEndpointId?: string;
   endpoints: ApiPlaygroundEndpointConfig[];
   leftMessages?: ApiPlaygroundMessage[];
@@ -219,10 +223,6 @@ function getMethodBadgeVariant(
   return "success";
 }
 
-function isValidSdpApiKey(rawValue: string): boolean {
-  return /^sk_(test|live)_[A-Za-z0-9_-]+$/.test(rawValue);
-}
-
 function buildFetchSnippet(
   endpoint: ApiPlaygroundEndpointConfig,
   resolvedPath: string,
@@ -348,6 +348,104 @@ function getExecutionStatus(
   };
 }
 
+interface ExecutePlaygroundRequestOptions {
+  activeEndpoint: ApiPlaygroundEndpointConfig;
+  apiKeyId: string | null;
+  fieldValues: Record<string, string>;
+  requestBody: unknown | null;
+  requestBodyResult: RequestBodyResult | null;
+  resolvedPath: string;
+  onExecutionError: (message: string) => void;
+  onResult: (result: ExecutionResult) => void;
+  onValidationError: (message: string) => void;
+  setIsExecuting: Dispatch<SetStateAction<boolean>>;
+  t: (key: MessageKey, values?: TranslationValues) => string;
+}
+
+async function executePlaygroundRequest({
+  activeEndpoint,
+  apiKeyId,
+  fieldValues,
+  requestBody,
+  requestBodyResult,
+  resolvedPath,
+  onExecutionError,
+  onResult,
+  onValidationError,
+  setIsExecuting,
+  t,
+}: ExecutePlaygroundRequestOptions): Promise<void> {
+  const missingFields = getMissingRequiredFields(activeEndpoint, fieldValues);
+  if (missingFields.length > 0) {
+    onValidationError(
+      t("Shared.SharedComponents.completeRequiredFields", { fields: missingFields.join(", ") })
+    );
+    return;
+  }
+
+  if (requestBodyResult?.invalidJsonField) {
+    onValidationError(
+      t("Shared.SharedComponents.invalidJsonField", {
+        field: requestBodyResult.invalidJsonField,
+      })
+    );
+    return;
+  }
+
+  const normalizedApiKey = normalizeApiKeyInput(getStoredApiKeySecret({ apiKeyId }) ?? "");
+  if (!normalizedApiKey) {
+    onExecutionError(t("Shared.SharedComponents.apiKeySecretRequired"));
+    return;
+  }
+  if (!isValidSdpApiKey(normalizedApiKey)) {
+    onValidationError(t("Shared.SharedComponents.invalidApiKeyFormat"));
+    return;
+  }
+
+  const startedAt = Date.now();
+  setIsExecuting(true);
+
+  try {
+    const proxyResponse = await fetch("/api/playground/execute", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        method: activeEndpoint.method,
+        path: resolvedPath,
+        body: requestBody,
+        apiKey: normalizedApiKey,
+      }),
+    });
+
+    const envelope = (await proxyResponse.json()) as {
+      ok?: boolean;
+      status?: number;
+      statusText?: string;
+      body?: unknown;
+    };
+
+    if (!proxyResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
+      onValidationError(t("Shared.SharedComponents.playgroundExecutionFailed"));
+      return;
+    }
+
+    onResult({
+      ok: envelope.ok ?? false,
+      status: envelope.status,
+      statusText: envelope.statusText,
+      durationMs: Date.now() - startedAt,
+      authMode: "api_key",
+      body: envelope.body ?? {},
+    });
+  } catch {
+    onExecutionError(t("Shared.SharedComponents.requestExecutionFailed"));
+  } finally {
+    setIsExecuting(false);
+  }
+}
+
 function FieldLabel({ children, htmlFor }: { children: string; htmlFor: string }) {
   return (
     <label
@@ -410,8 +508,8 @@ const OUTPUT_PANEL_LABEL_KEYS = [
 
 export function ApiPlaygroundShell({
   apiBaseUrl,
+  apiKeyId,
   apiKeySelector,
-  apiKeyValue,
   defaultEndpointId,
   endpoints,
   leftMessages = [],
@@ -559,88 +657,33 @@ export function ApiPlaygroundShell({
     setExecuteError(null);
   };
 
-  const handleExecute = async () => {
+  const handleExecute = () => {
     setExecuteError(null);
     setExecutionResult(null);
-
-    const missingFields = getMissingRequiredFields(activeEndpoint, fieldValues);
-    if (missingFields.length > 0) {
-      setExecuteError(
-        t("Shared.SharedComponents.completeRequiredFields", { fields: missingFields.join(", ") })
-      );
-      setActivePanel("response");
-      return;
-    }
-
-    if (requestBodyResult?.invalidJsonField) {
-      setExecuteError(
-        t("Shared.SharedComponents.invalidJsonField", {
-          field: requestBodyResult.invalidJsonField,
-        })
-      );
-      setActivePanel("response");
-      return;
-    }
-
-    const normalizedApiKey = normalizeApiKeyInput(apiKeyValue);
-    const hasApiKey = Boolean(normalizedApiKey);
-
-    if (hasApiKey && !isValidSdpApiKey(normalizedApiKey)) {
-      setExecuteError(t("Shared.SharedComponents.invalidApiKeyFormat"));
-      setActivePanel("response");
-      return;
-    }
-
-    const startedAt = Date.now();
-    setIsExecuting(true);
-
-    try {
-      const proxyResponse = await fetch("/api/playground/execute", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          method: activeEndpoint.method,
-          path: resolvedPath,
-          body: requestBody,
-          apiKey: hasApiKey ? normalizedApiKey : null,
-        }),
-      });
-
-      const envelope = (await proxyResponse.json()) as {
-        ok?: boolean;
-        status?: number;
-        statusText?: string;
-        body?: unknown;
-        error?: string;
-      };
-
-      if (!proxyResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
-        setExecuteError(envelope.error ?? t("Shared.SharedComponents.playgroundExecutionFailed"));
+    void executePlaygroundRequest({
+      activeEndpoint,
+      apiKeyId,
+      fieldValues,
+      requestBody,
+      requestBodyResult,
+      resolvedPath,
+      onExecutionError: (message) => {
+        setExecuteError(message);
+        setMobileSection("output");
         setActivePanel("response");
-        return;
-      }
-
-      setExecutionResult({
-        ok: envelope.ok ?? false,
-        status: envelope.status,
-        statusText: envelope.statusText,
-        durationMs: Date.now() - startedAt,
-        authMode: hasApiKey ? "api_key" : "session",
-        body: envelope.body ?? {},
-      });
-      setMobileSection("output");
-      setActivePanel("response");
-    } catch (error) {
-      setExecuteError(
-        error instanceof Error ? error.message : t("Shared.SharedComponents.requestExecutionFailed")
-      );
-      setMobileSection("output");
-      setActivePanel("response");
-    } finally {
-      setIsExecuting(false);
-    }
+      },
+      onResult: (result) => {
+        setExecutionResult(result);
+        setMobileSection("output");
+        setActivePanel("response");
+      },
+      onValidationError: (message) => {
+        setExecuteError(message);
+        setActivePanel("response");
+      },
+      setIsExecuting,
+      t,
+    });
   };
 
   const { statusToneVariant, statusLabel } = getExecutionStatus(executionResult, executeError, t);

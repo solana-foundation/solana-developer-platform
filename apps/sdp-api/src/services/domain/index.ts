@@ -7,10 +7,7 @@
 
 // Signing service - manages custody providers and signing operations
 export {
-  type CreateSigningRequestParams,
   type SigningConfigStore,
   type SigningConfiguration,
-  type SigningRequestRecord,
-  type SigningRequestStore,
   SigningService,
 } from "./signing.service";

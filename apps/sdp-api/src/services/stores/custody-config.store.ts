@@ -5,18 +5,14 @@
  * Supports DB-backed default resolution with project → organization fallback.
  */
 
-import type { SignStatus } from "@sdp/custody/signing";
 import type { PreparedStatement } from "@/db";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
-import { selectCustodyConfigTarget } from "@/services/domain/signing/custody-runtime-target";
-import type {
-  CreateSigningRequestParams,
-  SigningConfigStore,
-  SigningConfiguration,
-  SigningRequestRecord,
-  SigningRequestStore,
-} from "@/services/domain/signing.service";
+import {
+  type CustodyScopeSelection,
+  selectCustodyConfigTarget,
+} from "@/services/domain/signing/custody-runtime-target";
+import type { SigningConfigStore, SigningConfiguration } from "@/services/domain/signing.service";
 import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -95,21 +91,6 @@ interface CustodyWalletRow {
 interface CustodyWalletLookupRow extends CustodyWalletRow {
   provider: string;
   project_id: string | null;
-}
-
-interface SigningRequestRow {
-  id: string;
-  organization_id: string;
-  project_id: string | null;
-  custody_config_id: string;
-  token_transaction_id: string | null;
-  external_request_id: string | null;
-  status: string;
-  transaction_message: string;
-  signatures: string | null;
-  metadata: string | null;
-  created_at: string;
-  completed_at: string | null;
 }
 
 interface CustodyScopeDefaultRow {
@@ -257,8 +238,8 @@ export class CustodyConfigStore implements SigningConfigStore {
     orgId: string,
     projectId: string | undefined,
     configId: string
-  ): Promise<void> {
-    await selectCustodyConfigTarget(this.db, {
+  ): Promise<CustodyScopeSelection> {
+    return selectCustodyConfigTarget(this.db, {
       organizationId: orgId,
       projectId,
       configId,
@@ -881,139 +862,4 @@ export class CustodyConfigStore implements SigningConfigStore {
       projectId: row.project_id,
     };
   }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Signing Request Store Implementation
-// ═══════════════════════════════════════════════════════════════════════════
-
-export class SigningRequestStorePg implements SigningRequestStore {
-  constructor(private db: DatabaseClient) {}
-
-  /**
-   * Create a new signing request record.
-   */
-  async create(params: CreateSigningRequestParams): Promise<string> {
-    const id = `sig_${crypto.randomUUID()}`;
-
-    await this.db
-      .prepare(
-        `INSERT INTO signing_requests
-         (id, organization_id, project_id, custody_config_id, token_transaction_id, external_request_id, transaction_message, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        id,
-        params.organizationId,
-        params.projectId,
-        params.custodyConfigId,
-        params.tokenTransactionId ?? null,
-        params.externalRequestId,
-        params.transactionMessage,
-        params.metadata ? JSON.stringify(params.metadata) : null
-      )
-      .run();
-
-    return id;
-  }
-
-  /**
-   * Find a signing request by ID or external request ID.
-   */
-  async findByIdOrExternal(requestId: string): Promise<SigningRequestRecord | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT * FROM signing_requests
-         WHERE id = ? OR external_request_id = ?`
-      )
-      .bind(requestId, requestId)
-      .first<SigningRequestRow>();
-
-    return row ? this.mapRequestRow(row) : null;
-  }
-
-  /**
-   * Update the status of a signing request.
-   */
-  async updateStatus(id: string, status: SignStatus): Promise<void> {
-    if (status.status === "completed" && status.signatures) {
-      // Serialize signatures for storage
-      const signaturesJson = JSON.stringify(
-        Array.from(status.signatures.entries()).map(([publicKey, signature]) => ({
-          publicKey,
-          signature: encodeBase64(signature),
-        }))
-      );
-
-      await this.db
-        .prepare(
-          `UPDATE signing_requests
-           SET status = 'completed', signatures = ?, completed_at = datetime('now')
-           WHERE id = ?`
-        )
-        .bind(signaturesJson, id)
-        .run();
-    } else if (status.status === "rejected") {
-      await this.db
-        .prepare(
-          `UPDATE signing_requests
-           SET status = 'rejected', completed_at = datetime('now')
-           WHERE id = ?`
-        )
-        .bind(id)
-        .run();
-    } else if (status.status === "failed") {
-      await this.db
-        .prepare(
-          `UPDATE signing_requests
-           SET status = 'failed', completed_at = datetime('now')
-           WHERE id = ?`
-        )
-        .bind(id)
-        .run();
-    }
-  }
-
-  /**
-   * Get all pending signing requests for polling.
-   */
-  async findPending(orgId?: string): Promise<SigningRequestRecord[]> {
-    const query = orgId
-      ? `SELECT * FROM signing_requests WHERE status = 'pending' AND organization_id = ?`
-      : `SELECT * FROM signing_requests WHERE status = 'pending'`;
-
-    const { results } = await this.db
-      .prepare(query)
-      .bind(...(orgId ? [orgId] : []))
-      .all<SigningRequestRow>();
-
-    return results.map(this.mapRequestRow);
-  }
-
-  private mapRequestRow(row: SigningRequestRow): SigningRequestRecord {
-    return {
-      id: row.id,
-      organizationId: row.organization_id,
-      projectId: row.project_id,
-      custodyConfigId: row.custody_config_id,
-      tokenTransactionId: row.token_transaction_id,
-      externalRequestId: row.external_request_id,
-      status: row.status as "pending" | "completed" | "rejected" | "failed",
-      transactionMessage: row.transaction_message,
-      signatures: row.signatures,
-      metadata: row.metadata,
-    };
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Utilities
-// ═══════════════════════════════════════════════════════════════════════════
-
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
 }

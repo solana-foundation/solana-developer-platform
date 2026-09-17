@@ -77,7 +77,14 @@ export function createPostgresUnifiedTransactionsRepository(
         values.push(...aliases);
       }
       if (input.search !== undefined) {
-        const pattern = `%${escapeLikePattern(input.search)}%`;
+        // Prefix match, not contains: every searchable column is an
+        // identifier pasted from its start. This is still a scan — the
+        // underlying tables carry no ILIKE-compatible indexes on these
+        // columns — but a prefix comparison rejects rows on the first bytes
+        // instead of substring-searching every value, and it removes the
+        // guaranteed worst case a leading wildcard forces. The metered quota
+        // on the route is what actually bounds the spend.
+        const pattern = `${escapeLikePattern(input.search)}%`;
         clauses.push(
           "(id ILIKE ? ESCAPE '\\' OR module_id ILIKE ? ESCAPE '\\' OR signature ILIKE ? ESCAPE '\\')"
         );

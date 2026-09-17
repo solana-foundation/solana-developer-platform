@@ -22,8 +22,18 @@ import { formatDisplayLabel } from "@/lib/utils";
 
 type Translate = (key: MessageKey) => string;
 
-/** Human-readable action label, e.g. "update_authority" → "Update authority". */
-export function auditActionLabel(action: string): string {
+/** Human-readable action label, with resource context for overloaded audit verbs. */
+export function auditActionLabel(action: string, resourceType?: string, t?: Translate): string {
+  if (resourceType === "token_allowlist") {
+    if (action === "create" && t) return t("DashboardIssuance.activity.approveRecipient");
+    if (action === "revoke" && t) return t("DashboardIssuance.activity.removeRecipient");
+  }
+  if (resourceType === "token" && action === "create" && t) {
+    return t("DashboardIssuance.activity.createToken");
+  }
+  if (resourceType === "asset_profile" && action === "create" && t) {
+    return t("DashboardIssuance.activity.createAssetProfile");
+  }
   const label = formatDisplayLabel(action);
   // formatDisplayLabel title-cases every word; keep only the first capital so
   // labels read as sentence case ("Force burn", not "Force Burn").

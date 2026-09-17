@@ -3,16 +3,23 @@ import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "../../../errors";
 import type { RampRuntimeContext } from "../../types";
 import { BvnkRampClient } from "./client";
-import type { CreateBvnkCustomerV2Input } from "./schemas";
+import {
+  bvnkAgreementSession,
+  bvnkCustomer,
+  bvnkCustomerCreated,
+  bvnkIndividualCustomer,
+  bvnkLedgerWallet,
+  bvnkWalletProfilesResponse,
+} from "./test-fixtures";
 
-const runtimeContext = {
+const runtimeContext: RampRuntimeContext = {
   env: {
     BVNK_SANDBOX_WALLET_ID: "wallet_id",
     BVNK_SANDBOX_HAWK_AUTH_ID: "auth_id",
     BVNK_SANDBOX_HAWK_SECRET_KEY: "secret_key",
   },
   mode: "sandbox",
-} satisfies RampRuntimeContext;
+};
 
 const originalFetch = globalThis.fetch;
 
@@ -42,234 +49,110 @@ function queueFetch(...responses: Response[]): { requests: { url: string; init: 
   return { requests };
 }
 
-const individual = {
-  address: {
-    addressLine1: "1 Main Street",
-    city: "Austin",
-    postalCode: "78701",
-    stateCode: "TX",
-    countryCode: "US",
-  },
-  dateOfBirth: "1984-06-30",
-  firstName: "Jane",
-  lastName: "Doe",
-  birthCountryCode: "US",
-  nationality: "US",
-  taxIdentification: { number: "123-45-6789", taxResidenceCountryCode: "US" },
-  cdd: {
-    employmentStatus: "SALARIED",
-    sourceOfFunds: "SALARY",
-    pepStatus: "NOT_PEP",
-    intendedUseOfAccount: "TRANSFERS_OWN_WALLET",
-    expectedMonthlyVolume: { amount: "1000", currency: "USD" },
-    estimatedYearlyIncome: "INCOME_0_TO_50K",
-    employmentIndustrySector: "INVESTMENT",
-  },
-} satisfies CreateBvnkCustomerV2Input["individual"];
+const individual = bvnkIndividualCustomer();
 
-const customerSummary = {
-  id: "customer-id",
-  reference: "customer-reference",
-  status: "PENDING",
-  type: "INDIVIDUAL",
-  model: "EMBEDDED",
-  useCase: "STABLECOIN_PAYOUTS",
-};
+const session = bvnkAgreementSession();
 
-describe("BvnkRampClient v2 customer surfaces", () => {
-  it("creates a v2 customer and sends the required idempotency key", async () => {
-    const { requests } = queueFetch(respond(customerSummary, 201));
+describe("BvnkRampClient v1 customer surfaces", () => {
+  it("creates an agreement session for the residence country with the row-uuid idempotency header", async () => {
+    const { requests } = queueFetch(respond(session, 201));
 
-    const result = await new BvnkRampClient().createCustomerV2(runtimeContext, {
-      idempotencyKey: "customer-key",
-      useCase: "STABLECOIN_PAYOUTS",
-      reference: "customer-reference",
-      individual,
+    const result = await new BvnkRampClient().createAgreementSession(runtimeContext, {
+      countryCode: "US",
+      idempotencyKey: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
     });
 
-    assert.deepEqual(result, customerSummary);
-    assert.equal(new URL(requests[0].url).pathname, "/platform/v2/customers");
-    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "customer-key");
+    assert.deepEqual(result, session);
+    assert.equal(new URL(requests[0].url).pathname, "/platform/v1/customers/agreement/sessions");
+    assert.equal(
+      new Headers(requests[0].init.headers).get("X-Idempotency-Key"),
+      "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3"
+    );
     assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
-      useCase: "STABLECOIN_PAYOUTS",
-      reference: "customer-reference",
-      individual,
-    });
-  });
-
-  it("preserves dotted validation errors from v2 customer creation", async () => {
-    queueFetch(
-      respond(
-        {
-          message: "Validation failed",
-          details: { errors: { "individual.birthCountryCode": "Required" } },
-        },
-        400
-      )
-    );
-
-    await assert.rejects(
-      () =>
-        new BvnkRampClient().createCustomerV2(runtimeContext, {
-          idempotencyKey: "customer-key",
-          useCase: "STABLECOIN_PAYOUTS",
-          individual,
-        }),
-      (error: unknown) => {
-        assert.equal(error instanceof SdpPaymentsError, true);
-        if (!(error instanceof SdpPaymentsError)) return false;
-        assert.equal(error.message, "BVNK request failed with status 400: Validation failed");
-        assert.deepEqual(error.details, {
-          errors: { "individual.birthCountryCode": "Required" },
-        });
-        return true;
-      }
-    );
-  });
-
-  it("returns the full typed v2 customer detail including its fresh link", async () => {
-    const response = {
-      ...customerSummary,
-      status: "ACTIONS_REQUIRED",
-      authenticatedLink: {
-        link: "https://onboarding.example/customer",
-        expiresAt: "2030-01-01T00:00:00Z",
-      },
-      requiredActions: [{ type: "DATA", code: "TAX_ID", status: "REQUIRED" }],
-    };
-    queueFetch(respond({ ...response, individual }));
-
-    const result = await new BvnkRampClient().getCustomerV2(runtimeContext, {
-      id: customerSummary.id,
-    });
-
-    assert.deepEqual(result, response);
-  });
-
-  it("does not put a v2 customer response body in an error message", async () => {
-    const pii = "123-45-6789";
-    queueFetch(respond({ individual: { taxIdentification: { number: pii } } }, 500));
-
-    await assert.rejects(
-      () => new BvnkRampClient().getCustomerV2(runtimeContext, { id: customerSummary.id }),
-      (error: unknown) => {
-        assert.equal(error instanceof SdpPaymentsError, true);
-        if (!(error instanceof SdpPaymentsError)) return false;
-        assert.equal(error.message.includes(pii), false);
-        return true;
-      }
-    );
-  });
-});
-
-describe("BvnkRampClient v2 agreement surfaces", () => {
-  it("creates agreements", async () => {
-    const response = {
-      id: "working-set-id",
-      reference: "customer-reference",
-      agreements: [
-        {
-          id: "agreement-id",
-          status: "PENDING",
-          declinable: false,
-          name: "Terms",
-          description: "Platform terms and conditions",
-        },
-      ],
-      signingUrl: "https://onboarding.example/sign",
-    };
-    const { requests } = queueFetch(respond(response));
-
-    const result = await new BvnkRampClient().createAgreementsV2(runtimeContext, {
-      idempotencyKey: "agreement-key",
-      reference: "customer-reference",
-      useCase: "STABLECOIN_PAYOUTS",
       customerType: "INDIVIDUAL",
       countryCode: "US",
+      useCase: "EMBEDDED_FIAT_ACCOUNTS",
+    });
+  });
+
+  it("signs an agreement session with the consenting IP and accepts the empty 204", async () => {
+    const { requests } = queueFetch(new Response(null, { status: 204 }));
+
+    const result = await new BvnkRampClient().signAgreementSession(runtimeContext, {
+      reference: session.reference,
+      ipAddress: "203.0.113.10",
+    });
+
+    assert.equal(result, undefined);
+    assert.equal(
+      new URL(requests[0].url).pathname,
+      `/platform/v1/customers/agreement/sessions/${session.reference}`
+    );
+    assert.equal(requests[0].init.method, "PUT");
+    assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
+      status: "SIGNED",
+      ipAddress: "203.0.113.10",
+    });
+  });
+
+  it("creates a v1 customer with the idempotency header and no useCase", async () => {
+    const response = bvnkCustomerCreated();
+    const { requests } = queueFetch(respond(response, 201));
+
+    const result = await new BvnkRampClient().createCustomer(runtimeContext, {
+      idempotencyKey: "customer-key",
+      externalReference: "probe_v1_1789564047204",
+      signedAgreementSessionReference: session.reference,
+      individual,
     });
 
     assert.deepEqual(result, response);
-    assert.equal(new URL(requests[0].url).pathname, "/platform/v2/agreements");
-    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "agreement-key");
-  });
-
-  it("gets agreement content", async () => {
-    const response = {
-      downloadUrl: "https://files.example/agreement.pdf",
-      expiresAt: null,
-    };
-    queueFetch(respond(response));
-
-    const result = await new BvnkRampClient().getAgreementContentV2(runtimeContext, {
-      id: "agreement-id",
+    assert.equal(new URL(requests[0].url).pathname, "/platform/v1/customers");
+    assert.equal(new Headers(requests[0].init.headers).get("X-Idempotency-Key"), "customer-key");
+    const body = JSON.parse(String(requests[0].init.body)) as Record<string, unknown>;
+    assert.equal(body.useCase, undefined);
+    assert.equal(body.description, undefined);
+    assert.deepEqual(body, {
+      type: "individual",
+      externalReference: "probe_v1_1789564047204",
+      signedAgreementSessionReference: session.reference,
+      individual,
     });
-
-    assert.deepEqual(result, response);
   });
 
-  it("responds to agreements and parses per-agreement results", async () => {
-    const response = {
-      content: [{ agreementId: "agreement-id", status: "ACCEPTED" }],
-      totalElements: 1,
-      totalPages: 1,
-      hasNext: false,
-    };
+  it("returns the typed v1 customer including its verification link", async () => {
+    const response = bvnkCustomer();
     const { requests } = queueFetch(respond(response));
 
-    const result = await new BvnkRampClient().respondAgreementsV2(runtimeContext, {
-      idempotencyKey: "response-key",
-      reference: "customer-reference",
-      actions: [{ agreementId: "agreement-id", type: "ACCEPT" }],
+    const result = await new BvnkRampClient().getCustomer(runtimeContext, {
+      reference: response.reference,
     });
 
     assert.deepEqual(result, response);
-    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "response-key");
+    assert.equal(new URL(requests[0].url).pathname, `/platform/v1/customers/${response.reference}`);
   });
 
-  it("lists customer agreements", async () => {
-    const response = {
-      totalElements: 1,
-      totalPages: 1,
-      content: [
-        {
-          id: "assigned-agreement-id",
-          agreement: { version: null, title: "Terms", locale: null },
-          status: "ACCEPTED",
-          respondedAt: null,
-          respondedToDocumentChecksum: null,
-        },
-      ],
-      hasNext: false,
-    };
-    queueFetch(respond(response));
+  it("resolves a PENDING v1 customer whose verification block has no Sumsub link", async () => {
+    queueFetch(
+      respond({
+        reference: session.reference,
+        status: "PENDING",
+        verification: { status: "pending" },
+      })
+    );
 
-    const result = await new BvnkRampClient().listCustomerAgreementsV2(runtimeContext, {
-      customerId: customerSummary.id,
+    const result = await new BvnkRampClient().getCustomer(runtimeContext, {
+      reference: session.reference,
     });
 
-    assert.deepEqual(result, response);
+    const verification = result.verification;
+    assert.equal(verification === undefined ? undefined : verification.url, undefined);
+    assert.equal(verification === undefined ? undefined : verification.status, "pending");
   });
 });
 
 describe("BvnkRampClient v2 ledger surfaces", () => {
-  const wallet = {
-    id: "wallet-id",
-    name: "USD Wallet",
-    status: "ACTIVE",
-    paymentInstruments: [
-      {
-        type: "FIAT",
-        accountHolderName: "Jane Doe",
-        accountNumber: "123456789",
-        bankDetails: {
-          name: "Example Bank",
-          bic: "EXAMPLEUS",
-          nid: { value: "021000021", type: "ROUTING_NUMBER" },
-        },
-        remittanceInformationPrefix: "REF-123",
-      },
-    ],
-  };
+  const wallet = bvnkLedgerWallet();
 
   it("creates a ledger wallet", async () => {
     const { requests } = queueFetch(respond(wallet, 201));
@@ -278,7 +161,7 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
       idempotencyKey: "wallet-key",
       currency: "USD",
       name: "USD Wallet",
-      customerId: customerSummary.id,
+      customerId: "customer-id",
       profileId: "fiat:usd:profile",
     });
 
@@ -300,16 +183,79 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
   });
 
   it("lists ledger wallet profiles and rails", async () => {
-    const response = {
-      totalElements: 1,
-      totalPages: 1,
-      content: [{ id: "fiat:usd:profile", currencies: ["USD"], methods: ["ACH", "FEDWIRE"] }],
-      hasNext: false,
-    };
+    const response = bvnkWalletProfilesResponse();
     queueFetch(respond(response));
 
     const result = await new BvnkRampClient().listLedgerWalletProfilesV2(runtimeContext);
 
     assert.deepEqual(result, response);
+  });
+});
+
+describe("BvnkRampClient response parsing", () => {
+  it("treats a malformed v1 customer response as provider-unavailable", async () => {
+    queueFetch(respond({ unexpected: "shape" }));
+
+    await assert.rejects(
+      () =>
+        new BvnkRampClient().getCustomer(runtimeContext, {
+          reference: session.reference,
+        }),
+      (error: unknown) => {
+        assert.equal(error instanceof SdpPaymentsError, true);
+        if (!(error instanceof SdpPaymentsError)) return false;
+        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(error.message, "BVNK response is malformed.");
+        return true;
+      }
+    );
+  });
+});
+
+describe("BvnkRampClient estimate and simulation surfaces", () => {
+  it("computes off-ramp net fiat and total fees with exact decimal math", async () => {
+    queueFetch(
+      respond({
+        walletCurrency: "USD",
+        walletRequiredAmount: 100.5,
+        paidCurrency: "USDC",
+        paidRequiredAmount: 1,
+        feeCurrency: "USD",
+        feePredictedAmount: 0.25,
+        networkFeeCurrency: "USD",
+        networkFeePredictedAmount: 0.05,
+        totalWalletAmount: 100.8,
+        exchangeRate: 100.8,
+      })
+    );
+
+    const result = await new BvnkRampClient().estimateOfframp(runtimeContext, {
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      cryptoAmount: "1",
+    });
+
+    assert.equal(result.fiatAmount, "100.2");
+    assert.equal(result.fees.total, "0.3");
+    assert.equal(result.fees.provider, "0.25");
+    assert.equal(result.fees.network, "0.05");
+    assert.equal(result.exchangeRate, "100.2");
+  });
+
+  it("forwards the SDP transfer id as the remittance reference and idempotency key", async () => {
+    const { requests } = queueFetch(respond({ ok: true }));
+
+    await new BvnkRampClient().simulatePayin(runtimeContext, {
+      walletId: "wallet_id",
+      amount: 100,
+      currency: "USD",
+      originatorName: "Jane Doe",
+      remittanceInformation: "xfr_9f3b1c2d4e5f",
+      idempotencyKey: "xfr_9f3b1c2d4e5f",
+    });
+
+    const body = JSON.parse(String(requests[0].init.body));
+    assert.equal(body.remittanceInformation, "xfr_9f3b1c2d4e5f");
+    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "xfr_9f3b1c2d4e5f");
   });
 });

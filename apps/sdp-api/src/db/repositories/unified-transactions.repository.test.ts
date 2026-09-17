@@ -1,4 +1,4 @@
-import { wellKnownMint } from "@sdp/types";
+import { type UnifiedTransactionModule, wellKnownMint } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
@@ -117,6 +117,32 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       limit: 25,
     });
     expect(result.rows.map((row) => row.id)).toEqual(["xfr_unified_match"]);
+  });
+
+  it("matches search as a prefix of the identifier, never a substring", async () => {
+    await seedTransfer({
+      id: "xfr_unified_searchable",
+      type: "transfer",
+      status: "confirmed",
+      custodyWalletId: CUSTODY_WALLET,
+      counterpartyId: null,
+    });
+    const repository = createPostgresUnifiedTransactionsRepository(getDb(env));
+    const base = {
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT,
+      modules: ["payments"] as UnifiedTransactionModule[],
+      limit: 25,
+    };
+
+    const byPrefix = await repository.list({ ...base, search: "xfr_unified_sea" });
+    expect(byPrefix.rows.map((row) => row.id)).toEqual(["xfr_unified_searchable"]);
+
+    // A leading wildcard would force a sequential scan of every module's
+    // money table behind the view, so substring search is deliberately not
+    // offered.
+    const bySubstring = await repository.list({ ...base, search: "unified_searchable" });
+    expect(bySubstring.rows).toEqual([]);
   });
 
   it("filters by counterparty ID", async () => {
