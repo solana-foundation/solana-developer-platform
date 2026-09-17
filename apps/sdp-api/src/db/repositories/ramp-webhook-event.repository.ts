@@ -193,12 +193,22 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
     },
 
     async rearmParkedByOtherRevisions(appRevision) {
+      // Same batch and lock discipline as the claim path: bounded per pass —
+      // the parked set is small by nature, and the next minutely pass takes
+      // the rest — and SKIP LOCKED so overlapping passes never fight over a
+      // row.
       const result = await db
         .prepare(
           `UPDATE ramp_webhook_events
              SET status = 'pending', attempts = 0, parked_app_revision = NULL,
                  updated_at = sdp_iso_now()
-           WHERE status = 'failed' AND parked_app_revision IS DISTINCT FROM ?
+           WHERE id IN (
+             SELECT id FROM ramp_webhook_events
+              WHERE status = 'failed' AND parked_app_revision IS DISTINCT FROM ?
+              ORDER BY created_at ASC
+              LIMIT 100
+              FOR UPDATE SKIP LOCKED
+           )
            RETURNING *`
         )
         .bind(appRevision)
