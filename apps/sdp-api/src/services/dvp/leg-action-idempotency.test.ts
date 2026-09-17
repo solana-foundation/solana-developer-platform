@@ -363,6 +363,32 @@ describe("runDvpCloseOnce", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  // The close went out but this request could not confirm it. Recording that as
+  // the answer would let the retry read it back as landed, and the handler
+  // records a landed close as a settled trade: an unconfirmed broadcast would
+  // become a terminal state nothing verified.
+  it("does not answer a retry with an unconfirmed close", async () => {
+    const unconfirmed = async (recordAttempt: RecordDvpLegActionAttempt) => {
+      await recordAttempt({ signature: SIG, amount: null, expiryHeight: "500" });
+      return { signature: SIG, landed: false };
+    };
+    await expect(closeOnce("close-8", unconfirmed)).resolves.toEqual({
+      result: { signature: SIG, landed: false },
+      replayed: false,
+    });
+
+    // Still able to land, so the retry waits rather than inventing an outcome.
+    readDvpFundingReceipt.mockResolvedValue("pending");
+    await expect(closeOnce("close-8", unconfirmed)).rejects.toThrow(/still being processed/);
+
+    // Once the chain says it landed, the retry may be told so.
+    readDvpFundingReceipt.mockResolvedValue("landed");
+    await expect(closeOnce("close-8", unconfirmed)).resolves.toEqual({
+      result: { signature: SIG, landed: true },
+      replayed: true,
+    });
+  });
+
   // Nothing recorded means nothing was signed and nothing was sent, which is
   // the one case where the same key may be tried again immediately.
   it("frees the key when the close is refused before it signs anything", async () => {

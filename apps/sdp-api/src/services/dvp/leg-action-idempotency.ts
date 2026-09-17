@@ -245,9 +245,16 @@ export async function runDvpCloseOnce(
 ): Promise<{ result: DvpCloseActionResult; replayed: boolean }> {
   return runDvpActionOnce(env, idempotencyKey, scope, {
     run,
-    // Only a landed close is ever replayed, so the replayed answer is confirmed.
     replay: (_side, attempt) => ({ signature: attempt.signature, landed: true }),
     releaseOnError: (_error, recorded) => !recorded,
+    // A close the request could not confirm is NOT the answer to replay. Marking
+    // it sent would let the next retry read it back as a landed close, and the
+    // handler records a landed close as a settled or cancelled trade: an
+    // unconfirmed broadcast would become a terminal state nothing verified.
+    // Left pending, the attempt stays on the row and the retry asks the chain,
+    // which is the only thing that knows. Once it answers `landed` the row is
+    // marked sent and replayed as confirmed.
+    markSent: (result) => result.landed,
   });
 }
 
@@ -272,6 +279,11 @@ async function runDvpActionOnce<TResult extends { signature: Signature }>(
     replay: (side: "a" | "b" | null, attempt: DvpLegActionAttempt) => TResult;
     /** Whether a failure proves nothing was sent, so the key can be reused. */
     releaseOnError: (error: unknown, recorded: boolean) => boolean;
+    /**
+     * Whether this answer is the one a retry should be given. Defaults to true;
+     * a close overrides it, because an unconfirmed broadcast is not an answer.
+     */
+    markSent?: (result: TResult) => boolean;
   }
 ): Promise<{ result: TResult; replayed: boolean }> {
   if (idempotencyKey === null) {
@@ -316,6 +328,12 @@ async function runDvpActionOnce<TResult extends { signature: Signature }>(
       await requests.release(heldId);
     }
     throw error;
+  }
+
+  if (handlers.markSent !== undefined && !handlers.markSent(result)) {
+    // Deliberately left pending with its attempt on the row; the next retry
+    // resolves it from the chain rather than replaying an unverified answer.
+    return { result, replayed: false };
   }
 
   try {
