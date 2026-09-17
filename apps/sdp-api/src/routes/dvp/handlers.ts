@@ -514,16 +514,21 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
 
   const result = await closeDvpTrade(c, trade, action, settlement);
 
-  // We broadcast it, so we know the outcome — not `closed_unknown` from the sweep.
-  const closed = await createDvpTradeRepository(c.env).recordClose(
-    trade.id,
-    action === "settle" ? "settled" : "cancelled",
-    result.signature
-  );
+  // Recorded only once the close is confirmed: a second close can be accepted by
+  // the RPC and still be the one that fails. An unconfirmed close is left to the
+  // observation below and the reconciler, which decode what actually landed.
+  const closed = result.landed
+    ? await createDvpTradeRepository(c.env).recordClose(
+        trade.id,
+        action === "settle" ? "settled" : "cancelled",
+        result.signature
+      )
+    : null;
 
-  // The observation is a compare-and-swap on the row's status, so it has to
-  // see the closed row, not the one read before the close. A null means the
-  // reconciler already moved the row from a chain read, which beats this.
+  // The observation is a compare-and-swap on the row's status, so it has to see
+  // the closed row. A null means the close is unconfirmed, and the page's own
+  // polling or the reconciler reads it once it lands, or the reconciler already
+  // moved the row from a chain read, which beats this.
   if (closed !== null) {
     await observeDvpTradeNow(c.env, closed, result.signature);
   }
@@ -532,6 +537,7 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     tradeId: trade.id,
     action,
     signature: result.signature,
+    confirmed: result.landed,
   });
 };
 

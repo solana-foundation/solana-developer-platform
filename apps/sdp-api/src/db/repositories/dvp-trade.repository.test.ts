@@ -1,5 +1,5 @@
 import { DVP_SETTLEMENT_AVAILABILITY } from "@sdp/types";
-import { type Address, address, signature } from "@solana/kit";
+import { type Address, address, getBase58Decoder, signature } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -377,6 +377,133 @@ describe("DvpTradeRepository (postgres)", () => {
     });
   });
 
+  /**
+   * PRO-1973. One close lock per trade, so of a settle and a cancel sent
+   * together only one goes out. Every write names the signature it holds, so a
+   * slow request can never free or move a lock taken after its own was swept.
+   */
+  describe("close lock", () => {
+    const signatureOf = (byte: number) =>
+      signature(getBase58Decoder().decode(new Uint8Array(64).fill(byte)));
+    const AUTHORITY_SIGNATURE = signatureOf(2);
+    const SPONSORED_SIGNATURE = signatureOf(3);
+    const OTHER_SIGNATURE = signatureOf(4);
+
+    async function openTrade() {
+      const created = await repo.create(tradeInsert());
+      await repo.resolveCreate(created.id, "created");
+      return created;
+    }
+
+    it("admits exactly one close lock on a trade", async () => {
+      const created = await openTrade();
+
+      const [first, second] = await Promise.all([
+        repo.claimClose(created.id, {
+          action: "settle",
+          signature: AUTHORITY_SIGNATURE,
+          expiryHeight: "500",
+        }),
+        repo.claimClose(created.id, {
+          action: "cancel",
+          signature: OTHER_SIGNATURE,
+          expiryHeight: "500",
+        }),
+      ]);
+
+      expect([first, second].filter(Boolean)).toHaveLength(1);
+      const read = await repo.getById(scope, created.id);
+      expect(read?.closeClaim?.action).toBe(first ? "settle" : "cancel");
+    });
+
+    it("refuses a close lock on a trade that is already closed", async () => {
+      const created = await openTrade();
+      await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
+
+      await expect(
+        repo.claimClose(created.id, {
+          action: "cancel",
+          signature: AUTHORITY_SIGNATURE,
+          expiryHeight: "500",
+        })
+      ).resolves.toBe(false);
+    });
+
+    it("moves the lock only from the signature it holds", async () => {
+      const created = await openTrade();
+      await repo.claimClose(created.id, {
+        action: "settle",
+        signature: AUTHORITY_SIGNATURE,
+        expiryHeight: "500",
+      });
+
+      await expect(
+        repo.rebindCloseClaim(created.id, OTHER_SIGNATURE, SPONSORED_SIGNATURE)
+      ).resolves.toBe(false);
+      await expect(
+        repo.rebindCloseClaim(created.id, AUTHORITY_SIGNATURE, SPONSORED_SIGNATURE)
+      ).resolves.toBe(true);
+      await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+        closeClaim: { action: "settle", signature: SPONSORED_SIGNATURE, expiryHeight: "500" },
+      });
+    });
+
+    it("frees the lock only for the signature it holds", async () => {
+      const created = await openTrade();
+      await repo.claimClose(created.id, {
+        action: "cancel",
+        signature: AUTHORITY_SIGNATURE,
+        expiryHeight: "500",
+      });
+
+      await repo.releaseCloseClaim(created.id, OTHER_SIGNATURE);
+      expect((await repo.getById(scope, created.id))?.closeClaim).not.toBeNull();
+
+      await repo.releaseCloseClaim(created.id, AUTHORITY_SIGNATURE);
+      expect((await repo.getById(scope, created.id))?.closeClaim).toBeNull();
+    });
+
+    // A request that died holding the lock must not hold the trade forever,
+    // and one that can still land must not be freed under it.
+    it("sweeps only locks past their last valid height", async () => {
+      const created = await openTrade();
+      const other = await repo.create(
+        tradeInsert({
+          id: "dvp_trade_test_2",
+          swapDvp: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
+        })
+      );
+      await repo.resolveCreate(other.id, "created");
+      await repo.claimClose(created.id, {
+        action: "settle",
+        signature: AUTHORITY_SIGNATURE,
+        expiryHeight: "500",
+      });
+      await repo.claimClose(other.id, {
+        action: "cancel",
+        signature: OTHER_SIGNATURE,
+        expiryHeight: "900",
+      });
+
+      await expect(repo.releaseExpiredCloseClaims(900n)).resolves.toBe(1);
+      expect((await repo.getById(scope, created.id))?.closeClaim).toBeNull();
+      expect((await repo.getById(scope, other.id))?.closeClaim?.signature).toBe(OTHER_SIGNATURE);
+    });
+
+    it("clears the lock when the close is recorded", async () => {
+      const created = await openTrade();
+      await repo.claimClose(created.id, {
+        action: "settle",
+        signature: CLOSE_SIGNATURE,
+        expiryHeight: "500",
+      });
+
+      const closed = await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
+
+      expect(closed).toMatchObject({ status: "settled", closeClaim: null });
+    });
+  });
+
   it("sets the close time on the first closed observation and never moves it", async () => {
     const db = getDb(env);
     const created = await repo.create(tradeInsert());
@@ -500,6 +627,187 @@ describe("DvpTradeRepository (postgres)", () => {
     const listed = await repo.listOpenForReconciliation(10);
 
     expect(listed.map((trade) => trade.id).sort()).toEqual(["dvp_closed_recent", "dvp_open_old"]);
+  });
+
+  /**
+   * PRO-1930, PRO-1974. The sweep's limit is shared out between live trades,
+   * expired trades still holding something, and trades kept only for late
+   * deposits, so a crowd in one lane can slow the others but never shut them out.
+   */
+  describe("reconciliation lanes", () => {
+    const swapFor = (index: number) =>
+      address(getBase58Decoder().decode(new Uint8Array(32).fill(index + 1)));
+
+    /** Inserts a trade and forces the row into the state the lane reads. */
+    async function seedLaned(
+      id: string,
+      index: number,
+      state: {
+        status: string;
+        observedAt: string;
+        escrows?: [string | null, string | null];
+        expiryTimestamp?: string;
+        closedDaysAgo?: number;
+      }
+    ) {
+      await repo.create(
+        tradeInsert({
+          id,
+          swapDvp: swapFor(index),
+          ...(state.expiryTimestamp === undefined
+            ? {}
+            : { expiryTimestamp: state.expiryTimestamp }),
+        })
+      );
+      await getDb(env)
+        .prepare(
+          `UPDATE dvp_trades
+              SET status = ?, observed_at = ?, escrow_a_amount = ?, escrow_b_amount = ?,
+                  closed_at = CASE WHEN ?::int IS NULL THEN NULL
+                                   ELSE (CURRENT_TIMESTAMP - make_interval(days => ?::int))::text END
+            WHERE id = ?`
+        )
+        .bind(
+          state.status,
+          state.observedAt,
+          state.escrows?.[0] ?? null,
+          state.escrows?.[1] ?? null,
+          state.closedDaysAgo ?? null,
+          state.closedDaysAgo ?? null,
+          id
+        )
+        .run();
+    }
+
+    /** An expiry an hour ago, in unix seconds. */
+    const RECENT_EXPIRY = String(Math.floor(Date.now() / 1000) - 3_600);
+
+    it("gives expired and late-deposit work their share when live trades fill the limit", async () => {
+      for (let index = 0; index < 6; index += 1) {
+        await seedLaned(`dvp_live_${index}`, index, {
+          status: "created",
+          observedAt: `2026-09-01T00:00:0${index}.000Z`,
+        });
+      }
+      // Observed long after every live trade, so stalest-first alone would
+      // never reach these two.
+      await seedLaned("dvp_expired_funded", 10, {
+        status: "expired",
+        observedAt: "2026-09-10T00:00:00.000Z",
+        escrows: ["1000", "0"],
+        expiryTimestamp: RECENT_EXPIRY,
+      });
+      await seedLaned("dvp_recently_settled", 11, {
+        status: "settled",
+        observedAt: "2026-09-10T00:00:00.000Z",
+        closedDaysAgo: 1,
+      });
+
+      const listed = await repo.listOpenForReconciliation(4);
+
+      expect(listed.map((trade) => trade.id)).toEqual([
+        "dvp_live_0",
+        "dvp_live_1",
+        "dvp_expired_funded",
+        "dvp_recently_settled",
+      ]);
+    });
+
+    it("gives an empty lane's turns to the lanes that have work", async () => {
+      for (let index = 0; index < 5; index += 1) {
+        await seedLaned(`dvp_live_${index}`, index, {
+          status: "funded",
+          observedAt: `2026-09-01T00:00:0${index}.000Z`,
+        });
+      }
+
+      const listed = await repo.listOpenForReconciliation(4);
+
+      expect(listed).toHaveLength(4);
+    });
+
+    // An expired trade with nothing left in it and nothing moving on its legs
+    // has no work, so it stops taking a live trade's turn.
+    it("moves an emptied expired trade out of the live lanes, and a claim keeps it in", async () => {
+      for (let index = 0; index < 4; index += 1) {
+        await seedLaned(`dvp_live_${index}`, index, {
+          status: "created",
+          observedAt: `2026-09-01T00:00:0${index}.000Z`,
+        });
+      }
+      await seedLaned("dvp_expired_empty", 10, {
+        status: "expired",
+        observedAt: "2026-08-01T00:00:00.000Z",
+        escrows: ["0", "0"],
+        expiryTimestamp: RECENT_EXPIRY,
+      });
+      await seedLaned("dvp_expired_claimed", 11, {
+        status: "expired",
+        observedAt: "2026-08-02T00:00:00.000Z",
+        escrows: ["0", "0"],
+        expiryTimestamp: RECENT_EXPIRY,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO dvp_leg_funding_claims
+             (trade_id, side, organization_id, project_id, custody_wallet_id, signature, expiry_height, funding_tx)
+           VALUES ('dvp_expired_claimed', 'a', ?, ?, ?, 'sig_receipt', '100', 'sig_receipt')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT_ID, CUSTODY_WALLET_ID)
+        .run();
+
+      const lanes = await repo.listOpenForReconciliation(8);
+
+      // Round one: two live, the claimed expired trade, then the emptied one in
+      // the late-deposit lane even though it is the stalest row of all.
+      expect(lanes.slice(0, 4).map((trade) => trade.id)).toEqual([
+        "dvp_live_0",
+        "dvp_live_1",
+        "dvp_expired_claimed",
+        "dvp_expired_empty",
+      ]);
+    });
+
+    it("drops an emptied expired trade a week past its expiry, like a closed one", async () => {
+      await seedLaned("dvp_expired_long_ago", 1, {
+        status: "expired",
+        observedAt: "2026-08-01T00:00:00.000Z",
+        escrows: ["0", "0"],
+        expiryTimestamp: String(Math.floor(Date.now() / 1000) - 8 * 86_400),
+      });
+      await seedLaned("dvp_expired_unobserved", 2, {
+        status: "expired",
+        observedAt: "2026-08-01T00:00:00.000Z",
+        escrows: [null, null],
+        expiryTimestamp: String(Math.floor(Date.now() / 1000) - 8 * 86_400),
+      });
+
+      const listed = await repo.listOpenForReconciliation(8);
+
+      // Never observed empty is not known empty: that one keeps its lane.
+      expect(listed.map((trade) => trade.id)).toEqual(["dvp_expired_unobserved"]);
+    });
+
+    // A settle or cancel that went out and never confirmed still needs the
+    // sweep: it reads what landed and releases the lock. Dropping the trade
+    // would leave it open with a lock nothing clears.
+    it("keeps an expired trade whose close is still in flight, however old", async () => {
+      await seedLaned("dvp_expired_closing", 1, {
+        status: "expired",
+        observedAt: "2026-08-01T00:00:00.000Z",
+        escrows: ["0", "0"],
+        expiryTimestamp: String(Math.floor(Date.now() / 1000) - 8 * 86_400),
+      });
+      await repo.claimClose("dvp_expired_closing", {
+        action: "settle",
+        signature: CLOSE_SIGNATURE,
+        expiryHeight: "100",
+      });
+
+      const listed = await repo.listOpenForReconciliation(8);
+
+      expect(listed.map((trade) => trade.id)).toEqual(["dvp_expired_closing"]);
+    });
   });
 
   // Compare-and-swap: whoever moved the row off `creating` first had better

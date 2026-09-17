@@ -41,6 +41,7 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import { assertTradeNotClosing } from "./close-exclusion";
 import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 import { readMintDecimals } from "./mints";
 import { readDvpAccounts, readEscrowState } from "./read-chain";
@@ -401,6 +402,15 @@ export async function executeDvpFunding(
     throw conflict(`DvP trade ${trade.id}: this leg is already being funded by another request.`, {
       reason: DVP_LEG_REFUSAL.legFundingInProgress,
     });
+  }
+
+  // With the leg locked, a settle or cancel that starts now sees the lock and
+  // backs off. One that locked the trade first is seen here instead.
+  try {
+    await assertTradeNotClosing(env, rpc, trade.id);
+  } catch (error) {
+    await plan.release(claimSignature);
+    throw error;
   }
 
   let heldSignature: Signature = claimSignature;
