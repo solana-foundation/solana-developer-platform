@@ -33,15 +33,18 @@ export const RAMP_WEBHOOK_EVENT_REPLAY_BATCH = 50;
 export const RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT = "sdp_api_ramp_webhook_event_exhausted";
 
 /**
- * The identity a parked row is stamped with; a later release changes it.
- * Deliberately the release version, NOT K_REVISION: the api service parks
- * rows (background apply) and the worker re-arms them, and Cloud Run gives
- * every service its own revision name — a per-service identity would make
- * the two sides re-arm each other's parks forever. API_VERSION is the same
- * for both services within a release and moves exactly when a release ships.
+ * The identity a parked row is stamped with; a later deploy changes it.
+ * Deliberately the image build SHA, NOT K_REVISION and not API_VERSION: the
+ * api service parks rows (background apply) and the worker re-arms them, and
+ * Cloud Run gives every service its own revision name, while API_VERSION is
+ * static configuration that deploys do not bump. Both services deploy from
+ * the same image, so its build SHA is shared by the two sides and moves
+ * exactly when a deploy ships. A runtime without one (local, compose) uses a
+ * fixed placeholder: no deploys happen there, so nothing re-arms.
  */
 function currentAppRevision(env: Env): string {
-  return env.API_VERSION ?? "local";
+  const sha = env.SDP_BUILD_SHA?.trim();
+  return sha ? sha : "local";
 }
 
 /**

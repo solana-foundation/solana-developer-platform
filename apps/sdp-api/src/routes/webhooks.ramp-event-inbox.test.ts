@@ -274,7 +274,7 @@ describe("Ramp webhook event inbox", () => {
       .bind(
         fromOldDeploy.id,
         fromNullRevision.id,
-        env.API_VERSION ?? "local",
+        env.SDP_BUILD_SHA?.trim() || "local",
         fromOldDeploy.id,
         fromNullRevision.id,
         fromCurrentDeploy.id
