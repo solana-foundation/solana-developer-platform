@@ -102,6 +102,11 @@ COPY --from=builder --chown=sdp:nodejs /repo/apps/sdp-api/src/db/migrations/post
 
 # Pass --build-arg GIT_SHA=$(git rev-parse HEAD) to stamp the image.
 ARG GIT_SHA=""
+# Exposed to the runtime: the api service and the worker deploy from this same
+# image, so the build SHA is the one identity that is shared by both and
+# changes exactly when a deploy ships — the ramp webhook inbox uses it to
+# re-arm parked events after a deploy.
+ENV SDP_BUILD_SHA="$GIT_SHA"
 ARG IMAGE_SOURCE="https://github.com/solana-foundation/solana-developer-platform"
 LABEL org.opencontainers.image.title="sdp-api" \
       org.opencontainers.image.description="Solana Developer Platform — API (Node.js runtime)" \
