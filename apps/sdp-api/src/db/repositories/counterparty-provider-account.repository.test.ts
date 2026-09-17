@@ -812,7 +812,8 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       provider: "bvnk";
       id: string;
       sessionReference: string;
-      signedAt: string;
+      field: "signedAt";
+      timestamp: string;
     } = {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
@@ -820,11 +821,12 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       provider: "bvnk",
       id: seeded.id,
       sessionReference: "bvnk_session_signed",
-      signedAt: "2026-09-16T17:19:03.631Z",
+      field: "signedAt",
+      timestamp: "2026-09-16T17:19:03.631Z",
     };
 
     expect(
-      await repository.markCustomerLinkSessionSigned({
+      await repository.markCustomerLinkSessionTimestamp({
         ...input,
         counterpartyId: otherCounterparty.id,
       })
@@ -842,7 +844,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       residenceCountryCode: "US",
       session: { reference: "bvnk_session_signed", agreements: [] },
     });
-    expect(await repository.markCustomerLinkSessionSigned(input)).toMatchObject({
+    expect(await repository.markCustomerLinkSessionTimestamp(input)).toMatchObject({
       metadata: {
         session: {
           reference: "bvnk_session_signed",
@@ -850,7 +852,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         },
       },
     });
-    expect(await repository.markCustomerLinkSessionSigned(input)).toBeNull();
+    expect(await repository.markCustomerLinkSessionTimestamp(input)).toBeNull();
   });
 
   it("CAS-marks agreement consent without replacing a recorded signature", async () => {
@@ -878,11 +880,12 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       provider: "bvnk" as const,
       id: seeded.id,
       sessionReference: "bvnk_session_consent",
-      consentSubmittedAt: "2026-09-16T17:20:03.631Z",
+      field: "consentSubmittedAt" as const,
+      timestamp: "2026-09-16T17:20:03.631Z",
     };
 
     expect(
-      await repository.markCustomerLinkConsentSubmitted({
+      await repository.markCustomerLinkSessionTimestamp({
         ...input,
         counterpartyId: otherCounterparty.id,
       })
@@ -905,7 +908,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       },
     });
 
-    const updated = await repository.markCustomerLinkConsentSubmitted(input);
+    const updated = await repository.markCustomerLinkSessionTimestamp(input);
     if (updated === null) {
       throw new Error("Expected BVNK customer link consent submission");
     }
@@ -918,7 +921,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         consentSubmittedAt: "2026-09-16T17:20:03.631Z",
       },
     });
-    expect(await repository.markCustomerLinkConsentSubmitted(input)).toBeNull();
+    expect(await repository.markCustomerLinkSessionTimestamp(input)).toBeNull();
   });
 
   it("lists active and archived external rows with parent and tenant filters", async () => {

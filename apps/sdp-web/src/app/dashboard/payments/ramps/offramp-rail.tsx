@@ -93,7 +93,6 @@ export function OfframpRail({
   const verificationPending =
     onOnboardingStep &&
     wizard.onboarding !== null &&
-    wizard.onboarding !== undefined &&
     isRampOnboardingPendingStatus(wizard.onboarding.status);
   return (
     <RampWizardShell

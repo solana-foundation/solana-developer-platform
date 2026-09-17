@@ -190,16 +190,13 @@ export interface FindCustomerLinkBySessionReferenceInput {
   sessionReference: string;
 }
 
-export interface MarkCustomerLinkSessionSignedInput extends GetCounterpartyProviderAccountInput {
-  id: string;
-  sessionReference: string;
-  signedAt: string;
-}
+export type BvnkSessionTimestampField = "signedAt" | "consentSubmittedAt";
 
-export interface MarkCustomerLinkConsentSubmittedInput extends GetCounterpartyProviderAccountInput {
+export interface MarkCustomerLinkSessionTimestampInput extends GetCounterpartyProviderAccountInput {
   id: string;
   sessionReference: string;
-  consentSubmittedAt: string;
+  field: BvnkSessionTimestampField;
+  timestamp: string;
 }
 
 export interface InsertPendingExternalAccountInput extends ListActiveExternalAccountsInput {
@@ -351,23 +348,16 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * CAS-marks an active customer-link agreement session as signed.
+   * CAS-marks an agreement-session timestamp field on an active customer link.
+   * The write lands only while the session still lacks that field, so a
+   * replayed signature or consent event loses the CAS instead of overwriting
+   * the earlier record.
    *
-   * @param input - Tenant scope, row id, provider, session reference, and provider event timestamp.
-   * @returns The signed row, or null when the session was already signed or is outside the scope.
+   * @param input - Tenant scope, row id, provider, session reference, the timestamp field to record, and its value.
+   * @returns The updated row, or null when the field was already set or the row is outside the scope.
    */
-  markCustomerLinkSessionSigned(
-    input: MarkCustomerLinkSessionSignedInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
-   * CAS-marks an active customer-link agreement session as consent submitted.
-   *
-   * @param input - Tenant scope, row id, provider, session reference, and consent submission timestamp.
-   * @returns The consent-submitted row, or null when consent was already submitted or the row is outside the scope.
-   */
-  markCustomerLinkConsentSubmitted(
-    input: MarkCustomerLinkConsentSubmittedInput
+  markCustomerLinkSessionTimestamp(
+    input: MarkCustomerLinkSessionTimestampInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

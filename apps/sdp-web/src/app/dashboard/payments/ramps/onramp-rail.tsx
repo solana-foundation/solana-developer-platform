@@ -85,7 +85,6 @@ export function OnrampRail({
   const verificationPending =
     onOnboardingStep &&
     wizard.onboarding !== null &&
-    wizard.onboarding !== undefined &&
     isRampOnboardingPendingStatus(wizard.onboarding.status);
 
   const summaryDetails = [

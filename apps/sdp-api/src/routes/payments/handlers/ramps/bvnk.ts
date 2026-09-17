@@ -946,11 +946,12 @@ async function recordBvnkAgreementConsent(
     ipAddress: ipAddress === null ? BVNK_UNRESOLVED_CONSENT_IP : ipAddress,
   });
   const consentSubmittedAt = new Date().toISOString();
-  const updated = await accounts.markCustomerLinkConsentSubmitted({
+  const updated = await accounts.markCustomerLinkSessionTimestamp({
     ...scope,
     id: input.providerAccountId,
     sessionReference: input.sessionReference,
-    consentSubmittedAt,
+    field: "consentSubmittedAt",
+    timestamp: consentSubmittedAt,
   });
   if (updated !== null) {
     getLogger().info(

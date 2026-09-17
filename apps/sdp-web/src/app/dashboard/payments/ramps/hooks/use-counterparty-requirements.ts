@@ -429,7 +429,7 @@ export function useCounterpartyRequirements(
   // filters on the CURRENT corridor identity — no application-time guards.
   const [advanceRecord, setAdvanceRecord] = useState<AdvanceRecord | null>(null);
   const [collectRecord, setCollectRecord] = useState<{
-    subject: string;
+    corridor: string;
     result: CounterpartyRequirements;
   } | null>(null);
   const [isAdvancing, setIsAdvancing] = useState(false);
@@ -513,7 +513,7 @@ export function useCounterpartyRequirements(
         result,
       });
       if (isCollectStageStatus(result.status)) {
-        setCollectRecord({ subject: subjectKey, result });
+        setCollectRecord({ corridor, result });
       }
       return result;
     } finally {
@@ -570,7 +570,7 @@ export function useCounterpartyRequirements(
       dedupingInterval: 0,
       onSuccess: (latest) => {
         if (isCollectStageStatus(latest.status)) {
-          setCollectRecord({ subject: subjectKey, result: latest });
+          setCollectRecord({ corridor: corridorIdentity, result: latest });
         }
       },
     }
@@ -594,7 +594,7 @@ export function useCounterpartyRequirements(
   // Furthest collect stage wins for stage/field selection; the payout tree
   // prefers the GET answer, which a post-advance refetch keeps fresh.
   const collectAnswer =
-    collectRecord !== null && collectRecord.subject === subjectKey
+    collectRecord !== null && collectRecord.corridor === corridorIdentity
       ? collectRecord.result
       : undefined;
   const requirementsData = collectAnswer !== undefined ? collectAnswer : data;

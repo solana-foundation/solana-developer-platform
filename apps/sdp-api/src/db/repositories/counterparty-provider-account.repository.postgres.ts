@@ -16,14 +16,14 @@ import type {
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
-  MarkCustomerLinkConsentSubmittedInput,
-  MarkCustomerLinkSessionSignedInput,
+  MarkCustomerLinkSessionTimestampInput,
   PatchAccountMetadataInput,
   SetCustomerLinkSessionInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
+  type BvnkSessionTimestampField,
   bvnkFundingWalletMetadataSchema,
   counterpartyProviderAccountRowSchema,
   generateCounterpartyProviderAccountId,
@@ -61,6 +61,43 @@ function parseProviderAccountRows(
   rows: Record<string, unknown>[]
 ): CounterpartyProviderAccountRow[] {
   return rows.map((row) => parseProviderAccountRow(row));
+}
+
+function sessionTimestampUpdateSql(field: BvnkSessionTimestampField): string {
+  switch (field) {
+    case "signedAt":
+      return `UPDATE counterparty_provider_accounts
+             SET metadata = jsonb_set(metadata, '{session,signedAt}', to_jsonb(?::text)),
+                 updated_at = sdp_iso_now()
+             WHERE id = ?
+               AND organization_id = ?
+               AND project_id = ?
+               AND counterparty_id = ?
+               AND provider = ?
+               AND kind = 'customer_link'
+               AND status = 'active'
+               AND metadata->'session'->>'reference' = ?
+               AND NOT jsonb_exists(metadata->'session', 'signedAt')
+             RETURNING *`;
+    case "consentSubmittedAt":
+      return `UPDATE counterparty_provider_accounts
+             SET metadata = jsonb_set(metadata, '{session,consentSubmittedAt}', to_jsonb(?::text)),
+                 updated_at = sdp_iso_now()
+             WHERE id = ?
+               AND organization_id = ?
+               AND project_id = ?
+               AND counterparty_id = ?
+               AND provider = ?
+               AND kind = 'customer_link'
+               AND status = 'active'
+               AND metadata->'session'->>'reference' = ?
+               AND NOT jsonb_exists(metadata->'session', 'consentSubmittedAt')
+             RETURNING *`;
+    default: {
+      const exhaustive: never = field;
+      return exhaustive;
+    }
+  }
 }
 
 export function createPostgresCounterpartyProviderAccountsRepository(
@@ -404,69 +441,11 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return row === null ? null : parseProviderAccountRow(row);
     },
 
-    /**
-     * CAS-records the provider-confirmed agreement signature for one customer link.
-     *
-     * @param input - Tenant scope, customer-link id, session reference, and signed timestamp.
-     * @returns The signed row, or null when the expected unsigned row no longer exists.
-     */
-    async markCustomerLinkSessionSigned(input: MarkCustomerLinkSessionSignedInput) {
+    async markCustomerLinkSessionTimestamp(input: MarkCustomerLinkSessionTimestampInput) {
       const row = await db
-        .prepare(
-          `UPDATE counterparty_provider_accounts
-           SET metadata = jsonb_set(metadata, '{session,signedAt}', to_jsonb(?::text)),
-               updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND counterparty_id = ?
-             AND provider = ?
-             AND kind = 'customer_link'
-             AND status = 'active'
-             AND metadata->'session'->>'reference' = ?
-             AND NOT jsonb_exists(metadata->'session', 'signedAt')
-           RETURNING *`
-        )
+        .prepare(sessionTimestampUpdateSql(input.field))
         .bind(
-          input.signedAt,
-          input.id,
-          input.organizationId,
-          input.projectId,
-          input.counterpartyId,
-          input.provider,
-          input.sessionReference
-        )
-        .first<Record<string, unknown>>();
-
-      return row === null ? null : parseProviderAccountRow(row);
-    },
-
-    /**
-     * CAS-records an agreement-session consent submission without replacing
-     * sibling session metadata such as a concurrent provider signature.
-     *
-     * @param input - Tenant scope, customer-link id, session reference, and consent submission timestamp.
-     * @returns The consent-submitted row, or null when the expected unsigned row no longer exists.
-     */
-    async markCustomerLinkConsentSubmitted(input: MarkCustomerLinkConsentSubmittedInput) {
-      const row = await db
-        .prepare(
-          `UPDATE counterparty_provider_accounts
-           SET metadata = jsonb_set(metadata, '{session,consentSubmittedAt}', to_jsonb(?::text)),
-               updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND counterparty_id = ?
-             AND provider = ?
-             AND kind = 'customer_link'
-             AND status = 'active'
-             AND metadata->'session'->>'reference' = ?
-             AND NOT jsonb_exists(metadata->'session', 'consentSubmittedAt')
-           RETURNING *`
-        )
-        .bind(
-          input.consentSubmittedAt,
+          input.timestamp,
           input.id,
           input.organizationId,
           input.projectId,

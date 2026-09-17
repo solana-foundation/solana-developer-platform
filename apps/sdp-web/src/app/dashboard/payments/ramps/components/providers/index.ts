@@ -74,7 +74,7 @@ type PanelOnboardingRequirements =
   | MuralPanelOnboardingRequirements
   | HerclePanelOnboardingRequirements;
 
-const BVNK_ONBOARDING_PANEL_STATUSES = new Set<BvnkOnboardingPanelStatus>([
+const BVNK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> = new Set([
   "customer_verification_required",
   "customer_verifying",
   "counterparty_agreement_signing",
@@ -84,9 +84,10 @@ const BVNK_ONBOARDING_PANEL_STATUSES = new Set<BvnkOnboardingPanelStatus>([
   "ready",
 ]);
 
-const LIGHTSPARK_ONBOARDING_PANEL_STATUSES = new Set<LightsparkOnboardingPanelStatus>(["ready"]);
+const LIGHTSPARK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> =
+  new Set(["ready"]);
 
-const MURAL_ONBOARDING_PANEL_STATUSES = new Set<MuralOnboardingPanelStatus>([
+const MURAL_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> = new Set([
   "terms_of_service_required",
   "customer_verification_required",
   "customer_verifying",
@@ -95,54 +96,28 @@ const MURAL_ONBOARDING_PANEL_STATUSES = new Set<MuralOnboardingPanelStatus>([
   "ready",
 ]);
 
-const HERCLE_ONBOARDING_PANEL_STATUSES = new Set<HercleOnboardingPanelStatus>([
+const HERCLE_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> = new Set([
   "customer_verification_required",
   "customer_verifying",
   "customer_verification_failed",
   "ready",
 ]);
 
-function isBvnkPanelOnboardingRequirements(
+const isBvnkPanelOnboardingRequirements = (
   requirements: CounterpartyRequirements
-): requirements is BvnkPanelOnboardingRequirements {
-  if (requirements.provider !== "bvnk") {
-    return false;
-  }
-  for (const status of BVNK_ONBOARDING_PANEL_STATUSES) {
-    if (status === requirements.status) {
-      return true;
-    }
-  }
-  return false;
-}
+): requirements is BvnkPanelOnboardingRequirements =>
+  requirements.provider === "bvnk" && BVNK_ONBOARDING_PANEL_STATUSES.has(requirements.status);
 
-function isLightsparkPanelOnboardingRequirements(
+const isLightsparkPanelOnboardingRequirements = (
   requirements: CounterpartyRequirements
-): requirements is LightsparkPanelOnboardingRequirements {
-  if (requirements.provider !== "lightspark") {
-    return false;
-  }
-  for (const status of LIGHTSPARK_ONBOARDING_PANEL_STATUSES) {
-    if (status === requirements.status) {
-      return true;
-    }
-  }
-  return false;
-}
+): requirements is LightsparkPanelOnboardingRequirements =>
+  requirements.provider === "lightspark" &&
+  LIGHTSPARK_ONBOARDING_PANEL_STATUSES.has(requirements.status);
 
-function isMuralPanelOnboardingRequirements(
+const isMuralPanelOnboardingRequirements = (
   requirements: CounterpartyRequirements
-): requirements is MuralPanelOnboardingRequirements {
-  if (requirements.provider !== "mural") {
-    return false;
-  }
-  for (const status of MURAL_ONBOARDING_PANEL_STATUSES) {
-    if (status === requirements.status) {
-      return true;
-    }
-  }
-  return false;
-}
+): requirements is MuralPanelOnboardingRequirements =>
+  requirements.provider === "mural" && MURAL_ONBOARDING_PANEL_STATUSES.has(requirements.status);
 
 /**
  * Whether a requirements status is an onboarding-lifecycle state the panel can
@@ -162,9 +137,7 @@ export function isOnboardingPanelStatus(
     case "mural":
       return isMuralPanelOnboardingRequirements(requirements);
     case "hercle":
-      return HERCLE_ONBOARDING_PANEL_STATUSES.has(
-        requirements.status as HercleOnboardingPanelStatus
-      );
+      return HERCLE_ONBOARDING_PANEL_STATUSES.has(requirements.status);
     default:
       return false;
   }
