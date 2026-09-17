@@ -16,7 +16,7 @@ import { Reveal } from "@/components/reveal";
 import { CustodyScreen } from "@/components/wallet-app";
 
 const STEPS = [
-  { id: "custody", label: "Custody" },
+  { id: "custody", label: "Wallet" },
   { id: "configure", label: "Configure" },
   { id: "earn", label: "Earn" },
 ];
@@ -123,21 +123,20 @@ function CustodySection() {
       }
     >
       <div className="text-left">
-        <Kicker index={1} label="Custody" />
+        <Kicker index={1} label="Wallet" />
         <h2 className="mt-3 text-3xl font-semibold tracking-tight text-foreground lg:text-4xl">
           It starts as an ordinary wallet app.
         </h2>
         <p className="mt-4 leading-relaxed text-muted-foreground">
-          Northstar is a small fintech with a consumer Wallet app. Like any
-          money app, it custodies customer funds: dollars, euros, and the USDC
-          stablecoin. Balances live on the company&rsquo;s ledger — nothing on
+          Northstar is a small fintech with a consumer Wallet app. Customers
+          hold dollars, euros, and the USDC stablecoin side by side — nothing on
           this screen touches a blockchain yet.
         </p>
         <ul className="mt-5 space-y-2.5 text-sm">
           {[
-            "USD and EUR balances held with the company",
-            "USDC held 1:1 as a stablecoin balance",
-            "No keys, no chain — just a custodial account",
+            "USD, EUR, and USDC balances in one app",
+            "Yield can be surfaced to anyone holding stablecoins",
+            "SDP's on-ramp converts fiat into stablecoins",
           ].map((line) => (
             <li key={line} className="flex items-start gap-2.5">
               <ShieldCheckIcon className="mt-0.5 size-4 shrink-0 text-success" />

@@ -101,8 +101,7 @@ export function CustodyScreen() {
           $14,669.30
         </p>
         <p className="mt-1 flex items-center gap-1 text-[11px] text-background/60">
-          <ShieldCheckIcon className="size-3" />
-          Custodied by Northstar · 3 currencies
+          <ShieldCheckIcon className="size-3" />3 currencies · USD, EUR, USDC
         </p>
       </div>
       <p className="mt-5 px-5 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">

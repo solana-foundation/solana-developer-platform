@@ -2,7 +2,7 @@
 
 A standalone, interactive guide page for [`examples/embedded-yield-bank`](../embedded-yield-bank). It walks through the Embedded Yield story in three scrolling screens, each pairing explanatory text with a visual crafted in CSS and React:
 
-1. **Custody** — a faux mobile phone running the "Northstar Wallet" app, where a fintech custodies customer funds in USD, euros, and the USDC stablecoin. No blockchain anywhere on this screen.
+1. **Wallet** — a faux mobile phone running the "Northstar Wallet" app, where a fintech's customers hold dollars, euros, and the USDC stablecoin. Anyone holding stablecoins is a candidate for yield, and SDP's on-ramp converts fiat into stablecoins.
 2. **Configure** — the real SDP Embedded Yield dashboard (screenshot) where the wallet team selects which Earn strategies to surface. The strategies are backed by real-world assets (RWAs) like tokenized treasuries and private credit, and the customer's stablecoins move with one API request.
 3. **Earn** — the same faux phone with an "Earn 4.8%" button on the USDC balance. The button presses itself, a confirmation shows the stablecoins are now earning, and a fast-forwarded 30-day simulation accrues yield with a balance chart rising up and to the right.
 
