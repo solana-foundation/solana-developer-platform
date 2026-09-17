@@ -22,12 +22,15 @@ const workspace = vi.hoisted(() => ({
   flags: { custody: true, issuance: true },
   sdpEnvironment: "sandbox",
 }));
+const { mockUsePersistedDashboardSWR } = vi.hoisted(() => ({
+  mockUsePersistedDashboardSWR: vi.fn(() => ({ data: { activityRows: [], todaysVolume: 0 } })),
+}));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => workspace,
   useOptionalDashboardWorkspace: () => workspace,
 }));
 vi.mock("@/lib/dashboard-swr", () => ({
-  usePersistedDashboardSWR: () => ({ data: { activityRows: [], todaysVolume: 0 } }),
+  usePersistedDashboardSWR: mockUsePersistedDashboardSWR,
 }));
 vi.mock("./wallets/section-entry", () => ({
   SectionEntry: ({ children }: { children: ReactNode }) => children,
@@ -36,6 +39,7 @@ vi.mock("./wallets/section-entry", () => ({
 let progressKey: string;
 let orgSequence = 0;
 beforeEach(() => {
+  mockUsePersistedDashboardSWR.mockClear();
   workspace.initialQuickStartStep = "api-key";
   workspace.dashboardCacheScope.orgId = `home_org_${++orgSequence}`;
   progressKey = quickStartKey(workspace.dashboardCacheScope);
@@ -60,6 +64,25 @@ afterEach(() => {
 });
 
 describe("home after quick start", () => {
+  it("refreshes activity once per minute and pauses polling while hidden or offline", () => {
+    render(ui());
+
+    expect(mockUsePersistedDashboardSWR).toHaveBeenCalledWith(
+      "dashboard-home-activity",
+      expect.any(Function),
+      {
+        revalidateOnFocus: true,
+        refreshInterval: 60_000,
+        refreshWhenHidden: false,
+        refreshWhenOffline: false,
+      },
+      {
+        key: "home-activity",
+        ttlMs: 60_000,
+      }
+    );
+  });
+
   it("keeps loading and settled Home compact until quick start is dismissed", () => {
     const view = render(
       <>

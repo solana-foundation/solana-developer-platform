@@ -5,8 +5,8 @@ import {
   fetchOrgIssuanceActivity,
 } from "@/app/dashboard/home-page.data";
 import {
-  fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentTransfers,
 } from "@/app/dashboard/payments/payments-page.data";
 import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
@@ -23,7 +23,9 @@ export async function GET(request: Request) {
     );
     const [transfersResult, issuanceActivityResult, issuedTokenSymbolsResult] = await Promise.all([
       trace.step("fetch_payment_transfers", () =>
-        fetchDashboardPaymentTransfers(apiClient.request, 20)
+        // Home needs a recent persisted feed, not an observed-chain scan for every wallet.
+        // Wallet detail keeps the opt-in observed history where that RPC cost is intentional.
+        fetchPaymentTransfers(apiClient.request, 20, { includeObserved: false })
       ),
       issuanceEnabled
         ? trace.step("fetch_issuance_activity", () =>
