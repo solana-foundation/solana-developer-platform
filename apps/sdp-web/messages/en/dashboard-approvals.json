@@ -42,6 +42,8 @@
     "refreshFailed": "Approval requests could not be refreshed. Showing the last loaded results.",
     "viewOnly": "You can review approval requests, but your role cannot decide them.",
     "requesterCannotDecide": "You raised this request, so someone else has to decide it.",
+    "approvalGroupOnly": "Only approvers in this request's approval group can decide it.",
+    "adminOnly": "Only an organization admin can decide this request.",
     "noAccess": "Approval requests are not available for your role.",
     "noAccessDescription": "Ask an organization administrator for wallet read access.",
     "backToApprovals": "Back to approvals",

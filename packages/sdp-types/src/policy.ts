@@ -261,6 +261,12 @@ export interface WalletApprovalRequestSummary {
    * the same owner check the decision routes enforce.
    */
   viewerIsRequester: boolean;
+  /**
+   * Whether the caller may approve or reject this request: not its requester,
+   * and an active approver in its approval group, or an organization admin when
+   * it has no group. The same check the decision routes enforce.
+   */
+  viewerCanDecide: boolean;
 }
 
 export interface WalletControlProfile {

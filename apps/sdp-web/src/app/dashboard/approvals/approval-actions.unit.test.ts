@@ -50,6 +50,7 @@ describe("readApprovalActionResponse", () => {
     id: "apr_1",
     status: "approved",
     viewerIsRequester: false,
+    viewerCanDecide: true,
     operation: {
       status: "failed",
       executionCompletedAt: "2026-09-11T10:05:00.000Z",

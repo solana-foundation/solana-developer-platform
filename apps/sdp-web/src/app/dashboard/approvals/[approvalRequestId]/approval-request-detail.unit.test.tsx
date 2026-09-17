@@ -45,6 +45,7 @@ const pendingRequest: WalletApprovalRequestSummary = {
   },
   policyEvaluation: null,
   viewerIsRequester: false,
+  viewerCanDecide: true,
 };
 
 const REVIEW_DESCRIPTION =
@@ -151,7 +152,7 @@ describe("ApprovalRequestDetail", () => {
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApprovalRequestDetail
-          initialRequest={{ ...pendingRequest, viewerIsRequester: true }}
+          initialRequest={{ ...pendingRequest, viewerIsRequester: true, viewerCanDecide: false }}
           evaluation={null}
           apiKeyNames={{}}
           canDecide
@@ -166,6 +167,30 @@ describe("ApprovalRequestDetail", () => {
       screen.getByText("You raised this request, so someone else has to decide it.")
     ).toBeTruthy();
     // The review prompt is for whoever can decide; the requester cannot.
+    expect(screen.queryByText(REVIEW_DESCRIPTION)).toBeNull();
+  });
+
+  // A member with wallet write who is not the request's approver would only
+  // get a 403 from Approve, Reject or Cancel, so none is offered.
+  it.each([
+    ["approval group", "grp_1", "Only approvers in this request's approval group can decide it."],
+    ["organization admin", null, "Only an organization admin can decide this request."],
+  ])("offers no action when only an %s can decide", (_label, approvalGroupId, notice) => {
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          initialRequest={{ ...pendingRequest, approvalGroupId, viewerCanDecide: false }}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+      </I18nProvider>
+    );
+
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.getByText(notice)).toBeTruthy();
     expect(screen.queryByText(REVIEW_DESCRIPTION)).toBeNull();
   });
 

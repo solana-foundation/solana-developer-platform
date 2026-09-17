@@ -265,9 +265,11 @@ function ApprovalRequestHeader({
 }) {
   const t = useTranslations();
   const isPending = request.status === "pending";
-  // The API refuses a decision from whoever raised the request, so neither
-  // decision is offered to them. Withdrawing it stays theirs.
-  const canApproveOrReject = isPending && canDecide && !request.viewerIsRequester;
+  // The API reports who may decide, with the same check it enforces, so only
+  // decisions it will accept are offered. The requester can still withdraw.
+  const canApproveOrReject = isPending && canDecide && request.viewerCanDecide;
+  const canCancel =
+    isPending && canDecide && (request.viewerIsRequester || request.viewerCanDecide);
 
   return (
     <header className="flex flex-wrap items-start justify-between gap-5 border-b border-border-default pb-6">
@@ -288,7 +290,7 @@ function ApprovalRequestHeader({
         ) : null}
       </div>
 
-      {isPending && canDecide ? (
+      {canCancel ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -325,6 +327,15 @@ function ApprovalRequestHeader({
   );
 }
 
+/** Why a pending request offers the viewer no decision. */
+function pendingNoticeKey(request: WalletApprovalRequestSummary, canDecide: boolean) {
+  if (!canDecide) return "DashboardApprovals.viewOnly";
+  if (request.viewerIsRequester) return "DashboardApprovals.requesterCannotDecide";
+  return request.approvalGroupId
+    ? "DashboardApprovals.approvalGroupOnly"
+    : "DashboardApprovals.adminOnly";
+}
+
 /**
  * The one line under the header: who can decide a pending request, or what
  * running an approved one did. Other statuses need nothing beyond the badge.
@@ -340,10 +351,10 @@ function ApprovalRequestNotice({
 }) {
   const t = useTranslations();
   if (request.status === "pending") {
-    if (canDecide && !request.viewerIsRequester) return null;
+    if (canDecide && request.viewerCanDecide) return null;
     return (
       <p className="border-b border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
-        {t(canDecide ? "DashboardApprovals.requesterCannotDecide" : "DashboardApprovals.viewOnly")}
+        {t(pendingNoticeKey(request, canDecide))}
       </p>
     );
   }

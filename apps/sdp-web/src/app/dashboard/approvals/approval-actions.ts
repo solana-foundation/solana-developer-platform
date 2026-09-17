@@ -66,6 +66,7 @@ const approvalRequestEnvelopeSchema = z.object({
       id: z.string().min(1),
       status: z.enum(APPROVAL_REQUEST_STATUS),
       viewerIsRequester: z.boolean(),
+      viewerCanDecide: z.boolean(),
       operation: z.looseObject({
         status: z.enum(WALLET_OPERATION_STATUS),
         executionCompletedAt: z.string().nullable(),

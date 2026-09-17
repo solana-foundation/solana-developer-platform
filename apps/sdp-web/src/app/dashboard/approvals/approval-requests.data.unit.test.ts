@@ -64,6 +64,7 @@ function approvalRequest(
       evaluatedAt: "2026-07-16T12:00:00.000Z",
     },
     viewerIsRequester: false,
+    viewerCanDecide: true,
     ...overrides,
   };
 }

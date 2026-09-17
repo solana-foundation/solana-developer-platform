@@ -20,7 +20,7 @@ import { approvalRequestListQuerySchema, approvalRequestParamsSchema } from "../
 
 function mapApprovalRequest(
   row: ApprovalRequestDetailRow,
-  viewerIsRequester: boolean
+  viewer: ViewerDecision
 ): WalletApprovalRequestSummary {
   return {
     id: row.approval_request_id,
@@ -75,7 +75,8 @@ function mapApprovalRequest(
           evaluatedAt: row.evaluated_at ?? row.approval_created_at,
         }
       : null,
-    viewerIsRequester,
+    viewerIsRequester: viewer.isRequester,
+    viewerCanDecide: viewer.refusal === null,
   };
 }
 
@@ -125,6 +126,70 @@ async function requesterCheck(
   return (requestedBy) => requestedBy !== null && ownerOf(requestedBy) === callerOwner;
 }
 
+type DecisionRefusal = "requester" | "not_group_member" | "not_admin";
+
+interface ViewerDecision {
+  isRequester: boolean;
+  /** Why the caller cannot approve or reject, or null when they can. */
+  refusal: DecisionRefusal | null;
+}
+
+/**
+ * Answers "may the caller approve or reject this request?" for one request or
+ * many. The decision routes refuse on this answer and reads report it, so the
+ * dashboard offers exactly the decisions the API accepts.
+ *
+ * - Whoever raised the request never decides it.
+ * - A request routed to an approval group is decided by that group's active
+ *   approvers, who must be signed-in users.
+ * - Any other request is decided by an organization admin.
+ *
+ * Group membership is read once per distinct group on the page, not per row.
+ *
+ * @param repository - Policy repository.
+ * @param auth - The caller.
+ * @param rows - Every request on the page.
+ * @returns The caller's standing on a row.
+ */
+async function viewerDecisionCheck(
+  repository: ReturnType<typeof createPolicyRepository>,
+  auth: ApiKeyContext,
+  rows: readonly Pick<ApprovalRequestDetailRow, "requested_by" | "approval_group_id">[]
+): Promise<(row: Pick<ApprovalRequestDetailRow, "requested_by" | "approval_group_id">) => ViewerDecision> {
+  const isRequester = await requesterCheck(
+    repository,
+    auth,
+    rows.map((row) => row.requested_by)
+  );
+  const userId = auth.userId;
+  const groupIds = [
+    ...new Set(rows.flatMap((row) => (row.approval_group_id ? [row.approval_group_id] : []))),
+  ];
+  const approverGroups = new Set<string>();
+  if (userId) {
+    const memberships = await Promise.all(
+      groupIds.map((groupId) => repository.isApprovalGroupMember(groupId, userId))
+    );
+    groupIds.forEach((groupId, index) => {
+      if (memberships[index]) approverGroups.add(groupId);
+    });
+  }
+  const isAdmin = auth.permissions.includes("org:admin") || auth.permissions.includes("*");
+
+  return (row) => {
+    if (isRequester(row.requested_by)) {
+      return { isRequester: true, refusal: "requester" };
+    }
+    if (row.approval_group_id) {
+      return {
+        isRequester: false,
+        refusal: approverGroups.has(row.approval_group_id) ? null : "not_group_member",
+      };
+    }
+    return { isRequester: false, refusal: isAdmin ? null : "not_admin" };
+  };
+}
+
 async function readApprovalRequest(c: AppContext, approvalRequestId: string) {
   const auth = getAuth(c);
   const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
@@ -138,9 +203,15 @@ async function readApprovalRequest(c: AppContext, approvalRequestId: string) {
     throw notFound("Approval request");
   }
 
-  const isRequester = await requesterCheck(repository, auth, [row.requested_by]);
-  return mapApprovalRequest(row, isRequester(row.requested_by));
+  const viewer = await viewerDecisionCheck(repository, auth, [row]);
+  return mapApprovalRequest(row, viewer(row));
 }
+
+const DECISION_REFUSAL_MESSAGE: Record<DecisionRefusal, string> = {
+  requester: "Approval requests must be decided by a different principal",
+  not_group_member: "Approval request must be decided by an active approval-group member",
+  not_admin: "Ungrouped approval requests must be decided by an organization admin",
+};
 
 async function assertCanResolveApprovalRequest(
   c: AppContext,
@@ -158,28 +229,14 @@ async function assertCanResolveApprovalRequest(
     throw notFound("Approval request");
   }
 
+  const { isRequester, refusal } = (await viewerDecisionCheck(repository, auth, [row]))(row);
   // Requesters may withdraw their own pending request, but they cannot satisfy
   // or reject the approval gate they created.
-  const isRequester = await requesterCheck(repository, auth, [row.requested_by]);
-  if (isRequester(row.requested_by)) {
-    if (action === "cancel") {
-      return row;
-    }
-    throw forbidden("Approval requests must be decided by a different principal");
-  }
-
-  if (row.approval_group_id) {
-    if (
-      !auth.userId ||
-      !(await repository.isApprovalGroupMember(row.approval_group_id, auth.userId))
-    ) {
-      throw forbidden("Approval request must be decided by an active approval-group member");
-    }
+  if (isRequester && action === "cancel") {
     return row;
   }
-
-  if (!auth.permissions.includes("org:admin") && !auth.permissions.includes("*")) {
-    throw forbidden("Ungrouped approval requests must be decided by an organization admin");
+  if (refusal !== null) {
+    throw forbidden(DECISION_REFUSAL_MESSAGE[refusal]);
   }
   return row;
 }
@@ -203,13 +260,9 @@ export const listApprovalRequests = async (c: AppContext) => {
     limit: parsed.data.limit,
   });
 
-  const isRequester = await requesterCheck(
-    repository,
-    auth,
-    rows.map((row) => row.requested_by)
-  );
+  const viewer = await viewerDecisionCheck(repository, auth, rows);
   return success(c, {
-    approvalRequests: rows.map((row) => mapApprovalRequest(row, isRequester(row.requested_by))),
+    approvalRequests: rows.map((row) => mapApprovalRequest(row, viewer(row))),
   });
 };
 

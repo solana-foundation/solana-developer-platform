@@ -959,10 +959,33 @@ describe("Payments routes — transfer policy", () => {
     const ownerSessionId = "ses_payment_request_owner";
     const approverSessionId = "ses_payment_approver";
     const approverUserId = "usr_payment_approver";
+    const outsiderSessionId = "ses_payment_outsider";
+    const outsiderUserId = "usr_payment_outsider";
     await getDb(env).batch([
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
         .bind(approverUserId, "payment-approver@example.com"),
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(outsiderUserId, "payment-outsider@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'member', 'active')`
+        )
+        .bind("om_payment_outsider", TEST_ORG.id, outsiderUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'developer')`
+        )
+        .bind("pm_payment_outsider", TEST_PROJECT.id, outsiderUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(outsiderSessionId, outsiderUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
       getDb(env)
         .prepare(
           `INSERT INTO organization_members (id, organization_id, user_id, role, status)
@@ -1056,11 +1079,37 @@ describe("Payments routes — transfer policy", () => {
     const ownerRead = walletApprovalHttpResponseSchema.parse(
       await (await app.request(detailPath, { headers: ownerSessionHeaders }, env)).json()
     );
-    expect(ownerRead.data.approvalRequest.viewerIsRequester).toBe(true);
+    // The owner is also an approver in the group, but a requester never decides.
+    expect(ownerRead.data.approvalRequest).toMatchObject({
+      viewerIsRequester: true,
+      viewerCanDecide: false,
+    });
     const approverRead = walletApprovalHttpResponseSchema.parse(
       await (await app.request(detailPath, { headers: approverSessionHeaders }, env)).json()
     );
-    expect(approverRead.data.approvalRequest.viewerIsRequester).toBe(false);
+    expect(approverRead.data.approvalRequest).toMatchObject({
+      viewerIsRequester: false,
+      viewerCanDecide: true,
+    });
+    const outsiderSessionHeaders = {
+      "Content-Type": "application/json",
+      Cookie: `sdp_session=${outsiderSessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
+    const outsiderRead = await app.request(detailPath, { headers: outsiderSessionHeaders }, env);
+    expect(outsiderRead.status).toBe(200);
+    expect(
+      walletApprovalHttpResponseSchema.parse(await outsiderRead.json()).data.approvalRequest
+    ).toMatchObject({ viewerIsRequester: false, viewerCanDecide: false });
+    const outsiderDecision = await app.request(
+      approvalPath,
+      { method: "POST", headers: outsiderSessionHeaders },
+      env
+    );
+    expect(outsiderDecision.status).toBe(403);
+    expect(await outsiderDecision.json()).toMatchObject({
+      error: { message: "Approval request must be decided by an active approval-group member" },
+    });
     const listed = walletApprovalListHttpResponseSchema.parse(
       await (
         await app.request("/v1/wallets/approval-requests", { headers: apiHeaders }, env)
@@ -1068,7 +1117,7 @@ describe("Payments routes — transfer policy", () => {
     );
     expect(
       listed.data.approvalRequests.find((item) => item.id === pendingDetails.approvalRequestId)
-    ).toMatchObject({ viewerIsRequester: true });
+    ).toMatchObject({ viewerIsRequester: true, viewerCanDecide: false });
 
     const apiKeyDecision = await app.request(
       approvalPath,

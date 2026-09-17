@@ -73,6 +73,7 @@ function pendingRequest(
     },
     policyEvaluation: null,
     viewerIsRequester: false,
+    viewerCanDecide: true,
   };
 }
 
