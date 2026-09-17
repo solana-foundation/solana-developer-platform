@@ -651,6 +651,48 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("rejects minting to a wallet whose Token-2022 account is frozen", async () => {
+      const token = await seedIssuedToken({ id: "tok_issuance_mint_frozen_destination" });
+      const [frozenTokenAccount] = await findAssociatedTokenPda({
+        owner: address(TEST_SOLANA_ADDRESSES.wallet2),
+        mint: address(token.mintAddress ?? ""),
+        tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO frozen_accounts (
+             id, token_id, account_address, reason, frozen_at, frozen_by
+           ) VALUES ('frz_mint_destination', ?, ?, 'QA hold', sdp_iso_now(), ?)`
+        )
+        .bind(token.id, frozenTokenAccount, TEST_PROJECT_API_KEY.id)
+        .run();
+      const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/mint`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "ACCOUNT_FROZEN",
+          details: { field: "destination", tokenAccount: frozenTokenAccount },
+        },
+      });
+      expect(mintToSpy).not.toHaveBeenCalled();
+    });
+
     it("dry-runs an authority update with zero writes", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_authority_dry_run",
@@ -1497,6 +1539,61 @@ describe("Issuance Routes", () => {
         admitSpy.mockRestore();
         updateAuthoritySpy.mockRestore();
       }
+    });
+
+    it("executes a freeze-controller rotation with the live Token ACL controller signer", async () => {
+      const controller = TEST_SOLANA_ADDRESSES.wallet2;
+      const wallet = await seedIssuanceActivityWallet("wal_issuance_acl_controller", controller);
+      const token = await seedIssuedToken({
+        id: "tok_issuance_acl_controller",
+        signingWalletId: wallet.walletId,
+        freezeAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+      });
+      vi.mocked(AuthorityResolution.resolveCurrentAuthorityForRole).mockRestore();
+      const configSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: controller },
+      } as never);
+      const updateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "updateAuthority")
+        .mockResolvedValue({ signature: "sig_acl_controller_rotation", slot: 777n });
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/authority`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            signingCustodyWalletId: wallet.custodyWalletId,
+            authority: {
+              role: "freeze",
+              newAuthority: TEST_SOLANA_ADDRESSES.wallet3,
+            },
+          }),
+        },
+        env
+      );
+
+      expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+      expect(configSpy).toHaveBeenCalledOnce();
+      expect(updateAuthoritySpy).toHaveBeenCalledWith({
+        mint: address(token.mintAddress ?? ""),
+        role: Token2022.AuthorityType.FreezeAccount,
+        currentAuthority: expect.objectContaining({ address: controller }),
+        newAuthority: address(TEST_SOLANA_ADDRESSES.wallet3),
+        feePayer: expect.objectContaining({ address: controller }),
+      });
+      const stored = await app.request(
+        `/v1/issuance/tokens/${token.id}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect((await stored.json()).data.token.freezeAuthority).toBe(TEST_SOLANA_ADDRESSES.wallet3);
+      updateAuthoritySpy.mockRestore();
+      configSpy.mockRestore();
     });
 
     it("loads the approved authority signer before starting the external-effect fence", async () => {
@@ -3650,6 +3747,22 @@ describe("Issuance Routes", () => {
       expect(missBody.meta.hasMore).toBe(false);
     });
 
+    it("treats the exact Smoky SQL-shaped unicode search as an ordinary empty result", async () => {
+      const search = "qa-no-match-' OR 1=1 -- 🚀";
+      const query = new URLSearchParams({ search });
+      const response = await app.request(
+        `/v1/issuance/tokens?${query.toString()}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: [],
+        meta: { total: 0, hasMore: false },
+      });
+    });
+
     it("accepts a blank search as no filter", async () => {
       const res = await app.request(
         "/v1/issuance/tokens?search=",
@@ -3917,6 +4030,61 @@ describe("Issuance Routes", () => {
         expect(mintRead).not.toHaveBeenCalled();
       }
     );
+
+    it("returns the live pausable authority when requested", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_pause_authority_read",
+        mintAuthority: null,
+        isMintable: false,
+        extensions: { pausable: {} },
+      });
+      const pauseAuthority = TEST_SOLANA_ADDRESSES.wallet2;
+      const inspectSpy = vi.spyOn(MosaicSdk, "inspectToken").mockResolvedValue({
+        authorities: { pausableAuthority: pauseAuthority },
+      } as Awaited<ReturnType<typeof MosaicSdk.inspectToken>>);
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}?includePauseAuthority=true`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        data: {
+          pauseAuthority,
+          token: { mintAuthority: null, isMintable: false },
+        },
+      });
+      expect(inspectSpy).toHaveBeenCalledOnce();
+    });
+
+    it("returns the live Token ACL freeze controller instead of the stored mint authority", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_freeze_authority_read",
+        freezeAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+      });
+      const controller = TEST_SOLANA_ADDRESSES.wallet2;
+      const configSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: controller },
+      } as never);
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}?includeFreezeAuthority=true`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: {
+          freezeAuthority: controller,
+          token: { freezeAuthority: TEST_SOLANA_ADDRESSES.wallet1 },
+        },
+      });
+      expect(configSpy).toHaveBeenCalledOnce();
+    });
 
     it.each([
       {
@@ -4536,6 +4704,51 @@ describe("Issuance Routes", () => {
       expect(body.data.token.decimals).toBe(2);
     });
 
+    it("rejects changing stablecoin draft decimals away from six", async () => {
+      const createRes = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Stablecoin Draft",
+            symbol: "STBL",
+            template: "stablecoin",
+          }),
+        },
+        env
+      );
+      expect(createRes.status).toBe(201);
+      const stablecoinId = (await createRes.json()).data.token.id;
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${stablecoinId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ decimals: 9 }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "BAD_REQUEST", message: "Stablecoin decimals must be 6" },
+      });
+      const stored = await app.request(
+        `/v1/issuance/tokens/${stablecoinId}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect((await stored.json()).data.token.decimals).toBe(6);
+    });
+
     it("rejects symbol and decimals changes after deployment", async () => {
       const db = getDb(env);
       const deployedTokenId = "tok_symbollocked1";
@@ -4897,6 +5110,51 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.code).toBe("TOKEN_NOT_ACTIVE");
+    });
+
+    it("refuses to prepare a mint to a frozen Token-2022 account", async () => {
+      const activeMintAddress = TEST_ACTIVE_TOKEN.mintAddress;
+      if (!activeMintAddress) {
+        throw new Error("Active token fixture must have a mint address");
+      }
+      const [frozenTokenAccount] = await findAssociatedTokenPda({
+        owner: address(TEST_SOLANA_ADDRESSES.wallet2),
+        mint: address(activeMintAddress),
+        tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO frozen_accounts (
+             id, token_id, account_address, reason, frozen_at, frozen_by
+           ) VALUES ('frz_prepare_mint_destination', ?, ?, 'QA hold', sdp_iso_now(), ?)`
+        )
+        .bind(activeTokenId, frozenTokenAccount, TEST_PROJECT_API_KEY.id)
+        .run();
+      const prepareMintToSpy = vi.spyOn(MosaicService.prototype, "prepareMintTo");
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "ACCOUNT_FROZEN",
+          details: { field: "destination", tokenAccount: frozenTokenAccount },
+        },
+      });
+      expect(prepareMintToSpy).not.toHaveBeenCalled();
     });
 
     it("returns 400 when max supply would be exceeded", async () => {

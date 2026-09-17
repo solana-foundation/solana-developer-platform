@@ -247,6 +247,54 @@ it.each(["success", "error"] as const)(
   }
 );
 
+it("keeps deployed metadata Save disabled until its live signer finishes loading", async () => {
+  let resolveAuthorityWallets: ((response: Response) => void) | undefined;
+  const authorityWalletsResponse = new Promise<Response>((resolve) => {
+    resolveAuthorityWallets = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/authority-wallets")) return authorityWalletsResponse;
+      if (url.endsWith("/frozen")) return Response.json({ data: [], error: null, total: 0 });
+      if (url.includes("/transactions")) return Response.json({ data: [], error: null, total: 0 });
+      return Response.json({ data: {} });
+    })
+  );
+  const deployedToken: Token = {
+    ...token,
+    status: "active",
+    mintAddress: "58NU6ZxKq3aVv2q1s9bJcYtvHkbEwLmPqRs4TuVwVjVu",
+    metadataAuthority: wallet.publicKey,
+    deployedAt: "2026-09-09T01:00:00Z",
+  };
+  const user = userEvent.setup();
+  render(
+    <AssetManagementWorkspace token={deployedToken} assetProfile={profile} tokenError={null} />,
+    { wrapper }
+  );
+
+  await user.click(screen.getByRole("button", { name: "Settings" }));
+  await user.click(screen.getByRole("button", { name: "Edit settings" }));
+  await user.type(screen.getByLabelText("Description"), " changed");
+  expect(screen.getByText("Loading signer wallets…")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(true);
+
+  resolveAuthorityWallets?.(
+    Response.json({
+      data: { ...authorityData([wallet]), metadataAuthority: wallet.publicKey },
+    })
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(
+      false
+    )
+  );
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(saveProfile).toHaveBeenCalledOnce());
+});
+
 it.each([true, false])(
   "pending draft Save and Deploy follow wallet availability (%s)",
   async (walletsAvailable) => {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { parseIssuanceListQuery } from "@/app/dashboard/issuance/issuance-list-query";
+import { parseIssuanceListRequestQuery } from "@/app/dashboard/issuance/issuance-list-query";
 import {
   attachIssuanceAssetProfiles,
   fetchIssuanceTokensPage,
@@ -33,7 +33,7 @@ function emptyResponse(
 
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.issuance.tokens", request);
-  const query = parseIssuanceListQuery(new URL(request.url).searchParams);
+  const query = parseIssuanceListRequestQuery(new URL(request.url).searchParams);
 
   try {
     const [apiClient, assetProfilesEnabled] = await Promise.all([

@@ -41,6 +41,7 @@ const deployed = {
   ...token,
   status: "active" as const,
   mintAddress: "58NU6ZxKq3aVv2q1s9bJcYtvHkbEwLmPqRs4TuVwVjVu",
+  mintAuthority: "7xKq9fA2mNpQrStUvWxYz1234567890abcdefGHI",
   imageUrl: "https://example.test/unicorn.png",
   deployedAt: "2026-07-22T12:00:00.000Z",
 };
@@ -121,6 +122,13 @@ describe("asset profile header", () => {
     const draft = render(token);
     expect(draft).not.toContain(">Draft<");
     expect(draft).not.toContain("Deployed");
+  });
+
+  it("shows when deployed supply is permanently locked", () => {
+    expect(render(deployed)).not.toContain("Supply locked");
+    expect(render({ ...deployed, mintAuthority: null, isMintable: false })).toContain(
+      "Supply locked"
+    );
   });
 
   it("never recases the symbol chip", () => {
