@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
  * exports both components and helpers breaks Fast Refresh's state preservation.
  */
 
-function atomsToDecimalString(atoms: bigint, decimals: number): string {
+export function atomsToDecimalString(atoms: bigint, decimals: number): string {
   if (decimals === 0) return atoms.toString();
   const padded = atoms.toString().padStart(decimals + 1, "0");
   const whole = padded.slice(0, -decimals);
@@ -23,10 +23,21 @@ function atomsToDecimalString(atoms: bigint, decimals: number): string {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
-/** Inverse of `atomsToDecimalString` for a CANONICAL value at ≤ `decimals` scale. */
-function decimalStringToAtoms(canonical: string, decimals: number): bigint {
+/**
+ * Inverse of `atomsToDecimalString` for a value at ≤ `decimals` scale.
+ * Answers `null` for a value FINER than that scale: a quote with more
+ * SIGNIFICANT fractional digits than the mint has atoms is a malformed server
+ * response, and `padEnd` would silently over-count its atoms ("1.234" at scale
+ * 2 reads as 1234). A trailing-zero-PADDED quote ("1.200" at scale 2) is not
+ * finer precision — providers do not canonicalize — so the padding is stripped
+ * before the scale check and the value still parses. Callers treat `null` as
+ * unusable — the same fail-closed posture as an unavailable quote.
+ */
+function decimalStringToAtoms(canonical: string, decimals: number): bigint | null {
   const [whole, fraction = ""] = canonical.split(".");
-  return BigInt((whole || "0") + fraction.padEnd(decimals, "0"));
+  const significant = fraction.replace(/0+$/, "");
+  if (significant.length > decimals) return null;
+  return BigInt((whole || "0") + significant.padEnd(decimals, "0"));
 }
 
 /** Whole basis points a slippage tolerance may take; 10% is already an outlier. */
@@ -53,7 +64,8 @@ export function parseSlippageToleranceBps(value: string): number | null {
  * satisfiable protection at or below zero expected output, and clamping to one
  * atom would demand MORE than the vault expects to return — an order that can
  * only ever be refused, however often it is re-quoted. Callers block the
- * submission instead.
+ * submission instead. A quote FINER than the mint's own scale is unusable the
+ * same way: `null`, never a floor computed from a miscount.
  */
 export function floorForTolerance(
   quotedQuantity: string,
@@ -61,12 +73,37 @@ export function floorForTolerance(
   toleranceBps: number
 ): string | null {
   const atoms = decimalStringToAtoms(quotedQuantity, decimals);
-  if (atoms === 0n) return null;
+  if (atoms === null || atoms === 0n) return null;
   const floor = (atoms * BigInt(10_000 - toleranceBps)) / 10_000n;
   return atomsToDecimalString(floor > 0n ? floor : 1n, decimals);
 }
 
-/** True when the quote expects ZERO atoms out — nothing any floor could protect. */
+/**
+ * The floor the current quote and tolerance imply, or `undefined` while they
+ * cannot — shared verbatim by the DEPOSIT (`sharesOut`/`shareDecimals`) and
+ * WITHDRAWAL (`assetsOut`/`assetDecimals`) modals, which name their quote
+ * fields through the accessors.
+ */
+export function derivedMinOut<Preview extends { blockingIssues: readonly unknown[] }>(
+  toleranceBps: number | null,
+  quote: VaultQuoteState<Preview>,
+  quantity: (preview: Preview) => string,
+  decimals: (preview: Preview) => number
+): string | undefined {
+  if (toleranceBps === null || quote.kind !== "quoted") return undefined;
+  if (quote.preview.blockingIssues.length > 0) return undefined;
+  // `null` — a zero-output quote — has no satisfiable floor; blocking the
+  // submission is the only honest answer (see `floorForTolerance`).
+  return (
+    floorForTolerance(quantity(quote.preview), decimals(quote.preview), toleranceBps) ?? undefined
+  );
+}
+
+/**
+ * True when the quote expects ZERO atoms out — nothing any floor could protect.
+ * An over-scale (malformed) quote is not PROVABLY zero, so it answers `false`;
+ * the floor it derives is `null` and blocks the submission instead.
+ */
 export function isZeroQuote(quotedQuantity: string, decimals: number): boolean {
   return decimalStringToAtoms(quotedQuantity, decimals) === 0n;
 }

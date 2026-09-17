@@ -38,27 +38,78 @@ import {
   projectScopeWithRequiredIdempotencyHeaders,
 } from "./helpers";
 
-const earnConfigurationSecurity: Array<Record<string, string[]>> = [
-  { apiKeyAuth: [] },
-  { clerkBearerAuth: [] },
-  { sessionCookie: [] },
-];
+interface EarnSecurityMatrix {
+  optional: Array<Record<string, string[]>>;
+  required: Array<Record<string, string[]>>;
+}
 
-const earnPublicSecurity: Array<Record<string, string[]>> = [{ apiKeyAuth: [] }];
+const earnConfigurationSecurity: EarnSecurityMatrix = {
+  optional: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }, { sessionCookie: [] }, {}],
+  required: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }, { sessionCookie: [] }],
+};
+
+const earnPublicSecurity: EarnSecurityMatrix = {
+  optional: [{ apiKeyAuth: [] }, {}],
+  required: [{ apiKeyAuth: [] }],
+};
+
+const earnExampleOwnerAddress = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+
+const earnAnonymousRequestExamples = {
+  depositTransaction: {
+    summary: "Anonymous deposit build",
+    value: {
+      strategyId: "earn_strategy_example",
+      ownerAddress: earnExampleOwnerAddress,
+      amount: "25",
+      minSharesOut: "24.9",
+    },
+  },
+  withdrawalPreview: {
+    summary: "Anonymous withdrawal preview",
+    value: {
+      strategyId: "earn_strategy_example",
+      ownerAddress: earnExampleOwnerAddress,
+      shares: "10",
+    },
+  },
+  withdrawalTransaction: {
+    summary: "Anonymous withdrawal build",
+    value: {
+      strategyId: "earn_strategy_example",
+      ownerAddress: earnExampleOwnerAddress,
+      shares: "10",
+      minAmountOut: "24.9",
+    },
+  },
+} as const;
+
+function jsonContentWithAnonymousExample(
+  schema: Parameters<typeof jsonContent>[0],
+  anonymous: (typeof earnAnonymousRequestExamples)[keyof typeof earnAnonymousRequestExamples]
+) {
+  const content = jsonContent(schema);
+  return {
+    "application/json": {
+      ...content["application/json"],
+      examples: { anonymous },
+    },
+  };
+}
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
-  registerEarnStrategyPaths(registry, earnConfigurationSecurity);
-  registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
+  registerEarnStrategyPaths(registry, earnConfigurationSecurity.optional);
+  registerEarnDepositPreviewPath(registry, earnConfigurationSecurity.optional);
   // Treasury-facing, so the internal document only: partners hold no custody
   // wallets for this read to reconcile.
-  registerEarnVaultShareReconciliationPath(registry, earnConfigurationSecurity);
+  registerEarnVaultShareReconciliationPath(registry, earnConfigurationSecurity.required);
   registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
 }
 
 /** The partner-facing surface: the strategy catalogue plus the caller-signed money routes. */
 export function registerPublicEarnPaths(registry: OpenAPIRegistry) {
-  registerEarnStrategyPaths(registry, earnPublicSecurity);
-  registerEarnDepositPreviewPath(registry, earnPublicSecurity);
+  registerEarnStrategyPaths(registry, earnPublicSecurity.optional);
+  registerEarnDepositPreviewPath(registry, earnPublicSecurity.optional);
   registerEarnExternalWalletPaths(registry, earnPublicSecurity);
 }
 
@@ -76,7 +127,7 @@ function registerEarnStrategyPaths(
     operationId: "listEarnStrategies",
     description:
       "Returns the strategy catalogue visible to the caller, ranked by deposit size (TVL " +
-      "descending). By default the list answers the environment's own cluster — the shelf the " +
+      "descending). By default the list answers the environment's own cluster, the shelf the " +
       "caller can act on; pass `?cluster=` to browse the other cluster's mirrored shelf " +
       "(those rows stay `fundable: false`). Catalogued is not the same as fundable: branch on " +
       "`fundable` and `status` rather than assuming a listed strategy takes deposits.",
@@ -132,7 +183,9 @@ function registerEarnDepositPreviewPath(
       "Quotes how many shares a direct vault deposit would mint from the provider's live " +
       "accounting. Use it when the strategy's `depositSlippage.quoteRequired` is true, then " +
       "derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no " +
-      "idempotency key, and 501 when the provider cannot quote deposits.",
+      "idempotency key, and 501 when the provider cannot quote deposits. An anonymous request " +
+      "uses the deployment environment and no tenant state. An authenticated request retains " +
+      "its project environment, `earn:read` scope, and provider entitlement.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -181,10 +234,7 @@ function registerEarnVaultShareReconciliationPath(
   });
 }
 
-function registerEarnExternalWalletPaths(
-  registry: OpenAPIRegistry,
-  security: Array<Record<string, string[]>>
-) {
+function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: EarnSecurityMatrix) {
   // External-wallet (caller-signed) vault flows (PRO-1722): the B2B2C money
   // path. Each direction is a BUILD (returns an unsigned transaction for the
   // customer's own wallet to sign) and a SUBMIT (verifies the signature over
@@ -198,10 +248,11 @@ function registerEarnExternalWalletPaths(
     description:
       "Returns a complete live aggregate across the active partner project's end-user wallets, " +
       "grouped by strategy and token. The service pages every stored claim before hydration. " +
-      "Pass `includePositions=true` when a UI needs the already hydrated per-customer positions; " +
-      "this avoids a separate paid chain read for every owner. A total is omitted when any " +
+      "Owner addresses are omitted by default; pass `includeOwnerAddresses=true` to receive " +
+      "them, and add `includePositions=true` when a UI needs the already hydrated per-customer " +
+      "positions, which avoids a separate paid chain read for every owner. A total is omitted when any " +
       "contributing live value is unavailable, never reported as zero or partial.",
-    security,
+    security: security.required,
     request: { headers: projectScopeHeaders, query: earnExternalWalletPositionSummaryQuerySchema },
     responses: {
       200: {
@@ -220,10 +271,12 @@ function registerEarnExternalWalletPaths(
     operationId: "listEarnExternalWalletPositions",
     description:
       "Returns one strict keyset page of live positions for an end-user wallet in the active " +
-      "partner project. `ownerAddress` is required — the same query addressing every per-owner " +
-      "read on this surface uses. A wallet outside the project's scope answers 404. Live " +
-      "fields are absent when provider hydration is unavailable, never replaced with zero.",
-    security,
+      "partner project. `ownerAddress` is required, the same query addressing every per-owner " +
+      "read on this surface uses. A wallet with no positions in the project's scope (never " +
+      "deposited, fully exited, or held under another organization) answers 200 with an empty " +
+      "`positions` list, never 404. Live fields are absent when provider hydration is " +
+      "unavailable, never replaced with zero.",
+    security: security.required,
     request: {
       headers: projectScopeHeaders,
       query: earnExternalWalletPositionsQuerySchema,
@@ -233,7 +286,7 @@ function registerEarnExternalWalletPaths(
         description: "External-wallet position page",
         content: jsonContent(earnExternalWalletPositionsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -247,9 +300,12 @@ function registerEarnExternalWalletPaths(
       "Returns one keyset page of the wallet's recorded deposits and withdrawals, newest " +
       "first, in ledger vocabulary (`requested`, `submitted`, `confirmed`, `finalized`, " +
       "`failed`; only `finalized` and `failed` are terminal). `ownerAddress` is required; a " +
-      "wallet outside the active partner project answers 404. Reports on money that already " +
-      "moved, so no provider gate applies.",
-    security,
+      "wallet with no recorded movements in the active partner project answers 200 with an " +
+      "empty `movements` list, never 404. Each movement carries `tokenAmount` in `tokenMint` " +
+      "units for display (a withdrawal's observed payout once finalized) alongside the " +
+      "on-chain `amount`/`denomination`. Reports on money that already moved, so no provider " +
+      "gate applies.",
+    security: security.required,
     request: {
       headers: projectScopeHeaders,
       query: earnExternalWalletMovementsQuerySchema,
@@ -259,7 +315,7 @@ function registerEarnExternalWalletPaths(
         description: "External-wallet movement page",
         content: jsonContent(earnExternalWalletMovementsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -276,7 +332,7 @@ function registerEarnExternalWalletPaths(
       "network decides it; if the chain read is unavailable the last durable status is served " +
       "and a background reconciler (about every minute) remains the recovery path. Keep " +
       "polling until `finalized` or `failed` — those are the only terminal states.",
-    security,
+    security: security.required,
     request: {
       headers: projectScopeHeaders,
       params: earnExternalWalletMovementParamsSchema,
@@ -298,14 +354,16 @@ function registerEarnExternalWalletPaths(
     operationId: "getEarnExternalWalletEarnings",
     description:
       "Returns live balance and total earned per deposit token for the required " +
-      "`ownerAddress`: `earned` is live value minus " +
-      "finalized SDP deposits, stated only when exact. When it cannot be stated — live value " +
-      "unavailable, movements still settling, or a finalized withdrawal on a held position — " +
-      "the figure is absent with a named reason, never zero. Figures cover currently held " +
-      "positions: a fully exited position's history drops out (it stays on the movements " +
-      "list). Live value reads the owner's whole vault balance, so shares acquired outside " +
-      "SDP inflate it.",
-    security,
+      "`ownerAddress`: `earned` is live value plus observed withdrawal payouts " +
+      "(`totalWithdrawn`) minus finalized SDP deposits (`totalDeposited`), stated only when " +
+      "exact. When it cannot be stated (live value unavailable, movements still settling, or " +
+      "a finalized withdrawal whose payout was not observed) the figure is absent with a " +
+      "named reason, never zero. A wallet with no positions in the project's scope answers " +
+      "200 with `positionCount: 0` and empty `totalsByToken`, never 404. Figures cover " +
+      "currently held positions: a fully exited position's history drops out (it stays on the " +
+      "movements list). Live value reads the owner's whole vault balance, so shares acquired " +
+      "outside SDP inflate it.",
+    security: security.required,
     request: {
       headers: projectScopeHeaders,
       query: earnExternalWalletEarningsQuerySchema,
@@ -315,7 +373,7 @@ function registerEarnExternalWalletPaths(
         description: "External-wallet earnings",
         content: jsonContent(earnExternalWalletEarningsResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
     },
   });
 
@@ -326,18 +384,21 @@ function registerEarnExternalWalletPaths(
     summary: "Build an unsigned external-wallet deposit transaction",
     operationId: "createEarnExternalWalletDepositTransaction",
     description:
-      "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. By " +
-      "default the owner is the fee payer and only required signer; pass `feePayer` to pay " +
-      "the network fee (and any first-deposit account rent) from your own wallet instead — " +
-      "the transaction then also requires that wallet's signature, added server-side before " +
-      "submit. The transaction expires with its " +
-      "blockhash, and nothing moves until the signed bytes are submitted.",
-    security,
+      "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. An " +
+      "anonymous build uses the owner as fee payer, writes no tenant row, and must be signed, " +
+      "broadcast, and tracked by the caller. An authenticated build retains its `earn:write` " +
+      "scope and provider entitlement, persists a submit-capable build, and may name a " +
+      "caller-controlled `feePayer` that signs alongside the owner. The transaction expires " +
+      "with its blockhash, and nothing moves during the build.",
+    security: security.optional,
     request: {
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletDepositTransactionRequest),
+        content: jsonContentWithAnonymousExample(
+          earnExternalWalletDepositTransactionRequest,
+          earnAnonymousRequestExamples.depositTransaction
+        ),
       },
     },
     responses: {
@@ -357,11 +418,12 @@ function registerEarnExternalWalletPaths(
     operationId: "createEarnExternalWalletDeposit",
     description:
       "Verifies the signed bytes are exactly the built transaction and that every required " +
-      "signature is genuine — the owner's, and the fee payer's when the build named one — " +
+      "signature is genuine (the owner's, and the fee payer's when the build named one), " +
       "records the movement, then broadcasts. Requires the Idempotency-Key header: " +
       "a retry with the same key resolves the original movement (`replayed: true`), and each " +
-      "built transaction is consumable exactly once.",
-    security,
+      "built transaction is consumable exactly once. A build whose blockhash has expired is " +
+      "refused with 409 TRANSACTION_EXPIRED before anything is recorded; build again.",
+    security: security.required,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
       body: {
@@ -389,14 +451,18 @@ function registerEarnExternalWalletPaths(
       "accounting — the read a truthful `minAmountOut` floor is derived from (`assetsOut` " +
       "minus your chosen tolerance, quantized to `assetDecimals`). Read-only, no idempotency " +
       "key, and it takes the exit's own gates: a delisted strategy or a provider disabled for " +
-      "new deposits stays quotable. POST because the parameters are a body; 501 when the " +
-      "provider cannot quote exits.",
-    security,
+      "new deposits stays quotable. An authenticated request identifies its tenant position; " +
+      "an anonymous request identifies the strategy and signing owner without reading tenant " +
+      "state. POST because the parameters are a body; 501 when the provider cannot quote exits.",
+    security: security.optional,
     request: {
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletWithdrawalPreviewRequest),
+        content: jsonContentWithAnonymousExample(
+          earnExternalWalletWithdrawalPreviewRequest,
+          earnAnonymousRequestExamples.withdrawalPreview
+        ),
       },
     },
     responses: {
@@ -415,15 +481,21 @@ function registerEarnExternalWalletPaths(
     summary: "Build an unsigned external-wallet exit transaction",
     operationId: "createEarnExternalWalletWithdrawalTransaction",
     description:
-      "Builds one unsigned exit transaction for an external-wallet position. Takes no " +
-      "surfacing, entitlement, availability, or catalogue gate (ADR 0002 exit safety), so the " +
-      "exit works while the provider is disabled for new deposits.",
-    security,
+      "Builds one unsigned external-wallet exit. An authenticated request identifies its " +
+      "tenant position, retains its `earn:write` scope, and persists a submit-capable build. " +
+      "An anonymous request identifies the strategy and signing owner, uses the owner as fee " +
+      "payer, and writes no tenant row. Both tiers retain ADR 0002 exit safety, so the exit " +
+      "works while the provider is disabled for new deposits. A strategy with a withdrawal " +
+      "slippage policy still requires `minAmountOut`.",
+    security: security.optional,
     request: {
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletWithdrawalTransactionRequest),
+        content: jsonContentWithAnonymousExample(
+          earnExternalWalletWithdrawalTransactionRequest,
+          earnAnonymousRequestExamples.withdrawalTransaction
+        ),
       },
     },
     responses: {
@@ -444,8 +516,9 @@ function registerEarnExternalWalletPaths(
     description:
       "The exit mirror of the deposit submit: signature verified over the exact built message, " +
       "movement recorded before broadcast, Idempotency-Key required, one submission per built " +
-      "transaction.",
-    security,
+      "transaction. A build whose blockhash has expired is refused with 409 TRANSACTION_EXPIRED " +
+      "before anything is recorded; build again.",
+    security: security.required,
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
       body: {

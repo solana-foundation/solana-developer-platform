@@ -26,7 +26,6 @@ const {
   createFeePaymentAdapter,
   createMosaicService,
   createSigningService,
-  createToken2022Service,
   CustodyConfigStore,
   getDb,
   hashString,
@@ -782,7 +781,6 @@ async function createFundedLocalWallet(input: {
 export {
   app,
   createMosaicService,
-  createToken2022Service,
   ensurePrivyCustodyAddress,
   env,
   INTEGRATION_CUSTODY_PROVIDER,

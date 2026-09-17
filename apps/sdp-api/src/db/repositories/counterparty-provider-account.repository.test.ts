@@ -1,6 +1,7 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { bvnkCustomerLinkSeed, bvnkOnrampRequest } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -179,15 +180,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       kind: "funding_wallet",
       fiatCurrency: "USD",
       externalAccountReference: "wallet_resource_1",
-      metadata: {
-        onrampKey: "USD:USDC_SOLANA:dest",
-        request: {
-          currency: "USDC",
-          network: "SOLANA",
-          destinationWalletAddress: "dest",
-          fiatCurrency: "USD",
-        },
-      },
+      metadata: { onrampKey: "USD:USDC_SOLANA:dest", request: bvnkOnrampRequest() },
     });
     const merchantWallet = await repository.insertProviderResourceAccount({
       organizationId: TEST_ORG.id,
@@ -272,8 +265,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
-      provider: "bvnk",
-      providerCustomerReference: "bvnk_customer_kind_filter",
+      ...bvnkCustomerLinkSeed("bvnk_customer_kind_filter"),
     });
 
     expect(
@@ -312,8 +304,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: duplicateCounterparty.id,
-        provider: "bvnk",
-        providerCustomerReference: "bvnk_customer_kind_filter",
+        ...bvnkCustomerLinkSeed("bvnk_customer_kind_filter"),
       })
     ).rejects.toMatchObject({ code: "23505" });
     expect(

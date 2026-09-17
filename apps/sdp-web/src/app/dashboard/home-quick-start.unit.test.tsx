@@ -11,6 +11,7 @@ import {
   resumeQuickStart,
   setQuickStart,
 } from "@/lib/dashboard-quick-start";
+import DashboardLoading from "./(home)/loading";
 import { HomeWorkspace } from "./home-workspace";
 
 const workspace = vi.hoisted(() => ({
@@ -23,6 +24,7 @@ const workspace = vi.hoisted(() => ({
 }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => workspace,
+  useOptionalDashboardWorkspace: () => workspace,
 }));
 vi.mock("@/lib/dashboard-swr", () => ({
   usePersistedDashboardSWR: () => ({ data: { activityRows: [], todaysVolume: 0 } }),
@@ -58,6 +60,28 @@ afterEach(() => {
 });
 
 describe("home after quick start", () => {
+  it("keeps loading and settled Home compact until quick start is dismissed", () => {
+    const view = render(
+      <>
+        <DashboardLoading />
+        {ui()}
+      </>
+    );
+    expect(view.container.querySelector("[data-loading-home-hero]")).toBeNull();
+    expect(view.container.querySelector("[data-loading-home-activity-row]")).toBeNull();
+    expect(view.queryByText("Total Balance")).toBeNull();
+    act(() => dismissQuickStart(progressKey));
+    expect(view.container.querySelector("[data-loading-home-hero]")).toBeTruthy();
+    expect(view.getByText("Total Balance")).toBeTruthy();
+  });
+
+  it("keeps the full loading layout for established organizations", () => {
+    workspace.initialQuickStartStep = "wallet";
+    const view = render(<DashboardLoading />);
+    expect(view.container.querySelector("[data-loading-home-hero]")).toBeTruthy();
+    expect(view.container.querySelector("[data-loading-home-activity-row]")).toBeTruthy();
+  });
+
   it("preserves balances for an organization with existing API keys on a fresh browser", () => {
     workspace.initialQuickStartStep = "wallet";
     const view = render(ui());

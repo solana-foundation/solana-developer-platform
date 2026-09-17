@@ -27,6 +27,7 @@
  */
 
 import { apiTestSupport } from "@sdp/api/test-support";
+import { EARN_DEPOSIT_TOKEN_SYMBOLS, SOL_MINT, wellKnownMint } from "@sdp/types";
 import {
   type Address,
   address,
@@ -100,6 +101,38 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
     expect(declared.length).toBeGreaterThan(0);
 
     expect(declared.filter(({ program }) => !allowed.has(program))).toEqual([]);
+  });
+
+  /**
+   * `allowed_tokens` is the operator's declared mint set (PRO-1962). Kora does
+   * not gate signing on it on the deployed tag, so a gap here breaks nothing
+   * today and everything the day something starts reading it (token-fee
+   * pricing, a Kora upgrade). Same stale-instance caveat as the allowlist
+   * assertion above: the list ships as config, not code.
+   */
+  it("declares exactly the devnet Earn deposit mints as supported tokens, wSOL first", async (ctx) => {
+    const { tokens } = await client.getSupportedTokens();
+
+    // The token set ships as CONFIG (sdp-infra#180) and this suite runs against
+    // whatever the dev-env Kora currently mounts, so a deployment still serving
+    // the pre-PRO-1962 list (wSOL alone) is the rollout not having reached it,
+    // not a regression. Skip with the reason instead of failing a PR that
+    // cannot roll the config itself. Only that EXACT shape skips: a partial or
+    // drifted list is asserted in full below and fails.
+    ctx.skip(
+      tokens.length === 1 && tokens[0] === SOL_MINT,
+      "deployed devnet Kora still serves the pre-PRO-1962 token set (wSOL only); waiting on sdp-infra#180 to roll"
+    );
+
+    const expectedTokens = [
+      SOL_MINT,
+      ...EARN_DEPOSIT_TOKEN_SYMBOLS.flatMap((symbol) => {
+        const mint = wellKnownMint(symbol, CLUSTER);
+        return mint === undefined ? [] : [mint];
+      }),
+    ];
+
+    expect(tokens).toEqual(expectedTokens);
   });
 
   /**

@@ -1,7 +1,13 @@
-import { type PaymentTransferStatus, tokenFilterAliases } from "@sdp/types";
+import {
+  type PaymentTransactionKind,
+  type PaymentTransferStatus,
+  tokenFilterAliases,
+} from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
+import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
+import { PAYMENT_TRANSACTION_KIND_SQL } from "./payments.kind";
 import type {
   CreatePaymentTransferInput,
   ListTransfersByStatusInput,
@@ -12,14 +18,6 @@ import type {
   UpdatePaymentTransferInput,
 } from "./payments.repository";
 import { WALLET_TRANSFER_TYPES } from "./payments.repository";
-
-function buildInClause(length: number): string {
-  return Array.from({ length }, () => "?").join(", ");
-}
-
-function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, "\\$&");
-}
 
 function paymentTransferSearchExpression(alias: string): string {
   return `(
@@ -150,7 +148,9 @@ function buildTransferListWhere(params: ListTransfersInput): {
   return { whereClause: clauses.join(" AND "), values };
 }
 
-function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
+type PaymentTransferProjectionRow = Record<string, unknown> & { kind: PaymentTransactionKind };
+
+function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
@@ -165,6 +165,7 @@ function mapTransferRow(row: Record<string, unknown>): PaymentTransferRow {
     amount: row.amount as string | null,
     memo: (row.memo as string | null | undefined) ?? null,
     type: row.type as PaymentTransferRow["type"],
+    kind: row.kind,
     direction: row.direction as PaymentTransferRow["direction"],
     status: row.status as PaymentTransferRow["status"],
     provider: row.provider as PaymentTransferRow["provider"],
@@ -240,7 +241,8 @@ export function createPostgresPaymentsRepository(
       assertScope(input);
       const row = await db
         .prepare(
-          `INSERT INTO payment_transfers (
+          `WITH pt AS (
+           INSERT INTO payment_transfers (
              id,
              organization_id,
              project_id,
@@ -272,7 +274,9 @@ export function createPostgresPaymentsRepository(
              created_at,
              updated_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, CASE WHEN ?::boolean THEN sdp_iso_now() END, sdp_iso_now(), sdp_iso_now())
-           RETURNING *`
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(
           input.id,
@@ -304,7 +308,7 @@ export function createPostgresPaymentsRepository(
           input.idempotencyFingerprint ?? null,
           input.status === "confirmed"
         )
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -313,13 +317,14 @@ export function createPostgresPaymentsRepository(
       assertScope({ organizationId, projectId });
       const row = await db
         .prepare(
-          `SELECT * FROM payment_transfers
-           WHERE organization_id = ?
-             AND COALESCE(project_id, '') = COALESCE(?, '')
-             AND idempotency_key = ?`
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
+           WHERE pt.organization_id = ?
+             AND COALESCE(pt.project_id, '') = COALESCE(?, '')
+             AND pt.idempotency_key = ?`
         )
         .bind(organizationId, projectId, idempotencyKey)
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -360,7 +365,8 @@ export function createPostgresPaymentsRepository(
 
       const row = await db
         .prepare(
-          `UPDATE payment_transfers
+          `WITH pt AS (
+           UPDATE payment_transfers
            SET status = COALESCE(?, status),
                signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
                serialized_tx = CASE WHEN ?::boolean THEN ? ELSE serialized_tx END,
@@ -376,7 +382,9 @@ export function createPostgresPaymentsRepository(
                confirmed_at = CASE WHEN ?::boolean THEN COALESCE(confirmed_at, ?) ELSE confirmed_at END,
                updated_at = ?
            WHERE ${clauses.join(" AND ")}
-           RETURNING *`
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(
           input.status ?? null,
@@ -407,7 +415,7 @@ export function createPostgresPaymentsRepository(
           input.updatedAt,
           ...values
         )
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -430,13 +438,16 @@ export function createPostgresPaymentsRepository(
       });
       const row = await db
         .prepare(
-          `UPDATE payment_transfers
+          `WITH pt AS (
+           UPDATE payment_transfers
            SET signature = ?,
                signed_transaction = ?,
                last_valid_block_height = ?::numeric,
                updated_at = ?
            WHERE ${scope.where}
-           RETURNING *`
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(
           input.signature,
@@ -445,7 +456,7 @@ export function createPostgresPaymentsRepository(
           input.updatedAt,
           ...scope.values
         )
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -491,17 +502,20 @@ export function createPostgresPaymentsRepository(
       });
       const row = await db
         .prepare(
-          `UPDATE payment_transfers
+          `WITH pt AS (
+           UPDATE payment_transfers
            SET destination_address = ?,
                initiated_by_key_id = ?,
                status = 'processing',
                error = NULL,
                updated_at = ?
            WHERE ${scope.where}
-           RETURNING *`
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(input.destinationAddress, input.initiatedByKeyId, input.updatedAt, ...scope.values)
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -524,13 +538,16 @@ export function createPostgresPaymentsRepository(
       });
       const row = await db
         .prepare(
-          `UPDATE payment_transfers
+          `WITH pt AS (
+           UPDATE payment_transfers
            SET submission_started_at = ?, updated_at = ?
            WHERE ${scope.where}
-           RETURNING *`
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(input.startedAt, input.startedAt, ...scope.values)
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -577,13 +594,16 @@ export function createPostgresPaymentsRepository(
       }
       const row = await db
         .prepare(
-          `UPDATE payment_transfers
+          `WITH pt AS (
+           UPDATE payment_transfers
            SET ${assignments.join(", ")}
            WHERE ${scope.where}
-           RETURNING *`
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(...assignmentValues, ...scope.values)
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -594,14 +614,18 @@ export function createPostgresPaymentsRepository(
         organizationId: params.organizationId,
         projectId: params.projectId,
         includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: ["id = ?"],
+        tableAlias: "pt",
+        extraClauses: ["pt.id = ?"],
         extraValues: [params.transferId],
       });
 
       const row = await db
-        .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt WHERE ${scope.where}`
+        )
         .bind(...scope.values)
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -612,14 +636,18 @@ export function createPostgresPaymentsRepository(
         organizationId: params.organizationId,
         projectId: params.projectId,
         includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: ["signature = ?"],
+        tableAlias: "pt",
+        extraClauses: ["pt.signature = ?"],
         extraValues: [params.signature],
       });
 
       const row = await db
-        .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt WHERE ${scope.where}`
+        )
         .bind(...scope.values)
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -634,14 +662,18 @@ export function createPostgresPaymentsRepository(
         organizationId: params.organizationId,
         projectId: params.projectId,
         includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: ["id = ANY(?)"],
+        tableAlias: "pt",
+        extraClauses: ["pt.id = ANY(?)"],
         extraValues: [params.transferIds],
       });
 
       const rows = await db
-        .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt WHERE ${scope.where}`
+        )
         .bind(...scope.values)
-        .all<Record<string, unknown>>();
+        .all<PaymentTransferProjectionRow>();
 
       return rows.results.map(mapTransferRow);
     },
@@ -660,18 +692,22 @@ export function createPostgresPaymentsRepository(
             organizationId: effectiveOrganizationId,
             projectId: effectiveProjectId ?? null,
             includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-            extraClauses: ["provider = ?", "provider_reference = ?"],
+            tableAlias: "pt",
+            extraClauses: ["pt.provider = ?", "pt.provider_reference = ?"],
             extraValues: [params.provider, params.providerReference],
           })
         : {
-            where: "provider = ? AND provider_reference = ?",
+            where: "pt.provider = ? AND pt.provider_reference = ?",
             values: [params.provider, params.providerReference],
           };
 
       const row = await db
-        .prepare(`SELECT * FROM payment_transfers WHERE ${scope.where}`)
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt WHERE ${scope.where}`
+        )
         .bind(...scope.values)
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -685,14 +721,17 @@ export function createPostgresPaymentsRepository(
       }
       const row = await db
         .prepare(
-          `UPDATE payment_transfers
+          `WITH pt AS (
+           UPDATE payment_transfers
            SET provider_reference = ?, updated_at = ?
            WHERE ${clauses.join(" AND ")}
              AND (provider_reference IS NULL OR provider_reference = ?)
-           RETURNING *`
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(input.providerReference, input.updatedAt, ...values, input.providerReference)
-        .first<Record<string, unknown>>();
+        .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
     },
@@ -714,7 +753,7 @@ export function createPostgresPaymentsRepository(
 
       const rows = await db
         .prepare(
-          `SELECT pt.*, c.display_name AS counterparty_display_name
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind, c.display_name AS counterparty_display_name
            FROM payment_transfers pt
            LEFT JOIN counterparties c
              ON c.id = pt.counterparty_id
@@ -723,7 +762,7 @@ export function createPostgresPaymentsRepository(
            WHERE ${scope.where}`
         )
         .bind(...scope.values)
-        .all<Record<string, unknown>>();
+        .all<PaymentTransferProjectionRow>();
 
       return rows.results.map(mapTransferRow);
     },
@@ -743,7 +782,7 @@ export function createPostgresPaymentsRepository(
       const [rows, countRow] = await Promise.all([
         db
           .prepare(
-            `SELECT pt.*, c.display_name AS counterparty_display_name
+            `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind, c.display_name AS counterparty_display_name
              FROM payment_transfers pt
              LEFT JOIN counterparties c
                ON c.id = pt.counterparty_id
@@ -755,7 +794,7 @@ export function createPostgresPaymentsRepository(
              OFFSET ?`
           )
           .bind(...paginationValues)
-          .all<Record<string, unknown>>(),
+          .all<PaymentTransferProjectionRow>(),
         db
           .prepare(
             `SELECT COUNT(*) AS count
@@ -790,38 +829,38 @@ export function createPostgresPaymentsRepository(
         return [];
       }
 
-      const clauses = [`status IN (${buildInClause(statuses.length)})`];
+      const clauses = [`pt.status IN (${buildInClause(statuses.length)})`];
       const values: unknown[] = [...statuses];
 
       if (types?.length) {
-        clauses.push(`type IN (${buildInClause(types.length)})`);
+        clauses.push(`pt.type IN (${buildInClause(types.length)})`);
         values.push(...types);
       }
       if (hasSignature === true) {
-        clauses.push("signature IS NOT NULL");
+        clauses.push("pt.signature IS NOT NULL");
       } else if (hasSignature === false) {
-        clauses.push("signature IS NULL");
+        clauses.push("pt.signature IS NULL");
       }
       if (createdBefore) {
-        clauses.push("created_at < ?");
+        clauses.push("pt.created_at < ?");
         values.push(createdBefore);
       }
       if (updatedBefore) {
-        clauses.push("updated_at < ?");
+        clauses.push("pt.updated_at < ?");
         values.push(updatedBefore);
       }
 
       const rows = await db
         .prepare(
-          `SELECT *
-           FROM payment_transfers
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
            WHERE ${clauses.join(" AND ")}
-           ORDER BY updated_at ASC, id ASC
+           ORDER BY pt.updated_at ASC, pt.id ASC
            LIMIT ?
            OFFSET ?`
         )
         .bind(...values, limit, offset ?? 0)
-        .all<Record<string, unknown>>();
+        .all<PaymentTransferProjectionRow>();
 
       return rows.results.map(mapTransferRow);
     },
@@ -835,17 +874,17 @@ export function createPostgresPaymentsRepository(
       const pollableStatus: PaymentTransferStatus = "confirmed";
       const rows = await db
         .prepare(
-          `SELECT *
-           FROM payment_transfers
-           WHERE status = ?
-             AND type IN (${buildInClause(WALLET_TRANSFER_TYPES.length)})
-             AND signature IS NOT NULL
-             AND confirmed_at > ?
-           ORDER BY finalization_last_polled_at ASC NULLS FIRST, id ASC
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
+           WHERE pt.status = ?
+             AND pt.type IN (${buildInClause(WALLET_TRANSFER_TYPES.length)})
+             AND pt.signature IS NOT NULL
+             AND pt.confirmed_at > ?
+           ORDER BY pt.finalization_last_polled_at ASC NULLS FIRST, pt.id ASC
            LIMIT ?`
         )
         .bind(pollableStatus, ...WALLET_TRANSFER_TYPES, confirmedAfter, limit)
-        .all<Record<string, unknown>>();
+        .all<PaymentTransferProjectionRow>();
 
       return rows.results.map(mapTransferRow);
     },

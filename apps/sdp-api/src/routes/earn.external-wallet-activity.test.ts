@@ -154,7 +154,9 @@ async function seedPosition(input: {
 /**
  * One vault movement with valid 0062 commitment metadata for its status:
  * confirmed/finalized stamp `confirmed_at`, finalized stamps `settled_at` and
- * `amount_settled`, failed stamps `failure_reason`.
+ * `amount_settled`, failed stamps `failure_reason`. A finalized deposit also
+ * carries `token_amount_settled` (0103), as the writer stamps it; a finalized
+ * withdrawal carries it only when the test names an observed payout.
  */
 async function seedMovement(input: {
   positionId: string;
@@ -167,12 +169,20 @@ async function seedMovement(input: {
   createdAt: string;
   organizationId?: string;
   projectId?: string;
+  /** A finalized withdrawal's observed deposit-token payout; omitted = not observed. */
+  tokenAmountSettled?: string;
 }): Promise<string> {
   const movementId = generateEarnMovementId();
   const confirmedAt =
     input.status === "confirmed" || input.status === "finalized" ? input.createdAt : null;
   const settledAt = input.status === "finalized" ? input.createdAt : null;
   const amountSettled = input.status === "finalized" ? input.amount : null;
+  const tokenAmountSettled =
+    input.status !== "finalized"
+      ? null
+      : input.direction === "deposit"
+        ? input.amount
+        : (input.tokenAmountSettled ?? null);
   const failureReason = input.status === "failed" ? "expired unlanded" : null;
   const [source, destination] =
     input.direction === "deposit"
@@ -183,10 +193,11 @@ async function seedMovement(input: {
       `INSERT INTO earn_movements (
          id, organization_id, project_id, environment, provider, execution_model,
          direction, position_id, status, denomination, amount_requested, amount_settled,
+         token_amount_settled,
          owner_address, vault_address, source_address, destination_address,
          signature, signed_transaction, last_valid_block_height, request_id,
          idempotency_fingerprint, created_at, confirmed_at, settled_at, failure_reason
-       ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, ?, ?,
+       ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?, ?, 'AQ==', '12345', ?, ?, ?, ?, ?, ?)`
     )
     .bind(
@@ -199,6 +210,7 @@ async function seedMovement(input: {
       input.denomination,
       input.amount,
       amountSettled,
+      tokenAmountSettled,
       input.ownerAddress,
       input.vaultAddress,
       source,
@@ -407,7 +419,81 @@ describe("external-wallet activity", () => {
     expect((await get(`/v1/earn/external-wallet/movements${query}`)).status).toBe(400);
   });
 
-  it("404s an owner claimed only by another organization", async () => {
+  /** The empty answers every per-owner read gives a wallet with nothing in scope. */
+  async function expectEmptyReads(ownerAddress: string) {
+    const [movements, positions, earnings] = await Promise.all([
+      get(`/v1/earn/external-wallet/movements?ownerAddress=${ownerAddress}`),
+      get(`/v1/earn/external-wallet/positions?ownerAddress=${ownerAddress}`),
+      get(`/v1/earn/external-wallet/earnings?ownerAddress=${ownerAddress}`),
+    ]);
+    expect(movements.status).toBe(200);
+    expect(positions.status).toBe(200);
+    expect(earnings.status).toBe(200);
+    expect(((await movements.json()) as { data: unknown }).data).toEqual({
+      ownerAddress,
+      movements: [],
+      hasMore: false,
+      nextCursor: null,
+    });
+    expect(((await positions.json()) as { data: unknown }).data).toEqual({
+      ownerAddress,
+      positions: [],
+      hasMore: false,
+      nextCursor: null,
+    });
+    expect(((await earnings.json()) as { data: unknown }).data).toEqual({
+      earnings: {
+        ownerAddress,
+        positionCount: 0,
+        unavailablePositionCount: 0,
+        totalsByToken: [],
+      },
+    });
+  }
+
+  it("answers a never-seen owner with 200 and the empty shape on every per-owner read", async () => {
+    // A partner's balance screen renders for a customer who has not deposited
+    // yet; "no history" is content, not an error.
+    await expectEmptyReads(OWNER_B);
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("answers an owner with only a fully exited position with the same empty shape", async () => {
+    const exited = await seedPosition({
+      ownerAddress: OWNER_B,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+      closedAt: "2026-08-28T00:00:00.000Z",
+    });
+    await seedMovement({
+      positionId: exited,
+      ownerAddress: OWNER_B,
+      vaultAddress: "vault-usdc",
+      direction: "deposit",
+      status: "failed",
+      amount: "60",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+    });
+    // The closed position is hidden; the failed movement stays on the feed
+    // because history is history, so only positions and earnings are empty.
+    const positions = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
+    const earnings = await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_B}`);
+    expect(positions.status).toBe(200);
+    expect(earnings.status).toBe(200);
+    expect(((await positions.json()) as { data: { positions: unknown[] } }).data.positions).toEqual(
+      []
+    );
+    expect(((await earnings.json()) as { data: { earnings: unknown } }).data.earnings).toEqual({
+      ownerAddress: OWNER_B,
+      positionCount: 0,
+      unavailablePositionCount: 0,
+      totalsByToken: [],
+    });
+  });
+
+  it("answers an owner claimed only by another organization empty, leaking nothing", async () => {
     const position = await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
@@ -430,7 +516,10 @@ describe("external-wallet activity", () => {
     expect(body.data.movements).toHaveLength(1);
     expect(body.data.movements[0]?.providerReference).toBe("vault-usdc");
 
-    // An owner only a foreign organization has claimed reads as never seen.
+    // An owner only a foreign organization has claimed answers exactly like an
+    // owner nobody has seen: every query is org/project/environment scoped, so
+    // the empty shape is the same bytes either way and the caller cannot tell
+    // "not yours" from "never seen".
     const foreignOrg = "org_external_activity_foreign";
     const foreignProject = "prj_external_activity_foreign";
     await getDb(env)
@@ -443,7 +532,7 @@ describe("external-wallet activity", () => {
       members: [],
       ids: { sandbox: foreignProject, production: `${foreignProject}_production` },
     });
-    await seedPosition({
+    const foreign = await seedPosition({
       ownerAddress: OWNER_B,
       vaultAddress: "vault-foreign",
       tokenMint: USDC,
@@ -451,12 +540,21 @@ describe("external-wallet activity", () => {
       organizationId: foreignOrg,
       projectId: foreignProject,
     });
-    expect((await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_B}`)).status).toBe(
-      404
-    );
-    expect((await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_B}`)).status).toBe(
-      404
-    );
+    await seedMovement({
+      positionId: foreign,
+      ownerAddress: OWNER_B,
+      vaultAddress: "vault-foreign",
+      direction: "deposit",
+      status: "finalized",
+      amount: "60",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      organizationId: foreignOrg,
+      projectId: foreignProject,
+    });
+    await expectEmptyReads(OWNER_B);
+    // No live read is ever issued for a foreign holding.
+    expect(readVaultPositions).not.toHaveBeenCalled();
   });
 
   it("serves one movement by id and 404s a custody-signed row", async () => {
@@ -706,7 +804,76 @@ describe("external-wallet earnings", () => {
     expect(token).not.toHaveProperty("earned");
   });
 
-  it("withholds earned once a withdrawal exists, because exits are ledgered in shares", async () => {
+  it("values a finalized withdrawal from its observed payout and keeps earned exact", async () => {
+    const position = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    await seedMovement({
+      positionId: position,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      direction: "deposit",
+      status: "finalized",
+      amount: "60",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+    });
+    // 3 shares out, observed at settlement as 3.15 USDC back to the owner.
+    const withdrawal = await seedMovement({
+      positionId: position,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      direction: "withdrawal",
+      status: "finalized",
+      amount: "3",
+      denomination: SHARE,
+      createdAt: "2026-08-28T00:00:00.000Z",
+      tokenAmountSettled: "3.15",
+    });
+    liveValue({ "vault-usdc": "58" });
+
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
+      data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
+    };
+    // earned = live 58 + withdrawn 3.15 − deposited 60, and the arithmetic is
+    // visible: both ledger totals ride along with the live value.
+    expect(body.data.earnings.totalsByToken[0]).toMatchObject({
+      currentValue: "58",
+      totalDeposited: "60",
+      totalWithdrawn: "3.15",
+      earned: "1.15",
+    });
+    expect(body.data.earnings.totalsByToken[0]).not.toHaveProperty("earnedUnavailableReason");
+
+    // The feed renders one unit: the withdrawal's on-chain quantity stays in
+    // shares while tokenAmount/tokenMint carry the observed payout.
+    const activity = (await (
+      await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`)
+    ).json()) as { data: { movements: Array<Record<string, unknown>> } };
+    expect(activity.data.movements).toHaveLength(2);
+    expect(activity.data.movements[0]).toMatchObject({
+      movementId: withdrawal,
+      direction: "withdrawal",
+      amount: "3",
+      denomination: SHARE,
+      tokenMint: USDC,
+      tokenAmount: "3.15",
+    });
+    expect(activity.data.movements[1]).toMatchObject({
+      direction: "deposit",
+      amount: "60",
+      denomination: USDC,
+      tokenMint: USDC,
+      tokenAmount: "60",
+    });
+  });
+
+  it("keeps withdrawals_not_valued when a payout could not be observed", async () => {
     const position = await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
@@ -729,9 +896,22 @@ describe("external-wallet earnings", () => {
       vaultAddress: "vault-usdc",
       direction: "withdrawal",
       status: "finalized",
-      amount: "3",
+      amount: "2",
       denomination: SHARE,
       createdAt: "2026-08-28T00:00:00.000Z",
+      tokenAmountSettled: "2.1",
+    });
+    // A second exit whose transaction read failed at settlement: no payout on
+    // record, so the token's earned is withheld rather than understated.
+    const unvalued = await seedMovement({
+      positionId: position,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      direction: "withdrawal",
+      status: "finalized",
+      amount: "1",
+      denomination: SHARE,
+      createdAt: "2026-08-29T00:00:00.000Z",
     });
     liveValue({ "vault-usdc": "58" });
 
@@ -744,9 +924,20 @@ describe("external-wallet earnings", () => {
     expect(token).toMatchObject({
       currentValue: "58",
       totalDeposited: "60",
+      // Only the observed payout counts; the unvalued exit adds nothing.
+      totalWithdrawn: "2.1",
       earnedUnavailableReason: "withdrawals_not_valued",
     });
     expect(token).not.toHaveProperty("earned");
+
+    const activity = (await (
+      await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`)
+    ).json()) as { data: { movements: Array<Record<string, unknown>> } };
+    expect(activity.data.movements[0]).toMatchObject({
+      movementId: unvalued,
+      tokenMint: USDC,
+      tokenAmount: null,
+    });
   });
 
   it("scopes earned to current holdings: a fully exited vault's history drops out", async () => {

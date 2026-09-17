@@ -6,6 +6,8 @@ import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   type CollectedFieldData,
+  offeredCountryCodes,
+  offeredFiatCurrencies,
   type PayoutRequirementAccount,
   type RequirementField,
   requirementFieldName,
@@ -14,11 +16,12 @@ import { CheckIcon, ExternalLinkIcon, Loader2Icon, MapPinIcon, SearchIcon } from
 import { useEffect, useId, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Combobox } from "@/components/ui/combobox";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { fiatCurrencyOptions } from "@/lib/fiat-currency-options";
 import { autocompletePlaces, fetchPlaceDetails, newPlacesSessionToken } from "@/lib/places";
 import { cn } from "@/lib/utils";
 import { applyRequirementMask, requirementFieldError } from "../schema";
@@ -255,6 +258,25 @@ const COUNTRY_FIELD_OPTIONS = COUNTRIES.map((country) => {
   return { value: country.code, label: `${flag} ${country.name}` };
 });
 
+function comboboxOptions(
+  field: Extract<RequirementField, { kind: "select" | "country" | "currency" }>
+): readonly ComboboxOption[] {
+  switch (field.kind) {
+    case "select":
+      return field.options;
+    case "country": {
+      const offeredSet = new Set(offeredCountryCodes(field));
+      return COUNTRY_FIELD_OPTIONS.filter((option) => offeredSet.has(option.value));
+    }
+    case "currency":
+      return fiatCurrencyOptions(offeredFiatCurrencies(field));
+    default: {
+      const exhaustive: never = field;
+      throw new Error(`Unhandled requirement field kind: ${String(exhaustive)}`);
+    }
+  }
+}
+
 function RequirementFieldInput({
   field,
   value,
@@ -268,12 +290,13 @@ function RequirementFieldInput({
   switch (field.kind) {
     case "select":
     case "country":
+    case "currency":
       return (
         <Combobox
           label={field.label}
           value={value.length > 0 ? value : null}
           onChange={onChange}
-          options={field.kind === "select" ? field.options : COUNTRY_FIELD_OPTIONS}
+          options={comboboxOptions(field)}
           placeholder={t("DashboardPayments.ramps.selectField", {
             field: field.label.toLowerCase(),
           })}

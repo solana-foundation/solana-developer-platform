@@ -15,12 +15,12 @@ import {
   useTransition,
 } from "react";
 import { SWRConfig } from "swr";
-import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { clearStoredApiKeySecrets, syncStoredApiKeySecretScope } from "@/lib/playground-api-keys";
 import { reconcileProjectCookieAction, selectProjectAction } from "@/lib/project-cookie-action";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
@@ -63,6 +63,7 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 type DashboardWorkspaceProviderProps = {
   initialQuickStartStep?: import("@/lib/dashboard-quick-start").QuickStartStep | null;
   children: ReactNode;
+  scopeRefreshFallback: ReactNode;
   dashboardAccess: DashboardAccess;
   flags: DashboardFlags;
   serverDashboardCacheScope: DashboardCacheScope;
@@ -75,6 +76,7 @@ type DashboardWorkspaceProviderProps = {
 export function DashboardWorkspaceProvider({
   initialQuickStartStep = null,
   children,
+  scopeRefreshFallback,
   dashboardAccess,
   flags,
   serverDashboardCacheScope,
@@ -129,6 +131,17 @@ export function DashboardWorkspaceProvider({
 
   const [isProjectSwitching, startProjectSwitchTransition] = useTransition();
 
+  useEffect(() => {
+    if (!auth.isLoaded) {
+      return;
+    }
+
+    const scope = auth.userId
+      ? JSON.stringify([auth.userId, auth.orgId ?? null, selectedProjectId])
+      : null;
+    syncStoredApiKeySecretScope(scope);
+  }, [auth.isLoaded, auth.orgId, auth.userId, selectedProjectId]);
+
   const isProjectSwitchingRef = useRef(false);
   isProjectSwitchingRef.current = isProjectSwitching;
 
@@ -147,13 +160,16 @@ export function DashboardWorkspaceProvider({
 
   const selectProject = useCallback(
     (projectId: string | null) => {
+      if (projectId !== selectedProjectId) {
+        clearStoredApiKeySecrets();
+      }
       startProjectSwitchTransition(async () => {
         await selectProjectAction(projectId);
         setSelectedProjectId(projectId);
         router.replace(pathnameRef.current);
       });
     },
-    [router]
+    [router, selectedProjectId]
   );
 
   const initialCookieRepairStarted = useRef(false);
@@ -224,7 +240,7 @@ export function DashboardWorkspaceProvider({
 
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
-      initialQuickStartStep,
+      initialQuickStartStep: dashboardScopeIsFresh ? initialQuickStartStep : null,
       dashboardAccess,
       flags,
       dashboardCacheScope: liveDashboardCacheScope,
@@ -246,6 +262,7 @@ export function DashboardWorkspaceProvider({
     }),
     [
       initialQuickStartStep,
+      dashboardScopeIsFresh,
       dashboardAccess,
       flags,
       liveDashboardCacheScope,
@@ -269,11 +286,7 @@ export function DashboardWorkspaceProvider({
   return (
     <DashboardWorkspaceContext.Provider value={value}>
       <SWRConfig key={swrScopeKey} value={scopedSwrConfig}>
-        {shouldRenderScopeRefreshFallback ? (
-          <FullscreenLoadingIndicator allowDelayedReload />
-        ) : (
-          children
-        )}
+        {shouldRenderScopeRefreshFallback ? scopeRefreshFallback : children}
       </SWRConfig>
     </DashboardWorkspaceContext.Provider>
   );

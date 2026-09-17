@@ -84,6 +84,9 @@
     "organizationSlug": "Organization slug",
     "clerkOrganizationId": "Clerk organization ID",
     "unavailable": "Unavailable",
+    "restricted": "Restricted",
+    "signingDisabledTitle": "Signing is disabled",
+    "signingDisabledBody": "This wallet can receive funds but cannot sign transactions until signing is re-enabled.",
     "unableToLoadWalletProviders": "Unable to load wallet providers",
     "unableToLoadWallets": "Unable to load wallets",
     "trackedBalancesUnavailable": "Tracked balances are unavailable right now. Showing wallet-reported balance.",
@@ -661,8 +664,8 @@
     "apiKeyRoleFixedOnEdit": "The role remains fixed after creation. Wallet and policy scope can still be updated.",
     "apiKeyRoleDescription": {
       "api_admin": "Full endpoint access, including administrative operations.",
-      "api_developer": "Standard token, payment, counterparty, wallet, compliance, and webhook access.",
-      "api_readonly": "Read-only access to operational resources and audit data."
+      "api_developer": "Token, payment, Earn, counterparty, wallet, compliance, and webhook access.",
+      "api_readonly": "Read-only token, payment, Earn, counterparty, wallet, compliance, webhook, and audit access."
     },
     "apiKeyFullEndpointAccess": "Full endpoint access",
     "apiKeyPermissionCount": "{count} endpoint permissions",

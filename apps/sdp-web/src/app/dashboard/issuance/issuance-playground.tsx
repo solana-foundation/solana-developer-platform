@@ -12,7 +12,7 @@ import {
 
 interface IssuancePlaygroundProps {
   apiBaseUrl?: string | null;
-  apiKeyValue: string;
+  apiKeyId: string | null;
   hasActiveApiKeys: boolean;
   templates: IssuancePlaygroundTemplateView[];
   templatesError: string | null;
@@ -21,7 +21,7 @@ interface IssuancePlaygroundProps {
 
 export function IssuancePlayground({
   apiBaseUrl,
-  apiKeyValue,
+  apiKeyId,
   hasActiveApiKeys,
   templates,
   templatesError,
@@ -39,7 +39,7 @@ export function IssuancePlayground({
       endpoints={endpoints}
       defaultEndpointId="mint-execute"
       apiBaseUrl={apiBaseUrl}
-      apiKeyValue={apiKeyValue}
+      apiKeyId={apiKeyId}
       apiKeySelector={<PlaygroundApiKeySelector />}
       requiresApiKey={!hasActiveApiKeys}
       leftMessages={templatesError ? [{ text: templatesError, tone: "critical" }] : []}

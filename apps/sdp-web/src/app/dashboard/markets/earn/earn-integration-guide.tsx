@@ -1,32 +1,32 @@
 "use client";
 
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type EarnStrategy,
-  type SdpEnvironment,
-  SOLANA_CLUSTER_LABELS,
-  SOLANA_CLUSTERS,
-  type SolanaCluster,
-} from "@sdp/types";
+import type { EarnStrategy, SdpEnvironment } from "@sdp/types";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
-import { ArrowLeftIcon, CheckIcon, CopyIcon, InfoIcon, KeyRoundIcon } from "lucide-react";
+import { ArrowLeftIcon, CheckIcon, CopyIcon, InfoIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { CodeBlock } from "@/components/ui/code-block";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useCopy } from "@/lib/use-copy";
 import { EarnIntegrationGuideSkeleton } from "../markets-route-skeletons";
-import { earnProviderLabel, earnStrategyLiquidityLabel } from "./earn-format";
+import {
+  type EarnDepositAvailabilityLabels,
+  earnDepositAvailabilityLabel,
+  earnProviderLabel,
+  earnStrategyLiquidityLabel,
+} from "./earn-format";
 import {
   buildEarnIntegrationSections,
+  buildEarnServerIntegration,
   type EarnIntegrationSections,
 } from "./earn-integration-snippets";
 import { EarnDepositAvailabilityBadge, formatProviderApy } from "./earn-market-presentation";
@@ -35,13 +35,13 @@ import {
   type EarnProviderAccess,
   type EarnVaultDepositAvailability,
   earnVaultDepositAvailability,
+  earnVaultDepositOnlyEnvironment,
 } from "./earn-surfacing";
 
 type EarnIntegrationGuideProps = {
   apiBaseUrl?: string | null;
   earnHref: string;
   providerAccess: EarnProviderAccess | null;
-  strategyCluster?: SolanaCluster;
   strategyId?: string;
 };
 
@@ -85,12 +85,20 @@ const PROGRAM_AVAILABILITY_LABELS = {
   environment_unavailable: "DashboardMarkets.earnProgram.productionUnavailable",
   access_unavailable: "DashboardMarkets.earnProgram.accessUnavailable",
   provider_unavailable: "DashboardMarkets.earnProgram.providerUnavailable",
-} as const satisfies Readonly<Record<EarnVaultDepositAvailability, MessageKey>>;
+  production_only: "DashboardMarkets.earnProgram.sandboxUnavailable",
+} as const satisfies EarnDepositAvailabilityLabels;
 
-function unavailableDescriptionKey(availability: EarnVaultDepositAvailability): MessageKey {
+function unavailableDescriptionKey(
+  availability: EarnVaultDepositAvailability,
+  provider: string
+): MessageKey {
   switch (availability) {
+    case "cluster_unavailable":
+      return "DashboardMarkets.earnProgram.unavailableClusterDescription";
     case "environment_unavailable":
-      return "DashboardMarkets.earnProgram.unavailableEnvironmentDescription";
+      return earnVaultDepositOnlyEnvironment(provider) === "production"
+        ? "DashboardMarkets.earnProgram.unavailableEnvironmentProductionDescription"
+        : "DashboardMarkets.earnProgram.unavailableEnvironmentDescription";
     case "access_unavailable":
       return "DashboardMarkets.earnProgram.unavailableAccessDescription";
     case "provider_unavailable":
@@ -100,33 +108,29 @@ function unavailableDescriptionKey(availability: EarnVaultDepositAvailability): 
   }
 }
 
-function strategyOptionState(
-  strategy: EarnStrategy,
-  sdpEnvironment: SdpEnvironment,
-  providerAccess: EarnProviderAccess | null,
-  previewingMainnet: boolean
-): { availability: EarnVaultDepositAvailability; selectable: boolean } {
-  const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
-  const isMainnetPreview =
-    previewingMainnet &&
-    availability === "cluster_unavailable" &&
-    strategy.hostCluster === "mainnet-beta";
+/**
+ * The one list the picker shows. Production lists its own (mainnet) shelf.
+ * Sandbox lists the fundable devnet shelf first, then the mirrored mainnet
+ * catalogue: those rows stay visible but disabled ("Mainnet only"), the same
+ * posture as the Treasury strategy table, so nothing is hidden behind a toggle.
+ * The guide stays in its skeleton until BOTH shelves have answered: a mainnet
+ * deep link resolved against the devnet rows alone would flash "strategy no
+ * longer available" before flipping to the network-mismatch explanation. A
+ * failed mainnet read only drops its own rows.
+ */
+function useIntegrationCatalogue(sdpEnvironment: SdpEnvironment) {
+  const sandbox = sdpEnvironment === "sandbox";
+  const shelf = useEarnStrategies();
+  const mainnet = useEarnStrategies({ cluster: sandbox ? "mainnet-beta" : undefined });
+  if (!sandbox) return shelf;
 
-  if (!isMainnetPreview) {
-    return { availability, selectable: availability === "available" };
-  }
-
-  // Preview ignores only the cluster mismatch. Re-run the canonical checks so
-  // strategy status, deposit style, environment, and provider access still fail closed.
-  const previewAvailability = earnVaultDepositAvailability(
-    { ...strategy, fundable: true },
-    sdpEnvironment,
-    providerAccess
-  );
-
+  const devnetRows = shelf.strategies ?? [];
+  const mainnetRows = mainnet.error ? [] : (mainnet.strategies ?? []);
+  const seen = new Set(devnetRows.map((strategy) => strategy.id));
   return {
-    availability: previewAvailability === "available" ? availability : previewAvailability,
-    selectable: previewAvailability === "available",
+    strategies: [...devnetRows, ...mainnetRows.filter((strategy) => !seen.has(strategy.id))],
+    error: shelf.error,
+    isLoading: shelf.isLoading || mainnet.isLoading,
   };
 }
 
@@ -134,20 +138,12 @@ export function EarnIntegrationGuide({
   apiBaseUrl,
   earnHref,
   providerAccess,
-  strategyCluster: initialCluster,
   strategyId: initialStrategyId,
 }: EarnIntegrationGuideProps) {
   const t = useTranslations();
   const locale = useLocale();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const environmentCluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
-  const [catalogueCluster, setCatalogueCluster] = useState<SolanaCluster | undefined>(() =>
-    initialCluster === environmentCluster ? undefined : initialCluster
-  );
-  const strategiesCluster = sdpEnvironment === "sandbox" ? catalogueCluster : undefined;
-  const activeCluster = strategiesCluster ?? environmentCluster;
-  const previewingMainnet = sdpEnvironment === "sandbox" && activeCluster === "mainnet-beta";
-  const { strategies, error, isLoading } = useEarnStrategies({ cluster: strategiesCluster });
+  const { strategies, error, isLoading } = useIntegrationCatalogue(sdpEnvironment);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(
     initialStrategyId ?? null
   );
@@ -156,19 +152,9 @@ export function EarnIntegrationGuide({
   );
   if (isLoading) return <EarnIntegrationGuideSkeleton />;
 
-  const rows = strategies ?? [];
-  const options = rows.map((strategy) => {
-    const { availability, selectable } = strategyOptionState(
-      strategy,
-      sdpEnvironment,
-      providerAccess,
-      previewingMainnet
-    );
-    return {
-      availability,
-      selectable,
-      strategy,
-    };
+  const options = (strategies ?? []).map((strategy) => {
+    const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
+    return { availability, selectable: availability === "available", strategy };
   });
   const requestedStrategy = options.find(({ strategy }) => strategy.id === selectedStrategyId);
   const selectedOption =
@@ -176,35 +162,30 @@ export function EarnIntegrationGuide({
     (selectedStrategyId === null ? options.find(({ selectable }) => selectable) : undefined);
   const selectionIssue =
     selectedOption && !selectedOption.selectable
-      ? unavailableDescriptionKey(selectedOption.availability)
+      ? unavailableDescriptionKey(selectedOption.availability, selectedOption.strategy.provider)
       : undefined;
   const initialStrategyMissing = Boolean(initialStrategyId && !requestedStrategy);
 
-  const changeCluster = (cluster: SolanaCluster) => {
-    setSelectedStrategyId(null);
-    setCatalogueCluster(cluster === environmentCluster ? undefined : cluster);
-  };
-
   return (
     <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto w-full max-w-5xl space-y-8">
+      <div className="mx-auto w-full max-w-5xl space-y-6">
         <Button asChild className="-ml-2" iconLeft={<ArrowLeftIcon />} size="sm" variant="ghost">
           <Link href={earnHref}>{t("DashboardMarkets.earnProgram.back")}</Link>
         </Button>
 
+        <p className="text-sm leading-6 text-secondary italic">
+          {t("DashboardMarkets.earnProgram.guideIntro")}
+        </p>
+
         <CatalogueContent
-          activeCluster={activeCluster}
           activeSectionId={activeSectionId}
           apiBaseUrl={apiBaseUrl}
           catalogueError={error}
           initialStrategyMissing={initialStrategyMissing}
           locale={locale}
-          onClusterChange={changeCluster}
           onSectionChange={setActiveSectionId}
           onStrategyChange={setSelectedStrategyId}
           options={options}
-          previewingMainnet={previewingMainnet}
-          sdpEnvironment={sdpEnvironment}
           selectedOption={selectedOption}
           selectionIssue={selectionIssue}
         />
@@ -220,33 +201,25 @@ type StrategyOption = {
 };
 
 function CatalogueContent({
-  activeCluster,
   activeSectionId,
   apiBaseUrl,
   catalogueError,
   initialStrategyMissing,
   locale,
-  onClusterChange,
   onSectionChange,
   onStrategyChange,
   options,
-  previewingMainnet,
-  sdpEnvironment,
   selectedOption,
   selectionIssue,
 }: {
-  activeCluster: SolanaCluster;
   activeSectionId: keyof EarnIntegrationSections;
   apiBaseUrl?: string | null;
   catalogueError: unknown;
   initialStrategyMissing: boolean;
   locale: string;
-  onClusterChange: (cluster: SolanaCluster) => void;
   onSectionChange: (section: keyof EarnIntegrationSections) => void;
   onStrategyChange: (strategyId: string | null) => void;
   options: StrategyOption[];
-  previewingMainnet: boolean;
-  sdpEnvironment: SdpEnvironment;
   selectedOption: StrategyOption | undefined;
   selectionIssue: MessageKey | undefined;
 }) {
@@ -275,24 +248,17 @@ function CatalogueContent({
 
   return (
     <>
-      {previewingMainnet && showIntegration ? (
-        <Callout title={t("DashboardMarkets.earnProgram.mainnetPreviewTitle")} variant="warning">
-          {t("DashboardMarkets.earnProgram.mainnetPreviewDescription")}
-        </Callout>
-      ) : null}
-
-      <StrategyPickerCard
-        activeCluster={activeCluster}
-        initialStrategyMissing={initialStrategyMissing}
-        locale={locale}
-        onClusterChange={onClusterChange}
-        onStrategyChange={onStrategyChange}
-        options={options}
-        previewingMainnet={previewingMainnet}
-        sdpEnvironment={sdpEnvironment}
-        selectedOption={selectedOption}
-        selectionIssue={selectionIssue}
-      />
+      <section className="flex flex-col gap-4">
+        <StepHeading>{t("DashboardMarkets.earnProgram.stepChooseStrategy")}</StepHeading>
+        <StrategyPickerCard
+          initialStrategyMissing={initialStrategyMissing}
+          locale={locale}
+          onStrategyChange={onStrategyChange}
+          options={options}
+          selectedOption={selectedOption}
+          selectionIssue={selectionIssue}
+        />
+      </section>
 
       {showIntegration && selectedStrategy ? (
         <IntegrationReference
@@ -306,26 +272,23 @@ function CatalogueContent({
   );
 }
 
+/** The two numbered section titles share one style so the page reads as one flow. */
+function StepHeading({ children }: { children: string }) {
+  return <h3 className="text-[19px] leading-6 font-medium text-primary">{children}</h3>;
+}
+
 function StrategyPickerCard({
-  activeCluster,
   initialStrategyMissing,
   locale,
-  onClusterChange,
   onStrategyChange,
   options,
-  previewingMainnet,
-  sdpEnvironment,
   selectedOption,
   selectionIssue,
 }: {
-  activeCluster: SolanaCluster;
   initialStrategyMissing: boolean;
   locale: string;
-  onClusterChange: (cluster: SolanaCluster) => void;
   onStrategyChange: (strategyId: string | null) => void;
   options: StrategyOption[];
-  previewingMainnet: boolean;
-  sdpEnvironment: SdpEnvironment;
   selectedOption: StrategyOption | undefined;
   selectionIssue: MessageKey | undefined;
 }) {
@@ -334,29 +297,7 @@ function StrategyPickerCard({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("DashboardMarkets.earnProgram.strategy")}</CardTitle>
-        {sdpEnvironment === "sandbox" ? (
-          <CardAction>
-            <SegmentedControl
-              aria-label={t("DashboardMarkets.earnProgram.clusterToggleLabel")}
-              items={SOLANA_CLUSTERS.map((cluster) => ({
-                value: cluster,
-                label: SOLANA_CLUSTER_LABELS[cluster],
-              }))}
-              onValueChange={(value) => value && onClusterChange(value as SolanaCluster)}
-              value={activeCluster}
-            />
-          </CardAction>
-        ) : null}
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {previewingMainnet ? (
-          <p className="max-w-2xl text-sm leading-6 text-secondary">
-            {t("DashboardMarkets.earnProgram.mainnetCatalogueDescription")}
-          </p>
-        ) : null}
-
+      <CardContent className="space-y-4">
         <Select
           ariaLabel={t("DashboardMarkets.earnProgram.selectTitle")}
           onValueChange={onStrategyChange}
@@ -373,11 +314,12 @@ function StrategyPickerCard({
                   {!selectable ? (
                     <>
                       {" · "}
-                      {availability === "cluster_unavailable"
-                        ? t(PROGRAM_AVAILABILITY_LABELS.cluster_unavailable, {
-                            cluster: SOLANA_CLUSTER_LABELS[strategy.hostCluster],
-                          })
-                        : t(PROGRAM_AVAILABILITY_LABELS[availability])}
+                      {earnDepositAvailabilityLabel(
+                        availability,
+                        PROGRAM_AVAILABILITY_LABELS,
+                        strategy,
+                        t
+                      )}
                     </>
                   ) : null}
                 </span>
@@ -426,61 +368,34 @@ function StrategySelectionEmptyState({
   );
 }
 
+/**
+ * One plain line under the dropdown ("Kamino · Instant liquidity · 6.2% APY"),
+ * the availability badge, then the strategy ID as a copyable code surface.
+ * Reference, not a dashboard: no field labels, no big numbers, and no APY when
+ * it is unknown.
+ */
 function StrategyDetails({ locale, option }: { locale: string; option: StrategyOption }) {
   const t = useTranslations();
-  const { copied, copy, value: copiedValue } = useCopy(1200);
   const { strategy } = option;
-  const strategyIdCopied = copied && copiedValue === strategy.id;
+  const liquidity = earnStrategyLiquidityLabel(strategy, t);
+  const apy = formatProviderApy(strategy.currentApy, locale);
+  const facts = [
+    earnProviderLabel(strategy.provider),
+    liquidity ? t("DashboardMarkets.earnProgram.liquidityFact", { liquidity }) : undefined,
+    apy === "—" ? undefined : t("DashboardMarkets.earnProgram.apyFact", { apy }),
+  ].filter((fact): fact is string => Boolean(fact));
 
   return (
-    <div className="space-y-5">
-      <dl className="grid grid-cols-2 gap-x-8 gap-y-6 sm:grid-cols-4">
-        <div>
-          <dt className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.apy")}</dt>
-          <dd className="mt-1 text-lg font-medium tracking-tight text-primary tabular-nums">
-            {formatProviderApy(strategy.currentApy, locale)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.liquidity")}</dt>
-          <dd className="mt-1 text-sm text-primary">
-            {earnStrategyLiquidityLabel(strategy, t) ?? "—"}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.provider")}</dt>
-          <dd className="mt-1 text-sm text-primary">{earnProviderLabel(strategy.provider)}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-tertiary">
-            {t("DashboardMarkets.earnProgram.availability")}
-          </dt>
-          <dd className="mt-1">
-            <EarnDepositAvailabilityBadge
-              availability={option.availability}
-              labels={PROGRAM_AVAILABILITY_LABELS}
-              strategy={strategy}
-            />
-          </dd>
-        </div>
-      </dl>
-
-      <div className="flex min-w-0 items-center gap-4 border-t border-border-subtle pt-5">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-tertiary">{t("DashboardMarkets.earnProgram.strategyId")}</p>
-          <span className="mt-1 block truncate text-sm text-primary">{strategy.id}</span>
-        </div>
-        <Button
-          aria-label={t("DashboardMarkets.earnProgram.copyStrategyId")}
-          iconLeft={strategyIdCopied ? <CheckIcon /> : <CopyIcon />}
-          onClick={() => void copy(strategy.id)}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          {t(strategyIdCopied ? "Shared.SharedComponents.copied" : "Shared.SharedComponents.copy")}
-        </Button>
+    <div className="flex flex-col gap-4 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <p className="text-secondary tabular-nums">{facts.join(" · ")}</p>
+        <EarnDepositAvailabilityBadge
+          availability={option.availability}
+          labels={PROGRAM_AVAILABILITY_LABELS}
+          strategy={strategy}
+        />
       </div>
+      <CodeBlock code={strategy.id} title={t("DashboardMarkets.earnProgram.strategyId")} />
     </div>
   );
 }
@@ -497,12 +412,45 @@ function IntegrationReference({
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
+  const { copied, copy } = useCopy(1600);
   const sections = buildEarnIntegrationSections(strategy, apiBaseUrl ?? undefined);
+  const serverModule = buildEarnServerIntegration(strategy, apiBaseUrl ?? undefined);
   const activeSection =
     GUIDE_SECTIONS.find(({ id }) => id === activeSectionId) ?? GUIDE_SECTIONS[0];
 
   return (
-    <div className="flex flex-col gap-6 pt-1">
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <StepHeading>{t("DashboardMarkets.earnProgram.stepServerCode")}</StepHeading>
+        <Button
+          iconLeft={copied ? <CheckIcon /> : <CopyIcon />}
+          onClick={() => void copy(serverModule)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {t(
+            copied ? "Shared.SharedComponents.copied" : "DashboardMarkets.earnProgram.copyAllCode"
+          )}
+        </Button>
+      </div>
+
+      {/* The one thing the copied module needs that this page cannot generate: a
+          key. Informational rather than a warning, and it links to where the key
+          is made, because a warning with no way to act on it only says "no". The
+          sentence is split around the link since the catalog has no rich-text
+          helper. */}
+      <Callout variant="info">
+        {t("DashboardMarkets.earnProgram.apiKeyCalloutBefore")}{" "}
+        <Link
+          className="font-medium underline underline-offset-2"
+          href={DASHBOARD_SIDE_NAV_HREFS.apiKeys}
+        >
+          {t("DashboardMarkets.earnProgram.apiKeyCalloutLink")}
+        </Link>{" "}
+        {t("DashboardMarkets.earnProgram.apiKeyCalloutAfter")}
+      </Callout>
+
       <SegmentedControl
         aria-label={t("DashboardMarkets.earnProgram.guideNavigationTitle")}
         items={GUIDE_SECTIONS.map(({ id, navigationKey }) => ({
@@ -513,33 +461,22 @@ function IntegrationReference({
         value={activeSection.id}
       />
 
-      <section
+      <div
         aria-live="polite"
-        className="flex min-w-0 flex-col gap-5"
+        className="flex min-w-0 flex-col gap-3"
         id={`earn-guide-panel-${activeSection.id}`}
       >
-        <div className="flex flex-col gap-2">
-          <h3 className="text-[19px] leading-6 font-medium text-primary">
-            {t(activeSection.titleKey)}
-          </h3>
-          <p className="max-w-3xl text-sm leading-6 text-secondary">
-            {t(activeSection.descriptionKey)}
-          </p>
-          {activeSection.id === "client" ? (
-            <p className="flex items-center gap-2 text-xs text-tertiary">
-              <KeyRoundIcon aria-hidden="true" className="size-4 shrink-0" />
-              {t("DashboardMarkets.earnProgram.secretKeyDisclosure")}
-            </p>
-          ) : null}
-        </div>
-
+        <p className="text-sm leading-6">
+          <span className="font-medium text-primary">{t(activeSection.titleKey)}</span>
+          <span className="text-secondary">{` · ${t(activeSection.descriptionKey)}`}</span>
+        </p>
         <CodeBlock
           code={sections[activeSection.id]}
           language="typescript"
           title={t("DashboardMarkets.earnProgram.serverExample")}
           viewportClassName="max-h-[36rem]"
         />
-      </section>
-    </div>
+      </div>
+    </section>
   );
 }

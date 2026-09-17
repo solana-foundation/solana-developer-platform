@@ -4,6 +4,7 @@ import {
   isDecimalString,
   parseDecimalAmount,
 } from "@sdp/solana/amount";
+import { BASE58_ADDRESS_PATTERN } from "../base58-address";
 import type { KaminoVaultAllocation, KaminoVaultAllocations } from "./kamino-allocations-schema";
 
 /**
@@ -15,9 +16,6 @@ import type { KaminoVaultAllocation, KaminoVaultAllocations } from "./kamino-all
  * `Number` on a percent for `Intl` percent output; the deployed-weight
  * complement below never routes through a float at all.
  */
-
-/** Base58 Solana public key: the "name" Kamino reports for an unnamed market. */
-const PUBKEY_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /**
  * A percent-unit weight ("23.94" = 23.94%) as a locale percent string. A live
@@ -50,7 +48,7 @@ function isZeroWeight(pct: string): boolean {
  * string kept in the cell's `title`.
  */
 export function kaminoMarketLabel(marketName: string): string {
-  if (!PUBKEY_PATTERN.test(marketName)) return marketName;
+  if (!BASE58_ADDRESS_PATTERN.test(marketName)) return marketName;
   return `${marketName.slice(0, 6)}…${marketName.slice(-4)}`;
 }
 

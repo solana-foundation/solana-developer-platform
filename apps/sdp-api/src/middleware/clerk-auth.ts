@@ -531,6 +531,15 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   };
 }
 
+function assertClerkTenantClaims(payload: ClerkJwtPayload): void {
+  if (!payload.sub) {
+    throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
+  }
+  if (!resolveClerkOrganizationClaims(payload).organizationId) {
+    throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
+  }
+}
+
 export function clerkAuthMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     // Identity mapping, membership sync, and default-project provisioning all
@@ -553,13 +562,7 @@ export function clerkAuthMiddleware() {
         });
       }
 
-      if (!payload.sub) {
-        throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
-      }
-
-      if (!resolveClerkOrganizationClaims(payload).organizationId) {
-        throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
-      }
+      assertClerkTenantClaims(payload);
 
       const context = await buildClerkContext(c, payload);
 
@@ -580,7 +583,7 @@ export function clerkAuthMiddleware() {
   };
 }
 
-export function optionalClerkAuth() {
+export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const token = extractBearerToken(c);
 
@@ -591,24 +594,27 @@ export function optionalClerkAuth() {
 
     try {
       await runWithSystemDatabaseIdentity("http:auth", async () => {
-        const payload = await verifyClerkJwtForRequest(c, token);
-
-        if (payload.sub && resolveClerkOrganizationClaims(payload).organizationId) {
-          const clerkContext = await buildClerkContext(c, payload);
-          if (clerkContext) {
-            await enforceRateLimit(
-              c,
-              `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
-              DASHBOARD_ACTOR_MAX_REQUESTS
-            );
-            c.set("clerk", clerkContext);
-          }
+        let payload: ClerkJwtPayload;
+        try {
+          payload = await verifyClerkJwtForRequest(c, token);
+        } catch (error) {
+          throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
+            cause: error instanceof Error ? error.message : String(error),
+          });
         }
+        assertClerkTenantClaims(payload);
+        const clerkContext = await buildClerkContext(c, payload);
+        await enforceRateLimit(
+          c,
+          `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
+          DASHBOARD_ACTOR_MAX_REQUESTS
+        );
+        c.set("clerk", clerkContext);
       });
     } catch (error) {
       // Ignore invalid Clerk auth for optional usage, but never rate
       // limiting — a limited user must not proceed as anonymous.
-      if (error instanceof AppError && error.code === "RATE_LIMITED") {
+      if (options.rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
         throw error;
       }
     }

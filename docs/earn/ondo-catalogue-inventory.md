@@ -16,7 +16,8 @@ the owner's USDY balance, and the exit is the reverse swap. Surfaced 2026-09-14
 | `sourceKind` | `rwa` | Tokenized note backed by short-term Treasuries and bank deposits; traces to the issuer's published mint, the same allowlist bar Veda clears |
 | `depositMints` | mainnet USDC only | The pair Ondo's own market-making liquidity quotes; other stablecoins ride the swap-funded deposit leg into USDC first |
 | `liquidityTerm` | `instant` | Secondary-market exit, no lock |
-| `currentApy` | none | Ondo's rate API is key-gated; a DEX price reading is not a rate of return (PRO-1833) |
+| `currentApy` | issuer-published APY as a fraction (e.g. `0.035999` for Sep 2026's 3.5999%, shown as 3.6%) | `ondo.finance/api/v1/assets`, the `usdy` entry's `apy`, read keylessly each hourly pass and truncated, never rounded up (PRO-1833) |
+| `riskMetadata.tvlUsd` | USDY supply on Solana in USD | Same listing, `tvlUsd.solana` |
 | `depositSlippage` / `withdrawalSlippage` | 50 bps default, quote required | Both legs are real swaps; the builder proves the encoded threshold covers the caller's floor |
 | `riskMetadata.curator` | `ondo` | Issuer attribution |
 
@@ -47,8 +48,8 @@ depend on finding this file.
 - **Sandbox catalogue**: the PRO-1742 browse-only mirror, `fundable: false`, on
   the explicit `?cluster=mainnet-beta` opt-in. Ondo has no devnet deployment
   (verified on-chain 2026-09-02; Ondo's staging also runs on mainnet).
-- **Deposits**: production projects only
-  (`EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS.ondo`). Mainnet is
+- **Deposits**: production projects only, derived from `ONDO_DEPLOYMENTS`
+  having no devnet entry (`EARN_PROVIDER_DEPLOYED_CLUSTERS.ondo`). Mainnet is
   wallet-pays: the custody wallet needs SOL for fees and for its USDY token
   account's rent, and USDC to swap.
 - **Platform prerequisites**: `JUPITER_SWAP_API_KEY` (shared with swap-funded
@@ -57,6 +58,7 @@ depend on finding this file.
   reports `configured: false` and no deposit action is offered. A devnet
   deployment reaches mainnet through `SOLANA_MAINNET_RPC_URL`
   (`resolveCatalogueRpcUrl` in `@sdp/earn`); without it the production pass
-  skips and the sandbox mirror stays empty.
+  skips and the sandbox mirror stays empty. The rate and TVL need nothing
+  extra: Ondo's assets API is public.
 - **Per-org**: `providerOverrides.earn.ondo` in the organization's Clerk
   private metadata, synced by the `organization.updated` webhook.

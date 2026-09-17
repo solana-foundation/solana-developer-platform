@@ -2,16 +2,26 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "../../../errors";
 import type { RampRuntimeContext } from "../../types";
-import { BvnkRampClient, type CreateBvnkCustomerV2Input } from "./client";
+import { BvnkRampClient } from "./client";
+import {
+  bvnkAgreementActionsResponse,
+  bvnkAgreementContent,
+  bvnkAgreementWorkingSet,
+  bvnkCustomerDetailV2,
+  bvnkCustomerSummary,
+  bvnkIndividualCustomer,
+  bvnkLedgerWallet,
+  bvnkWalletProfilesResponse,
+} from "./test-fixtures";
 
-const runtimeContext = {
+const runtimeContext: RampRuntimeContext = {
   env: {
     BVNK_SANDBOX_WALLET_ID: "wallet_id",
     BVNK_SANDBOX_HAWK_AUTH_ID: "auth_id",
     BVNK_SANDBOX_HAWK_SECRET_KEY: "secret_key",
   },
   mode: "sandbox",
-} satisfies RampRuntimeContext;
+};
 
 const originalFetch = globalThis.fetch;
 
@@ -41,39 +51,9 @@ function queueFetch(...responses: Response[]): { requests: { url: string; init: 
   return { requests };
 }
 
-const individual = {
-  address: {
-    addressLine1: "1 Main Street",
-    city: "Austin",
-    postalCode: "78701",
-    stateCode: "TX",
-    countryCode: "US",
-  },
-  dateOfBirth: "1984-06-30",
-  firstName: "Jane",
-  lastName: "Doe",
-  birthCountryCode: "US",
-  nationality: "US",
-  taxIdentification: { number: "123-45-6789", taxResidenceCountryCode: "US" },
-  cdd: {
-    employmentStatus: "SALARIED",
-    sourceOfFunds: "SALARY",
-    pepStatus: "NOT_PEP",
-    intendedUseOfAccount: "TRANSFERS_OWN_WALLET",
-    expectedMonthlyVolume: { amount: "1000", currency: "USD" },
-    estimatedYearlyIncome: "INCOME_0_TO_50K",
-    employmentIndustrySector: "INVESTMENT",
-  },
-} satisfies CreateBvnkCustomerV2Input["individual"];
+const individual = bvnkIndividualCustomer();
 
-const customerSummary = {
-  id: "customer-id",
-  reference: "customer-reference",
-  status: "PENDING",
-  type: "INDIVIDUAL",
-  model: "EMBEDDED_BVNK_MANAGED",
-  useCase: "STABLECOIN_PAYOUTS",
-};
+const customerSummary = bvnkCustomerSummary();
 
 describe("BvnkRampClient v2 customer surfaces", () => {
   it("creates a v2 customer and sends the required idempotency key", async () => {
@@ -87,6 +67,7 @@ describe("BvnkRampClient v2 customer surfaces", () => {
     });
 
     assert.deepEqual(result, customerSummary);
+    assert.equal(new URL(requests[0].url).origin, "https://api.sandbox.bvnk.com");
     assert.equal(new URL(requests[0].url).pathname, "/platform/v2/customers");
     assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "customer-key");
     assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
@@ -117,7 +98,7 @@ describe("BvnkRampClient v2 customer surfaces", () => {
       (error: unknown) => {
         assert.equal(error instanceof SdpPaymentsError, true);
         if (!(error instanceof SdpPaymentsError)) return false;
-        assert.equal(error.message, "BVNK request failed with status 400");
+        assert.equal(error.message, "BVNK request failed with status 400: Validation failed");
         assert.deepEqual(error.details, {
           errors: { "individual.birthCountryCode": "Required" },
         });
@@ -127,17 +108,8 @@ describe("BvnkRampClient v2 customer surfaces", () => {
   });
 
   it("returns the full typed v2 customer detail including its fresh link", async () => {
-    const response = {
-      ...customerSummary,
-      status: "ACTIONS_REQUIRED",
-      authenticatedLink: {
-        link: "https://onboarding.example/customer",
-        expiresAt: "2030-01-01T00:00:00Z",
-      },
-      requiredActions: [{ type: "DATA", code: "TAX_ID", status: "REQUIRED" }],
-      individual,
-    };
-    queueFetch(respond(response));
+    const response = bvnkCustomerDetailV2();
+    queueFetch(respond({ ...response, individual: bvnkIndividualCustomer() }));
 
     const result = await new BvnkRampClient().getCustomerV2(runtimeContext, {
       id: customerSummary.id,
@@ -160,58 +132,11 @@ describe("BvnkRampClient v2 customer surfaces", () => {
       }
     );
   });
-
-  it("creates a v3 contact with PII in the request body and a deterministic key from the caller", async () => {
-    const { requests } = queueFetch(respond({ contactId: "contact-id" }, 201));
-
-    const result = await new BvnkRampClient().createContactV3(runtimeContext, {
-      idempotencyKey: "contact-key",
-      entity: {
-        type: "INDIVIDUAL",
-        relationshipType: "SELF_OWNED",
-        firstName: "Jane",
-        lastName: "Doe",
-        dateOfBirth: "1984-06-30",
-        address: {
-          addressLine1: "1 Main Street",
-          city: "Austin",
-          postalCode: "78701",
-          country: "US",
-          region: "TX",
-        },
-      },
-    });
-
-    assert.deepEqual(result, { contactId: "contact-id" });
-    assert.equal(new URL(requests[0].url).pathname, "/platform/v3/contacts");
-    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "contact-key");
-    assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
-      entity: {
-        type: "INDIVIDUAL",
-        relationshipType: "SELF_OWNED",
-        firstName: "Jane",
-        lastName: "Doe",
-        dateOfBirth: "1984-06-30",
-        address: {
-          addressLine1: "1 Main Street",
-          city: "Austin",
-          postalCode: "78701",
-          country: "US",
-          region: "TX",
-        },
-      },
-    });
-  });
 });
 
 describe("BvnkRampClient v2 agreement surfaces", () => {
   it("creates agreements", async () => {
-    const response = {
-      id: "working-set-id",
-      reference: "customer-reference",
-      agreements: [{ id: "agreement-id", status: "PENDING", declinable: false, name: "Terms" }],
-      signingUrl: "https://onboarding.example/sign",
-    };
+    const response = bvnkAgreementWorkingSet();
     const { requests } = queueFetch(respond(response));
 
     const result = await new BvnkRampClient().createAgreementsV2(runtimeContext, {
@@ -228,11 +153,7 @@ describe("BvnkRampClient v2 agreement surfaces", () => {
   });
 
   it("gets agreement content", async () => {
-    const response = {
-      downloadUrl: "https://files.example/agreement.pdf",
-      filename: "agreement.pdf",
-      expiresAt: null,
-    };
+    const response = bvnkAgreementContent();
     queueFetch(respond(response));
 
     const result = await new BvnkRampClient().getAgreementContentV2(runtimeContext, {
@@ -243,12 +164,7 @@ describe("BvnkRampClient v2 agreement surfaces", () => {
   });
 
   it("responds to agreements and parses per-agreement results", async () => {
-    const response = {
-      content: [{ agreementId: "agreement-id", status: "ACCEPTED" }],
-      totalElements: 1,
-      totalPages: 1,
-      hasNext: false,
-    };
+    const response = bvnkAgreementActionsResponse();
     const { requests } = queueFetch(respond(response));
 
     const result = await new BvnkRampClient().respondAgreementsV2(runtimeContext, {
@@ -287,24 +203,7 @@ describe("BvnkRampClient v2 agreement surfaces", () => {
 });
 
 describe("BvnkRampClient v2 ledger surfaces", () => {
-  const wallet = {
-    id: "wallet-id",
-    name: "USD Wallet",
-    status: "ACTIVE",
-    paymentInstruments: [
-      {
-        type: "FIAT",
-        accountHolderName: "Jane Doe",
-        accountNumber: "123456789",
-        bankDetails: {
-          name: "Example Bank",
-          bic: "EXAMPLEUS",
-          nid: { value: "021000021", type: "ROUTING_NUMBER" },
-        },
-        remittanceInformationPrefix: "REF-123",
-      },
-    ],
-  };
+  const wallet = bvnkLedgerWallet();
 
   it("creates a ledger wallet", async () => {
     const { requests } = queueFetch(respond(wallet, 201));
@@ -335,16 +234,81 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
   });
 
   it("lists ledger wallet profiles and rails", async () => {
-    const response = {
-      totalElements: 1,
-      totalPages: 1,
-      content: [{ id: "fiat:usd:profile", currencies: ["USD"], methods: ["ACH", "FEDWIRE"] }],
-      hasNext: false,
-    };
+    const response = bvnkWalletProfilesResponse();
     queueFetch(respond(response));
 
     const result = await new BvnkRampClient().listLedgerWalletProfilesV2(runtimeContext);
 
     assert.deepEqual(result, response);
+  });
+});
+
+describe("BvnkRampClient response parsing", () => {
+  it("treats a malformed v2 customer response as provider-unavailable", async () => {
+    queueFetch(respond({ unexpected: "shape" }));
+
+    await assert.rejects(
+      () =>
+        new BvnkRampClient().createCustomerV2(runtimeContext, {
+          idempotencyKey: "customer-key",
+          useCase: "STABLECOIN_PAYOUTS",
+          individual,
+        }),
+      (error: unknown) => {
+        assert.equal(error instanceof SdpPaymentsError, true);
+        if (!(error instanceof SdpPaymentsError)) return false;
+        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(error.message, "BVNK response is malformed.");
+        return true;
+      }
+    );
+  });
+});
+
+describe("BvnkRampClient estimate and simulation surfaces", () => {
+  it("computes off-ramp net fiat and total fees with exact decimal math", async () => {
+    queueFetch(
+      respond({
+        walletCurrency: "USD",
+        walletRequiredAmount: 100.5,
+        paidCurrency: "USDC",
+        paidRequiredAmount: 1,
+        feeCurrency: "USD",
+        feePredictedAmount: 0.25,
+        networkFeeCurrency: "USD",
+        networkFeePredictedAmount: 0.05,
+        totalWalletAmount: 100.8,
+        exchangeRate: 100.8,
+      })
+    );
+
+    const result = await new BvnkRampClient().estimateOfframp(runtimeContext, {
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      cryptoAmount: "1",
+    });
+
+    assert.equal(result.fiatAmount, "100.2");
+    assert.equal(result.fees.total, "0.3");
+    assert.equal(result.fees.provider, "0.25");
+    assert.equal(result.fees.network, "0.05");
+    assert.equal(result.exchangeRate, "100.2");
+  });
+
+  it("forwards the SDP transfer id as the remittance reference and idempotency key", async () => {
+    const { requests } = queueFetch(respond({ ok: true }));
+
+    await new BvnkRampClient().simulatePayin(runtimeContext, {
+      walletId: "wallet_id",
+      amount: 100,
+      currency: "USD",
+      originatorName: "Jane Doe",
+      remittanceInformation: "xfr_9f3b1c2d4e5f",
+      idempotencyKey: "xfr_9f3b1c2d4e5f",
+    });
+
+    const body = JSON.parse(String(requests[0].init.body));
+    assert.equal(body.remittanceInformation, "xfr_9f3b1c2d4e5f");
+    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "xfr_9f3b1c2d4e5f");
   });
 });

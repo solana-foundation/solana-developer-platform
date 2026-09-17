@@ -2,9 +2,11 @@ import {
   COUNTERPARTY_ENTITY_TYPES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  paymentSubscriptionCollectionAttemptMetadataSchema,
   RAMP_FIAT_CURRENCIES,
   RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
+  UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
 import {
@@ -610,6 +612,10 @@ export const transferSchema = z
       .optional()
       .openapi({ description: "Project identifier for the transfer." }),
     type: transferTypeSchema,
+    kind: z.enum(UNIFIED_TRANSACTION_MODULE_CONTRACTS.payments.kinds).openapi({
+      description:
+        "Dashboard transaction kind derived from the transfer type and originating Payments resource.",
+    }),
     direction: transferDirectionSchema,
     status: transferStatusSchema,
     signature: z.string().nullable().openapi({
@@ -1483,9 +1489,9 @@ export const paymentSubscriptionCollectionAttemptSchema = z
     status: paymentSubscriptionCollectionAttemptStatusSchema,
     signature: z.string().nullable().openapi({ description: "Solana transaction signature." }),
     error: z.string().nullable().openapi({ description: "Collection error, if any." }),
-    metadata: z.record(z.string(), z.unknown()).openapi({
-      description: "Provider/job metadata for the attempt.",
-    }),
+    metadata: paymentSubscriptionCollectionAttemptMetadataSchema.describe(
+      "Provider/job metadata for the attempt."
+    ),
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
   })

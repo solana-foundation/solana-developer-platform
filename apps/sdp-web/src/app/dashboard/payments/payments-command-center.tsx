@@ -21,7 +21,10 @@ import {
 import { createTimedTrace } from "@/lib/request-tracing";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparties } from "./counterparty/counterparty-page.data";
-import { PAYMENT_COMMAND_ACTION_DESTINATIONS } from "./payments-command-center.constants";
+import {
+  PAYMENT_COMMAND_ACTION_DESTINATIONS,
+  PAYMENT_COMMAND_ACTIVITY_DESTINATIONS,
+} from "./payments-command-center.constants";
 import { resolveCommandCenterCounterparty } from "./payments-command-center.utils";
 import {
   PaymentsActivitySkeleton,
@@ -32,12 +35,12 @@ import {
 import {
   formatCurrencyAmount,
   formatDirection,
+  formatPaymentTransferType,
   formatTimestamp,
   normalizeAggregateBalances,
   resolveTokenByMint,
   resolveTotalBalance,
   resolveTransferTokenLabel,
-  resolveTransferTypeLabel,
   resolveUsdBalanceValue,
   selectTopAggregateBalanceRows,
   shortenAddress,
@@ -256,13 +259,13 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
       <SectionHeading title={t("DashboardPayments.commandCenter.activity")} />
       <div className="mt-3 flex items-end gap-5 border-b border-border-default text-sm">
         <Link
-          href="/dashboard/payments/transactions?type=transfer"
+          href={PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.transfers}
           className="border-b-2 border-primary px-0.5 pb-2 font-medium text-primary"
         >
           {t("DashboardPayments.commandCenter.transfers")}
         </Link>
         <Link
-          href="/dashboard/payments/transactions?type=transfer_batch"
+          href={PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.batches}
           className="px-0.5 pb-2 text-secondary hover:text-primary"
         >
           {t("DashboardPayments.commandCenter.batches")}
@@ -303,7 +306,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                     </span>
                     <span
                       className="min-w-0 truncate text-primary"
-                      title={`${formatDirection(transfer.direction, t)} · ${resolveTransferTypeLabel(transfer.type, t)}`}
+                      title={`${formatDirection(transfer.direction, t)} · ${formatPaymentTransferType(transfer.type, t)}`}
                     >
                       {formatDirection(transfer.direction, t)} · {compactType(transfer)}
                     </span>
@@ -336,7 +339,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                 >
                   <span className="flex items-center justify-between gap-2">
                     <span className="font-medium text-primary">
-                      {resolveTransferTypeLabel(transfer.type, t)} ·{" "}
+                      {formatPaymentTransferType(transfer.type, t)} ·{" "}
                       {formatDirection(transfer.direction, t)}
                     </span>
                     <Badge variant={statusVariant(transfer.status)}>
@@ -384,7 +387,7 @@ async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientP
     {
       href: "/dashboard/payments/recurring",
       icon: CalendarClockIcon,
-      count: recurring.ok ? recurring.total : null,
+      count: recurring.ok ? recurring.data.total : null,
       label: t("DashboardPayments.commandCenter.activeSchedules"),
     },
     {

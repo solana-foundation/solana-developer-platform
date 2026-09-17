@@ -11,8 +11,9 @@ import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
 
 import { createApp } from "@/app";
-import { startCron } from "@/cron/runner";
+import { startCron, startEarnCatalogueBootSync } from "@/cron/runner";
 import { getProcessEnv } from "@/lib/runtime-env";
+import { resolveAnonymousEarnEnvironment } from "@/routes/earn/environment";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { createNodeHttpApp } from "@/runtime/http-node";
 import { getLogger } from "@/runtime/logger";
@@ -106,6 +107,16 @@ function assertRequiredEnv(env: Env): void {
 async function main(): Promise<void> {
   const env = getProcessEnv();
   assertRequiredEnv(env);
+  const anonymousEarnEnvironment = resolveAnonymousEarnEnvironment(env.ENVIRONMENT);
+
+  getLogger().info(
+    {
+      event: "sdp_api_earn_environment_resolved",
+      environment: anonymousEarnEnvironment,
+      source: "ENVIRONMENT",
+    },
+    "Anonymous Earn environment resolved"
+  );
 
   // Validate boot-time process.env tunables before opening any sockets, so a
   // typo fails immediately instead of after a partial startup.
@@ -115,6 +126,7 @@ async function main(): Promise<void> {
   const app = createNodeHttpApp(createApp({ observability: noopObservability }));
   const bg = new NodeBackgroundRunner();
   const cron = startCron({ env, bg });
+  startEarnCatalogueBootSync({ env, bg });
 
   const port = resolvePort();
   const server: ServerType = serve({

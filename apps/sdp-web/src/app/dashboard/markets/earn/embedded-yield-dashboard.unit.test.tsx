@@ -404,7 +404,7 @@ describe("EmbeddedYieldDashboard", () => {
       <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
     );
 
-    expect(screen.getByText("Choose a yield strategy to integrate")).toBeTruthy();
+    expect(screen.getByText("Your customer portfolio will show here")).toBeTruthy();
     expect(screen.getByText(/Showing the last complete portfolio/)).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Showing the last complete portfolio");
     expect(screen.queryByText("Customer portfolio unavailable")).toBeNull();

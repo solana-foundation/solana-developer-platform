@@ -383,6 +383,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       createdByUserId: createdBy,
       createdByKeyId: actor.apiKeyId ?? undefined,
       actorPermissions: actor.permissions,
+      actorApiKeyRole: c.get("apiKey")?.role ?? null,
       name,
       description,
       role,
@@ -532,6 +533,7 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
       organizationId: actor.organizationId,
       projectId,
       actorPermissions: actor.permissions,
+      actorApiKeyRole: c.get("apiKey")?.role ?? null,
       currentRole: existing.role,
       name: body.name,
       description: body.description,
@@ -578,6 +580,11 @@ export const createApiKeyControlProfile = async (
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot manage control profiles of the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   const profile = await new ApiKeyPolicyStore(
@@ -606,6 +613,11 @@ export const createApiKeyControlProfileRevision = async (
   const { keyId, profileId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot manage control profiles of the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   const revision = await new ApiKeyPolicyStore(
@@ -639,6 +651,11 @@ export const activateApiKeyControlProfileRevision = async (c: AppContext) => {
   const { keyId, profileId, revisionId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot manage control profiles of the API key being used for this request");
+  }
+
   const active = await new ApiKeyPolicyStore(
     createPolicyRepository(c.env, getRequestTenantScope(c))
   ).activateApiKeyControlProfileRevision({
@@ -665,6 +682,11 @@ export const writeApiKeyPolicyBindings = async (
   const { keyId } = c.req.param();
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
+
+  if (actor.apiKeyId && keyId === actor.apiKeyId) {
+    throw badRequest("Cannot replace policy bindings of the API key being used for this request");
+  }
+
   const body = c.req.valid("json");
 
   const custodyTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
@@ -780,6 +802,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     projectId,
     gracePeriodHours,
     actor.permissions,
+    c.get("apiKey")?.role ?? null,
     c.env.API_KEY_PEPPER,
     // The pre-flight check above fails fast, but the rows it judged can
     // change before the rotation lock is taken; this guard re-judges the

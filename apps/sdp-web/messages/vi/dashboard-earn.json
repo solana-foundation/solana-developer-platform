@@ -517,7 +517,8 @@
       "devnetStrategiesLoading": "Đang tải chiến lược Devnet. Chiến lược Mainnet vẫn khả dụng.",
       "devnetStrategiesUnavailable": "Không tải được chiến lược Devnet. Chiến lược Mainnet vẫn khả dụng.",
       "mainnetStrategiesLoading": "Đang tải chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng.",
-      "mainnetStrategiesUnavailable": "Không tải được chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng."
+      "mainnetStrategiesUnavailable": "Không tải được chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng.",
+      "sandboxUnavailable": "Chỉ Production"
     },
     "earnProgram": {
       "eyebrow": "Yield nhúng",
@@ -696,7 +697,19 @@
       "ageUnderWeek": "0–7 ngày",
       "ageUnderMonth": "8–30 ngày",
       "ageUnderQuarter": "31–90 ngày",
-      "ageOlder": "90+ ngày"
+      "ageOlder": "90+ ngày",
+      "sandboxUnavailable": "Chỉ Production",
+      "stepChooseStrategy": "1. Chọn chiến lược",
+      "stepServerCode": "2. Thiết lập mã máy chủ",
+      "copyAllCode": "Sao chép toàn bộ mã",
+      "guideIntro": "Khách hàng của bạn nhận lợi suất ngay trong sản phẩm của bạn và vẫn nắm quyền lưu ký tài sản của họ. Chọn một chiến lược, rồi thêm embedded-yield.ts vào máy chủ của bạn. Máy chủ của bạn tạo từng khoản nạp hoặc rút, Wallet của khách hàng ký giao dịch đó, và SDP theo dõi số dư cùng lợi nhuận.",
+      "liquidityFact": "{liquidity} thanh khoản",
+      "apyFact": "{apy} APY",
+      "unavailableClusterDescription": "Chiến lược này chạy trên một network khác với dự án này. Hãy chuyển sang dự án trên network đó để tích hợp.",
+      "unavailableEnvironmentProductionDescription": "Provider này chỉ nhận khoản nạp vault mới từ dự án Production. Hãy chuyển sang dự án Production để tích hợp.",
+      "apiKeyCalloutBefore": "Bạn cần",
+      "apiKeyCalloutLink": "Developer API key",
+      "apiKeyCalloutAfter": "cho dự án này (bao gồm earn:read và earn:write). Hãy giữ nó trên máy chủ của bạn, không để trong client."
     },
     "liquidity": {
       "instant": "Tức thì",
@@ -918,7 +931,34 @@
       "youDeliver": "Bạn giao",
       "youDelivered": "Bạn đã giao",
       "youReceive": "Bạn nhận",
-      "youReceived": "Bạn đã nhận"
+      "youReceived": "Bạn đã nhận",
+      "actionCancelling": "Đang hủy…",
+      "actionFailed": "Yêu cầu thất bại ({status}).",
+      "actionUnconfirmed": "SDP đã gửi yêu cầu nhưng không đọc được phản hồi. Hãy kiểm tra giao dịch trước khi thử lại.",
+      "actionFunding": "Đang nạp…",
+      "actionReclaim": "Thu hồi",
+      "actionReclaiming": "Đang thu hồi…",
+      "actionSettling": "Đang thanh toán…",
+      "fundRefusedAlreadyFunded": "Phần này đã có đủ số tiền cần thiết.",
+      "fundRefusedBalanceChanged": "Một khoản nạp đã đến trong lúc thao tác đang được chuẩn bị. Không có gì được gửi đi, vì vậy hãy nạp lại phần còn thiếu.",
+      "fundRefusedBalanceShort": "Wallet này không đủ {symbol} để nạp cho phần này. Không có gì được gửi đi.",
+      "fundRefusedBalanceShortUnnamed": "Wallet này không có đủ Token này để nạp cho phần này. Không có gì được gửi đi.",
+      "fundRefusedFrozen": "Escrow của phần này đang bị freeze, nên khoản chuyển vào sẽ bị từ chối. Issuer của Token phải unfreeze nó trước.",
+      "fundRefusedInProgress": "Phần này đang được xử lý. Hãy quay lại sau một chút.",
+      "fundRefusedNoToken": "Wallet này chưa có {symbol} nào. Hãy gửi một ít vào, rồi nạp cho phần này.",
+      "fundRefusedNoTokenUnnamed": "Wallet này chưa có Token này. Hãy gửi một ít vào, rồi nạp cho phần này.",
+      "fundRefusedNotFundable": "Không thể nạp cho giao dịch này nữa.",
+      "fundRefusedUnverified": "SDP không thể xác minh giao dịch này on-chain, nên không có gì được gửi đi.",
+      "reclaimRefusedClosed": "Giao dịch này đã đóng, nên không còn gì để thu hồi.",
+      "reclaimRefusedEmpty": "Escrow của phần này đã trống.",
+      "reclaimRefusedSignerChanged": "Wallet của bên này không còn ký cho nó nữa, nên không có gì được gửi đi.",
+      "reclaimRefusedTransferHook": "Reclaim chưa hỗ trợ Token có Transfer Hook. Không có gì được gửi đi.",
+      "createUnconfirmed": "Giao dịch có thể đã được tạo, nhưng SDP không đọc được phản hồi. Bấm Create lần nữa để mở giao dịch; sẽ không tạo thêm giao dịch thứ hai.",
+      "settleTooEarly": "Giao dịch này có thể thanh toán từ {when}.",
+      "statusFundedTooEarly": "Đã nạp",
+      "toastReclaimed": "Khoản nạp của bạn đang được hoàn trả.",
+      "txFundingSent": "Gửi từ Wallet của bạn",
+      "viewTransaction": "Xem giao dịch"
     }
   }
 }

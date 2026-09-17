@@ -925,17 +925,25 @@ the own-lane foreign-cluster drop: a provider's non-production source reporting
 mainnet instruments is still drift, warned and skipped.
 
 **Each lane delists only the cluster sub-shelf it is the truth for**
-(`deleteUnlistedStrategies` gained a `hostCluster` scope), so one lane's keep
+(`deprecateUnlistedStrategies` gained a `hostCluster` scope), so one lane's keep
 set can never tear down the other lane's rows. The mirror lane additionally
 converges to EMPTY on a reliable "nothing is listed" answer: a successful
 production fetch with no accepted mainnet rows, or a steady-state skip (stub
 provider, production credentials absent or revoked). The usual empty-keep-set
-refusal stays absolute for fundable own shelves, where a wrong delete costs a
-customer a vault mid-deposit; the asymmetry flips for the mirror because its
-rows are browse-only and re-mirrored hourly, while refusing would serve
-orphaned "production catalogue" rows forever after production stopped vouching
-for them. The repository enforces that an authorized-empty delist is
+refusal stays absolute for fundable own shelves, where a wrong delist hides a
+vault a customer may be mid-deposit into; the asymmetry flips for the mirror
+because its rows are browse-only and re-mirrored hourly, while refusing would
+serve orphaned "production catalogue" rows forever after production stopped
+vouching for them. The repository enforces that an authorized-empty delist is
 cluster-scoped, never environment-wide.
+
+PRO-1943 changed the storage half of delisting without changing that active-set
+contract. An unlisted active row is now marked `deprecated` with a
+`catalogue_delisted_at` tombstone instead of being deleted. It remains absent
+from catalogue lists and deposit admission, but preserves the stable provider,
+vault, and mint identity required to build an anonymous exit. A later provider
+relist clears only this sync-owned marker and reactivates the same id; an
+operator pause or deprecation has no marker and remains sticky.
 
 **Accepted cap: the mirror is faithful only for cluster-distinct references.**
 The upsert key stays (provider, provider_reference, environment) with no
@@ -986,6 +994,10 @@ throughout.
 
 ## Addendum — 2026-08-26 External wallets: caller-signed vault movements (PRO-1722)
 
+This section describes the authenticated build-and-submit contract. The
+PRO-1943 addendum below adds an anonymous unsigned-build tier whose caller
+broadcasts directly and whose build is not persisted.
+
 The B2B2C money path ships. An *external wallet* is a **non-custodial wallet**
 the partner's platform connects — SDP holds no key for it, and its owner is
 not an SDP tenant. Every prior vault money path resolved an exact custody
@@ -1021,7 +1033,7 @@ row (migration 0070) — and every treasury read scopes by custody wallet, so
 external-wallet rows are structurally invisible to those surfaces rather than
 filtered by convention.
 
-### The two-call shape, and why the build persists
+### The authenticated two-call shape, and why the build persists
 
 Each direction is BUILD then SUBMIT. The build runs the gates, asks the
 provider for the plan, appends a memo carrying the built transaction's id
@@ -1143,10 +1155,42 @@ caveat stands unchanged: live value reads the owner's whole vault balance, so
 shares acquired outside SDP inflate `earned`; that stays a documented property
 of non-custodial reads.
 
+### Addendum to the addendum: 2026-09-15 empty reads, settle-time payout, close on empty
+
+Three of the above are now implemented differently, driven by a partner
+integration measured against the live API:
+
+- **No per-owner read 404s an owner.** `positions`, `movements` and `earnings`
+  answer 200 with the empty shape for a wallet with nothing in the project's
+  scope (never deposited, fully exited, or claimed by another organization).
+  A balance screen must render for a new customer, and every query is already
+  org/project/environment scoped, so a foreign claim produces the same empty
+  bytes as no claim: nothing leaks that the content itself would not. The
+  `hasExternalWalletPositionOwner` gate is gone. Only the retired
+  path-addressed shapes and the movement-by-id detail still 404.
+- **`withdrawals_not_valued` is now the exception, not the rule.** The
+  "deliberately follow-up work" above is done: when a withdrawal reaches
+  `finalized`, the reconciler fetches the landed transaction and records the
+  receiving wallet's post-minus-pre balance of the position's deposit token as
+  `earn_movements.token_amount_settled` (migration 0103; deposits get their
+  settled amount). `earned` = `currentValue + totalWithdrawn − totalDeposited`,
+  with `totalWithdrawn` on the wire so the arithmetic is visible, and the
+  reason is reported only for a finalized withdrawal whose payout was not
+  observed (pre-0103 rows, or a settlement whose transaction read failed).
+  Unobserved stays NULL; it is never estimated at the current share price,
+  for the reason given above. Movements carry `tokenMint`/`tokenAmount` next
+  to the unchanged `amount`/`denomination` so a feed renders one unit.
+- **A fully exited holding closes.** The same settlement hook reads the
+  holding live for that one vault and owner and stamps `closed_at` when
+  shares are "0" (fail-soft; a later deposit transition re-opens it), for
+  external-wallet and custody rows alike. Before this nothing ever wrote
+  `closed_at` at runtime, so an exited position stayed "held" forever.
+
 ## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
 
 Supersedes the "Owner pays everything" accepted cost in the 2026-08-26
-addendum. Both external-wallet BUILD routes now take an optional `feePayer`: a
+addendum for authenticated callers. Both authenticated external-wallet BUILD
+routes now take an optional `feePayer`: a
 wallet the API caller (the partner) controls, which becomes the transaction's
 fee payer and, through the provider's `rentPayer`, funds the share-ATA rent an
 account creation needs. The compiled transaction then requires the partner's
@@ -1195,3 +1239,48 @@ payer); the fee payer adds 96 bytes to the compiled transaction, so near-limit
 swap-funded builds fall to the split flow slightly more often; and the
 blockhash window now has to fit the partner's co-signature too, which is why
 the docs tell partners to co-sign programmatically.
+
+## Addendum: 2026-09-14 Keyless catalogue and unsigned builds (PRO-1943)
+
+The hosted Earn API now has two access tiers over one set of route handlers.
+A valid SDP credential enriches a request with its existing organization,
+project, permission, entitlement, and environment context. With no credential,
+only this deliberate keyless subset is reachable:
+
+- `GET /v1/earn/strategies`
+- `GET /v1/earn/strategies/:strategyId`
+- `POST /v1/earn/vault-deposit-previews`
+- `POST /v1/earn/external-wallet/deposit-transactions`
+- `POST /v1/earn/external-wallet/withdrawal-previews`
+- `POST /v1/earn/external-wallet/withdrawal-transactions`
+
+Submits, movements, positions, earnings, programs, custody vault operations,
+and the aggregate movement feed remain authenticated. No second anonymous
+route tree exists; duplicating endpoint definitions would let the two contracts
+drift.
+
+Anonymous calls have no tenant identity. They use the operator-controlled
+`SDP_ENVIRONMENT`, may not supply a different fee payer, and do not evaluate an
+organization entitlement. Most importantly, they never persist an external
+wallet build, split-swap advisory, movement, or position. The owner pays, signs,
+broadcasts, and tracks the returned transaction. `sponsored` means SDP paid and
+is therefore `false`; a caller-provided fee payer on a keyed build is not SDP
+sponsorship.
+
+Withdrawal lookup follows the identity boundary. A keyed request names a
+tenant-scoped `positionId`. A keyless request names `{strategyId,
+ownerAddress, shares}` and never probes the position table. Both paths enforce
+the provider's withdrawal capability and live quote floor without turning a
+money-in entitlement into a money-out gate.
+
+Abuse controls are also tiered. Public catalogue reads receive a generous
+per-IP limit and cache headers. Anonymous previews and builds receive a tighter
+per-IP limit plus a separate RPC budget that fails closed. Authenticated
+metering continues to use the project API key. Structured request and rejection
+logs carry the normalized route and access tier so operations can derive
+traffic and saturation counters without route-specific code.
+
+The OpenAPI document, generated API reference, Embedded Yield guide, and AI
+discovery files are one public contract. Changing an operation's OpenAPI
+`security` declaration still requires the named security review mandated by
+PRO-1872 before those generated artifacts are published.

@@ -12,6 +12,7 @@ import { toWalletIdentity, WalletIdentityBadge } from "../wallet-identity";
 import type { PermissionRow } from "./token-management-workspace.types";
 import {
   getSignerWalletOptionLabel,
+  getSignerWalletUnavailableReason,
   SOLANA_ADDRESS_PATTERN,
 } from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";
@@ -77,8 +78,10 @@ export function TokenAuthorityModal({
   const noneConfirmationCopy = getNoneConfirmationCopy(row, t);
   const currentAuthorityWallet =
     signerWallets.find((wallet) => wallet.id === signerWalletId) ??
-    (signerWallets.length === 1 ? signerWallets[0] : null);
+    (!signerWalletId && signerWallets.length === 1 ? signerWallets[0] : null);
   const signerChoiceRequired = signerWallets.length > 1 && !signerWalletId;
+  const selectedSignerUnavailableReason =
+    signerUnavailableReason ?? getSignerWalletUnavailableReason(signerWallets, signerWalletId, t);
 
   return (
     <Modal
@@ -96,7 +99,7 @@ export function TokenAuthorityModal({
           currentAuthorityWallet={currentAuthorityWallet}
           copy={noneConfirmationCopy}
           isPending={isPending}
-          signerUnavailableReason={signerUnavailableReason}
+          signerUnavailableReason={selectedSignerUnavailableReason}
           onBack={() => setNoneConfirmationRowId(null)}
           onConfirm={() => {
             setNoneConfirmationRowId(null);
@@ -169,7 +172,7 @@ export function TokenAuthorityModal({
                 disabled={
                   isPending ||
                   signerChoiceRequired ||
-                  Boolean(signerUnavailableReason) ||
+                  Boolean(selectedSignerUnavailableReason) ||
                   (isSettingNone && Boolean(row.removalDisabledReason))
                 }
               >

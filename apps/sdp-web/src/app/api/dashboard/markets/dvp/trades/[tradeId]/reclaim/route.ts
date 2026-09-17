@@ -1,4 +1,4 @@
-import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 /**
@@ -8,11 +8,10 @@ import { proxyToSdpApi } from "@/lib/sdp-api";
  */
 export async function POST(request: Request, { params }: { params: Promise<{ tradeId: string }> }) {
   const { tradeId } = await params;
-  const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER);
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.dvp.trades.reclaim",
     path: `/v1/dvp/trades/${encodeURIComponent(tradeId)}/reclaim`,
-    upstreamHeaders: idempotencyKey ? { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey } : undefined,
+    upstreamHeaders: forwardedIdempotencyHeaders(request),
   });
 }

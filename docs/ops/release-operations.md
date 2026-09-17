@@ -79,7 +79,7 @@ This value is mandatory for hosted services because token deployment embeds meta
 
 Use a conventional pull request title such as `feat:`, `fix:`, `perf:`, `docs:`, or `refactor:`. Release automation uses the merged history to calculate the next version and changelog.
 
-When the pull request merges, the dev workflow runs if a relevant API, package, workspace, lockfile, or workflow path changed:
+Merging deploys stage. Dev is deployed on request: label a pull request `deploy-dev` (`deploy-dev-on-label.yml` deploys its head and follows later pushes until the label is removed) or dispatch the dev workflow on `main`:
 
 [`.github/workflows/deploy-sdp-api-gcp.yml`](../../.github/workflows/deploy-sdp-api-gcp.yml)
 

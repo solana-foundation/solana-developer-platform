@@ -27,11 +27,17 @@ export interface Env {
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
+  /** Anonymous Earn paid-upstream budget, per client IP. */
+  EARN_ANONYMOUS_RPC_MAX_REQUESTS?: string;
+  EARN_ANONYMOUS_RPC_WINDOW_SECONDS?: string;
   API_VERSION: string;
   // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
   CLOUD_RUN_JOB?: string;
+  // Trust the first X-Forwarded-For address outside Cloud Run only when a
+  // deployment-owned proxy replaces caller-supplied forwarding headers.
+  TRUST_PROXY_HEADERS?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). The
   // SDP-hosted token metadata URL burned into the on-chain MetadataPointer is
@@ -216,9 +222,9 @@ export interface Env {
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
 
-  // Recurring payment collection controls
-  PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE?: string;
-  PAYMENTS_RECURRING_COLLECTION_RETRY_AFTER_MINUTES?: string;
+  // MagicBlock private payments configuration
+  MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
+  MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
 
   // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
   SDP_FLAG_ASSET_PROFILES?: string;
@@ -274,9 +280,6 @@ export interface Env {
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
   BVNK_WEBHOOK_SECRET?: string;
-  BVNK_API_BASE_URL?: string;
-  BVNK_SIGNING_HOST?: string;
-  PROXY_SHARED_SECRET?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
@@ -322,6 +325,10 @@ export interface Env {
   // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
   // process serves both clusters and withdrawals are not environment-gated.
   EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
+  // Whether the Earn volume caps (ADR 0004) refuse deposits. Unset or false is
+  // shadow mode: evaluate and emit `sdp_api_earn_volume_cap_evaluated`, refuse
+  // nothing. See `isEarnVolumeCapsEnforced`.
+  EARN_VOLUME_CAPS_ENFORCED?: string;
 
   // Earn vault-infra provider configuration
   UPSHIFT_API_KEY?: string;

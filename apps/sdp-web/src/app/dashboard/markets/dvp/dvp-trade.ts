@@ -13,6 +13,7 @@ import {
   type DvpTradeSide,
   type DvpTradeStatus,
 } from "@sdp/types";
+import { z } from "zod";
 
 export { DVP_TRADE_SIDES, type DvpSettlementAvailability, type DvpTradeSide, type DvpTradeStatus };
 
@@ -34,6 +35,14 @@ export interface DvpCallerWallet {
   name: string | null;
 }
 
+export const dvpActionWalletSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().nullable(),
+  isRuntimeExecutionAllowed: z.boolean(),
+});
+
+export type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
+
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
   address: string;
@@ -47,6 +56,8 @@ export interface DvpPartyRef {
    * caller custodies this party; the id is the wallet page's identifier.
    */
   wallet: DvpCallerWallet | null;
+  /** Present on action-bearing reads; null means no readable funding target. */
+  actionWallet?: DvpActionWallet | null;
 }
 
 export interface DvpTradeLeg {
@@ -158,7 +169,7 @@ const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
   "expired",
 ]);
 
-export function isDvpTradeOpen(trade: DvpTrade): boolean {
+function isDvpTradeOpen(trade: DvpTrade): boolean {
   return OPEN.has(trade.status);
 }
 
@@ -221,6 +232,15 @@ export function formatLegAmount(baseUnits: string, decimals: number | null): str
   const fraction = decimals === 0 ? "" : digits.slice(digits.length - decimals).replace(/0+$/, "");
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
+}
+
+/**
+ * A u64-seconds wire timestamp as an ISO instant, for `formatTimestamp`.
+ * One expression, three surfaces: the conversion spelled inline is how an
+ * expiry once rendered in microseconds.
+ */
+export function dvpTimestampToIso(seconds: string): string {
+  return new Date(Number(seconds) * 1000).toISOString();
 }
 
 /**

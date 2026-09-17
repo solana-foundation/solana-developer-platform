@@ -1,12 +1,19 @@
 "use client";
 
-import { decimalScale, isDecimalString } from "@sdp/solana/amount";
-import type { Counterparty, CounterpartyAccount, PaymentsDashboardWallet } from "@sdp/types";
+import { compareDecimalAmounts, decimalScale, isDecimalString } from "@sdp/solana/amount";
+import {
+  type Counterparty,
+  type CounterpartyAccount,
+  PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
+  type PaymentRecurringPaymentSchedulePreset,
+  type PaymentsDashboardWallet,
+} from "@sdp/types";
 import { PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
+import { z } from "zod";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import { TokenMark } from "@/components/token-mark";
 import type { BadgeVariant } from "@/components/ui/badge";
@@ -28,7 +35,6 @@ import {
   type CounterpartiesResult,
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
-  fetchWallets,
 } from "../payments-workspace.data";
 import { AmountBalanceReadout } from "../ramps/components/amount-balance-readout";
 import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
@@ -36,6 +42,7 @@ import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
 import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import { createRecurringPayment } from "./recurring-payments.data";
+import { accountAddress, parsePeriodHours } from "./recurring-payments-shared";
 
 interface RecurringPaymentCreateWorkspaceProps {
   wallets: PaymentsDashboardWallet[];
@@ -47,7 +54,7 @@ interface RecurringPaymentCreateWorkspaceProps {
 
 type StepId = "counterparty" | "destination" | "details" | "review";
 
-type SchedulePreset = "24" | "168" | "720" | "custom";
+type SchedulePreset = PaymentRecurringPaymentSchedulePreset;
 
 interface RecurringPaymentCreateFields {
   counterpartyId: string;
@@ -63,14 +70,6 @@ interface RecurringPaymentCreateFields {
 
 type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
 
-function resolveAccountAddress(account: CounterpartyAccount | null): string {
-  if (!account) {
-    return "";
-  }
-  const address = account.details.address;
-  return typeof address === "string" ? address : "";
-}
-
 export function recurringPaymentAssetOptions(
   wallet: PaymentsDashboardWallet | null,
   issuedTokenSymbolsByMint: Record<string, string>,
@@ -85,16 +84,6 @@ export function recurringPaymentAssetOptions(
   });
 }
 
-function resolvePeriodHours(fields: RecurringPaymentCreateFields): number | null {
-  const rawValue =
-    fields.schedulePreset === "custom" ? fields.customPeriodHours : fields.schedulePreset;
-  if (!/^\d+$/.test(rawValue.trim())) {
-    return null;
-  }
-  const value = Number(rawValue);
-  return Number.isInteger(value) && value > 0 && value <= 24 * 365 ? value : null;
-}
-
 function resolveScheduleLabel(
   fields: RecurringPaymentCreateFields,
   t: ReturnType<typeof useTranslations>,
@@ -106,7 +95,7 @@ function resolveScheduleLabel(
       t("DashboardPayments.recurring.notSet")
     );
   }
-  const periodHours = resolvePeriodHours(fields);
+  const periodHours = parsePeriodHours(fields.schedulePreset, fields.customPeriodHours);
   if (!periodHours) {
     return t("DashboardPayments.recurring.customInterval");
   }
@@ -120,13 +109,6 @@ type AmountValidationError = "format" | "notPositive" | "decimals";
 /** Max fractional digits accepted before a selected asset bounds the precision (the on-chain 9-decimal cap). */
 const AMOUNT_PATTERN_MAX_DECIMALS = 9;
 
-/**
- * Validates a recurring payment amount and reports why it fails.
- *
- * @param value - The raw amount input.
- * @param maxDecimals - The maximum fractional digits the selected asset supports.
- * @returns The failure reason, or null when the amount is valid.
- */
 function amountError(value: string, maxDecimals: number): AmountValidationError | null {
   const trimmed = value.trim();
   if (!isDecimalString(trimmed)) {
@@ -135,17 +117,9 @@ function amountError(value: string, maxDecimals: number): AmountValidationError 
   if (decimalScale(trimmed) > maxDecimals) {
     return "decimals";
   }
-  return /[1-9]/.test(trimmed) ? null : "notPositive";
+  return compareDecimalAmounts(trimmed, "0") > 0 ? null : "notPositive";
 }
 
-/**
- * Resolves the field hint copy for an amount validation failure.
- *
- * @param error - The amount validation failure reason.
- * @param maxDecimals - The maximum fractional digits the selected asset supports.
- * @param t - The translation function.
- * @returns The localized error message.
- */
 function amountErrorMessage(
   error: AmountValidationError,
   maxDecimals: number,
@@ -204,14 +178,13 @@ function ReviewSummaryCard({ rows }: { rows: Array<{ label: string; value: React
 
 function FieldHint({
   children,
-  tone = "neutral",
+  tone,
 }: {
   children: ReactNode;
-  tone?: "neutral" | "error";
+  tone: "neutral" | "error" | "warning";
 }) {
-  return (
-    <p className={tone === "error" ? "text-sm text-error" : "text-sm text-tertiary"}>{children}</p>
-  );
+  const toneClassName = { neutral: "text-tertiary", error: "text-error", warning: "text-warning" };
+  return <p className={`text-sm ${toneClassName[tone]}`}>{children}</p>;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This wizard intentionally keeps shared form state in one place while each step remains simple.
@@ -292,7 +265,8 @@ export function RecurringPaymentCreateWorkspace({
       fallbackData: counterpartiesResult,
     }
   );
-  const liveCounterparties = liveCounterpartiesResult ?? counterpartiesResult;
+  const liveCounterparties =
+    liveCounterpartiesResult === undefined ? counterpartiesResult : liveCounterpartiesResult;
 
   const { liveWallets: availableWallets, liveWalletsError } = usePaymentsActionWallets(
     wallets,
@@ -313,18 +287,19 @@ export function RecurringPaymentCreateWorkspace({
 
   const cryptoAccounts = useMemo(
     () =>
-      (accounts ?? []).filter(
+      (accounts === undefined ? [] : accounts).filter(
         (account) =>
           account.accountKind === "crypto_wallet" &&
           account.status === "active" &&
-          resolveAccountAddress(account).length > 0
+          accountAddress(account).length > 0
       ),
     [accounts]
   );
 
-  const selectedCounterparty =
-    liveCounterparties.data.find((counterparty) => counterparty.id === fields.counterpartyId) ??
-    null;
+  const foundCounterparty = liveCounterparties.data.find(
+    (counterparty) => counterparty.id === fields.counterpartyId
+  );
+  const selectedCounterparty = foundCounterparty === undefined ? null : foundCounterparty;
   const activeCounterpartiesResult = useMemo(
     () => ({
       ...liveCounterparties,
@@ -332,10 +307,12 @@ export function RecurringPaymentCreateWorkspace({
     }),
     [liveCounterparties]
   );
-  const selectedAccount =
-    cryptoAccounts.find((account) => account.id === fields.counterpartyAccountId) ?? null;
-  const selectedWallet =
-    availableWallets.find((wallet) => wallet.id === fields.sourceCustodyWalletId) ?? null;
+  const foundAccount = cryptoAccounts.find(
+    (account) => account.id === fields.counterpartyAccountId
+  );
+  const selectedAccount = foundAccount === undefined ? null : foundAccount;
+  const foundWallet = availableWallets.find((wallet) => wallet.id === fields.sourceCustodyWalletId);
+  const selectedWallet = foundWallet === undefined ? null : foundWallet;
 
   const assetOptions = useMemo<ComboboxOption[]>(
     () => recurringPaymentAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
@@ -374,7 +351,8 @@ export function RecurringPaymentCreateWorkspace({
   const nonSolBalanceCount =
     selectedWallet?.balances?.filter((balance) => !isSolBalance(balance)).length ?? 0;
 
-  const selectedAsset = assetOptions.find((asset) => asset.value === fields.token) ?? null;
+  const foundAsset = assetOptions.find((asset) => asset.value === fields.token);
+  const selectedAsset = foundAsset === undefined ? null : foundAsset;
   const selectedAssetBalance = useMemo<WalletBalance | null>(
     () =>
       selectedAsset
@@ -386,11 +364,22 @@ export function RecurringPaymentCreateWorkspace({
     ? selectedAssetBalance.decimals
     : AMOUNT_PATTERN_MAX_DECIMALS;
   const amountValidationError = amountError(fields.amount, maxAmountDecimals);
-  const availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : null;
   const exceedsBalance =
-    fields.amount.length > 0 && availableAmount !== null && Number(fields.amount) > availableAmount;
-  const periodHours = resolvePeriodHours(fields);
+    isDecimalString(fields.amount) &&
+    selectedAssetBalance !== null &&
+    compareDecimalAmounts(fields.amount, selectedAssetBalance.uiAmount) > 0;
+  const periodHours = parsePeriodHours(fields.schedulePreset, fields.customPeriodHours);
   const currentStep = createSteps[stepIndex];
+  const accountSelectPlaceholder = accountsLoading
+    ? t("DashboardPayments.recurring.loadingAccounts")
+    : cryptoAccounts.length === 0
+      ? t("DashboardPayments.recurring.noSolanaAccounts")
+      : t("DashboardPayments.recurring.selectDestinationAccount");
+  const assetSelectPlaceholder = fields.sourceCustodyWalletId
+    ? assetOptions.length === 0
+      ? t("DashboardPayments.recurring.noTokenBalances")
+      : t("DashboardPayments.recurring.selectAsset")
+    : t("DashboardPayments.recurring.selectWalletFirst");
 
   useEffect(() => {
     if (!fields.sourceCustodyWalletId) {
@@ -424,9 +413,6 @@ export function RecurringPaymentCreateWorkspace({
     }));
     setFormError(null);
     if (counterpartyId) {
-      void preload(paymentsQueryKeys.actionWallets(), () =>
-        fetchWallets({ includeBalances: true }, t)
-      );
       void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId }), () =>
         fetchCounterpartyAccounts(counterpartyId, t)
       );
@@ -434,7 +420,8 @@ export function RecurringPaymentCreateWorkspace({
   };
 
   const selectWallet = (sourceCustodyWalletId: string) => {
-    const wallet = availableWallets.find((entry) => entry.id === sourceCustodyWalletId) ?? null;
+    const foundWallet = availableWallets.find((entry) => entry.id === sourceCustodyWalletId);
+    const wallet = foundWallet === undefined ? null : foundWallet;
     const nextAssets = recurringPaymentAssetOptions(wallet, issuedTokenSymbolsByMint, t);
     setFields((current) => ({
       ...current,
@@ -473,7 +460,7 @@ export function RecurringPaymentCreateWorkspace({
       return Boolean(fields.counterpartyId);
     }
     if (currentStep.id === "destination") {
-      return Boolean(fields.counterpartyAccountId && resolveAccountAddress(selectedAccount));
+      return Boolean(fields.counterpartyAccountId && accountAddress(selectedAccount));
     }
     if (currentStep.id === "details") {
       return Boolean(
@@ -504,7 +491,7 @@ export function RecurringPaymentCreateWorkspace({
     {
       label: t("DashboardPayments.recurring.destinationAccount"),
       value: selectedAccount
-        ? (selectedAccount.label ?? shortenAddress(resolveAccountAddress(selectedAccount)))
+        ? (selectedAccount.label ?? shortenAddress(accountAddress(selectedAccount)))
         : t("DashboardPayments.recurring.notSelected"),
     },
     {
@@ -585,11 +572,21 @@ export function RecurringPaymentCreateWorkspace({
     if (!canProceed || submitting) {
       return;
     }
-    if (currentStep.id === "review") {
-      await submitRecurringPayment();
-      return;
+    const stepId: StepId = currentStep.id;
+    switch (stepId) {
+      case "counterparty":
+      case "destination":
+      case "details":
+        setStepIndex((current) => current + 1);
+        return;
+      case "review":
+        await submitRecurringPayment();
+        return;
+      default: {
+        const exhaustive: never = stepId;
+        throw new Error(`Unhandled recurring payment step: ${String(exhaustive)}`);
+      }
     }
-    setStepIndex((current) => current + 1);
   };
 
   const handleSecondary = () => {
@@ -654,20 +651,14 @@ export function RecurringPaymentCreateWorkspace({
             value={fields.counterpartyAccountId || null}
             onChange={(value) => setField("counterpartyAccountId", value)}
             options={cryptoAccounts.map((account) => {
-              const address = resolveAccountAddress(account);
+              const address = accountAddress(account);
               return {
                 value: account.id,
                 label: account.label ?? shortenAddress(address),
                 description: shortenAddress(address),
               };
             })}
-            placeholder={
-              accountsLoading
-                ? t("DashboardPayments.recurring.loadingAccounts")
-                : cryptoAccounts.length === 0
-                  ? t("DashboardPayments.recurring.noSolanaAccounts")
-                  : t("DashboardPayments.recurring.selectDestinationAccount")
-            }
+            placeholder={accountSelectPlaceholder}
             searchPlaceholder={t("DashboardPayments.recurring.searchAccounts")}
             icon={<WalletIcon />}
             isLoading={accountsLoading}
@@ -724,12 +715,21 @@ export function RecurringPaymentCreateWorkspace({
               value: wallet.id,
               label: wallet.label ?? wallet.walletId,
               description: shortenAddress(wallet.publicKey),
+              ...(wallet.isRuntimeExecutionAllowed !== true
+                ? { badge: t("DashboardPayments.restricted"), badgeVariant: "warning" as const }
+                : {}),
             }))}
             placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
             searchPlaceholder={t("DashboardPayments.recurring.searchWallets")}
             icon={<WalletIcon />}
             disabled={availableWallets.length === 0}
           />
+          {selectedWallet && selectedWallet.isRuntimeExecutionAllowed !== true ? (
+            <FieldHint tone="warning">
+              {t("DashboardPayments.signingUnavailable")}{" "}
+              {t("DashboardPayments.recurring.signingDisabledDraft")}
+            </FieldHint>
+          ) : null}
 
           <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
             <div className="flex flex-col gap-2">
@@ -748,14 +748,14 @@ export function RecurringPaymentCreateWorkspace({
                 size="xl"
                 maxDecimals={maxAmountDecimals}
                 action={
-                  availableAmount !== null ? (
+                  selectedAssetBalance !== null ? (
                     <AmountBalanceReadout
-                      available={selectedAssetBalance?.uiAmount ?? "0"}
+                      available={selectedAssetBalance.uiAmount}
                       assetLabel={selectedAsset?.label ?? fields.token}
                       exceeds={exceedsBalance}
                       onMax={
-                        availableAmount > 0
-                          ? () => setField("amount", selectedAssetBalance?.uiAmount ?? "")
+                        compareDecimalAmounts(selectedAssetBalance.uiAmount, "0") > 0
+                          ? () => setField("amount", selectedAssetBalance.uiAmount)
                           : undefined
                       }
                     />
@@ -774,13 +774,7 @@ export function RecurringPaymentCreateWorkspace({
               value={fields.token || null}
               onChange={(value) => setField("token", value)}
               options={assetSelectOptions}
-              placeholder={
-                fields.sourceCustodyWalletId
-                  ? assetOptions.length === 0
-                    ? t("DashboardPayments.recurring.noTokenBalances")
-                    : t("DashboardPayments.recurring.selectAsset")
-                  : t("DashboardPayments.recurring.selectWalletFirst")
-              }
+              placeholder={assetSelectPlaceholder}
               searchable={false}
               disabled={!fields.sourceCustodyWalletId || assetSelectOptions.length === 0}
               size="xl"
@@ -797,7 +791,10 @@ export function RecurringPaymentCreateWorkspace({
           <Combobox
             label={t("DashboardPayments.recurring.billingInterval")}
             value={fields.schedulePreset}
-            onChange={(value) => setField("schedulePreset", value as SchedulePreset)}
+            onChange={(value) => {
+              const parsed = z.enum(PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS).safeParse(value);
+              if (parsed.success) setField("schedulePreset", parsed.data);
+            }}
             options={schedulePresets}
             searchable={false}
             icon={<RepeatIcon />}
@@ -822,7 +819,8 @@ export function RecurringPaymentCreateWorkspace({
                 placeholder="24"
                 size="xl"
               />
-              {fields.customPeriodHours && !resolvePeriodHours(fields) ? (
+              {fields.customPeriodHours &&
+              !parsePeriodHours(fields.schedulePreset, fields.customPeriodHours) ? (
                 <FieldHint tone="error">
                   {t("DashboardPayments.recurring.invalidInterval")}
                 </FieldHint>
@@ -847,7 +845,9 @@ export function RecurringPaymentCreateWorkspace({
                   {t("DashboardPayments.recurring.invalidFirstPayment")}
                 </FieldHint>
               ) : (
-                <FieldHint>{t("DashboardPayments.recurring.startAfterActivation")}</FieldHint>
+                <FieldHint tone="neutral">
+                  {t("DashboardPayments.recurring.startAfterActivation")}
+                </FieldHint>
               )}
             </div>
 
@@ -868,7 +868,7 @@ export function RecurringPaymentCreateWorkspace({
                   {t("DashboardPayments.recurring.invalidMetadataUrl")}
                 </FieldHint>
               ) : (
-                <FieldHint>{t("DashboardPayments.recurring.optional")}</FieldHint>
+                <FieldHint tone="neutral">{t("DashboardPayments.recurring.optional")}</FieldHint>
               )}
             </div>
           </div>

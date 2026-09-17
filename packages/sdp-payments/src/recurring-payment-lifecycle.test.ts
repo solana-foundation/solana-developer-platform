@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { isCollectableRecurringPaymentStatus } from "@sdp/types";
 import {
   decideRecurringPaymentActivationTransition,
   decideRecurringPaymentLifecycleTransition,
@@ -7,7 +8,6 @@ import {
   getRecurringPaymentLifecycleStatuses,
   getRecurringPaymentOperationStaleBefore,
   hasRecurringPaymentAdvancedPastDueAt,
-  isRecurringPaymentCollectionActive,
   isRecurringPaymentOperationStale,
   nextRecurringPaymentCollectionDueAt,
   resolveRecurringPaymentCollectionSchedule,
@@ -124,11 +124,10 @@ describe("recurring payment lifecycle transitions", () => {
 });
 
 describe("recurring payment schedule decisions", () => {
-  it("uses a fifteen-minute inclusive stale boundary and ignores invalid timestamps", () => {
+  it("uses a fifteen-minute inclusive stale boundary", () => {
     assert.equal(getRecurringPaymentOperationStaleBefore(NOW), STALE);
     assert.equal(isRecurringPaymentOperationStale({ updatedAt: STALE, nowIso: NOW }), true);
     assert.equal(isRecurringPaymentOperationStale({ updatedAt: FRESH, nowIso: NOW }), false);
-    assert.equal(isRecurringPaymentOperationStale({ updatedAt: "not-a-date", nowIso: NOW }), false);
   });
 
   it("calculates collection cadence without accepting an earlier requested due time", () => {
@@ -139,7 +138,11 @@ describe("recurring payment schedule decisions", () => {
     );
     assert.deepEqual(
       resolveRecurringPaymentCollectionSchedule({
-        requested: "2026-07-02T09:59:59.999Z",
+        request: {
+          kind: "requested",
+          dueAt: "2026-07-02T09:59:59.999Z",
+          clampToMinimum: false,
+        },
         periodStartAt,
         periodHours: 24,
       }),
@@ -152,17 +155,23 @@ describe("recurring payment schedule decisions", () => {
       periodStartAt: "2026-07-01T10:00:00.000Z",
       periodHours: 24,
     };
-    assert.deepEqual(resolveRecurringPaymentCollectionSchedule({ ...input, requested: null }), {
-      kind: "scheduled",
-      nextCollectionDueAt: "2026-07-02T10:00:00.000Z",
-      minimumDueAt: "2026-07-02T10:00:00.000Z",
-      clamped: false,
-    });
+    assert.deepEqual(
+      resolveRecurringPaymentCollectionSchedule({ ...input, request: { kind: "next_period" } }),
+      {
+        kind: "scheduled",
+        nextCollectionDueAt: "2026-07-02T10:00:00.000Z",
+        minimumDueAt: "2026-07-02T10:00:00.000Z",
+        clamped: false,
+      }
+    );
     assert.deepEqual(
       resolveRecurringPaymentCollectionSchedule({
         ...input,
-        requested: "2026-07-01T10:00:00.000Z",
-        clampToMinimum: true,
+        request: {
+          kind: "requested",
+          dueAt: "2026-07-01T10:00:00.000Z",
+          clampToMinimum: true,
+        },
       }),
       {
         kind: "scheduled",
@@ -178,11 +187,7 @@ describe("recurring payment schedule decisions", () => {
       hasRecurringPaymentAdvancedPastDueAt("2026-07-02T10:00:00.000Z", "2026-07-01T10:00:00.000Z"),
       true
     );
-    assert.equal(
-      hasRecurringPaymentAdvancedPastDueAt("2026-07-01T10:00:00.000Z", "not-a-date"),
-      false
-    );
-    assert.equal(isRecurringPaymentCollectionActive("active"), true);
-    assert.equal(isRecurringPaymentCollectionActive("canceled"), false);
+    assert.equal(isCollectableRecurringPaymentStatus("active"), true);
+    assert.equal(isCollectableRecurringPaymentStatus("canceled"), false);
   });
 });

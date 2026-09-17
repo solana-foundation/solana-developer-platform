@@ -17,6 +17,14 @@ function getJsonSchema(value: unknown): TestJsonSchema {
   ].schema;
 }
 
+function getJsonExamples(value: unknown) {
+  return (
+    value as {
+      content: Record<string, { examples?: Record<string, { value?: unknown }> }>;
+    }
+  ).content["application/json"].examples;
+}
+
 function getWalletResponseSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallet ?? {};
 }
@@ -90,14 +98,13 @@ describe("OpenAPI spec", () => {
     }
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
 
-    // ── SECURITY REVIEW GATE (PRO-1872, threat model EARN-027) ──────────────
-    // The public/preview split is a PUBLICATION boundary, not an auth boundary:
-    // every /v1/earn route accepts every auth mode at runtime, so the public
-    // document is the whole partner-facing contract. Promoting a preview route
-    // into it is a security-relevant scope change and a threat-model revisit
-    // trigger. This list is the gate: a PR that grows it must carry security
-    // sign-off (routes/earn/CLAUDE.md, "Public OpenAPI promotion"). Do not
-    // widen the list to make a red test pass.
+    // SECURITY REVIEW GATE (PRO-1872, threat model EARN-027)
+    // The public/preview split is a publication boundary. Earn also has a
+    // narrower keyless runtime tier, but changing either the operation list or
+    // an operation's public security declaration is a threat-model revisit
+    // trigger. This list is the route-publication gate: a PR that grows it must
+    // carry security sign-off (routes/earn/CLAUDE.md, "Public OpenAPI
+    // promotion"). Do not widen the list to make a red test pass.
     const publicEarnOperations = Object.entries(publicDocument.paths ?? {})
       .filter(([path]) => path.startsWith("/v1/earn"))
       .flatMap(([path, item]) =>
@@ -123,11 +130,12 @@ describe("OpenAPI spec", () => {
         "POST /v1/earn/external-wallet/withdrawals",
       ].sort()
     );
+    expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
     // Coverage parity across the boundary: every published operation is the
     // same registered route as its internal twin (same operationId), so the
     // app-level request tracing and rate limiting that wrap `/v1/*` apply to
     // both by construction; there is no public-only mount to fall outside them.
-    for (const operation of publicEarnOperations) {
+    for (const operation of [...publicEarnOperations, "GET /v1/transactions"]) {
       const [method, path] = operation.split(" ") as [string, string];
       const key = method.toLowerCase() as "get" | "post";
       expect(internal.paths?.[path]?.[key]?.operationId).toBe(
@@ -135,19 +143,51 @@ describe("OpenAPI spec", () => {
       );
     }
 
-    for (const path of [
-      "/v1/earn/vault-deposit-previews",
-      "/v1/earn/external-wallet/deposit-transactions",
-      "/v1/earn/external-wallet/deposits",
-      "/v1/earn/external-wallet/withdrawal-transactions",
-      "/v1/earn/external-wallet/withdrawals",
-    ]) {
-      const publicOperation = publicDocument.paths?.[path]?.post;
-      expect(publicOperation?.operationId).toBeDefined();
-      expect(publicOperation?.security).toEqual([{ apiKeyAuth: [] }]);
+    // Pin the runtime's exact optional-auth boundary in both documents. An
+    // empty security requirement means the request may be anonymous; the
+    // named alternatives preserve the authenticated behavior of the same
+    // handler. Any route moving between these lists is a threat-model revisit.
+    const optionalAuthOperations = [
+      { method: "get", path: "/v1/earn/strategies" },
+      { method: "get", path: "/v1/earn/strategies/{strategyId}" },
+      { method: "post", path: "/v1/earn/vault-deposit-previews" },
+      { method: "post", path: "/v1/earn/external-wallet/deposit-transactions" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-previews" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-transactions" },
+    ] as const;
+    const keyedOnlyOperations = [
+      { method: "get", path: "/v1/earn/external-wallet/positions/summary" },
+      { method: "get", path: "/v1/earn/external-wallet/positions" },
+      { method: "get", path: "/v1/earn/external-wallet/movements" },
+      { method: "get", path: "/v1/earn/external-wallet/movements/{movementId}" },
+      { method: "get", path: "/v1/earn/external-wallet/earnings" },
+      { method: "post", path: "/v1/earn/external-wallet/deposits" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawals" },
+    ] as const;
 
-      const internalOperation = internal.paths?.[path]?.post;
+    expect(
+      [...optionalAuthOperations, ...keyedOnlyOperations]
+        .map(({ method, path }) => `${method.toUpperCase()} ${path}`)
+        .sort()
+    ).toEqual(publicEarnOperations);
+
+    for (const { method, path } of optionalAuthOperations) {
+      const publicOperation = publicDocument.paths?.[path]?.[method];
+      expect(publicOperation?.operationId).toBeDefined();
+      expect(publicOperation?.security).toEqual([{ apiKeyAuth: [] }, {}]);
+
+      const internalOperation = internal.paths?.[path]?.[method];
       expect(internalOperation?.security).toEqual([
+        { apiKeyAuth: [] },
+        { clerkBearerAuth: [] },
+        { sessionCookie: [] },
+        {},
+      ]);
+    }
+
+    for (const { method, path } of keyedOnlyOperations) {
+      expect(publicDocument.paths?.[path]?.[method]?.security).toEqual([{ apiKeyAuth: [] }]);
+      expect(internal.paths?.[path]?.[method]?.security).toEqual([
         { apiKeyAuth: [] },
         { clerkBearerAuth: [] },
         { sessionCookie: [] },
@@ -165,6 +205,63 @@ describe("OpenAPI spec", () => {
         publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.responses?.["200"]
       )
     ).toContain("sharesOut");
+
+    const withdrawalBuildRequest = getJsonSchema(
+      publicDocument.paths?.["/v1/earn/external-wallet/withdrawal-transactions"]?.post?.requestBody
+    );
+    expect(withdrawalBuildRequest.anyOf).toEqual([
+      expect.objectContaining({
+        required: expect.arrayContaining(["positionId", "shares"]),
+      }),
+      expect.objectContaining({
+        required: expect.arrayContaining(["strategyId", "ownerAddress", "shares"]),
+      }),
+    ]);
+
+    const anonymousRequestExamples = [
+      {
+        path: "/v1/earn/external-wallet/deposit-transactions",
+        value: {
+          strategyId: "earn_strategy_example",
+          ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+          amount: "25",
+          minSharesOut: "24.9",
+        },
+      },
+      {
+        path: "/v1/earn/external-wallet/withdrawal-previews",
+        value: {
+          strategyId: "earn_strategy_example",
+          ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+          shares: "10",
+        },
+      },
+      {
+        path: "/v1/earn/external-wallet/withdrawal-transactions",
+        value: {
+          strategyId: "earn_strategy_example",
+          ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+          shares: "10",
+          minAmountOut: "24.9",
+        },
+      },
+    ];
+
+    for (const { path, value } of anonymousRequestExamples) {
+      const examples = getJsonExamples(publicDocument.paths?.[path]?.post?.requestBody);
+      expect(examples?.anonymous?.value).toEqual(value);
+      expect(examples?.anonymous?.value).not.toHaveProperty("feePayer");
+      expect(examples?.anonymous?.value).not.toHaveProperty("positionId");
+    }
+
+    for (const path of [
+      "/v1/earn/external-wallet/deposit-transactions",
+      "/v1/earn/external-wallet/withdrawal-transactions",
+    ]) {
+      expect(JSON.stringify(publicDocument.paths?.[path]?.post?.responses?.["200"])).toContain(
+        '"sponsored"'
+      );
+    }
 
     const submitRequest = getJsonSchema(
       publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody

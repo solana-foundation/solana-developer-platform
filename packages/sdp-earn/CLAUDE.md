@@ -6,6 +6,24 @@ multi-provider — keep every provider-specific detail behind the provider-neutr
 seams below. Read `README.md` here for the full architecture (including the
 custody boundary); ADR 0002 (`docs/decisions/`) for the invariants.
 
+## Hosted API access tiers
+
+This package defines provider capabilities; the API router defines caller
+authentication. Do not confuse a provider's own upstream credential with an
+integrator's SDP API key.
+
+- Strategy catalogue reads, deposit and withdrawal previews, and unsigned
+  external-wallet transaction builds accept either a valid SDP credential or
+  no credential. The anonymous form has no organization or project context,
+  maps the deployment's validated `ENVIRONMENT`, and persists nothing.
+- Submits, programs, custody vault operations, movements, positions, earnings,
+  and aggregate reads require an authenticated tenant and their existing Earn
+  permissions.
+- A credentialed call to an optional-auth route preserves the existing tenant
+  environment, entitlement, custom fee-payer, persistence, and submit flow.
+- A missing `GROUND_*_API_KEY` is a provider configuration failure. It says
+  nothing about whether an integrator supplied an SDP API key.
+
 ## Local development — the whole Earn stack
 
 **Absolute rule: local resources only.** Never point any of this at a shared or
@@ -45,12 +63,19 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
   by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
   shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
+- **Keyless environment** maps `ENVIRONMENT=development` to sandbox and
+  `ENVIRONMENT=production` to production. Authenticated calls continue to
+  derive environment from the selected project.
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
   `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
-  ids and `allow_create_account = true`, so the harness needs no edit (deployed
-  devnet Kora carries the same allowlist since sdp-infra#64, asserted by the
-  `Kora / Live Smoke` shard on secret-bearing CI runs). Its
+  ids, every devnet Earn deposit mint in `allowed_tokens` (wSOL first) and
+  `allow_create_account = true`, so the harness needs no edit (deployed devnet
+  Kora carries the same allowlist and token set since sdp-infra#64 and
+  PRO-1962, asserted by the `Kora / Live Smoke` shard on secret-bearing CI
+  runs). The harness image (e9bc391) has no `transfer_hook_policy`; the
+  deployed f0377c0 configs set it to `allow_all` so sign-only PYUSD/USDG
+  movements pass, see the comment in the toml before bumping the image. Its
   `SIGNER_PRIVATE_KEY` does need devnet SOL, because it pays the fee AND the
   share-ATA rent for real. The flag fails CLOSED, so a value
   the wrapper drops looks like "sponsorship silently did nothing" rather than an
@@ -80,11 +105,12 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 
 ### 4. Get catalogue data — live provider sync
 
-With sandbox provider credentials set and both flags on, the hourly
-catalogue-sync cron populates `earn_strategies` from live provider sources. It
-fires on the hour, so a freshly started API has an empty catalogue until a live
-pass succeeds. This is intentional: the sync is the only admitting writer and
-every row must pass the provider's declared-support checks.
+With sandbox provider credentials set and both flags on, the catalogue-sync
+cron populates `earn_strategies` from live provider sources. It runs once at
+API boot (through the slotted `runEarnCatalogueSyncIfDue`, so restarts inside
+the hour skip) and then on the hour, so a freshly started API lists strategies
+within seconds of coming up. The sync is the only admitting writer and every
+row must pass the provider's declared-support checks.
 
 See README.md → "Catalogue data" for cadence and failure behaviour. A database
 still holding `seed-demo-` rows from the removed `db:seed:earn` needs a one-time
@@ -158,7 +184,7 @@ ADR 0002's 2026-08-14 addendum.
 | A key you minted yourself returns `strategies: []` **and** `programs: []` | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox programs, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive a provider's **production** API from a laptop. |
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
 | Catalogue empty right after boot | sync cron runs on the hour; verify flags, provider credentials, and scheduler registration, then wait for a live pass |
-| Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; production Kamino remains `environment_unavailable` in the provider-scoped deposit-environment map |
+| Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; since PRO-1986 Kamino deposits open in production too, while Veda stays `environment_unavailable` there until PRO-1777 |
 | Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
 | Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
 | Local API boots on 8787 despite `PORT=…` | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (scripts/dev-local.mjs) |
@@ -166,6 +192,7 @@ ADR 0002's 2026-08-14 addendum.
 | No Veda rows in the PRODUCTION catalogue | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is devnet-only: the published mainnet vault state is Veda's shared Test Vault, so production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. Sandbox carries the devnet Test Vault row |
 | A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b) |
 | No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below |
+| The Ondo pass fails with `Ondo assets API listed no usdy entry` or `Ondo USDY apy is not a non-negative number` | `ondo.finance/api/v1/assets` changed shape (the `usdy` entry or its numeric `apy` percent). Check the live body; the row keeps its last figures until fixed |
 | No Ondo row in the sandbox MIRROR either, on a devnet deployment | the production pass needs a mainnet RPC: `resolveCatalogueRpcUrl` reads `SOLANA_MAINNET_RPC_URL` and falls back to `SOLANA_RPC_URL`, which a devnet deployment fails the genesis proof on (steady-state skip, mirror converges to empty). Set the override; smoky needs it in sdp-infra dev `app_secret_keys` + Doppler |
 
 ## Ondo — a TOKEN-HOLDING strategy, no vault program at all
@@ -181,9 +208,13 @@ The catalogue read (`providers/ondo/client.ts`) genesis-proves the RPC and
 verifies the mint account before reporting the one-row shelf, and the row is
 its `sourceKind: "rwa"`: the classification traces to the
 issuer's own published mint address in `ONDO_DEPLOYMENTS`
-(`@sdp/types/ondo-programs`), the same allowlist bar Veda clears. No
-`currentApy` — Ondo's rate API is credentialed and SDP holds no key yet
-(PRO-1833). The row's `riskMetadata` carries the eligibility constraints an
+(`@sdp/types/ondo-programs`), the same allowlist bar Veda clears. Its
+`currentApy` and Solana `tvlUsd` are the issuer's published figures, one
+keyless GET to `ondo.finance/api/v1/assets` (`providers/ondo/usdy-rate.ts`,
+PRO-1833; NOT the credentialed Stocks API, which has no USDY). Written by this
+hourly pass, not the metrics refresh, because Ondo sets the rate monthly. An
+unreachable API fails the Ondo pass (rows keep their last figures).
+The row's `riskMetadata` carries the eligibility constraints an
 integrator asks about (Reg S non-US-person restriction, issuer freeze
 authority), with the longer record in `docs/earn/ondo-catalogue-inventory.md`.
 Execution lives in `@sdp/ondo`; see that package's CLAUDE.md for why the
@@ -235,10 +266,12 @@ organization's own custody wallets and submitting it — `@sdp/kamino` and
 `@sdp/veda` build the plan, the API signs and submits
 (`POST /v1/earn/vault-deposits`). Since PRO-1722 the same builders also serve
 the EXTERNAL-WALLET flow (`/v1/earn/external-wallet/*`), where the plan's
-`owner` is a wallet SDP does not custody and the OWNER signs instead of SDP —
-nothing changes on the packages' side, because the builders always took the
-owner as a parameter. Those packages depend on this one, never the reverse: the
-hourly catalogue cron must not load a chain SDK it never calls.
+`owner` is a wallet SDP does not custody and the OWNER signs instead of SDP.
+A keyed caller may submit those signed bytes through SDP; an anonymous caller
+broadcasts them directly. Nothing changes on the packages' side because the
+builders always took the owner as a parameter. Those packages depend on this
+one, never the reverse: the hourly catalogue cron must not load a chain SDK it
+never calls.
 
 Three Kamino facts drive most of its code, all measured against the live API on
 2026-08-13 (Kamino publishes an agent-readable API index at
@@ -436,10 +469,11 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
   `resolveEarnProviderClient` — DB provider ids are open strings and MUST be
   resolved through this, never direct-indexed.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, live
-  metrics, vault-direct (deposit + read) and vault-withdraw. All are
-  method-presence guards in capabilities.ts and a provider may implement any
-  subset — Kamino has live metrics, vault-direct and vault-withdraw
-  (PRO-1702); Veda has vault-direct and vault-withdraw (instant redemption
+  metrics, vault-direct (deposit + read), vault-withdraw, and the two live
+  quotes (deposit and withdrawal previews). All are method-presence guards in
+  capabilities.ts and a provider may implement any subset. Kamino has live
+  metrics, vault-direct, vault-withdraw (PRO-1702) and both quotes
+  (`@sdp/kamino`); Veda has vault-direct and vault-withdraw (instant redemption
   only — the queued exit waits on its own capability, see
   `docs/decisions/0003-veda-vault-withdrawals.md`). A deposit-only provider's
   exit route answers 501, which is a statement about SDP's plumbing rather

@@ -4,7 +4,7 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
       "wallets": 19,
-      "payments": 38,
+      "payments": 39,
       "counterparties": 13,
       "issuance": 37
     }
@@ -1630,6 +1630,7 @@
               "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
+              "kind": "pay",
               "direction": "outbound",
               "status": "confirmed",
               "signature": "sig_example",
@@ -1917,6 +1918,7 @@
               "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
+              "kind": "pay",
               "direction": "outbound",
               "status": "confirmed",
               "signature": "sig_example",
@@ -1995,6 +1997,7 @@
               "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
+              "kind": "pay",
               "direction": "outbound",
               "status": "confirmed",
               "signature": "sig_example",
@@ -2142,6 +2145,7 @@
                 "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
+                "kind": "pay",
                 "direction": "outbound",
                 "status": "confirmed",
                 "signature": "sig_example",
@@ -2359,6 +2363,7 @@
                 "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
+                "kind": "pay",
                 "direction": "outbound",
                 "status": "confirmed",
                 "signature": "sig_example",
@@ -2878,7 +2883,11 @@
               "status": "pending",
               "signature": "example",
               "error": "example",
-              "metadata": {},
+              "metadata": {
+                "recurringPaymentId": "recurringpayment_example",
+                "initiatedByKeyId": "initiatedbykey_example",
+                "source": "manual"
+              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
             },
@@ -2889,6 +2898,7 @@
               "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
+              "kind": "pay",
               "direction": "outbound",
               "status": "confirmed",
               "signature": "sig_example",
@@ -3687,7 +3697,11 @@
               "status": "pending",
               "signature": "example",
               "error": "example",
-              "metadata": {},
+              "metadata": {
+                "recurringPaymentId": "recurringpayment_example",
+                "initiatedByKeyId": "initiatedbykey_example",
+                "source": "manual"
+              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
             }
@@ -3819,7 +3833,11 @@
                 "status": "pending",
                 "signature": "example",
                 "error": "example",
-                "metadata": {},
+                "metadata": {
+                  "recurringPaymentId": "recurringpayment_example",
+                  "initiatedByKeyId": "initiatedbykey_example",
+                  "source": "manual"
+                },
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-01T00:00:00.000Z"
               }
@@ -5371,6 +5389,143 @@
           "meta": {
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "list-unified-transactions",
+        "operationId": "listUnifiedTransactions",
+        "title": "List transactions",
+        "method": "GET",
+        "path": "/v1/transactions?module={module}&kind={kind}&status={status}&custodyWalletId={custodyWalletId}&counterpartyId={counterpartyId}&token={token}&search={search}&createdAtFrom={createdAtFrom}&createdAtTo={createdAtTo}&cursor={cursor}&limit={limit}",
+        "pathFields": [
+          {
+            "key": "module",
+            "label": "module",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "payments",
+                "value": "payments"
+              },
+              {
+                "label": "earn",
+                "value": "earn"
+              },
+              {
+                "label": "dvp",
+                "value": "dvp"
+              },
+              {
+                "label": "private_channels",
+                "value": "private_channels"
+              },
+              {
+                "label": "issuance",
+                "value": "issuance"
+              },
+              {
+                "label": "rings",
+                "value": "rings"
+              }
+            ]
+          },
+          {
+            "key": "kind",
+            "label": "kind",
+            "required": false
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "succeeded",
+                "value": "succeeded"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              },
+              {
+                "label": "canceled",
+                "value": "canceled"
+              }
+            ]
+          },
+          {
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "required": false
+          },
+          {
+            "key": "counterpartyId",
+            "label": "counterpartyId",
+            "required": false
+          },
+          {
+            "key": "token",
+            "label": "token",
+            "required": false
+          },
+          {
+            "key": "search",
+            "label": "search",
+            "required": false
+          },
+          {
+            "key": "createdAtFrom",
+            "label": "createdAtFrom",
+            "required": false
+          },
+          {
+            "key": "createdAtTo",
+            "label": "createdAtTo",
+            "required": false
+          },
+          {
+            "key": "cursor",
+            "label": "cursor",
+            "required": false
+          },
+          {
+            "key": "limit",
+            "label": "limit",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "transactions": [
+              {
+                "id": "_example",
+                "moduleId": "module_example",
+                "status": "pending",
+                "organizationId": "organization_example",
+                "projectId": "project_example",
+                "custodyWalletId": "custodywallet_example",
+                "custodyWalletLabel": "example",
+                "token": "example",
+                "amount": "example",
+                "counterpartyId": "counterparty_example",
+                "signature": "example",
+                "createdAt": "example",
+                "module": "payments",
+                "kind": "pay",
+                "moduleStatus": "pending"
+              }
+            ],
+            "nextCursor": "example"
           }
         }
       }
@@ -8747,7 +8902,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"feePayment\": \"sponsored\"\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authorityCustodyWalletIds\": {\n    \"metadata\": \"cwlt_metadata\",\n    \"freeze\": \"cwlt_freeze\",\n    \"permanentDelegate\": \"cwlt_recovery\"\n  },\n  \"feePayment\": \"sponsored\"\n}",
             "required": false
           }
         ],

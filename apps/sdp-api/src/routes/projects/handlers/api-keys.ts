@@ -211,6 +211,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       createdByKeyId: auth.apiKeyId ?? undefined,
       createdByUserId: auth.userId ?? undefined,
       actorPermissions: auth.permissions,
+      actorApiKeyRole: c.get("apiKey")?.role ?? null,
       name,
       description,
       role,

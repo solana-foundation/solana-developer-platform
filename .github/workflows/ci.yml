@@ -211,7 +211,7 @@ jobs:
           detect api '^(apps/sdp-api/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/run-workspace-tests\.mjs|scripts/doppler/|\.github/workflows/ci\.yml)'
           detect rest '^(apps/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
           detect e2e '^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
-          detect docker '^(apps/|packages/|package\.json|\.npmrc|tsconfig\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|docker-compose(\.ci)?\.yml|\.dockerignore|\.github/workflows/ci\.yml)'
+          detect docker '^(apps/|packages/|package\.json|\.npmrc|tsconfig\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|scripts/docker/|docker-compose(\.ci)?\.yml|\.dockerignore|\.github/workflows/ci\.yml)'
 
   test:
     name: Unit Tests (api ${{ matrix.shard }}/8)
@@ -305,6 +305,9 @@ jobs:
         with:
           name: vitest-api-shard-${{ matrix.shard }}
           path: apps/sdp-api/.vitest-reports/blob-${{ matrix.shard }}-8.json
+          # A rerun of failed shards must replace the first attempt's blob, or the
+          # merge step below keeps re-reporting failures the rerun already fixed.
+          overwrite: true
           include-hidden-files: true
           if-no-files-found: error
 
@@ -693,7 +696,7 @@ jobs:
             custody_provider: privy
           - name: Surfpool / Issuance Core
             provider: surfpool
-            test_files: src/tests/issuance-crud.test.ts src/tests/token2022.test.ts
+            test_files: src/tests/issuance-crud.test.ts src/tests/mosaic-custom-mint.test.ts src/tests/dvp-settlement.test.ts
             rpc_provider: quicknode
             custody_provider: local
           - name: Surfpool / Issuance Prepare

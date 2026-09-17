@@ -355,16 +355,18 @@ export interface EarnExternalWalletStrategyTotal {
   providerReference: string;
   label: string;
   /**
-   * Exact project-scoped owners contributing to this strategy total. Present by
-   * default; ABSENT when the caller passed `includeOwnerAddresses=false`
-   * (PRO-1873). This is the end-user address book of the whole project, so an
-   * analytics consumer that only needs totals should opt out and never hold it.
+   * Exact project-scoped owners contributing to this strategy total. ABSENT by
+   * default; present only when the caller passed `includeOwnerAddresses=true`
+   * (PRO-1873 added the flag, PRO-1908 made omission the default). This is the
+   * end-user address book of the whole project, so only a surface that renders
+   * per-customer detail should opt in.
    */
   ownerAddresses?: string[];
   /**
    * Complete live positions contributing to this strategy total. Present only
-   * when the caller passes `includePositions=true`; absent from totals-only
-   * responses so analytics consumers do not receive per-customer details.
+   * when the caller passes `includePositions=true` alongside
+   * `includeOwnerAddresses=true`; absent from totals-only responses so
+   * analytics consumers do not receive per-customer details.
    */
   positions?: EarnExternalWalletPosition[];
   walletCount: number;
@@ -552,29 +554,31 @@ export interface EarnVaultWithdrawalsPage {
  * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
  *
  * An external wallet is a NON-CUSTODIAL wallet the partner's platform
- * connects; SDP holds no key for it and never signs. Each direction is two
- * calls: a BUILD returns an unsigned transaction to sign, and a SUBMIT
- * takes the signed bytes back, records the movement, then broadcasts. These
- * surfaces postdate the unified ledger, so statuses are the ledger's own
- * vault vocabulary (`requested … finalized`), never the legacy deposit one.
+ * connects; SDP holds no key for it and never signs. A BUILD always returns an
+ * unsigned transaction. A keyed integration can SUBMIT the signed bytes for a
+ * durable movement and SDP broadcast. A keyless integration broadcasts and
+ * tracks the transaction itself. These surfaces postdate the unified ledger,
+ * so recorded statuses use its vault vocabulary (`requested … finalized`).
  */
 
 /** One unsigned transaction SDP built for an external wallet to sign. */
 export interface EarnExternalWalletTransaction {
-  /** Names the built transaction on the submit call. Single-use. */
+  /** Opaque build id. A durable keyed build is single-use on submit. */
   transactionId: string;
   /**
    * Base64 wire bytes of the UNSIGNED transaction. The external wallet signs
-   * exactly these bytes — the fee payer is the owner, or the partner's
-   * `feePayer` when one was named on the build — and the partner returns the
-   * signed encoding on the submit call; any other change is refused there.
+   * exactly these bytes. The fee payer is the owner, or the partner's
+   * `feePayer` on a keyed build. A keyed integration returns the signed
+   * encoding on submit; a keyless integration broadcasts it directly.
    */
   transaction: string;
   /** Block height after which these exact bytes can no longer land. */
   lastValidBlockHeight: string;
+  /** Whether SDP supplied and signed the transaction's fee payer. */
+  sponsored: boolean;
   ownerAddress: string;
   /**
-   * The partner fee payer compiled into the transaction, echoed from the
+   * The partner fee payer compiled into a keyed transaction, echoed from the
    * build request. Present, the transaction requires this wallet's signature
    * IN ADDITION to the owner's — co-sign server-side before submitting — and
    * this wallet pays the network fee plus any account rent the transaction
@@ -619,20 +623,23 @@ export interface EarnExternalWalletDepositTransactionResponse {
  * back an unsigned SWAP-ONLY transaction for the owner to sign and broadcast
  * itself, plus the exact follow-up deposit to build once the swap lands. The
  * follow-up build then takes the ordinary single-transaction path. SDP does
- * record an advisory that the split was handed out, and flags owners whose
- * swap landed without a follow-up deposit (PRO-1864); recovery stays the
- * partner's duty.
+ * records an advisory for a keyed split and flags owners whose swap landed
+ * without a follow-up deposit (PRO-1864). An anonymous split writes nothing;
+ * recovery stays the caller's duty in both tiers.
  */
 export interface EarnExternalWalletDepositSwapSplitResponse {
   /** Discriminates from the atomic response, which carries `transaction`. */
   requiresSeparateSwap: true;
+  /** Split swap transactions are never sponsored by SDP. */
+  sponsored: false;
   swap: EarnDepositSwap & {
     /**
      * Base64 wire bytes of the UNSIGNED swap transaction. The fee payer is
      * the owner, or the original request's `feePayer` (which then co-signs
      * this transaction too). The partner broadcasts it itself; it moves only
      * the owner's own funds between the owner's own token accounts, so SDP
-     * records no movement for it, only the orphan-detection advisory.
+     * records no movement. Only a keyed request creates an orphan-detection
+     * advisory.
      */
     transaction: string;
     /** Block height after which these exact bytes can no longer land. */
@@ -660,16 +667,27 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
   };
 }
 
+type EarnExternalWalletExitReference =
+  | {
+      /** The tenant position being exited on an authenticated build. */
+      positionId: string;
+      strategyId?: never;
+    }
+  | {
+      /** The catalogue strategy being exited on an anonymous build. */
+      strategyId: string;
+      positionId?: never;
+    };
+
 /** Response body of POST /v1/earn/external-wallet/withdrawal-transactions. */
 export interface EarnExternalWalletWithdrawalTransactionResponse {
-  transaction: EarnExternalWalletTransaction & {
-    /** The external-wallet position being exited. */
-    positionId: string;
-    /** Shares encoded in the transaction, share units. */
-    shares: string;
-    /** Minimum deposit-token amount encoded in the transaction, or null. */
-    minAmountOut: string | null;
-  };
+  transaction: EarnExternalWalletTransaction &
+    EarnExternalWalletExitReference & {
+      /** Shares encoded in the transaction, share units. */
+      shares: string;
+      /** Minimum deposit-token amount encoded in the transaction, or null. */
+      minAmountOut: string | null;
+    };
 }
 
 /** One recorded external-wallet vault movement, either direction. */
@@ -687,6 +705,14 @@ export interface EarnExternalWalletMovement {
   amount: string;
   /** Token mint for a deposit; share mint for a withdrawal. */
   denomination: string;
+  /** The position's deposit-token mint: the unit an activity feed renders in. */
+  tokenMint: string;
+  /**
+   * Quantity in `tokenMint` units. A deposit's amount; a withdrawal's observed
+   * payout once finalized, null before that or when it could not be observed.
+   * `amount`/`denomination` stay the on-chain quantity (shares on a withdrawal).
+   */
+  tokenAmount: string | null;
   failureReason: string | null;
   createdAt: string;
   confirmedAt: string | null;
@@ -724,14 +750,14 @@ export interface EarnExternalWalletMovementResponse {
  * - `movements_pending`: a movement is still settling, so live value and the
  *   ledger describe different moments.
  * - `withdrawals_not_valued`: a currently held position has a finalized
- *   withdrawal, and the ledger records exits in shares, not in the deposit
- *   token, so no exact token-denominated earned figure exists (ADR 0002).
+ *   withdrawal whose token payout was not observed at settlement (rows that
+ *   predate the observation, or a settlement whose transaction read failed),
+ *   so `totalWithdrawn` is incomplete and earned cannot be exact (ADR 0002).
  *
  * Every earnings figure covers the wallet's CURRENTLY HELD positions: a fully
  * exited position drops out entirely (its deposits leave `totalDeposited`
- * along with its unvalued withdrawal), so one full exit does not withhold the
- * open positions' earned forever. The exited history stays on the movements
- * list.
+ * along with its withdrawals), so one full exit does not withhold the open
+ * positions' earned. The exited history stays on the movements list.
  */
 export type EarnExternalWalletEarnedUnavailableReason =
   | "live_value_unavailable"
@@ -749,10 +775,17 @@ export interface EarnExternalWalletTokenEarnings {
   /** Sum of finalized SDP deposits, a pure ledger fact — always present. */
   totalDeposited: string;
   /**
-   * `currentValue − totalDeposited`, signed. Absent (with the reason below)
-   * whenever it cannot be stated exactly. Live value reads the owner's WHOLE
-   * vault balance, so shares acquired outside SDP inflate this figure — a
-   * documented property of non-custodial hydration, not a bug (ADR 0002).
+   * Sum of the observed token payouts of finalized withdrawals, a ledger fact,
+   * always present. Excludes withdrawals whose payout was not observed; those
+   * are what `withdrawals_not_valued` reports.
+   */
+  totalWithdrawn: string;
+  /**
+   * `currentValue + totalWithdrawn − totalDeposited`, signed. Absent (with the
+   * reason below) whenever it cannot be stated exactly. Live value reads the
+   * owner's WHOLE vault balance, so shares acquired outside SDP inflate this
+   * figure, a documented property of non-custodial hydration, not a bug
+   * (ADR 0002).
    */
   earned?: string;
   earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;

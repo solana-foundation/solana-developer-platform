@@ -9,7 +9,7 @@ import {
   runApprovedWalletOperationRecovery,
 } from "./approved-wallet-operations";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "./dvp-trades";
-import { EARN_CATALOGUE_SYNC_CRON } from "./earn-catalogue-sync";
+import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSyncIfDue } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_CRON } from "./earn-split-swaps";
 import {
@@ -39,7 +39,7 @@ import {
   runRevokedApiKeyCacheReconciliation,
 } from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
-import { startCron } from "./runner";
+import { startCron, startEarnCatalogueBootSync } from "./runner";
 import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
 
 const scheduleMock = vi.fn();
@@ -64,6 +64,11 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 vi.mock("node-cron", () => ({
   schedule: (...args: unknown[]) => scheduleMock(...args),
+}));
+
+vi.mock("./earn-catalogue-sync", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./earn-catalogue-sync")>()),
+  runEarnCatalogueSyncIfDue: vi.fn(async () => "synced" as const),
 }));
 
 vi.mock("./approved-wallet-operations", () => ({
@@ -173,6 +178,7 @@ describe("startCron", () => {
     vi.mocked(runRingsIndexingPoll).mockReset();
     vi.mocked(runSecretRetirements).mockReset();
     vi.mocked(runProviderCredentialSecretCleanup).mockReset();
+    vi.mocked(runEarnCatalogueSyncIfDue).mockClear();
   });
 
   // The secret-retirement sweep is registered behind no flag at all, so it is
@@ -407,6 +413,13 @@ describe("startCron", () => {
     );
   });
 
+  it("does not run the catalogue sync from startCron itself", () => {
+    const bg = makeBg();
+    startCron({ env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env, bg });
+    expect(bg.run).not.toHaveBeenCalled();
+    expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
+  });
+
   it("schedules when DISABLE_CRON is set to a recognised falsy value ('false' / '0')", () => {
     startCron({ env: { DISABLE_CRON: "false" } as Env, bg: makeBg() });
     startCron({ env: { DISABLE_CRON: "0" } as Env, bg: makeBg() });
@@ -563,5 +576,62 @@ describe("startCron", () => {
       bg,
       observability: expect.anything(),
     });
+  });
+});
+
+describe("startEarnCatalogueBootSync", () => {
+  beforeEach(() => {
+    vi.mocked(runEarnCatalogueSyncIfDue).mockClear();
+  });
+
+  it("runs one slotted sync at boot when earn is enabled", async () => {
+    const bg = makeBg();
+    startEarnCatalogueBootSync({
+      env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
+      bg,
+    });
+    // Handed to the background runner, never awaited by the caller.
+    expect(bg.run).toHaveBeenCalledTimes(1);
+    await vi.mocked(bg.run).mock.calls[0][0];
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs even where in-process cron is disabled (managed Cloud Run, DISABLE_CRON)", async () => {
+    for (const env of [
+      { MARKETS_ENABLED: "true", EARN_ENABLED: "true", K_SERVICE: "sdp-api" },
+      { MARKETS_ENABLED: "true", EARN_ENABLED: "true", DISABLE_CRON: "true" },
+    ]) {
+      const bg = makeBg();
+      expect(startCron({ env: env as Env, bg })).toBeNull();
+      startEarnCatalogueBootSync({ env: env as Env, bg });
+      expect(bg.run).toHaveBeenCalledTimes(1);
+      await vi.mocked(bg.run).mock.calls[0][0];
+    }
+    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(2);
+  });
+
+  it("logs a failed boot sync instead of letting the background runner swallow it", async () => {
+    vi.mocked(runEarnCatalogueSyncIfDue).mockRejectedValueOnce(new Error("redis unavailable"));
+    const bg = makeBg();
+    startEarnCatalogueBootSync({
+      env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
+      bg,
+    });
+    // The tracked promise settles cleanly: the failure is reported, not rethrown.
+    await expect(vi.mocked(bg.run).mock.calls[0][0]).resolves.toBeUndefined();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_earn_catalogue_boot_sync_failed",
+        error_message: "redis unavailable",
+      })
+    );
+  });
+
+  it("does nothing when earn is off", () => {
+    const bg = makeBg();
+    startEarnCatalogueBootSync({ env: {} as Env, bg });
+    expect(bg.run).not.toHaveBeenCalled();
+    expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
   });
 });

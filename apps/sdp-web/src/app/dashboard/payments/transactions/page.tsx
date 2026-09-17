@@ -1,18 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { Suspense } from "react";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { fetchPaymentsIssuedTokenSymbols } from "../payments-page.data";
-import { TransactionsResultsSkeleton } from "../payments-route-skeletons";
+import { fetchIssuedTokensByMint } from "../payments-page.data";
 import { fetchTransactionsPage } from "./transactions-page.data";
-import { hasRemovedTransactionWalletFilter, parseTransactionFilters } from "./transactions-query";
-import { TransactionsResults } from "./transactions-results";
+import { parseTransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
 
 interface TransactionsPageProps {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 export default async function TransactionsPage({ searchParams }: TransactionsPageProps) {
@@ -20,72 +17,22 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
-  const rawSearchParams = (await searchParams) ?? {};
-  const filters = parseTransactionFilters(rawSearchParams);
-  if (hasRemovedTransactionWalletFilter(rawSearchParams)) {
-    return (
-      <TransactionsWorkspace disableCsvExport filters={filters}>
-        <TransactionsResults
-          result={{
-            transfers: [],
-            total: 0,
-            page: filters.page,
-            pageSize: filters.pageSize,
-            hasMore: false,
-            error: "Removed wallet filter",
-          }}
-          serverFilters={filters}
-          issuedTokenSymbolsByMint={{}}
-        />
-      </TransactionsWorkspace>
-    );
-  }
+  const filters = parseTransactionFilters(await searchParams);
   const trace = createTimedTrace("dashboard.payments.transactions.page");
-  const apiClientPromise = trace.step("create_sdp_api_client", () =>
+  const apiClient = await trace.step("create_sdp_api_client", () =>
     createSdpApiClient(trace.childContext("dashboard.payments.transactions.api"))
   );
-  trace.log({ ok: true, phase: "page_chrome" });
-
-  return (
-    <TransactionsWorkspace filters={filters}>
-      <Suspense key={JSON.stringify(filters)} fallback={<TransactionsResultsSkeleton />}>
-        <TransactionsData apiClientPromise={apiClientPromise} filters={filters} />
-      </Suspense>
-    </TransactionsWorkspace>
-  );
-}
-
-async function TransactionsData({
-  apiClientPromise,
-  filters,
-}: {
-  apiClientPromise: ReturnType<typeof createSdpApiClient>;
-  filters: ReturnType<typeof parseTransactionFilters>;
-}) {
-  const trace = createTimedTrace("dashboard.payments.transactions.results");
-  const { request } = await apiClientPromise;
-  // Issued tokens are absent from the well-known catalogue, so without this map every
-  // token this org minted renders as a shortened mint address.
-  const [result, issuedTokenSymbolsResult] = await Promise.all([
-    trace.step("fetch_transactions_page", () => fetchTransactionsPage(request, filters)),
-    fetchPaymentsIssuedTokenSymbols(request),
+  const [result, issuedTokensByMint] = await Promise.all([
+    trace.step("fetch_transactions_page", () => fetchTransactionsPage(apiClient, filters)),
+    trace.step("fetch_issued_tokens", () => fetchIssuedTokensByMint(apiClient.request)),
   ]);
-  trace.log({
-    ok: !result.error,
-    requestCount: 1,
-    responseBytes: new TextEncoder().encode(JSON.stringify(result)).byteLength,
-    page: result.page,
-    pageSize: result.pageSize,
-    resultCount: result.transfers.length,
-    total: result.total,
-  });
+  trace.log({ ok: true, resultCount: result.transactions.length });
+
   return (
-    <TransactionsResults
-      result={result}
-      serverFilters={filters}
-      issuedTokenSymbolsByMint={Object.fromEntries(
-        (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token.symbol])
-      )}
+    <TransactionsWorkspace
+      initialFilters={filters}
+      initialResult={result}
+      issuedTokensByMint={issuedTokensByMint}
     />
   );
 }

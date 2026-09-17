@@ -3,22 +3,18 @@ import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildEarnServerIntegration } from "./earn-integration-snippets";
 
-type IntegrationStrategy = Pick<
-  EarnStrategy,
-  "id" | "provider" | "depositMints" | "hostCluster" | "depositSlippage" | "withdrawalSlippage"
->;
+type IntegrationStrategy = Pick<EarnStrategy, "id" | "depositSlippage" | "withdrawalSlippage">;
 
 const strategy: IntegrationStrategy = {
   id: "earn_strategy_veda",
-  provider: "veda",
-  depositMints: ["4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"],
-  hostCluster: "devnet",
   depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
   withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
 };
 
 type GeneratedIntegration = {
   listEarnStrategies(): Promise<Record<string, unknown>>;
+  previewEarnDeposit(amount: string): Promise<Record<string, unknown>>;
+  previewEarnWithdrawal(positionId: string, shares: string): Promise<Record<string, unknown>>;
   buildEarnDepositTransaction(input: {
     ownerAddress: string;
     amount: string;
@@ -121,7 +117,6 @@ describe("generated Embedded Yield integration", () => {
           strategyId: strategy.id,
           ownerAddress: "customer",
           amount: "1",
-          sourceTokenMint: strategy.depositMints[0],
           feePayer: "sponsor",
           minSharesOut: "0.999",
         },
@@ -158,7 +153,6 @@ describe("generated Embedded Yield integration", () => {
 
     const generated = await loadGeneratedIntegration({
       ...strategy,
-      provider: "kamino",
       depositSlippage: null,
       withdrawalSlippage: null,
     });
@@ -167,12 +161,44 @@ describe("generated Embedded Yield integration", () => {
     expect(requests).toEqual([
       {
         path: "/v1/earn/external-wallet/deposit-transactions",
-        body: {
-          strategyId: strategy.id,
-          ownerAddress: "customer",
-          amount: "1",
-          sourceTokenMint: strategy.depositMints[0],
-        },
+        body: { strategyId: strategy.id, ownerAddress: "customer", amount: "1" },
+      },
+    ]);
+  });
+
+  it("needs only the strategy id and ships the previews for every provider", async () => {
+    process.env.SDP_API_KEY = "sk_test_example";
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        requests.push({ path, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+        return Response.json({ data: { assetsOut: "1", assetDecimals: 6, blockingIssues: [] } });
+      })
+    );
+    const source = buildEarnServerIntegration(
+      { ...strategy, depositSlippage: null, withdrawalSlippage: null },
+      "https://api.test"
+    );
+    expect(source).toContain(`const STRATEGY_ID = "${strategy.id}";`);
+    expect(source).not.toContain("sourceTokenMint");
+    expect(source).not.toContain("EMBEDDED_YIELD_STRATEGY");
+    // No floor is required, so the floor arithmetic stays out of the module.
+    expect(source).not.toContain("floorForTolerance");
+
+    const generated = await loadGeneratedIntegration({
+      ...strategy,
+      depositSlippage: null,
+      withdrawalSlippage: null,
+    });
+    await generated.previewEarnDeposit("1");
+    await generated.previewEarnWithdrawal("position", "1");
+    expect(requests).toEqual([
+      { path: "/v1/earn/vault-deposit-previews", body: { strategyId: strategy.id, amount: "1" } },
+      {
+        path: "/v1/earn/external-wallet/withdrawal-previews",
+        body: { positionId: "position", shares: "1" },
       },
     ]);
   });

@@ -31,6 +31,7 @@ import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repos
 import { badRequest, internalError, unsupportedCounterparty } from "@/lib/errors";
 import { rampRuntime } from "@/routes/payments/context";
 import type { AppContext } from "@/routes/webhooks/ramps/processor";
+import type { Env } from "@/types/env";
 
 interface AdvanceHercleCounterpartyInput {
   counterparty: CounterpartyRow;
@@ -55,8 +56,8 @@ function scopeOf(counterparty: CounterpartyRow, projectId: string): HercleScope 
   };
 }
 
-function accountsRepository(c: AppContext): CounterpartyProviderAccountsRepository {
-  return createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+function accountsRepository(env: Env): CounterpartyProviderAccountsRepository {
+  return createPostgresCounterpartyProviderAccountsRepository(getDb(env));
 }
 
 /**
@@ -71,11 +72,11 @@ export interface HercleCounterpartyLink {
 }
 
 export async function readHercleCounterpartyLink(
-  c: AppContext,
+  env: Env,
   counterparty: CounterpartyRow,
   projectId: string = counterparty.project_id
 ): Promise<HercleCounterpartyLink | null> {
-  const accounts = accountsRepository(c);
+  const accounts = accountsRepository(env);
   const scope = scopeOf(counterparty, projectId);
   const link = await accounts.getProviderAccount(scope);
   if (!link) {
@@ -111,12 +112,12 @@ export async function advanceHercleCounterparty(
     );
   }
 
-  const accounts = accountsRepository(c);
+  const accounts = accountsRepository(c.env);
   const scope = scopeOf(counterparty, projectId);
   const runtime: RampRuntimeContext = rampRuntime(c);
   const client = RAMP_PROVIDER_CLIENTS.hercle;
 
-  let link = await readHercleCounterpartyLink(c, counterparty, projectId);
+  let link = await readHercleCounterpartyLink(c.env, counterparty, projectId);
   if (!link) {
     // KYB input is collected per provisioning attempt and passed straight to Hercle; SDP
     // stores none of it (only the returned account id lands in the customer link).
@@ -227,7 +228,7 @@ export async function resolveHercleRequirements(
     verificationUrl = verification.verificationUrl;
     if (verificationStatus !== state.verificationStatus) {
       await patchVerificationStatus(
-        accountsRepository(c),
+        accountsRepository(c.env),
         scopeOf(counterparty, projectId),
         link.linkRowId,
         verificationStatus
@@ -262,10 +263,10 @@ export async function patchVerificationStatus(
  * the provisioning status the wizard already renders.
  */
 export async function readReadyHercleCounterpartyLink(
-  c: AppContext,
+  env: Env,
   counterparty: CounterpartyRow
 ): Promise<HercleCounterpartyLink | null> {
-  const link = await readHercleCounterpartyLink(c, counterparty);
+  const link = await readHercleCounterpartyLink(env, counterparty);
   if (link === null || link.state.verificationStatus !== "ready") {
     return null;
   }

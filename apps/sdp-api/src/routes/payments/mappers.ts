@@ -1,4 +1,9 @@
-import type { RampCryptoDeposit, RampTransferSettlement } from "@sdp/types";
+import type {
+  PaymentSubscriptionCollectionAttempt,
+  RampCryptoDeposit,
+  RampTransferSettlement,
+} from "@sdp/types";
+import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories";
 import {
   isRampTransferType,
   type PaymentTransferRow as TransferRow,
@@ -14,6 +19,7 @@ export function mapTransferRow(row: TransferRow) {
     providerWalletId: row.wallet_id,
     ...(row.project_id ? { projectId: row.project_id } : {}),
     type: row.type,
+    kind: row.kind,
     direction: row.direction,
     status: row.status,
     signature: row.signature,
@@ -65,5 +71,27 @@ export function mapTransferRow(row: TransferRow) {
     ...(settlement ? { settlement } : {}),
     ...(cryptoDeposit ? { cryptoDeposit } : {}),
     ...(moneygram ? { moneygram } : {}),
+  };
+}
+
+export function mapCollectionAttemptRow(
+  row: PaymentSubscriptionCollectionAttemptRow
+): PaymentSubscriptionCollectionAttempt {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    subscriptionId: row.subscription_id,
+    transferId: row.transfer_id,
+    token: row.token,
+    amount: row.amount,
+    dueAt: row.due_at,
+    attemptedAt: row.attempted_at,
+    status: row.status,
+    signature: row.signature,
+    error: row.error,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }

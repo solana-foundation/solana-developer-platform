@@ -16,7 +16,7 @@ import { notFound } from "@/lib/errors";
 import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
 import type { Env } from "@/types/env";
-import { type AppContext, getEarnRepository, resolveSdpEnvironment } from "../context";
+import { type AppContext, getEarnRepository, resolveKeylessEarnEnvironment } from "../context";
 import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "../schemas";
 import { CURATED_VAULTS, HIDDEN_STRATEGY_TERMS, HIDDEN_VAULTS } from "./curation";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
@@ -119,7 +119,7 @@ export async function requireEarnStrategy(
 
   if (
     !strategy ||
-    strategy.environment !== resolveSdpEnvironment(c) ||
+    strategy.environment !== resolveKeylessEarnEnvironment(c) ||
     isHiddenStrategy(strategy)
   ) {
     throw notFound("Earn strategy");
@@ -132,7 +132,7 @@ export const listEarnStrategies = async (c: AppContext) => {
   const query = parseQuery(c, listEarnStrategiesQuerySchema);
 
   const repo = getEarnRepository(c);
-  const environment = resolveSdpEnvironment(c);
+  const environment = resolveKeylessEarnEnvironment(c);
   // The shelf a caller can act on is the default; `?cluster=` is the explicit
   // opt-in that browses another cluster's sub-shelf — in practice a sandbox
   // reader reviewing the mirrored mainnet catalogue (PRO-1742). Opting in
@@ -169,7 +169,7 @@ export const getEarnStrategy = async (c: AppContext) => {
   const strategy = await requireEarnStrategy(c, strategyId);
 
   const response: EarnStrategyResponse = {
-    strategy: mapToEarnStrategy(strategy, resolveSdpEnvironment(c), c.env),
+    strategy: mapToEarnStrategy(strategy, resolveKeylessEarnEnvironment(c), c.env),
   };
   return success(c, response);
 };

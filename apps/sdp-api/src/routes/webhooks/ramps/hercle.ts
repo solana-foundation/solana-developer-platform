@@ -17,7 +17,8 @@ import {
 } from "@/routes/payments/handlers/ramps/hercle";
 import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
-import type { AppContext, WebhookProcessor } from "./processor";
+import type { Env } from "@/types/env";
+import type { WebhookProcessor } from "./processor";
 
 /**
  * Hercle webhooks: ECDSA P-256 (SHA-256) over `${X-Timestamp}.${rawBody}` with a base64
@@ -147,11 +148,11 @@ export function parseHercleWebhookEvent(payload: unknown): HercleWebhookEvent {
  * Hercle mints it per read.
  */
 async function handleVerificationEvent(
-  c: AppContext,
+  env: Env,
   event: Extract<HercleWebhookEvent, { kind: "verification" }>
 ): Promise<void> {
   const counterparty = await createSystemCounterpartiesRepository(
-    c.env
+    env
   ).findActiveCounterpartyByProviderCustomerReference({
     provider: "hercle",
     providerCustomerReference: event.accountId,
@@ -160,13 +161,13 @@ async function handleVerificationEvent(
     getLogger().warn(`[hercle webhook] no counterparty for account ${event.accountId}`);
     return;
   }
-  const link = await readHercleCounterpartyLink(c, counterparty);
+  const link = await readHercleCounterpartyLink(env, counterparty);
   if (!link) {
     getLogger().warn(`[hercle webhook] no customer link for account ${event.accountId}`);
     return;
   }
   await patchVerificationStatus(
-    createPostgresCounterpartyProviderAccountsRepository(getDb(c.env)),
+    createPostgresCounterpartyProviderAccountsRepository(getDb(env)),
     {
       organizationId: counterparty.organization_id,
       projectId: counterparty.project_id,
@@ -217,29 +218,29 @@ export class HercleWebhookProcessor implements WebhookProcessor<unknown, HercleW
     return parseHercleWebhookEvent(payload);
   }
 
-  async process(c: AppContext, _environment: SdpEnvironment, event: HercleWebhookEvent) {
+  async process(env: Env, _environment: SdpEnvironment, event: HercleWebhookEvent) {
     switch (event.kind) {
       case "ignore":
         getLogger().info(`[hercle webhook] ignored event: ${event.reason}`);
         return;
       case "verification":
-        return handleVerificationEvent(c, event);
+        return handleVerificationEvent(env, event);
       case "settlement":
         switch (event.status) {
           case "awaiting_payment":
-            return applyRampSettlementEvent(c.env, {
+            return applyRampSettlementEvent(env, {
               provider: "hercle",
               kind: "awaiting_payment",
               reference: event.reference,
             });
           case "settling":
-            return applyRampSettlementEvent(c.env, {
+            return applyRampSettlementEvent(env, {
               provider: "hercle",
               kind: "settling",
               reference: event.reference,
             });
           case "settled":
-            return applyRampSettlementEvent(c.env, {
+            return applyRampSettlementEvent(env, {
               provider: "hercle",
               kind: "settled",
               reference: event.reference,
@@ -247,7 +248,7 @@ export class HercleWebhookProcessor implements WebhookProcessor<unknown, HercleW
             });
           case "failed":
           case "expired":
-            return applyRampSettlementEvent(c.env, {
+            return applyRampSettlementEvent(env, {
               provider: "hercle",
               kind: event.status,
               reference: event.reference,

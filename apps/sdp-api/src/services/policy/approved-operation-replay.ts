@@ -16,7 +16,7 @@ import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.servic
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
-const REPLAY_HEADER = "x-sdp-approved-operation-replay";
+export const APPROVED_OPERATION_REPLAY_HEADER = "x-sdp-approved-operation-replay";
 const EXECUTION_HEARTBEAT_MS = 30_000;
 const capabilities = new Map<
   string,
@@ -165,7 +165,7 @@ export async function reserveMintSupplyAtApprovedEffectBoundary(
 export async function tryApprovedOperationReplayAuth(
   c: Context<{ Bindings: Env }>
 ): Promise<boolean> {
-  const token = c.req.header(REPLAY_HEADER);
+  const token = c.req.header(APPROVED_OPERATION_REPLAY_HEADER);
   if (!token) {
     return false;
   }
@@ -328,7 +328,7 @@ export async function executeApprovedWalletOperation(
     ]);
     const headers = new Headers({
       "content-type": "application/json",
-      [REPLAY_HEADER]: token,
+      [APPROVED_OPERATION_REPLAY_HEADER]: token,
       "idempotency-key": request.idempotencyKey,
     });
     if (operation.project_id) {

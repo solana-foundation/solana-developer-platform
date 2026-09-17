@@ -5,6 +5,7 @@ import { SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { InstructionActionButton } from "./components/manual-instructions-quote";
 import { OfframpStepContent } from "./components/offramp-step-content";
@@ -16,14 +17,39 @@ import type { RailProps } from "./ramp-action-page";
 import { getRampTransferState } from "./ramp-transfer-state";
 import { preStepSummaryDetails } from "./wizard-summary";
 
-function offrampPrimaryLabel(wizard: OfframpWizard, t: ReturnType<typeof useTranslations>): string {
+function offrampPrimaryLabel(
+  wizard: OfframpWizard,
+  verificationPending: boolean,
+  verificationUrl: string | undefined,
+  t: ReturnType<typeof useTranslations>
+): string {
   switch (true) {
     case wizard.hostedQuoteLoading:
       return t("DashboardPayments.processing");
+    case verificationPending:
+      return t("DashboardPayments.verificationPending");
+    case verificationUrl !== undefined:
+      return t("DashboardPayments.completeVerification");
+    case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
+      return t("DashboardPayments.bvnk.acceptAgreements");
     case wizard.isLastStep:
       return t("DashboardPayments.counterparty.done");
     default:
       return t("DashboardPayments.counterparty.next");
+  }
+}
+
+function offrampPrimaryAction(
+  wizard: OfframpWizard,
+  verificationUrl: string | undefined
+): () => void {
+  switch (true) {
+    case verificationUrl !== undefined:
+      return () => openExternalRampUrl(verificationUrl);
+    case wizard.isLastStep:
+      return wizard.finish;
+    default:
+      return () => void wizard.handlePrimary();
   }
 }
 
@@ -57,6 +83,17 @@ export function OfframpRail({
   const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const showInlineStatus =
     wizard.onTransactionStage && (hostedStage || Boolean(wizard.depositTarget));
+  const onOnboardingStep =
+    wizard.currentStepId === "COMPLETE" || wizard.currentStepId === "REQUIREMENTS";
+  const verificationUrl =
+    onOnboardingStep && wizard.onboarding?.status === "customer_verification_required"
+      ? wizard.onboarding.verificationUrl
+      : undefined;
+  const verificationPending =
+    onOnboardingStep &&
+    (wizard.onboarding?.status === "customer_verifying" ||
+      wizard.onboarding?.status === "customer_funding_account_provisioning" ||
+      wizard.onboarding?.status === "funding_account_provisioning");
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
@@ -68,12 +105,13 @@ export function OfframpRail({
       }
       primaryDisabled={
         wizard.hostedQuoteLoading ||
+        verificationPending ||
         !wizard.canProceed ||
         (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
       }
-      primaryLabel={offrampPrimaryLabel(wizard, t)}
+      primaryLabel={offrampPrimaryLabel(wizard, verificationPending, verificationUrl, t)}
       walletsError={wizard.liveWalletsError}
-      onPrimary={() => void wizard.handlePrimary()}
+      onPrimary={offrampPrimaryAction(wizard, verificationUrl)}
       onSecondary={wizard.handleSecondary}
       counterpartyDialog={null}
       summary={

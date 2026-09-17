@@ -1,3 +1,4 @@
+import { mapPrivateChannelDepositRow, type PrivateChannelDepositRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -9,9 +10,11 @@ import {
   mapPrivateChannelError,
 } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
 import type { AppContext } from "../context";
-import { loadPrivateChannelProjectRpcClient } from "../context";
+import { getPrivateChannelDepositRepository, loadPrivateChannelProjectRpcClient } from "../context";
 import { requireIdempotencyKey } from "../helpers";
+import { authorizeMovementReplay, matchesDepositReplay, requireMovementWrite } from "../replay";
 import { type createDepositBodySchema, depositIdParamSchema } from "../schemas";
 import { resolveDepositCreateContext } from "../value-movement-access";
 
@@ -37,10 +40,36 @@ export async function createPrivateChannelDeposit(
 
   try {
     const idempotencyKey = requireIdempotencyKey(c, "Private Channels deposits");
+    await requireMovementWrite(c);
+    const auth = getAuth(c);
+    const onReplay = async (row: PrivateChannelDepositRow) => {
+      // Source from the recorded row, never the body's wallet; recipient from the
+      // body, resolved by the same seam as the first request.
+      const context = await authorizeMovementReplay(c, row, () =>
+        resolveDepositCreateContext(c, {
+          walletId: row.wallet_id,
+          recipient: body.recipient,
+        })
+      );
+      matchesDepositReplay(row, { ...body, recipient: context.recipient });
+      return mapPrivateChannelDepositRow(row);
+    };
+    const replay = await getPrivateChannelDepositRepository(c).findDepositByIdempotency({
+      organizationId: auth.organizationId,
+      projectId: requireProjectId(c),
+      idempotencyKey,
+    });
+    if (replay) return success(c, await onReplay(replay));
     const context = await resolveDepositCreateContext(c, {
       walletId: body.walletId,
       recipient: body.recipient,
     });
+    const signer = await createPrivateChannelSigner(
+      c.env,
+      context.auth.organizationId,
+      context.projectId,
+      context.wallet
+    );
     const projectRpc = await loadPrivateChannelProjectRpcClient(c);
 
     // Auth-enabled instances JWT-gate the gateway baseline read.
@@ -60,6 +89,8 @@ export async function createPrivateChannelDeposit(
       projectId: context.projectId,
       userId: context.auth.userId ?? null,
       wallet: context.wallet,
+      signer,
+      onReplay,
       amount: body.amount,
       mint: body.mint,
       recipient: context.recipient,

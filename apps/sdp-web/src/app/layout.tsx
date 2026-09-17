@@ -57,8 +57,14 @@ export default async function RootLayout({
     <html lang={locale} suppressHydrationWarning>
       <head>
         {process.env.NODE_ENV === "development" && (
+          // react-grab lets developers select page context for coding agents
+          // directly from the running site. Dev-only: this never loads in
+          // production. The version and integrity hash are pinned so `pnpm
+          // dev` cannot silently execute a different build than the one
+          // reviewed here.
           <Script
-            src="//unpkg.com/react-grab/dist/index.global.js"
+            src="https://unpkg.com/react-grab@0.2.0/dist/index.global.js"
+            integrity="sha384-PXOWAzllLihCpnqFflLZrth6D6UsI8PqPYbA6qYnE44Cld6haJIBjLZR4onqH+3z"
             crossOrigin="anonymous"
             strategy="beforeInteractive"
           />

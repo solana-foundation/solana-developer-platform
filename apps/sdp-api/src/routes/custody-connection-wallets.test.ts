@@ -599,6 +599,16 @@ describe("Connection-owned wallet control plane", () => {
       },
     });
 
+    const targetKeyId = "key_custody_connection_wallets_target";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_keys (
+           id, organization_id, project_id, created_by, name, key_prefix,
+           key_hash, role, permissions, status
+         ) VALUES (?, ?, ?, ?, 'Target', 'sk_test_ccwt', 'hash_ccw_target', 'api_developer', '["*"]', 'active')`
+      )
+      .bind(targetKeyId, ORGANIZATION_ID, PROJECT_ID, USER_ID)
+      .run();
     await getDb(env).batch([
       getDb(env)
         .prepare(
@@ -607,7 +617,7 @@ describe("Connection-owned wallet control plane", () => {
            ) VALUES ('akcp_connection_wallets', ?, ?, ?, 'Connection controls',
                      'active', 'akcpr_connection_wallets')`
         )
-        .bind(ORGANIZATION_ID, PROJECT_ID, API_KEY.id),
+        .bind(ORGANIZATION_ID, PROJECT_ID, targetKeyId),
       getDb(env).prepare(
         `INSERT INTO api_key_control_profile_revisions (
              id, profile_id, revision_number, rules, default_action, activated_at
@@ -616,7 +626,7 @@ describe("Connection-owned wallet control plane", () => {
       ),
     ]);
     const binding = await app.request(
-      `/v1/api-keys/${API_KEY.id}/policy-bindings`,
+      `/v1/api-keys/${targetKeyId}/policy-bindings`,
       {
         method: "PUT",
         headers,

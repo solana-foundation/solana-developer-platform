@@ -42,8 +42,21 @@ export async function custodyWalletForParty(
     projectId: params.projectId,
     publicKey: partyAddress,
   });
-  const match = ids.find((id) => allowedWalletIds === null || allowedWalletIds.includes(id));
-  return match === undefined ? null : match;
+  return selectPartyWalletId(ids, allowedWalletIds);
+}
+
+/**
+ * Selects the first write-admitted candidate before any read-visibility check.
+ *
+ * @param ids - Operational wallet IDs in selection order.
+ * @param allowedWalletIds - Write allowlist; null is unrestricted, [] denies all.
+ * @returns The selected wallet ID, or null when no candidate is admitted.
+ */
+export function selectPartyWalletId(
+  ids: readonly string[],
+  allowedWalletIds: readonly string[] | null
+): string | null {
+  return ids.find((id) => allowedWalletIds === null || allowedWalletIds.includes(id)) ?? null;
 }
 
 /**

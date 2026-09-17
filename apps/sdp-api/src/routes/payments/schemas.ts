@@ -1,4 +1,5 @@
 import { HERCLE_SETTLEMENT_STATUSES } from "@sdp/payments/ramps/providers/hercle/provider-data";
+import { isIsoDuration } from "@sdp/policy";
 import { isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
@@ -9,6 +10,10 @@ import {
   MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  PAYMENT_RECURRING_PAYMENT_STATUSES,
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
+  PAYMENT_SUBSCRIPTION_PLAN_STATUSES,
+  PAYMENT_SUBSCRIPTION_STATUSES,
   PAYMENT_TRANSFER_STATUSES,
   PAYMENT_TRANSFER_TYPES,
   type PolicyRule,
@@ -162,6 +167,18 @@ export const walletPolicyRuleSchema: z.ZodType<PolicyRule> = z.discriminatedUnio
   }),
   z.object({
     ...policyRuleBaseShape,
+    kind: z.literal("velocity"),
+    scope: z.enum(["wallet", "organization", "api_key"]).optional(),
+    window: z.string().refine((value) => isIsoDuration(value), {
+      message: "window must be an ISO 8601 duration such as PT1H, P1D or P1DT12H",
+    }),
+    max: z.string().refine((value) => isDecimalString(value), { message: "Invalid amount format" }),
+    asset: z.string().min(1).max(120).optional(),
+    assets: z.array(z.string().min(1).max(120)).max(100).optional(),
+    operationTypes: z.array(walletOperationTypeSchema).max(100).optional(),
+  }),
+  z.object({
+    ...policyRuleBaseShape,
     kind: z.literal("approval"),
     families: z.array(walletOperationFamilySchema).max(20).optional(),
     operationTypes: z.array(walletOperationTypeSchema).max(100).optional(),
@@ -185,8 +202,9 @@ export const updateWalletPolicyBaseSchema = z.object({
 
 /**
  * Cross-rule constraints shared by every policy-rules payload: unique rule
- * ids, and amount rules keyed by asset mint (a bound is meaningless across
- * tokens, so an asset-less amount rule is rejected rather than blanket-applied).
+ * ids, and amount and velocity rules keyed by asset mint (a bound is
+ * meaningless across tokens, so an asset-less rule is rejected rather than
+ * blanket-applied).
  *
  * @param rules - The parsed rules array.
  * @param ctx - The zod refinement context to report issues on.
@@ -203,6 +221,17 @@ export function refinePolicyRules(rules: PolicyRule[], ctx: z.RefinementCtx): vo
         code: "custom",
         path: ["rules", index],
         message: "Amount rules must name the asset mint(s) they bound",
+      });
+    }
+    if (
+      rule.kind === "velocity" &&
+      rule.asset === undefined &&
+      (rule.assets === undefined || rule.assets.length === 0)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["rules", index],
+        message: "Velocity rules must name the asset mint(s) they bound",
       });
     }
     if (rule.id === undefined) {
@@ -272,36 +301,15 @@ export const recurringPaymentIdParamsSchema = z.object({
   id: z.string().min(1),
 });
 
-export const paymentSubscriptionPlanStatusSchema = z.enum(["draft", "active", "archived"]);
+export const paymentSubscriptionPlanStatusSchema = z.enum(PAYMENT_SUBSCRIPTION_PLAN_STATUSES);
 
-export const paymentSubscriptionStatusSchema = z.enum([
-  "pending_authorization",
-  "active",
-  "paused",
-  "canceling",
-  "canceled",
-  "expired",
-]);
+export const paymentSubscriptionStatusSchema = z.enum(PAYMENT_SUBSCRIPTION_STATUSES);
 
-export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "failed",
-  "skipped",
-]);
+export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum(
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES
+);
 
-export const paymentRecurringPaymentStatusSchema = z.enum([
-  "pending_activation",
-  "activating",
-  "active",
-  "updating",
-  "canceling",
-  "resuming",
-  "paused",
-  "canceled",
-  "expired",
-]);
+export const paymentRecurringPaymentStatusSchema = z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES);
 
 export const createRecurringPaymentSchema = z.strictObject({
   sourceCustodyWalletId: z.string().min(1),
@@ -766,11 +774,7 @@ const simulateLightsparkSandboxTransferPayloadSchema = z.object({
 });
 
 const simulateBvnkSandboxPayinPayloadSchema = z.object({
-  counterpartyId: z.string().min(1),
-  amount: z.number().positive(),
-  fiatCurrency: rampFiatCurrencySchema,
-  assetRail: onrampCryptoRailSchema,
-  destinationCustodyWalletId: z.string().min(1),
+  transferId: z.string().min(1),
 });
 
 const simulateMuralSandboxPayinPayloadSchema = z.object({

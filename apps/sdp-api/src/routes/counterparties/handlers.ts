@@ -19,6 +19,7 @@ import {
   type ListProjectCounterpartyAccountsResponse,
 } from "@sdp/types";
 import type { PayoutRequirementAccount } from "@sdp/types/ramp-requirements";
+import { isCollectFieldsRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
@@ -43,7 +44,11 @@ import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
 } from "@/routes/payments/handlers/ramps";
-import { bvnkCustomerRequirementsFromMetadata } from "@/routes/payments/handlers/ramps/bvnk";
+import {
+  bvnkCollectCounterparty,
+  bvnkCustomerRequirementsFromMetadata,
+  bvnkStoredStage,
+} from "@/routes/payments/handlers/ramps/bvnk";
 import {
   readHercleCounterpartyLink,
   resolveHercleRequirements,
@@ -308,7 +313,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   }
 
   if (query.data.provider === "hercle") {
-    const link = await readHercleCounterpartyLink(c, counterparty, projectId);
+    const link = await readHercleCounterpartyLink(c.env, counterparty, projectId);
     if (link !== null) {
       return success(
         c,
@@ -493,7 +498,7 @@ export const submitCounterpartyRequirements = async (
     counterpartyId: counterparty.id,
     provider: input.provider,
   });
-  const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
+  let requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     {
       direction: input.direction,
@@ -515,6 +520,19 @@ export const submitCounterpartyRequirements = async (
     return success(c, requirements);
   }
 
+  let gateOnCollectedFields = true;
+  if (input.provider === "bvnk" && providerAccount !== null) {
+    const stage = bvnkStoredStage(
+      bvnkCustomerProviderAccountMetadataSchema.parse(providerAccount.metadata)
+    );
+    if (stage !== null && stage.kind === "collect_counterparty") {
+      requirements = bvnkCollectCounterparty(input.direction, stage.residenceCountryCode);
+    }
+    if (stage !== null && stage.kind === "agreements_pending") {
+      gateOnCollectedFields = false;
+    }
+  }
+
   if (requirements.status === "collect_account") {
     if (
       await lightsparkPayoutSubmissionNeedsRequirements(
@@ -529,7 +547,7 @@ export const submitCounterpartyRequirements = async (
     }
   }
 
-  if (requirements.status === "collect" || requirements.status === "collect_counterparty") {
+  if (gateOnCollectedFields && isCollectFieldsRequirements(requirements)) {
     const collectedData = "collectedData" in input ? input.collectedData : undefined;
     const missing = requirements.fields
       .flatMap((field) => (field.kind === "address" ? field.fields : [field]))

@@ -1,184 +1,121 @@
-import { PAYMENT_TRANSFER_TYPES } from "@sdp/types";
-export const TRANSACTION_TYPES = PAYMENT_TRANSFER_TYPES;
+import {
+  UNIFIED_TRANSACTION_MODULES,
+  UNIFIED_TRANSACTION_STATUSES,
+  type UnifiedTransactionModule,
+} from "@sdp/types";
+import { z } from "zod";
 
-export const TRANSACTION_STATUSES = [
-  "pending",
-  "processing",
-  "confirmed",
-  "finalized",
-  "failed",
-  "awaiting_payment",
-  "settling",
-  "completed",
-  "canceled",
-  "expired",
-] as const;
+const rawFiltersSchema = z.object({
+  tab: z.string().optional().catch(undefined),
+  kind: z.string().trim().min(1).optional().catch(undefined),
+  status: z.enum(UNIFIED_TRANSACTION_STATUSES).optional().catch(undefined),
+  custodyWalletId: z.string().trim().max(128).min(1).optional().catch(undefined),
+  counterpartyId: z.string().trim().max(128).min(1).optional().catch(undefined),
+  token: z.string().trim().max(128).min(1).optional().catch(undefined),
+  search: z.string().trim().max(200).min(3).optional().catch(undefined),
+  from: z.iso.date().optional().catch(undefined),
+  to: z.iso.date().optional().catch(undefined),
+  cursor: z.string().min(1).optional().catch(undefined),
+  cursors: z.string().optional().catch(undefined),
+});
 
-export const TRANSACTION_SORT_FIELDS = ["createdAt", "updatedAt", "amount", "status"] as const;
-
-export type TransactionTypeFilter = (typeof TRANSACTION_TYPES)[number];
-export type TransactionStatusFilter = (typeof TRANSACTION_STATUSES)[number];
-export type TransactionSortField = (typeof TRANSACTION_SORT_FIELDS)[number];
-
-export interface TransactionFilters {
-  search?: string;
-  status?: TransactionStatusFilter;
-  direction?: "inbound" | "outbound";
-  type?: TransactionTypeFilter;
-  custodyWalletId?: string;
-  counterpartyId?: string;
-  asset?: string;
-  provider?: string;
-  from?: string;
-  to?: string;
-  /**
-   * Address-level chain activity with no exact wallet attribution. Persisted
-   * exact rows stay the default; callers opt in when they need observed history.
-   */
-  includeObserved: boolean;
-  sortBy: TransactionSortField;
-  sortDirection: "asc" | "desc";
-  snapshot: string;
-  page: number;
-  pageSize: number;
-}
+export type TransactionFilters = Omit<z.infer<typeof rawFiltersSchema>, "tab" | "cursors"> & {
+  module?: UnifiedTransactionModule;
+  cursors: string[];
+};
 
 type RawSearchParams = Record<string, string | string[] | undefined>;
 
-const DEFAULT_PAGE_SIZE = 25;
-export const MIN_TRANSACTION_SEARCH_LENGTH = 3;
-
-export function hasRemovedTransactionWalletFilter(searchParams: RawSearchParams): boolean {
-  return Object.hasOwn(searchParams, "wallet") || Object.hasOwn(searchParams, "walletAddress");
+function scalar(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
 }
 
-function firstValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
+/**
+ * Narrows a raw `?tab=` value to a transaction module. The shared header tabs
+ * carry the module id in `tab`, so the workspace and this parser interpret the
+ * param identically.
+ *
+ * @param value - The raw tab value, if any.
+ * @returns The matching module, or undefined for "all", an absent tab, or an unknown value.
+ */
+export function parseTransactionModule(
+  value: string | null | undefined
+): UnifiedTransactionModule | undefined {
+  return UNIFIED_TRANSACTION_MODULES.find((candidate) => candidate === value);
 }
 
-function parseEnum<T extends string>(
-  value: string | undefined,
-  values: readonly T[]
-): T | undefined {
-  return value && values.includes(value as T) ? (value as T) : undefined;
+export function parseTransactionFilters(searchParams: RawSearchParams): TransactionFilters {
+  const parsed = rawFiltersSchema.parse(
+    Object.fromEntries(Object.entries(searchParams).map(([key, value]) => [key, scalar(value)]))
+  );
+  const { tab, cursors: rawCursors, ...rest } = parsed;
+  const cursors = rawCursors === undefined || rawCursors === "" ? [] : rawCursors.split(",");
+  return { ...rest, module: parseTransactionModule(tab), cursors };
 }
 
-function parsePositiveInteger(value: string | undefined, fallback: number, max?: number): number {
-  const parsed = Number.parseInt(value ?? "", 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
-  return max ? Math.min(parsed, max) : parsed;
-}
+const TRANSACTION_URL_PARAM_KEYS = [
+  "kind",
+  "status",
+  "custodyWalletId",
+  "counterpartyId",
+  "token",
+  "search",
+  "from",
+  "to",
+  "cursor",
+] as const satisfies readonly (keyof Omit<TransactionFilters, "module" | "cursors">)[];
 
-function parseDate(value: string | undefined): string | undefined {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
-  return Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime()) ? undefined : value;
-}
-
-function parseTimestamp(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
-}
-
-function parseTrimmed(value: string | undefined, maxLength = 200): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed.slice(0, maxLength) : undefined;
-}
-
-export function normalizeTransactionSearch(value: string | undefined): string | undefined {
-  const trimmed = parseTrimmed(value);
-  return trimmed && trimmed.length >= MIN_TRANSACTION_SEARCH_LENGTH ? trimmed : undefined;
-}
-
-export function parseTransactionFilters(
-  searchParams: RawSearchParams,
-  now = new Date()
-): TransactionFilters {
-  const custodyWalletId = parseTrimmed(firstValue(searchParams.custodyWalletId));
+/**
+ * Every URL param the transactions page owns, shaped for a shallow history
+ * update: present filters carry their value and absent ones are null, so a
+ * replaced filter set never leaves a stale param behind.
+ *
+ * @param filters - The filter set the URL should reflect.
+ * @returns Param updates for `replaceDashboardSearchParams`.
+ */
+export function toTransactionUrlUpdates(
+  filters: TransactionFilters
+): Record<string, string | null> {
   return {
-    search: normalizeTransactionSearch(firstValue(searchParams.search)),
-    status: parseEnum(firstValue(searchParams.status), TRANSACTION_STATUSES),
-    direction: parseEnum(firstValue(searchParams.direction), ["inbound", "outbound"] as const),
-    type: parseEnum(firstValue(searchParams.type), TRANSACTION_TYPES),
-    custodyWalletId,
-    counterpartyId: parseTrimmed(firstValue(searchParams.counterparty)),
-    asset: parseTrimmed(firstValue(searchParams.asset), 64),
-    provider: parseTrimmed(firstValue(searchParams.provider), 64),
-    from: parseDate(firstValue(searchParams.from)),
-    to: parseDate(firstValue(searchParams.to)),
-    includeObserved:
-      Boolean(custodyWalletId) && firstValue(searchParams.includeObserved) === "true",
-    sortBy: parseEnum(firstValue(searchParams.sortBy), TRANSACTION_SORT_FIELDS) ?? "createdAt",
-    sortDirection:
-      parseEnum(firstValue(searchParams.sortDirection), ["asc", "desc"] as const) ?? "desc",
-    snapshot: parseTimestamp(firstValue(searchParams.snapshot)) ?? now.toISOString(),
-    page: parsePositiveInteger(firstValue(searchParams.page), 1),
-    pageSize: parsePositiveInteger(firstValue(searchParams.pageSize), DEFAULT_PAGE_SIZE, 100),
+    tab: filters.module === undefined ? null : filters.module,
+    ...Object.fromEntries(
+      TRANSACTION_URL_PARAM_KEYS.map((key) => [
+        key,
+        filters[key] === undefined ? null : filters[key],
+      ])
+    ),
+    cursors: filters.cursors.length === 0 ? null : filters.cursors.join(","),
   };
 }
 
 export function serializeTransactionFilters(filters: TransactionFilters): URLSearchParams {
   const query = new URLSearchParams();
-  const set = (key: string, value: string | number | undefined) => {
-    if (value !== undefined && value !== "") query.set(key, String(value));
-  };
-
-  set("search", normalizeTransactionSearch(filters.search));
-  set("status", filters.status);
-  set("direction", filters.direction);
-  set("type", filters.type);
-  set("custodyWalletId", filters.custodyWalletId);
-  set("counterparty", filters.counterpartyId);
-  set("asset", filters.asset);
-  set("provider", filters.provider);
-  set("from", filters.from);
-  set("to", filters.to);
-  if (filters.custodyWalletId && filters.includeObserved) set("includeObserved", "true");
-  if (filters.sortBy !== "createdAt") set("sortBy", filters.sortBy);
-  if (filters.sortDirection !== "desc") set("sortDirection", filters.sortDirection);
-  set("snapshot", filters.snapshot);
-  if (filters.page !== 1) set("page", filters.page);
-  if (filters.pageSize !== DEFAULT_PAGE_SIZE) set("pageSize", filters.pageSize);
+  for (const [key, value] of Object.entries(toTransactionUrlUpdates(filters))) {
+    if (value !== null) query.set(key, value);
+  }
   return query;
 }
 
-export function toTransactionsApiQuery(filters: TransactionFilters): URLSearchParams {
-  const query = new URLSearchParams({
-    page: String(filters.page),
-    pageSize: String(filters.pageSize),
-    includeObserved: String(Boolean(filters.custodyWalletId) && filters.includeObserved),
-    sortBy: filters.sortBy,
-    sortDirection: filters.sortDirection,
-  });
-  const set = (key: string, value: string | undefined) => {
-    if (value) query.set(key, value);
+export function toTransactionsApiQuery(
+  filters: TransactionFilters,
+  limit: number
+): URLSearchParams {
+  const query = new URLSearchParams({ limit: String(limit) });
+  const values = {
+    module: filters.module,
+    kind: filters.kind,
+    status: filters.status,
+    custodyWalletId: filters.custodyWalletId,
+    counterpartyId: filters.counterpartyId,
+    token: filters.token,
+    search: filters.search,
+    createdAtFrom: filters.from === undefined ? undefined : `${filters.from}T00:00:00.000Z`,
+    createdAtTo: filters.to === undefined ? undefined : `${filters.to}T23:59:59.999Z`,
+    cursor: filters.cursor,
   };
-
-  set("search", normalizeTransactionSearch(filters.search));
-  set("status", filters.status);
-  set("direction", filters.direction);
-  set("type", filters.type);
-  set("custodyWalletId", filters.custodyWalletId);
-  set("counterpartyId", filters.counterpartyId);
-  set("token", filters.asset);
-  set("provider", filters.provider);
-  set("from", filters.from ? `${filters.from}T00:00:00.000Z` : undefined);
-  const requestedTo = filters.to ? `${filters.to}T23:59:59.999Z` : undefined;
-  set("to", requestedTo && requestedTo < filters.snapshot ? requestedTo : filters.snapshot);
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined) query.set(key, value);
+  }
   return query;
-}
-
-export function countActiveTransactionFilters(filters: TransactionFilters): number {
-  return [
-    filters.status,
-    filters.direction,
-    filters.type,
-    filters.custodyWalletId,
-    filters.counterpartyId,
-    filters.asset,
-    filters.provider,
-    filters.from,
-    filters.to,
-    filters.custodyWalletId && filters.includeObserved ? "included" : undefined,
-  ].filter(Boolean).length;
 }

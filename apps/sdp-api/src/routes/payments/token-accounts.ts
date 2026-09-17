@@ -187,26 +187,20 @@ export async function resolveSourceTokenAccountOrAta(
   mint: Address,
   tokenProgram: Address
 ): Promise<{ tokenAccount: Address; decimals: number; exists: boolean }> {
-  const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
-
-  if (selected) {
-    return {
-      ...selected,
-      exists: true,
-    };
-  }
-
   const [tokenAccount] = await findAssociatedTokenPda({
     owner,
     tokenProgram,
     mint,
   });
-  const decimals = await resolveMintDecimals(rpc, mint);
+  const [tokenAccountInfo, decimals] = await Promise.all([
+    getAccountInfo(rpc, tokenAccount),
+    resolveMintDecimals(rpc, mint),
+  ]);
 
   return {
     tokenAccount,
     decimals,
-    exists: false,
+    exists: tokenAccountInfo !== null,
   };
 }
 

@@ -44,10 +44,6 @@ export interface BvnkRuleEntity {
   address?: BvnkRuleEntityAddress;
 }
 
-export interface BvnkComplianceInput {
-  partyDetails?: Record<string, unknown>[];
-}
-
 export const BVNK_NETWORKS = ["SOLANA"] as const;
 
 export type BvnkNetwork = (typeof BVNK_NETWORKS)[number];
@@ -148,33 +144,6 @@ export function bvnkUnverifiedOnboardingStatus(
     return "verification_failed";
   }
   throw internalError(`Unmapped BVNK customer KYC status: ${status ?? "(missing)"}`);
-}
-
-/**
- * Normalizes a stored subdivision code to the bare 2-letter form BVNK's
- * `stateCode` field requires. Strips a leading ISO 3166-2 country prefix
- * (e.g. `US-TX` -> `TX`) only when the prefix matches the address's own
- * country code; throws a typed bad-request error when the result is not
- * exactly 2 characters.
- *
- * TODO(zach, 2026-07-02): temporary translation layer. The counterparty
- * location model will be refactored to store both ISO code variants so
- * provider mappers can read the form they need directly — remove this
- * normalization when that lands.
- */
-export function normalizeBvnkStateCode(countryCode: string, subdivisionCode: string): string {
-  const prefixMatch = /^([A-Z]{2})-([A-Z0-9]{2,3})$/.exec(subdivisionCode.toUpperCase());
-  const candidate =
-    prefixMatch && prefixMatch[1] === countryCode.toUpperCase()
-      ? prefixMatch[2]
-      : subdivisionCode.toUpperCase();
-  if (candidate.length !== 2) {
-    throw badRequest("BVNK requires a 2-letter state/subdivision code.", {
-      field: "identity.address.subdivisionCode",
-      value: subdivisionCode,
-    });
-  }
-  return candidate;
 }
 
 /**
@@ -467,6 +436,26 @@ export function parseBvnkOnrampWalletName(
     throw internalError(`Malformed BVNK on-ramp wallet name: ${walletName}`);
   }
   return parsed.data;
+}
+
+/**
+ * Parses an SDP-created BVNK wallet name into its logical wallet reference.
+ *
+ * @param walletName BVNK wallet `name` value.
+ * @returns The parsed on-ramp or off-ramp wallet reference.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the name does not match the
+ * SDP BVNK wallet naming contract.
+ */
+export function parseBvnkWalletName(walletName: string): BVNKWallet {
+  const parts = walletName.split(":");
+  switch (parts[1]) {
+    case "offramp":
+      return parseBvnkOfframpWalletName(walletName);
+    case "onramp":
+      return parseBvnkOnrampWalletName(walletName);
+    default:
+      throw internalError(`Malformed BVNK wallet name: ${walletName}`);
+  }
 }
 
 export function readBvnkOfframpWallets(

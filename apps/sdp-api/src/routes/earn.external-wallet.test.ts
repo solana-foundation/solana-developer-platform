@@ -9,7 +9,7 @@ import {
 } from "@/db/repositories";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
-import { badRequest } from "@/lib/errors";
+import { badRequest, transactionExpired } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -280,7 +280,8 @@ function builtRow(overrides: Record<string, unknown> = {}) {
 function submitResult(overrides: Record<string, unknown> = {}) {
   const movementId = `earn_movement_${crypto.randomUUID()}`;
   return {
-    position: { id: "earn_position_ext_test" },
+    // The wire's tokenMint/tokenAmount come from the position's deposit token.
+    position: { id: "earn_position_ext_test", token_mint: USDC_MINT },
     movement: {
       id: movementId,
       position_id: "earn_position_ext_test",
@@ -305,14 +306,16 @@ function submitResult(overrides: Record<string, unknown> = {}) {
 function post(
   path: string,
   body: Record<string, unknown>,
-  options: { idempotencyKey?: string | null; apiKey?: string } = {}
+  options: { idempotencyKey?: string | null; apiKey?: string | null } = {}
 ) {
   return app.request(
     `/v1/earn/external-wallet/${path}`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${options.apiKey ?? TEST_API_KEY.raw}`,
+        ...(options.apiKey === null
+          ? {}
+          : { Authorization: `Bearer ${options.apiKey ?? TEST_API_KEY.raw}` }),
         "Content-Type": "application/json",
         ...(options.idempotencyKey == null ? {} : { "Idempotency-Key": options.idempotencyKey }),
       },
@@ -358,6 +361,25 @@ afterEach(() => {
 });
 
 describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates", () => {
+  it("builds anonymously without tenant context or sponsorship", async () => {
+    const strategy = await seedStrategy();
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: { transaction: { ownerAddress: OWNER, amount: "25", sponsored: false } },
+    });
+    const input = buildExternalWalletDepositTransaction.mock.calls[0]?.[1];
+    expect(input).not.toHaveProperty("organizationId");
+    expect(input).not.toHaveProperty("projectId");
+    expect(input).not.toHaveProperty("feePayer");
+  });
+
   it("builds against a resolved, admitted strategy", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
@@ -456,6 +478,26 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         amount: "25",
       });
       expect(res.status).toBe(400);
+      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    });
+
+    it("refuses a separate fee payer on an anonymous build", async () => {
+      const strategy = await seedStrategy();
+      const res = await post(
+        "deposit-transactions",
+        {
+          strategyId: strategy.id,
+          ownerAddress: OWNER,
+          feePayer: FEE_PAYER,
+          amount: "25",
+        },
+        { apiKey: null }
+      );
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        error: { message: expect.stringContaining("API key") },
+      });
       expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
     });
   });
@@ -698,9 +740,8 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
   });
 
   it("refuses a deprecated strategy (catalogue admission)", async () => {
-    // "Delisted" in the threat model (EARN-012/020) is `deprecated` in code:
-    // the delist pass leaves the row behind so it stays addressable by id,
-    // which is exactly why the admission gate must refuse it here too.
+    // `deprecated` stays addressable by id for exit safety, which is exactly
+    // why the admission gate must refuse it here too.
     await seedAuth();
     const strategy = await seedStrategy({ status: "deprecated" });
     const res = await post("deposit-transactions", {
@@ -760,9 +801,37 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(res.status).toBe(400);
   });
 
-  it("keeps production closed by the environment capability", async () => {
+  it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
-    const strategy = await seedStrategy({ environment: "production" });
+    const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+    const missingFloor = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: PROD_API_KEY.raw }
+    );
+    expect(missingFloor.status).toBe(400);
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
+      { apiKey: PROD_API_KEY.raw }
+    );
+    expect(res.status).toBe(200);
+    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ environment: "production", provider: "kamino", minSharesOut: "1" })
+    );
+  });
+
+  it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({
+      provider: "veda",
+      underlyingSource: "veda",
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
     const res = await post(
       "deposit-transactions",
       { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
@@ -772,6 +841,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("not available");
     expect(body.error.message).toContain("production");
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
@@ -864,6 +934,27 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
     expect(res.status).toBe(400);
   });
 
+  it("answers an expired build as 409 TRANSACTION_EXPIRED", async () => {
+    await seedAuth();
+    submitExternalWalletDeposit.mockRejectedValue(
+      transactionExpired(
+        "This transaction's blockhash expired before it was submitted. " +
+          "Build a new transaction and have the customer sign it again."
+      )
+    );
+
+    const res = await post(
+      "deposits",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("TRANSACTION_EXPIRED");
+    expect(body.error.message).toContain("Build a new transaction");
+  });
+
   it("records the submit and answers the movement in ledger vocabulary", async () => {
     await seedAuth();
     const key = crypto.randomUUID();
@@ -893,6 +984,119 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
 });
 
 describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", () => {
+  it("builds an anonymous exit from global strategy metadata", async () => {
+    const strategy = await seedStrategy();
+
+    const res = await post(
+      "withdrawal-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: {
+        transaction: {
+          strategyId: strategy.id,
+          ownerAddress: OWNER,
+          shares: "10",
+          sponsored: false,
+        },
+      },
+    });
+    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        positionId: null,
+        vaultAddress: strategy.provider_reference,
+        ownerAddress: OWNER,
+        tokenMint: USDC_MINT,
+        shareMint: SHARE_MINT,
+        shareAtaRentFunder: null,
+      })
+    );
+    const input = buildExternalWalletWithdrawalTransaction.mock.calls[0]?.[1];
+    expect(input).not.toHaveProperty("organizationId");
+    expect(input).not.toHaveProperty("projectId");
+  });
+
+  it("quotes an anonymous exit from the same global strategy locator", async () => {
+    const strategy = await seedStrategy();
+
+    const res = await post(
+      "withdrawal-previews",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: { strategyId: strategy.id, assetsOut: "9.95", assetDecimals: 6 },
+    });
+    expect(quoteVaultWithdrawal).toHaveBeenCalledWith(expect.anything(), {
+      providerReference: strategy.provider_reference,
+      shares: "10",
+    });
+  });
+
+  it("keeps anonymous previews and exits available after catalogue delisting", async () => {
+    const strategy = await seedStrategy();
+    await createPostgresEarnRepository(getDb(env)).deprecateUnlistedStrategies({
+      provider: "kamino",
+      environment: "sandbox",
+      listedProviderReferences: ["another-vault"],
+    });
+
+    const preview = await post(
+      "withdrawal-previews",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+    const exit = await post(
+      "withdrawal-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(preview.status).toBe(200);
+    expect(exit.status).toBe(200);
+    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        vaultAddress: strategy.provider_reference,
+        tokenMint: USDC_MINT,
+        shareMint: SHARE_MINT,
+        ownerAddress: OWNER,
+      })
+    );
+  });
+
+  it("does not let an anonymous caller resolve a tenant position id", async () => {
+    await seedAuth();
+    const positionId = await seedExternalWalletPosition();
+    const res = await post(
+      "withdrawal-transactions",
+      { positionId, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(400);
+    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps the authenticated exit body position-based", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    const res = await post("withdrawal-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      shares: "10",
+    });
+
+    expect(res.status).toBe(400);
+    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["withdrawal preview", "withdrawal-previews"],
     ["withdrawal transaction", "withdrawal-transactions"],
@@ -989,6 +1193,21 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("minAmountOut");
     expect(body.error.message).toContain("jupiter_lend");
+    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
+  it("enforces the withdrawal floor on an anonymous build", async () => {
+    const strategy = await seedStrategy({ provider: "jupiter_lend" });
+    const res = await post(
+      "withdrawal-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { message: expect.stringContaining("minAmountOut") },
+    });
     expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
   });
 
@@ -1146,6 +1365,39 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "failure" });
     expect(String(rows[0]?.metadata)).toContain("signature verification failed");
+  });
+
+  it("closes the deposit intent as a failure when the build expired (409)", async () => {
+    await seedAuth();
+    submitExternalWalletDeposit.mockRejectedValue(transactionExpired());
+
+    const res = await post(
+      "deposits",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(409);
+
+    // The expiry refusal is pre-record, so it takes the same 4xx gate as a
+    // verification failure: closed, never paged.
+    const rows = await auditRows("deposit");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "failure" });
+  });
+
+  it("writes no withdrawal audit row when the exit build expired (409)", async () => {
+    await seedAuth();
+    submitExternalWalletWithdrawal.mockRejectedValue(transactionExpired());
+
+    const res = await post(
+      "withdrawals",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("TRANSACTION_EXPIRED");
+    await expect(auditRows("withdraw")).resolves.toHaveLength(0);
   });
 
   it("leaves the deposit intent unresolved on an ambiguous 5xx", async () => {

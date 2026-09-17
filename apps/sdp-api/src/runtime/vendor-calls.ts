@@ -32,19 +32,7 @@ export async function withVendorCall<T>(
   }
 }
 
-export function signFailedResult(method: string, result: unknown): string | null {
-  if (method !== "sign" || !result || typeof result !== "object") {
-    return null;
-  }
-  const r = result as { status?: unknown; error?: unknown };
-  return r.status === "failed" ? String(r.error ?? "signing returned status failed") : null;
-}
-
-export function instrumentVendorPort<T extends object>(
-  vendor: string,
-  port: T,
-  isFailureResult?: (method: string, result: unknown) => string | null
-): T {
+export function instrumentVendorPort<T extends object>(vendor: string, port: T): T {
   return new Proxy(port, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
@@ -53,22 +41,15 @@ export function instrumentVendorPort<T extends object>(
       }
       return function proxied(this: unknown, ...args: unknown[]) {
         const startedAt = Date.now();
-        const settle = (result: unknown) => {
-          const failure = isFailureResult?.(prop, result);
-          if (failure) {
-            logVendorCallFailure(vendor, prop, new Error(failure), startedAt);
-          }
-          return result;
-        };
         try {
           const result = value.apply(target, args);
           if (result instanceof Promise) {
-            return result.then(settle, (error: unknown) => {
+            return result.catch((error: unknown) => {
               logVendorCallFailure(vendor, prop, error, startedAt);
               throw error;
             });
           }
-          return settle(result);
+          return result;
         } catch (error) {
           logVendorCallFailure(vendor, prop, error, startedAt);
           throw error;

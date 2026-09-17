@@ -1,16 +1,15 @@
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
-import type { WalletOperationActor, WalletOperationType } from "@sdp/types";
+import {
+  assertNever,
+  type RecurringPaymentPolicyPayload,
+  type WalletOperationActor,
+} from "@sdp/types";
 import { type DatabaseExecutor, getDb } from "@/db";
-import { AppError } from "@/lib/errors";
+import { AppError, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-
-export type RecurringPaymentOperationType = Extract<
-  WalletOperationType,
-  "recurring_payment_create" | "recurring_payment_update" | "recurring_payment_collection"
->;
 
 interface PendingCollectionApprovalRow {
   wallet_operation_id: string;
@@ -92,8 +91,7 @@ export async function assertNoPendingRecurringCollectionApproval(input: {
     collectionDueAt: input.collectionDueAt,
   });
   if (pending) {
-    throw new AppError(
-      "CONFLICT",
+    throw conflict(
       "Recurring payment source cannot change while a collection approval is pending",
       {
         walletOperationId: pending.wallet_operation_id,
@@ -124,53 +122,53 @@ export async function enforceRecurringPaymentPolicy(input: {
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
-  operationType: RecurringPaymentOperationType;
   token: string;
   amount: string;
   destination: string;
   apiKeyId: string | null;
   actor: WalletOperationActor | null;
-  rawPayload: Record<string, unknown>;
+  rawPayload: RecurringPaymentPolicyPayload;
 }): Promise<WalletOperationPolicyEnforcement> {
   const scope = createTenantScope({
     organizationId: input.organizationId,
     projectId: input.projectId,
   });
 
-  const recurringPaymentId = input.rawPayload.recurringPaymentId;
-  const collectionDueAt = input.rawPayload.collectionDueAt;
-  if (
-    input.operationType === "recurring_payment_collection" &&
-    typeof recurringPaymentId === "string" &&
-    typeof collectionDueAt === "string"
-  ) {
-    const pending = await findPendingCollectionApproval({
-      db: getDb(input.env),
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      custodyWalletId: input.sourceWallet.id,
-      recurringPaymentId,
-      collectionDueAt,
-    });
-    if (pending) {
-      const details = {
-        walletOperationId: pending.wallet_operation_id,
-        policyEvaluationId: pending.policy_evaluation_id,
-        decision: pending.decision,
-        reasonCode: pending.reason_code,
-        reason: pending.reason,
-        requiresApproval: pending.requires_approval,
-        approvalRequestId: pending.approval_request_id,
-      };
-      if (pending.custody_wallet_id === null) {
-        throw new AppError(
-          "CONFLICT",
-          "Recurring payment collection approval wallet identity is unresolved",
-          details
-        );
+  switch (input.rawPayload.operationType) {
+    case "recurring_payment_collection": {
+      const pending = await findPendingCollectionApproval({
+        db: getDb(input.env),
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        custodyWalletId: input.sourceWallet.id,
+        recurringPaymentId: input.rawPayload.recurringPaymentId,
+        collectionDueAt: input.rawPayload.collectionDueAt,
+      });
+      if (pending) {
+        const details = {
+          walletOperationId: pending.wallet_operation_id,
+          policyEvaluationId: pending.policy_evaluation_id,
+          decision: pending.decision,
+          reasonCode: pending.reason_code,
+          reason: pending.reason,
+          requiresApproval: pending.requires_approval,
+          approvalRequestId: pending.approval_request_id,
+        };
+        if (pending.custody_wallet_id === null) {
+          throw conflict(
+            "Recurring payment collection approval wallet identity is unresolved",
+            details
+          );
+        }
+        throw new AppError("SIGNING_PENDING", "Wallet operation requires policy approval", details);
       }
-      throw new AppError("SIGNING_PENDING", "Wallet operation requires policy approval", details);
+      break;
     }
+    case "recurring_payment_create":
+    case "recurring_payment_update":
+      break;
+    default:
+      assertNever(input.rawPayload);
   }
 
   return enforceWalletOperationPolicy(input.env, scope, {
@@ -182,7 +180,7 @@ export async function enforceRecurringPaymentPolicy(input: {
     actor: input.actor,
     source: input.apiKeyId === null && input.actor === null ? "system" : "api",
     operationFamily: "payment",
-    operationType: input.operationType,
+    operationType: input.rawPayload.operationType,
     asset: input.token,
     amount: input.amount,
     destination: input.destination,

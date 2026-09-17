@@ -7,6 +7,7 @@ import type {
   PolicyDecision,
   PolicyEvaluation,
   PolicyEvaluationContext,
+  VelocityPolicyRule,
   WalletOperationActor,
   WalletOperationContext,
   WalletOperationEnvelope,
@@ -15,6 +16,17 @@ import type {
   WalletOperationStatus,
   WalletOperationType,
 } from "@sdp/types";
+import type { VelocityObservation } from "./velocity";
+
+/**
+ * The candidate a velocity measurement is scoped by. `id` is the
+ * wallet-operation row under evaluation, which the measurement must exclude;
+ * a dry-run candidate has none.
+ */
+export type VelocityCandidate = Pick<
+  PolicyCandidate,
+  "organizationId" | "projectId" | "custodyWalletId" | "walletId" | "apiKeyId"
+> & { id?: string };
 
 export interface CreateWalletOperationInput {
   organizationId: string;
@@ -75,6 +87,11 @@ export interface RecordPolicyEvaluationInput {
  * Wallet-scope and API-key-scope policy resolution meet in
  * {@link loadEffectivePolicies} because an API-key wallet binding can supply
  * the wallet profile as well; the store composes the per-scope lookups.
+ *
+ * {@link loadVelocityObservations} measures the rolling totals every velocity
+ * rule in play needs, one observation per rule asset, so evaluation itself
+ * stays synchronous. A key the store cannot answer is simply absent and the
+ * rule reviews.
  */
 export interface PolicyEnforcementStore {
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationEnvelope>;
@@ -84,6 +101,10 @@ export interface PolicyEnforcementStore {
       "organizationId" | "projectId" | "apiKeyId" | "custodyWalletId"
     >
   ): Promise<EffectiveOperationPolicies>;
+  loadVelocityObservations(
+    candidate: VelocityCandidate,
+    rules: VelocityPolicyRule[]
+  ): Promise<VelocityObservation[]>;
   createApprovalRequest(
     input: CreateApprovalRequestInput
   ): Promise<{ id: string; status: ApprovalRequestStatus }>;

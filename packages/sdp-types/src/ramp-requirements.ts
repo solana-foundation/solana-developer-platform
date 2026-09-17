@@ -1,4 +1,5 @@
-import type { CountryCode } from "./countries";
+import { COUNTRY_CODES, type CountryCode } from "./countries";
+import { RAMP_FIAT_CURRENCIES, type RampFiatCurrency } from "./generated/ramp.generated";
 import type { RampDirection } from "./payments";
 import type { RampProviderId } from "./provider-access";
 
@@ -33,6 +34,16 @@ export type RequirementField =
       key: string;
       label: string;
       required: boolean;
+      /** Subset of country codes the client may offer; absent means every supported country. */
+      options?: CountryCode[];
+    }
+  | {
+      kind: "currency";
+      key: string;
+      label: string;
+      required: boolean;
+      /** Subset of fiat currencies the client may offer; absent means every supported currency. */
+      options?: RampFiatCurrency[];
     }
   | {
       kind: "date";
@@ -78,6 +89,28 @@ export function requirementFieldName(key: string): string {
     return key;
   }
   return key.slice(separator + 1);
+}
+
+/**
+ * Country codes a country field may accept.
+ *
+ * @param field - Country requirement field whose options bound the offer.
+ * @returns The field's option subset, or every supported country when the field lists none.
+ */
+export function offeredCountryCodes(
+  field: Extract<RequirementField, { kind: "country" }>
+): readonly CountryCode[] {
+  return field.options === undefined ? COUNTRY_CODES : field.options;
+}
+
+/**
+ * @param field - A currency requirement field.
+ * @returns The field's option subset, or every supported fiat currency when the field lists none.
+ */
+export function offeredFiatCurrencies(
+  field: Extract<RequirementField, { kind: "currency" }>
+): readonly RampFiatCurrency[] {
+  return field.options === undefined ? RAMP_FIAT_CURRENCIES : field.options;
 }
 
 /** Slug-keyed values the client collects for `status: "collect"` fields and passes through on the quote. */
@@ -128,15 +161,24 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "bvnk"; status: "collect_counterparty"; fields: RequirementField[] }
   | {
       provider: "bvnk";
+      /**
+       * First BVNK step: collects only the tax-residence country so agreements
+       * can be minted for it before any other PII is requested.
+       */
+      status: "collect_counterparty_residence";
+      fields: RequirementField[];
+    }
+  | {
+      provider: "bvnk";
       status: "customer_agreement_required";
-      /** Agreements are minted JIT per response and their URLs are never persisted. */
+      /** Agreement text is an external link; `downloadUrl` is minted JIT per response and never persisted. */
       agreements: {
         id: string;
-        filename: string;
+        name: string;
+        description: string;
         downloadUrl: string;
       }[];
     }
-  | { provider: "bvnk"; status: "customer_pending_agreement_acceptance" }
   | {
       provider: "bvnk";
       status: "customer_verification_required";
@@ -157,3 +199,55 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "hercle"; status: "customer_verifying" }
   | { provider: "hercle"; status: "customer_verification_failed" }
 );
+
+/** Collect stages whose answer carries a `fields` array for the client to render. */
+export const COLLECT_FIELDS_STATUSES = [
+  "collect",
+  "collect_counterparty",
+  "collect_counterparty_residence",
+] as const;
+
+export type CollectFieldsStatus = (typeof COLLECT_FIELDS_STATUSES)[number];
+
+/**
+ * Requirement statuses answered on the client's requirements step before the
+ * provider can advance: field collection, payout-account selection, or
+ * agreement consent.
+ */
+export const COLLECT_STAGE_STATUSES = [
+  ...COLLECT_FIELDS_STATUSES,
+  "collect_account",
+  "customer_agreement_required",
+] as const;
+
+export type CollectStageStatus = (typeof COLLECT_STAGE_STATUSES)[number];
+
+/**
+ * Whether a requirements status is a collect stage.
+ *
+ * @param status - Requirements lifecycle status to classify.
+ * @returns True for the collect-stage statuses.
+ */
+export function isCollectStageStatus(
+  status: CounterpartyRequirements["status"]
+): status is CollectStageStatus {
+  return COLLECT_STAGE_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Collect-stage requirements whose answer carries a field set rather than a payout tree or agreements. */
+export type CollectFieldsRequirements = Extract<
+  CounterpartyRequirements,
+  { status: CollectFieldsStatus }
+>;
+
+/**
+ * Whether a requirements answer is a collect stage with collectable fields.
+ *
+ * @param requirements - Requirements answer to classify.
+ * @returns True when `requirements.fields` is present for the client to render.
+ */
+export function isCollectFieldsRequirements(
+  requirements: CounterpartyRequirements
+): requirements is CollectFieldsRequirements {
+  return COLLECT_FIELDS_STATUSES.some((candidate) => candidate === requirements.status);
+}

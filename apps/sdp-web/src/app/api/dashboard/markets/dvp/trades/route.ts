@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 /**
@@ -46,11 +47,10 @@ export async function GET(request: Request) {
  * trade instead of creating a second one at a second address.
  */
 export async function POST(request: Request) {
-  const idempotencyKey = request.headers.get("Idempotency-Key");
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.dvp.trades.create",
     path: "/v1/dvp/trades",
-    upstreamHeaders: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+    upstreamHeaders: forwardedIdempotencyHeaders(request),
   });
 }

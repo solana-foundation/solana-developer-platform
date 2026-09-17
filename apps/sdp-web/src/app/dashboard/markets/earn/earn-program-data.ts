@@ -128,14 +128,6 @@ export function hasPrograms(state: EarnProgramsState | undefined): boolean {
   return state?.kind === "ready" && state.programs.length > 0;
 }
 
-export function findProgram(
-  state: EarnProgramsState | undefined,
-  programId: string | undefined
-): EarnProgram | undefined {
-  if (!programId || state?.kind !== "ready") return undefined;
-  return state.programs.find((program) => program.id === programId);
-}
-
 async function requestJson<T>(path: string): Promise<{ status: number; body: T | undefined }> {
   const response = await fetch(path);
   let body: T | undefined;
@@ -159,6 +151,16 @@ function errorMessage(body: unknown, status: number): string {
 function programPath(programId: string, suffix = ""): string {
   return `/api/dashboard/markets/earn/programs/${encodeURIComponent(programId)}${suffix}`;
 }
+
+/**
+ * The two cadences the earn hooks refresh at, named once so a tuning change
+ * cannot miss a surface: the fast one drives feeds derived from live chain
+ * reads (program deposits, vault position values), the slow one the
+ * recorded-movement ledgers, whose DISCOVERY tier is deliberately calmer —
+ * each in-flight movement then runs its own faster watch poll.
+ */
+const LIVE_FEED_REFRESH_MS = 15_000;
+const LEDGER_REFRESH_MS = 30_000;
 
 const PROGRAMS_PAGE_SIZE = 100;
 
@@ -430,7 +432,7 @@ export function useEarnProgramDeposits(programId: string | undefined) {
     programId ? earnQueryKeys.programDeposits({ programId }) : null,
     () => fetchEarnProgramDeposits(programId as string),
     // Deposits land on-chain outside the dashboard, so keep the feed fresh.
-    { refreshInterval: 15_000 }
+    { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
   return { page: data, error, isLoading };
 }
@@ -539,12 +541,20 @@ export function useEarnVaultPositions() {
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultPositions(),
     () => fetchEarnVaultPositions(),
-    { refreshInterval: 15_000 }
+    { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
   return { positions: data, error, isLoading, refresh: () => void mutate() };
 }
 
 const EXTERNAL_WALLET_POSITIONS_PAGE_SIZE = 100;
+
+/**
+ * Hard stop on the paging loop, same reason as the other readers' page limits:
+ * a server that never stops advancing its cursor must not spin this client
+ * (and the BFF it drives) forever. 20 pages × 100 = 2,000 live positions for
+ * one end-user wallet, far past anything a partner wallet can plausibly hold.
+ */
+const EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT = 20;
 
 /**
  * Reads every live position for exactly one partner end-user wallet.
@@ -557,7 +567,7 @@ export async function fetchEarnExternalWalletPositions(
   const seenCursors = new Set<string>();
   let before: string | undefined;
 
-  while (true) {
+  for (let page = 1; page <= EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT; page += 1) {
     const query = new URLSearchParams({ limit: String(EXTERNAL_WALLET_POSITIONS_PAGE_SIZE) });
     if (before) query.set("before", before);
     const { status, body } = await requestJson<{ data: EarnExternalWalletPositionsPage }>(
@@ -577,6 +587,9 @@ export async function fetchEarnExternalWalletPositions(
     seenCursors.add(nextCursor);
     before = nextCursor;
   }
+
+  // A partial portfolio is worse than an error because it can hide money.
+  throw new Error("External-wallet positions pagination exceeded its safety limit");
 }
 
 export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
@@ -653,29 +666,36 @@ const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
   }),
 });
 
+/**
+ * The API's 202 approval hold, identical for deposits and withdrawals: the
+ * custody wallet still owes the transaction a signature. One schema for both
+ * outcome unions so the pending arm cannot drift between the two mirrors.
+ */
+const signingPendingOutcomeSchema = z
+  .object({
+    error: z.object({
+      code: z.literal("SIGNING_PENDING"),
+      message: z.string(),
+      details: z
+        .object({
+          approvalRequestId: z.string().optional(),
+          walletOperationId: z.string().optional(),
+        })
+        .optional(),
+    }),
+  })
+  .transform(({ error }) => ({
+    kind: "approval_pending" as const,
+    message: error.message,
+    approvalRequestId: error.details?.approvalRequestId,
+    walletOperationId: error.details?.walletOperationId,
+  }));
+
 const earnVaultDepositOutcomeSchema = z.union([
   z
     .object({ data: earnVaultDepositSchema })
     .transform(({ data }) => ({ kind: "submitted" as const, deposit: data })),
-  z
-    .object({
-      error: z.object({
-        code: z.literal("SIGNING_PENDING"),
-        message: z.string(),
-        details: z
-          .object({
-            approvalRequestId: z.string().optional(),
-            walletOperationId: z.string().optional(),
-          })
-          .optional(),
-      }),
-    })
-    .transform(({ error }) => ({
-      kind: "approval_pending" as const,
-      message: error.message,
-      approvalRequestId: error.details?.approvalRequestId,
-      walletOperationId: error.details?.walletOperationId,
-    })),
+  signingPendingOutcomeSchema,
 ]);
 
 export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
@@ -899,13 +919,16 @@ export async function fetchEarnVaultDepositByRequestId(
   return deposit ? { kind: "found", deposit } : { kind: "absent" };
 }
 
+/** Why a quote declines to price a request; both preview envelopes carry it. */
+const vaultPreviewBlockingIssues = z.array(z.object({ code: z.string(), message: z.string() }));
+
 const earnVaultDepositPreviewEnvelopeSchema = z.object({
   data: z.object({
     strategyId: z.string(),
     /** Shares at the provider's live rate, decimal string at share scale. */
     sharesOut: z.string().regex(/^\d+(\.\d+)?$/),
     shareDecimals: z.number().int().min(0).max(38),
-    blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+    blockingIssues: vaultPreviewBlockingIssues,
     /**
      * SDP intends to sponsor this movement's network fee and rent. Optional
      * for deploy skew against an older API; absent renders wallet-pays copy,
@@ -952,7 +975,7 @@ const earnVaultWithdrawalPreviewEnvelopeSchema = z.object({
     /** Deposit-token amount at the provider's live rate, decimal string. */
     assetsOut: z.string().regex(/^\d+(\.\d+)?$/),
     assetDecimals: z.number().int().min(0).max(38),
-    blockingIssues: z.array(z.object({ code: z.string(), message: z.string() })),
+    blockingIssues: vaultPreviewBlockingIssues,
     /** Same sponsorship intent as the deposit preview; exits have no swap. */
     feeSponsored: z.boolean().optional(),
   }),
@@ -1004,7 +1027,7 @@ export function useEarnVaultDeposits() {
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultDepositsInFlight(),
     () => fetchEarnVaultDeposits({ settled: false }),
-    { refreshInterval: 30_000 }
+    { refreshInterval: LEDGER_REFRESH_MS }
   );
   return { deposits: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -1193,25 +1216,7 @@ const earnVaultWithdrawalOutcomeSchema = z.union([
   z
     .object({ data: z.object({ withdrawal: earnVaultWithdrawalSchema }) })
     .transform(({ data }) => ({ kind: "submitted" as const, withdrawal: data.withdrawal })),
-  z
-    .object({
-      error: z.object({
-        code: z.literal("SIGNING_PENDING"),
-        message: z.string(),
-        details: z
-          .object({
-            approvalRequestId: z.string().optional(),
-            walletOperationId: z.string().optional(),
-          })
-          .optional(),
-      }),
-    })
-    .transform(({ error }) => ({
-      kind: "approval_pending" as const,
-      message: error.message,
-      approvalRequestId: error.details?.approvalRequestId,
-      walletOperationId: error.details?.walletOperationId,
-    })),
+  signingPendingOutcomeSchema,
 ]);
 
 export type EarnVaultWithdrawalOutcome = z.infer<typeof earnVaultWithdrawalOutcomeSchema>;
@@ -1340,7 +1345,7 @@ export function useEarnVaultWithdrawals() {
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultWithdrawalsInFlight(),
     () => fetchEarnVaultWithdrawals({ settled: false }),
-    { refreshInterval: 30_000 }
+    { refreshInterval: LEDGER_REFRESH_MS }
   );
   return { withdrawals: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -1483,7 +1488,7 @@ export function useEarnProgramWithdrawals(programId: string | undefined) {
     // Detect withdrawals created from another session while this dashboard is
     // open; the list is a cheap local-DB read and live outcome polling begins
     // only for provider-accepted nonterminal rows.
-    { refreshInterval: 30_000 }
+    { refreshInterval: LEDGER_REFRESH_MS }
   );
   return { withdrawals: data, error, isLoading, refresh: () => void mutate() };
 }

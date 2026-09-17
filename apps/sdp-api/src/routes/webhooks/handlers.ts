@@ -7,12 +7,12 @@ import type {
 } from "@clerk/backend";
 import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
 import type { SdpEnvironment } from "@sdp/types";
-import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
 import { success } from "@/lib/response";
 import { createKVStoreSet } from "@/runtime/kv-redis";
@@ -26,42 +26,14 @@ import {
   ClerkUsersService,
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
+import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
 import { ProjectService } from "@/services/project.service";
 import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
-import { BvnkWebhookProcessor } from "./ramps/bvnk";
-import { CoinbaseWebhookProcessor } from "./ramps/coinbase";
-import { HercleWebhookProcessor } from "./ramps/hercle";
-import { LightsparkWebhookProcessor } from "./ramps/lightspark";
-import { MoonpayWebhookProcessor } from "./ramps/moonpay";
-import { MuralWebhookProcessor } from "./ramps/mural";
 import type { WebhookProcessor } from "./ramps/processor";
-import { StripeWebhookProcessor } from "./ramps/stripe";
+import { parseRampWebhookProvider, RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "./ramps/registry";
 
 type AppContext = Context<{ Bindings: Env }>;
-
-const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
-  moonpay: new MoonpayWebhookProcessor(),
-  lightspark: new LightsparkWebhookProcessor(),
-  bvnk: new BvnkWebhookProcessor(),
-  coinbase: new CoinbaseWebhookProcessor(),
-  mural: new MuralWebhookProcessor(),
-  stripe: new StripeWebhookProcessor(),
-  hercle: new HercleWebhookProcessor(),
-} as const satisfies Record<
-  Exclude<RampProviderId, "moneygram">,
-  WebhookProcessor<unknown, unknown>
->;
-
-type WebhookRampProvider = keyof typeof RAMP_PROVIDER_WEBHOOK_PROCESSOR;
-
-function parseRampWebhookProvider(value: string | undefined): WebhookRampProvider {
-  if (value !== undefined && Object.hasOwn(RAMP_PROVIDER_WEBHOOK_PROCESSOR, value)) {
-    return value as WebhookRampProvider;
-  }
-
-  throw badRequest("Unsupported ramp webhook provider");
-}
 
 async function findOrganizationMapping(c: AppContext, clerkOrgId: string) {
   const mapping = await findClerkOrganizationMapping(getDb(c.env), clerkOrgId);
@@ -489,21 +461,33 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
     rawBody,
     requestUrl: c.req.url,
   });
-  const event = processor.parse(payload);
+  processor.parse(payload);
 
-  // Signature is verified, so ack with 200 immediately and settle in the background: a
-  // slow DB write must not delay the 2xx the provider expects.
-  // TODO(ramps): until the reconciliation cron lands, this background pass is the only
-  // path that settles a transfer. The cron will reconcile any transaction left in a
-  // non-terminal state here (e.g. background processing that failed).
+  // Signature and shape are verified, so the event is durable before the 200
+  // the provider expects: a crash or DB blip in the background apply can no
+  // longer lose the only settlement signal the provider will send — the
+  // replay job picks the row back up.
+  const stored = await createPostgresRampWebhookEventsRepository(getDb(c.env)).insertEvent({
+    provider: processor.provider,
+    environment,
+    payload,
+  });
+
+  // Ack immediately and apply in the background: a slow settlement write must
+  // not delay the 2xx. The apply discharges the stored row on success and
+  // records the failure on it otherwise, leaving replay to retry.
+  // The apply records its own failures on the row; this catch is only for the
+  // recording itself failing (the DB going away mid-pass). The row is still
+  // pending then, so the replay job picks it up — log and move on.
   c.executionCtx.waitUntil(
-    processor.process(c, environment, event).catch((error) =>
+    applyStoredRampWebhookEvent(c.env, stored, stored.attempts + 1).catch((error) =>
       getLogger().error(
         {
           provider: processor.provider,
+          webhook_event_id: stored.id,
           error: error instanceof Error ? error.message : String(error),
         },
-        "[ramp webhook] background processing failed"
+        "[ramp webhook] background apply failed to record its outcome"
       )
     )
   );

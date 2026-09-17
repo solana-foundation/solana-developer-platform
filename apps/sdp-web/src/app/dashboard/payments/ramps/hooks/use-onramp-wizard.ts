@@ -151,7 +151,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     ) {
       return;
     }
-    if (!wizard.selectedWallet) {
+    if (!wizard.selectedWallet || wizard.quoteTransferId === null) {
       return;
     }
 
@@ -202,13 +202,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         await simulateSandboxTransfer(
           {
             provider: "bvnk",
-            payload: {
-              counterpartyId: wizard.fields.counterpartyId,
-              amount: Number(wizard.fields.amount.trim()),
-              fiatCurrency: wizard.selectedRampPair.fiatCurrency,
-              assetRail: wizard.selectedRampPair.assetRail,
-              destinationCustodyWalletId: wizard.selectedWallet.id,
-            },
+            payload: { transferId: wizard.quoteTransferId },
           },
           t
         );

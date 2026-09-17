@@ -199,6 +199,90 @@ afterEach(() => {
 });
 
 describe("external-wallet position reads", () => {
+  async function settleSeededMovements(positionId: string) {
+    await getDb(env)
+      .prepare(
+        `UPDATE earn_movements
+            SET status = 'finalized', confirmed_at = sdp_iso_now(), settled_at = sdp_iso_now(),
+                amount_settled = amount_requested
+          WHERE position_id = ?`
+      )
+      .bind(positionId)
+      .run();
+  }
+
+  async function closedAtOf(positionId: string) {
+    const row = await getDb(env)
+      .prepare("SELECT closed_at FROM earn_positions WHERE id = ?")
+      .bind(positionId)
+      .first<{ closed_at: string | null }>();
+    return row?.closed_at ?? null;
+  }
+
+  it("closes a settled position the live read proves empty, so the next page drops it", async () => {
+    const positionId = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    await settleSeededMovements(positionId);
+    readVaultPositions.mockImplementation(
+      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+        input.providerReferences.map((providerReference) => ({
+          providerReference,
+          owner: input.owner,
+          cluster: "devnet",
+          shares: "0",
+          withdrawableShares: "0",
+          tokenValue: "0",
+          tokenMint: USDC,
+          shareMint: SHARE,
+        }))
+    );
+
+    // The observing read still answers what it saw.
+    const first = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as { data: { positions: Array<{ shares: string }> } };
+    expect(firstBody.data.positions).toHaveLength(1);
+    expect(firstBody.data.positions[0]?.shares).toBe("0");
+    expect(await closedAtOf(positionId)).not.toBeNull();
+
+    const second = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+    await expect(second.json()).resolves.toMatchObject({ data: { positions: [] } });
+  });
+
+  it("never closes a zero-share position while one of its movements is unsettled", async () => {
+    // seedPosition leaves a `requested` deposit on the holding.
+    const positionId = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    readVaultPositions.mockImplementation(
+      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+        input.providerReferences.map((providerReference) => ({
+          providerReference,
+          owner: input.owner,
+          cluster: "devnet",
+          shares: "0",
+          withdrawableShares: "0",
+          tokenValue: "0",
+          tokenMint: USDC,
+          shareMint: SHARE,
+        }))
+    );
+
+    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+    expect(response.status).toBe(200);
+    expect(await closedAtOf(positionId)).toBeNull();
+    const again = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+    const body = (await again.json()) as { data: { positions: unknown[] } };
+    expect(body.data.positions).toHaveLength(1);
+  });
+
   it("summary excludes another project's positions and owner addresses", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,
@@ -233,7 +317,9 @@ describe("external-wallet position reads", () => {
       label: "USDT vault",
     });
 
-    const response = await get("/v1/earn/external-wallet/positions/summary?includePositions=true");
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true"
+    );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
 
@@ -285,7 +371,7 @@ describe("external-wallet position reads", () => {
     );
   });
 
-  it("keeps owner addresses but omits position details from the default summary", async () => {
+  it("default summary carries no owner address and no position details (EARN-028, PRO-1908)", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
@@ -293,14 +379,44 @@ describe("external-wallet position reads", () => {
       label: "USDC vault",
     });
 
+    // A fresh earn:read key with no flag: totals only. The address book is
+    // opt-in, never the default.
     const response = await get("/v1/earn/external-wallet/positions/summary");
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       data: {
         summary: {
+          walletCount: number;
           totalsByStrategy: Array<Record<string, unknown>>;
         };
       };
+    };
+
+    expect(body.data.summary.walletCount).toBe(1);
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]).toMatchObject({
+      walletCount: 1,
+      positionCount: 1,
+    });
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("ownerAddresses");
+    expect(body.data.summary.totalsByStrategy[0]).not.toHaveProperty("positions");
+    expect(JSON.stringify(body)).not.toContain(OWNER_A);
+  });
+
+  it("summary returns owner addresses only on an explicit opt-in, without position details", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true"
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { summary: { totalsByStrategy: Array<Record<string, unknown>> } };
     };
 
     expect(body.data.summary.totalsByStrategy).toHaveLength(1);
@@ -402,7 +518,7 @@ describe("external-wallet position reads", () => {
     expect(warning).not.toContain(OWNER_B);
   });
 
-  it("summary omits every owner address when the caller asks for totals only (EARN-028, PRO-1873)", async () => {
+  it("summary omits every owner address when the caller opts out in so many words (EARN-028, PRO-1873)", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-usdc",
@@ -452,7 +568,27 @@ describe("external-wallet position reads", () => {
     expect(response.status).toBe(400);
   });
 
-  it("404s an owner whose claim belongs to another organization", async () => {
+  it("rejects position details without an explicit owner-address opt-in (PRO-1908)", async () => {
+    // Positions name their owners, so the old dashboard shape (includePositions
+    // alone) may not quietly re-enable the address book under the new default.
+    const response = await get("/v1/earn/external-wallet/positions/summary?includePositions=true");
+    expect(response.status).toBe(400);
+  });
+
+  it("answers a never-seen owner with an empty page, not 404", async () => {
+    // A customer who has not deposited yet is content, not an error: the
+    // partner's balance screen renders an empty list.
+    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { data: unknown }).data).toEqual({
+      ownerAddress: OWNER_B,
+      positions: [],
+      hasMore: false,
+      nextCursor: null,
+    });
+  });
+
+  it("answers an owner whose claim belongs to another organization empty, leaking nothing", async () => {
     const foreignOrg = "org_external_position_foreign";
     const foreignProject = "prj_external_position_foreign";
     await getDb(env)
@@ -474,9 +610,16 @@ describe("external-wallet position reads", () => {
       projectId: foreignProject,
     });
 
-    expect((await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`)).status).toBe(
-      404
-    );
+    // Same bytes as an owner nobody has seen: the query is org/project scoped,
+    // so a foreign claim is indistinguishable from no claim.
+    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { data: unknown }).data).toEqual({
+      ownerAddress: OWNER_B,
+      positions: [],
+      hasMore: false,
+      nextCursor: null,
+    });
   });
 
   it.each(["&limit=0", "&limit=101", "&before=not-a-cursor", "&page=2"])(

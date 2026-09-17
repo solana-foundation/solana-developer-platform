@@ -55,7 +55,13 @@ it("does not mistake a wallet lookup failure for an empty inventory", () => {
 
 it("does not show the setup prompt when wallets are available", () => {
   renderPermissions([
-    { id: "cwlt_test", walletId: "provider_test", label: "Test wallet", publicKey: "address_test" },
+    {
+      id: "cwlt_test",
+      walletId: "provider_test",
+      isRuntimeExecutionAllowed: true,
+      label: "Test wallet",
+      publicKey: "address_test",
+    },
   ]);
   expect(screen.queryByRole("link", { name: /Go to Wallets/ })).toBeNull();
   fireEvent.focus(window);

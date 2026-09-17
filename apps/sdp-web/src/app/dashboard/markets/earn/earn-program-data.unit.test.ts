@@ -294,7 +294,7 @@ describe("external-wallet position reads", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("continues one wallet past one hundred strict cursor pages", async () => {
+  it("throws when a wallet feed keeps minting fresh cursors past the safety limit", async () => {
     let page = 0;
     const fetchMock = vi.fn(async () => {
       const current = page;
@@ -303,8 +303,8 @@ describe("external-wallet position reads", () => {
         JSON.stringify({
           data: {
             positions: [externalWalletPosition(`p${current}`)],
-            hasMore: current < 100,
-            nextCursor: current < 100 ? `cursor_${current}` : null,
+            hasMore: true,
+            nextCursor: `cursor_${current}`,
           },
         }),
         { headers: { "Content-Type": "application/json" } }
@@ -314,8 +314,35 @@ describe("external-wallet position reads", () => {
 
     await expect(
       fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
-    ).resolves.toHaveLength(101);
-    expect(fetchMock).toHaveBeenCalledTimes(101);
+    ).rejects.toThrow("External-wallet positions pagination exceeded its safety limit");
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+  });
+
+  it("accepts a twentieth page that ends the feed without a twenty-first request", async () => {
+    // The boundary this pins: the last allowed page may still be the one that
+    // closes the feed. An off-by-one in the loop bound would either reject
+    // this final page or fire an unnecessary extra request.
+    let page = 0;
+    const fetchMock = vi.fn(async () => {
+      const current = page;
+      page += 1;
+      return new Response(
+        JSON.stringify({
+          data: {
+            positions: [externalWalletPosition(`p${current}`)],
+            hasMore: current < 19,
+            nextCursor: current < 19 ? `cursor_${current}` : null,
+          },
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+    ).resolves.toHaveLength(20);
+    expect(fetchMock).toHaveBeenCalledTimes(20);
   });
 
   it("fails loudly when a wallet cursor repeats", async () => {
@@ -377,7 +404,14 @@ describe("vault deposit availability", () => {
 
   it("opens only an active, fundable, surfaced vault-direct strategy in an enabled environment", () => {
     expect(isEarnVaultDepositAvailable(kamino, "sandbox", providerAccess)).toBe(true);
-    expect(isEarnVaultDepositAvailable(kamino, "production", providerAccess)).toBe(false);
+    // Kamino is deployed on both clusters, so production opens too (PRO-1986);
+    // the environment gate now bites a provider deployed on devnet only.
+    expect(isEarnVaultDepositAvailable(kamino, "production", providerAccess)).toBe(true);
+    expect(
+      isEarnVaultDepositAvailable({ ...kamino, provider: "veda" }, "production", {
+        veda: { entitled: true, configured: true, enabled: true },
+      })
+    ).toBe(false);
     expect(
       isEarnVaultDepositAvailable({ ...kamino, fundable: false }, "sandbox", providerAccess)
     ).toBe(false);

@@ -107,8 +107,8 @@ const earnStrategySchema = z
       description:
         "Whether the instrument exists on the caller's own cluster. `false` is definitive: a " +
         "deposit can never work here. `true` is necessary but NOT sufficient — the strategy " +
-        "must also be `active` and the organization entitled to the provider — so branch on " +
-        "it rather than assuming a listed strategy takes deposits.",
+        "must also be `active`, and an authenticated organization must be entitled to the " +
+        "provider, so branch on it rather than assuming a listed strategy takes deposits.",
     }),
     feeSponsored: z.boolean().openapi({
       description:
@@ -140,9 +140,10 @@ export const earnStrategyResponse = successResponseSchema(
 );
 
 // ---------------------------------------------------------------------------
-// External-wallet (caller-signed) vault flows (PRO-1722): SDP builds an
-// unsigned transaction for a wallet it does not custody, the owner signs it,
-// and the submit records the movement before SDP broadcasts.
+// External-wallet (caller-signed) vault flows (PRO-1722, PRO-1943): SDP builds
+// an unsigned transaction for a wallet it does not custody. A keyed caller can
+// submit it for durable tracking and SDP broadcast; an anonymous caller signs,
+// broadcasts, and tracks it directly.
 // ---------------------------------------------------------------------------
 
 const solanaAddressExample = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
@@ -156,8 +157,8 @@ const earnOwnerAddressSchema = z
   .openapi({
     description:
       "The external wallet: the customer's own Solana address. It signs and owns the shares; " +
-      "SDP holds no key for it. It also pays the network fee unless the build names a " +
-      "`feePayer`. The pattern is necessary but not " +
+      "SDP holds no key for it. It also pays the network fee unless an authenticated build " +
+      "names a `feePayer`. The pattern is necessary but not " +
       "sufficient — the string must additionally decode to a 32-byte public key, which no " +
       "pattern can express, so a well-shaped base58 string that does not decode still " +
       "answers 400.",
@@ -173,13 +174,12 @@ const earnFeePayerRequestSchema = z
   .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
   .openapi({
     description:
-      "Optional: sponsor this transaction from your own wallet instead of the customer's. " +
-      "The named address becomes the transaction's fee payer — it pays the network fee, and " +
-      "it funds the share-account rent an account creation needs — and the built transaction " +
-      "then requires ITS signature alongside the owner's: co-sign server-side with the fee " +
-      "payer's key before submitting. The wallet needs a SOL balance; simulation refuses the " +
-      "build (400, naming the fee payer) when it cannot pay. Sending the owner's own address " +
-      "means the default (the owner pays and signs alone).",
+      "Authenticated builds only: pay for this transaction from your own wallet instead of " +
+      "the customer's. The named address becomes the transaction's fee payer. It pays the " +
+      "network fee, funds any share-account rent, and must sign alongside the owner. Co-sign " +
+      "server-side with the fee payer's key before submitting. Simulation refuses the build " +
+      "with a 400 naming the fee payer when it cannot pay. Sending the owner's own address " +
+      "uses the default: the owner pays and signs alone.",
     example: earnFeePayerExample,
   });
 
@@ -278,41 +278,66 @@ const earnDepositSwapSchema = z
     description: "The Jupiter swap leg attached to (or split out of) a swap-funded deposit.",
   });
 
+const earnExternalWalletPositionLocatorSchema = z.object({
+  positionId: z.string().min(1).max(128).openapi({
+    description: "Tenant position id used by an authenticated caller.",
+    example: "earn_position_example",
+  }),
+});
+
+const earnExternalWalletStrategyLocatorSchema = z.object({
+  strategyId: z.string().min(1).openapi({
+    description: "Global catalogue strategy id used by an anonymous caller.",
+    example: "earn_strategy_example",
+  }),
+  ownerAddress: earnOwnerAddressSchema,
+});
+
+const earnExternalWalletWithdrawalFields = {
+  shares: earnDecimalAmountSchema.openapi({
+    description: "Shares to redeem, decimal string in share units.",
+    example: "10",
+  }),
+  minAmountOut: earnDecimalAmountSchema.optional().openapi({
+    description:
+      "Exit slippage floor: the minimum deposit-token amount to accept, decimal string in " +
+      "the token's own units. Derive it from the withdrawal preview's `assetsOut` minus a " +
+      "chosen tolerance. Providers whose builder refuses an implicit tolerance (see the " +
+      "strategy's `withdrawalSlippage`) answer its absence with a 400.",
+    example: "24.9",
+  }),
+  feePayer: earnFeePayerRequestSchema.optional(),
+} as const;
+
 export const earnExternalWalletWithdrawalTransactionRequest = z
-  .object({
-    positionId: z.string().min(1).max(128).openapi({ example: "earn_position_example" }),
-    shares: earnDecimalAmountSchema.openapi({
-      description: "Shares to redeem, decimal string in share units.",
-      example: "10",
-    }),
-    minAmountOut: earnDecimalAmountSchema.optional().openapi({
-      description:
-        "Exit slippage floor: the minimum deposit-token amount to accept, decimal string in " +
-        "the token's own units. Derive it from the withdrawal preview's `assetsOut` minus a " +
-        "chosen tolerance. Providers whose builder refuses an implicit tolerance (see the " +
-        "strategy's `withdrawalSlippage`) answer its absence with a 400.",
-      example: "24.9",
-    }),
-    feePayer: earnFeePayerRequestSchema.optional(),
-  })
+  .union([
+    earnExternalWalletPositionLocatorSchema.extend(earnExternalWalletWithdrawalFields),
+    earnExternalWalletStrategyLocatorSchema.extend(earnExternalWalletWithdrawalFields),
+  ])
   .openapi({
     description:
-      "Build one unsigned exit transaction for an external-wallet position. The position " +
-      "carries the vault and both mints, so a delisted vault stays exitable.",
+      "Build one unsigned exit transaction. Authenticated callers name their tenant position; " +
+      "anonymous callers name a global strategy and the owner wallet. Both forms resolve the " +
+      "trusted vault and mint metadata server-side.",
   });
 
+const earnExternalWalletWithdrawalPreviewFields = {
+  shares: earnDecimalAmountSchema.openapi({
+    description: "Shares the exit would redeem, decimal string in share units.",
+    example: "10",
+  }),
+} as const;
+
 export const earnExternalWalletWithdrawalPreviewRequest = z
-  .object({
-    positionId: z.string().min(1).max(128).openapi({ example: "earn_position_example" }),
-    shares: earnDecimalAmountSchema.openapi({
-      description: "Shares the exit would redeem, decimal string in share units.",
-      example: "10",
-    }),
-  })
+  .union([
+    earnExternalWalletPositionLocatorSchema.extend(earnExternalWalletWithdrawalPreviewFields),
+    earnExternalWalletStrategyLocatorSchema.extend(earnExternalWalletWithdrawalPreviewFields),
+  ])
   .openapi({
     description:
-      "Quote one exit against the vault's live accounting. Read-only: nothing is built and " +
-      "nothing is persisted.",
+      "Quote one exit against the vault's live accounting. Authenticated callers name a " +
+      "tenant position; anonymous callers name a global strategy and owner wallet. Read-only: " +
+      "nothing is built and nothing is persisted.",
   });
 
 const earnVaultQuoteIssueSchema = z.object({
@@ -425,23 +450,33 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
   })
 );
 
+const earnExternalWalletWithdrawalPreviewResponseFields = {
+  assetsOut: earnDecimalAmountSchema.openapi({
+    description:
+      "What redeeming the shares would pay at the live rate, decimal string in the deposit " +
+      "token's units. A truthful `minAmountOut` floor is derived from this figure.",
+    example: "25.02",
+  }),
+  assetDecimals: z.number().int().openapi({
+    description: "The deposit token's decimals, which define the scale used to quantize a floor.",
+    example: 6,
+  }),
+  blockingIssues: z.array(earnVaultQuoteIssueSchema).openapi({
+    description: "Conditions the provider reports would block this exit; empty when none.",
+  }),
+} as const;
+
 export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema(
-  z.object({
-    positionId: z.string().openapi({ example: "earn_position_example" }),
-    assetsOut: earnDecimalAmountSchema.openapi({
-      description:
-        "What redeeming the shares would pay at the live rate, decimal string in the deposit " +
-        "token's units — the figure a truthful `minAmountOut` floor is derived from.",
-      example: "25.02",
-    }),
-    assetDecimals: z.number().int().openapi({
-      description: "The deposit token's decimals — the scale a floor must be quantized to.",
-      example: 6,
-    }),
-    blockingIssues: z.array(earnVaultQuoteIssueSchema).openapi({
-      description: "Conditions the provider reports would block this exit; empty when none.",
-    }),
-  })
+  z.union([
+    earnExternalWalletPositionLocatorSchema.extend(
+      earnExternalWalletWithdrawalPreviewResponseFields
+    ),
+    z
+      .object({
+        strategyId: z.string().openapi({ example: "earn_strategy_example" }),
+      })
+      .extend(earnExternalWalletWithdrawalPreviewResponseFields),
+  ])
 );
 
 export const earnExternalWalletSubmitRequest = z
@@ -480,13 +515,21 @@ const earnExternalWalletTransactionSchema = z
         "expires with its blockhash (about a minute).",
     }),
     lastValidBlockHeight: z.string().openapi({ example: "361186610" }),
+    sponsored: z.boolean().openapi({
+      description:
+        "Whether SDP supplied and signed the fee payer. Always false for an anonymous build, " +
+        "which must be signed, broadcast, and tracked by the caller. A partner-controlled " +
+        "feePayer on an authenticated build also leaves this false.",
+      example: false,
+    }),
     ownerAddress: earnOwnerAddressSchema,
     feePayer: z
       .string()
       .optional()
       .openapi({
         description:
-          "Echo of the build request's `feePayer`. Present, this transaction requires the fee " +
+          "Echo of an authenticated build request's `feePayer`. Present, this transaction " +
+          "requires the fee " +
           "payer's signature IN ADDITION to the owner's — co-sign server-side before " +
           "submitting; the submit refuses a missing or invalid fee-payer signature. Absent, " +
           "the owner signs alone and pays the fee.",
@@ -525,13 +568,12 @@ const earnExternalWalletDepositTransactionSchema = earnExternalWalletTransaction
 
 const earnExternalWalletWithdrawalTransactionSchema = earnExternalWalletTransactionSchema
   .extend({
-    positionId: z.string().openapi({ example: "earn_position_example" }),
     shares: earnDecimalAmountSchema,
     minAmountOut: earnDecimalAmountSchema.nullable().openapi({
       description: "The floor encoded in the transaction, or null when the request carried none.",
     }),
   })
-  .openapi({ description: "The built exit transaction plus the position it redeems from." });
+  .openapi({ description: "The common fields of one built exit transaction." });
 
 const earnExternalWalletMovementSchema = z
   .object({
@@ -544,8 +586,9 @@ const earnExternalWalletMovementSchema = z
     direction: z.enum(["deposit", "withdrawal"]),
     status: z.enum(["requested", "submitted", "confirmed", "finalized", "failed"]).openapi({
       description:
-        "Ledger vocabulary. `confirmed` is optimistic and can still be dropped by a fork; " +
-        "only `finalized` and `failed` are terminal.",
+        "Ledger vocabulary. `requested` means SDP recorded the signed transaction but has not " +
+        "yet confirmed it reached the network. `confirmed` is optimistic and can still be " +
+        "dropped by a fork; only `finalized` and `failed` are terminal.",
     }),
     signature: z.string().openapi({ description: "The transaction signature, for explorers." }),
     ownerAddress: earnOwnerAddressSchema,
@@ -555,6 +598,17 @@ const earnExternalWalletMovementSchema = z
     denomination: z.string().openapi({
       description: "Token mint for a deposit; share mint for a withdrawal.",
       example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    }),
+    tokenMint: z.string().openapi({
+      description:
+        "The position's deposit-token mint. Render `tokenAmount` in these units; " +
+        "`amount`/`denomination` is the on-chain quantity (shares on a withdrawal).",
+      example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    }),
+    tokenAmount: earnDecimalAmountSchema.nullable().openapi({
+      description:
+        "Quantity in `tokenMint` units. A deposit's amount; a withdrawal's observed payout " +
+        "once `finalized`, otherwise null (also null when the payout could not be observed).",
     }),
     failureReason: z.string().nullable(),
     createdAt: isoDateTimeSchema,
@@ -572,11 +626,14 @@ const earnExternalWalletDepositSwapSplitSchema = z
     requiresSeparateSwap: z.literal(true).openapi({
       description: "Discriminates from the atomic answer, which carries `transaction`.",
     }),
+    sponsored: z.literal(false).openapi({
+      description: "Split swap transactions are never sponsored by SDP.",
+    }),
     swap: earnDepositSwapSchema.extend({
       transaction: z.string().openapi({
         description:
           "Base64 wire bytes of the UNSIGNED swap-only transaction. The fee payer is the " +
-          "owner, or the original request's `feePayer` (which then co-signs this transaction " +
+          "owner, or an authenticated request's `feePayer` (which then co-signs this transaction " +
           "too). The partner broadcasts it itself — it moves only the owner's own funds, so " +
           "SDP records nothing for it.",
       }),
@@ -610,7 +667,9 @@ const earnExternalWalletDepositSwapSplitSchema = z
   .openapi({
     description:
       "Answered instead of a built transaction when the composed swap + deposit cannot fit " +
-      "one Solana packet (1,232 bytes) even on a compact route. No submit-capable build or movement was persisted; SDP retained only a recovery advisory.",
+      "one Solana packet (1,232 bytes) even on a compact route. No submit-capable build or " +
+      "movement is persisted. SDP retains a recovery advisory only for an authenticated " +
+      "request; an anonymous request writes nothing.",
   });
 
 export const earnExternalWalletDepositTransactionResponse = successResponseSchema(
@@ -621,7 +680,16 @@ export const earnExternalWalletDepositTransactionResponse = successResponseSchem
 );
 
 export const earnExternalWalletWithdrawalTransactionResponse = successResponseSchema(
-  z.object({ transaction: earnExternalWalletWithdrawalTransactionSchema })
+  z.object({
+    transaction: z.union([
+      earnExternalWalletWithdrawalTransactionSchema.extend({
+        positionId: z.string().openapi({ example: "earn_position_example" }),
+      }),
+      earnExternalWalletWithdrawalTransactionSchema.extend({
+        strategyId: z.string().openapi({ example: "earn_strategy_example" }),
+      }),
+    ]),
+  })
 );
 
 export const earnExternalWalletDepositResponse = successResponseSchema(
@@ -690,9 +758,10 @@ const earnExternalWalletStrategyTotalSchema = z.object({
     .optional()
     .openapi({
       description:
-        "The exact project-scoped owners contributing to this strategy total. Present by default; " +
-        "absent when the request passed `includeOwnerAddresses=false`. This list is the project's " +
-        "end-user address book, so keys that only need totals should opt out.",
+        "The exact project-scoped owners contributing to this strategy total. Absent by default; " +
+        "present only when the request passes `includeOwnerAddresses=true`. This list is the " +
+        "project's end-user address book, so only a surface that has to render per-customer " +
+        "detail should opt in.",
     }),
   positions: z
     .array(earnExternalWalletPositionSchema)
@@ -700,8 +769,8 @@ const earnExternalWalletStrategyTotalSchema = z.object({
     .openapi({
       description:
         "Complete live positions contributing to this strategy total. Present only when the " +
-        "request passes `includePositions=true`; use this single drill-down instead of one " +
-        "live request per owner.",
+        "request passes `includePositions=true` together with `includeOwnerAddresses=true`; use " +
+        "this single drill-down instead of one live request per owner.",
     }),
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
@@ -768,11 +837,17 @@ const earnExternalWalletTokenEarningsSchema = z
     totalDeposited: earnLiveDecimalAmountSchema.openapi({
       description: "Sum of finalized SDP deposits — a ledger fact, always present.",
     }),
+    totalWithdrawn: earnLiveDecimalAmountSchema.openapi({
+      description:
+        "Sum of the observed token payouts of finalized withdrawals, a ledger fact, always " +
+        "present. Excludes withdrawals whose payout was not observed (see " +
+        "`withdrawals_not_valued`).",
+    }),
     earned: earnSignedDecimalAmountSchema.optional().openapi({
       description:
-        "`currentValue − totalDeposited`, stated only when exact and never coerced to zero. " +
-        "Live hydration reads the owner's whole vault balance, so shares acquired outside SDP " +
-        "inflate this figure — a documented property of non-custodial reads.",
+        "`currentValue + totalWithdrawn − totalDeposited`, stated only when exact and never " +
+        "coerced to zero. Live hydration reads the owner's whole vault balance, so shares " +
+        "acquired outside SDP inflate this figure (a documented property of non-custodial reads).",
     }),
     earnedUnavailableReason: z
       .enum(["live_value_unavailable", "movements_pending", "withdrawals_not_valued"])
@@ -780,8 +855,8 @@ const earnExternalWalletTokenEarningsSchema = z
       .openapi({
         description:
           "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
-          "or a currently held position has a finalized withdrawal (the ledger records exits in " +
-          "shares, so no exact token-denominated earned figure exists once money has gone out).",
+          "or a currently held position has a finalized withdrawal whose token payout was not " +
+          "observed at settlement, so `totalWithdrawn` is incomplete.",
       }),
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });

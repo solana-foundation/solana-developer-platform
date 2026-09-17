@@ -873,6 +873,9 @@
     "integrationRpcNoditDescription": "Utilisez Nodit pour votre trafic RPC Solana.",
     "integrationRpcQuickNodeDescription": "Utilisez votre endpoint QuickNode configuré pour le RPC Solana.",
     "integrationRpcTritonDescription": "Acheminez les requêtes Solana via l'infrastructure de Triton.",
-    "integrationRpcValidationCloudDescription": "Utilisez Validation Cloud pour votre trafic RPC Solana."
+    "integrationRpcValidationCloudDescription": "Utilisez Validation Cloud pour votre trafic RPC Solana.",
+    "restricted": "Restreint",
+    "signingDisabledTitle": "La signature est désactivée",
+    "signingDisabledBody": "Ce Wallet peut recevoir des fonds, mais ne peut pas signer de transactions tant que la signature n'est pas réactivée."
   }
 }

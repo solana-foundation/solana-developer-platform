@@ -62,7 +62,7 @@ export type {
 } from "./dvp-trade.repository";
 export { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 export type {
-  DeleteUnlistedEarnStrategiesInput,
+  DeprecateUnlistedEarnStrategiesInput,
   EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
@@ -176,6 +176,7 @@ export type {
 } from "./kyc-wallet.repository";
 export { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
 export type {
+  CollectibleRecurringPaymentRow,
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   CreatePaymentRecurringPaymentLifecycleAttemptInput,
@@ -188,18 +189,18 @@ export type {
   ListPaymentRecurringPaymentsResult,
   PaymentRecurringPaymentActivationAttemptRow,
   PaymentRecurringPaymentActivationAttemptStage,
-  PaymentRecurringPaymentActivationAttemptStatus,
+  PaymentRecurringPaymentAttemptStatus,
   PaymentRecurringPaymentLifecycleAttemptRow,
   PaymentRecurringPaymentLifecycleAttemptStage,
-  PaymentRecurringPaymentLifecycleAttemptStatus,
   PaymentRecurringPaymentLifecycleOperation,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
   PaymentRecurringPaymentUpdateAttemptMode,
   PaymentRecurringPaymentUpdateAttemptRow,
   PaymentRecurringPaymentUpdateAttemptStage,
-  PaymentRecurringPaymentUpdateAttemptStatus,
   PaymentRecurringPaymentUpdateEventRow,
+  RecoverableCollectionRecurringPaymentRow,
+  RecurringPaymentCollectionCycleRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
   UpdatePaymentRecurringPaymentInput,
@@ -298,6 +299,7 @@ export type {
   PolicyRepository,
   PolicyRepositoryContext,
   ReplaceApiKeyWalletPolicyBindingsInput,
+  SumWalletOperationAmountsInput,
   UpdateApprovalRequestStatusInput,
   UpsertApiKeyWalletPolicyBindingInput,
   WalletControlProfileRevisionHistoryRow,
@@ -486,6 +488,13 @@ export type {
   TokenRepositoryContext,
 } from "./token.repository";
 export { createPostgresTokenRepository } from "./token.repository.postgres";
+export type {
+  ListUnifiedTransactionsInput,
+  ListUnifiedTransactionsResult,
+  UnifiedTransactionModuleWalletScope,
+  UnifiedTransactionsRepository,
+} from "./unified-transactions.repository";
+export { createPostgresUnifiedTransactionsRepository } from "./unified-transactions.repository.postgres";
 export type {
   EnrolledWalletRow,
   UpsertWalletAssetEnrollmentInput,

@@ -1,4 +1,5 @@
-import { COUNTRY_CODES } from "@sdp/types/countries";
+import type { CountryCode } from "@sdp/types/countries";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   CollectedFieldData,
@@ -7,10 +8,9 @@ import type {
   RequirementField,
   RequirementOption,
 } from "@sdp/types/ramp-requirements";
+import { offeredCountryCodes, offeredFiatCurrencies } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { SdpPaymentsError } from "../errors";
-
-const countryCodeSchema = z.enum(COUNTRY_CODES);
 
 /**
  * Builds the ready state for a non-Lightspark ramp counterparty.
@@ -58,6 +58,22 @@ export function selectField(args: {
 }
 
 /**
+ * Builds a zod enum for requirement option values, rejecting empty option sets
+ * with the requirement field's name.
+ *
+ * @param values - Option values the field accepts.
+ * @param field - Requirement field the values belong to.
+ * @returns The corresponding enum schema.
+ */
+function requirementEnumSchema(values: readonly string[], field: RequirementField): z.ZodTypeAny {
+  const [first, ...rest] = values;
+  if (first === undefined) {
+    throw new Error(`Requirement field "${field.key}" (${field.kind}) has no options`);
+  }
+  return z.enum([first, ...rest]);
+}
+
+/**
  * Creates a country requirement field validated against ISO 3166-1 alpha-2 codes.
  *
  * @param args - Country requirement field properties.
@@ -67,8 +83,19 @@ export function countryField(args: {
   key: string;
   label: string;
   required: boolean;
+  options?: CountryCode[];
 }): RequirementField {
   return { kind: "country", ...args };
+}
+
+/** Creates a currency requirement field validated against the supported ramp fiat currencies. */
+export function currencyField(args: {
+  key: string;
+  label: string;
+  required: boolean;
+  options?: RampFiatCurrency[];
+}): RequirementField {
+  return { kind: "currency", ...args };
 }
 
 export function dateField(args: {
@@ -108,15 +135,20 @@ export function fieldToZod(field: RequirementField): z.ZodTypeAny {
       return field.required ? schema : schema.optional();
     }
     case "select": {
-      const [first, ...rest] = field.options.map((option) => option.value);
-      if (first === undefined) {
-        throw new Error(`Requirement field "${field.key}" (select) has no options`);
-      }
-      const schema = z.enum([first, ...rest]);
+      const schema = requirementEnumSchema(
+        field.options.map((option) => option.value),
+        field
+      );
       return field.required ? schema : schema.optional();
     }
-    case "country":
-      return field.required ? countryCodeSchema : countryCodeSchema.optional();
+    case "country": {
+      const schema = requirementEnumSchema(offeredCountryCodes(field), field);
+      return field.required ? schema : schema.optional();
+    }
+    case "currency": {
+      const schema = requirementEnumSchema(offeredFiatCurrencies(field), field);
+      return field.required ? schema : schema.optional();
+    }
     case "date": {
       const before = field.before;
       const schema =

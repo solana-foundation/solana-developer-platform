@@ -9,7 +9,7 @@ import {
   earnSwapSourceTokens,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { ArrowRightLeftIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import { ArrowRightLeftIcon, Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
@@ -19,7 +19,6 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
 import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { cn } from "@/lib/utils";
@@ -29,10 +28,14 @@ import {
   walletDisplayName,
 } from "./deposit/earn-funding-wallets";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
+import { compareUnsignedDecimals, MAX_AMOUNT_LENGTH, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
-import { shortenMarketAddress, sumDecimalStrings } from "./earn-market-presentation";
+import {
+  shortenMarketAddress,
+  sumDecimalStrings,
+  TransactionLink,
+} from "./earn-market-presentation";
 import {
   createEarnVaultDeposit,
   type EarnVaultDeposit,
@@ -51,21 +54,21 @@ import {
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
 import {
-  floorForTolerance,
+  atomsToDecimalString,
+  derivedMinOut,
   isExpiredQuote,
   isSlippageExceededRefusal,
-  isZeroQuote,
   parseSlippageToleranceBps,
   quoteForKey,
   useDebouncedVaultQuote,
   type VaultQuoteState,
 } from "./earn-vault-slippage";
-import { VaultSlippageSection } from "./earn-vault-slippage-section";
-import { earnVaultDepositUiState, earnVaultPositionStatusDisplay } from "./earn-vault-ui-state";
-
-const MAX_AMOUNT_LENGTH = 128;
-
-export { compareUnsignedDecimals };
+import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
+import {
+  earnVaultDepositUiState,
+  earnVaultPositionStatusDisplay,
+  vaultOutcomeTone,
+} from "./earn-vault-ui-state";
 
 export type VaultDepositAmountValidation =
   | { kind: "valid"; canonicalAmount: string }
@@ -93,14 +96,6 @@ export function validateVaultDepositAmount(
   }
 
   return { kind: "valid", canonicalAmount: amount.canonical };
-}
-
-function atomsToDecimalString(atoms: bigint, decimals: number): string {
-  if (decimals === 0) return atoms.toString();
-  const padded = atoms.toString().padStart(decimals + 1, "0");
-  const whole = padded.slice(0, -decimals);
-  const fraction = padded.slice(-decimals).replace(/0+$/, "");
-  return fraction ? `${whole}.${fraction}` : whole;
 }
 
 /**
@@ -176,59 +171,6 @@ function DepositConfirmNote({
         ? t("DashboardEarn.deposit.vaultConfirmNoteSponsored")
         : t("DashboardEarn.deposit.vaultConfirmNote")}
     </p>
-  );
-}
-
-/** Quote-state notices under the summary: loading, unavailable, or blocked. */
-function DepositQuoteNotices({ quote }: { quote: VaultQuoteState<EarnVaultDepositPreview> }) {
-  const t = useTranslations();
-  if (quote.kind === "loading") {
-    return (
-      <p className="mt-2 text-xs text-tertiary" role="status">
-        {t("DashboardEarn.deposit.vaultQuoteLoading")}
-      </p>
-    );
-  }
-  if (quote.kind === "unavailable") {
-    return (
-      <p className="mt-2 text-xs text-error" role="alert">
-        {t("DashboardEarn.deposit.vaultQuoteUnavailable")}
-      </p>
-    );
-  }
-  const blockingIssue = quote.kind === "quoted" ? quote.preview.blockingIssues[0] : undefined;
-  if (blockingIssue) {
-    return (
-      <p className="mt-2 text-xs text-error" role="alert">
-        {t("DashboardEarn.deposit.vaultQuoteBlocked", { message: blockingIssue.message })}
-      </p>
-    );
-  }
-  if (
-    quote.kind === "quoted" &&
-    isZeroQuote(quote.preview.sharesOut, quote.preview.shareDecimals)
-  ) {
-    return (
-      <p className="mt-2 text-xs text-error" role="alert">
-        {t("DashboardEarn.deposit.vaultQuoteZeroShares")}
-      </p>
-    );
-  }
-  return null;
-}
-
-/** The floor the current quote and tolerance imply, or `undefined` while they cannot. */
-function derivedMinSharesOut(
-  toleranceBps: number | null,
-  quote: VaultQuoteState<EarnVaultDepositPreview>
-): string | undefined {
-  if (toleranceBps === null || quote.kind !== "quoted") return undefined;
-  if (quote.preview.blockingIssues.length > 0) return undefined;
-  // `null` — a zero-share quote — has no satisfiable floor; blocking the
-  // submission is the only honest answer (see `floorForTolerance`).
-  return (
-    floorForTolerance(quote.preview.sharesOut, quote.preview.shareDecimals, toleranceBps) ??
-    undefined
   );
 }
 
@@ -661,12 +603,6 @@ function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
   }
 }
 
-function depositOutcomeTone(statusVariant: BadgeVariant): "success" | "warning" | "info" {
-  if (statusVariant === "success") return "success";
-  if (statusVariant === "warning") return "warning";
-  return "info";
-}
-
 function DepositMovementResult({
   outcome,
   symbol,
@@ -697,7 +633,7 @@ function DepositMovementResult({
 
   return (
     <>
-      {processing ? null : <EarnOutcomeMark tone={depositOutcomeTone(statusVariant)} />}
+      {processing ? null : <EarnOutcomeMark tone={vaultOutcomeTone(statusVariant)} />}
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -728,15 +664,7 @@ function DepositMovementResult({
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultTransaction")}</dt>
           <dd className="text-right">
-            <a
-              className="inline-flex items-center gap-1 text-secondary underline decoration-border-strong underline-offset-4 transition-colors hover:text-primary"
-              href={explorerTxUrl(deposit.signature, deposit.strategy.hostCluster)}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {shortenMarketAddress(deposit.signature)}
-              <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
-            </a>
+            <TransactionLink cluster={deposit.strategy.hostCluster} signature={deposit.signature} />
           </dd>
         </div>
       </dl>
@@ -1256,7 +1184,17 @@ function DepositReviewStep(props: DepositReviewStepProps) {
         symbol={symbol}
       />
 
-      <DepositQuoteNotices quote={quote} />
+      <VaultQuoteNotices
+        decimals={(preview) => preview.shareDecimals}
+        keys={{
+          blocked: "DashboardEarn.deposit.vaultQuoteBlocked",
+          loading: "DashboardEarn.deposit.vaultQuoteLoading",
+          unavailable: "DashboardEarn.deposit.vaultQuoteUnavailable",
+          zero: "DashboardEarn.deposit.vaultQuoteZeroShares",
+        }}
+        quantity={(preview) => preview.sharesOut}
+        quote={quote}
+      />
 
       {slippagePolicy ? (
         <VaultSlippageSection
@@ -1430,7 +1368,12 @@ export function EarnVaultDepositModal({
     quoteRefreshKey
   );
   const quote = quoteForKey(rawQuote, quoteKey);
-  const minSharesOut = derivedMinSharesOut(slippageBps, quote);
+  const minSharesOut = derivedMinOut(
+    slippageBps,
+    quote,
+    (preview) => preview.sharesOut,
+    (preview) => preview.shareDecimals
+  );
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minSharesOut === undefined);
 
   /**

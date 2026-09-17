@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Rows for trades another organization set up that name this project.
  *
@@ -7,8 +8,9 @@
  * pay and take a real transfer with it, so both directions are covered.
  */
 
+import { cleanup, fireEvent, render as mount, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Table, TableBody } from "@/components/ui/table";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -19,6 +21,11 @@ import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 // The fund action links its transaction on the project's cluster, read from the dashboard.
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const YOUR_ESCROW = "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y";
 const THEIR_ESCROW = "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU";
@@ -55,6 +62,7 @@ function trade(overrides: Partial<DvpInboundTrade> = {}): DvpInboundTrade {
           address: "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk",
           counterparty: null,
           wallet: { id: "cwlt_dvp_inbound", name: null },
+          actionWallet: { id: "cwlt_dvp_inbound", name: null, isRuntimeExecutionAllowed: true },
         },
       }),
     },
@@ -77,6 +85,63 @@ function render(trades: DvpInboundTrade[]): string {
 }
 
 describe("InboundRows", () => {
+  it("shows and submits the exact action wallet for the reader's leg", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    const value = trade();
+    value.legs.b.party.actionWallet = {
+      id: "cwlt_action",
+      name: "Funding desk",
+      isRuntimeExecutionAllowed: true,
+    };
+    const { container } = mount(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <Table>
+          <TableBody>
+            <InboundRows trades={[value]} />
+          </TableBody>
+        </Table>
+      </I18nProvider>
+    );
+
+    expect(within(container).getByRole("link", { name: "Funding desk" }).getAttribute("href")).toBe(
+      "/dashboard/wallets/cwlt_action"
+    );
+    fireEvent.click(within(container).getByRole("button", { name: "Fund your leg" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/dashboard/markets/dvp/trades/dvp_inbound_1/fund",
+        expect.objectContaining({ body: JSON.stringify({ side: "b", walletId: "cwlt_action" }) })
+      )
+    );
+  });
+
+  it.each([null, { id: "cwlt_disabled", name: "Disabled desk", isRuntimeExecutionAllowed: false }])(
+    "keeps the inbound trade visible but prevents unavailable funding: %j",
+    (actionWallet) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      const value = trade();
+      value.legs.b.party.actionWallet = actionWallet;
+      const { container } = mount(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <Table>
+            <TableBody>
+              <InboundRows trades={[value]} />
+            </TableBody>
+          </Table>
+        </I18nProvider>
+      );
+
+      const button = within(container).getByRole("button", { name: "Fund your leg" });
+      expect(button.hasAttribute("disabled")).toBe(true);
+      expect(container.textContent).toContain("Signing is disabled");
+      expect(container.textContent).not.toContain("for this wallet");
+      expect(container.textContent).toContain(YOUR_ESCROW);
+      fireEvent.click(button);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
   it("shows the escrow for the reader's own leg, not the counterparty's", () => {
     expect(render([trade({ yourSide: "b" })])).toContain(YOUR_ESCROW);
   });
@@ -120,7 +185,7 @@ describe("InboundRows", () => {
       trade({
         legs: {
           a: leg(THEIR_ESCROW, { symbol: "ATD" }),
-          b: leg(YOUR_ESCROW, { frozen: true }),
+          b: leg(YOUR_ESCROW, { frozen: true, party: trade().legs.b.party }),
         },
       }),
     ]);

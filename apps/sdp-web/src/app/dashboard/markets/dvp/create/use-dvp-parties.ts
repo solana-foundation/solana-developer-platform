@@ -16,10 +16,8 @@
  */
 
 import { z } from "zod";
+import { BASE58_ADDRESS_PATTERN } from "../../base58-address";
 import type { DvpCreateCounterpartyAccount, DvpCreateWallet } from "./dvp-create.data";
-
-/** Base58 excludes 0, O, I and l so they cannot be confused when read aloud. */
-const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /**
  * One party slot: exactly one reference variant, chosen and filled.
@@ -39,7 +37,7 @@ const partySlotSchema = z.discriminatedUnion("mode", [
   }),
   z.object({
     mode: z.literal("address"),
-    address: z.string().regex(BASE58_ADDRESS),
+    address: z.string().regex(BASE58_ADDRESS_PATTERN),
   }),
 ]);
 
@@ -47,12 +45,6 @@ export type DvpPartySlot = z.infer<typeof partySlotSchema>;
 export type DvpPartySlotMode = DvpPartySlot["mode"];
 
 export { partySlotSchema };
-
-/** The two slots together, as the parties step validates them. */
-export const partiesStepSchema = z.object({
-  partyA: partySlotSchema,
-  partyB: partySlotSchema,
-});
 
 /** One party on the wire: the exact union the create endpoint takes. */
 export type DvpPartyRef =

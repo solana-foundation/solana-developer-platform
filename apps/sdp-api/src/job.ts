@@ -199,7 +199,9 @@ export async function runCronJob(): Promise<void> {
           })
         );
         await collect(
-          monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () => collectDueRecurringPayments(env))
+          monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () =>
+            collectDueRecurringPayments(env, new Date())
+          )
         );
         if (privateChannelsEnabled) {
           const outcomes = await Promise.allSettled([

@@ -6,6 +6,7 @@ import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
+import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
@@ -46,6 +47,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     onboarding,
     isAdvancing,
     retryOnboarding,
+    pendingAgreements,
     quote,
     transferStatus,
     quoteSimulationLoading,
@@ -110,7 +112,13 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     // Native fieldset[disabled] freezes every nested input and combobox trigger
     // while the advance POST is in flight, so mid-flight edits can't desync the
     // form from what the provider was sent.
-    return (
+    return pendingAgreements !== null ? (
+      <BvnkAgreementConsent agreements={pendingAgreements} />
+    ) : onboarding !== null &&
+      hasOnboardingLifecycle(onboarding.provider) &&
+      isOnboardingPanelStatus(onboarding) ? (
+      <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
+    ) : (
       <fieldset disabled={isAdvancing} className="min-w-0">
         <RequirementsFields
           provider={fields.provider}

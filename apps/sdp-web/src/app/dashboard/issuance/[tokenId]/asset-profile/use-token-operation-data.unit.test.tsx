@@ -10,7 +10,6 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import type { TokenManagementSupportingData } from "../token-management-workspace.data";
 import { AssetManagementWorkspace } from "./asset-management-workspace";
 import { useTokenOperationData } from "./use-token-operation-data";
 
@@ -28,24 +27,9 @@ vi.mock("./actions", () => ({ updateAssetProfileAction: saveProfile }));
 const wallet: PaymentsDashboardWallet = {
   id: "cwlt_a",
   walletId: "provider_a",
+  isRuntimeExecutionAllowed: true,
   publicKey: "address_a",
   label: "Wallet A",
-};
-const supportingData: TokenManagementSupportingData = {
-  authorityWallets: [wallet],
-  authorityWalletsError: null,
-  transactions: [],
-  transactionsError: null,
-  transactionsTotal: 0,
-  transactionsHasMore: false,
-  allowlistEntries: [],
-  allowlistError: null,
-  allowlistTotal: 0,
-  allowlistHasMore: false,
-  frozenAccounts: [],
-  frozenAccountsError: null,
-  frozenAccountsTotal: 0,
-  frozenAccountsHasMore: false,
 };
 function authorityData(wallets: PaymentsDashboardWallet[]) {
   return {
@@ -113,6 +97,7 @@ function wrapper({ children }: { children: ReactNode }) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
+        scopeRefreshFallback={<div>Loading workspace</div>}
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: true,
@@ -137,14 +122,12 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderData() {
+function renderData(input: Token = token) {
   return renderHook(
     () =>
       useTokenOperationData({
-        token,
+        token: input,
         shouldLoadAuthorityWallets: true,
-        shouldLoadSupportingData: true,
-        showControlList: false,
       }),
     { wrapper }
   );
@@ -162,25 +145,38 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("keeps independently loaded wallets usable when supporting data fails", async () => {
+it("loads authority wallets", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn<typeof fetch>(async (input) => {
-      if (String(input).endsWith("/authority-wallets")) {
-        return Response.json({ data: authorityData([wallet]) });
-      }
-      return Response.json(
-        { error: { message: "Supporting service unavailable" } },
-        { status: 503 }
-      );
-    })
+    vi.fn<typeof fetch>(async () => Response.json({ data: authorityData([wallet]) }))
   );
   const { result } = renderData();
-  await waitFor(() =>
-    expect(result.current.frozenAccountsError).toBe("Supporting service unavailable")
-  );
+  await waitFor(() => expect(result.current.authorityWallets).toEqual([wallet]));
   expect(result.current.authorityWallets).toEqual([wallet]);
   expect(result.current.authorityWalletsError).toBeNull();
+});
+
+it("loads frozen-account totals for a deployed token after freeze authority is revoked", async () => {
+  const deployedToken = {
+    ...token,
+    status: "active" as const,
+    mintAddress: "58NU6ZxKq3aVv2q1s9bJcYtvHkbEwLmPqRs4TuVwVjVu",
+    isFreezable: false,
+    freezeAuthority: null,
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (input) =>
+      String(input).endsWith("/frozen")
+        ? Response.json({ data: [], error: null, total: 3 })
+        : Response.json({ data: authorityData([wallet]) })
+    )
+  );
+
+  const { result } = renderData(deployedToken);
+
+  await waitFor(() => expect(result.current.frozenAccountsTotal).toBe(3));
+  expect(result.current.frozenAccountsError).toBeNull();
 });
 
 it.each([true, false])(
@@ -252,14 +248,14 @@ it.each(["success", "error"] as const)(
 );
 
 it.each([true, false])(
-  "pending draft Save and Deploy follow wallet availability despite supporting-data failure (%s)",
+  "pending draft Save and Deploy follow wallet availability (%s)",
   async (walletsAvailable) => {
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input) =>
         walletsAvailable && String(input).endsWith("/authority-wallets")
           ? Response.json({ data: authorityData([wallet]) })
-          : Response.json({ error: { message: "Supporting service unavailable" } }, { status: 503 })
+          : Response.json({ error: { message: "Wallet service unavailable" } }, { status: 503 })
       )
     );
     const user = userEvent.setup();
@@ -299,76 +295,28 @@ it.each([true, false])(
   }
 );
 
-it("uses the supporting wallet inventory when the dedicated request fails", async () => {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof fetch>(async (input) =>
-      String(input).endsWith("/authority-wallets")
-        ? Response.json({ error: { message: "Authority request unavailable" } }, { status: 503 })
-        : Response.json({ data: supportingData })
-    )
-  );
-  const { result } = renderData();
-  await waitFor(() =>
-    expect(result.current.authorityWalletsFetchError).toBe("Authority request unavailable")
-  );
-  await waitFor(() => expect(result.current.authorityWallets).toEqual([wallet]));
-  expect(result.current.authorityWalletsError).toBeNull();
-});
-
 it("preserves a wallet-level error inside a successful HTTP response", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn<typeof fetch>(async (input) =>
-      String(input).endsWith("/authority-wallets")
-        ? Response.json({
-            data: { ...authorityData([]), authorityWalletsError: "Wallet lookup denied" },
-          })
-        : Response.json({ error: { message: "Supporting service unavailable" } }, { status: 503 })
+    vi.fn<typeof fetch>(async () =>
+      Response.json({
+        data: { ...authorityData([]), authorityWalletsError: "Wallet lookup denied" },
+      })
     )
   );
   const { result } = renderData();
-  await waitFor(() =>
-    expect(result.current.frozenAccountsError).toBe("Supporting service unavailable")
-  );
+  await waitFor(() => expect(result.current.authorityWalletsError).toBe("Wallet lookup denied"));
   expect(result.current.authorityWalletsError).toBe("Wallet lookup denied");
   expect(result.current.authorityWallets).toEqual([]);
 });
 
-it.each([{ primaryWallets: [] }, { primaryWallets: [wallet] }])(
-  "does not add secondary-only rows to a successful primary inventory $primaryWallets",
-  async ({ primaryWallets }) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input) =>
-        String(input).endsWith("/authority-wallets")
-          ? Response.json({ data: authorityData(primaryWallets) })
-          : Response.json({
-              data: {
-                ...supportingData,
-                authorityWallets: [wallet, { ...wallet, id: "cwlt_removed" }],
-              },
-            })
-      )
-    );
-    const { result } = renderData();
-    await waitFor(() => expect(result.current.authorityWalletsLoading).toBe(false));
-    await waitFor(() => expect(result.current.supportingDataLoading).toBe(false));
-    expect(result.current.authorityWallets).toEqual(primaryWallets);
-    expect(result.current.authorityWalletsError).toBeNull();
-  }
-);
-
 it("keeps wallet failure blocking even when previous inventories were cached", async () => {
-  const fetchMock = vi.fn<typeof fetch>(async (input) =>
-    Response.json({
-      data: String(input).endsWith("/authority-wallets") ? authorityData([wallet]) : supportingData,
-    })
+  const fetchMock = vi.fn<typeof fetch>(async () =>
+    Response.json({ data: authorityData([wallet]) })
   );
   vi.stubGlobal("fetch", fetchMock);
   const first = renderData();
   await waitFor(() => expect(first.result.current.authorityWalletsLoading).toBe(false));
-  await waitFor(() => expect(first.result.current.supportingDataLoading).toBe(false));
   expect(first.result.current.authorityWallets).toEqual([wallet]);
   first.unmount();
 
@@ -376,9 +324,6 @@ it("keeps wallet failure blocking even when previous inventories were cached", a
   const second = renderData();
   await waitFor(() =>
     expect(second.result.current.authorityWalletsFetchError).toBe("Wallet inventory unavailable")
-  );
-  await waitFor(() =>
-    expect(second.result.current.frozenAccountsError).toBe("Wallet inventory unavailable")
   );
   expect(second.result.current.authorityWalletsError).toBe("Wallet inventory unavailable");
   expect(second.result.current.authorityWallets).toEqual([]);
