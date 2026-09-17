@@ -57,6 +57,23 @@ interface TokenMarkProps {
   className?: string;
 }
 
+/**
+ * Issuer-supplied logo URLs render as a raw `<img src>`, so the string alone
+ * picks the one network request this component may issue. Upstream issuance
+ * validates the scheme at write time, but this is the render boundary every
+ * surface shares: anything that is not a credential-free https URL falls back
+ * to the monogram rather than letting token metadata point the dashboard's
+ * network at an arbitrary origin.
+ */
+export function isRenderableLogoUrl(candidate: string): boolean {
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === "https:" && parsed.username === "" && parsed.password === "";
+  } catch {
+    return false;
+  }
+}
+
 /** Two or three characters read better than a truncated long symbol. */
 function toMonogram(symbol: string): string {
   const trimmed = symbol.trim();
@@ -107,7 +124,7 @@ export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: Tok
     );
   }
 
-  if (logoUrl && failedLogoUrl !== logoUrl) {
+  if (logoUrl && isRenderableLogoUrl(logoUrl) && failedLogoUrl !== logoUrl) {
     return (
       <span
         className={cn(
