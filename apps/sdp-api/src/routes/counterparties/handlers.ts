@@ -49,6 +49,10 @@ import {
   bvnkStoredStage,
   refreshBvnkCustomerAccount,
 } from "@/routes/payments/handlers/ramps/bvnk";
+import {
+  readHercleCounterpartyLink,
+  resolveHercleRequirements,
+} from "@/routes/payments/handlers/ramps/hercle";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import {
@@ -277,6 +281,16 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       c,
       await resolveMuralRequirements(c, counterparty, projectId, query.data.direction)
     );
+  }
+
+  if (query.data.provider === "hercle") {
+    const link = await readHercleCounterpartyLink(c.env, counterparty, projectId);
+    if (link !== null) {
+      return success(
+        c,
+        await resolveHercleRequirements(c, counterparty, projectId, query.data.direction, link)
+      );
+    }
   }
 
   const providerAccount = await createPostgresCounterpartyProviderAccountsRepository(

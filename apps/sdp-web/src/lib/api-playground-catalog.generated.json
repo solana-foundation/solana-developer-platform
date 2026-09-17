@@ -1801,6 +1801,10 @@
               {
                 "label": "stripe",
                 "value": "stripe"
+              },
+              {
+                "label": "hercle",
+                "value": "hercle"
               }
             ]
           },
@@ -4526,6 +4530,10 @@
               {
                 "label": "stripe",
                 "value": "stripe"
+              },
+              {
+                "label": "hercle",
+                "value": "hercle"
               }
             ]
           }
@@ -5245,6 +5253,10 @@
               {
                 "label": "stripe",
                 "value": "stripe"
+              },
+              {
+                "label": "hercle",
+                "value": "hercle"
               }
             ]
           }
@@ -6654,6 +6666,10 @@
               {
                 "label": "stripe",
                 "value": "stripe"
+              },
+              {
+                "label": "hercle",
+                "value": "hercle"
               }
             ]
           },
