@@ -197,8 +197,11 @@ describe("ApprovalRequestDetail", () => {
   // sdp-web ships on merge, sdp-api on release: an API without the viewer
   // fields must leave the page as it was, not hide every decision.
   it("offers every decision when the API does not report the viewer yet", () => {
-    const { viewerIsRequester: _requester, viewerCanDecide: _canDecide, ...olderApi } =
-      pendingRequest;
+    const {
+      viewerIsRequester: _requester,
+      viewerCanDecide: _canDecide,
+      ...olderApi
+    } = pendingRequest;
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApprovalRequestDetail

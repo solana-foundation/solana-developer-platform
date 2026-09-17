@@ -260,10 +260,10 @@ export function ApprovalRequestDetail({
  * they are absent the page offers what it did before, every decision to a role
  * that may decide, and the API's own check still refuses anyone else.
  */
-function viewerStanding(request: {
-  viewerIsRequester?: boolean;
-  viewerCanDecide?: boolean;
-}): { isRequester: boolean; canDecide: boolean } {
+function viewerStanding(request: { viewerIsRequester?: boolean; viewerCanDecide?: boolean }): {
+  isRequester: boolean;
+  canDecide: boolean;
+} {
   const isRequester = request.viewerIsRequester === true;
   return { isRequester, canDecide: request.viewerCanDecide ?? !isRequester };
 }
