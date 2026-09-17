@@ -292,6 +292,9 @@ function StrategiesSection() {
         <h2 className="text-2xl font-semibold tracking-tight text-foreground lg:text-3xl">
           Mainnet strategies at a glance
         </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Pay with any of the supported stables: USDC, USDG, USDT, or PYUSD.
+        </p>
         <div className="mt-5 overflow-x-auto rounded-xl border border-foreground/10 bg-background">
           <table className="w-full text-left text-sm">
             <thead>
@@ -303,7 +306,7 @@ function StrategiesSection() {
                   Provider
                 </th>
                 <th scope="col" className="px-4 py-2.5 font-semibold">
-                  Asset
+                  Base Asset*
                 </th>
                 <th
                   scope="col"
@@ -337,6 +340,8 @@ function StrategiesSection() {
           </table>
         </div>
         <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+          *You can deposit from any of the supported stables — USDC, USDG, USDT,
+          or PYUSD — and SDP routes it into the strategy&rsquo;s base asset.
           This table may not be exhaustive. APYs were pulled from live data on
           September 17th, 2026.
         </p>
