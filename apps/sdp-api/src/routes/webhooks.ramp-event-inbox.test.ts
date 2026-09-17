@@ -12,6 +12,7 @@ import {
   RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
   replayRampWebhookEvents,
 } from "@/services/jobs/replay-ramp-webhook-events";
+import { bvnkPayinStatusChangeEvent } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -285,6 +286,19 @@ describe("Ramp webhook event inbox", () => {
     } finally {
       processSpy.mockRestore();
     }
+    expect(await readInboxRows()).toHaveLength(0);
+  });
+
+  it("discards a sandbox BVNK settlement for an unknown customer through the real processor", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const stored = await events.insertEvent({
+      provider: "bvnk",
+      environment: "sandbox",
+      payload: bvnkPayinStatusChangeEvent({ customerReference: "customer_unknown" }),
+    });
+
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+
     expect(await readInboxRows()).toHaveLength(0);
   });
 

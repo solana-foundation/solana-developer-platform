@@ -3,10 +3,7 @@ import {
   createPostgresRampWebhookEventsRepository,
   type RampWebhookEventRow,
 } from "@/db/repositories/ramp-webhook-event.repository";
-import {
-  TerminalRampWebhookError,
-  type WebhookProcessor,
-} from "@/routes/webhooks/ramps/processor";
+import { TerminalRampWebhookError, type WebhookProcessor } from "@/routes/webhooks/ramps/processor";
 import {
   isWebhookRampProvider,
   RAMP_PROVIDER_WEBHOOK_PROCESSOR,
