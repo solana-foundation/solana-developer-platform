@@ -32,6 +32,11 @@ export const RAMP_WEBHOOK_EVENT_REPLAY_BATCH = 50;
 
 export const RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT = "sdp_api_ramp_webhook_event_exhausted";
 
+/** The identity a parked row is stamped with; a later deploy changes it. */
+function currentAppRevision(env: Env): string {
+  return env.K_REVISION ?? "local";
+}
+
 /**
  * Applies one persisted event and discharges its row. On failure the row
  * keeps its payload and error for the next replay pass, or parks as `failed`
@@ -54,6 +59,7 @@ export async function applyStoredRampWebhookEvent(
       error: `no webhook processor for provider ${row.provider}`,
       attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      appRevision: currentAppRevision(env),
     });
     return false;
   }
@@ -70,6 +76,7 @@ export async function applyStoredRampWebhookEvent(
       error: message,
       attempts,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      appRevision: currentAppRevision(env),
     });
     if (attempts >= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS) {
       logEvent("error", {
@@ -94,12 +101,30 @@ export async function applyStoredRampWebhookEvent(
 export async function replayRampWebhookEvents(env: Env): Promise<number> {
   const events = createPostgresRampWebhookEventsRepository(getDb(env));
   const cutoff = new Date(Date.now() - RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS).toISOString();
+  const appRevision = currentAppRevision(env);
+
+  // A deploy may carry the fix a parked row was waiting for: rows parked by a
+  // different revision go back to pending with fresh attempts, so the happy
+  // path after an incident is "ship the fix" with no manual re-arm. Rows the
+  // CURRENT revision parked stay parked — same code, same payload, same
+  // outcome.
+  for (const row of await events.rearmParkedByOtherRevisions(appRevision)) {
+    logEvent("info", {
+      event: "sdp_api_ramp_webhook_event_rearmed",
+      flow: "ramp-settlement",
+      webhook_event_id: row.id,
+      provider: row.provider,
+      environment: row.environment,
+      app_revision: appRevision,
+    });
+  }
 
   // A crash after the final claim leaves a pending row every claim excludes:
   // park it as failed and page, instead of stranding it silently.
   for (const row of await events.parkExhausted({
     updatedBefore: cutoff,
     maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+    appRevision,
   })) {
     logEvent("error", {
       event: RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT,

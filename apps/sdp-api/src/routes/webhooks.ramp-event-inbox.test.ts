@@ -247,6 +247,56 @@ describe("Ramp webhook event inbox", () => {
     expect(await readInboxRows()).toHaveLength(1);
   });
 
+  it("re-arms rows parked by another revision and leaves current-revision parks alone", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const fromOldDeploy = await events.insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: completedPayload,
+    });
+    const fromNullRevision = await events.insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: { type: "transaction_updated", data: { status: 42 } },
+    });
+    const fromCurrentDeploy = await events.insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: { type: "transaction_updated", data: { status: 43 } },
+    });
+    await getDb(env)
+      .prepare(
+        `UPDATE ramp_webhook_events
+           SET status = 'failed', attempts = 10,
+               parked_app_revision = CASE id WHEN ? THEN 'rev-previous' WHEN ? THEN NULL ELSE ? END
+         WHERE id IN (?, ?, ?)`
+      )
+      .bind(
+        fromOldDeploy.id,
+        fromNullRevision.id,
+        env.K_REVISION ?? "local",
+        fromOldDeploy.id,
+        fromNullRevision.id,
+        fromCurrentDeploy.id
+      )
+      .run();
+
+    await replayRampWebhookEvents(env);
+
+    const rows = await getDb(env)
+      .prepare("SELECT id, status, attempts FROM ramp_webhook_events ORDER BY created_at ASC")
+      .all<{ id: string; status: string; attempts: number }>();
+    const byId = new Map(rows.results.map((row) => [row.id, row]));
+    // Parked by an older deploy (or before revisions were stamped): the new
+    // rollout may carry the fix, so both go back to pending with fresh
+    // attempts for the next pass.
+    expect(byId.get(fromOldDeploy.id)).toMatchObject({ status: "pending", attempts: 0 });
+    expect(byId.get(fromNullRevision.id)).toMatchObject({ status: "pending", attempts: 0 });
+    // Parked by the revision that is still running: same code, same payload —
+    // stays parked.
+    expect(byId.get(fromCurrentDeploy.id)).toMatchObject({ status: "failed" });
+  });
+
   it("keeps a failing event pending with its error, then parks it after the last attempt", async () => {
     // A payload `parse` rejects stands in for any deterministic apply failure.
     const events = createPostgresRampWebhookEventsRepository(getDb(env));
