@@ -1,8 +1,12 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type CachedApiKey, CUSTODY_CONFIG_STATUSES, type CustodyConfigStatus } from "@sdp/types";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
+import { initializeSigningResponseSchema } from "@/openapi/schemas/custody";
+import type { SwitchSigningRequest } from "@/routes/custody/schemas";
+import { getLogger } from "@/runtime/logger";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -53,6 +57,77 @@ let originalParaApiKey: string | undefined;
 let originalPrivyByokEnabled: string | undefined;
 let originalPrivyAppId: string | undefined;
 let originalPrivyAppSecret: string | undefined;
+let originalCustodyEncryptionKey: string | undefined;
+
+async function switchProvider(body: SwitchSigningRequest): Promise<Response> {
+  return app.request(
+    "/v1/wallets/switch",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      },
+      body: JSON.stringify(body),
+    },
+    env
+  );
+}
+
+async function readScopeDefault() {
+  return getDb(env).queryOne<{
+    default_custody_config_id: string | null;
+    default_custody_connection_id: string | null;
+  }>(
+    `SELECT default_custody_config_id, default_custody_connection_id
+     FROM custody_scope_defaults WHERE organization_id = ? AND project_id = ?`,
+    [TEST_ORG.id, TEST_PROJECT.id]
+  );
+}
+
+async function prepareParaConfig(status: CustodyConfigStatus | "absent") {
+  const db = getDb(env);
+  if (status === "absent") {
+    await db.batch([
+      db.prepare("DELETE FROM custody_wallets WHERE custody_config_id = ?").bind(PARA_CONFIG_ID),
+      db.prepare("DELETE FROM custody_configs WHERE id = ?").bind(PARA_CONFIG_ID),
+    ]);
+  } else {
+    await db.execute("UPDATE custody_configs SET status = ? WHERE id = ?", [
+      status,
+      PARA_CONFIG_ID,
+    ]);
+  }
+  const providerFetch = vi.fn(async () =>
+    Response.json({
+      id: "para_wallet_initialized",
+      address: "11111111111111111111111111111111",
+      type: "SOLANA",
+      scheme: "ED25519",
+      status: "ready",
+    })
+  );
+  vi.stubGlobal("fetch", providerFetch);
+  return providerFetch;
+}
+
+async function readSwitchAudit() {
+  const rows = await getDb(env).queryMany<{
+    action: string;
+    resource_type: string;
+    resource_id: string;
+    api_key_id: string | null;
+    request_id: string | null;
+    metadata: string;
+  }>(
+    "SELECT action, resource_type, resource_id, api_key_id, request_id, metadata FROM audit_logs WHERE organization_id = ? ORDER BY ledger_sequence",
+    [TEST_ORG.id]
+  );
+  return rows.map((row) => ({
+    ...row,
+    metadata: z.record(z.string(), z.json()).parse(JSON.parse(row.metadata)),
+  }));
+}
 
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -170,7 +245,7 @@ async function seedAuthAndConfigs(): Promise<void> {
         "cwlt_para_a",
         PARA_CONFIG_ID,
         "para_wallet_a",
-        "para_pubkey_a",
+        "11111111111111111111111111111111",
         "Para Root A",
         "root",
         "active"
@@ -246,6 +321,8 @@ describe("Custody multi-provider routes", () => {
     originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
     originalPrivyAppId = env.PRIVY_APP_ID;
     originalPrivyAppSecret = env.PRIVY_APP_SECRET;
+    originalCustodyEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
+    env.CUSTODY_ENCRYPTION_KEY = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
     env.PARA_API_KEY = "para_test_api_key";
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
@@ -256,7 +333,262 @@ describe("Custody multi-provider routes", () => {
     env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
     env.PRIVY_APP_ID = originalPrivyAppId;
     env.PRIVY_APP_SECRET = originalPrivyAppSecret;
+    env.CUSTODY_ENCRYPTION_KEY = originalCustodyEncryptionKey;
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     await clearKVStores(env);
+  });
+
+  it.each([...CUSTODY_CONFIG_STATUSES, "absent"] as const)(
+    "rejects unavailable provider for an %s Config before opening an audit intent",
+    async (status) => {
+      const providerFetch = await prepareParaConfig(status);
+      const before = await readScopeDefault();
+      env.PARA_API_KEY = undefined;
+
+      const response = await switchProvider({ provider: "para" });
+
+      expect(response.status).toBe(403);
+      expect(providerFetch).not.toHaveBeenCalled();
+      expect(await readScopeDefault()).toEqual(before);
+      expect(await readSwitchAudit()).toHaveLength(0);
+    }
+  );
+
+  it("rejects fresh legacy Privy setup before opening an audit intent", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    env.PRIVY_APP_ID = "legacy-privy-app";
+    env.PRIVY_APP_SECRET = "legacy-privy-secret";
+    await getDb(env).execute("UPDATE custody_configs SET status = 'inactive' WHERE id = ?", [
+      PRIVY_CONFIG_ID,
+    ]);
+    const before = await readScopeDefault();
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+
+    const response = await switchProvider({ provider: "privy" });
+
+    expect(response.status).toBe(403);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await readScopeDefault()).toEqual(before);
+    expect(await readSwitchAudit()).toHaveLength(0);
+  });
+
+  it.each([...CUSTODY_CONFIG_STATUSES, "absent"] as const)(
+    "does not change an %s Config when the audit intent cannot persist",
+    async (status) => {
+      const db = getDb(env);
+      const providerFetch = await prepareParaConfig(status);
+      await db.execute(
+        `ALTER TABLE audit_logs ADD CONSTRAINT fail_switch_intent
+       CHECK (metadata::jsonb->>'auditPhase' IS DISTINCT FROM 'intent') NOT VALID`
+      );
+      try {
+        const response = await switchProvider({ provider: "para" });
+        expect(response.status).toBe(500);
+        expect(await readScopeDefault()).toEqual({
+          default_custody_config_id: PRIVY_CONFIG_ID,
+          default_custody_connection_id: null,
+        });
+        expect(providerFetch).not.toHaveBeenCalled();
+        expect(
+          await db.queryOne("SELECT status FROM custody_configs WHERE id = ?", [PARA_CONFIG_ID])
+        ).toEqual(status === "absent" ? null : { status });
+      } finally {
+        await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT fail_switch_intent");
+      }
+    }
+  );
+
+  it.each([...CUSTODY_CONFIG_STATUSES, "absent"] as const)(
+    "keeps an %s Config switch successful when later audit writes fail",
+    async (status) => {
+      const db = getDb(env);
+      const providerFetch = await prepareParaConfig(status);
+      await db.execute(
+        `ALTER TABLE audit_logs ADD CONSTRAINT fail_switch_outcome
+       CHECK (metadata::jsonb->>'auditPhase' IS NOT DISTINCT FROM 'intent') NOT VALID`
+      );
+      try {
+        const response = await switchProvider({ provider: "para" });
+        expect(response.status).toBe(201);
+        const body = z
+          .object({ data: initializeSigningResponseSchema.strict() })
+          .parse(await response.json());
+        expect(await readScopeDefault()).toEqual({
+          default_custody_config_id: body.data.configId,
+          default_custody_connection_id: null,
+        });
+        expect(providerFetch).toHaveBeenCalledTimes(status === "absent" ? 2 : 0);
+        const audit = await readSwitchAudit();
+        expect(audit).toHaveLength(1);
+        expect(audit[0]).toMatchObject({
+          api_key_id: TEST_API_KEY.id,
+          metadata: { auditPhase: "intent", target: { metadata: { ownerKind: "config" } } },
+        });
+      } finally {
+        await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT fail_switch_outcome");
+      }
+    }
+  );
+
+  it.each(["intent", "outcome"] as const)(
+    "handles unavailable Connection audit %s without a misleading selection",
+    async (phase) => {
+      env.PRIVY_BYOK_ENABLED = "true";
+      const connection = await seedActivePrivyConnection(`audit_${phase}`);
+      const db = getDb(env);
+      await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT fail_connection_audit
+      CHECK (metadata::jsonb->>'auditPhase' IS DISTINCT FROM '${phase}') NOT VALID`);
+      try {
+        const response = await switchProvider({ connectionId: connection.connectionId });
+        expect(response.status).toBe(phase === "intent" ? 500 : 201);
+        expect(await readScopeDefault()).toEqual({
+          default_custody_config_id: PRIVY_CONFIG_ID,
+          default_custody_connection_id: phase === "intent" ? null : connection.connectionId,
+        });
+        expect(await readSwitchAudit()).toHaveLength(phase === "intent" ? 0 : 1);
+      } finally {
+        await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT fail_connection_audit");
+      }
+    }
+  );
+
+  it("audits one actual Connection transition and a technical completion for concurrent same-target switches", async () => {
+    env.PRIVY_BYOK_ENABLED = "true";
+    const connection = await seedActivePrivyConnection("concurrent_audit");
+    const responses = await Promise.all([
+      switchProvider({ connectionId: connection.connectionId }),
+      switchProvider({ connectionId: connection.connectionId }),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    const audit = await readSwitchAudit();
+    const outcomes = audit.filter((row) => row.metadata.auditPhase === "outcome");
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes.find((row) => row.metadata.completionStatus === "success")).toMatchObject({
+      resource_type: "custody_connection",
+      resource_id: connection.connectionId,
+      api_key_id: TEST_API_KEY.id,
+      metadata: {
+        event: "default_provider_changed",
+        selections: [
+          {
+            previousConfigId: PRIVY_CONFIG_ID,
+            previousConnectionId: null,
+            selectedConfigId: PRIVY_CONFIG_ID,
+            selectedConnectionId: connection.connectionId,
+          },
+        ],
+      },
+    });
+    expect(outcomes.find((row) => row.metadata.completionStatus === "noop")).toMatchObject({
+      action: "maintenance",
+      resource_type: "audit_ledger",
+      metadata: { event: "default_provider_selection_completed" },
+    });
+  });
+
+  it("retains the confirmed initialization audit when the final selection commit response is lost", async () => {
+    await prepareParaConfig("inactive");
+    const db = getDb(env);
+    await db.execute(
+      "DELETE FROM custody_scope_defaults WHERE organization_id = ? AND project_id = ?",
+      [TEST_ORG.id, TEST_PROJECT.id]
+    );
+    const transaction = db.transaction.bind(db);
+    const errorLog = vi.spyOn(getLogger(), "error");
+    vi.spyOn(db, "transaction").mockImplementation(async (callback) => {
+      const result = await transaction(callback);
+      if (
+        result &&
+        typeof result === "object" &&
+        "previousConfigId" in result &&
+        result.previousConfigId === PARA_CONFIG_ID
+      ) {
+        throw new Error("selection commit response lost");
+      }
+      return result;
+    });
+    const response = await switchProvider({ provider: "para" });
+    expect(response.status).toBe(500);
+    const audit = await readSwitchAudit();
+    expect(audit).toMatchObject([
+      { metadata: { auditPhase: "intent" } },
+      { metadata: { event: "provider_initialization_completed" } },
+    ]);
+    expect(audit).toHaveLength(2);
+    const [intent, initialization] = audit;
+    assert(intent);
+    assert(initialization);
+    expect(initialization.metadata.commandAuditIntentId).toBe(intent.resource_id);
+    expect(initialization.metadata.defaultSelection).toEqual({
+      previousConfigId: null,
+      previousConnectionId: null,
+      selectedConfigId: PARA_CONFIG_ID,
+      selectedConnectionId: null,
+    });
+    expect(await readScopeDefault()).toEqual({
+      default_custody_config_id: PARA_CONFIG_ID,
+      default_custody_connection_id: null,
+    });
+    expect(errorLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "custody_default_selection_outcome_unknown",
+        initializedConfigId: PARA_CONFIG_ID,
+        reason: "selection_outcome_unconfirmed",
+      })
+    );
+  });
+
+  it("records concurrent inactive Config initialization as command completions without claiming two reactivations", async () => {
+    await prepareParaConfig("inactive");
+    const db = getDb(env);
+    const transaction = db.transaction.bind(db);
+    let release = () => {};
+    const bothInitializationsReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let transactionCalls = 0;
+    // Hold the first initialization before its database transaction starts until
+    // the other request also passed the inactive Config checks. No writes occur
+    // under this barrier, so both requests deterministically observe the race.
+    vi.spyOn(db, "transaction").mockImplementation(async (callback) => {
+      transactionCalls += 1;
+      if (transactionCalls <= 2) {
+        if (transactionCalls === 2) release();
+        await bothInitializationsReady;
+      }
+      return transaction(callback);
+    });
+
+    const responses = await Promise.all([
+      switchProvider({ provider: "para" }),
+      switchProvider({ provider: "para" }),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    const audit = await readSwitchAudit();
+    const initializations = audit.filter(
+      (row) => row.metadata.event === "provider_initialization_completed"
+    );
+    expect(initializations).toHaveLength(2);
+    for (const entry of initializations) {
+      expect(entry).toMatchObject({
+        action: "maintenance",
+        resource_type: "audit_ledger",
+        metadata: { configId: PARA_CONFIG_ID },
+      });
+      expect(entry.resource_id).toBe(entry.metadata.commandAuditIntentId);
+    }
+    expect(
+      audit.filter(
+        (row) =>
+          row.metadata.event === "provider_reactivated" ||
+          row.metadata.event === "provider_connected"
+      )
+    ).toEqual([]);
+    expect(audit.filter((row) => row.metadata.event === "default_provider_changed")).toHaveLength(
+      1
+    );
   });
 
   it("switches default provider without deactivating other active providers", async () => {

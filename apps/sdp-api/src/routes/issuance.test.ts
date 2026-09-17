@@ -957,6 +957,277 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("stops a denied deploy before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_deploy_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_deploy_denied",
+        mintAddress: null,
+        status: "pending",
+        signingCustodyWalletId: wallet.custodyWalletId,
+        signingWalletId: wallet.walletId,
+        requiresAllowlist: false,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-deploy", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const createTokenSpy = vi.spyOn(MosaicService.prototype, "createToken");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/deploy`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({}),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(createTokenSpy).not.toHaveBeenCalled();
+        const stored = await getDb(env)
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{ status: string }>();
+        expect(stored).toEqual({ status: "pending" });
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_deploy_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        createTokenSpy.mockRestore();
+      }
+    });
+
+    it("stops a deploy whose metadata authority wallet is denied by its own policy", async () => {
+      const deployWallet = await seedIssuanceActivityWallet(
+        "wal_issuance_deploy_meta_ok",
+        policyMintAuthority
+      );
+      const metadataWallet = await seedIssuanceActivityWallet(
+        "wal_issuance_deploy_meta_denied",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_deploy_meta_denied",
+        mintAddress: null,
+        status: "pending",
+        signingCustodyWalletId: deployWallet.custodyWalletId,
+        signingWalletId: deployWallet.walletId,
+        requiresAllowlist: false,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${metadataWallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-deploy-metadata", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const createTokenSpy = vi.spyOn(MosaicService.prototype, "createToken");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/deploy`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              authorityCustodyWalletIds: { metadata: metadataWallet.custodyWalletId },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(createTokenSpy).not.toHaveBeenCalled();
+        const stored = await getDb(env)
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{ status: string }>();
+        expect(stored).toEqual({ status: "pending" });
+      } finally {
+        createTokenSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied allowlist add before signer and list mutation", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_allowlist_add_denied",
+        TEST_ACTIVE_TOKEN.mintAuthority ?? TEST_SOLANA_ADDRESSES.wallet3
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_allowlist_add_denied",
+        signingWalletId: wallet.walletId,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-allowlist-add", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(addToListSpy).not.toHaveBeenCalled();
+        const row = await getDb(env)
+          .prepare("SELECT id FROM token_allowlists WHERE token_id = ? AND address = ?")
+          .bind(token.id, TEST_SOLANA_ADDRESSES.wallet1)
+          .first<{ id: string }>();
+        expect(row).toBeNull();
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_allowlist_add_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        addToListSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied allowlist removal before signer and list mutation", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_allowlist_remove_denied",
+        TEST_ACTIVE_TOKEN.mintAuthority ?? TEST_SOLANA_ADDRESSES.wallet3
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_allowlist_remove_denied",
+        signingWalletId: wallet.walletId,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO token_allowlists (id, token_id, address, status, added_by)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "tal_policy_remove_denied",
+          token.id,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          "active",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-allowlist-remove", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const removeFromListSpy = vi.spyOn(MosaicService.prototype, "removeFromList");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/allowlist/tal_policy_remove_denied`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(removeFromListSpy).not.toHaveBeenCalled();
+        const row = await getDb(env)
+          .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+          .bind("tal_policy_remove_denied")
+          .first<{ status: string }>();
+        expect(row).toEqual({ status: "active" });
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_allowlist_remove_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        removeFromListSpy.mockRestore();
+      }
+    });
+
     it("stops a denied unfreeze before signer and issuance side effects", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_unfreeze_denied",
@@ -5515,6 +5786,76 @@ describe("Issuance Routes", () => {
         expect(body.data.entry.status).toBe("active");
         expect(admitSpy).not.toHaveBeenCalled();
         admitSpy.mockRestore();
+      });
+
+      it("refuses to re-add an address already on the control list", async () => {
+        const first = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+        expect(first.status).toBe(201);
+
+        const replay = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+        expect(replay.status).toBe(409);
+        const count = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM token_allowlists WHERE token_id = ?")
+          .bind(tokenId)
+          .first<{ count: number }>();
+        expect(count).toEqual({ count: 1 });
+      });
+
+      it("acknowledges removing an already revoked allowlist entry without signing", async () => {
+        const createRes = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+        expect(createRes.status).toBe(201);
+        const entryId = (await createRes.json()).data.entry.id as string;
+        await getDb(env)
+          .prepare("UPDATE token_allowlists SET status = 'revoked' WHERE id = ?")
+          .bind(entryId)
+          .run();
+        const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        signerSpy.mockClear();
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(204);
+        expect(signerSpy).not.toHaveBeenCalled();
       });
 
       it("syncs the control list on-chain when an ABL address is configured", async () => {

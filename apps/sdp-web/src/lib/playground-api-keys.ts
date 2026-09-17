@@ -61,6 +61,15 @@ function scheduleExpiryCheck(now = Date.now()): void {
   );
 }
 
+/**
+ * Shape check only. It says the string could be SDP key material, never that the
+ * key exists or belongs to this project. Only the API can answer that, by
+ * hashing the whole key.
+ */
+export function isValidSdpApiKey(rawValue: string): boolean {
+  return /^sk_(test|live)_[A-Za-z0-9_-]+$/.test(rawValue);
+}
+
 export function normalizeApiKeyInput(rawValue: string): string {
   const trimmed = rawValue.trim();
   if (trimmed.startsWith("Bearer ")) {
