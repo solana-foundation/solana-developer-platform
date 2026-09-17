@@ -30,8 +30,11 @@ api/dashboard/markets/earn/
                                      Kamino's allocations source is
                                      mainnet-only, so the handler refuses any
                                      other cluster with a 400 before reading
-                                     anything else. Everything else about the
-                                     request is policed by the store module —
+                                     anything else, and a vault that is not
+                                     even a public key is a client bug —
+                                     400 before anything downstream. The
+                                     rest of the request is policed by the
+                                     store module —
                                      the server boundary: Kamino would answer
                                      any well-formed mainnet vault, so the
                                      store admits a vault only if it is a
