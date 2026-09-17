@@ -1939,19 +1939,17 @@ describe("TreasurySolutionsWorkspace", () => {
   });
 
   it("keeps sandbox-only vault deposits disabled when another provider is open in production", () => {
+    // Kamino deposits open in production since PRO-1986; Veda is the provider
+    // the deposit-environment map still leaves sandbox-only (PRO-1777).
     mocks.environment = "production";
     renderWorkspace();
 
-    const row = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((candidate) => candidate?.textContent?.includes("6.2%"));
+    const row = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!row) throw new Error("Expected vault strategy row");
     expect(
       (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
     expect(within(row).getByText("Sandbox only")).toBeTruthy();
-    expect(within(row).getByText("$12,345,678.90")).toBeTruthy();
     expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
   });
 

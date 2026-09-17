@@ -6,6 +6,8 @@ import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
 
+export class TerminalRampWebhookError extends Error {}
+
 export interface WebhookProcessor<Payload = unknown, Event = unknown> {
   readonly provider: RampProviderId;
   verify(context: RampWebhookValidationContext): Promise<Payload>;

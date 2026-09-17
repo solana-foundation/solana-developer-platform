@@ -370,15 +370,25 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
 }
 
 /**
- * Wallet policies are the control plane that constrains API keys, so an API
- * key may author them only with the api_admin role — a lesser key must not
- * rewrite the profile that governs itself. Dashboard actors are unaffected.
+ * Wallet and API-key policies are the control plane that constrains keys, so
+ * authoring them is held to administrators on both actor axes: an API key
+ * must hold the api_admin role — a lesser key must not rewrite the profile
+ * that governs itself or a sibling — and a dashboard actor must hold the
+ * org:admin permission, which only the organization admin role grants.
  */
 export function requireAdminApiKeyRole() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const apiKey = c.get("apiKey");
-    if (apiKey && apiKey.role !== "api_admin") {
-      throw new AppError("FORBIDDEN", "This operation requires an api_admin API key");
+    if (apiKey) {
+      if (apiKey.role !== "api_admin") {
+        throw new AppError("FORBIDDEN", "This operation requires an api_admin API key");
+      }
+      await next();
+      return;
+    }
+    const permissions = grantedPermissions(c);
+    if (permissions !== "*" && !permissions.includes("org:admin")) {
+      throw new AppError("FORBIDDEN", "This operation requires an organization admin");
     }
     await next();
   };

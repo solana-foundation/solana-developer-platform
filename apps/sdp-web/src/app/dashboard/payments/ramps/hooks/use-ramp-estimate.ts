@@ -29,11 +29,13 @@ export function useRampEstimate({
   enabled,
 }: UseRampEstimateArgs): UseRampEstimateResult {
   const t = useTranslations();
-  const debouncedAmount = useDebounce(amount.trim(), 300);
-  const hasAmount = enabled && debouncedAmount.length > 0 && /[1-9]/.test(debouncedAmount);
+  const currentAmount = amount.trim();
+  const debouncedAmount = useDebounce(currentAmount, 300);
+  const hasAmount = enabled && currentAmount.length > 0 && /[1-9]/.test(currentAmount);
+  const isDebouncing = currentAmount !== debouncedAmount;
 
   const { data, isValidating } = useSWR(
-    hasAmount
+    hasAmount && !isDebouncing
       ? paymentsQueryKeys.rampEstimate({
           direction,
           fiatCurrency: selectedPair.fiatCurrency,
@@ -51,18 +53,18 @@ export function useRampEstimate({
         },
         t
       ),
-    { keepPreviousData: true }
+    { keepPreviousData: false }
   );
 
   const estimatesByProvider = useMemo(() => {
     const map = new Map<RampProviderId, RampProviderEstimateResult>();
-    if (hasAmount && data) {
+    if (hasAmount && !isDebouncing && data) {
       for (const result of data) {
         map.set(result.provider, result);
       }
     }
     return map;
-  }, [data, hasAmount]);
+  }, [data, hasAmount, isDebouncing]);
 
-  return { estimatesByProvider, loading: isValidating };
+  return { estimatesByProvider, loading: hasAmount && (isDebouncing || isValidating) };
 }

@@ -1,10 +1,12 @@
+import "server-only";
+
 import type {
   TokenEarnings,
   YieldMovement,
   YieldPosition,
   YieldStrategy,
-} from "../src/types.ts";
-import type { DemoConfig } from "./env.ts";
+} from "../src/types";
+import type { DemoConfig } from "./env";
 
 interface SdpErrorEnvelope {
   error?: {
@@ -169,13 +171,6 @@ export class EmbeddedYieldClient {
     return data.withdrawal;
   }
 
-  async getMovement(movementId: string): Promise<YieldMovement> {
-    const data = await this.request<{ movement: YieldMovement }>(
-      `/v1/earn/external-wallet/movements/${encodeURIComponent(movementId)}`
-    );
-    return data.movement;
-  }
-
   async listActivity(ownerAddress: string): Promise<YieldMovement[]> {
     return this.allowUnknownOwner(async () => {
       const query = new URLSearchParams({ ownerAddress, limit: "20" });
@@ -220,31 +215,6 @@ export class EmbeddedYieldClient {
     }, []);
   }
 
-  async waitForMovement(
-    movementId: string,
-    timeoutMs = 45_000
-  ): Promise<YieldMovement> {
-    const deadline = Date.now() + timeoutMs;
-    let movement = await this.getMovement(movementId);
-
-    while (
-      movement.status !== "finalized" &&
-      movement.status !== "failed" &&
-      Date.now() < deadline
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 1_500));
-      movement = await this.getMovement(movementId);
-    }
-
-    if (movement.status !== "finalized" && movement.status !== "failed") {
-      throw new Error(
-        `Movement ${movementId} is still ${movement.status} after ${timeoutMs}ms; refresh before treating it as settled`
-      );
-    }
-
-    return movement;
-  }
-
   private async allowUnknownOwner<T>(
     load: () => Promise<T>,
     empty: T
@@ -278,6 +248,7 @@ export class EmbeddedYieldClient {
       {
         method: options.method ?? "GET",
         headers,
+        cache: "no-store",
         body:
           options.body === undefined ? undefined : JSON.stringify(options.body),
       }

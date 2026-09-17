@@ -24,7 +24,7 @@ import {
 import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
-import type { AppError } from "@/lib/errors";
+import { type AppError, conflict } from "@/lib/errors";
 import {
   acceptTransaction,
   buildDvpTradeRow,
@@ -62,7 +62,9 @@ vi.mock("@sdp/dvp", async (importOriginal) => ({
   verifySwapDvpAccount,
   decodeSwapDvpChecked,
 }));
+const assertTradeNotClosing = vi.hoisted(() => vi.fn());
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
+vi.mock("./close-exclusion", () => ({ assertTradeNotClosing }));
 vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
   createPostgresDvpLegFundingClaimRepository: () => ({
     claim: claimFunding,
@@ -147,6 +149,7 @@ describe("fundDvpTradeLeg", () => {
     });
     sendTransaction.mockImplementation(acceptTransaction);
     claimFunding.mockResolvedValue(true);
+    assertTradeNotClosing.mockResolvedValue(undefined);
     releaseFunding.mockResolvedValue(undefined);
     rebindSignature.mockResolvedValue(true);
     hasClaim.mockResolvedValue(true);
@@ -616,5 +619,29 @@ describe("fundDvpTradeLeg", () => {
         expect.objectContaining({ side: "b", organizationId: "org_b", custodyWalletId: "cwlt_b" })
       );
     });
+  });
+
+  // PRO-1973. The leg is locked first, then the trade read: a settle or cancel
+  // that locked the trade before that read is in flight, so this backs off and
+  // frees the leg for it. One that locks after sees the leg's lock instead.
+  it("backs off before sponsorship and frees the leg when a settle or cancel is in flight", async () => {
+    const closing = conflict("a settle is in flight on this trade", {
+      reason: DVP_LEG_REFUSAL.tradeClosing,
+    });
+    assertTradeNotClosing.mockRejectedValue(closing);
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toBe(closing);
+
+    expect(claimFunding.mock.invocationCallOrder[0]).toBeLessThan(
+      assertTradeNotClosing.mock.invocationCallOrder[0]
+    );
+    expect(releaseFunding).toHaveBeenCalledWith(
+      trade().id,
+      "a",
+      claimFunding.mock.calls[0][0].signature
+    );
+    expect(prepareOwnedSubmission).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+    expect(recordAttempt).not.toHaveBeenCalled();
   });
 });

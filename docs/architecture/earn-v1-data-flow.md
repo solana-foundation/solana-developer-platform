@@ -145,11 +145,12 @@ ones for every READ.
 The withdraw counterpart landed with PRO-1702: `POST /v1/earn/vault-withdrawals`
 records one share-mint-denominated signed movement before broadcasting it, and
 the treasury dashboard's exit action drives it. The shared vault reconciliation
-sweep finishes an ambiguous or interrupted submission. Production vault
-deposits open PER PROVIDER (`EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`
-in `@sdp/types`): the two mainnet-only providers, Jupiter Lend and Ondo, accept
-production deposits, while Kamino and Veda stay sandbox-only until PRO-1635's
-launch checklist opens them; the exit route itself takes no environment gate —
+sweep finishes an ambiguous or interrupted submission. Vault deposits open
+where the provider is DEPLOYED (`EARN_PROVIDER_DEPLOYED_CLUSTERS` in
+`@sdp/types`, derived from each provider's program table and mapped through
+`CLUSTER_BY_SDP_ENVIRONMENT`): Kamino from sandbox and production, Jupiter Lend
+and Ondo from production only, Veda from sandbox until PRO-1777 fills its
+mainnet deployment; the exit route itself takes no environment gate —
 money out beats money off.
 
 The removed pre-PRO-1634 execution sketch is not a contract. New providers must
@@ -175,7 +176,7 @@ per-provider movement endpoints or status polling types from git history.
 | Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Treasury vault deposits and withdrawals emit `program` / `earn_vault_deposit` or `earn_vault_withdrawal`, enforce before custody, and fence approved retries against the signed intent; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
 | Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
-| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public Earn route inventory and the optional-auth contract for the keyless subset | 🔨 regenerate after the security-reviewed contract change |
+| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public Earn route inventory and the optional-auth contract for the six keyless operations | ✅ source and generated artifacts aligned |
 
 **Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
 (Kamino, Veda, Jupiter Lend and Ondo carry real catalogue reads;

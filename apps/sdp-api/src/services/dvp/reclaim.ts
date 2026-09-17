@@ -40,6 +40,7 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import { assertTradeNotClosing } from "./close-exclusion";
 import { readDvpFundingReceipt } from "./funding-receipt";
 import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 import { UNSUPPORTED_MINT_EXTENSIONS } from "./mints";
@@ -182,6 +183,17 @@ export async function reclaimDvpTradeLeg(
     throw conflict(`DvP trade ${trade.id}: this leg is already being moved; nothing was sent`, {
       reason: DVP_LEG_REFUSAL.legFundingInProgress,
     });
+  }
+
+  // With the leg locked, a settle or cancel that starts now sees the lock and
+  // backs off. One that locked the trade first is seen here instead. Backing off
+  // after taking over a receipt drops that receipt; the transfer it pointed at
+  // has already landed or provably moved nothing, so no funding is lost.
+  try {
+    await assertTradeNotClosing(env, rpc, trade.id);
+  } catch (error) {
+    await claims.release(trade.id, side, claimSignature);
+    throw error;
   }
 
   let heldSignature: Signature = claimSignature;

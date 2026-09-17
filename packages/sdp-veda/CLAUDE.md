@@ -256,6 +256,7 @@ pnpm --filter @sdp/veda test
 ```
 
 DEVNET only. Veda's own checklist requires their separate approval for any
-value-moving mainnet test, and Veda's entry in
-`EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` is sandbox-only for the same
-reason.
+value-moving mainnet test, and `VEDA_DEPLOYMENTS["mainnet-beta"]` stays null
+for the same reason: `EARN_PROVIDER_DEPLOYED_CLUSTERS` derives Veda's deposit
+environments from that table, so production deposits open only when PRO-1777
+fills it.

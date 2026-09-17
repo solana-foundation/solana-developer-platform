@@ -65,6 +65,19 @@ const productionOnlyStrategy: EarnStrategy = {
   withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
 };
 
+/** Veda deposits stay sandbox-only until it names a production vault (PRO-1777). */
+const sandboxOnlyStrategy: EarnStrategy = {
+  ...liveStrategy,
+  id: "earn_strategy_veda",
+  provider: "veda",
+  providerReference: "VedaVault1111111111111111111111111111111111",
+  name: "Veda Treasury Fund",
+  sourceKind: "rwa",
+  shareMint: "ShareVeda1111111111111111111111111111111111",
+  depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+  withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+};
+
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as SdpEnvironment,
   strategyClusters: [] as Array<SolanaCluster | undefined>,
@@ -84,7 +97,7 @@ vi.mock("./earn-program-data", () => ({
         ? mocks.mainnetLoading
           ? undefined
           : [mainnetStrategy]
-        : [liveStrategy, secondLiveStrategy, productionOnlyStrategy],
+        : [liveStrategy, secondLiveStrategy, productionOnlyStrategy, sandboxOnlyStrategy],
       error: undefined,
       isLoading: mainnet && mocks.mainnetLoading,
     };
@@ -386,7 +399,7 @@ describe("EarnIntegrationGuide", () => {
     // Deep link: the explanation says production-only, not sandbox-only.
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/Production projects only/)).toBeTruthy();
-    expect(screen.queryByText(/sandbox-only/)).toBeNull();
+    expect(screen.queryByText(/Sandbox projects only/)).toBeNull();
 
     // Dropdown: the disabled row carries the same verdict.
     await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
@@ -401,13 +414,16 @@ describe("EarnIntegrationGuide", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
         earnHref="/dashboard/markets/embedded-yield"
-        providerAccess={providerAccess}
-        strategyId="earn_strategy_live"
+        providerAccess={{
+          ...providerAccess,
+          veda: { entitled: true, configured: true, enabled: true },
+        }}
+        strategyId={sandboxOnlyStrategy.id}
       />
     );
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.getByText(/sandbox-only/)).toBeTruthy();
+    expect(screen.getByText(/Sandbox projects only/)).toBeTruthy();
     expect(screen.queryByText("2. Set up the server code")).toBeNull();
   });
 

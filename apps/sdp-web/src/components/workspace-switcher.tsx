@@ -20,6 +20,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { clearStoredApiKeySecrets } from "@/lib/playground-api-keys";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 
@@ -143,6 +144,7 @@ export function WorkspaceSwitcher({
                 disabled={isOrganizationSwitching || isProjectSwitching}
                 onSelect={() => {
                   if (!isActive && setActive) {
+                    clearStoredApiKeySecrets();
                     setOrganizationSwitching(true);
                     onOrganizationSwitchingChange?.(true);
                     const finishSwitch = () => {

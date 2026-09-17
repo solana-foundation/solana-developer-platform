@@ -66,6 +66,18 @@ export interface DvpLegFundingClaimRepository {
   release(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
   /** Records the transfer once it is on the wire, so it outlives the claim. */
   recordFundingTx(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
+  /**
+   * Whether any leg of the trade is being moved right now: a lock (a funding not
+   * yet on the wire, or a reclaim not yet confirmed) whose transaction can still
+   * land.
+   *
+   * Read by a close before it is sent. A receipt does not count: a funding on
+   * the wire either lands before the close, and settle reads the escrow as it
+   * is, or after it, and the transfer into a closed escrow fails with nothing
+   * moved. The trade's own organization reads every organization's claims on its
+   * trade (0110), so a party's reclaim counts.
+   */
+  hasLiveClaim(tradeId: string, blockHeight: bigint): Promise<boolean>;
   /** Every claim on a trade, for rendering who has paid and who has not. */
   listForTrade(tradeId: string): Promise<DvpLegFundingClaim[]>;
   /**
@@ -226,6 +238,19 @@ export function createPostgresDvpLegFundingClaimRepository(
         .bind(blockHeight.toString())
         .all<{ trade_id: string }>();
       return result.results.length;
+    },
+
+    async hasLiveClaim(tradeId, blockHeight) {
+      const row = await db
+        .prepare(
+          `SELECT 1 AS live
+             FROM dvp_leg_funding_claims
+            WHERE trade_id = ? AND funding_tx IS NULL AND CAST(expiry_height AS NUMERIC) >= ?
+            LIMIT 1`
+        )
+        .bind(tradeId, blockHeight.toString())
+        .first<{ live: number }>();
+      return row !== null;
     },
 
     async listForTrade(tradeId) {

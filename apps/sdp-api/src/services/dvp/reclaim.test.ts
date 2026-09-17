@@ -28,6 +28,7 @@ import {
 } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
+import { conflict } from "@/lib/errors";
 import { acceptTransaction, buildDvpTradeRow, createTestSponsor } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 
@@ -59,7 +60,9 @@ vi.mock("@sdp/dvp", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/dvp")>()),
   verifySwapDvpAccount,
 }));
+const assertTradeNotClosing = vi.hoisted(() => vi.fn());
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
+vi.mock("./close-exclusion", () => ({ assertTradeNotClosing }));
 vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
   createPostgresDvpLegFundingClaimRepository: () => ({
     claimForReclaim,
@@ -155,6 +158,7 @@ describe("reclaimDvpTradeLeg", () => {
     fetchMaybeMint.mockResolvedValue({ exists: true, data: { extensions: { __option: "None" } } });
     listForTrade.mockResolvedValue([]);
     claimForReclaim.mockResolvedValue(true);
+    assertTradeNotClosing.mockResolvedValue(undefined);
     rebindSignature.mockResolvedValue(true);
     hasClaim.mockResolvedValue(true);
     releaseClaim.mockResolvedValue(undefined);
@@ -430,5 +434,29 @@ describe("reclaimDvpTradeLeg", () => {
       details: { reason: DVP_LEG_REFUSAL.signerNotParty },
     });
     expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+  });
+
+  // PRO-1973. The leg is locked first, then the trade read: a settle or cancel
+  // that locked the trade before that read is in flight, so this backs off and
+  // frees the leg for it. One that locks after sees the leg's lock instead.
+  it("backs off before sponsorship and frees the leg when a settle or cancel is in flight", async () => {
+    const closing = conflict("a settle is in flight on this trade", {
+      reason: DVP_LEG_REFUSAL.tradeClosing,
+    });
+    assertTradeNotClosing.mockRejectedValue(closing);
+
+    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toBe(closing);
+
+    expect(claimForReclaim.mock.invocationCallOrder[0]).toBeLessThan(
+      assertTradeNotClosing.mock.invocationCallOrder[0]
+    );
+    expect(releaseClaim).toHaveBeenCalledWith(
+      trade().id,
+      "a",
+      claimForReclaim.mock.calls[0][0].signature
+    );
+    expect(prepareOwnedSubmission).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+    expect(recordAttempt).not.toHaveBeenCalled();
   });
 });
