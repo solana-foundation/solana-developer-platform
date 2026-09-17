@@ -27,16 +27,15 @@ function GeneratedApiKeyModal({
   const [copyLabel, setCopyLabel] = useState(() => t("DashboardCustody.copyValue"));
 
   useEffect(() => {
-    if (!keyValue) {
+    if (!(keyValue && apiKeyId)) {
       return;
     }
 
     storeApiKeySecret({
       value: keyValue,
-      apiKeyId: apiKeyId ?? null,
-      keyPrefix: keyPrefix ?? null,
+      apiKeyId,
     });
-  }, [apiKeyId, keyValue, keyPrefix]);
+  }, [apiKeyId, keyValue]);
 
   const close = async () => {
     setIsOpen(false);

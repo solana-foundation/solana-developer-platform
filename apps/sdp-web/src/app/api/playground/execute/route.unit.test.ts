@@ -108,14 +108,46 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("fails closed when ownership verification cannot be resolved", async () => {
-    const request = vi.fn().mockRejectedValueOnce(new Error("metadata service unavailable"));
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new Error(`request failed for Bearer ${OWNED_API_KEY}`));
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(executeRequest());
+    const responseText = await response.text();
 
     expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({ error: "Playground execution failed" });
+    expect(JSON.parse(responseText)).toEqual({ error: "Playground execution failed" });
+    expect(responseText).not.toContain(OWNED_API_KEY);
+    expect(mocks.logRouteResult).toHaveBeenLastCalledWith(expect.anything(), 500, {
+      error: "Playground execution failed",
+    });
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("redacts a rejected upstream response that echoes the submitted secret", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: `Rejected ${OWNED_API_KEY}` }), {
+          status: 400,
+          statusText: `Rejected ${OWNED_API_KEY}`,
+        })
+      );
+    mocks.createSdpApiClient.mockResolvedValue({ request });
+
+    const response = await POST(executeRequest());
+    const responseText = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(responseText)).toEqual({
+      ok: false,
+      status: 400,
+      statusText: "Rejected [REDACTED]",
+      body: { error: "Rejected [REDACTED]" },
+    });
+    expect(responseText).not.toContain(OWNED_API_KEY);
   });
 
   it.each([
