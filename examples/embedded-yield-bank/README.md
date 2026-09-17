@@ -32,11 +32,13 @@ affordances for the example.
   modules guarded with `server-only`.
 - The whole deployment, including signing routes, fails closed behind HTTP
   Basic auth using `DEMO_ACCESS_USERNAME` and `DEMO_ACCESS_PASSWORD`.
+- Deposit and withdrawal routes accept same-origin JSON requests only, before
+  any request body can reach the server-side signer.
 - No secret uses a `NEXT_PUBLIC_` prefix and no secret is serialized into page
   props or API responses.
 - Movement routes submit promptly. The browser polls the dashboard route for
-  finality, which avoids holding a serverless function open while Solana
-  settles.
+  finality for up to two minutes, then pauses and surfaces a timeout. This
+  avoids holding a serverless function open while Solana settles.
 - API responses and outbound SDP reads use `no-store` caching.
 - Submit retries reuse one `Idempotency-Key`.
 - Quote-derived slippage floors use exact `BigInt` arithmetic.
@@ -68,6 +70,13 @@ development configuration described in
    ```dotenv
    DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5432/sdp
    REDIS_URL=redis://127.0.0.1:6379
+   MARKETS_ENABLED=true
+   EARN_ENABLED=true
+   ```
+
+   Also enable the comparison dashboard in `apps/sdp-web/.env.local`:
+
+   ```dotenv
    MARKETS_ENABLED=true
    EARN_ENABLED=true
    ```
@@ -149,7 +158,8 @@ into client-side settings.
 - Use an API key from the exact sandbox project selected in the SDP dashboard.
 - Restart Northstar after changing `.env.local`.
 - Wait for a submitted movement to finalize before comparing balances. The
-  dashboard refreshes automatically while a movement is pending.
+  dashboard refreshes automatically for up to two minutes, then pauses and
+  prompts for a manual refresh if settlement is still unresolved.
 
 ## Validation
 
