@@ -286,8 +286,10 @@ export function App() {
       </main>
       <footer className="border-t border-foreground/10 px-6 py-10">
         <p className="mx-auto max-w-6xl text-xs leading-relaxed text-muted-foreground">
-          Demo balances are fictional and rates are illustrative. For the real
-          devnet integration — live balances, strategies, and movements — see{" "}
+          Demo balances are fictional and rates are illustrative. 8.43% was the
+          real mainnet Kamino Institutional Commodity Yield rate on September
+          17th, 2026. For the real devnet integration — live balances,
+          strategies, and movements — see{" "}
           <code className="rounded bg-muted px-1.5 py-0.5">
             examples/embedded-yield-bank
           </code>{" "}
