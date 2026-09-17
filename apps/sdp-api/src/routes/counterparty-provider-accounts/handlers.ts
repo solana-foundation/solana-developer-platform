@@ -113,6 +113,9 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
  * @returns Public provider-account response row without corridor data.
  */
 function mapCustomerLinkAccount(row: CounterpartyProviderAccountRow): CounterpartyProviderAccount {
+  if (row.kind !== "customer_link") {
+    throw internalError("Customer-link account mapper received a non customer-link row.");
+  }
   return {
     id: row.id,
     provider: row.provider,
@@ -140,7 +143,9 @@ function mapProviderAccount(
   enriched: ReadonlyMap<string, RampExternalAccountDetails>,
   customerLink: CounterpartyProviderAccountRow | undefined
 ): CounterpartyProviderAccount {
-  if (row.fiat_currency === null || row.destination_country === null) {
+  const fiatCurrency = row.fiat_currency;
+  const destinationCountry = row.destination_country;
+  if (row.kind !== "payout_account" || fiatCurrency === null || destinationCountry === null) {
     throw internalError("External provider-account row is missing corridor data.");
   }
 
@@ -149,8 +154,8 @@ function mapProviderAccount(
     id: row.id,
     provider: row.provider,
     kind: row.kind,
-    fiatCurrency: row.fiat_currency,
-    destinationCountry: row.destination_country,
+    fiatCurrency,
+    destinationCountry,
     paymentRail: row.payment_rail,
     status: row.status,
     providerStatus: row.provider_status,
@@ -178,8 +183,8 @@ function mapProviderAccount(
 /**
  * Maps a virtual funding wallet row into the public provider-account shape,
  * attaching the request-time live state (balance, payment instruments, active
- * rule) when the row was enriched. Funding wallets carry no corridor data, so
- * null currency and country are valid here.
+ * rule) when the row was enriched. Funding wallets carry the wallet's fiat
+ * currency and no destination country.
  *
  * @param row - Parent-scoped virtual funding wallet row.
  * @param live - Just-in-time live state indexed by row id.
@@ -191,11 +196,15 @@ function mapVirtualFundingWalletAccount(
   live: ReadonlyMap<string, BvnkProviderAccountLiveState>,
   customerLink: CounterpartyProviderAccountRow | undefined
 ): CounterpartyProviderAccount {
+  const fiatCurrency = row.fiat_currency;
+  if (row.kind !== "virtual_funding_wallet" || fiatCurrency === null) {
+    throw internalError("Virtual funding-wallet row is missing its fiat currency.");
+  }
   const result: CounterpartyProviderAccount = {
     id: row.id,
     provider: row.provider,
     kind: row.kind,
-    fiatCurrency: row.fiat_currency,
+    fiatCurrency,
     destinationCountry: row.destination_country,
     paymentRail: row.payment_rail,
     status: row.status,

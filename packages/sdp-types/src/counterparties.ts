@@ -105,13 +105,9 @@ export interface ListCounterpartyAccountsResponse {
   pageSize: number;
 }
 
-export interface CounterpartyProviderAccount {
+interface CounterpartyProviderAccountBase {
   id: string;
   provider: RampProviderId;
-  kind: CounterpartyProviderAccountKind;
-  fiatCurrency: string | null;
-  destinationCountry: CountryCode | null;
-  paymentRail: string | null;
   status: CounterpartyAccountStatus;
   providerStatus: string | null;
   createdAt: string;
@@ -126,6 +122,36 @@ export interface CounterpartyProviderAccount {
    */
   live?: BvnkProviderAccountLiveState;
 }
+
+/**
+ * Public provider-account response row, discriminated on `kind`. Wallet kinds
+ * always carry the wallet's fiat currency.
+ */
+export type CounterpartyProviderAccount =
+  | (CounterpartyProviderAccountBase & {
+      kind: "customer_link";
+      fiatCurrency: string | null;
+      destinationCountry: CountryCode | null;
+      paymentRail: string | null;
+    })
+  | (CounterpartyProviderAccountBase & {
+      kind: "payout_account";
+      fiatCurrency: string;
+      destinationCountry: CountryCode;
+      paymentRail: string | null;
+    })
+  | (CounterpartyProviderAccountBase & {
+      kind: "virtual_funding_wallet";
+      fiatCurrency: string;
+      destinationCountry: CountryCode | null;
+      paymentRail: string | null;
+    })
+  | (CounterpartyProviderAccountBase & {
+      kind: "merchant_wallet";
+      fiatCurrency: string;
+      destinationCountry: CountryCode | null;
+      paymentRail: string | null;
+    });
 
 export interface CounterpartyProviderCustomerLink {
   kind: "customer_link";

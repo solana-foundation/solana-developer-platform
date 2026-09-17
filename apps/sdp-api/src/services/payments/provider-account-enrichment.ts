@@ -1,7 +1,6 @@
-import { decimalStringFromNumber } from "@sdp/payments/decimal";
 import { providerUnavailable, SdpPaymentsError } from "@sdp/payments/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import { BVNK_SANDBOX_FIAT_CURRENCIES } from "@sdp/payments/ramps/providers/bvnk/currencies";
+import { isBvnkFiatCurrency } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import type { BvnkLedgerWalletV2 } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type {
   RampExternalAccountDetails,
@@ -199,7 +198,7 @@ function isBvnkLiveEligibleRow(row: CounterpartyProviderAccountRow): boolean {
     row.provider === "bvnk" &&
     row.kind === "virtual_funding_wallet" &&
     row.fiat_currency !== null &&
-    BVNK_SANDBOX_FIAT_CURRENCIES.some((currency) => currency === row.fiat_currency) &&
+    isBvnkFiatCurrency(row.fiat_currency) &&
     row.external_account_reference !== null
   );
 }
@@ -258,21 +257,16 @@ async function mapBvnkWalletLiveOk(
   payments: PaymentsRepository,
   row: CounterpartyProviderAccountRow
 ): Promise<BvnkProviderAccountLiveState> {
-  if (wallet.balance === undefined) {
-    throw providerUnavailable("BVNK returned a ledger wallet without a balance.");
-  }
   const okLive: Extract<BvnkProviderAccountLiveState, { state: "ok" }> = {
     state: "ok",
     balance: {
-      amount:
-        typeof wallet.balance.amount === "string"
-          ? wallet.balance.amount
-          : decimalStringFromNumber(wallet.balance.amount),
+      amount: wallet.balance.amount,
       currency: wallet.balance.currency,
     },
-    paymentInstruments: (wallet.paymentInstruments ?? []).map(mapBvnkPaymentInstrument),
+    paymentInstruments: wallet.paymentInstruments.map(mapBvnkPaymentInstrument),
   };
-  const activeRule = rules.find((rule) => rule.status === "ACTIVE") ?? null;
+  const found = rules.find((rule) => rule.status === "ACTIVE");
+  const activeRule = found === undefined ? null : found;
   if (activeRule === null) {
     return okLive;
   }
@@ -296,7 +290,7 @@ async function mapBvnkWalletLiveOk(
       status: activeRule.status,
       destinationAddress,
       cryptoCurrency,
-      transferId: activeRuleTransfer?.id ?? null,
+      transferId: activeRuleTransfer === null ? null : activeRuleTransfer.id,
     },
   };
 }
@@ -308,7 +302,7 @@ async function mapBvnkWalletLiveOk(
  * @returns The public instrument object.
  */
 function mapBvnkPaymentInstrument(
-  instrument: NonNullable<BvnkLedgerWalletV2["paymentInstruments"]>[number]
+  instrument: BvnkLedgerWalletV2["paymentInstruments"][number]
 ): LivePaymentInstrument {
   return {
     type: instrument.type,
@@ -317,17 +311,18 @@ function mapBvnkPaymentInstrument(
     ...(instrument.remittanceInformationPrefix !== undefined
       ? { remittanceInformationPrefix: instrument.remittanceInformationPrefix }
       : {}),
-    ...(instrument.bankDetails === undefined
-      ? {}
-      : {
-          bankDetails: {
-            name: instrument.bankDetails.name,
-            bic: instrument.bankDetails.bic,
-            ...(instrument.bankDetails.nid?.type === undefined
-              ? {}
-              : { nid: { value: instrument.bankDetails.nid.value, type: instrument.bankDetails.nid.type } }),
-          },
-        }),
+    bankDetails: {
+      name: instrument.bankDetails.name,
+      bic: instrument.bankDetails.bic,
+      ...(instrument.bankDetails.nid?.type === undefined
+        ? {}
+        : {
+            nid: {
+              value: instrument.bankDetails.nid.value,
+              type: instrument.bankDetails.nid.type,
+            },
+          }),
+    },
   };
 }
 

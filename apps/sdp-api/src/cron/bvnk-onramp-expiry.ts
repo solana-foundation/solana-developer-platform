@@ -1,25 +1,13 @@
-/**
- * BVNK on-ramp quote expiry entrypoint.
- *
- * An `awaiting_payment` on-ramp transfer is an abandoned quote after the
- * 24-hour TTL: the transfer is expired by a status-guarded UPDATE (the status
- * in the WHERE is the CAS), then every expired transfer still holding a
- * non-deactivated payment rule has that rule deactivated. A failed
- * deactivation is logged and left for the next tick: the ruleStatus filter
- * keeps matching until the deactivation lands, and the stray-rule sweep at
- * the next quote is the backstop for rules that never deactivate.
- *
- * Wraps `reconcileBvnkOnrampExpiry` with a Sentry cron monitor when
- * observability is supplied, and hands the resulting promise to the
- * BackgroundRunner so the Node background runner keeps it alive past the
- * initiating tick and drains it during graceful shutdown.
- */
-
-import { readRecord } from "@sdp/payments/json";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { bvnkOnrampTransferProviderDataSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { BVNK_ONRAMP_QUOTE_TTL_HOURS, type SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
+import type { CounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository";
+import { createSystemPaymentsRepository } from "@/db/repositories";
+import { internalError } from "@/lib/errors";
+import { resolveBvnkOnrampRule } from "@/routes/payments/handlers/ramps/bvnk";
 import { getLogger } from "@/runtime/logger";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
@@ -30,7 +18,38 @@ export const BVNK_ONRAMP_EXPIRY_CRON = "*/15 * * * *";
 
 interface ExpiredBvnkOnrampTransferRow {
   id: string;
+  organization_id: string;
+  project_id: string;
+  counterparty_id: string;
+  fiat_currency: string;
   provider_data: Record<string, unknown>;
+}
+
+/**
+ * Resolves the BVNK ledger wallet id backing an expired transfer's funding
+ * wallet row, needed to list and deactivate its payment rule.
+ *
+ * @param accounts - Provider-account repository used for the row lookup.
+ * @param transfer - The expired on-ramp transfer row.
+ * @returns The BVNK wallet id bound to the transfer's funding wallet.
+ */
+async function walletIdForTransfer(
+  accounts: CounterpartyProviderAccountsRepository,
+  transfer: ExpiredBvnkOnrampTransferRow
+): Promise<string> {
+  const row = await accounts.getVirtualFundingWallet({
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    counterpartyId: transfer.counterparty_id,
+    provider: "bvnk",
+    fiatCurrency: transfer.fiat_currency,
+  });
+  if (row === null || row.external_account_reference === null) {
+    throw internalError(
+      `BVNK on-ramp transfer ${transfer.id} has no bound funding wallet for its rule.`
+    );
+  }
+  return row.external_account_reference;
 }
 
 /** A deployment configures exactly one BVNK credential set; its presence picks the ramp environment. */
@@ -46,11 +65,13 @@ function bvnkCronRuntimeContext(env: Env): RampRuntimeContext {
 }
 
 /**
- * Expires abandoned BVNK on-ramp quotes and deactivates their payment rules.
- * The expiration UPDATE matches only rows still `awaiting_payment`, so a
- * transfer that settled or completed concurrently keeps its status; the
- * deactivation pass covers every expired row whose rule is not yet marked
- * DEACTIVATED, so a failed deactivation is retried on the next tick.
+ * Expires abandoned BVNK on-ramp quotes past the 24-hour TTL and deactivates
+ * their payment rules. The expiration UPDATE matches only rows still
+ * `awaiting_payment`, so a transfer that settled or completed concurrently
+ * keeps its status; each expired row's rule is resolved first (adopting a
+ * rule a crash left bound at BVNK but not on the row) and then deactivated,
+ * unless already marked DEACTIVATED, so a failed deactivation is retried on
+ * the next tick.
  *
  * @param env - Process environment used for database and provider access.
  * @returns Resolves once the expiry and deactivation pass complete.
@@ -59,24 +80,23 @@ export async function reconcileBvnkOnrampExpiry(env: Env): Promise<void> {
   await getDb(env)
     .prepare(
       `UPDATE payment_transfers
-       SET status = 'expired',
-           updated_at = sdp_iso_now()
-       WHERE provider = 'bvnk'
-         AND direction = 'onramp'
-         AND status = 'awaiting_payment'
-         AND created_at < now() - make_interval(hours => ?)`
+      SET status = 'expired',
+          updated_at = sdp_iso_now()
+      WHERE provider = 'bvnk'
+        AND type = 'onramp'
+        AND status = 'awaiting_payment'
+        AND created_at < now() - make_interval(hours => ?)`
     )
     .bind(BVNK_ONRAMP_QUOTE_TTL_HOURS)
     .run();
 
   const expired = await getDb(env)
     .prepare(
-      `SELECT id, provider_data
+      `SELECT id, organization_id, project_id, counterparty_id, fiat_currency, provider_data
        FROM payment_transfers
        WHERE provider = 'bvnk'
-         AND direction = 'onramp'
+         AND type = 'onramp'
          AND status = 'expired'
-         AND provider_data->'bvnk'->>'ruleId' IS NOT NULL
          AND provider_data->'bvnk'->>'ruleStatus' IS DISTINCT FROM 'DEACTIVATED'
        ORDER BY created_at ASC
        LIMIT 1000`
@@ -85,11 +105,23 @@ export async function reconcileBvnkOnrampExpiry(env: Env): Promise<void> {
 
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const ctx = bvnkCronRuntimeContext(env);
+  const payments = createSystemPaymentsRepository(env);
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
   for (const transfer of expired.results) {
-    const bvnk = readRecord(transfer.provider_data.bvnk) ?? {};
-    const ruleId = typeof bvnk.ruleId === "string" ? bvnk.ruleId : undefined;
-    if (ruleId === undefined || ruleId === "") {
-      continue;
+    const bvnk = bvnkOnrampTransferProviderDataSchema.parse(transfer.provider_data).bvnk;
+    let ruleId = bvnk.ruleId;
+    if (ruleId === undefined) {
+      const rule = await resolveBvnkOnrampRule(
+        payments,
+        ctx,
+        transfer,
+        await walletIdForTransfer(accounts, transfer),
+        null
+      );
+      if (rule === null) {
+        continue;
+      }
+      ruleId = rule.ruleId;
     }
     try {
       await client.deactivateOnrampRule(ctx, { ruleId });
@@ -124,6 +156,15 @@ export interface BvnkOnrampExpiryDeps {
   observability?: Observability;
 }
 
+/**
+ * Wraps `reconcileBvnkOnrampExpiry` with a Sentry cron monitor when
+ * observability is supplied, and hands the resulting promise to the
+ * BackgroundRunner so the Node background runner keeps it alive past the
+ * initiating tick and drains it during graceful shutdown.
+ *
+ * @param deps - Environment, background runner, and optional observability.
+ * @returns Nothing; the work promise is owned by the background runner.
+ */
 export function runBvnkOnrampExpiryReconciliation(deps: BvnkOnrampExpiryDeps): void {
   const work = () => reconcileBvnkOnrampExpiry(deps.env);
 

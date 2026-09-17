@@ -28,6 +28,7 @@ export const bvnkOnrampTransferProviderDataSchema = z.object({
     ruleId: z.string().min(1).optional(),
     ruleStatus: z.string().min(1).optional(),
     creditedFiatAmount: z.string().min(1).optional(),
+    appliedPayinId: z.string().min(1).optional(),
   }),
 });
 export type BvnkOnrampTransferProviderData = z.infer<typeof bvnkOnrampTransferProviderDataSchema>;
@@ -145,12 +146,15 @@ export const bvnkV2LedgerWalletSchema = z.object({
   name: z.string().min(1),
   status: z.enum(["ACTIVE", "INACTIVE", "TERMINATED"]),
   customer: z.object({ id: z.string().min(1), name: z.string().optional() }).optional(),
-  balance: z.object({ amount: z.number(), currency: z.string().min(1) }).optional(),
-  paymentInstruments: z.array(bvnkV2PaymentInstrumentSchema).optional(),
+  balance: z.object({ amount: z.number(), currency: z.string().min(1) }),
+  paymentInstruments: z.array(bvnkV2PaymentInstrumentSchema),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
-export type BvnkLedgerWalletV2 = z.infer<typeof bvnkV2LedgerWalletSchema>;
+export type BvnkLedgerWalletV2 = Omit<z.infer<typeof bvnkV2LedgerWalletSchema>, "balance"> & {
+  /** Available balance as a decimal string, converted once at the client boundary. */
+  balance: { amount: string; currency: string };
+};
 
 export const bvnkRuleResponseSchema = z.object({
   id: z.string().min(1),

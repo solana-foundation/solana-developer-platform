@@ -320,9 +320,9 @@ export interface CounterpartyProviderAccountsRepository {
 
   /**
    * Patches metadata on an active provider-account row within its parent
-   * scope: shallow-merges `set`, then removes `unset` keys. The merged
-   * result must satisfy the row kind's metadata schema or the write rolls
-   * back.
+   * scope: shallow-merges `set`, then removes `unset` keys. The row is
+   * locked for the read-merge-write, and the merged result must satisfy the
+   * row kind's metadata schema or the write rolls back.
    *
    * @param input - Tenant scope, row id, provider, keys to merge, and keys to remove.
    * @returns The patched row, or null when it is outside the scope.

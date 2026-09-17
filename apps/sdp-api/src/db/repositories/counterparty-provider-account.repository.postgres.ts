@@ -388,8 +388,6 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     },
 
     async patchAccountMetadata(input: PatchAccountMetadataInput) {
-      // The row is locked for the read-merge-write and the merged blob is
-      // validated against the row kind's schema BEFORE the UPDATE.
       return db.transaction(async (tx) => {
         const current = await tx
           .prepare(

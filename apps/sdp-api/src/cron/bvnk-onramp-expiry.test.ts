@@ -45,6 +45,8 @@ async function insertTransfer(input: {
   status: string;
   providerData: Record<string, unknown>;
   createdAt: string;
+  projectId?: string | null;
+  counterpartyId?: string | null;
 }): Promise<void> {
   await getDb(env)
     .prepare(
@@ -53,12 +55,14 @@ async function insertTransfer(input: {
          destination_address, token, amount, memo, type, direction, status, provider,
          provider_reference, delivery_mode, fiat_currency, fiat_amount, provider_data,
          signature, serialized_tx, initiated_by_key_id, created_at, updated_at
-       ) VALUES (?, ?, NULL, ?, NULL, NULL, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, 'USD', NULL, ?::jsonb, NULL, NULL, NULL, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, 'USD', NULL, ?::jsonb, NULL, NULL, NULL, ?, ?)`
     )
     .bind(
       input.id,
       ORG_ID,
+      input.projectId ?? null,
       "wallet_bvnk_expiry",
+      input.counterpartyId ?? null,
       input.direction === "onramp" ? "dest" : null,
       "USDC",
       input.type,
@@ -210,6 +214,59 @@ describe("reconcileBvnkOnrampExpiry", () => {
       expect.anything(),
       expect.objectContaining({ ruleId: "rule_retry_1" })
     );
+  });
+
+  it("adopts the rule a crash left at BVNK on a ruleless expired transfer, then deactivates it", async () => {
+    const listRules = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listOnrampRulesByWallet")
+      .mockResolvedValue([
+        { id: "rule_leftover_1", reference: "sdp_onramp_xfr_expire_ruleless", status: "ACTIVE" },
+      ]);
+    const PROJECT_ID = "prj_bvnk_expiry_recovery";
+    const COUNTERPARTY_ID = "cpty_bvnk_expiry_recovery";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_provider_accounts (
+           id, organization_id, project_id, counterparty_id, provider,
+           provider_customer_reference, kind, external_account_reference, fiat_currency,
+           provider_status, status, metadata
+         ) VALUES (?, ?, ?, ?, 'bvnk', '', 'virtual_funding_wallet', ?, 'USD', 'ACTIVE', 'active', '{}')`
+      )
+      .bind(
+        "counterparty_provider_account_funding",
+        ORG_ID,
+        PROJECT_ID,
+        COUNTERPARTY_ID,
+        "wallet_bvnk_expiry_external"
+      )
+      .run();
+    await insertTransfer({
+      id: "xfr_expire_ruleless",
+      provider: "bvnk",
+      type: "onramp",
+      direction: "inbound",
+      status: "awaiting_payment",
+      providerData: {
+        bvnk: { fundingWalletAccountId: "counterparty_provider_account_funding" },
+      },
+      createdAt: OLD,
+      projectId: PROJECT_ID,
+      counterpartyId: COUNTERPARTY_ID,
+    });
+
+    await reconcileBvnkOnrampExpiry(env);
+
+    expect(listRules).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ walletId: "wallet_bvnk_expiry_external" })
+    );
+    expect(deactivateRule).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ruleId: "rule_leftover_1" })
+    );
+    const transfer = await readTransfer("xfr_expire_ruleless");
+    expect(transfer?.status).toBe("expired");
+    expect(transfer?.provider_data.bvnk?.ruleStatus).toBe("DEACTIVATED");
   });
 });
 

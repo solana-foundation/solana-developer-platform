@@ -1,5 +1,6 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { reconcileBvnkOnrampExpiry } from "@/cron/bvnk-onramp-expiry";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
 import { closeDatabasePools } from "@/db/client";
@@ -59,6 +60,11 @@ vi.mock("@/cron/earn-split-swaps", () => ({
 
 vi.mock("@/cron/earn-vault-movements", () => ({
   EARN_VAULT_MOVEMENTS_MONITOR: "sdp-api-reconcile-earn-vault-movements",
+}));
+
+vi.mock("@/cron/bvnk-onramp-expiry", () => ({
+  BVNK_ONRAMP_EXPIRY_MONITOR: "sdp-api-bvnk-onramp-expiry",
+  reconcileBvnkOnrampExpiry: vi.fn(async () => {}),
 }));
 
 // Literal constants keep the heavy service graph behind pending-transfers out
@@ -387,6 +393,8 @@ describe("runCronJob", () => {
     // The rings poll gates itself on the flag plus the http adapter, so the job
     // hands it every tick — this is its only tick on a managed deployment.
     expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
+    // BVNK on-ramp quote expiry is an always-on tick, like recurring collection.
+    expect(reconcileBvnkOnrampExpiry).toHaveBeenCalledExactlyOnceWith(env);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     // The split-swap detector is ungated and runs AFTER the vault sweep, so the
     // exit reconciler never waits on advisory work (ADR 0002, PRO-1864).
@@ -446,6 +454,7 @@ describe("runCronJob", () => {
         expect(trackPendingDeposits).toHaveBeenCalledTimes(1);
         expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
         expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
+        expect(reconcileBvnkOnrampExpiry).toHaveBeenCalledTimes(1);
         expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
         expect(reconcileDvpTrades).toHaveBeenCalledTimes(1);
         expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledTimes(1);

@@ -26,6 +26,7 @@ export function bvnkLedgerWallet(overrides?: Partial<BvnkLedgerWalletV2>): BvnkL
     id: "wallet-id",
     name: "USD Wallet",
     status: "ACTIVE",
+    balance: { amount: "10.00", currency: "USD" },
     paymentInstruments: [
       {
         type: "FIAT",

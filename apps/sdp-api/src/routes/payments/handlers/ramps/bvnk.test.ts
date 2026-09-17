@@ -20,6 +20,7 @@ const mockAccounts = vi.hoisted(() => ({
 const mockPayments = vi.hoisted(() => ({
   createTransfer: vi.fn(),
   getInFlightBvnkOnrampTransferByFundingWallet: vi.fn(),
+  findInFlightTransferByBvnkRuleId: vi.fn(),
   bindBvnkOnrampRule: vi.fn(),
 }));
 
@@ -208,6 +209,17 @@ function transferRow(overrides?: Record<string, unknown>): Record<string, unknow
   };
 }
 
+/** provider_data for a transfer whose rule id is already bound to the row. */
+const BOUND_RULE_PROVIDER_DATA = {
+  provider_data: {
+    bvnk: {
+      fundingWalletAccountId: FUNDING_ACCOUNT_ID,
+      ruleId: "rule_active_1",
+      ruleStatus: "ACTIVE",
+    },
+  },
+};
+
 /** A BVNK rule-list entry, shaped like `BvnkRuleListEntry`. */
 function ruleEntry(id: string, reference: string, status = "ACTIVE"): {
   id: string;
@@ -250,6 +262,7 @@ function bvnkLedgerWallet(status = "ACTIVE"): Record<string, unknown> {
     id: WALLET_ID,
     name: `sdp:onramp:${COUNTERPARTY_ID}:USD`,
     status,
+    balance: { amount: "1.50", currency: "USD" },
     paymentInstruments: [
       {
         type: "FIAT",
@@ -626,6 +639,7 @@ describe("bvnkOnrampQuote", () => {
     mockAccounts.getVirtualFundingWallet.mockResolvedValue(fundingWalletRow());
     mockPayments.createTransfer.mockResolvedValue(transferRow());
     mockPayments.getInFlightBvnkOnrampTransferByFundingWallet.mockResolvedValue(null);
+    mockPayments.findInFlightTransferByBvnkRuleId.mockResolvedValue(null);
     mockPayments.bindBvnkOnrampRule.mockResolvedValue(transferRow());
     createOnrampRule = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule");
     listOnrampRulesByWallet = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listOnrampRulesByWallet");
@@ -710,12 +724,15 @@ describe("bvnkOnrampQuote", () => {
   it("maps a unique-index race on the second transfer insert to a 409 naming the active transfer", async () => {
     const firstTransferId = TRANSFER_ID;
     const racingTransferId = "xfr_aaaaaaaa-1111-2222-3333-444444444444";
+    // Both quotes pass the in-flight pre-check; the unique index then decides
+    // the INSERT, and the loser's catch lookup finds the winner.
+    mockPayments.getInFlightBvnkOnrampTransferByFundingWallet
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(transferRow({ id: firstTransferId, ...BOUND_RULE_PROVIDER_DATA }));
     mockPayments.createTransfer
       .mockResolvedValueOnce(transferRow({ id: firstTransferId }))
       .mockRejectedValueOnce(uniqueViolationError());
-    mockPayments.getInFlightBvnkOnrampTransferByFundingWallet.mockResolvedValue(
-      transferRow({ id: firstTransferId })
-    );
 
     await bvnkOnrampQuote(fakeContext(), onrampRequest({ transferId: firstTransferId }));
     // Snapshot the first quote's provider work so the conflicted attempt can
@@ -737,7 +754,8 @@ describe("bvnkOnrampQuote", () => {
     // The losing insert maps to a 409 that names the transfer already holding
     // the queue slot — the active transfer, not the loser.
     expectConflictNamingActiveTransfer(caught, firstTransferId);
-    // The conflicted attempt performs no rule management at all.
+    // The winner already carries its rule, so the conflicted attempt performs
+    // no rule management at all.
     expect(listOnrampRulesByWallet.mock.calls.length).toBe(ruleWorkAfterFirstQuote.list);
     expect(deactivateOnrampRule.mock.calls.length).toBe(ruleWorkAfterFirstQuote.deactivate);
     expect(createOnrampRule.mock.calls.length).toBe(ruleWorkAfterFirstQuote.create);
@@ -745,11 +763,10 @@ describe("bvnkOnrampQuote", () => {
     expect(mockPayments.bindBvnkOnrampRule.mock.calls.length).toBe(ruleWorkAfterFirstQuote.bind);
   });
 
-  it("rejects a second quote blocked by an in-flight transfer before any rule work, even for a different destination", async () => {
+  it("rejects a second quote for a locked funding corridor before any BVNK call at all", async () => {
     const activeTransferId = "xfr_bbbbbbbb-1111-2222-3333-444444444444";
-    mockPayments.createTransfer.mockRejectedValue(uniqueViolationError());
     mockPayments.getInFlightBvnkOnrampTransferByFundingWallet.mockResolvedValue(
-      transferRow({ id: activeTransferId })
+      transferRow({ id: activeTransferId, ...BOUND_RULE_PROVIDER_DATA })
     );
 
     let caught: unknown;
@@ -766,13 +783,43 @@ describe("bvnkOnrampQuote", () => {
     }
 
     expectConflictNamingActiveTransfer(caught, activeTransferId);
-    // The wallet-status refresh may reach BVNK, but the lock check fires
-    // before any rule listing, deactivation, creation, or binding.
+    // The pre-check lock fires before the JIT wallet refresh and any rule
+    // listing, deactivation, creation, or binding.
+    expect(mockPayments.createTransfer).not.toHaveBeenCalled();
+    expect(getLedgerWalletV2).not.toHaveBeenCalled();
+    expect(listLedgerWalletProfilesV2).not.toHaveBeenCalled();
+    expect(createLedgerWalletV2).not.toHaveBeenCalled();
     expect(listOnrampRulesByWallet).not.toHaveBeenCalled();
     expect(deactivateOnrampRule).not.toHaveBeenCalled();
     expect(createOnrampRule).not.toHaveBeenCalled();
     expect(getContactV3).not.toHaveBeenCalled();
     expect(mockPayments.bindBvnkOnrampRule).not.toHaveBeenCalled();
+  });
+
+  it("repairs the lock holder's unbound rule before conflicting with the retried quote", async () => {
+    const activeTransferId = "xfr_dddddddd-1111-2222-3333-444444444444";
+    const holderRuleId = "rule_holder_recovered_1";
+    // The holder crashed between rule create and CAS: the pre-check finds it
+    // unbound, adopts the wallet's matching ACTIVE rule, then conflicts.
+    mockPayments.getInFlightBvnkOnrampTransferByFundingWallet.mockResolvedValue(
+      transferRow({ id: activeTransferId })
+    );
+    listOnrampRulesByWallet.mockResolvedValue([
+      ruleEntry(holderRuleId, buildBvnkOnrampRuleReference(activeTransferId)),
+    ]);
+
+    let caught: unknown;
+    try {
+      await bvnkOnrampQuote(fakeContext(), onrampRequest());
+    } catch (error) {
+      caught = error;
+    }
+
+    expectConflictNamingActiveTransfer(caught, activeTransferId);
+    expect(createOnrampRule).not.toHaveBeenCalled();
+    expect(mockPayments.bindBvnkOnrampRule).toHaveBeenCalledWith(
+      expect.objectContaining({ transferId: activeTransferId, ruleId: holderRuleId })
+    );
   });
 
   it("adopts the wallet's single ACTIVE rule matching the transfer reference after a crash before the CAS", async () => {

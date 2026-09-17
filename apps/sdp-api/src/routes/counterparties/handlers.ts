@@ -1,5 +1,5 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import { BVNK_SANDBOX_FIAT_CURRENCIES } from "@sdp/payments/ramps/providers/bvnk/currencies";
+import { isBvnkFiatCurrency } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import {
   isBvnkWalletActive,
   readBvnkOfframpWallet,
@@ -282,7 +282,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   });
 
   if (query.data.provider === "bvnk") {
-    if (!BVNK_SANDBOX_FIAT_CURRENCIES.some((currency) => currency === query.data.fiatCurrency)) {
+    if (!isBvnkFiatCurrency(query.data.fiatCurrency)) {
       return success(c, {
         provider: "bvnk",
         direction: query.data.direction,
@@ -342,7 +342,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       if (
         walletRow !== null &&
         walletRow.external_account_reference !== null &&
-        isBvnkWalletActive(walletRow.provider_status ?? "")
+        isBvnkWalletActive(walletRow.provider_status)
       ) {
         return success(c, readyCounterparty("bvnk", query.data.direction));
       }

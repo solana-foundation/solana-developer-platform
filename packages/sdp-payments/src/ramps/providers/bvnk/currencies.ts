@@ -12,6 +12,18 @@ import { BVNK_SANDBOX_API_URL } from "./client";
 
 /** Sandbox fiat set; BVNK's sandbox executes only these fiats while the catalogs list the global set. */
 export const BVNK_SANDBOX_FIAT_CURRENCIES = ["EUR", "USD"] as const;
+export type BvnkFiatCurrency = (typeof BVNK_SANDBOX_FIAT_CURRENCIES)[number];
+
+/**
+ * Narrowing guard for the BVNK sandbox fiat set, shared by every gate that
+ * decides whether BVNK may serve a fiat currency.
+ *
+ * @param code - Currency code to test.
+ * @returns Whether the code is in the sandbox fiat set.
+ */
+export function isBvnkFiatCurrency(code: string): code is BvnkFiatCurrency {
+  return (BVNK_SANDBOX_FIAT_CURRENCIES as readonly string[]).includes(code);
+}
 
 const bvnkCurrencyEntrySchema = z.object({
   code: z.string().optional(),

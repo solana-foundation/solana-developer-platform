@@ -952,3 +952,114 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     expect(denied).toEqual({ rows: [], total: 0 });
   });
 });
+
+describe("PaymentsRepository.getInFlightBvnkOnrampTransferByFundingWallet (postgres)", () => {
+  let repo: PaymentsRepository;
+
+  beforeAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  afterAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  beforeEach(async () => {
+    const db = getDb(env);
+    await db.prepare("DELETE FROM payment_transfers").run();
+    await db.prepare("DELETE FROM custody_wallets").run();
+    await db.prepare("DELETE FROM custody_configs").run();
+    await db.prepare("DELETE FROM projects").run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+      )
+      .bind(TEST_USER.id, TEST_USER.email)
+      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
+    await seedExactWallet();
+    repo = createPostgresPaymentsRepository(db);
+  });
+
+  async function seedBvnkOnrampTransfer(input: {
+    id: string;
+    status: string;
+    fundingWalletAccountId: string;
+    providerData?: Record<string, unknown>;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
+          (id, organization_id, project_id, wallet_id, counterparty_id, destination_address,
+           token, type, direction, status, provider, delivery_mode, fiat_currency,
+           provider_data, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        input.id,
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        TEST_WALLET_ID,
+        "cpty_bvnk_onramp_lookup",
+        "dest",
+        "USDC",
+        "onramp",
+        "inbound",
+        input.status,
+        "bvnk",
+        "manual_instructions",
+        "USD",
+        JSON.stringify(
+          input.providerData ?? { bvnk: { fundingWalletAccountId: input.fundingWalletAccountId } }
+        ),
+        now,
+        now
+      )
+      .run();
+  }
+
+  it("finds the row the quote handler inserts: type onramp, direction inbound, awaiting_payment", async () => {
+    const fundingWalletAccountId = "counterparty_provider_account_funding_lookup";
+    await seedBvnkOnrampTransfer({
+      id: "xfr_bvnk_inflight_found",
+      status: "awaiting_payment",
+      fundingWalletAccountId,
+    });
+
+    const found = await repo.getInFlightBvnkOnrampTransferByFundingWallet({
+      fundingWalletAccountId,
+    });
+
+    expect(found?.id).toBe("xfr_bvnk_inflight_found");
+  });
+
+  it("ignores settled-and-completed rows and rows for another funding wallet", async () => {
+    const fundingWalletAccountId = "counterparty_provider_account_funding_lookup_2";
+    await seedBvnkOnrampTransfer({
+      id: "xfr_bvnk_completed",
+      status: "completed",
+      fundingWalletAccountId,
+    });
+    await seedBvnkOnrampTransfer({
+      id: "xfr_bvnk_other_wallet",
+      status: "awaiting_payment",
+      fundingWalletAccountId: "counterparty_provider_account_funding_other",
+    });
+
+    expect(
+      await repo.getInFlightBvnkOnrampTransferByFundingWallet({ fundingWalletAccountId })
+    ).toBeNull();
+  });
+});

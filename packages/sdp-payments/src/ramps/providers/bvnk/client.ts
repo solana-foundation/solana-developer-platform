@@ -254,7 +254,14 @@ export class BvnkRampClient implements RampProvider {
         ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
       },
     });
-    return parseBvnkResponse(bvnkV2LedgerWalletSchema, response);
+    const parsed = parseBvnkResponse(bvnkV2LedgerWalletSchema, response);
+    return {
+      ...parsed,
+      balance: {
+        amount: decimalStringFromNumber(parsed.balance.amount),
+        currency: parsed.balance.currency,
+      },
+    };
   }
 
   /**
@@ -274,7 +281,14 @@ export class BvnkRampClient implements RampProvider {
       `/ledger/v2/wallets/${encodeURIComponent(input.walletId)}`,
       { method: "GET" }
     );
-    return parseBvnkResponse(bvnkV2LedgerWalletSchema, response);
+    const parsed = parseBvnkResponse(bvnkV2LedgerWalletSchema, response);
+    return {
+      ...parsed,
+      balance: {
+        amount: decimalStringFromNumber(parsed.balance.amount),
+        currency: parsed.balance.currency,
+      },
+    };
   }
 
   /**

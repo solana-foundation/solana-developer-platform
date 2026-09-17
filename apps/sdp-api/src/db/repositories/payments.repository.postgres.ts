@@ -745,11 +745,9 @@ export function createPostgresPaymentsRepository(
           `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
            FROM payment_transfers pt
            WHERE pt.provider = 'bvnk'
-             AND pt.direction = 'onramp'
+             AND pt.type = 'onramp'
              AND pt.status = ANY(?)
-             AND pt.provider_data->'bvnk'->>'fundingWalletAccountId' = ?
-           ORDER BY pt.created_at ASC, pt.id ASC
-           LIMIT 1`
+             AND pt.provider_data->'bvnk'->>'fundingWalletAccountId' = ?`
         )
         .bind([...RAMP_TRANSFER_STATUS_BVNK_ONRAMP_IN_FLIGHT], fundingWalletAccountId)
         .first<PaymentTransferProjectionRow>();

@@ -10,6 +10,10 @@ import {
 } from "@/cron/earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_MONITOR } from "@/cron/earn-split-swaps";
 import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
+import {
+  BVNK_ONRAMP_EXPIRY_MONITOR,
+  reconcileBvnkOnrampExpiry,
+} from "@/cron/bvnk-onramp-expiry";
 import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
@@ -213,6 +217,9 @@ export async function runCronJob(): Promise<void> {
           await monitored(PENDING_DEPOSITS_MONITOR, async () => undefined);
           await monitored(PENDING_WITHDRAWALS_MONITOR, async () => undefined);
         }
+        await collect(
+          monitored(BVNK_ONRAMP_EXPIRY_MONITOR, () => reconcileBvnkOnrampExpiry(env))
+        );
         await collect(monitored(RINGS_INDEXING_MONITOR, () => pollRingsIndexing(env)));
         await collect(
           monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env))

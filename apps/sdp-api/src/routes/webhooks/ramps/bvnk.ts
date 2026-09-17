@@ -1,10 +1,10 @@
-import { readRecord } from "@sdp/payments/json";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   isBvnkWalletActive,
   readBvnkOfframpReference,
   withBvnkOfframpWalletStatus,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { bvnkOnrampTransferProviderDataSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import {
   NON_TERMINAL_RAMP_TRANSFER_STATUSES,
@@ -19,6 +19,7 @@ import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterpa
 import { createSystemCounterpartiesRepository, createSystemPaymentsRepository } from "@/db/repositories";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
+import { resolveBvnkOnrampRule } from "@/routes/payments/handlers/ramps/bvnk";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import {
@@ -38,6 +39,7 @@ function webhookRampContext(env: Env, environment: SdpEnvironment): RampRuntimeC
 
 async function handleBvnkPaymentPayinStatusChange(
   env: Env,
+  environment: SdpEnvironment,
   event: Extract<BvnkWebhook, { event: "bvnk:payment:payin:status-change" }>
 ): Promise<void> {
   if (event.data.status !== "COMPLETED") {
@@ -62,7 +64,16 @@ async function handleBvnkPaymentPayinStatusChange(
       `BVNK webhook payin ${event.data.uuid} has no in-flight onramp transfer for funding wallet ${wallet.id}`
     );
   }
-  const bvnk = readRecord(transfer.provider_data.bvnk) ?? {};
+  const bvnk = bvnkOnrampTransferProviderDataSchema.parse(transfer.provider_data).bvnk;
+  if (bvnk.ruleId === undefined) {
+    await resolveBvnkOnrampRule(
+      payments,
+      webhookRampContext(env, environment),
+      transfer,
+      event.data.beneficiary.walletId,
+      null
+    );
+  }
   if (bvnk.appliedPayinId === event.data.uuid) {
     getLogger().info(
       `[bvnk webhook] pay-in ${event.data.uuid} already applied to transfer ${transfer.id}`
@@ -133,19 +144,18 @@ async function handleBvnkPaymentCryptoStatusChange(
     );
     return;
   }
-  const bvnk = readRecord(transfer.provider_data.bvnk) ?? {};
-  const ruleId = typeof bvnk.ruleId === "string" ? bvnk.ruleId : undefined;
-  if (ruleId === undefined || ruleId === "") {
+  const bvnk = bvnkOnrampTransferProviderDataSchema.parse(transfer.provider_data).bvnk;
+  if (bvnk.ruleId === undefined) {
     return;
   }
   try {
     await RAMP_PROVIDER_CLIENTS.bvnk.deactivateOnrampRule(
       webhookRampContext(env, environment),
-      { ruleId }
+      { ruleId: bvnk.ruleId }
     );
   } catch (error) {
     getLogger().error(
-      `sdp_api_bvnk_rule_deactivate_failed rule=${ruleId} transfer=${transfer.id} error=${
+      `sdp_api_bvnk_rule_deactivate_failed rule=${bvnk.ruleId} transfer=${transfer.id} error=${
         error instanceof Error ? error.message : String(error)
       }`
     );
@@ -394,7 +404,7 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
         getLogger().info(`[bvnk webhook] ignored event: ${webhook.reason}`);
         return;
       case "bvnk:payment:payin:status-change":
-        return handleBvnkPaymentPayinStatusChange(env, webhook);
+        return handleBvnkPaymentPayinStatusChange(env, environment, webhook);
       case "bvnk:payment:crypto:status-change":
         return handleBvnkPaymentCryptoStatusChange(env, environment, webhook);
       case "bvnk:payment:channel:transaction-detected":

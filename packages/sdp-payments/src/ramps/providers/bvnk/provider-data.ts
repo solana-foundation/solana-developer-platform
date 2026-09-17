@@ -160,8 +160,8 @@ export function buildBvnkOnrampRuleReference(paymentTransferId: string): string 
 
 const BVNK_WALLET_ACTIVE_STATUSES = new Set(["ACTIVE", "COMPLETED"]);
 
-export function isBvnkWalletActive(status: string | undefined): boolean {
-  return status !== undefined && BVNK_WALLET_ACTIVE_STATUSES.has(status.toUpperCase());
+export function isBvnkWalletActive(status: string | null): boolean {
+  return status !== null && BVNK_WALLET_ACTIVE_STATUSES.has(status.toUpperCase());
 }
 
 export function readBvnkData(
@@ -174,7 +174,7 @@ export function readBvnkData(
 /** Merchant-owned BVNK off-ramp wallet, one per fiat currency. */
 export interface BvnkOfframpWallet {
   id: string;
-  status?: string;
+  status: string;
 }
 
 /**

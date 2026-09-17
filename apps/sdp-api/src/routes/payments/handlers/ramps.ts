@@ -1,7 +1,7 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { bvnkOfframpFields } from "@sdp/payments/ramps/providers/bvnk/counterparty";
-import { BVNK_SANDBOX_FIAT_CURRENCIES } from "@sdp/payments/ramps/providers/bvnk/currencies";
+import { isBvnkFiatCurrency } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import {
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
@@ -149,13 +149,6 @@ import {
   rampQuoteExpiryProviderData,
 } from "./ramps/quote-binding";
 import { stripeOnrampQuote } from "./ramps/stripe";
-
-/** Type guard for the single BVNK sandbox fiat set, shared by both ramp directions. */
-function isBvnkSandboxFiatCurrency(
-  value: string
-): value is (typeof BVNK_SANDBOX_FIAT_CURRENCIES)[number] {
-  return BVNK_SANDBOX_FIAT_CURRENCIES.some((currency) => currency === value);
-}
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];
@@ -696,7 +689,7 @@ export async function advanceCounterpartyRequirements(
     case "lightspark":
       return advanceLightsparkRequirements(c, input);
     case "bvnk": {
-      if (!isBvnkSandboxFiatCurrency(input.fiatCurrency)) {
+      if (!isBvnkFiatCurrency(input.fiatCurrency)) {
         return {
           provider: "bvnk",
           direction: input.direction,
@@ -772,7 +765,7 @@ export async function advanceCounterpartyRequirements(
         input.projectId,
         input.fiatCurrency
       );
-      if (!isBvnkWalletActive(wallet.provider_status ?? undefined)) {
+      if (!isBvnkWalletActive(wallet.provider_status)) {
         return { provider: "bvnk", direction: input.direction, status: "provisioning" };
       }
       return readyCounterparty("bvnk", input.direction);
@@ -1234,7 +1227,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       if (!input.fiatCurrency) {
         throw badRequest("fiatCurrency is required for BVNK off-ramp.");
       }
-      if (!isBvnkSandboxFiatCurrency(input.fiatCurrency)) {
+      if (!isBvnkFiatCurrency(input.fiatCurrency)) {
         throw badRequest(`BVNK off-ramp does not support payouts in ${input.fiatCurrency}.`);
       }
       const beneficiary = latestBvnkOfframpBeneficiary(

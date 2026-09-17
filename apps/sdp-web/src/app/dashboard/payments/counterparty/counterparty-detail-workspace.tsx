@@ -174,9 +174,9 @@ function providerAccountStatus(
 
 interface ProviderAccountGroup {
   provider: RampProviderId;
-  customerLink: CounterpartyProviderAccount | undefined;
-  payoutAccounts: CounterpartyProviderAccount[];
-  fundingWallets: CounterpartyProviderAccount[];
+  customerLink: Extract<CounterpartyProviderAccount, { kind: "customer_link" }> | undefined;
+  payoutAccounts: Extract<CounterpartyProviderAccount, { kind: "payout_account" }>[];
+  fundingWallets: Extract<CounterpartyProviderAccount, { kind: "virtual_funding_wallet" }>[];
 }
 
 /**
@@ -229,13 +229,17 @@ function CustomerLinkRow() {
   );
 }
 
-function FundingWalletRow({ account }: { account: CounterpartyProviderAccount }) {
+function FundingWalletRow({
+  account,
+}: {
+  account: Extract<CounterpartyProviderAccount, { kind: "virtual_funding_wallet" }>;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
   const live = account.live;
   const title = `${t("DashboardPayments.counterparty.providerAccountFunding")} · ${
-    account.fiatCurrency ?? ""
+    account.fiatCurrency
   }`;
   if (live === undefined) {
     return (
@@ -400,10 +404,7 @@ function ProviderAccountCard({ group }: { group: ProviderAccountGroup }) {
               </thead>
               <tbody>
                 {payoutAccounts.map((account) => {
-                  const flag =
-                    account.destinationCountry === null
-                      ? null
-                      : regionFlagEmoji(account.destinationCountry);
+                  const flag = regionFlagEmoji(account.destinationCountry);
                   return (
                     <tr key={account.id} className="border-b border-border-default last:border-b-0">
                       <td className="whitespace-nowrap px-4 py-3">
