@@ -5,7 +5,7 @@ import "@fontsource-variable/inter/index.css";
 import "../index.css";
 
 export const metadata: Metadata = {
-  title: "Embedded Yield, illustrated",
+  title: "Stablecoin Savings Account for Your Users",
   description:
     "An interactive walkthrough of Embedded Yield on the Solana Developer Platform: custody, configure, and earn, illustrated.",
 };

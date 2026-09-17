@@ -27,8 +27,8 @@ function StepNav({ activeId }: { activeId: string }) {
     <header className="sticky top-0 z-40 border-b border-foreground/10 bg-app/85 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
         <p className="text-sm font-bold tracking-tight text-foreground">
-          Embedded Yield
-          <span className="text-muted-foreground">, illustrated</span>
+          Stablecoin Savings Account
+          <span className="text-muted-foreground"> for your users</span>
         </p>
         <nav className="flex items-center gap-1 text-xs font-semibold">
           {STEPS.map((step, index) => (
@@ -63,8 +63,8 @@ function Hero() {
           Give your customers yield with one code snippet.
         </h1>
         <p className="mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground lg:text-lg">
-          A consumer wallet company adds interest-bearing stablecoins for its
-          customers, with yield backed by real-world assets.
+          Launch a B2B2C product or B2B2B stablecoin savings product with 24/7
+          yields on the go.
         </p>
         <p className="mt-6 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
           <ArrowDownIcon className="size-4 animate-bounce" />
@@ -122,14 +122,13 @@ function CustodySection() {
           It starts as an ordinary wallet app.
         </h2>
         <p className="mt-4 leading-relaxed text-muted-foreground">
-          Northstar is a small fintech with a consumer Wallet app. Customers
-          hold dollars, euros, and the USDC stablecoin side by side.
+          Northstar is a small fintech with a consumer Wallet app.
         </p>
         <ul className="mt-5 space-y-2.5 text-sm">
           {[
             "USD, EUR, and USDC balances in one app",
             "Yield can be surfaced to anyone holding stablecoins",
-            "SDP's on-ramps can convert fiat into stablecoins",
+            "Onramp fiat into stablecoins via Solana Developer Platform payments solution",
           ].map((line) => (
             <li key={line} className="flex items-start gap-2.5">
               <ShieldCheckIcon className="mt-0.5 size-4 shrink-0 text-success" />
