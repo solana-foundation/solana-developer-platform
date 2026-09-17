@@ -118,7 +118,9 @@ function groupProviderAccounts(
         counterpartyId: row.counterparty_id,
         provider: row.provider,
         fiatCurrency: row.fiat_currency,
-        providerCustomerReference: providerCustomerReferenceSchema.parse(row.provider_customer_reference),
+        providerCustomerReference: providerCustomerReferenceSchema.parse(
+          row.provider_customer_reference
+        ),
         rowIds: new Set([row.id]),
       });
       continue;

@@ -292,7 +292,11 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     if (wallet !== undefined && isBvnkWalletActive(wallet.status)) {
       return success(c, readyCounterparty("bvnk", query.data.direction));
     }
-    return success(c, { provider: "bvnk", direction: query.data.direction, status: "provisioning" });
+    return success(c, {
+      provider: "bvnk",
+      direction: query.data.direction,
+      status: "provisioning",
+    });
   }
 
   let payoutAccounts: PayoutRequirementAccount[] | undefined;
@@ -332,10 +336,11 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       if (entry.ruleId && entry.bankAccount?.accountNumber) {
         return success(c, readyCounterparty("bvnk", query.data.direction));
       }
-      return success(
-        c,
-        { provider: "bvnk", direction: query.data.direction, status: "provisioning" }
-      );
+      return success(c, {
+        provider: "bvnk",
+        direction: query.data.direction,
+        status: "provisioning",
+      });
     }
     const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
       mapToCounterparty(counterparty),
@@ -421,7 +426,7 @@ export const submitCounterpartyRequirements = async (
     counterpartyId: counterparty.id,
     provider: input.provider,
   });
-  let requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
+  const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     {
       direction: input.direction,

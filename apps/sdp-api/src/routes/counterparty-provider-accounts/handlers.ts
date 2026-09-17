@@ -1,8 +1,8 @@
 import type { RampExternalAccountDetails } from "@sdp/payments/ramps/types";
-import {
-  type CounterpartyProviderAccount,
-  type CounterpartyProviderCustomerLink,
-  type ListCounterpartyProviderAccountsResponse,
+import type {
+  CounterpartyProviderAccount,
+  CounterpartyProviderCustomerLink,
+  ListCounterpartyProviderAccountsResponse,
 } from "@sdp/types";
 import { z } from "zod";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
@@ -174,6 +174,8 @@ function mapCustomerLink(
   return {
     kind: "customer_link",
     provider: row.provider,
-    providerCustomerReference: providerCustomerReferenceSchema.parse(row.provider_customer_reference),
+    providerCustomerReference: providerCustomerReferenceSchema.parse(
+      row.provider_customer_reference
+    ),
   } satisfies CounterpartyProviderCustomerLink;
 }

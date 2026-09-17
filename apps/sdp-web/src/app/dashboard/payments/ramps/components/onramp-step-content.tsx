@@ -142,9 +142,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     hasOnboardingLifecycle(onboarding.provider) &&
     isOnboardingPanelStatus(onboarding)
   ) {
-    return (
-      <RampOnboardingPanel direction="onramp" onboarding={onboarding} />
-    );
+    return <RampOnboardingPanel direction="onramp" onboarding={onboarding} />;
   }
 
   if (currentStepId === "PROVIDER" && quote && transferStatus?.status === "completed") {

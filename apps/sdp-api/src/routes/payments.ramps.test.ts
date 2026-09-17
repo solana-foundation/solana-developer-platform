@@ -5,10 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import {
-  bvnkOnrampProviderDataSeed,
-  TEST_BVNK_OFFRAMP_WALLET_ID,
-} from "@/test/helpers/bvnk";
+import { bvnkOnrampProviderDataSeed, TEST_BVNK_OFFRAMP_WALLET_ID } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
 import {
   getAccountInfoMock,

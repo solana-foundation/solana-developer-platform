@@ -39,7 +39,12 @@ afterEach(async () => {
   await client.query("ROLLBACK");
 });
 
-async function seedCounterparty(orgId: string, userId: string, projectId: string, counterpartyId: string) {
+async function seedCounterparty(
+  orgId: string,
+  userId: string,
+  projectId: string,
+  counterpartyId: string
+) {
   await client.query(`INSERT INTO organizations (id, name, slug) VALUES ($1, $2, $3)`, [
     orgId,
     `Org ${orgId}`,

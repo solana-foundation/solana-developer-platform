@@ -206,10 +206,7 @@ export type CollectFieldsStatus = (typeof COLLECT_FIELDS_STATUSES)[number];
  * Requirement statuses answered on the client's requirements step before the
  * provider can advance: field collection or payout-account selection.
  */
-export const COLLECT_STAGE_STATUSES = [
-  ...COLLECT_FIELDS_STATUSES,
-  "collect_account",
-] as const;
+export const COLLECT_STAGE_STATUSES = [...COLLECT_FIELDS_STATUSES, "collect_account"] as const;
 
 export type CollectStageStatus = (typeof COLLECT_STAGE_STATUSES)[number];
 

@@ -1,15 +1,15 @@
 import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
+  bvnkOfframpFields,
+  isBvnkOfframpCurrency,
+} from "@sdp/payments/ramps/providers/bvnk/counterparty";
+import {
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
   normalizeBvnkCurrencyAndNetwork,
   readBvnkOfframpWallet,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import {
-  bvnkOfframpFields,
-  isBvnkOfframpCurrency,
-} from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import { bvnkOnrampTransferProviderDataSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import {
   lightsparkCollectAccountRequirements,
@@ -63,6 +63,7 @@ import {
 } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import { providerCustomerReferenceSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import {
   generatePaymentTransferId,
   type PaymentTransferRow,
@@ -152,7 +153,6 @@ import {
   rampQuoteExpiryProviderData,
 } from "./ramps/quote-binding";
 import { stripeOnrampQuote } from "./ramps/stripe";
-import { providerCustomerReferenceSchema } from "@/db/repositories/counterparty-provider-account.repository";
 
 type OnrampCurrencyPair = {
   source: (typeof ONRAMP_SUPPORT)[number]["source"];

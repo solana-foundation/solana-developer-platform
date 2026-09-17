@@ -139,10 +139,10 @@ describe("validateBvnkCounterparty", () => {
   it("requires a fiat currency for off-ramp validation", () => {
     assert.throws(
       () =>
-        validateBvnkCounterparty(
-          counterparty(),
-          { direction: "offramp", providerData: {} } as unknown as ValidateCounterpartyOptions
-        ),
+        validateBvnkCounterparty(counterparty(), {
+          direction: "offramp",
+          providerData: {},
+        } as unknown as ValidateCounterpartyOptions),
       SdpPaymentsError
     );
   });

@@ -1066,10 +1066,6 @@ describe("BVNK ramp webhook", () => {
     return row?.provider_data.bvnk;
   }
 
-
-
-
-
   it("caches bank details on the matching wallet entry on a wallet status-change webhook", async () => {
     const res = await sendBvnkWebhook(
       bvnkWalletStatusChangeEvent({
@@ -1082,7 +1078,6 @@ describe("BVNK ramp webhook", () => {
     expect(entry?.bankAccount?.accountNumber).toBe("900473221558");
     expect(entry?.bankAccount?.bankName).toBe("LEAD BANK");
   });
-
 
   it("activates the off-ramp wallet on a wallet status-change webhook with no customer", async () => {
     const OFFRAMP_WALLET_ID = "a:offramp:wallet:1";
@@ -1464,7 +1459,11 @@ describe("BVNK ramp webhook", () => {
     const res = await sendBvnkWebhook(
       {
         event: "bvnk:payment:payin:status-change",
-        data: { status: "COMPLETED", amount: { value: "100" }, beneficiary: { walletId: WALLET_ID } },
+        data: {
+          status: "COMPLETED",
+          amount: { value: "100" },
+          beneficiary: { walletId: WALLET_ID },
+        },
       },
       "not-a-valid-signature"
     );

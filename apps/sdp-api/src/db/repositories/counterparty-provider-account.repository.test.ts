@@ -89,7 +89,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "lightspark",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       fiatCurrency: "USD",
       destinationCountry: "US",
       paymentRail: "ACH",
@@ -136,7 +138,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "lightspark",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       fiatCurrency: "USD",
       destinationCountry: "US",
       paymentRail: "ACH",
@@ -321,7 +325,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "lightspark",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       fiatCurrency: "USD",
       destinationCountry: "US",
       paymentRail: "ACH",
@@ -361,7 +367,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "lightspark",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       fiatCurrency: "USD",
       destinationCountry: "US",
       paymentRail: "ACH",
@@ -443,7 +451,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "lightspark",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       fiatCurrency: "USD",
       destinationCountry: "US",
       paymentRail: "ACH",
@@ -460,7 +470,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "lightspark",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       fiatCurrency: "USD",
       destinationCountry: "US",
       paymentRail: "ACH",
@@ -484,7 +496,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "lightspark",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       fiatCurrency: "USD",
       destinationCountry: "US",
       paymentRail: "ACH",
@@ -494,7 +508,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "lightspark",
-      providerCustomerReference: providerCustomerReferenceSchema.parse(customer.provider_customer_reference),
+      providerCustomerReference: providerCustomerReferenceSchema.parse(
+        customer.provider_customer_reference
+      ),
       fiatCurrency: "GBP",
       destinationCountry: "GB",
       paymentRail: "FPS",

@@ -1,8 +1,5 @@
 import type { Counterparty } from "@sdp/types";
-import type {
-  CounterpartyRequirements,
-  RequirementField,
-} from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements, RequirementField } from "@sdp/types/ramp-requirements";
 import { badRequest, unsupportedCounterparty } from "../../../errors";
 import { readyCounterparty, textField } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";

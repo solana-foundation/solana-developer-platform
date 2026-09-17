@@ -1,8 +1,4 @@
-import type {
-  BvnkContactV3,
-  BvnkLedgerWalletProfilesV2,
-  BvnkLedgerWalletV2,
-} from "./schemas";
+import type { BvnkContactV3, BvnkLedgerWalletProfilesV2, BvnkLedgerWalletV2 } from "./schemas";
 
 export function bvnkContactV3(overrides?: Partial<BvnkContactV3>): BvnkContactV3 {
   return {

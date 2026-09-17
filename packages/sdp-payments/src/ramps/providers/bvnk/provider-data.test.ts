@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { BvnkContactV3 } from "./schemas";
 import { buildBvnkThirdPartyRuleEntity } from "./counterparty";
 import {
   buildBvnkOfframpWalletName,
@@ -11,6 +10,7 @@ import {
   parseBvnkOnrampPaymentRuleKey,
   parseBvnkOnrampWalletName,
 } from "./provider-data";
+import type { BvnkContactV3 } from "./schemas";
 
 const ONRAMP_KEY = "USD:USDC_SOLANA:dest";
 

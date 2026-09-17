@@ -975,7 +975,6 @@ describe("Counterparties Routes", () => {
       }
     });
 
-
     it("rejects an onramp requirements destination wallet outside the API key's bindings", async () => {
       const created = await createCounterparty({ externalId: "requirements_wallet_scope" });
       expect(created.status).toBe(201);
@@ -1010,17 +1009,6 @@ describe("Counterparties Routes", () => {
       const body = await res.json();
       expect(body.error.message).toBe("API key is not authorized for the requested wallet");
     });
-
-
-
-
-
-
-
-
-
-
-
   });
 
   describe("counterparty accounts", () => {
