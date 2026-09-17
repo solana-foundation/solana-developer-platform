@@ -46,7 +46,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
  * fixture deliberately returns an id that the key material does not spell.
  */
 function mockResolve(result: { ok: boolean; body: unknown }) {
-  const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => ({
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
     ok: result.ok,
     json: async () => result.body,
   }));
@@ -132,7 +132,11 @@ describe("PlaygroundApiKeySelector", () => {
     // never be inferred from the pasted value.
     mockResolve({
       ok: true,
-      body: { id: "key_other_workspace", name: "Other workspace key", keyPrefix: "sk_test_example" },
+      body: {
+        id: "key_other_workspace",
+        name: "Other workspace key",
+        keyPrefix: "sk_test_example",
+      },
     });
     const view = render(ui());
     const secretInput = view.getByLabelText("API key value") as HTMLInputElement;
@@ -149,7 +153,10 @@ describe("PlaygroundApiKeySelector", () => {
   });
 
   it("keeps a rejected key out of the store and off the playground", async () => {
-    mockResolve({ ok: false, body: { error: "API key is not available for the selected project" } });
+    mockResolve({
+      ok: false,
+      body: { error: "API key is not available for the selected project" },
+    });
     const view = render(ui());
     const secretInput = view.getByLabelText("API key value") as HTMLInputElement;
 
