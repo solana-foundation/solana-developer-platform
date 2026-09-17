@@ -5840,15 +5840,9 @@ Source: https://platform.solana.com/docs/reference/postman-collection
 
 > Download the public SDP API Postman collection generated from the OpenAPI contract.
 
-The Postman collection is generated from the same public OpenAPI contract that powers the API reference. It includes only end-user-facing API families:
-
-- Health
-- API Keys
-- Wallets
-- Projects
-- Issuance
-- Payments
-- Compliance
+The Postman collection is generated from the same public OpenAPI contract that
+powers the [API reference](/docs/reference/api). It includes every
+end-user-facing family published there.
 
 Internal-only endpoint families such as `rpc`, `admin`, `onboarding`, `auth`, `organizations`, and `members` are intentionally excluded.
 
@@ -5862,6 +5856,12 @@ When you import the collection into Postman, set:
 
 - `baseUrl` to the SDP API environment you want to target
 - `sdpApiKey` to your bearer API key
+
+The six keyless Earn catalogue, quote, and unsigned-build requests import with
+**No Auth**, so they work without changing the placeholder API key. To exercise
+their authenticated behavior, switch the individual request to **Inherit auth
+from parent**. Tenant reads and transaction submissions always inherit the
+collection API key.
 
 ---
 

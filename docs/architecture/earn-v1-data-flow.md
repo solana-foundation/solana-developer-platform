@@ -176,7 +176,7 @@ per-provider movement endpoints or status polling types from git history.
 | Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Treasury vault deposits and withdrawals emit `program` / `earn_vault_deposit` or `earn_vault_withdrawal`, enforce before custody, and fence approved retries against the signed intent; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
 | Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
-| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public Earn route inventory and the optional-auth contract for the keyless subset | 🔨 regenerate after the security-reviewed contract change |
+| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public Earn route inventory and the optional-auth contract for the six keyless operations | ✅ source and generated artifacts aligned |
 
 **Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
 (Kamino, Veda, Jupiter Lend and Ondo carry real catalogue reads;
