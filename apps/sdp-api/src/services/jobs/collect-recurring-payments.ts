@@ -25,8 +25,11 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
 // Rows are independent: collection, activation, and lifecycle recovery each
-// claim their recurring payment under a row lock before touching the chain,
-// so the fan-out only has to bound paid upstream (RPC) concurrency.
+// claim their recurring payment under a row lock before touching the chain.
+// Batches fan out per organization because policy velocity sums (spending
+// limits) are org-scoped and only count decided operations: same-org rows
+// evaluate serially so each check sees the earlier collections, keeping the
+// in-flight set per scope at one as in the serial job (ADR 0004).
 const COLLECTION_ROW_CONCURRENCY = 8;
 
 type CollectionRowOutcome = "ok" | "failed" | "skipped";
@@ -229,13 +232,34 @@ async function processRowsConcurrently<T extends PaymentRecurringPaymentRow>(
   okKey: "recovered" | "collected",
   run: (row: T) => Promise<CollectionRowOutcome>
 ): Promise<void> {
-  const settled = await mapSettledWithConcurrency(rows, COLLECTION_ROW_CONCURRENCY, run);
-  for (const outcome of settled) {
-    if (outcome.status === "fulfilled") {
-      addOutcome(result, outcome.value, okKey);
-      continue;
+  const orgBatches = new Map<string, T[]>();
+  for (const row of rows) {
+    const batch = orgBatches.get(row.organization_id);
+    if (batch) {
+      batch.push(row);
+    } else {
+      orgBatches.set(row.organization_id, [row]);
     }
-    throw outcome.reason;
+  }
+
+  const settled = await mapSettledWithConcurrency(
+    [...orgBatches.values()],
+    COLLECTION_ROW_CONCURRENCY,
+    async (batch) => {
+      const outcomes: CollectionRowOutcome[] = [];
+      for (const row of batch) {
+        outcomes.push(await run(row));
+      }
+      return outcomes;
+    }
+  );
+  for (const batch of settled) {
+    if (batch.status === "rejected") {
+      throw batch.reason;
+    }
+    for (const outcome of batch.value) {
+      addOutcome(result, outcome, okKey);
+    }
   }
 }
 

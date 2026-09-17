@@ -236,6 +236,38 @@ describe("collectDueRecurringPayments", () => {
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
   });
 
+  it("collects same-organization rows serially while fanning out across organizations", async () => {
+    const orgInFlight = new Map<string, number>();
+    let orgMaxInFlight = 0;
+    let globalInFlight = 0;
+    let globalMaxInFlight = 0;
+    mocks.collectRecurringPayment.mockImplementation(async (input: { organizationId: string }) => {
+      const org = input.organizationId;
+      const orgCurrent = (orgInFlight.get(org) ?? 0) + 1;
+      orgInFlight.set(org, orgCurrent);
+      orgMaxInFlight = Math.max(orgMaxInFlight, orgCurrent);
+      globalInFlight += 1;
+      globalMaxInFlight = Math.max(globalMaxInFlight, globalInFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      globalInFlight -= 1;
+      orgInFlight.set(org, orgCurrent - 1);
+      return {};
+    });
+    mocks.rows.due = [
+      recurringRow("active", { id: "prp_org_a_1", organization_id: "org_a" }),
+      recurringRow("active", { id: "prp_org_a_2", organization_id: "org_a" }),
+      recurringRow("active", { id: "prp_org_b_1", organization_id: "org_b" }),
+      recurringRow("active", { id: "prp_org_b_2", organization_id: "org_b" }),
+      recurringRow("active", { id: "prp_org_c_1", organization_id: "org_c" }),
+    ];
+
+    const result = await collectDueRecurringPayments(env, new Date());
+
+    expect(result).toEqual({ recovered: 0, collected: 5, failed: 0, skipped: 0 });
+    expect(orgMaxInFlight).toBe(1);
+    expect(globalMaxInFlight).toBeGreaterThan(1);
+  });
+
   it("fails closed when a recurring payment has no exact source wallet", async () => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
     mocks.rows.due = [recurringRow("active", { source_custody_wallet_id: null })];
