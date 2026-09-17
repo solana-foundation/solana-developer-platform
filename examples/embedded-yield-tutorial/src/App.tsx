@@ -59,7 +59,7 @@ function Hero() {
           Solana Developer Platform · Embedded Yield
         </p>
         <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-foreground lg:text-6xl">
-          From custody to yield in three screens.
+          Surfacing yield to your customers with one code snippet.
         </h1>
         <p className="mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground lg:text-lg">
           An interactive companion to the{" "}
@@ -70,8 +70,7 @@ function Hero() {
             embedded-yield-bank
           </a>{" "}
           example: a consumer wallet company adds interest-bearing stablecoins
-          for its customers, with yield backed by real-world assets. Scroll
-          through — everything on the right is drawn with CSS and React.
+          for its customers, with yield backed by real-world assets.
         </p>
         <p className="mt-6 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
           <ArrowDownIcon className="size-4 animate-bounce" />
