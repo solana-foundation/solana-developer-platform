@@ -59,7 +59,7 @@ function Hero() {
           Solana Developer Platform · Embedded Yield
         </p>
         <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-foreground lg:text-6xl">
-          Surfacing yield to your customers with one code snippet.
+          Give your customers yield with one code snippet.
         </h1>
         <p className="mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground lg:text-lg">
           An interactive companion to the{" "}
