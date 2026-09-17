@@ -54,3 +54,77 @@ test("honors the non-breaking override set the version bump honors", () => {
   assert.doesNotMatch(markdown, /BREAKING/);
   assert.match(markdown, /### Features\n\n\* retained an inaccurate footer/);
 });
+
+test("renders a revert under Reverts and drops the commit it undoes", () => {
+  // 0.79.0 shipped this shape: a provider added and reverted in the same range.
+  // The notes announced it under Features and repeated it under Other Changes
+  // using the reverted commit's own title, so nothing said it had been pulled.
+  const feature = "b".repeat(40);
+  const markdown = buildSectionMarkdown(REPO, "0.79.0", "v0.78.0", [
+    commit({
+      sha: feature,
+      type: "feat",
+      description: "**ramps:** add a provider",
+      prNumber: "1501",
+    }),
+    commit({
+      sha: "c".repeat(40),
+      type: "revert",
+      description: '"feat(ramps): add a provider (#1501)"',
+      body: `This reverts ${feature.slice(0, 9)}.`,
+      prNumber: "1901",
+    }),
+  ]);
+
+  assert.match(markdown, /### Reverts/);
+  assert.match(markdown, /"feat\(ramps\): add a provider \(#1501\)"/);
+  assert.doesNotMatch(markdown, /### Features/);
+  assert.doesNotMatch(markdown, /\*\*ramps:\*\* add a provider/);
+});
+
+test("accepts the full git revert footer as well as an abbreviated sha", () => {
+  const feature = "d".repeat(40);
+  const markdown = buildSectionMarkdown(REPO, "0.79.0", "v0.78.0", [
+    commit({ sha: feature, type: "feat", description: "shipped then pulled" }),
+    commit({
+      sha: "e".repeat(40),
+      type: "revert",
+      description: '"feat: shipped then pulled"',
+      body: `This reverts commit ${feature}.\n\nBecause it broke.`,
+    }),
+  ]);
+
+  assert.doesNotMatch(markdown, /shipped then pulled\b(?!")/);
+  assert.match(markdown, /### Reverts/);
+});
+
+test("a revert of something outside this release leaves the range untouched", () => {
+  const markdown = buildSectionMarkdown(REPO, "0.79.0", "v0.78.0", [
+    commit({ sha: "f".repeat(40), type: "feat", description: "unrelated feature" }),
+    commit({
+      sha: "1".repeat(40),
+      type: "revert",
+      description: '"feat: something from an older release"',
+      body: "This reverts commit 9999999999999999999999999999999999999999.",
+    }),
+  ]);
+
+  assert.match(markdown, /### Features/);
+  assert.match(markdown, /unrelated feature/);
+  assert.match(markdown, /### Reverts/);
+});
+
+test("a breaking commit that is reverted in the same release is not announced as breaking", () => {
+  const breaking = "2".repeat(40);
+  const markdown = buildSectionMarkdown(REPO, "0.79.0", "v0.78.0", [
+    commit({ sha: breaking, type: "feat", description: "breaking thing", breaking: true }),
+    commit({
+      sha: "3".repeat(40),
+      type: "revert",
+      description: '"feat!: breaking thing"',
+      body: `This reverts commit ${breaking}.`,
+    }),
+  ]);
+
+  assert.doesNotMatch(markdown, /BREAKING CHANGES/);
+});

@@ -3,6 +3,7 @@ import { nonBreakingCommitOverrides } from "./release-version.mjs";
 export const changelogSections = [
   { key: "feat", heading: "Features" },
   { key: "fix", heading: "Bug Fixes" },
+  { key: "revert", heading: "Reverts" },
   { key: "perf", heading: "Performance Improvements" },
   { key: "docs", heading: "Documentation" },
   { key: "refactor", heading: "Refactors" },
@@ -16,6 +17,9 @@ function categorizeCommit(type) {
   }
   if (type === "fix") {
     return "fix";
+  }
+  if (type === "revert") {
+    return "revert";
   }
   if (type === "perf") {
     return "perf";
@@ -47,6 +51,36 @@ function prUrl(repo, number) {
   return `https://github.com/${repo}/pull/${number}`;
 }
 
+/**
+ * A revert commit names what it undoes: `git revert` writes "This reverts commit
+ * <sha>.", and a hand-written one usually writes the short sha. Reading it lets
+ * the notes drop a feature that no longer exists in the release instead of
+ * announcing it, which is what 0.79.0 did with the Hercle provider: the feature
+ * appeared under Features and its revert appeared separately under the feature's
+ * own title, so nothing on the page said it had been pulled.
+ */
+const REVERTED_SHA = /^This reverts(?: commit)? ([0-9a-f]{7,40})/im;
+
+function revertedShas(commits) {
+  const shas = [];
+  for (const commit of commits) {
+    if (commit.type !== "revert") {
+      continue;
+    }
+    const match = REVERTED_SHA.exec(commit.body ?? "");
+    if (match) {
+      shas.push(match[1].toLowerCase());
+    }
+  }
+  return shas;
+}
+
+function isReverted(sha, revertedList) {
+  const value = (sha ?? "").toLowerCase();
+  // Either side may be abbreviated, so compare on the shorter length.
+  return revertedList.some((reverted) => value.startsWith(reverted) || reverted.startsWith(value));
+}
+
 export function buildSectionMarkdown(repo, version, previousTag, commits) {
   const releaseTag = `v${version}`;
   const date = new Date().toISOString().slice(0, 10);
@@ -57,8 +91,15 @@ export function buildSectionMarkdown(repo, version, previousTag, commits) {
   // breaking changes filed silently under Features. The same override set the
   // bump honors applies, so a commit judged non-breaking is not flagged.
   const breakingEntries = [];
+  const reverted = revertedShas(commits);
 
   for (const commit of commits) {
+    // A commit undone inside this same release never shipped, so listing it
+    // would advertise something the release does not contain. The revert itself
+    // still appears, under Reverts.
+    if (commit.type !== "revert" && isReverted(commit.sha, reverted)) {
+      continue;
+    }
     const bucket = categorizeCommit(commit.type);
     const shortSha = commit.sha.slice(0, 7);
     const prLink = commit.prNumber
