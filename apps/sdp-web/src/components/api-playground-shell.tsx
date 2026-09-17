@@ -9,7 +9,11 @@ import { Input } from "@/components/ui/input";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { getStoredApiKeySecret, normalizeApiKeyInput } from "@/lib/playground-api-keys";
+import {
+  getStoredApiKeySecret,
+  isValidSdpApiKey,
+  normalizeApiKeyInput,
+} from "@/lib/playground-api-keys";
 import { setNestedValue } from "@/lib/set-nested-value";
 import { HighlightedCode, type HighlightLanguage } from "@/lib/shiki-code";
 import { cn } from "@/lib/utils";
@@ -217,10 +221,6 @@ function getMethodBadgeVariant(
   }
 
   return "success";
-}
-
-function isValidSdpApiKey(rawValue: string): boolean {
-  return /^sk_(test|live)_[A-Za-z0-9_-]+$/.test(rawValue);
 }
 
 function buildFetchSnippet(
