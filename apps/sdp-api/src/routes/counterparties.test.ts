@@ -1509,6 +1509,16 @@ describe("Counterparties Routes", () => {
             signedAt: expect.any(String),
           },
         });
+        const consentAudit = await getDb(env)
+          .prepare(
+            `SELECT metadata::jsonb ->> 'consentIp' AS consent_ip, status FROM audit_logs
+             WHERE resource_type = 'counterparty' AND resource_id = ?
+               AND metadata::jsonb ->> 'action' = 'bvnk_agreement_session_signed'
+               AND metadata::jsonb ->> 'auditPhase' = 'outcome'`
+          )
+          .bind(counterparty.id)
+          .first<{ consent_ip: string; status: string }>();
+        expect(consentAudit).toEqual({ consent_ip: "203.0.113.9", status: "success" });
         const linked = await repository.getProviderAccount({
           organizationId: TEST_ORG.id,
           projectId: TEST_PROJECT_ID,

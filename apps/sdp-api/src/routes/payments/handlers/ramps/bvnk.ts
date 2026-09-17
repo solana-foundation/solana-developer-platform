@@ -1045,28 +1045,46 @@ export async function ensureBvnkCustomer(
       }
       if (stage.kind === "agreements_pending" && agreementConsent !== undefined) {
         const ipAddress = getClientIp(c);
-        await client.signAgreementSession(ctx, {
-          reference: stage.sessionReference,
-          ipAddress: ipAddress === null ? BVNK_UNRESOLVED_CONSENT_IP : ipAddress,
+        const consentIp = ipAddress === null ? BVNK_UNRESOLVED_CONSENT_IP : ipAddress;
+        // Signing registers the consent (and its IP) with the provider — a
+        // legal state change admitted intent/outcome like the other
+        // provisioning steps.
+        const audit = requestProvisioningAudit(c, counterparty);
+        const intent = await audit.begin({
+          action: "bvnk_agreement_session_signed",
+          metadata: { sessionReference: stage.sessionReference, consentIp },
         });
-        const now = new Date().toISOString();
-        const updated = await accounts.patchAccountMetadata({
-          organizationId: counterparty.organization_id,
-          projectId,
-          counterpartyId: counterparty.id,
-          provider: "bvnk",
-          id: existing.id,
-          set: {
-            session: {
-              ...metadata.session,
-              signedAt: now,
+        let updated: Awaited<ReturnType<typeof accounts.patchAccountMetadata>>;
+        let signedAt: string;
+        try {
+          await client.signAgreementSession(ctx, {
+            reference: stage.sessionReference,
+            ipAddress: consentIp,
+          });
+          signedAt = new Date().toISOString();
+          updated = await accounts.patchAccountMetadata({
+            organizationId: counterparty.organization_id,
+            projectId,
+            counterpartyId: counterparty.id,
+            provider: "bvnk",
+            id: existing.id,
+            set: {
+              session: {
+                ...metadata.session,
+                signedAt,
+              },
             },
-          },
-          unset: [],
-        });
-        if (!updated) {
-          throw internalError("BVNK agreement consent update escaped its tenant scope.");
+            unset: [],
+          });
+          if (!updated) {
+            throw internalError("BVNK agreement consent update escaped its tenant scope.");
+          }
+          await audit.complete(intent, { signedAt });
+        } catch (error) {
+          await audit.fail(intent, error);
+          throw error;
         }
+        const now = signedAt;
         getLogger().info(
           {
             counterparty_id: counterparty.id,
