@@ -1,5 +1,3 @@
-import { CheckIcon } from "lucide-react";
-
 /**
  * The repository's pinned mainnet Earn shelf — the four curated Kamino vaults
  * from `CURATED_VAULTS["mainnet-beta"]` in the API's earn curation config
@@ -84,7 +82,7 @@ export function DashboardPreview() {
             <thead>
               <tr className="text-[10px] tracking-wider text-muted-foreground uppercase">
                 <th scope="col" className="w-8 py-1.5 pr-2 font-semibold">
-                  <span className="sr-only">Surface</span>
+                  <span className="sr-only">Select</span>
                 </th>
                 <th scope="col" className="py-1.5 font-semibold">
                   Strategy
@@ -109,14 +107,14 @@ export function DashboardPreview() {
                   <td className="py-2 pr-2 align-middle">
                     <span
                       aria-hidden="true"
-                      className={`flex size-4 items-center justify-center rounded border ${
+                      className={`flex size-4 items-center justify-center rounded-full border ${
                         strategy.surfaced
-                          ? "border-success bg-success text-white"
+                          ? "border-success"
                           : "border-foreground/25 bg-background"
                       }`}
                     >
                       {strategy.surfaced ? (
-                        <CheckIcon className="size-3" strokeWidth="3" />
+                        <span className="size-2 rounded-full bg-success" />
                       ) : null}
                     </span>
                   </td>
@@ -154,8 +152,8 @@ export function DashboardPreview() {
         </div>
       </div>
       <figcaption className="mt-3 text-center text-xs text-muted-foreground">
-        The SDP Embedded Yield page where the wallet team chooses the Earn
-        strategies its customers can enter — here, the pinned mainnet shelf.
+        The SDP Embedded Yield page where the wallet team chooses the one Earn
+        strategy its customers can enter — here, the pinned mainnet shelf.
       </figcaption>
     </figure>
   );
