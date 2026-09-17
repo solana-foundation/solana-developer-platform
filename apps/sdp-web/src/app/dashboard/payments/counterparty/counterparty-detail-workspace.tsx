@@ -1,5 +1,6 @@
 "use client";
 
+import type { BvnkPaymentInstrument } from "@sdp/types";
 import {
   type Counterparty,
   type CounterpartyAccount,
@@ -234,6 +235,42 @@ function CustomerLinkRow() {
   );
 }
 
+function InstrumentDetails({ instrument }: { instrument: BvnkPaymentInstrument }) {
+  const t = useTranslations();
+  const routing =
+    instrument.bankDetails.nid === undefined || instrument.bankDetails.nid.type !== "ROUTING_NUMBER"
+      ? null
+      : instrument.bankDetails.nid.value;
+  return (
+    <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 pl-6 text-xs">
+      <dt className="text-tertiary">
+        {t("DashboardPayments.counterparty.providerAccountAccountHolder")}
+      </dt>
+      <dd className="text-primary">{instrument.accountHolderName}</dd>
+      <dt className="text-tertiary">{t("DashboardPayments.counterparty.providerAccountNumber")}</dt>
+      <dd className="text-primary">{instrument.accountNumber}</dd>
+      <dt className="text-tertiary">{t("DashboardPayments.counterparty.providerAccountBank")}</dt>
+      <dd className="text-primary">{instrument.bankDetails.name}</dd>
+      {routing === null ? null : (
+        <>
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountRouting")}
+          </dt>
+          <dd className="text-primary">{routing}</dd>
+        </>
+      )}
+      {instrument.bankDetails.bic === undefined ? null : (
+        <>
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountBic")}
+          </dt>
+          <dd className="text-primary">{instrument.bankDetails.bic}</dd>
+        </>
+      )}
+    </dl>
+  );
+}
+
 function FundingWalletRow({
   account,
 }: {
@@ -300,30 +337,7 @@ function FundingWalletRow({
           {t("DashboardPayments.counterparty.providerAccountNoActiveRule")}
         </p>
       )}
-      {open && instrument !== undefined ? (
-        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 pl-6 text-xs">
-          <dt className="text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountAccountHolder")}
-          </dt>
-          <dd className="text-primary">{instrument.accountHolderName}</dd>
-          <dt className="text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountNumber")}
-          </dt>
-          <dd className="text-primary">{instrument.accountNumber}</dd>
-          <dt className="text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountBank")}
-          </dt>
-          <dd className="text-primary">{instrument.bankDetails.name}</dd>
-          {instrument.bankDetails.bic === undefined ? null : (
-            <>
-              <dt className="text-tertiary">
-                {t("DashboardPayments.counterparty.providerAccountRouting")}
-              </dt>
-              <dd className="text-primary">{instrument.bankDetails.bic}</dd>
-            </>
-          )}
-        </dl>
-      ) : null}
+      {open && instrument !== undefined ? <InstrumentDetails instrument={instrument} /> : null}
     </div>
   );
 }
@@ -387,30 +401,7 @@ function SettlementWalletRow({
           </span>
         </button>
       )}
-      {open && instrument !== undefined ? (
-        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 pl-6 text-xs">
-          <dt className="text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountAccountHolder")}
-          </dt>
-          <dd className="text-primary">{instrument.accountHolderName}</dd>
-          <dt className="text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountNumber")}
-          </dt>
-          <dd className="text-primary">{instrument.accountNumber}</dd>
-          <dt className="text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountBank")}
-          </dt>
-          <dd className="text-primary">{instrument.bankDetails.name}</dd>
-          {instrument.bankDetails.bic === undefined ? null : (
-            <>
-              <dt className="text-tertiary">
-                {t("DashboardPayments.counterparty.providerAccountRouting")}
-              </dt>
-              <dd className="text-primary">{instrument.bankDetails.bic}</dd>
-            </>
-          )}
-        </dl>
-      ) : null}
+      {open && instrument !== undefined ? <InstrumentDetails instrument={instrument} /> : null}
     </div>
   );
 }

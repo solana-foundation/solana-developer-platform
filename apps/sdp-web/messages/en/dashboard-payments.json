@@ -584,6 +584,7 @@
       "providerAccountNoActiveRule": "No active rule",
       "providerAccountAccountHolder": "Account holder",
       "providerAccountRouting": "Routing",
+      "providerAccountBic": "BIC",
       "providerAccountSettlement": "Settlement"
     },
     "playground": {
