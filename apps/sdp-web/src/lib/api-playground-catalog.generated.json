@@ -7997,7 +7997,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8360,7 +8362,7 @@
         "operationId": "getToken",
         "title": "Get token",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeMetadataAuthority={includeMetadataAuthority}",
+        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeFreezeAuthority={includeFreezeAuthority}&includeMetadataAuthority={includeMetadataAuthority}&includePauseAuthority={includePauseAuthority}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8388,9 +8390,45 @@
             ]
           },
           {
+            "key": "includeFreezeAuthority",
+            "label": "includeFreezeAuthority",
+            "description": "Opt in to a read-only lookup of the authority that controls freeze operations. Token ACL mints return the live mint-config controller.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
             "key": "includeMetadataAuthority",
             "label": "includeMetadataAuthority",
             "description": "Opt in to a read-only lookup of the current metadata authority for wallet selection. Tokens with a mint use live chain state; tokens without a mint use the stored metadata authority, falling back to stored mint authority, without RPC. Ordinary token reads do not perform this lookup.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
+            "key": "includePauseAuthority",
+            "label": "includePauseAuthority",
+            "description": "Opt in to a read-only lookup of the live Token-2022 pausable authority for wallet selection.",
             "defaultValue": "true",
             "required": false,
             "kind": "select",
@@ -8466,7 +8504,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8559,7 +8599,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8663,7 +8705,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8960,7 +9004,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -9095,7 +9141,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",

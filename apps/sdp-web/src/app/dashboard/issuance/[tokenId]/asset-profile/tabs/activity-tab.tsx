@@ -150,7 +150,7 @@ function ActivityEventRow({
       <TableCell align="left">
         <span className="inline-flex items-center gap-1.5 rounded-md bg-fill-subtle px-2 py-1 text-xs font-medium text-secondary">
           <ActionIcon className="h-3.5 w-3.5 shrink-0" />
-          {auditActionLabel(event.action)}
+          {auditActionLabel(event.action, event.resourceType, t)}
         </span>
         <span className="mt-1 block text-xs text-tertiary sm:hidden">
           {formatDateTime(event.createdAt, locale)}

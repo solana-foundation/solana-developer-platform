@@ -27,6 +27,7 @@ export function DetailsTab({
   const rows = [
     [t("DashboardIssuance.forms.name"), form.draft.name],
     [t("DashboardIssuance.create.symbol"), form.draft.symbol],
+    [t("DashboardIssuance.create.decimals"), form.draft.decimals],
     [
       t("DashboardIssuance.ux.issuanceLimit"),
       form.draft.maxSupply
@@ -96,9 +97,10 @@ function EditableDetailsTab({ token, form }: { token: Token; form: AssetProfileF
   const symbolError = fieldError("symbol");
   const decimalsError = fieldError("decimals");
 
-  // Symbol and decimals are baked into the mint at deploy, so they lock once
-  // the token is on-chain and stay editable only while it's a draft.
+  // Symbol and decimals are baked into the mint at deploy. Stablecoins are
+  // fixed to the product's six-decimal contract even while still drafts.
   const isDeployed = Boolean(token.mintAddress);
+  const decimalsLocked = isDeployed || token.template === "stablecoin";
 
   return (
     <div className="w-full space-y-8">
@@ -116,35 +118,39 @@ function EditableDetailsTab({ token, form }: { token: Token; form: AssetProfileF
             />
           </div>
           {isDeployed ? (
-            <>
-              <ReadOnlyField label={t("DashboardIssuance.create.symbol")} value={token.symbol} />
-              <ReadOnlyField
-                label={t("DashboardIssuance.create.decimals")}
-                value={String(token.decimals)}
-              />
-            </>
+            <ReadOnlyField label={t("DashboardIssuance.create.symbol")} value={token.symbol} />
           ) : (
-            <>
-              <TextField
-                label={t("DashboardIssuance.create.symbol")}
-                required
-                disabled={saving}
-                value={draft.symbol}
-                onChange={(value) => updateDraft({ symbol: value })}
-                placeholder={t("DashboardIssuance.assetDetails.symbolPlaceholder")}
-                error={symbolError}
-              />
-              <TextField
-                label={t("DashboardIssuance.create.decimals")}
-                required
-                type="number"
-                disabled={saving}
-                value={draft.decimals}
-                onChange={(value) => updateDraft({ decimals: value })}
-                placeholder={t("DashboardIssuance.create.decimalsPlaceholder")}
-                error={decimalsError}
-              />
-            </>
+            <TextField
+              label={t("DashboardIssuance.create.symbol")}
+              required
+              disabled={saving}
+              value={draft.symbol}
+              onChange={(value) => updateDraft({ symbol: value })}
+              placeholder={t("DashboardIssuance.assetDetails.symbolPlaceholder")}
+              error={symbolError}
+            />
+          )}
+          {decimalsLocked ? (
+            <ReadOnlyField
+              label={t("DashboardIssuance.create.decimals")}
+              value={!isDeployed && token.template === "stablecoin" ? "6" : String(token.decimals)}
+              lockReason={
+                token.template === "stablecoin"
+                  ? t("DashboardIssuance.draftForm.stableDecimals")
+                  : undefined
+              }
+            />
+          ) : (
+            <TextField
+              label={t("DashboardIssuance.create.decimals")}
+              required
+              type="number"
+              disabled={saving}
+              value={draft.decimals}
+              onChange={(value) => updateDraft({ decimals: value })}
+              placeholder={t("DashboardIssuance.create.decimalsPlaceholder")}
+              error={decimalsError}
+            />
           )}
           {/* The cap lives on the token row, not in issuance_metadata, and SDP
               enforces it at mint time — so it stays editable for as long as SDP

@@ -1,6 +1,7 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenTransaction } from "@sdp/types";
+import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";
 import { getDb } from "@/db";
@@ -52,6 +53,38 @@ type AppContext = Context<{ Bindings: Env }>;
 type MintBody = z.output<typeof mintSchema>;
 
 type MintOperationAmount = ReturnType<typeof resolveMintOperationAmount>;
+
+async function assertMintDestinationNotFrozen(params: {
+  tokenService: TokenService;
+  tokenId: string;
+  mintAddress: ReturnType<typeof assertValidAddress>;
+  destination: ReturnType<typeof assertValidAddress>;
+}): Promise<void> {
+  const destinationIsFrozen = await params.tokenService.isAccountFrozen(
+    params.tokenId,
+    params.destination
+  );
+  const [associatedTokenAccount] = await findAssociatedTokenPda({
+    owner: params.destination,
+    mint: params.mintAddress,
+    tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+  });
+  const associatedAccountIsFrozen =
+    associatedTokenAccount === params.destination
+      ? destinationIsFrozen
+      : await params.tokenService.isAccountFrozen(params.tokenId, associatedTokenAccount);
+
+  if (destinationIsFrozen || associatedAccountIsFrozen) {
+    throw new AppError(
+      "ACCOUNT_FROZEN",
+      "Cannot mint to a frozen token account. Unfreeze the destination before minting.",
+      {
+        field: "destination",
+        tokenAccount: destinationIsFrozen ? params.destination : associatedTokenAccount,
+      }
+    );
+  }
+}
 
 interface MintExecutionPolicyResolved {
   tokenId: string;
@@ -448,6 +481,15 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     });
   }
 
+  const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
+  const destination = assertValidAddress(body.mint.destination, "destination");
+  await assertMintDestinationNotFrozen({
+    tokenService,
+    tokenId,
+    mintAddress,
+    destination,
+  });
+
   const currentAuthority = await resolveCurrentAuthorityForRole(c.env, tokenService, token, "mint");
   if (!currentAuthority) {
     throw badRequest("Current mint authority is not available for this token");
@@ -460,9 +502,6 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     currentAuthority: mintAuthority,
     requiredWalletPermissions: ["tokens:write"],
   });
-  const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
-  const destination = assertValidAddress(body.mint.destination, "destination");
-
   // Build unsigned transaction using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
@@ -696,6 +735,12 @@ export async function extractMintPolicyCandidate(
   });
   const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
   const destination = assertValidAddress(input.mint.destination, "destination");
+  await assertMintDestinationNotFrozen({
+    tokenService,
+    tokenId,
+    mintAddress,
+    destination,
+  });
 
   return {
     candidate: buildIssuancePolicyCandidate({

@@ -315,6 +315,27 @@ describe("authority-resolution", () => {
     expect(fetchMaybeMintMock).not.toHaveBeenCalled();
   });
 
+  it("uses the Token ACL controller when resolving a freeze authority update", async () => {
+    getTokenAclMintConfigMock.mockResolvedValue({
+      exists: true,
+      data: { freezeAuthority: OTHER_AUTHORITY },
+    });
+
+    await expect(
+      resolveCurrentAuthorityForRole(
+        {
+          SOLANA_RPC_URL: "https://rpc.example.test",
+          SOLANA_NETWORK: "devnet",
+        } as never,
+        { updateTokenAuthorities: vi.fn() } as never,
+        createToken({ freezeAuthority: AUTHORITY }),
+        "freeze"
+      )
+    ).resolves.toBe(OTHER_AUTHORITY);
+    expect(getTokenAclMintConfigMock).toHaveBeenCalledOnce();
+    expect(fetchMaybeMintMock).not.toHaveBeenCalled();
+  });
+
   it("keeps the base freeze authority for non-Token ACL mints", async () => {
     fetchMaybeMintMock.mockResolvedValue(createDecodedMint({ freezeAuthority: AUTHORITY }));
 
