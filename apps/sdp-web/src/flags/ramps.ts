@@ -3,7 +3,6 @@ import { RAMP_PROVIDERS } from "@sdp/types";
 import {
   rampProviderBvnk,
   rampProviderCoinbase,
-  rampProviderHercle,
   rampProviderLightspark,
   rampProviderMoneygram,
   rampProviderMoonpay,
@@ -19,7 +18,6 @@ const RAMP_PROVIDER_FLAGS = {
   coinbase: rampProviderCoinbase,
   mural: rampProviderMural,
   stripe: rampProviderStripe,
-  hercle: rampProviderHercle,
 } as const satisfies Record<RampProviderId, typeof rampProviderMoonpay>;
 
 /**

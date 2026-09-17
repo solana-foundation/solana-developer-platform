@@ -27,7 +27,6 @@ import {
   bvnkFundingWalletMetadataSchema,
   counterpartyProviderAccountRowSchema,
   generateCounterpartyProviderAccountId,
-  hercleCustomerLinkMetadataSchema,
 } from "./counterparty-provider-account.repository";
 
 /**
@@ -45,9 +44,6 @@ function assertProviderAccountMetadata(
 ): void {
   if (kind === "funding_wallet" && provider === "bvnk") {
     bvnkFundingWalletMetadataSchema.parse(metadata);
-  }
-  if (kind === "customer_link" && provider === "hercle") {
-    hercleCustomerLinkMetadataSchema.parse(metadata);
   }
 }
 
