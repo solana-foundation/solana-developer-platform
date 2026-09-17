@@ -1182,7 +1182,7 @@ describe("Counterparties Routes", () => {
       }
     });
 
-    it("reads back a stored COUNTERPARTY_VERIFIED status on a BVNK customer link", async () => {
+    it("reads back a verified BVNK customer link from its stored metadata status", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_verified" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
@@ -1200,7 +1200,7 @@ describe("Counterparties Routes", () => {
           TEST_PROJECT_ID,
           counterparty.id,
           "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
-          "COUNTERPARTY_VERIFIED",
+          null,
           {
             status: "VERIFIED",
             residenceCountryCode: "US",
@@ -1225,14 +1225,14 @@ describe("Counterparties Routes", () => {
           destinationCountry: null,
           paymentRail: null,
           status: "active",
-          providerStatus: "COUNTERPARTY_VERIFIED",
+          providerStatus: null,
           createdAt: expect.any(String),
           customerLink: {
             provider: "bvnk",
             id: rowId,
             providerCustomerReference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
             status: "active",
-            providerStatus: "COUNTERPARTY_VERIFIED",
+            providerStatus: "VERIFIED",
             createdAt: expect.any(String),
             residenceCountryCode: "US",
             agreements: [],
