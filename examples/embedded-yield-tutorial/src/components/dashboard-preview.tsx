@@ -20,7 +20,7 @@ const MAINNET_STRATEGIES = [
     asset: "USDG",
     tvl: "$43.3M",
     apy: "4.34%",
-    surfaced: true,
+    surfaced: false,
   },
   {
     name: "Steakhouse USDC",

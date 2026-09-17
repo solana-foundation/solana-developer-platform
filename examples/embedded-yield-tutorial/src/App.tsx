@@ -182,10 +182,8 @@ Authorization: Bearer <project-api-key>
         </h2>
         <p className="mt-4 leading-relaxed text-muted-foreground">
           The company opens the SDP dashboard&rsquo;s Embedded Yield page and
-          chooses which Earn strategy its customers can enter — led by the
-          Kamino Institutional Commodity Yield vault at 8.43% APY on USDC,
-          SDP&rsquo;s highest-yielding fund — while SDP handles the on-chain
-          plumbing.
+          chooses which Earn strategy its customers can enter, while SDP handles
+          the on-chain plumbing.
         </p>
         <p className="mt-6 text-sm font-semibold text-foreground">
           Bring your own signing infrastructure — or easily use one of ours.
