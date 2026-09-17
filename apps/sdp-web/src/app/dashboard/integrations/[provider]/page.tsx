@@ -220,8 +220,16 @@ function resolveConnectionsProvider(
   return providerSupportsStoredCredentialSetup(provider) ? provider : null;
 }
 
-/** Who is asking, and what they may do. Never returns for a signed-out viewer. */
-async function resolveViewer() {
+/**
+ * Who is asking, and which workspace this render is scoped to. Never returns
+ * for a viewer who is signed out, has no organization, or is not onboarded.
+ *
+ * One gate rather than two, and strictly in this order. `auth()` is a local
+ * session read with no round trip to overlap, so splitting it out to run
+ * alongside the onboarding fetch buys nothing measurable and costs a request
+ * sent on behalf of someone who is about to be redirected away.
+ */
+async function resolveRequestContext() {
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -229,11 +237,8 @@ async function resolveViewer() {
   if (!orgId) {
     redirect("/dashboard");
   }
-  return resolveDashboardAccess(orgRole);
-}
+  const dashboardAccess = resolveDashboardAccess(orgRole);
 
-/** The organization and project this render is scoped to. */
-async function resolveWorkspace() {
   const { organizationClient, projectClient } = await createRequestScopedSdpApiClients();
   const onboarding =
     await organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
@@ -243,10 +248,15 @@ async function resolveWorkspace() {
   if (!projectClient) {
     throw new Error("Selected project required");
   }
-  // The shell only routes here after onboarding, so a missing setting means
-  // the organization runs on SDP's default RPC, not "none".
-  const activeRpcProvider: OrganizationRpcProvider = onboarding.setup?.rpcProvider ?? "default";
-  return { projectClient, organizationId: onboarding.organization.id, activeRpcProvider };
+
+  return {
+    dashboardAccess,
+    projectClient,
+    organizationId: onboarding.organization.id,
+    // The shell only routes here after onboarding, so a missing setting means
+    // the organization runs on SDP's default RPC, not "none".
+    activeRpcProvider: (onboarding.setup?.rpcProvider ?? "default") as OrganizationRpcProvider,
+  };
 }
 
 type ProviderAvailability = Awaited<ReturnType<typeof fetchProviderAvailability>>;
@@ -316,8 +326,8 @@ export default async function IntegrationDetailPage({
     notFound();
   }
 
-  const dashboardAccess = await resolveViewer();
-  const { projectClient, organizationId, activeRpcProvider } = await resolveWorkspace();
+  const { dashboardAccess, projectClient, organizationId, activeRpcProvider } =
+    await resolveRequestContext();
 
   const connectionsProvider = resolveConnectionsProvider(provider, custodyEnabled);
   const custodyConnectionsApply = connectionsProvider !== null && (await privyByok());

@@ -49,7 +49,6 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 function ConnectionHeaderCard({
   canManageCustody,
   connection,
-  formattedCreated,
   listItem,
   onAddWallet,
   onMakeDefault,
@@ -59,7 +58,6 @@ function ConnectionHeaderCard({
 }: {
   canManageCustody: boolean;
   connection: CustodyInstallationConnection;
-  formattedCreated: string | null;
   listItem: CustodyConnectionListItem | null;
   onAddWallet: () => void;
   onMakeDefault: () => void;
@@ -67,6 +65,9 @@ function ConnectionHeaderCard({
   provider: CustodyProvider;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const locale = useLocale();
+  const formattedCreated = listItem ? formatCreatedDate(listItem.createdAt, locale) : null;
+
   return (
     <header className="rounded-2xl border border-border-default bg-surface-raised p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -236,6 +237,122 @@ function DeactivateConnectionCard({
 }
 
 /**
+ * The one banner an unsettled connection gets.
+ *
+ * Which of the two it is, and whether it carries any action, is decided here
+ * rather than on the page: the outcome is the specific diagnosis and the
+ * unfinished state the generic one, and they were once rendered together —
+ * overlapping words, two buttons re-running the same check.
+ */
+function SetupStateBanner({
+  canManageCustody,
+  connection,
+  onCancelSetup,
+  onRecheck,
+  rechecking,
+  t,
+}: {
+  canManageCustody: boolean;
+  connection: CustodyInstallationConnection;
+  onCancelSetup: () => void;
+  onRecheck: () => void;
+  rechecking: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const outcome = resolveCompletionOutcome(connection.completion);
+
+  if (outcome) {
+    return (
+      <VerificationOutcomeCallout
+        outcome={outcome}
+        connectionId={connection.id}
+        onRecheck={canManageCustody && connection.canComplete ? onRecheck : undefined}
+        rechecking={rechecking}
+        onCancelSetup={canManageCustody && connection.canCancel ? onCancelSetup : undefined}
+      />
+    );
+  }
+
+  if (connection.status === "pending" || connection.status === "failed") {
+    return (
+      <UnfinishedSetupCallout
+        canCancel={connection.canCancel}
+        canComplete={connection.canComplete}
+        canManageCustody={canManageCustody}
+        onCancelSetup={onCancelSetup}
+        onRecheck={onRecheck}
+        rechecking={rechecking}
+        t={t}
+      />
+    );
+  }
+
+  return null;
+}
+
+/** Which dialog, if any, the page is showing. */
+type DialogName = "addWallet" | "makeDefault" | "deactivate" | "cancelSetup" | null;
+
+/** Every dialog the page can open, each deciding for itself when it is visible. */
+function ConnectionDialogs({
+  activeWalletCount,
+  connection,
+  open,
+  onClose,
+  projectName,
+  provider,
+}: {
+  activeWalletCount: number;
+  connection: CustodyInstallationConnection;
+  open: DialogName;
+  onClose: () => void;
+  projectName: string;
+  provider: CustodyProvider;
+}) {
+  return (
+    <>
+      <AddWalletDialog
+        isOpen={open === "addWallet"}
+        onClose={onClose}
+        connectionId={connection.id}
+        connectionLabel={connection.label}
+        provider={provider}
+        projectName={projectName}
+      />
+      <MakeDefaultDialog
+        isOpen={open === "makeDefault"}
+        onClose={onClose}
+        connectionId={connection.id}
+        label={connection.label}
+        provider={provider}
+        projectName={projectName}
+        // This page reads one connection, so it cannot see which of the others
+        // is the project default. Saying "the project has no default today"
+        // from here would be a guess; the dialog has copy for not knowing.
+        currentDefaultLabel={null}
+        currentDefaultKnown={false}
+      />
+      <DeactivateConnectionDialog
+        isOpen={open === "deactivate"}
+        onClose={onClose}
+        connectionId={connection.id}
+        label={connection.label}
+        provider={provider}
+        activeWalletCount={activeWalletCount}
+        isDefault={connection.isDefault}
+      />
+      <CancelSetupDialog
+        isOpen={open === "cancelSetup"}
+        onClose={onClose}
+        connectionId={connection.id}
+        label={connection.label}
+        provider={provider}
+      />
+    </>
+  );
+}
+
+/**
  * Everything one custody connection is and everything that can be done to it,
  * on one scrolling page.
  *
@@ -266,22 +383,16 @@ export function ConnectionDetailView({
   canManageCustody: boolean;
 }) {
   const t = useTranslations();
-  const locale = useLocale();
   const router = useRouter();
   const projectName = useSelectedProjectName();
-  const [addWalletOpen, setAddWalletOpen] = useState(false);
-  const [makeDefaultOpen, setMakeDefaultOpen] = useState(false);
-  const [deactivateOpen, setDeactivateOpen] = useState(false);
-  const [cancelSetupOpen, setCancelSetupOpen] = useState(false);
+  // One dialog at a time by construction: opening any of them closes the rest,
+  // which is what a modal surface means anyway.
+  const [openDialog, setOpenDialog] = useState<DialogName>(null);
   const [rechecking, startRecheck] = useTransition();
 
   const isDeactivated = connection.status === "deactivated";
   const isUnfinished = connection.status === "pending" || connection.status === "failed";
   const activeWallets = wallets.filter((wallet) => wallet.status === "active");
-  const outcome = resolveCompletionOutcome(connection.completion);
-
-  const createdAt = listItem?.createdAt ?? null;
-  const formattedCreated = createdAt ? formatCreatedDate(createdAt, locale) : null;
 
   const handleRecheck = () => {
     startRecheck(async () => {
@@ -300,10 +411,9 @@ export function ConnectionDetailView({
       <ConnectionHeaderCard
         canManageCustody={canManageCustody}
         connection={connection}
-        formattedCreated={formattedCreated}
         listItem={listItem}
-        onAddWallet={() => setAddWalletOpen(true)}
-        onMakeDefault={() => setMakeDefaultOpen(true)}
+        onAddWallet={() => setOpenDialog("addWallet")}
+        onMakeDefault={() => setOpenDialog("makeDefault")}
         projectName={projectName}
         provider={provider}
         t={t}
@@ -311,35 +421,16 @@ export function ConnectionDetailView({
 
       {isDeactivated ? (
         <Callout variant="neutral">{t("DashboardCustody.connectionDeactivatedExplainer")}</Callout>
-      ) : null}
-
-      {/* One banner, not two. The outcome names *why* the last check ended the
-          way it did, the unfinished state names *what is left to do*, and they
-          were rendered one under the other — near-identical words, and two
-          buttons that both re-ran the same check. The outcome is the more
-          specific of the two, so when there is one it carries the actions; the
-          generic banner is what a connection with no recorded attempt gets. */}
-      {outcome ? (
-        <VerificationOutcomeCallout
-          outcome={outcome}
-          connectionId={connection.id}
-          onRecheck={canManageCustody && connection.canComplete ? handleRecheck : undefined}
-          rechecking={rechecking}
-          onCancelSetup={
-            canManageCustody && connection.canCancel ? () => setCancelSetupOpen(true) : undefined
-          }
-        />
-      ) : isUnfinished ? (
-        <UnfinishedSetupCallout
-          canCancel={connection.canCancel}
-          canComplete={connection.canComplete}
+      ) : (
+        <SetupStateBanner
           canManageCustody={canManageCustody}
-          onCancelSetup={() => setCancelSetupOpen(true)}
+          connection={connection}
+          onCancelSetup={() => setOpenDialog("cancelSetup")}
           onRecheck={handleRecheck}
           rechecking={rechecking}
           t={t}
         />
-      ) : null}
+      )}
 
       <ConnectionWalletsCard
         wallets={wallets}
@@ -361,46 +452,17 @@ export function ConnectionDetailView({
           activeWalletCount={activeWallets.length}
           canManageCustody={canManageCustody}
           isUnfinished={isUnfinished}
-          onDeactivate={() => setDeactivateOpen(true)}
+          onDeactivate={() => setOpenDialog("deactivate")}
           t={t}
         />
       )}
 
-      <AddWalletDialog
-        isOpen={addWalletOpen}
-        onClose={() => setAddWalletOpen(false)}
-        connectionId={connection.id}
-        connectionLabel={connection.label}
-        provider={provider}
-        projectName={projectName}
-      />
-      <MakeDefaultDialog
-        isOpen={makeDefaultOpen}
-        onClose={() => setMakeDefaultOpen(false)}
-        connectionId={connection.id}
-        label={connection.label}
-        provider={provider}
-        projectName={projectName}
-        // This page reads one connection, so it cannot see which of the others
-        // is the project default. Saying "the project has no default today"
-        // from here would be a guess; the dialog has copy for not knowing.
-        currentDefaultLabel={null}
-        currentDefaultKnown={false}
-      />
-      <DeactivateConnectionDialog
-        isOpen={deactivateOpen}
-        onClose={() => setDeactivateOpen(false)}
-        connectionId={connection.id}
-        label={connection.label}
-        provider={provider}
+      <ConnectionDialogs
         activeWalletCount={activeWallets.length}
-        isDefault={connection.isDefault}
-      />
-      <CancelSetupDialog
-        isOpen={cancelSetupOpen}
-        onClose={() => setCancelSetupOpen(false)}
-        connectionId={connection.id}
-        label={connection.label}
+        connection={connection}
+        open={openDialog}
+        onClose={() => setOpenDialog(null)}
+        projectName={projectName}
         provider={provider}
       />
     </div>

@@ -194,21 +194,33 @@ function CurrentCredentialCard({
  * stops returning `rollback`, the secret is gone and there is nothing to show.
  */
 function PreviousCredentialCard({
-  canRollBackNow,
-  expiresAt,
+  canAct,
+  lifecycle,
   onRollBack,
-  retiredAt,
-  rotationBlocks,
+  pending,
   t,
 }: {
-  canRollBackNow: boolean;
-  expiresAt: string;
+  canAct: boolean;
+  lifecycle: CustodyCredentialLifecycle;
   onRollBack: () => void;
-  retiredAt: Date | null;
-  rotationBlocks: boolean;
+  pending: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
   const formatDate = useDateFormatter();
+
+  // Owns the whole "is there anything to roll back to" question, rather than
+  // leaving four derived values on the caller: once the API stops returning
+  // `rollback`, the secret is gone and there is no card.
+  if (!lifecycle.rollback) {
+    return null;
+  }
+
+  const { expiresAt } = lifecycle.rollback;
+  const rollbackState = canRollBack(lifecycle);
+  const retiredAt = resolveRetiredAt(expiresAt);
+  const canRollBackNow = canAct && rollbackState.available && !pending;
+  const rotationBlocks =
+    rollbackState.available === false && rollbackState.reason === "rotation_pending";
 
   return (
     <div className="rounded-xl border border-border-default p-4">
@@ -248,6 +260,117 @@ function PreviousCredentialCard({
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Which of the three states the current credential is in.
+ *
+ * `creating` and `pending` both mean the same thing to a reader — nothing has
+ * verified this credential yet — so they share one badge.
+ */
+function resolveCredentialBadge(
+  credential: LifecycleCredential,
+  isDeactivated: boolean,
+  t: ReturnType<typeof useTranslations>
+): { variant: "outline" | "warning" | "success"; label: string } {
+  if (isDeactivated) {
+    return { variant: "outline", label: t("DashboardCustody.credentialRetired") };
+  }
+  if (credential.status === "pending" || credential.status === "creating") {
+    return { variant: "warning", label: t("DashboardCustody.credentialUnverified") };
+  }
+  return { variant: "success", label: t("DashboardCustody.connectionStatusActive") };
+}
+
+/**
+ * Whether rotation and rollback are live at all.
+ *
+ * Four conditions, and only the first is about permission: the other three are
+ * about the credential being something SDP holds, still uses, and has verified.
+ * Everything else on this card is read-only by nature, not by policy.
+ */
+function canActOnCredential({
+  canManageCustody,
+  credential,
+  isDeactivated,
+  managedHere,
+}: {
+  canManageCustody: boolean;
+  credential: LifecycleCredential;
+  isDeactivated: boolean;
+  managedHere: boolean;
+}): boolean {
+  const isUnverified = credential.status === "pending" || credential.status === "creating";
+  return canManageCustody && managedHere && !isDeactivated && !isUnverified;
+}
+
+/** The section's frame, for the two states that have no credential to show. */
+function CredentialsNotice({
+  message,
+  title,
+  variant,
+}: {
+  message: string;
+  title: string;
+  variant: "neutral" | "warning";
+}) {
+  return (
+    <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
+      <h2 className="text-base font-medium text-primary">{title}</h2>
+      <Callout variant={variant} className="mt-3">
+        {message}
+      </Callout>
+    </section>
+  );
+}
+
+/** Mounted only where the actions behind them are live. */
+function CredentialDialogs({
+  connectionId,
+  deactivateOpen,
+  lifecycle,
+  onCloseDeactivate,
+  onCloseRollback,
+  onCloseRotate,
+  provider,
+  rollbackOpen,
+  rotateOpen,
+}: {
+  connectionId: string;
+  deactivateOpen: boolean;
+  lifecycle: CustodyCredentialLifecycle;
+  onCloseDeactivate: () => void;
+  onCloseRollback: () => void;
+  onCloseRotate: () => void;
+  provider: CustodyProvider;
+  rollbackOpen: boolean;
+  rotateOpen: boolean;
+}) {
+  return (
+    <>
+      <RotateCredentialsModal
+        isOpen={rotateOpen}
+        onClose={onCloseRotate}
+        lifecycle={lifecycle}
+        provider={provider}
+        connectionId={connectionId}
+      />
+      <RollbackDialog
+        isOpen={rollbackOpen}
+        onClose={onCloseRollback}
+        lifecycle={lifecycle}
+        provider={provider}
+        connectionId={connectionId}
+      />
+      <DeactivateCredentialsDialog
+        isOpen={deactivateOpen}
+        onClose={onCloseDeactivate}
+        lifecycle={lifecycle}
+        provider={provider}
+        connectionId={connectionId}
+      />
+    </>
   );
 }
 
@@ -303,50 +426,31 @@ export function ConnectionCredentialsSection({
 
   if (lifecycle === "restricted") {
     return (
-      <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
-        <h2 className="text-base font-medium text-primary">
-          {t("DashboardCustody.credentialsTitle")}
-        </h2>
-        <Callout variant="neutral" className="mt-3">
-          {t("DashboardCustody.credentialsRestricted")}
-        </Callout>
-      </section>
+      <CredentialsNotice
+        title={t("DashboardCustody.credentialsTitle")}
+        variant="neutral"
+        message={t("DashboardCustody.credentialsRestricted")}
+      />
     );
   }
 
+  // A failed read is not the same as "there are none", and the rest of the page
+  // is still true, so this says so and invites a retry.
   if (!lifecycle) {
     return (
-      <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
-        <h2 className="text-base font-medium text-primary">
-          {t("DashboardCustody.credentialsTitle")}
-        </h2>
-        {/* A failed read is not the same as "there are none", and the rest of
-            the page is still true, so this says so and invites a retry. */}
-        <Callout variant="warning" className="mt-3">
-          {t("DashboardCustody.credentialsUnavailable")}
-        </Callout>
-      </section>
+      <CredentialsNotice
+        title={t("DashboardCustody.credentialsTitle")}
+        variant="warning"
+        message={t("DashboardCustody.credentialsUnavailable")}
+      />
     );
   }
 
   const credential = lifecycle.providerCredential;
   const candidate = lifecycle.rotationCandidate;
   const managedHere = isCredentialManagedHere(credential);
-  const rollbackState = canRollBack(lifecycle);
   const isDeactivated = connection.status === "deactivated";
-  const isUnverified = credential.status === "pending" || credential.status === "creating";
-
-  const credentialBadge = isDeactivated
-    ? { variant: "outline" as const, label: t("DashboardCustody.credentialRetired") }
-    : isUnverified
-      ? { variant: "warning" as const, label: t("DashboardCustody.credentialUnverified") }
-      : { variant: "success" as const, label: t("DashboardCustody.connectionStatusActive") };
-
-  // Rotation and rollback need a settled, SDP-held credential on a live
-  // connection. Everything else is read-only by nature, not by policy.
-  const canAct = canManageCustody && managedHere && !isDeactivated && !isUnverified;
-
-  const retiredAt = lifecycle.rollback ? resolveRetiredAt(lifecycle.rollback.expiresAt) : null;
+  const canAct = canActOnCredential({ canManageCustody, credential, isDeactivated, managedHere });
 
   // Both take the id rather than closing over `candidate`, because only the
   // branch that renders these buttons knows a candidate exists.
@@ -374,9 +478,9 @@ export function ConnectionCredentialsSection({
         <h2 className="text-base font-medium text-primary">
           {t("DashboardCustody.credentialsTitle")}
         </h2>
-        {!managedHere ? (
+        {managedHere ? null : (
           <Badge variant="outline">{t("DashboardCustody.credentialDeploymentBadge")}</Badge>
-        ) : null}
+        )}
       </div>
 
       {candidate ? (
@@ -391,7 +495,7 @@ export function ConnectionCredentialsSection({
 
       <div className="mt-3 grid gap-4 @3xl/connection-credentials:grid-cols-2">
         <CurrentCredentialCard
-          badge={credentialBadge}
+          badge={resolveCredentialBadge(credential, isDeactivated, t)}
           canAct={canAct}
           canManageCustody={canManageCustody}
           credential={credential}
@@ -405,44 +509,27 @@ export function ConnectionCredentialsSection({
           t={t}
         />
 
-        {lifecycle.rollback ? (
-          <PreviousCredentialCard
-            canRollBackNow={canAct && rollbackState.available && !pending}
-            expiresAt={lifecycle.rollback.expiresAt}
-            onRollBack={() => setRollbackOpen(true)}
-            retiredAt={retiredAt}
-            rotationBlocks={
-              rollbackState.available === false && rollbackState.reason === "rotation_pending"
-            }
-            t={t}
-          />
-        ) : null}
+        <PreviousCredentialCard
+          canAct={canAct}
+          lifecycle={lifecycle}
+          onRollBack={() => setRollbackOpen(true)}
+          pending={pending}
+          t={t}
+        />
       </div>
 
       {canAct ? (
-        <>
-          <RotateCredentialsModal
-            isOpen={rotateOpen}
-            onClose={() => setRotateOpen(false)}
-            lifecycle={lifecycle}
-            provider={provider}
-            connectionId={connection.id}
-          />
-          <RollbackDialog
-            isOpen={rollbackOpen}
-            onClose={() => setRollbackOpen(false)}
-            lifecycle={lifecycle}
-            provider={provider}
-            connectionId={connection.id}
-          />
-          <DeactivateCredentialsDialog
-            isOpen={deactivateOpen}
-            onClose={() => setDeactivateOpen(false)}
-            lifecycle={lifecycle}
-            provider={provider}
-            connectionId={connection.id}
-          />
-        </>
+        <CredentialDialogs
+          connectionId={connection.id}
+          deactivateOpen={deactivateOpen}
+          lifecycle={lifecycle}
+          onCloseDeactivate={() => setDeactivateOpen(false)}
+          onCloseRollback={() => setRollbackOpen(false)}
+          onCloseRotate={() => setRotateOpen(false)}
+          provider={provider}
+          rollbackOpen={rollbackOpen}
+          rotateOpen={rotateOpen}
+        />
       ) : null}
     </section>
   );

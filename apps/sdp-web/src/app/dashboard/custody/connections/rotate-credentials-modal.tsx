@@ -2,7 +2,7 @@
 
 import type { CustodyProvider } from "@sdp/types";
 import { Loader2Icon, RefreshCwIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -84,15 +84,14 @@ function RotateCredentialsForm({
   const [appSecret, setAppSecret] = useState("");
   // One key per user intent, reused verbatim if the same rotation is retried:
   // the server replays the original result for a repeated key instead of
-  // opening a second rotation. A ref rather than state because the key is
-  // never rendered — reassigning it must not cost a render.
+  // opening a second rotation.
   //
-  // Lazily minted the way React documents for expensive ref contents, so a
-  // re-render of an open dialog does not burn a UUID per keystroke.
-  const idempotencyKeyRef = useRef("");
-  if (!idempotencyKeyRef.current) {
-    idempotencyKeyRef.current = crypto.randomUUID();
-  }
+  // State, not a ref: re-minting is a settled decision the submit handler makes
+  // from the result, and a ref would have to be written during render to be
+  // initialised lazily — which React is free to replay or discard. The extra
+  // render costs nothing, since it batches with the secret being cleared beside
+  // it. This mirrors the same key's handling in `privy-credential-form.tsx`.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
   const connectionCount = lifecycle.impact.connections.length;
 
@@ -102,7 +101,7 @@ function RotateCredentialsForm({
     formData.set("credentialId", lifecycle.providerCredential.id);
     formData.set("provider", provider);
     formData.set("connectionId", connectionId);
-    formData.set("idempotencyKey", idempotencyKeyRef.current);
+    formData.set("idempotencyKey", idempotencyKey);
     formData.set("appId", appId);
     formData.set("appSecret", appSecret);
 
@@ -129,7 +128,7 @@ function RotateCredentialsForm({
     // committed, so its key is kept and a retry replays it rather than opening
     // a second rotation.
     if (result.status === "failed") {
-      idempotencyKeyRef.current = crypto.randomUUID();
+      setIdempotencyKey(crypto.randomUUID());
     }
 
     if (result.status === "success") {
