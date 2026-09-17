@@ -63,9 +63,7 @@ export function mapTransferRow(row: TransferRow) {
   const moneygram = mapMoneygramTransferDetails(row);
   const bvnk = row.provider_data.bvnk as Record<string, unknown> | undefined;
   const creditedFiatAmount =
-    row.type === "offramp" &&
-    bvnk !== undefined &&
-    typeof bvnk.creditedFiatAmount === "string"
+    row.type === "offramp" && bvnk !== undefined && typeof bvnk.creditedFiatAmount === "string"
       ? bvnk.creditedFiatAmount
       : undefined;
   return {

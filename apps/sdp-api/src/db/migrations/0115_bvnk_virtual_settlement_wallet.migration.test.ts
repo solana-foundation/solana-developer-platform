@@ -62,11 +62,17 @@ afterEach(async () => {
   await client.query("ROLLBACK");
 });
 
-async function seedCorridorRows(orgId: string, userId: string, projectId: string, counterpartyId: string) {
-  await client.query(
-    `INSERT INTO organizations (id, name, slug) VALUES ($1, $2, $3)`,
-    [orgId, `Org ${orgId}`, orgId]
-  );
+async function seedCorridorRows(
+  orgId: string,
+  userId: string,
+  projectId: string,
+  counterpartyId: string
+) {
+  await client.query(`INSERT INTO organizations (id, name, slug) VALUES ($1, $2, $3)`, [
+    orgId,
+    `Org ${orgId}`,
+    orgId,
+  ]);
   await client.query(`INSERT INTO users (id, email) VALUES ($1, $2)`, [
     userId,
     `owner-${userId}@example.test`,

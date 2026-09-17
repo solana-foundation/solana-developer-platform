@@ -107,9 +107,7 @@ describe("BvnkWebhookProcessor.parse", () => {
     // assertion pins the event name and correlation reference without
     // freezing the extras (channelId/walletAmount may or may not survive the
     // schema transform).
-    expect(
-      processor.parse(bvnkChannelTransactionEvent("transaction-detected"))
-    ).toMatchObject({
+    expect(processor.parse(bvnkChannelTransactionEvent("transaction-detected"))).toMatchObject({
       event: "bvnk:payment:channel:transaction-detected",
       data: { reference: "bvnk-sandbox-test-payment" },
     });

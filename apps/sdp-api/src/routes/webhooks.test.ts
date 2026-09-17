@@ -1374,7 +1374,10 @@ describe("BVNK ramp webhook", () => {
   /** The channel uuid BVNK assigned to the off-ramp channel at quote time. */
   const CHANNEL_ID = "019f0ce4-98ab-7424-a968-fc323266b8ed";
 
-  function detectedChannelEvent(transferId: string, eventId: string): Parameters<typeof sendBvnkWebhook>[0] {
+  function detectedChannelEvent(
+    transferId: string,
+    eventId: string
+  ): Parameters<typeof sendBvnkWebhook>[0] {
     return bvnkChannelTransactionEvent("transaction-detected", {
       eventId,
       channelId: CHANNEL_ID,
@@ -1431,15 +1434,25 @@ describe("BVNK ramp webhook", () => {
 
   it("moves a BVNK off-ramp transfer to settling when a channel transaction is detected", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
-    await insertBvnkOfframpTransfer({ id: transferId, status: "awaiting_payment", providerReference: CHANNEL_ID });
+    await insertBvnkOfframpTransfer({
+      id: transferId,
+      status: "awaiting_payment",
+      providerReference: CHANNEL_ID,
+    });
 
-    const res = await sendBvnkWebhook(detectedChannelEvent(transferId, "019f0ce4-c81e-7000-8000-000000000000"));
+    const res = await sendBvnkWebhook(
+      detectedChannelEvent(transferId, "019f0ce4-c81e-7000-8000-000000000000")
+    );
 
     expect(res.status).toBe(200);
     const transfer = await getDb(env)
       .prepare("SELECT status, fiat_amount, provider_data FROM payment_transfers WHERE id = ?")
       .bind(transferId)
-      .first<{ status: string; fiat_amount: string | null; provider_data: { bvnk?: Record<string, unknown> } }>();
+      .first<{
+        status: string;
+        fiat_amount: string | null;
+        provider_data: { bvnk?: Record<string, unknown> };
+      }>();
     // Detected only claims the settling transition; the credited amount is
     // not known until the confirmed delivery.
     expect(transfer?.status).toBe("settling");
@@ -1451,9 +1464,15 @@ describe("BVNK ramp webhook", () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
     // The transfer never saw a detected delivery: confirmed accepts the
     // awaiting_payment claim directly so a missed event cannot strand a sale.
-    await insertBvnkOfframpTransfer({ id: transferId, status: "awaiting_payment", providerReference: CHANNEL_ID });
+    await insertBvnkOfframpTransfer({
+      id: transferId,
+      status: "awaiting_payment",
+      providerReference: CHANNEL_ID,
+    });
 
-    const res = await sendBvnkWebhook(confirmedChannelEvent(transferId, "019f0ce5-28a6-7000-8000-000000000000", 4.95));
+    const res = await sendBvnkWebhook(
+      confirmedChannelEvent(transferId, "019f0ce5-28a6-7000-8000-000000000000", 4.95)
+    );
 
     expect(res.status).toBe(200);
     const transfer = await getDb(env)
@@ -1466,9 +1485,15 @@ describe("BVNK ramp webhook", () => {
 
   it("completes a settling BVNK off-ramp transfer and writes the credited fiat amount once", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
-    await insertBvnkOfframpTransfer({ id: transferId, status: "settling", providerReference: CHANNEL_ID });
+    await insertBvnkOfframpTransfer({
+      id: transferId,
+      status: "settling",
+      providerReference: CHANNEL_ID,
+    });
 
-    const res = await sendBvnkWebhook(confirmedChannelEvent(transferId, "019f0ce5-28a6-7000-8000-000000000000", 4.95));
+    const res = await sendBvnkWebhook(
+      confirmedChannelEvent(transferId, "019f0ce5-28a6-7000-8000-000000000000", 4.95)
+    );
     expect(res.status).toBe(200);
     const first = await getDb(env)
       .prepare("SELECT status, provider_data FROM payment_transfers WHERE id = ?")
@@ -1493,7 +1518,11 @@ describe("BVNK ramp webhook", () => {
 
   it("rejects a detected channel transaction without a channelId", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
-    await insertBvnkOfframpTransfer({ id: transferId, status: "awaiting_payment", providerReference: CHANNEL_ID });
+    await insertBvnkOfframpTransfer({
+      id: transferId,
+      status: "awaiting_payment",
+      providerReference: CHANNEL_ID,
+    });
 
     const res = await sendBvnkWebhook({
       event: "bvnk:payment:channel:transaction-detected",
@@ -1510,7 +1539,11 @@ describe("BVNK ramp webhook", () => {
 
   it("rejects a confirmed channel transaction without a walletAmount", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
-    await insertBvnkOfframpTransfer({ id: transferId, status: "settling", providerReference: CHANNEL_ID });
+    await insertBvnkOfframpTransfer({
+      id: transferId,
+      status: "settling",
+      providerReference: CHANNEL_ID,
+    });
 
     const res = await sendBvnkWebhook({
       event: "bvnk:payment:channel:transaction-confirmed",
@@ -1538,7 +1571,11 @@ describe("BVNK ramp webhook", () => {
         "SELECT status, provider_status, metadata FROM counterparty_provider_accounts WHERE id = ?"
       )
       .bind(SETTLEMENT_ACCOUNT_ID)
-      .first<{ status: string; provider_status: string | null; metadata: Record<string, unknown> }>();
+      .first<{
+        status: string;
+        provider_status: string | null;
+        metadata: Record<string, unknown>;
+      }>();
     expect(row?.status).toBe("active");
     expect(row?.provider_status).toBe("ACTIVE");
     // The webhook stores nothing on the row or the counterparty anymore.
