@@ -1,8 +1,11 @@
+import { SOL_MINT } from "@sdp/types";
 import { address, createNoopSigner } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
+import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -1203,4 +1206,141 @@ describe("Payments routes — transfer policy", () => {
     );
     expect(mixedAuthSelfCancel.status).toBe(200);
   });
+  // An off-ramp deposit held for approval sends nothing. Approving it replays
+  // the send, which still requires the provider sale to be waiting for this
+  // exact deposit: a sale the provider failed in the meantime gets no funds.
+  it.each([
+    {
+      providerStatus: "awaiting_payment",
+      operationStatus: "completed",
+      transferStatus: "settling",
+    },
+    { providerStatus: "failed", operationStatus: "failed", transferStatus: "failed" },
+  ] as const)(
+    "approves a held off-ramp deposit while the sale is $providerStatus",
+    async ({ providerStatus, operationStatus, transferStatus }) => {
+      const sessionId = "ses_offramp_deposit_approver";
+      const approverUserId = "usr_offramp_deposit_approver";
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+          )
+          .bind(approverUserId, "offramp-deposit-approver@example.com"),
+        getDb(env)
+          .prepare(
+            `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+             VALUES (?, ?, ?, 'admin', 'active')`
+          )
+          .bind("om_offramp_deposit_approver", TEST_ORG.id, approverUserId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id, role)
+             VALUES (?, ?, ?, 'admin')`
+          )
+          .bind("pm_offramp_deposit_approver", TEST_PROJECT.id, approverUserId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+             VALUES (?, ?, ?, 'session', ?)`
+          )
+          .bind(sessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      ]);
+      await seedWalletControlProfile({
+        rules: [
+          {
+            id: "approve-offramp-deposit",
+            kind: "approval",
+            operationTypes: ["payment_transfer_execute"],
+          },
+        ],
+      });
+      const transferId = generatePaymentTransferId();
+      const tenant = createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id });
+      await createPostgresPaymentsRepository(getDb(env), tenant).createTransfer({
+        id: transferId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_WALLET_ID,
+        counterpartyId: null,
+        sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        destinationAddress: null,
+        token: SOL_MINT,
+        amount: "1",
+        memo: null,
+        type: "offramp",
+        direction: "outbound",
+        status: "awaiting_payment",
+        provider: "moonpay",
+        providerReference: "moonpay-held-deposit",
+        deliveryMode: "hosted",
+        fiatCurrency: "USD",
+        fiatAmount: "100",
+        providerData: {
+          cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+        },
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: TEST_API_KEY.id,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
+      });
+
+      const held = await postTransfer(
+        {
+          transferId,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "1",
+        },
+        {}
+      );
+      expect(held.status).toBe(202);
+      const { approvalRequestId } = approvalErrorDetailsSchema.parse(
+        (await readErrorResponse(held)).error.details
+      );
+      expect(await readTransferRow(transferId)).toMatchObject({
+        status: "awaiting_payment",
+        signature: null,
+      });
+
+      if (providerStatus === "failed") {
+        // The provider's failure webhook lands before anyone approves.
+        await getDb(env)
+          .prepare("UPDATE payment_transfers SET status = 'failed' WHERE id = ?")
+          .bind(transferId)
+          .run();
+      }
+
+      const approved = await app.request(
+        `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+        {
+          method: "POST",
+          headers: { Cookie: `sdp_session=${sessionId}`, "x-project-id": TEST_PROJECT.id },
+        },
+        env
+      );
+      expect(approved.status).toBe(200);
+      const approvedBody = walletApprovalHttpResponseSchema.parse(await approved.json());
+      expect(approvedBody.data.approvalRequest).toMatchObject({
+        status: "approved",
+        operation: { status: operationStatus },
+      });
+
+      const row = await readTransferRow(transferId);
+      expect(row?.status).toBe(transferStatus);
+      if (providerStatus === "failed") {
+        expect(row?.signature).toBeNull();
+        expect(approvedBody.data.approvalRequest.operation.executionError).toBe(
+          "Ramp transfer is no longer awaiting payment (status: failed)"
+        );
+      } else {
+        expect(row?.signature).toBeTruthy();
+        expect(row?.destination_address).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+      }
+    }
+  );
 });
