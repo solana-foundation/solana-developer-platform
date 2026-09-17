@@ -646,6 +646,38 @@ describe("Counterparties Routes", () => {
         fields: [
           { kind: "text", key: "firstName", label: "First name", required: true },
           { kind: "text", key: "lastName", label: "Last name", required: true },
+          {
+            kind: "date",
+            key: "dateOfBirth",
+            label: "Date of birth",
+            required: true,
+            before: new Date().toISOString().slice(0, 10),
+          },
+          {
+            kind: "address",
+            key: "address",
+            label: "Residential address",
+            required: true,
+            fields: [
+              {
+                kind: "text",
+                key: "address.addressLine1",
+                label: "Address line 1",
+                required: true,
+              },
+              { kind: "text", key: "address.city", label: "City", required: true },
+              { kind: "text", key: "address.postalCode", label: "Postal code", required: true },
+              { kind: "country", key: "address.country", label: "Country", required: true },
+              {
+                kind: "text",
+                key: "address.stateCode",
+                label: "State",
+                required: false,
+                maxLength: 2,
+                pattern: "^(?:[A-Z]{2})?$",
+              },
+            ],
+          },
         ],
       });
     });
@@ -671,7 +703,40 @@ describe("Counterparties Routes", () => {
         provider: "bvnk",
         direction: "onramp",
         status: "collect",
-        fields: [{ kind: "text", key: "legalName", label: "Legal name", required: true }],
+        fields: [
+          { kind: "text", key: "legalName", label: "Legal name", required: true },
+          {
+            kind: "text",
+            key: "registrationNumber",
+            label: "Registration number",
+            required: false,
+          },
+          {
+            kind: "address",
+            key: "address",
+            label: "Registered address",
+            required: true,
+            fields: [
+              {
+                kind: "text",
+                key: "address.addressLine1",
+                label: "Address line 1",
+                required: true,
+              },
+              { kind: "text", key: "address.city", label: "City", required: true },
+              { kind: "text", key: "address.postalCode", label: "Postal code", required: true },
+              { kind: "country", key: "address.country", label: "Country", required: true },
+              {
+                kind: "text",
+                key: "address.stateCode",
+                label: "State",
+                required: false,
+                maxLength: 2,
+                pattern: "^(?:[A-Z]{2})?$",
+              },
+            ],
+          },
+        ],
       });
     });
   });

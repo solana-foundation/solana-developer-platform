@@ -120,10 +120,18 @@ export interface CounterpartyProviderAccount {
   customerLink?: CounterpartyProviderCustomerLink;
 }
 
+/**
+ * Public provider-side identity link carried on provider-account rows. The
+ * reference is the provider's counterparty object id (a BVNK contact id, a
+ * Lightspark Grid customer id, or the equivalent identity object).
+ */
 export interface CounterpartyProviderCustomerLink {
-  kind: "customer_link";
   provider: RampProviderId;
+  id: string;
   providerCustomerReference: string;
+  status: CounterpartyAccountStatus;
+  providerStatus: string | null;
+  createdAt: string;
 }
 
 export type CounterpartyProviderAccountKind =

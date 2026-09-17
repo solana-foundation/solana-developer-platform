@@ -2,12 +2,19 @@ import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   type BvnkOnrampRequestSpec,
   buildBvnkOnrampPaymentRuleKey,
+  bvnkRuleReference,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type { RequirementField } from "@sdp/types/ramp-requirements";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { AppContext } from "../../context";
-import { advanceBvnkContact, bvnkContactFields, bvnkOnrampQuote } from "./bvnk";
+import {
+  advanceBvnkContact,
+  bvnkContactFields,
+  bvnkOnrampQuote,
+  ensureBvnkPaymentRule,
+} from "./bvnk";
 
 const mockTransaction = vi.hoisted(() => ({}));
 
@@ -35,6 +42,10 @@ function fakeContext(): AppContext {
   return {
     get: (key: string) => (key === "apiKey" ? { environment: "sandbox" } : undefined),
   } as unknown as AppContext;
+}
+
+function fakeRuntimeContext(): RampRuntimeContext {
+  return { env: {}, mode: "sandbox" };
 }
 
 function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow {
@@ -267,7 +278,11 @@ describe("advanceBvnkContact", () => {
   it("clears a pending row that the contact search matches exactly one contact", async () => {
     const existingContactId = "contact_existing_1";
     mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
-    listContacts.mockResolvedValue([bvnkContact({ id: existingContactId })]);
+    listContacts.mockResolvedValue({
+      content: [bvnkContact({ id: existingContactId })],
+      pageable: { pageNumber: 0, pageSize: 50 },
+      hasNext: false,
+    });
     mockAccounts.completeCustomerLink.mockResolvedValue({
       ...pendingCustomerLinkRow(),
       provider_customer_reference: existingContactId,
@@ -284,7 +299,7 @@ describe("advanceBvnkContact", () => {
     expect(result).toEqual({ contactId: existingContactId });
     expect(listContacts).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ q: COUNTERPARTY_ID, pageSize: 5 })
+      expect.objectContaining({ q: COUNTERPARTY_ID, pageSize: 50, pageNumber: 0 })
     );
     expect(createContact).not.toHaveBeenCalled();
     expect(mockAccounts.claimPendingCustomerLink).not.toHaveBeenCalled();
@@ -296,12 +311,54 @@ describe("advanceBvnkContact", () => {
     );
   });
 
+  it("adopts a contact found on the second page, failing closed across the page boundary", async () => {
+    const pageTwoContactId = "contact_page_two";
+    mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
+    listContacts
+      .mockResolvedValueOnce({
+        content: [],
+        pageable: { pageNumber: 0, pageSize: 50 },
+        hasNext: true,
+      })
+      .mockResolvedValueOnce({
+        content: [bvnkContact({ id: pageTwoContactId })],
+        pageable: { pageNumber: 1, pageSize: 50 },
+        hasNext: false,
+      });
+    mockAccounts.completeCustomerLink.mockResolvedValue({
+      ...pendingCustomerLinkRow(),
+      provider_customer_reference: pageTwoContactId,
+      status: "active",
+    });
+
+    const result = await advanceBvnkContact(fakeContext(), {
+      counterparty: counterpartyRow(),
+      projectId: PROJECT_ID,
+      collectedData: INDIVIDUAL_COLLECTED,
+    });
+
+    // The match on page two is followed and adopted; nothing is created.
+    expect(result).toEqual({ contactId: pageTwoContactId });
+    expect(listContacts).toHaveBeenCalledTimes(2);
+    expect(listContacts).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({ q: COUNTERPARTY_ID, pageNumber: 1 })
+    );
+    expect(createContact).not.toHaveBeenCalled();
+    expect(mockAccounts.completeCustomerLink).toHaveBeenCalledWith(
+      expect.objectContaining({ providerCustomerReference: pageTwoContactId })
+    );
+  });
+
   it("refuses to adopt when the contact search matches more than one contact", async () => {
     const duplicateIds = ["contact_dup_1", "contact_dup_2"];
     mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
-    listContacts.mockResolvedValue(
-      duplicateIds.map((id) => bvnkContact({ id, description: COUNTERPARTY_ID }))
-    );
+    listContacts.mockResolvedValue({
+      content: duplicateIds.map((id) => bvnkContact({ id, description: COUNTERPARTY_ID })),
+      pageable: { pageNumber: 0, pageSize: 50 },
+      hasNext: false,
+    });
 
     let caught: unknown;
     try {
@@ -324,7 +381,11 @@ describe("advanceBvnkContact", () => {
 
   it("creates the contact when the contact search finds no match", async () => {
     mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
-    listContacts.mockResolvedValue([]);
+    listContacts.mockResolvedValue({
+      content: [],
+      pageable: { pageNumber: 0, pageSize: 50 },
+      hasNext: false,
+    });
     createContact.mockResolvedValue(bvnkContact({ id: CONTACT_ID }));
     mockAccounts.completeCustomerLink.mockResolvedValue({
       ...pendingCustomerLinkRow(),
@@ -350,7 +411,11 @@ describe("advanceBvnkContact", () => {
     const winnerContactId = "contact_race_winner";
     const orphanContactId = "contact_race_orphan";
     mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
-    listContacts.mockResolvedValue([]);
+    listContacts.mockResolvedValue({
+      content: [],
+      pageable: { pageNumber: 0, pageSize: 50 },
+      hasNext: false,
+    });
     createContact
       .mockResolvedValueOnce(bvnkContact({ id: winnerContactId }))
       .mockResolvedValueOnce(bvnkContact({ id: orphanContactId }));
@@ -500,6 +565,135 @@ describe("advanceBvnkContact US state rule", () => {
         }),
       })
     );
+  });
+});
+
+describe("ensureBvnkPaymentRule", () => {
+  let listOnrampRulesByWallet: ReturnType<typeof vi.spyOn>;
+  let createOnrampRule: ReturnType<typeof vi.spyOn>;
+  let getContactV3: ReturnType<typeof vi.spyOn>;
+
+  const destinationWalletAddress = "J4t4M6zJH3M6ewN9pmRUpMt2EMWXXCFPYvnrD9ck9EEi";
+  const paymentRuleKey = buildBvnkOnrampPaymentRuleKey(
+    "USD",
+    "USDC",
+    "SOLANA",
+    destinationWalletAddress
+  );
+
+  const repo = {
+    mutateProviderData: vi.fn(),
+  };
+  const audit = {
+    begin: vi.fn(),
+    complete: vi.fn(),
+    fail: vi.fn(),
+  };
+
+  function counterpartyWithWalletButNoRule(): CounterpartyRow {
+    return {
+      ...counterpartyRow(),
+      provider_data: {
+        bvnk: {
+          wallets: {
+            [paymentRuleKey]: {
+              walletId: "wallet_bvnk_123",
+              walletStatus: "ACTIVE",
+              bankAccount: { accountNumber: "000123456789", bankName: "BVNK Bank" },
+            },
+          },
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listOnrampRulesByWallet = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listOnrampRulesByWallet");
+    createOnrampRule = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule");
+    getContactV3 = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getContactV3");
+    repo.mutateProviderData.mockResolvedValue(counterpartyRow());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("adopts the ACTIVE rule whose reference matches the deterministic reference before creating a new one", async () => {
+    const existingRuleId = "rule_existing_at_bvnk";
+    const reference = await bvnkRuleReference(COUNTERPARTY_ID, paymentRuleKey);
+    listOnrampRulesByWallet.mockResolvedValue([
+      { id: existingRuleId, reference, status: "ACTIVE" },
+    ]);
+
+    const result = await ensureBvnkPaymentRule(
+      fakeRuntimeContext(),
+      repo as never,
+      counterpartyWithWalletButNoRule(),
+      PROJECT_ID,
+      CONTACT_ID,
+      {
+        fiatCurrency: "USD",
+        currency: "USDC",
+        network: "SOLANA",
+        destinationWalletAddress,
+      } satisfies BvnkOnrampRequestSpec,
+      audit as never
+    );
+
+    // The rule that already exists at BVNK is adopted onto the row; no new
+    // rule is created and no contact is fetched to build one.
+    expect(result.entry.ruleId).toBe(existingRuleId);
+    expect(result.entry.ruleStatus).toBe("ACTIVE");
+    expect(result.onboardingStatus).toBe("ready");
+    expect(listOnrampRulesByWallet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ walletId: "wallet_bvnk_123" })
+    );
+    expect(createOnrampRule).not.toHaveBeenCalled();
+    expect(getContactV3).not.toHaveBeenCalled();
+    expect(audit.begin).not.toHaveBeenCalled();
+    expect(repo.mutateProviderData).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates the rule when no ACTIVE rule at BVNK matches the reference", async () => {
+    listOnrampRulesByWallet.mockResolvedValue([
+      { id: "rule_some_other", reference: "sdp_other", status: "ACTIVE" },
+    ]);
+    const createRule = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule");
+    createRule.mockResolvedValue({
+      id: "rule_created_fresh",
+      reference: "fresh",
+      status: "ACTIVE",
+    });
+    vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getContactV3").mockResolvedValue({
+      id: CONTACT_ID,
+      description: COUNTERPARTY_ID,
+      entity: {
+        type: "INDIVIDUAL",
+        relationshipType: "THIRD_PARTY",
+        firstName: "Ada",
+        lastName: "Lovelace",
+      },
+    } as never);
+
+    const result = await ensureBvnkPaymentRule(
+      fakeRuntimeContext(),
+      repo as never,
+      counterpartyWithWalletButNoRule(),
+      PROJECT_ID,
+      CONTACT_ID,
+      {
+        fiatCurrency: "USD",
+        currency: "USDC",
+        network: "SOLANA",
+        destinationWalletAddress,
+      } satisfies BvnkOnrampRequestSpec,
+      audit as never
+    );
+
+    expect(createRule).toHaveBeenCalledTimes(1);
+    expect(result.entry.ruleId).toBe("rule_created_fresh");
   });
 });
 

@@ -28,6 +28,7 @@ import {
   readBvnkWallets,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type {
+  BvnkContactV3,
   BvnkLedgerWalletProfilesV2,
   BvnkLedgerWalletProfileV2,
   BvnkLedgerWalletV2,
@@ -593,8 +594,25 @@ export async function advanceBvnkContact(
   let contactId: string;
   let createdThisRequest = false;
   if (claim.preExisted) {
-    const contacts = await client.listContactsV3(ctx, { q: input.counterparty.id, pageSize: 5 });
-    const matches = contacts.filter((contact) => contact.description === input.counterparty.id);
+    const pageSize = 50;
+    const maxPages = 10;
+    const matches: BvnkContactV3[] = [];
+    for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
+      const page = await client.listContactsV3(ctx, {
+        q: input.counterparty.id,
+        pageSize,
+        pageNumber,
+      });
+      matches.push(
+        ...page.content.filter((contact) => contact.description === input.counterparty.id)
+      );
+      if (!page.hasNext) {
+        break;
+      }
+      if (pageNumber === maxPages - 1) {
+        throw providerUnavailable("BVNK contact search did not converge");
+      }
+    }
     if (matches.length > 1) {
       throw providerUnavailable(
         `BVNK contact lookup for ${input.counterparty.id} is ambiguous (${matches
@@ -808,30 +826,47 @@ export async function ensureBvnkPaymentRule(
   }
 
   if (!entry.ruleId && entry.walletId && isBvnkWalletActive(entry.walletStatus)) {
-    const ruleIntent = await audit.begin({
-      action: "bvnk_onramp_payment_rule_created",
-      metadata: {
-        currency: params.currency,
-        network: params.network,
-        destination: params.destinationWalletAddress,
-      },
-    });
-    try {
-      const contact = await client.getContactV3(ctx, { contactId });
-      const rule = await client.createOnrampRule(ctx, {
-        reference: await bvnkRuleReference(counterparty.id, paymentRuleKey),
-        walletId: entry.walletId,
-        currency: params.currency,
-        network: params.network,
-        beneficiaryAddress: params.destinationWalletAddress,
-        entity: buildBvnkThirdPartyRuleEntity(contact, counterparty.id),
-      });
-      entry = { ...entry, ruleId: rule.id, ruleStatus: rule.status };
+    const reference = await bvnkRuleReference(counterparty.id, paymentRuleKey);
+    const activeRules = (
+      await client.listOnrampRulesByWallet(ctx, { walletId: entry.walletId })
+    ).filter((rule) => rule.status === "ACTIVE" && rule.reference === reference);
+    if (activeRules.length > 1) {
+      throw providerUnavailable(
+        `BVNK rule lookup for ${entry.walletId} is ambiguous (${activeRules
+          .map((rule) => rule.id)
+          .join(", ")}); refusing to pick one.`
+      );
+    }
+    const adopted = activeRules[0];
+    if (adopted !== undefined) {
+      entry = { ...entry, ruleId: adopted.id, ruleStatus: adopted.status };
       await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
-      await audit.complete(ruleIntent, { ruleId: rule.id });
-    } catch (error) {
-      await audit.fail(ruleIntent, error);
-      throw error;
+    } else {
+      const ruleIntent = await audit.begin({
+        action: "bvnk_onramp_payment_rule_created",
+        metadata: {
+          currency: params.currency,
+          network: params.network,
+          destination: params.destinationWalletAddress,
+        },
+      });
+      try {
+        const contact = await client.getContactV3(ctx, { contactId });
+        const rule = await client.createOnrampRule(ctx, {
+          reference,
+          walletId: entry.walletId,
+          currency: params.currency,
+          network: params.network,
+          beneficiaryAddress: params.destinationWalletAddress,
+          entity: buildBvnkThirdPartyRuleEntity(contact, counterparty.id),
+        });
+        entry = { ...entry, ruleId: rule.id, ruleStatus: rule.status };
+        await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
+        await audit.complete(ruleIntent, { ruleId: rule.id });
+      } catch (error) {
+        await audit.fail(ruleIntent, error);
+        throw error;
+      }
     }
   }
 
