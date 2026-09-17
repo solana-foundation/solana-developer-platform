@@ -86,3 +86,15 @@ For credential rotation, rollback, and cancellation, HTTP `200` reports the obse
 2. Compare request logs, database transaction evidence, and other audit outcomes for the same transition. The current credential status alone cannot prove which request committed it.
 3. Preserve the evidence in the incident record. Append an outcome only after both the transaction result and its attribution are proven; otherwise leave the intent unresolved and escalate to the security/on-call team.
 4. Do not repeat a credential transition just to close its audit intent. Do not rewrite append-only audit rows or PostgreSQL/Redis checkpoints.
+
+### Wallet creation and explicit custody defaults
+
+Additional Connection wallet creation records its initiating request before calling the Provider. This includes wallet API calls, API-key provisioning, and first-use DVP settlement-wallet provisioning. The intent names the planned SDP wallet ID; a successful `custody_wallet_created` outcome identifies the persisted wallet and the actual previous/new Connection default. Filter by `auditPhase: outcome`, `status: success`, and `result: created` when looking for confirmed creations: the intent's nested target is only an attempt.
+
+A wallet creation outcome does not mean the subsequent API key or DVP trade succeeded. Those steps can fail after wallet creation; the created wallet remains. A DVP provisioning race can also leave a created wallet unused. Check `dvp_settlement_wallets` before treating a created wallet as the assigned settlement authority.
+
+For a `custody_wallet_orphan_risk` event, correlate its `auditIntentId` with the ledger intent, then inspect Provider and local wallet records. An unknown Provider response or persistence result leaves the intent unresolved. Additional wallet creation is not idempotent: do not repeat it to repair the audit record.
+
+Explicit default selections use the same intent/outcome rule. If outcome persistence fails after a confirmed change, the successful response is preserved and `audit_critical_outcome_persistence_failed` identifies the unresolved intent. An unchanged default closes the attempt without claiming a second transition. A `custody_default_wallet_audit_unresolved` event means persistence was not confirmed; the current pointer alone cannot prove which request changed it. Preserve request/transaction evidence and append an outcome only after both the result and attribution are proven.
+
+An explicit provider switch can initialize or reuse a Config before its final selection. Its technical `provider_initialization_completed` event uses `commandAuditIntentId` and `configId` to identify that confirmed substep, without claiming which concurrent request created or reactivated the Config. The final selection outcome includes the actual selection steps, including any default change made by initialization. Inspect `custody_switch_initialization_audit_failed` for a missing substep record and `custody_default_selection_outcome_unknown` for an unconfirmed command result. An initialized Config does not prove that the whole switch completed.

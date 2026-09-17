@@ -420,7 +420,7 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, walletId, ["payments:write"]);
   }
 
-  const trade = await createDvpTrade(c.env, {
+  const trade = await createDvpTrade(c.env, c, {
     organizationId: auth.organizationId,
     projectId,
     partyA: body.partyA,
