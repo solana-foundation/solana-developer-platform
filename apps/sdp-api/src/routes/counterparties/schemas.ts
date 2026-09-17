@@ -20,7 +20,7 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
   z
     .object({
       provider: z.enum(
-        ["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe", "hercle"],
+        ["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"],
         {
           error: "provider does not support onramp requirements",
         }

@@ -187,7 +187,6 @@ function mapCustomerLink(
     case "coinbase":
     case "mural":
     case "stripe":
-    case "hercle":
       return {
         provider: row.provider,
         id: row.id,

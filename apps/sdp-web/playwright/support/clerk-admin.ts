@@ -302,10 +302,8 @@ export async function setClerkOrganizationTier(
     },
   };
 
-  // Clerk retired `private_metadata` on the organization PATCH (422 form_param_deprecated); the
-  // metadata resource's PUT replaces the field wholesale, which is what the old body did.
-  await requestClerk(`/organizations/${organizationId}/metadata`, {
-    method: "PUT",
+  await requestClerk(`/organizations/${organizationId}`, {
+    method: "PATCH",
     body: JSON.stringify({
       private_metadata: nextPrivateMetadata,
     }),
