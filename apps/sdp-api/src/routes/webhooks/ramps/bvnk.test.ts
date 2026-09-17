@@ -25,6 +25,17 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
 
+  it("accepts the terminal-success statuses customer webhooks report", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    for (const status of ["COMPLETED", "APPROVED"] as const) {
+      expect(processor.parse(bvnkCustomerStatusChangeEvent({ status }))).toEqual({
+        event: "bvnk:customers:status-change",
+        data: { customerId: "customer_1", status },
+      });
+    }
+  });
+
   it("rejects a customer status-change whose status is not the uppercase enum", () => {
     const processor = new BvnkWebhookProcessor();
 

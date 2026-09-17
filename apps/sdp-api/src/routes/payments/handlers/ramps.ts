@@ -1561,6 +1561,7 @@ export async function simulateSandboxTransfer(
         currency: transfer.fiat_currency,
         originatorName: counterparty.display_name,
         remittanceInformation: transfer.id,
+        idempotencyKey: transfer.id,
       });
       break;
     }

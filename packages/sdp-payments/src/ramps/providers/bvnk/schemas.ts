@@ -117,6 +117,12 @@ export const bvnkV2CustomerStatusSchema = z.enum([
   "REJECTED",
   "TERMINATED",
 ]);
+/** Customer webhooks also report terminal success as COMPLETED or APPROVED, which the v2 customer API never returns. */
+export const bvnkCustomerWebhookStatusSchema = z.enum([
+  ...bvnkV2CustomerStatusSchema.options,
+  "COMPLETED",
+  "APPROVED",
+]);
 
 const bvnkV2CustomerTypeSchema = z.enum(["COMPANY", "INDIVIDUAL"]);
 const bvnkV2CustomerModelSchema = z.enum([

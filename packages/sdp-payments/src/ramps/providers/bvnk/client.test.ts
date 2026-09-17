@@ -295,7 +295,7 @@ describe("BvnkRampClient estimate and simulation surfaces", () => {
     assert.equal(result.exchangeRate, "100.2");
   });
 
-  it("forwards the SDP transfer id verbatim as the remittance reference", async () => {
+  it("forwards the SDP transfer id as the remittance reference and idempotency key", async () => {
     const { requests } = queueFetch(respond({ ok: true }));
 
     await new BvnkRampClient().simulatePayin(runtimeContext, {
@@ -304,9 +304,11 @@ describe("BvnkRampClient estimate and simulation surfaces", () => {
       currency: "USD",
       originatorName: "Jane Doe",
       remittanceInformation: "xfr_9f3b1c2d4e5f",
+      idempotencyKey: "xfr_9f3b1c2d4e5f",
     });
 
     const body = JSON.parse(String(requests[0].init.body));
     assert.equal(body.remittanceInformation, "xfr_9f3b1c2d4e5f");
+    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "xfr_9f3b1c2d4e5f");
   });
 });

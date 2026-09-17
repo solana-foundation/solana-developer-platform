@@ -1,4 +1,4 @@
-import { bvnkV2CustomerStatusSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
+import { bvnkCustomerWebhookStatusSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type { BvnkBankFundingDetails } from "@sdp/types";
 import { z } from "zod";
 
@@ -45,7 +45,7 @@ const bvnkLedgersSchema = z
 export const bvnkWebhookSchema = z.discriminatedUnion("event", [
   z.object({
     event: z.literal("bvnk:customers:status-change"),
-    data: z.object({ customerId: z.string().min(1), status: bvnkV2CustomerStatusSchema }),
+    data: z.object({ customerId: z.string().min(1), status: bvnkCustomerWebhookStatusSchema }),
   }),
   z.object({
     event: z.literal("bvnk:platform:customer:update"),

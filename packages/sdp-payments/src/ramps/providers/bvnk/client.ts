@@ -465,6 +465,7 @@ export class BvnkRampClient implements RampProvider {
       currency: string;
       originatorName: string;
       remittanceInformation: string;
+      idempotencyKey: string;
     }
   ): Promise<unknown> {
     const currency = bvnkSandboxPayinCurrencySchema.safeParse(input.currency);
@@ -474,6 +475,7 @@ export class BvnkRampClient implements RampProvider {
     const config = readBvnkConfig(env, mode);
     return this.request(config, "/payment/v2/payins/simulation", {
       method: "POST",
+      headers: { "Idempotency-Key": input.idempotencyKey },
       body: {
         walletId: input.walletId,
         amount: input.amount,
