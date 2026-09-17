@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { getStoredApiKeySecret } from "@/lib/playground-api-keys";
 
 const PaymentsPlayground = dynamic(
   () => import("./payments-playground").then((module) => module.PaymentsPlayground),
@@ -49,24 +48,10 @@ export function PaymentsPlaygroundWorkspace({
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
     [apiKeys, selectedPlaygroundApiKeyId]
   );
-  const selectedPlaygroundApiKeyPrefix = selectedPlaygroundApiKey?.keyPrefix ?? null;
-  const playgroundApiKeyValue = useMemo(() => {
-    if (!selectedPlaygroundApiKey) {
-      return "";
-    }
-
-    const stored = getStoredApiKeySecret({
-      apiKeyId: selectedPlaygroundApiKey.id,
-      keyPrefix: selectedPlaygroundApiKeyPrefix,
-    });
-
-    return stored ?? "";
-  }, [selectedPlaygroundApiKey, selectedPlaygroundApiKeyPrefix]);
-
   return (
     <PaymentsPlayground
       apiBaseUrl={apiBaseUrl}
-      apiKeyValue={playgroundApiKeyValue}
+      apiKeyId={selectedPlaygroundApiKey?.id ?? null}
       hasActiveApiKeys={apiKeys.length > 0}
       transfers={transfers}
       transfersError={transfersError}

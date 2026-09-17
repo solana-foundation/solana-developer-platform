@@ -4,13 +4,13 @@ import type {
   TokenEarnings,
   YieldPosition,
   YieldStrategy,
-} from "../src/types.ts";
+} from "../src/types";
 import {
   assertBuiltFeePayer,
   deriveWithdrawalFloor,
   summarizeAccountToken,
-} from "./embedded-yield.ts";
-import { SdpApiError } from "./sdp-client.ts";
+} from "./embedded-yield";
+import { SdpApiError } from "./sdp-client";
 
 describe("Embedded Yield orchestration", () => {
   it("keeps account totals in one token denomination", () => {

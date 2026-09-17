@@ -43,6 +43,9 @@ export function TokenDeployWalletDialog({
       <h4 className="pr-12 text-[22px] leading-[1.2] font-medium text-primary">
         {t("DashboardIssuance.management.deployToken")}
       </h4>
+      <p className="mt-2 text-sm leading-5 text-secondary">
+        {t("DashboardIssuance.management.sendTransactionDescription")}
+      </p>
       <div className="mt-5">
         <TokenSignerSelect
           signerWallets={signerWallets}

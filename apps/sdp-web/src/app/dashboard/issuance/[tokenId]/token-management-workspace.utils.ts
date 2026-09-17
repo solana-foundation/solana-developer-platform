@@ -1,3 +1,4 @@
+import { isAddress } from "@sdp/solana";
 import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/types";
 import type { AppLocale } from "@/i18n/config";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -23,6 +24,12 @@ import type {
 } from "./token-management-workspace.types";
 
 export const SOLANA_ADDRESS_PATTERN = "[1-9A-HJ-NP-Za-km-z]{32,44}";
+const SOLANA_ADDRESS_REGEX = new RegExp(`^${SOLANA_ADDRESS_PATTERN}$`);
+
+export function isValidSolanaAddressInput(value: string): boolean {
+  const normalized = value.trim();
+  return SOLANA_ADDRESS_REGEX.test(normalized) && isAddress(normalized);
+}
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export const getTokenAmountFieldDescription = (t: Translate) =>
@@ -447,8 +454,10 @@ function getTokenLifecycleDisabledReason(
   }
 }
 
-function getPauseAuthorityAddress(token: Token): string | null {
-  return token.extensions?.pausable?.authority ?? token.mintAuthority ?? null;
+function getPauseAuthorityAddress(token: Token, livePauseAuthority?: string | null): string | null {
+  return livePauseAuthority !== undefined
+    ? livePauseAuthority
+    : (token.extensions?.pausable?.authority ?? token.mintAuthority ?? null);
 }
 
 // Why the "lock supply" action can't run, or null when it can.
@@ -479,7 +488,8 @@ export function getLockSupplyDisabledReason(token: Token, t: Translate): string 
 
 export function getTokenActionDisabledReasons(
   token: Token,
-  t: Translate
+  t: Translate,
+  livePauseAuthority?: string | null
 ): {
   mintDisabledReason: string | null;
   burnDisabledReason: string | null;
@@ -505,7 +515,7 @@ export function getTokenActionDisabledReasons(
   const permanentDelegateDisabledReason = !token.extensions?.permanentDelegate
     ? t("DashboardIssuance.management.noPermanentDelegateAuthority")
     : null;
-  const pauseAuthority = getPauseAuthorityAddress(token);
+  const pauseAuthority = getPauseAuthorityAddress(token, livePauseAuthority);
 
   return {
     mintDisabledReason,
@@ -847,6 +857,7 @@ export function getSignerSelectionForAction({
   authorityWallets,
   metadataAuthority,
   metadataAuthorityError,
+  pauseAuthority,
   allowlistAuthority,
   permissionRow,
   t,
@@ -856,6 +867,7 @@ export function getSignerSelectionForAction({
   authorityWallets: PaymentsDashboardWallet[];
   metadataAuthority: string | null;
   metadataAuthorityError?: string | null;
+  pauseAuthority?: string | null;
   allowlistAuthority?: string | null;
   permissionRow?: PermissionRow | null;
   t: Translate;
@@ -946,7 +958,7 @@ export function getSignerSelectionForAction({
       uncontrolledReason = t("DashboardIssuance.management.freezeAuthorityNotControlled");
       break;
     case "pause":
-      requiredAuthority = token.extensions?.pausable?.authority ?? token.mintAuthority;
+      requiredAuthority = getPauseAuthorityAddress(token, pauseAuthority);
       missingReason = t("DashboardIssuance.management.noPauseAuthorityConfigured");
       uncontrolledReason = t("DashboardIssuance.management.pauseAuthorityNotControlled");
       break;

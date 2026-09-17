@@ -2085,6 +2085,12 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         case "organization":
           break;
         case "wallet":
+          // The branch mirrors the identity the write path stamps: every
+          // producer of a custody-wallet operation records the row with its
+          // `custody_wallet_id` set from the same resolved wallet the
+          // candidate carries, so filtering on it cannot silently drop rows
+          // of that wallet. Rows without the column belong to non-custody
+          // (user) wallets and sum under `wallet_id` below.
           if (input.custodyWalletId !== null) {
             conditions.push("custody_wallet_id = ?");
             params.push(input.custodyWalletId);

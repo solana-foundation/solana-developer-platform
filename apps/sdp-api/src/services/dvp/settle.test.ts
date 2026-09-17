@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import { getSettleDvpInstruction } from "@sdp/dvp";
+import { DVP_CLOSE_REFUSAL } from "@sdp/types";
 import {
   address,
   getCompiledTransactionMessageDecoder,
@@ -23,8 +24,8 @@ import {
 import { generateKeyPairSigner } from "@solana/signers";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DvpTradeRow } from "@/db/repositories";
-import { type AppError, conflict } from "@/lib/errors";
+import type { DvpCloseClaim, DvpTradeRow } from "@/db/repositories";
+import { type AppError, conflict, solanaRpcError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import { buildFundedDvpTradeRow, DVP_TEST_AUTHORITY, DVP_TEST_USER_B } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
@@ -44,6 +45,45 @@ const getRecentBlockhash = vi.hoisted(() =>
   }))
 );
 
+const confirmTransaction = vi.hoisted(() => vi.fn());
+const getBlockHeight = vi.hoisted(() => vi.fn());
+const hasLiveClaim = vi.hoisted(() => vi.fn());
+/**
+ * The trade's close lock, as the row holds it. A compare-and-set in one step,
+ * as the guarded UPDATE is, so two closes racing here race as they would there.
+ */
+const closeLocks = vi.hoisted(() => new Map<string, DvpCloseClaim>());
+const trades = vi.hoisted(() => ({
+  claimClose: vi.fn(async (id: string, claim: DvpCloseClaim) => {
+    if (closeLocks.has(id)) {
+      return false;
+    }
+    closeLocks.set(id, claim);
+    return true;
+  }),
+  rebindCloseClaim: vi.fn(async (id: string, from: string, to: DvpCloseClaim["signature"]) => {
+    const held = closeLocks.get(id);
+    if (held?.signature !== from) {
+      return false;
+    }
+    closeLocks.set(id, { ...held, signature: to });
+    return true;
+  }),
+  releaseCloseClaim: vi.fn(async (id: string, signature: string) => {
+    if (closeLocks.get(id)?.signature === signature) {
+      closeLocks.delete(id);
+    }
+  }),
+}));
+
+vi.mock("@/db", () => ({ getDb: () => ({}) }));
+vi.mock("@/db/repositories", async () => ({
+  ...(await vi.importActual<typeof import("@/db/repositories")>("@/db/repositories")),
+  createDvpTradeRepository: () => trades,
+}));
+vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
+  createPostgresDvpLegFundingClaimRepository: () => ({ hasLiveClaim }),
+}));
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/sponsorship.service", async () => {
   const actual = await vi.importActual<typeof import("@/services/sponsorship.service")>(
@@ -62,7 +102,8 @@ vi.mock("@/services/sponsorship.service", async () => {
 });
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({}),
+  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+  confirmTransaction,
   getRecentBlockhash,
   sendTransaction,
 }));
@@ -110,6 +151,10 @@ describe("closeDvpTrade", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    closeLocks.clear();
+    getBlockHeight.mockResolvedValue(50n);
+    hasLiveClaim.mockResolvedValue(false);
+    confirmTransaction.mockResolvedValue({ confirmationStatus: "confirmed", err: null, slot: 1n });
     // The settlement window is judged by the cluster clock read with the escrows.
     readDvpAccounts.mockResolvedValue({
       trade: { exists: true, address: trade().swapDvp },
@@ -481,5 +526,170 @@ describe("closeDvpTrade", () => {
 
       expect(getRecentBlockhash).toHaveBeenCalledTimes(2);
     });
+  });
+
+  /**
+   * PRO-1973. A close holds the trade's lock from before it is sponsored until
+   * what it did is known; a leg action holds its leg's. Every case below is one
+   * ordering of those locks against a send.
+   */
+  describe("close exclusion", () => {
+    it("of a settle and a cancel sent together, sends one and refuses the other", async () => {
+      const outcomes = await Promise.allSettled([
+        closeDvpTrade(context, trade(), "settle", settlement),
+        closeDvpTrade(context, trade(), "cancel", settlement),
+      ]);
+
+      expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+      const [refused] = outcomes.filter((outcome) => outcome.status === "rejected");
+      assert(refused?.status === "rejected");
+      expect(refused.reason).toMatchObject({
+        statusCode: 409,
+        details: { reason: DVP_CLOSE_REFUSAL.closeInProgress },
+      });
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses a close while another close's lock can still land, before sponsorship", async () => {
+      closeLocks.set("dvp_settle_test", {
+        action: "cancel",
+        signature: "held" as DvpCloseClaim["signature"],
+        expiryHeight: "100",
+      });
+
+      await expect(closeDvpTrade(context, trade(), "settle", settlement)).rejects.toMatchObject({
+        details: { reason: DVP_CLOSE_REFUSAL.closeInProgress },
+      });
+      expect(prepareOwnedSubmission).not.toHaveBeenCalled();
+      expect(sendTransaction).not.toHaveBeenCalled();
+    });
+
+    // A funding or reclaim took its leg's lock first. Sending the close now
+    // could close the escrow under it, so the close backs off and frees its lock.
+    it("backs off and frees its lock while a leg is being funded or reclaimed", async () => {
+      hasLiveClaim.mockResolvedValue(true);
+
+      await expect(closeDvpTrade(context, trade(), "cancel", settlement)).rejects.toMatchObject({
+        statusCode: 409,
+        details: { reason: DVP_CLOSE_REFUSAL.legMoving },
+      });
+      expect(hasLiveClaim).toHaveBeenCalledWith("dvp_settle_test", 50n);
+      expect(prepareOwnedSubmission).not.toHaveBeenCalled();
+      expect(sendTransaction).not.toHaveBeenCalled();
+      expect(closeLocks.size).toBe(0);
+    });
+
+    // The leg read comes after the lock is written, so a leg action that locks
+    // after that read sees the close instead.
+    it("reads the leg locks only after its own lock is held", async () => {
+      hasLiveClaim.mockImplementation(async () => {
+        expect(closeLocks.has("dvp_settle_test")).toBe(true);
+        return false;
+      });
+
+      await closeDvpTrade(context, trade(), "settle", settlement);
+
+      expect(hasLiveClaim).toHaveBeenCalledOnce();
+    });
+
+    it("moves the lock onto the sponsored signature before broadcast, and keeps it once confirmed", async () => {
+      sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) => {
+        const sent = getSignatureFromTransaction(getTransactionDecoder().decode(bytes));
+        expect(closeLocks.get("dvp_settle_test")?.signature).toBe(sent);
+        return sent;
+      });
+
+      const result = await closeDvpTrade(context, trade(), "settle", settlement);
+
+      expect(result.landed).toBe(true);
+      expect(closeLocks.get("dvp_settle_test")).toEqual({
+        action: "settle",
+        signature: result.signature,
+        expiryHeight: "100",
+      });
+    });
+
+    it("frees the lock when the sponsor refuses to sign", async () => {
+      prepareOwnedSubmission.mockRejectedValueOnce(new Error("sponsor rate limited"));
+
+      await expect(closeDvpTrade(context, trade(), "settle", settlement)).rejects.toThrow(
+        "sponsor rate limited"
+      );
+      expect(closeLocks.size).toBe(0);
+    });
+
+    it("frees the lock on a preflight rejection, which sent nothing", async () => {
+      sendTransaction.mockRejectedValue(preflightError());
+
+      await expect(closeDvpTrade(context, trade(), "cancel", settlement)).rejects.toMatchObject({
+        code: "TRANSACTION_FAILED",
+      } satisfies Partial<AppError>);
+      expect(closeLocks.size).toBe(0);
+    });
+
+    // The transaction may be on the wire. Until its blockhash expires it can
+    // still land, so neither a second close nor a leg action may go out.
+    it("keeps the lock after an ambiguous send", async () => {
+      sendTransaction.mockRejectedValue(new Error("socket hang up"));
+
+      await expect(closeDvpTrade(context, trade(), "settle", settlement)).rejects.toThrow(
+        "socket hang up"
+      );
+      expect(closeLocks.get("dvp_settle_test")?.action).toBe("settle");
+      const sendsBefore = sendTransaction.mock.calls.length;
+      await expect(closeDvpTrade(context, trade(), "cancel", settlement)).rejects.toMatchObject({
+        details: { reason: DVP_CLOSE_REFUSAL.closeInProgress },
+      });
+      expect(sendTransaction).toHaveBeenCalledTimes(sendsBefore);
+    });
+
+    // Accepted is not landed. A settle can be accepted and fail in the program,
+    // and recording it as settled would be the wrong status.
+    it("reports a close the program refused as failed, and frees the lock", async () => {
+      confirmTransaction.mockResolvedValue({
+        confirmationStatus: "confirmed",
+        err: { InstructionError: [4, { Custom: 6 }] },
+        slot: 1n,
+      });
+
+      await expect(closeDvpTrade(context, trade(), "settle", settlement)).rejects.toMatchObject({
+        code: "TRANSACTION_FAILED",
+        statusCode: 400,
+        details: { reason: DVP_CLOSE_REFUSAL.closeFailedOnChain },
+      });
+      expect(closeLocks.size).toBe(0);
+    });
+
+    it.each([
+      ["times out", () => confirmTransaction.mockRejectedValue(solanaRpcError("timed out"))],
+      [
+        "is only processed",
+        () =>
+          confirmTransaction.mockResolvedValue({
+            confirmationStatus: "processed",
+            err: null,
+            slot: 1n,
+          }),
+      ],
+      [
+        "failed at processed only",
+        () =>
+          confirmTransaction.mockResolvedValue({
+            confirmationStatus: "processed",
+            err: { InstructionError: [4, { Custom: 6 }] },
+            slot: 1n,
+          }),
+      ],
+    ])(
+      "reports a close whose confirmation %s as not landed, and keeps the lock",
+      async (_, arrange) => {
+        arrange();
+
+        const result = await closeDvpTrade(context, trade(), "cancel", settlement);
+
+        expect(result.landed).toBe(false);
+        expect(closeLocks.get("dvp_settle_test")?.signature).toBe(result.signature);
+      }
+    );
   });
 });

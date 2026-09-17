@@ -164,6 +164,29 @@ describe("Clerk auth request cache", () => {
     });
   });
 
+  it("strict optional auth returns unauthorized for a malformed bearer token", async () => {
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", optionalClerkAuth({ rejectInvalid: true }));
+    app.get("/optional", (c) => c.json({ authenticated: Boolean(c.get("clerk")) }));
+    app.onError((error, c) => {
+      if (error instanceof AppError) {
+        return c.json(error.toResponse(), error.statusCode as 401);
+      }
+      throw error;
+    });
+
+    const res = await app.request(
+      "/optional",
+      { headers: { Authorization: "Bearer invalid" } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({
+      error: { code: "UNAUTHORIZED", message: "Invalid Clerk token" },
+    });
+  });
+
   it("reuses a cached Clerk JWT across rate limiting and auth in one request", async () => {
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_cached",

@@ -59,7 +59,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/redaction` -> None
 - `@sdp/rpc` -> `@sdp/types`
-- `@sdp/solana` -> `@sdp/rpc`, `@sdp/types`
+- `@sdp/solana` -> `@sdp/rpc`
 - `@sdp/spc-escrow` -> None
 - `@sdp/spc-withdraw` -> None
 - `@sdp/types` -> None

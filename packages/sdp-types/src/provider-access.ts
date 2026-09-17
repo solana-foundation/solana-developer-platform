@@ -1,12 +1,21 @@
 import type { SdpEnvironment } from "./api-keys";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
 import { EARN_EXECUTION_MODELS, type EarnPortfolioToken } from "./earn";
+import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
+import { KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
+import { ONDO_DEPLOYMENTS } from "./ondo-programs";
 import {
   normalizeOrganizationTier,
   ORGANIZATION_RPC_PROVIDERS,
   type OrganizationRpcProvider,
   type OrganizationTier,
 } from "./organizations";
+import { VEDA_DEPLOYMENTS } from "./veda-programs";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
+} from "./well-known-tokens";
 
 export const COMPLIANCE_PROVIDERS = ["range", "elliptic", "trm", "chainalysis"] as const;
 export type ComplianceProviderId = (typeof COMPLIANCE_PROVIDERS)[number];
@@ -281,41 +290,55 @@ export const SURFACED_EARN_PROVIDERS: readonly EarnProviderId[] = EARN_PROVIDERS
   (provider) => EARN_PROVIDER_SURFACING[provider]
 );
 
-/**
- * Environments where each `vault_direct` provider may accept a NEW deposit.
- *
- * Jupiter publishes devnet program ids, but SDP's pinned SDK has no validated
- * devnet USDT market identity or cluster selector. Its mirrored sandbox row
- * therefore stays browse-only and only a production project may reach the
- * integrated mainnet market. Existing devnet providers keep their sandbox-only
- * launch posture.
- * Withdrawals deliberately do not consult this map: an exit must remain open
- * in every environment where a position can exist.
- *
- * Exhaustive per provider so opening Jupiter on mainnet cannot accidentally
- * open Kamino, Veda, or a future provider there too.
- */
-export const EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS = {
-  veda: ["sandbox"],
-  upshift: ["sandbox"],
-  perena: ["sandbox"],
-  kamino: ["sandbox"],
-  jupiter_lend: ["production"],
-  // USDY exists on mainnet only (`ONDO_DEPLOYMENTS` devnet is null), so the
-  // sandbox mirror is browse-only and only a production project may deposit.
-  ondo: ["production"],
-} as const satisfies Record<EarnProviderId, readonly SdpEnvironment[]>;
+/** The clusters where a per-cluster deployment table names a deployment. */
+function deployedClusters(
+  table: Readonly<Record<SolanaCluster, unknown>>
+): readonly SolanaCluster[] {
+  return SOLANA_CLUSTERS.filter((cluster) => table[cluster] != null);
+}
 
 /**
- * Whether a provider's non-custodial vault deposit may be opened in this
- * environment. Fail-closed for either an unknown provider or environment.
+ * Clusters each `vault_direct` provider has a deployment SDP can execute
+ * against, DERIVED from the provider's own program or deployment table so this
+ * can never disagree with it. Filling `VEDA_DEPLOYMENTS["mainnet-beta"]`
+ * (PRO-1777) opens Veda to production here with no second edit; Jupiter Lend
+ * and Ondo stay mainnet-only for as long as their tables say so.
+ *
+ * Upshift and Perena are registered placeholders with no client and no
+ * deployment anywhere, so they take deposits nowhere.
+ *
+ * Exhaustive per provider: a provider added to `EARN_PROVIDERS` without an
+ * entry here is a compile error.
+ */
+export const EARN_PROVIDER_DEPLOYED_CLUSTERS = {
+  veda: deployedClusters(VEDA_DEPLOYMENTS),
+  upshift: [],
+  perena: [],
+  kamino: deployedClusters(KAMINO_KVAULT_PROGRAM_IDS),
+  jupiter_lend: deployedClusters(JUPITER_LEND_EARN_PROGRAM_IDS),
+  ondo: deployedClusters(ONDO_DEPLOYMENTS),
+} as const satisfies Record<EarnProviderId, readonly SolanaCluster[]>;
+
+/**
+ * Whether a provider's non-custodial vault deposit may be opened from a
+ * project in `environment`: the environment's cluster
+ * (`CLUSTER_BY_SDP_ENVIRONMENT`: sandbox is devnet, production is mainnet-beta)
+ * must carry one of the provider's deployments. So a mainnet vault is
+ * depositable from a production project only, whichever provider fronts it,
+ * while sandbox keeps browsing the mirrored mainnet shelf read-only.
+ *
+ * Withdrawals deliberately do not consult this: an exit must remain open in
+ * every environment where a position can exist. Fail-closed for an unknown
+ * provider or environment.
  */
 export function isVaultDirectDepositEnabled(environment: string, provider: string): boolean {
-  if (!Object.hasOwn(EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS, provider)) return false;
-  const environments = EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS[
+  if (!Object.hasOwn(CLUSTER_BY_SDP_ENVIRONMENT, environment)) return false;
+  if (!Object.hasOwn(EARN_PROVIDER_DEPLOYED_CLUSTERS, provider)) return false;
+  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment as SdpEnvironment];
+  const clusters = EARN_PROVIDER_DEPLOYED_CLUSTERS[
     provider as EarnProviderId
-  ] as readonly string[];
-  return environments.includes(environment);
+  ] as readonly SolanaCluster[];
+  return clusters.includes(cluster);
 }
 
 /**

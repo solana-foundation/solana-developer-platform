@@ -12,7 +12,7 @@ import {
 
 interface PaymentsPlaygroundProps {
   apiBaseUrl?: string | null;
-  apiKeyValue: string;
+  apiKeyId: string | null;
   hasActiveApiKeys: boolean;
   transfers: PaymentsPlaygroundTransferView[];
   transfersError: string | null;
@@ -22,7 +22,7 @@ interface PaymentsPlaygroundProps {
 
 export function PaymentsPlayground({
   apiBaseUrl,
-  apiKeyValue,
+  apiKeyId,
   hasActiveApiKeys,
   transfers,
   transfersError,
@@ -41,7 +41,7 @@ export function PaymentsPlayground({
       endpoints={endpoints}
       defaultEndpointId="execute-transfer"
       apiBaseUrl={apiBaseUrl}
-      apiKeyValue={apiKeyValue}
+      apiKeyId={apiKeyId}
       apiKeySelector={<PlaygroundApiKeySelector />}
       requiresApiKey={!hasActiveApiKeys}
       leftMessages={[

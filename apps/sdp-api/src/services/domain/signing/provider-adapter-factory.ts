@@ -10,15 +10,10 @@ import {
   createIbmHavenApiClient,
   normalizeDfnsWalletId,
 } from "@sdp/custody/dfns";
-import {
-  SigningError,
-  type SigningPort,
-  type SignRequest,
-  type SignResult,
-} from "@sdp/custody/signing";
+import { SigningError, type SigningPort } from "@sdp/custody/signing";
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
-import { instrumentVendorPort, signFailedResult } from "@/runtime/vendor-calls";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import {
   KeychainCoinbaseAdapter,
   KeychainDfnsAdapter,
@@ -66,17 +61,6 @@ class LifecycleOnlyAdapter implements SigningPort {
       `Provider does not support transaction signing: ${this.providerId}`,
       "INVALID_REQUEST"
     );
-  }
-
-  async sign(_request: SignRequest): Promise<SignResult> {
-    throw new SigningError(
-      `Provider does not support transaction signing: ${this.providerId}`,
-      "INVALID_REQUEST"
-    );
-  }
-
-  requiresApproval(): boolean {
-    return false;
   }
 }
 
@@ -306,8 +290,7 @@ export async function createAdapterFromEncryptedConfig(
   // shared-module test runs and would log rejection noise in production.
   return instrumentVendorPort(
     parsed.provider,
-    await factory({ env, orgId, record, parsed, cipher }),
-    signFailedResult
+    await factory({ env, orgId, record, parsed, cipher })
   );
 }
 

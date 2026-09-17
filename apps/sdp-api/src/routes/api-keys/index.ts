@@ -3,7 +3,11 @@
  */
 
 import { Hono } from "hono";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import {
+  requireAdminApiKeyRole,
+  requirePermissions,
+  unifiedAuthMiddleware,
+} from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
@@ -52,23 +56,27 @@ apiKeys.patch(
 apiKeys.post(
   "/:keyId/policy-profiles",
   requirePermissions("api-keys:write"),
+  requireAdminApiKeyRole(),
   validateBody(apiKeyControlProfileCreateSchema),
   createApiKeyControlProfile
 );
 apiKeys.post(
   "/:keyId/policy-profiles/:profileId/revisions",
   requirePermissions("api-keys:write"),
+  requireAdminApiKeyRole(),
   validateBody(apiKeyControlProfileRevisionCreateSchema),
   createApiKeyControlProfileRevision
 );
 apiKeys.post(
   "/:keyId/policy-profiles/:profileId/revisions/:revisionId/activate",
   requirePermissions("api-keys:write"),
+  requireAdminApiKeyRole(),
   activateApiKeyControlProfileRevision
 );
 apiKeys.put(
   "/:keyId/policy-bindings",
   requirePermissions("api-keys:write"),
+  requireAdminApiKeyRole(),
   validateBody(apiKeyPolicyBindingsWriteSchema),
   writeApiKeyPolicyBindings
 );
