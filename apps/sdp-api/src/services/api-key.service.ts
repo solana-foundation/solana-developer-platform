@@ -124,6 +124,12 @@ export function isApiKeyAlreadyRotated(
   return "alreadyRotatedTo" in result;
 }
 
+export interface ApiKeyIdentity {
+  id: string;
+  name: string;
+  keyPrefix: string;
+}
+
 export interface VerifyApiKeyOwnershipInput {
   apiKey: string;
   organizationId: string;
@@ -194,24 +200,40 @@ export class ApiKeyService {
    * Display prefixes are intentionally not used here: they are short, public,
    * and not unique. The raw key is hashed in memory and is never stored.
    */
-  async ownsUsableApiKey(input: VerifyApiKeyOwnershipInput): Promise<boolean> {
-    assertTenantClaim(this.scope, input, "ApiKeyService.ownsUsableApiKey");
+  /**
+   * Resolves key material to the key it IS, not just to a yes or no. The match is
+   * an exact hash lookup inside the org and project boundary, so the identity it
+   * returns is the real row rather than anything inferred from the visible prefix.
+   * Callers that only need usability can read the null.
+   */
+  async resolveUsableApiKey(input: VerifyApiKeyOwnershipInput): Promise<ApiKeyIdentity | null> {
+    assertTenantClaim(this.scope, input, "ApiKeyService.resolveUsableApiKey");
     const keyHash = await hashString(input.apiKey, input.pepper);
     const row = await this.db
       .prepare(
-        `SELECT status, expires_at
+        `SELECT id, name, key_prefix, status, expires_at
          FROM api_keys
          WHERE key_hash = ? AND organization_id = ? AND project_id = ?
          LIMIT 1`
       )
       .bind(keyHash, input.organizationId, input.projectId)
-      .first<{ status: ApiKeyStatus; expires_at: string | null }>();
+      .first<{
+        id: string;
+        name: string;
+        key_prefix: string;
+        status: ApiKeyStatus;
+        expires_at: string | null;
+      }>();
 
     if (row?.status !== "active") {
-      return false;
+      return null;
     }
 
-    return !row.expires_at || new Date(row.expires_at) >= new Date();
+    if (row.expires_at && new Date(row.expires_at) < new Date()) {
+      return null;
+    }
+
+    return { id: row.id, name: row.name, keyPrefix: row.key_prefix };
   }
 
   async listForProject(projectId: string): Promise<ApiKeyListItem[]> {
@@ -376,6 +398,15 @@ export class ApiKeyService {
       }
 
       throw error;
+    }
+
+    // A key created BY a key inherits its creator's policy foundation, the
+    // same way rotation clones it: otherwise a policy-bound key could mint a
+    // sibling born free of the per-key rules that govern the creator and act
+    // through it. Runs on the caller's transactional client, so the key and
+    // its cloned policy commit together.
+    if (input.createdByKeyId) {
+      await this.cloneApiKeyPolicyFoundation(this.db, input.createdByKeyId, keyId);
     }
 
     return {

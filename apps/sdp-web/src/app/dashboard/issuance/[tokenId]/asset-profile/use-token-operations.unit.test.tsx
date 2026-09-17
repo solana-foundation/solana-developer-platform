@@ -8,7 +8,13 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { useTokenOperations } from "./use-token-operations";
 
-const mocks = vi.hoisted(() => ({ runAction: vi.fn(), environment: "sandbox" }));
+const mocks = vi.hoisted(() => ({
+  runAction: vi.fn(),
+  environment: "sandbox",
+  freezeAuthority: null as string | null,
+  freezeAuthorityError: null as string | null,
+  pauseAuthority: null as string | null,
+}));
 const source = "3yQfmv9WiotYSDmamiow5Xt2abcvDxTzmFBSYEEGZtqe";
 const destination = "5wLf85zhVpJ7xBjDCE1KK8yTXyCrbbzoCUuv3Dwsd5PQ";
 
@@ -26,9 +32,21 @@ vi.mock("./use-token-operation-data", () => ({
   useTokenOperationData: () => ({
     authorityWallets: [
       { id: "cwlt_test", walletId: "wal_test", isRuntimeExecutionAllowed: true, publicKey: source },
+      {
+        id: "cwlt_new_mint",
+        walletId: "wal_new_mint",
+        isRuntimeExecutionAllowed: true,
+        publicKey: destination,
+      },
     ],
     authorityWalletsLoading: false,
     authorityWalletsError: null,
+    authorityWalletsData: {
+      freezeAuthority: mocks.freezeAuthority,
+      freezeAuthorityError: mocks.freezeAuthorityError,
+      pauseAuthority: mocks.pauseAuthority,
+      pauseAuthorityError: null,
+    },
     allowlistEntries: [],
     frozenAccounts: [],
     transactions: [],
@@ -88,8 +106,12 @@ function renderOperations(overrides: Partial<Token> = {}) {
 }
 
 beforeEach(() => {
-  mocks.runAction.mockClear();
+  mocks.runAction.mockReset();
+  mocks.runAction.mockResolvedValue({ ok: true, message: "Done", status: 200, body: {} });
   mocks.environment = "sandbox";
+  mocks.freezeAuthority = source;
+  mocks.freezeAuthorityError = null;
+  mocks.pauseAuthority = null;
 });
 afterEach(cleanup);
 
@@ -167,7 +189,7 @@ describe("token operation confirmations", () => {
 });
 
 describe("draft deployment authorities", () => {
-  it("deploys with the saved distinct permission wallets and updated mint wallet", () => {
+  it("confirms before deploying with the saved distinct permission wallets", () => {
     const { result } = renderOperations({ mintAddress: null, status: "pending" });
     act(() =>
       result.current.deployToken({
@@ -177,6 +199,11 @@ describe("draft deployment authorities", () => {
         "permanent-delegate": "cwlt_recovery",
       })
     );
+    expect(result.current.deployWalletDialogOpen).toBe(true);
+    expect(result.current.deployCustodyWalletId).toBe("cwlt_new_mint");
+    expect(mocks.runAction).not.toHaveBeenCalled();
+
+    act(() => result.current.confirmDeployWallet());
     expect(mocks.runAction).toHaveBeenCalledWith(
       expect.objectContaining({
         path: "/api/dashboard/issuance/tokens/tok_test/deploy",
@@ -215,5 +242,64 @@ describe("draft deployment authorities", () => {
       }),
       expect.anything()
     );
+  });
+});
+
+describe("post-action state", () => {
+  it("renders and selects the live Token ACL controller instead of stale stored freeze authority", () => {
+    mocks.freezeAuthority = destination;
+    const { result } = renderOperations({ freezeAuthority: source });
+
+    expect(result.current.permissionRows.find((row) => row.authorityRole === "freeze")?.value).toBe(
+      destination
+    );
+    expect(result.current.effectiveFreezeDisabledReason).toBeNull();
+  });
+
+  it("keeps a revoked live freeze authority disabled instead of restoring stale stored data", () => {
+    mocks.freezeAuthority = null;
+    const { result } = renderOperations({ freezeAuthority: source });
+
+    expect(result.current.permissionRows.find((row) => row.authorityRole === "freeze")?.value).toBe(
+      null
+    );
+    expect(result.current.effectiveFreezeDisabledReason).not.toBeNull();
+  });
+
+  it("keeps pause available from the live pausable authority after supply is locked", () => {
+    mocks.pauseAuthority = source;
+    const { result } = renderOperations({
+      mintAuthority: null,
+      isMintable: false,
+      extensions: { pausable: {} },
+    });
+
+    expect(result.current.effectivePauseDisabledReason).toBeNull();
+  });
+
+  it("updates the permission row immediately after an authority rotation", async () => {
+    const { result } = renderOperations();
+    const freezeRow = result.current.permissionRows.find((row) => row.authorityRole === "freeze");
+    expect(freezeRow?.value).toBe(source);
+    if (!freezeRow) throw new Error("Expected freeze authority row");
+
+    act(() => result.current.handleAuthorityModalOpen(freezeRow));
+    act(() => result.current.setAuthorityModalNewAuthority(destination));
+    await act(() => result.current.handleAuthorityModalConfirm());
+
+    expect(result.current.permissionRows.find((row) => row.authorityRole === "freeze")?.value).toBe(
+      destination
+    );
+  });
+
+  it("clears approved-recipient inputs after a successful add", async () => {
+    const { result } = renderOperations();
+    act(() => result.current.setAllowlistForm({ address: destination, label: "Treasury" }));
+    act(() => result.current.handleAddAllowlist());
+    const options = mocks.runAction.mock.calls.at(-1)?.[1];
+
+    await act(() => options.onSuccess({ ok: true, message: "Done", status: 200, body: {} }));
+
+    expect(result.current.allowlistForm).toEqual({ address: "", label: "" });
   });
 });

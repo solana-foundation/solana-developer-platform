@@ -1,4 +1,4 @@
-const nonBreakingCommitOverrides = new Set([
+export const nonBreakingCommitOverrides = new Set([
   // This merged commit retained an inaccurate BREAKING CHANGE footer. Keep the
   // immutable history intact while excluding only that commit from bump selection.
   // biome-ignore lint/security/noSecrets: Public Git commit SHA, not a secret.

@@ -1,6 +1,5 @@
-import { createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { inspectToken, MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
+import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -13,7 +12,6 @@ import {
   assertApprovedWalletOperationCustodyWallet,
   beginApprovedWalletOperationEffect,
 } from "@/services/policy/approved-operation-replay";
-import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
@@ -25,6 +23,7 @@ import {
   createResolvedAuthoritySigner,
   resolveAuthorityWallet,
   resolveDirectIssuanceReplay,
+  resolvePauseAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
@@ -34,13 +33,6 @@ import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
-
-type MosaicSdkRpc = Parameters<typeof inspectToken>[0];
-
-async function resolvePauseAuthority(env: Env, mintAddress: ReturnType<typeof assertValidAddress>) {
-  const token = await inspectToken(createRpcForSdk<MosaicSdkRpc>(env), mintAddress);
-  return token.authorities.pausableAuthority ?? null;
-}
 
 export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema>) => {
   const { tokenId } = c.req.param();

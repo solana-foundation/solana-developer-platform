@@ -8,7 +8,10 @@
 import type { PreparedStatement } from "@/db";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
-import { selectCustodyConfigTarget } from "@/services/domain/signing/custody-runtime-target";
+import {
+  type CustodyScopeSelection,
+  selectCustodyConfigTarget,
+} from "@/services/domain/signing/custody-runtime-target";
 import type { SigningConfigStore, SigningConfiguration } from "@/services/domain/signing.service";
 import type { Env } from "@/types/env";
 
@@ -235,8 +238,8 @@ export class CustodyConfigStore implements SigningConfigStore {
     orgId: string,
     projectId: string | undefined,
     configId: string
-  ): Promise<void> {
-    await selectCustodyConfigTarget(this.db, {
+  ): Promise<CustodyScopeSelection> {
+    return selectCustodyConfigTarget(this.db, {
       organizationId: orgId,
       projectId,
       configId,

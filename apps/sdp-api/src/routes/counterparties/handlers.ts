@@ -24,7 +24,6 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
@@ -48,6 +47,7 @@ import {
   bvnkCollectCounterparty,
   bvnkCustomerRequirementsFromMetadata,
   bvnkStoredStage,
+  refreshBvnkCustomerAccount,
 } from "@/routes/payments/handlers/ramps/bvnk";
 import {
   readHercleCounterpartyLink,
@@ -94,35 +94,6 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
 }
 
 type SubmitCounterpartyRequirementsInput = z.infer<typeof submitCounterpartyRequirementsSchema>;
-
-async function refreshBvnkCustomerAccount(
-  c: AppContext,
-  counterparty: CounterpartyRow,
-  projectId: string,
-  providerAccount: CounterpartyProviderAccountRow
-): Promise<{ customer: BvnkCustomerResolution; verificationUrl: string }> {
-  const detail = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(rampRuntime(c), {
-    id: providerAccount.provider_customer_reference,
-  });
-  const updated = await createPostgresCounterpartyProviderAccountsRepository(
-    getDb(c.env)
-  ).patchAccountMetadata({
-    organizationId: counterparty.organization_id,
-    projectId,
-    counterpartyId: counterparty.id,
-    provider: "bvnk",
-    id: providerAccount.id,
-    set: { status: detail.status },
-    unset: [],
-  });
-  if (updated === null) {
-    throw internalError("BVNK customer status update escaped its tenant scope.");
-  }
-  return {
-    customer: { customerReference: detail.id, status: detail.status },
-    verificationUrl: detail.authenticatedLink.link,
-  };
-}
 
 /**
  * Checks whether a Lightspark payout submission still needs account data.
@@ -332,27 +303,20 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   });
 
   let refreshedBvnkCustomer:
-    | { customer: BvnkCustomerResolution; verificationUrl: string }
+    | { customer: BvnkCustomerResolution; verificationUrl: string | undefined }
     | undefined;
   if (query.data.provider === "bvnk" && providerAccount !== null) {
     const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(providerAccount.metadata);
-    const storedRequirements = await bvnkCustomerRequirementsFromMetadata(
-      c,
-      query.data.direction,
-      metadata
-    );
+    const storedRequirements = bvnkCustomerRequirementsFromMetadata(query.data.direction, metadata);
     if (storedRequirements) {
       return success(c, storedRequirements);
     }
-    if (metadata.status === undefined) {
-      throw internalError("BVNK customer-link metadata is missing customer state.");
-    }
-    refreshedBvnkCustomer = await refreshBvnkCustomerAccount(
-      c,
+    refreshedBvnkCustomer = await refreshBvnkCustomerAccount(c.env, rampRuntime(c), {
       counterparty,
       projectId,
-      providerAccount
-    );
+      providerAccountId: providerAccount.id,
+      customerReference: providerAccount.provider_customer_reference,
+    });
     if (!isBvnkCustomerVerified(refreshedBvnkCustomer.customer.status)) {
       const onboardingStatus = bvnkUnverifiedOnboardingStatus(
         refreshedBvnkCustomer.customer.status

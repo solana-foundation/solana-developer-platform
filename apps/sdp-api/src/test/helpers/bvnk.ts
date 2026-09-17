@@ -83,28 +83,6 @@ export function bvnkCustomerStatusChangeEvent(overrides?: Partial<BvnkCustomerSt
   };
 }
 
-type BvnkAgreementStatusChangeData = Extract<
-  BvnkWebhookInput,
-  { event: "bvnk:customers:agreements:status-change" }
->["data"];
-
-export function bvnkAgreementStatusChangeEvent(
-  overrides?: Partial<BvnkAgreementStatusChangeData>
-): {
-  event: "bvnk:customers:agreements:status-change";
-  data: BvnkAgreementStatusChangeData;
-} {
-  return {
-    event: "bvnk:customers:agreements:status-change",
-    data: {
-      customerId: "customer_1",
-      agreementId: "agreement_1",
-      status: "ACCEPTED",
-      ...overrides,
-    },
-  };
-}
-
 type BvnkWalletStatusChangeData = Extract<
   BvnkWebhookInput,
   { event: "ledger:v2:wallet:status-change" }
@@ -254,45 +232,6 @@ export function bvnkCachedCustomerSeed(
     customerReference: ref,
     status: "PENDING",
     ...overrides,
-  };
-}
-
-export const EPC_AGREEMENT_NAME = "EPC Partner Platform Agreement (US)";
-export const EPC_AGREEMENT_DESCRIPTION =
-  "Terms and conditions for EPC Partner Platform customers in the US";
-
-export type BvnkEpcAgreementMetadata = BvnkCustomerProviderAccountMetadata;
-
-export type BvnkEpcAgreementEntry = NonNullable<
-  BvnkEpcAgreementMetadata["agreements"]
->["entries"][string];
-
-export function bvnkEpcAgreementEntry(
-  agreementId: string,
-  overrides?: Partial<BvnkEpcAgreementEntry>
-): Record<string, BvnkEpcAgreementEntry> {
-  return {
-    [agreementId]: {
-      status: "PENDING",
-      name: EPC_AGREEMENT_NAME,
-      description: EPC_AGREEMENT_DESCRIPTION,
-      ...overrides,
-    },
-  };
-}
-
-export function bvnkCustomerLinkMetadata(
-  input?: Partial<BvnkEpcAgreementMetadata>
-): BvnkEpcAgreementMetadata {
-  return {
-    ...(input?.status === undefined ? {} : { status: input.status }),
-    ...(input?.verificationStatus === undefined
-      ? {}
-      : { verificationStatus: input.verificationStatus }),
-    ...(input?.residenceCountryCode === undefined
-      ? {}
-      : { residenceCountryCode: input.residenceCountryCode }),
-    ...(input?.agreements === undefined ? {} : { agreements: input.agreements }),
   };
 }
 

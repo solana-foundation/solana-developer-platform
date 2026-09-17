@@ -16,6 +16,9 @@ export function getTokenOperationPermissions({
   authorityWalletsLoading,
   authorityWalletsError,
   canManageTokenAdmin,
+  freezeAuthorityError,
+  pauseAuthority,
+  pauseAuthorityError,
   t,
 }: {
   token: Token;
@@ -23,6 +26,9 @@ export function getTokenOperationPermissions({
   authorityWalletsLoading: boolean;
   authorityWalletsError: string | null;
   canManageTokenAdmin: boolean;
+  freezeAuthorityError?: string | null;
+  pauseAuthority?: string | null;
+  pauseAuthorityError?: string | null;
   t: ReturnType<typeof useTranslations>;
 }) {
   const {
@@ -32,7 +38,7 @@ export function getTokenOperationPermissions({
     forceBurnDisabledReason,
     pauseDisabledReason,
     freezeDisabledReason,
-  } = getTokenActionDisabledReasons(token, t);
+  } = getTokenActionDisabledReasons(token, t, pauseAuthority);
   const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
 
   const withWalletLoadError = <T extends { unavailableReason: string | null }>(selection: T): T => {
@@ -51,7 +57,14 @@ export function getTokenOperationPermissions({
     action: Parameters<typeof getSignerSelectionForAction>[0]["action"]
   ) =>
     withWalletLoadError(
-      getSignerSelectionForAction({ action, token, authorityWallets, metadataAuthority, t })
+      getSignerSelectionForAction({
+        action,
+        token,
+        authorityWallets,
+        metadataAuthority,
+        pauseAuthority,
+        t,
+      })
     );
   const deploySignerSelection = signerSelectionFor("deploy");
   const deployDisabledReason = deploySignerSelection.unavailableReason;
@@ -136,9 +149,9 @@ export function getTokenOperationPermissions({
   const effectiveForceBurnDisabledReason =
     forceBurnDisabledReason ?? forceBurnSignerSelection.unavailableReason;
   const effectiveFreezeDisabledReason =
-    freezeDisabledReason ?? freezeSignerSelection.unavailableReason;
+    freezeAuthorityError ?? freezeDisabledReason ?? freezeSignerSelection.unavailableReason;
   const effectivePauseDisabledReason =
-    pauseDisabledReason ?? pauseSignerSelection.unavailableReason;
+    pauseAuthorityError ?? pauseDisabledReason ?? pauseSignerSelection.unavailableReason;
 
   return {
     pauseDisabledReason,

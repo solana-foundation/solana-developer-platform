@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { requireProjectId } from "@/lib/auth";
 import { forbidden, unauthorized } from "@/lib/errors";
-import { noContent } from "@/lib/response";
+import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
@@ -48,18 +48,25 @@ playgroundInternal.post(
       throw unauthorized("Dashboard session required");
     }
 
-    const owned = await new ApiKeyService(getDb(c.env), getRequestTenantScope(c)).ownsUsableApiKey({
+    const identity = await new ApiKeyService(
+      getDb(c.env),
+      getRequestTenantScope(c)
+    ).resolveUsableApiKey({
       apiKey,
       organizationId: actor.organizationId,
       projectId: requireProjectId(c),
       pepper: c.env.API_KEY_PEPPER,
     });
 
-    if (!owned) {
+    if (!identity) {
       throw forbidden("API key is not available for the selected project");
     }
 
-    return noContent(c);
+    // The identity is what lets the dashboard drop its key picker: the caller
+    // pastes key material and learns which key it is, instead of asserting it
+    // from a visible prefix that collides. Nothing here is new to the caller,
+    // who already holds this key and can list the project's keys.
+    return success(c, identity);
   }
 );
 

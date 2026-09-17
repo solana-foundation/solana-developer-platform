@@ -1,14 +1,15 @@
 "use client";
 
-import type { PrivateChannelDeposit } from "@sdp/types";
+import { isPrivateChannelDepositTerminal, type PrivateChannelDeposit } from "@sdp/types";
 import { CheckCircle2Icon, CircleIcon, Loader2Icon, XCircleIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import useSWR from "swr";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
+import { privateChannelsQueryKeys } from "../private-channels-query-key";
 import { fetchDepositAction } from "./actions";
 
 const RANK: Record<PrivateChannelDeposit["status"], number> = {
@@ -34,11 +35,6 @@ const STAGES = [
   },
 ] as const;
 
-const TERMINAL: ReadonlySet<PrivateChannelDeposit["status"]> = new Set([
-  "confirmed",
-  "settled",
-  "failed",
-]);
 const POLL_INTERVAL_MS = 1500;
 
 export function DepositProgress({
@@ -48,34 +44,33 @@ export function DepositProgress({
   deposit: PrivateChannelDeposit;
   onReset: () => void;
 }) {
-  const [deposit, setDeposit] = useState(initial);
   const cluster = useSolanaCluster();
   const t = useTranslations();
-
-  useEffect(() => {
-    setDeposit(initial);
-  }, [initial]);
-
-  useEffect(() => {
-    if (TERMINAL.has(deposit.status)) {
-      return;
+  const { data = initial } = useSWR(
+    privateChannelsQueryKeys.deposit(initial.id),
+    async () => {
+      const result = await fetchDepositAction(initial.id);
+      if (result === null) throw new Error("Private channel status is unavailable");
+      return result;
+    },
+    {
+      fallbackData: initial,
+      keepPreviousData: false,
+      dedupingInterval: POLL_INTERVAL_MS,
+      revalidateOnMount: false,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      errorRetryCount: Infinity,
+      errorRetryInterval: POLL_INTERVAL_MS,
+      refreshInterval: (current) =>
+        current && isPrivateChannelDepositTerminal(current.status) ? 0 : POLL_INTERVAL_MS,
     }
-    let active = true;
-    const timer = setInterval(async () => {
-      const next = await fetchDepositAction(deposit.id);
-      if (active && next) {
-        setDeposit(next);
-      }
-    }, POLL_INTERVAL_MS);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [deposit.id, deposit.status]);
+  );
+  const deposit = data;
 
   const rank = RANK[deposit.status];
   const failed = deposit.status === "failed";
-  const done = deposit.status === "confirmed" || deposit.status === "settled";
+  const done = isPrivateChannelDepositTerminal(deposit.status) && !failed;
 
   return (
     <div className="space-y-5">

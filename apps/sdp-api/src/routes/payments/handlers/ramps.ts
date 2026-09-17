@@ -138,6 +138,7 @@ import {
   ensureBvnkOfframpWallet,
   ensureBvnkPaymentRule,
   readBvnkCustomerLink,
+  refreshBvnkCustomerAccount,
 } from "./ramps/bvnk";
 import { advanceHercleCounterparty, readReadyHercleCounterpartyLink } from "./ramps/hercle";
 import {
@@ -696,17 +697,31 @@ async function bvnkCustomerVerificationRequirements(
   if (!customer.customerReference) {
     throw internalError("BVNK customer reference is missing while resolving verification.");
   }
-  const detail = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(rampRuntime(c), {
-    id: customer.customerReference,
+  const account = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getProviderAccount({
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "bvnk",
+  });
+  if (!account) {
+    throw internalError("BVNK customer-link row is missing while resolving verification.");
+  }
+  const refreshed = await refreshBvnkCustomerAccount(c.env, rampRuntime(c), {
+    counterparty: input.counterparty,
+    projectId: input.projectId,
+    providerAccountId: account.id,
+    customerReference: customer.customerReference,
   });
   const resolution: BvnkPaymentRuleResolution = {
-    customer: { customerReference: detail.id, status: detail.status },
+    customer: refreshed.customer,
     entry: {},
-    onboardingStatus: isBvnkCustomerVerified(detail.status)
+    onboardingStatus: isBvnkCustomerVerified(refreshed.customer.status)
       ? "ready"
-      : bvnkUnverifiedOnboardingStatus(detail.status),
+      : bvnkUnverifiedOnboardingStatus(refreshed.customer.status),
   };
-  return bvnkOnboardingRequirements(resolution, input.direction, detail.authenticatedLink.link);
+  return bvnkOnboardingRequirements(resolution, input.direction, refreshed.verificationUrl);
 }
 
 export async function advanceCounterpartyRequirements(
