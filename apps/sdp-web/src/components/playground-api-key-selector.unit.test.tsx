@@ -201,6 +201,68 @@ describe("PlaygroundApiKeySelector", () => {
     expect(workspace.selectedPlaygroundApiKeyId).toBeNull();
   });
 
+  it("ignores an answer for key material the user has already replaced", async () => {
+    // Greptile P1: a slow answer for key A used to land after the user had moved
+    // on to key B, attaching A and discarding what they had typed.
+    let releaseFirst: (() => void) | undefined;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const sent = JSON.parse(String(init?.body)) as { apiKey: string };
+      if (sent.apiKey === "sk_test_first_key") {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          id: sent.apiKey === "sk_test_first_key" ? "key_test" : "key_other_workspace",
+          name: "Resolved key",
+          keyPrefix: "sk_test_example",
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(ui());
+    const secretInput = view.getByLabelText("API key value") as HTMLInputElement;
+
+    fireEvent.change(secretInput, { target: { value: "sk_test_first_key" } });
+    fireEvent.blur(secretInput);
+
+    // The user keeps typing while the first answer is still in flight.
+    fireEvent.change(secretInput, { target: { value: "sk_test_second_key" } });
+    releaseFirst?.();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    expect(getStoredApiKeySecret({ apiKeyId: "key_test" })).toBeNull();
+    expect(workspace.selectedPlaygroundApiKeyId).toBeNull();
+    expect(secretInput.value).toBe("sk_test_second_key");
+  });
+
+  it("surfaces an error instead of checking forever when the request fails", async () => {
+    // Greptile P1: a throwing fetch or an unreadable body escaped the handler
+    // after the checking state was set, so the field never resolved.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      })
+    );
+    const view = render(ui());
+    const secretInput = view.getByLabelText("API key value") as HTMLInputElement;
+
+    fireEvent.change(secretInput, { target: { value: "sk_test_unreachable" } });
+    fireEvent.blur(secretInput);
+
+    await waitFor(() => {
+      expect(view.getByRole("alert").textContent).toBe(
+        "That key is not available for this project"
+      );
+    });
+    expect(view.queryByText("Checking key")).toBeNull();
+    expect(workspace.selectedPlaygroundApiKeyId).toBeNull();
+  });
+
   it("does not extend secret expiry during passive rerenders", async () => {
     mockResolve({
       ok: true,

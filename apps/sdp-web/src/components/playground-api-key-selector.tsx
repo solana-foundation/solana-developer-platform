@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,20 +27,28 @@ interface ResolvedApiKey {
 }
 
 async function resolveApiKey(apiKey: string): Promise<ResolvedApiKey | { error: string }> {
-  const response = await fetch("/api/playground/api-key", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey }),
-  });
+  // Every failure has to come back as a value. A throw here escapes the caller
+  // after it has set the checking state, which leaves the field checking forever.
+  // The empty body of an older API that answers 204 lands here too, as a json()
+  // rejection rather than a response we can read.
+  try {
+    const response = await fetch("/api/playground/api-key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey }),
+    });
 
-  const payload = (await response.json()) as Partial<ResolvedApiKey> & { error?: string };
-  if (!response.ok) {
-    return { error: payload.error ?? "" };
-  }
-  if (!payload.id || !payload.name || !payload.keyPrefix) {
+    const payload = (await response.json()) as Partial<ResolvedApiKey> & { error?: string };
+    if (!response.ok) {
+      return { error: payload.error ?? "" };
+    }
+    if (!payload.id || !payload.name || !payload.keyPrefix) {
+      return { error: "" };
+    }
+    return { id: payload.id, name: payload.name, keyPrefix: payload.keyPrefix };
+  } catch {
     return { error: "" };
   }
-  return { id: payload.id, name: payload.name, keyPrefix: payload.keyPrefix };
 }
 
 /**
@@ -76,6 +84,14 @@ export function PlaygroundApiKeySelector() {
   const [draft, setDraft] = useState<string | null>(null);
   const [resolution, setResolution] = useState<Resolution>({ kind: "idle" });
 
+  /**
+   * Identifies the in-flight request. Editing the field or starting a new
+   * identification invalidates whatever is already in flight, so a slow answer
+   * for material the user has since replaced cannot attach that older key or
+   * overwrite what they typed next.
+   */
+  const identifyRequestRef = useRef(0);
+
   const detachSecret = () => {
     if (selectedPlaygroundApiKeyId) {
       clearStoredApiKeySecret({ apiKeyId: selectedPlaygroundApiKeyId });
@@ -85,6 +101,7 @@ export function PlaygroundApiKeySelector() {
 
   const onChange = (rawValue: string) => {
     const normalized = normalizeApiKeyInput(rawValue);
+    identifyRequestRef.current += 1;
     setDraft(normalized);
     setResolution({ kind: "idle" });
     // A key already attached stops being the active key the moment the field is
@@ -108,8 +125,16 @@ export function PlaygroundApiKeySelector() {
       return;
     }
 
+    const material = draft;
+    const requestId = identifyRequestRef.current + 1;
+    identifyRequestRef.current = requestId;
+
     setResolution({ kind: "checking" });
-    const result = await resolveApiKey(draft);
+    const result = await resolveApiKey(material);
+    if (requestId !== identifyRequestRef.current) {
+      return;
+    }
+
     if ("error" in result) {
       setResolution({
         kind: "rejected",
@@ -118,7 +143,7 @@ export function PlaygroundApiKeySelector() {
       return;
     }
 
-    storeApiKeySecret({ value: draft, apiKeyId: result.id });
+    storeApiKeySecret({ value: material, apiKeyId: result.id });
     setSelectedPlaygroundApiKeyId(result.id);
     setDraft(null);
     setResolution({ kind: "resolved", name: result.name, keyPrefix: result.keyPrefix });
