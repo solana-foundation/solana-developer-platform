@@ -56,7 +56,8 @@ function counterpartyRow(overrides?: Partial<CounterpartyRow>): CounterpartyRow 
 /**
  * The customer-link row `claimPendingCustomerLink` returns: kind
  * `customer_link`, status `pending`, reference NULL — claimed inside the
- * advance's single transaction, bound by the CAS once the contact exists.
+ * advance's claim transaction (committed before any BVNK call), bound by the
+ * standalone CAS once the contact exists.
  */
 function pendingCustomerLinkRow(): Record<string, unknown> {
   return {
@@ -293,6 +294,50 @@ describe("advanceBvnkContact", () => {
     expect(mockAccounts.completeCustomerLink).toHaveBeenCalledWith(
       expect.objectContaining({ providerCustomerReference: CONTACT_ID })
     );
+  });
+
+  it("deletes the orphan contact and conflicts when a concurrent advance completes the row first", async () => {
+    const deleteContact = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "deleteContactV3");
+    const winnerContactId = "contact_race_winner";
+    const orphanContactId = "contact_race_orphan";
+    mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
+    listContacts.mockResolvedValue([]);
+    createContact
+      .mockResolvedValueOnce(bvnkContact({ id: winnerContactId }))
+      .mockResolvedValueOnce(bvnkContact({ id: orphanContactId }));
+    mockAccounts.completeCustomerLink
+      .mockResolvedValueOnce({
+        ...pendingCustomerLinkRow(),
+        provider_customer_reference: winnerContactId,
+        status: "active",
+      })
+      .mockResolvedValueOnce(null);
+    deleteContact.mockResolvedValue(undefined);
+
+    const winner = await advanceBvnkContact(fakeContext(), {
+      counterparty: counterpartyRow(),
+      projectId: PROJECT_ID,
+      collectedData: { firstName: "Ada", lastName: "Lovelace" },
+    });
+    expect(winner).toEqual({ contactId: winnerContactId });
+
+    let caught: unknown;
+    try {
+      await advanceBvnkContact(fakeContext(), {
+        counterparty: counterpartyRow(),
+        projectId: PROJECT_ID,
+        collectedData: { firstName: "Ada", lastName: "Lovelace" },
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      code: "CONFLICT",
+      message: "A BVNK contact for this counterparty was created concurrently.",
+    });
+    expect(createContact).toHaveBeenCalledTimes(2);
+    expect(deleteContact).toHaveBeenCalledTimes(1);
+    expect(deleteContact).toHaveBeenCalledWith(expect.anything(), { contactId: orphanContactId });
   });
 });
 

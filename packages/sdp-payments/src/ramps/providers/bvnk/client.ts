@@ -341,6 +341,26 @@ export class BvnkRampClient implements RampProvider {
   }
 
   /**
+   * Deletes a v3 contact by its BVNK-assigned id. Used to remove a contact
+   * this request created but could not bind to the customer-link row because
+   * a concurrent advance completed the row first; a bound contact is never
+   * deleted.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - The contact id to delete.
+   * @returns Nothing; BVNK answers 204 on success.
+   */
+  async deleteContactV3(
+    { env, mode }: RampRuntimeContext,
+    input: { contactId: string }
+  ): Promise<void> {
+    const config = readBvnkConfig(env, mode);
+    await this.request(config, `/platform/v3/contacts/${encodeURIComponent(input.contactId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /**
    * Lists v2 ledger wallet profiles and their supported payment rails.
    *
    * @param ctx - Runtime provider credentials and environment.

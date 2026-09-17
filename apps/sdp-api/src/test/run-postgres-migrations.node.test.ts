@@ -142,4 +142,25 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_two ON example(id);`;
     ).rejects.toThrow("must contain exactly one CREATE INDEX CONCURRENTLY");
     expect(client.query).not.toHaveBeenCalled();
   });
+
+  it("purges stale BVNK customer links and drops the agreement-session index in 0112", () => {
+    const sql = readMigration("0112_bvnk_direct_model_contacts.sql");
+
+    expect(sql).toContain(
+      "DELETE FROM counterparty_provider_accounts WHERE kind = 'customer_link' AND provider = 'bvnk'"
+    );
+    expect(sql.match(/DELETE FROM counterparty_provider_accounts/g)).toEqual([
+      "DELETE FROM counterparty_provider_accounts",
+    ]);
+    expect(sql).not.toContain("provider IN ('bvnk', 'lightspark', 'hercle')");
+
+    expect(sql).toContain(
+      "DROP INDEX IF EXISTS idx_counterparty_provider_accounts_bvnk_session_reference"
+    );
+    expect(sql).not.toContain("idx_counterparty_provider_accounts_customer_link_reference");
+
+    expect(sql).toContain(
+      "ALTER TABLE counterparty_provider_accounts ALTER COLUMN provider_customer_reference DROP NOT NULL"
+    );
+  });
 });

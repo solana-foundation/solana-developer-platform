@@ -34,7 +34,7 @@ import type {
   BvnkOnrampTransferProviderData,
 } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import { createBvnkContactV3InputSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
+import { buildRequirementSchema, parseCollectedFields } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type {
@@ -472,13 +472,17 @@ export function bvnkCollectRequirements(
 }
 
 /**
- * Advances the BVNK contact step in one transaction: claims the counterparty's
- * customer-link slot as a pending row, creates the third-party contact at BVNK,
- * and activates the row with the contact id via a compare-and-swap that matches
- * only while the row is unbound. A pending row left by a crashed advance is
- * reconciled against BVNK contacts listed by description: exactly one match is
- * adopted without a create, several matches abort with providerUnavailable, and
- * no match proceeds to create.
+ * Advances the BVNK contact step: claims the counterparty's customer-link
+ * slot as a pending row in its own committed transaction, creates (or adopts
+ * after a crash) the third-party contact at BVNK, then activates the row via
+ * a standalone compare-and-swap that matches only while the row is unbound.
+ * No database transaction spans a BVNK call, so a provider crash never rolls
+ * the claim back behind a contact that already exists. A pending row left by
+ * a crashed advance is reconciled against BVNK contacts listed by
+ * description: exactly one match is adopted without a create, several
+ * matches abort with providerUnavailable, and no match proceeds to create.
+ * If the compare-and-swap loses to a concurrent advance, the contact this
+ * request created is deleted at BVNK and the request fails with conflict.
  *
  * @param c - Request context used for provider and repository access.
  * @param input - Counterparty, project, and the collected identity fields.
@@ -486,16 +490,14 @@ export function bvnkCollectRequirements(
  */
 export async function advanceBvnkContact(
   c: AppContext,
-  input: { counterparty: CounterpartyRow; projectId: string; collectedData?: CollectedFieldData }
+  input: { counterparty: CounterpartyRow; projectId: string; collectedData: CollectedFieldData }
 ): Promise<{ contactId: string }> {
   const fields = bvnkContactFields(input.counterparty.entity_type);
-  const parsed = buildRequirementSchema(fields).safeParse(input.collectedData);
-  if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Missing or invalid identity fields for the BVNK contact.", {
-      errors: z.treeifyError(parsed.error),
-    });
-  }
-  const collected = parsed.data;
+  const collected = parseCollectedFields(
+    fields,
+    input.collectedData,
+    "Missing or invalid identity fields for the BVNK contact."
+  );
   const ctx = rampRuntime(c);
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const scope = {
@@ -509,58 +511,77 @@ export async function advanceBvnkContact(
     relationshipType: "THIRD_PARTY",
     ...collected,
   });
-  return getDb(c.env).transaction(async (transaction) => {
-    const db = asTransactionalClient(transaction);
-    const accounts = createPostgresCounterpartyProviderAccountsRepository(db);
+  const claim = await getDb(c.env).transaction(async (transaction) => {
+    const accounts = createPostgresCounterpartyProviderAccountsRepository(
+      asTransactionalClient(transaction)
+    );
     const pending = await accounts.getPendingCustomerLink(scope);
-    let claimed = pending;
-    if (claimed !== null) {
-      const contacts = await client.listContactsV3(ctx, { q: input.counterparty.id, pageSize: 5 });
-      const matches = contacts.filter((contact) => contact.description === input.counterparty.id);
-      if (matches.length > 1) {
-        throw providerUnavailable(
-          `BVNK contact lookup for ${input.counterparty.id} is ambiguous (${matches
-            .map((match) => match.id)
-            .join(", ")}); refusing to pick one.`
-        );
-      }
-      if (matches.length === 1) {
-        const completed = await accounts.completeCustomerLink({
-          ...scope,
-          id: claimed.id,
-          providerCustomerReference: matches[0].id,
-        });
-        if (completed === null) {
-          throw internalError("BVNK customer-link reservation was lost underneath the contact adoption.");
-        }
-        return { contactId: matches[0].id };
-      }
-    } else {
-      try {
-        claimed = await accounts.claimPendingCustomerLink(scope);
-      } catch (error) {
-        if (isPostgresUniqueViolation(error)) {
-          throw conflict(
-            "A BVNK contact submission for this counterparty is already in progress."
-          );
-        }
-        throw error;
-      }
+    if (pending !== null) {
+      return { row: pending, preExisted: true };
     }
+    try {
+      const claimed = await accounts.claimPendingCustomerLink(scope);
+      return { row: claimed, preExisted: false };
+    } catch (error) {
+      if (isPostgresUniqueViolation(error)) {
+        throw conflict("A BVNK contact submission for this counterparty is already in progress.");
+      }
+      throw error;
+    }
+  });
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  let contactId: string;
+  let createdThisRequest = false;
+  if (claim.preExisted) {
+    const contacts = await client.listContactsV3(ctx, { q: input.counterparty.id, pageSize: 5 });
+    const matches = contacts.filter((contact) => contact.description === input.counterparty.id);
+    if (matches.length > 1) {
+      throw providerUnavailable(
+        `BVNK contact lookup for ${input.counterparty.id} is ambiguous (${matches
+          .map((match) => match.id)
+          .join(", ")}); refusing to pick one.`
+      );
+    }
+    if (matches.length === 1) {
+      contactId = matches[0].id;
+    } else {
+      const contact = await client.createContactV3(ctx, {
+        description: input.counterparty.id,
+        entity,
+      });
+      contactId = contact.id;
+      createdThisRequest = true;
+    }
+  } else {
     const contact = await client.createContactV3(ctx, {
       description: input.counterparty.id,
       entity,
     });
-    const completed = await accounts.completeCustomerLink({
-      ...scope,
-      id: claimed.id,
-      providerCustomerReference: contact.id,
-    });
-    if (completed === null) {
-      throw internalError("BVNK customer-link reservation was lost underneath the contact assignment.");
-    }
-    return { contactId: contact.id };
+    contactId = contact.id;
+    createdThisRequest = true;
+  }
+  const completed = await accounts.completeCustomerLink({
+    ...scope,
+    id: claim.row.id,
+    providerCustomerReference: contactId,
   });
+  if (completed === null) {
+    if (createdThisRequest) {
+      await client.deleteContactV3(ctx, { contactId });
+      getLogger().warn(
+        {
+          event: "sdp_api_bvnk_contact_orphan_deleted",
+          contactId,
+          rowId: claim.row.id,
+          counterpartyId: input.counterparty.id,
+        },
+        "Deleted a BVNK contact that lost the customer-link completion race"
+      );
+      throw conflict("A BVNK contact for this counterparty was created concurrently.");
+    }
+    return { contactId };
+  }
+  return { contactId };
 }
 
 export interface BvnkProvisioningAudit {

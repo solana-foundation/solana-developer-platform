@@ -4,13 +4,7 @@ import type { Counterparty } from "@sdp/types";
 import { SdpPaymentsError } from "../../../errors";
 import { countryField, parseCollectedFields } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
-import {
-  bvnkOfframpFields,
-  buildBvnkThirdPartyRuleEntity,
-  isBvnkOfframpCurrency,
-  validateBvnkCounterparty,
-} from "./counterparty";
-import type { BvnkContactV3 } from "./schemas";
+import { bvnkOfframpFields, isBvnkOfframpCurrency, validateBvnkCounterparty } from "./counterparty";
 
 function counterparty(): Counterparty {
   return {
@@ -24,46 +18,6 @@ function counterparty(): Counterparty {
     createdBy: null,
     createdAt: "2026-06-11T00:00:00.000Z",
     updatedAt: "2026-06-11T00:00:00.000Z",
-  };
-}
-
-function individualContact(): BvnkContactV3 {
-  return {
-    id: "a3700c37-3f46-4766-b0db-3250b073fd9c",
-    description: "cpty_123e4567-e89b-12d3-a456-426614174000",
-    entity: {
-      type: "INDIVIDUAL",
-      relationshipType: "THIRD_PARTY",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      dateOfBirth: "1815-12-10",
-      address: {
-        addressLine1: "1 Main Street",
-        addressLine2: "Suite 400",
-        city: "Austin",
-        stateCode: "TX",
-        postalCode: "78701",
-        region: "Texas",
-        country: "US",
-      },
-    },
-    createdAt: "2026-06-10T10:30:00Z",
-    updatedAt: "2026-06-10T10:30:00Z",
-  };
-}
-
-function companyContact(): BvnkContactV3 {
-  return {
-    id: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-    description: "cpty_123e4567-e89b-12d3-a456-426614174000",
-    entity: {
-      type: "COMPANY",
-      relationshipType: "THIRD_PARTY",
-      legalName: "Acme Corporation",
-      registrationNumber: "12345678",
-    },
-    createdAt: "2026-06-10T10:30:00Z",
-    updatedAt: "2026-06-10T10:30:00Z",
   };
 }
 
@@ -191,59 +145,5 @@ describe("validateBvnkCounterparty", () => {
         ),
       SdpPaymentsError
     );
-  });
-});
-
-describe("buildBvnkThirdPartyRuleEntity", () => {
-  it("maps an individual contact onto a THIRD_PARTY INDIVIDUAL rule entity", () => {
-    const entity = buildBvnkThirdPartyRuleEntity(individualContact(), counterparty().id);
-
-    assert.deepEqual(entity, {
-      type: "INDIVIDUAL",
-      relationshipType: "THIRD_PARTY",
-      customerIdentifier: counterparty().id,
-      firstName: "Ada",
-      lastName: "Lovelace",
-      dateOfBirth: "1815-12-10",
-      address: {
-        addressLine1: "1 Main Street",
-        addressLine2: "Suite 400",
-        city: "Austin",
-        stateCode: "TX",
-        postalCode: "78701",
-        countryCode: "US",
-        country: "US",
-      },
-    });
-  });
-
-  it("omits optional identity lanes when the contact has no address or birth date", () => {
-    const minimal: BvnkContactV3 = {
-      ...individualContact(),
-      entity: {
-        type: "INDIVIDUAL",
-        relationshipType: "THIRD_PARTY",
-        firstName: "Ada",
-        lastName: "Lovelace",
-      },
-    };
-
-    const entity = buildBvnkThirdPartyRuleEntity(minimal, counterparty().id);
-
-    assert.equal(entity.type, "INDIVIDUAL");
-    assert.equal(entity.address, undefined);
-    assert.equal(entity.dateOfBirth, undefined);
-  });
-
-  it("maps a company contact onto a THIRD_PARTY COMPANY rule entity", () => {
-    const entity = buildBvnkThirdPartyRuleEntity(companyContact(), counterparty().id);
-
-    assert.deepEqual(entity, {
-      type: "COMPANY",
-      relationshipType: "THIRD_PARTY",
-      customerIdentifier: counterparty().id,
-      legalName: "Acme Corporation",
-      registrationNumber: "12345678",
-    });
   });
 });

@@ -721,9 +721,6 @@ export async function advanceCounterpartyRequirements(
           })
         ).contactId;
       } else {
-        if (!link.provider_customer_reference) {
-          throw internalError("BVNK customer-link row is missing its contact id.");
-        }
         contactId = link.provider_customer_reference;
       }
       if (input.direction === "offramp") {

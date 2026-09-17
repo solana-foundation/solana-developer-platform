@@ -214,9 +214,6 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         )
         .first<Record<string, unknown>>();
 
-      if (row === null) {
-        throw internalError("Counterparty customer-link claim escaped its tenant scope.");
-      }
       return pendingCustomerLinkRowSchema.parse(row);
     },
 

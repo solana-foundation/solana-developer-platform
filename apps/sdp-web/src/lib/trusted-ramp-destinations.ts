@@ -1,5 +1,4 @@
 import {
-  BVNK_CUSTOMER_LINK_APPROVED_HOSTS,
   COINBASE_HOSTED_APPROVED_HOSTS,
   isTrustedRampDestination,
   MONEYGRAM_WIDGET_APPROVED_HOSTS,
@@ -7,7 +6,6 @@ import {
 } from "@sdp/types/ramp-destinations";
 
 export {
-  BVNK_CUSTOMER_LINK_APPROVED_HOSTS,
   COINBASE_HOSTED_APPROVED_HOSTS,
   isTrustedRampDestination,
   MONEYGRAM_WIDGET_APPROVED_HOSTS,
