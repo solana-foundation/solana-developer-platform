@@ -62,7 +62,14 @@ import {
 import { executeSeize, extractSeizePolicyCandidate, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
-import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
+import {
+  createToken,
+  extractTokenUpdatePolicyCandidate,
+  getToken,
+  listTokenFacets,
+  listTokens,
+  updateToken,
+} from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
 import type { AppContext } from "./helpers";
 import {
@@ -133,6 +140,7 @@ issuance.patch(
   "/tokens/:tokenId",
   requirePermissions("tokens:write"),
   validateBody(updateTokenSchema),
+  policyGate({ extract: extractTokenUpdatePolicyCandidate }),
   updateToken
 );
 

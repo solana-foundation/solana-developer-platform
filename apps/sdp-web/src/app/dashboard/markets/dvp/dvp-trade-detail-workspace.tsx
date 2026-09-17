@@ -55,6 +55,7 @@ import {
   frozenLegs,
   isDvpPartyView,
   isDvpTradeClosed,
+  isDvpTradeOpen,
   legFundingRatio,
   legTransfers,
   overFundedLegs,
@@ -949,14 +950,9 @@ function TradeWarnings({ trade }: { trade: DvpTrade }) {
  * matters most.
  */
 function canReclaimLeg(leg: DvpTradeLeg, status: DvpTrade["status"]): boolean {
-  const open =
-    status === "created" ||
-    status === "partially_funded" ||
-    status === "funded" ||
-    status === "expired";
   return (
     leg.party.wallet !== null &&
-    open &&
+    isDvpTradeOpen({ status }) &&
     leg.funding !== null &&
     BigInt(leg.funding.observedAmount) > 0n
   );

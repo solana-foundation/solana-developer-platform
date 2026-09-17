@@ -1,5 +1,6 @@
 import type { SponsorshipProviderConfiguration } from "@sdp/payments/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
 import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -8,6 +9,7 @@ import {
   SponsorshipBudgetRepository,
   type SponsorshipNetwork,
   type SponsorshipReconciliationReservation,
+  sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
@@ -66,30 +68,71 @@ export interface SponsorshipReconciliationDependencies {
     signature: Signature
   ) => Promise<Awaited<ReturnType<typeof solanaRpc.getTransaction>>>;
   isBlockhashValid?: (blockhash: Blockhash) => Promise<boolean>;
-  getProviderConfiguration?: () => Promise<SponsorshipProviderConfiguration>;
+  getProviderConfiguration?: (cluster: SolanaCluster) => Promise<SponsorshipProviderConfiguration>;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * Reconcile every network, every tick. One process can sponsor on both
+ * clusters (Earn movements pick the paymaster by cluster), and each network has
+ * its own reservations, policies, breaker and Kora, so each gets its own pass
+ * against its own RPC and its own provider configuration.
+ *
+ * A network is never skipped for lacking a paymaster NOW: reservations outlive
+ * configuration. If a cluster's Kora is unwired after transactions reserved
+ * against it, those reservations still need settling and a recoverable breaker
+ * still needs resetting, so the pass runs, cannot read the provider
+ * configuration, and reports that as a failed pass (tripping the breaker after
+ * the usual consecutive failures) rather than leaving budget locked in
+ * silence. A network with nothing outstanding costs one candidates query.
+ */
 export async function reconcileSponsorshipBudgets(
   env: Env,
   dependencies: SponsorshipReconciliationDependencies = {}
 ): Promise<void> {
+  const failures: unknown[] = [];
+  for (const cluster of SOLANA_CLUSTERS) {
+    try {
+      await reconcileSponsorshipNetwork(env, cluster, dependencies);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    throw new AggregateError(
+      failures,
+      "Sponsorship reconciliation failed on more than one network"
+    );
+  }
+}
+
+async function reconcileSponsorshipNetwork(
+  env: Env,
+  cluster: SolanaCluster,
+  dependencies: SponsorshipReconciliationDependencies
+): Promise<void> {
   const repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
   const budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
-  const rpc =
-    dependencies.getTransaction || dependencies.isBlockhashValid ? null : solanaRpc.createRpc(env);
+  // Built on first use, not up front: a network with nothing outstanding must
+  // finish its pass without needing an RPC endpoint at all.
+  let rpc: solanaRpc.SolanaRpc | null = null;
+  const clusterRpc = () => {
+    rpc ??= solanaRpc.createClusterRpc(env, cluster);
+    return rpc;
+  };
   const getTransaction =
     dependencies.getTransaction ??
-    ((signature: Signature) => solanaRpc.getTransaction(assertRpc(rpc), signature));
+    ((signature: Signature) => solanaRpc.getTransaction(clusterRpc(), signature));
   const isBlockhashValid =
     dependencies.isBlockhashValid ??
-    ((blockhash: Blockhash) => solanaRpc.isBlockhashValid(assertRpc(rpc), blockhash));
+    ((blockhash: Blockhash) => solanaRpc.isBlockhashValid(clusterRpc(), blockhash));
   const now = dependencies.now?.() ?? new Date();
   const sleep =
     dependencies.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const updatedBefore = new Date(now.getTime() - RECONCILIATION_DELAY_MS).toISOString();
-  const network = env.SOLANA_NETWORK === "mainnet-beta" ? "mainnet" : "devnet";
+  const network = sponsorshipNetworkForCluster(cluster);
   const reservations = await repository.listReconciliationCandidates(
     network,
     updatedBefore,
@@ -121,10 +164,13 @@ export async function reconcileSponsorshipBudgets(
 
   const getProviderConfiguration =
     dependencies.getProviderConfiguration ??
-    (() => getManagedSponsorshipProviderConfiguration(env));
+    ((target: SolanaCluster) => getManagedSponsorshipProviderConfiguration(env, target));
   let providerConfiguration: SponsorshipProviderConfiguration;
   try {
-    providerConfiguration = await readProviderConfiguration(getProviderConfiguration, sleep);
+    providerConfiguration = await readProviderConfiguration(
+      () => getProviderConfiguration(cluster),
+      sleep
+    );
   } catch (error) {
     // With no live reservations there is nothing the breaker protects; the
     // already-tripped policy stays down and the next tick probes again.
@@ -435,9 +481,4 @@ async function persistAmbiguousCharge(input: {
   }
   await tripBreaker(repository, budgetRedis, reservation.network, input.breakerReason);
   throw new Error(input.lostTransitionError);
-}
-
-function assertRpc(rpc: solanaRpc.SolanaRpc | null): solanaRpc.SolanaRpc {
-  if (!rpc) throw new Error("A Solana RPC dependency is required for sponsorship reconciliation");
-  return rpc;
 }

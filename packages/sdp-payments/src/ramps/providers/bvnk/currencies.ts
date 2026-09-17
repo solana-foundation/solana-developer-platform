@@ -10,6 +10,9 @@ import {
 import type { ProviderRailSupportDistillation, RampDiscoveryContext } from "../../types";
 import { BVNK_SANDBOX_API_URL } from "./client";
 
+/** Sandbox fiat set; BVNK's sandbox executes only these fiats while the catalogs list the global set. */
+export const BVNK_SANDBOX_FIAT_CURRENCIES = ["EUR", "USD"] as const;
+
 const bvnkCurrencyEntrySchema = z.object({
   code: z.string().optional(),
   fiat: z.boolean().optional(),
@@ -24,6 +27,9 @@ function addBvnkFiatCurrency(
   droppedCodes: Set<string>
 ): void {
   const normalized = code.trim().toUpperCase();
+  if (!BVNK_SANDBOX_FIAT_CURRENCIES.some((currency) => currency === normalized)) {
+    return;
+  }
   if (!isActiveIso4217CurrencyCode(normalized)) {
     droppedCodes.add(normalized);
     return;
@@ -32,11 +38,12 @@ function addBvnkFiatCurrency(
 }
 
 /**
- * Distills the BVNK currency dumps into the rail-support snapshot. Deposit
- * entries with deposit support become on-ramp fiat currencies, fiat entries
- * with withdrawal support become off-ramp fiat currencies, and crypto entries
- * traded on the Solana protocol become the crypto rails. Inactive or
- * non-ISO 4217 codes are dropped and reported.
+ * Distills the BVNK currency dumps into the rail-support snapshot intersected
+ * with the sandbox fiat set. Deposit entries with deposit support become
+ * on-ramp fiat currencies, fiat entries with withdrawal support become off-ramp
+ * fiat currencies, and crypto entries traded on the Solana protocol become the
+ * crypto rails. Codes outside the sandbox fiat set are skipped silently;
+ * inactive or non-ISO 4217 codes inside it are dropped and reported.
  *
  * @param depositRaw - Raw BVNK deposit-currency dump body.
  * @param fiatRaw - Raw BVNK fiat-currency dump body.

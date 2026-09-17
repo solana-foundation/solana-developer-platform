@@ -957,6 +957,149 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("replays an approved metadata-update PATCH through to the token", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_metadata_approved",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_metadata_approved",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        metadataAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [
+              {
+                id: "approve-issuance-metadata",
+                kind: "approval",
+                operationTypes: ["issuance_metadata_update_execute"],
+              },
+            ],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const updateMetadataSpy = vi
+        .spyOn(MosaicService.prototype, "updateMetadata")
+        .mockResolvedValue({ signature: "sig_metadata_approved", slot: 42n });
+
+      try {
+        const pendingResponse = await app.request(
+          `/v1/issuance/tokens/${token.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ name: "Approved metadata rename" }),
+          },
+          env
+        );
+        expect(pendingResponse.status).toBe(202);
+        const pendingBody = (await pendingResponse.json()) as {
+          error: { details: { approvalRequestId: string; walletOperationId: string } };
+        };
+        const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+        const repository = createPostgresPolicyRepository(
+          getDb(env),
+          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+        );
+        await repository.updateApprovalRequestStatus({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId,
+          status: "approved",
+          operationStatus: "executing",
+          resolvedBy: TEST_PROJECT_API_KEY.id,
+        });
+
+        // The stored envelope must replay as a PATCH against the same route —
+        // this is what a POST-only envelope silently broke.
+        expect(await recoverApprovedWalletOperations(env)).toBe(1);
+        expect(await repository.getWalletOperationById(walletOperationId)).toMatchObject({
+          status: "completed",
+        });
+        expect(updateMetadataSpy).toHaveBeenCalledTimes(1);
+        const stored = await getDb(env)
+          .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{ name: string }>();
+        expect(stored).toEqual({ name: "Approved metadata rename" });
+      } finally {
+        updateMetadataSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied metadata update before signer and token mutation", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_metadata_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_metadata_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        metadataAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-metadata", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Denied metadata rename" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(403);
+      expect(signerSpy).not.toHaveBeenCalled();
+      const stored = await getDb(env)
+        .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+        .bind(token.id)
+        .first<{ name: string }>();
+      expect(stored?.name).not.toBe("Denied metadata rename");
+      const operationCount = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_metadata_update_execute'"
+        )
+        .first<{ count: number }>();
+      expect(operationCount).toEqual({ count: 1 });
+    });
+
     it("stops a denied deploy before signer and issuance side effects", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_deploy_denied",
@@ -4282,7 +4425,10 @@ describe("Issuance Routes", () => {
           updateAuthority: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet2 }),
         })
       );
-      expect(mintRead).toHaveBeenCalledTimes(2);
+      // Three mint reads: the policy gate's extractor resolves the live
+      // metadata authority once to judge the signing wallet, and the handler
+      // resolves it again for the GET and the update itself.
+      expect(mintRead).toHaveBeenCalledTimes(3);
     });
 
     it.each(["", "?includeMetadataAuthority=false"])(

@@ -27,9 +27,10 @@ import { toast } from "sonner";
 import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { dvpToastAction } from "./dvp-action-toast";
 import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
+import { dvpErrorEnvelopeSchema } from "./dvp-trade";
 
 export type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
 
@@ -137,14 +138,6 @@ function sameCopy(key: MessageKey): { withSymbol: MessageKey; withoutSymbol: Mes
 const legRefusalReasonSchema = z.enum(DVP_LEG_REFUSAL);
 const closeRefusalReasonSchema = z.enum(DVP_CLOSE_REFUSAL);
 
-/** A failed call's envelope. Only what the toast reads is required. */
-const errorEnvelopeSchema = z.object({
-  error: z.object({
-    message: z.string(),
-    details: z.object({ reason: z.string() }).partial().optional(),
-  }),
-});
-
 /** Fund and reclaim answer with the transaction they broadcast. */
 const broadcastEnvelopeSchema = z.object({ data: z.object({ signature: z.string().min(1) }) });
 
@@ -212,7 +205,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
 
   /** Plain copy for a refusal the dashboard can name, else the API's own message. */
   function refusalMessage(body: unknown, status: number, symbol: string | null): string {
-    const envelope = errorEnvelopeSchema.safeParse(body);
+    const envelope = dvpErrorEnvelopeSchema.safeParse(body);
     if (!envelope.success) {
       return t("DashboardMarkets.dvp.actionFailed", { status: String(status) });
     }
@@ -273,13 +266,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       // out but has not confirmed says sent, not done.
       toast.success(t(success.message), {
         position: "bottom-right",
-        // Whatever SDP just sent can be checked on chain from the toast that
-        // reports it, without hunting for it on the page.
-        action: {
-          label: t("DashboardMarkets.dvp.viewTransaction"),
-          onClick: () =>
-            window.open(explorerTxUrl(success.signature, cluster), "_blank", "noopener,noreferrer"),
-        },
+        action: dvpToastAction(t, success.signature, cluster),
       });
       router.refresh();
     } catch (caught) {

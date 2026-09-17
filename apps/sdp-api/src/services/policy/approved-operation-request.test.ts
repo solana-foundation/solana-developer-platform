@@ -39,7 +39,7 @@ describe("walletOperationExecutionRequest", () => {
   it("refuses methods the replay engine cannot re-issue", () => {
     expect(() =>
       walletOperationExecutionRequest(
-        requestContext("PATCH", "http://api.internal/v1/issuance/tokens/tok_1"),
+        requestContext("PUT", "http://api.internal/v1/issuance/tokens/tok_1"),
         {}
       )
     ).toThrow();

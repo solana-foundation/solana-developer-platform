@@ -24,10 +24,28 @@ import type { Address, Signature } from "@solana/kit";
  */
 export interface FeePaymentEnv extends RpcEnv {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
+  /** The Kora serving the process's default cluster (`SOLANA_NETWORK`). */
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
   KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
+  /**
+   * Per-cluster Kora endpoints, for a process that sponsors on BOTH clusters.
+   * Each trio is self-contained: a cluster with its own URL uses its own key and
+   * audience, never the default trio's. See `resolveKoraEndpoint`.
+   *
+   * The cluster is a SUFFIX on purpose. `KORA_DEVNET_RPC_URL` and
+   * `KORA_MAINNET_RPC_URL` already exist in Doppler and mean something else:
+   * the Solana RPC each deployed Kora service itself talks to, mounted into
+   * sdp-api on every environment. Reusing those names made CI's Kora shim lose
+   * to a Solana RPC URL. Do not rename these back.
+   */
+  KORA_RPC_URL_DEVNET?: string;
+  KORA_API_KEY_DEVNET?: string;
+  KORA_CLOUD_RUN_AUDIENCE_DEVNET?: string;
+  KORA_RPC_URL_MAINNET?: string;
+  KORA_API_KEY_MAINNET?: string;
+  KORA_CLOUD_RUN_AUDIENCE_MAINNET?: string;
   FEE_PAYER_PRIVATE_KEY?: string;
   CUSTODY_PRIVATE_KEY?: string;
 }

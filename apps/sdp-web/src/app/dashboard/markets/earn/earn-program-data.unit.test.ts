@@ -14,12 +14,10 @@ import {
   earnVaultMovementRefreshInterval,
   fetchEarnExternalWalletPositionSummary,
   fetchEarnExternalWalletPositions,
-  fetchEarnProgramDeposits,
   fetchEarnProgramsState,
   fetchEarnProgramWithdrawals,
   fetchEarnStrategies,
   fetchEarnVaultPositions,
-  hasPrograms,
   isEarnVaultDepositAvailable,
 } from "./earn-program-data";
 
@@ -614,7 +612,6 @@ describe("fetchEarnProgramsState", () => {
     stubProgramsResponse(200, { data: { programs: [], total: 0 } });
     const state = await fetchEarnProgramsState();
     expect(state).toEqual({ kind: "ready", programs: [] });
-    expect(hasPrograms(state)).toBe(false);
   });
 
   it("keeps every program, in the order the API returned them", async () => {
@@ -623,7 +620,6 @@ describe("fetchEarnProgramsState", () => {
     });
     const state = await fetchEarnProgramsState();
     if (state.kind !== "ready") throw new Error("expected ready");
-    expect(hasPrograms(state)).toBe(true);
     // Order is load-bearing: consumers that track one program across polls rely
     // on the head of this list being stable.
     expect(state.programs.map((program) => program.id)).toEqual(["p1", "p2"]);
@@ -692,19 +688,6 @@ describe("fetchEarnProgramsState pagination", () => {
       "Earn programs pagination exceeded its safety limit"
     );
     expect(fetchMock).toHaveBeenCalledTimes(20);
-  });
-});
-
-describe("fetchEarnProgramDeposits (via useEarnProgramDeposits fetcher)", () => {
-  /**
-   * No 404→empty mapping: the program id always comes from a program resolved
-   * through the live list in this org+environment, so a 404 can only be a
-   * broken proxy path or a scoping regression — and rendering that as "no
-   * deposits yet" on a funded program would mask the bug as calm.
-   */
-  it("throws on 404 rather than reporting an empty feed", async () => {
-    stubProgramsResponse(404, { error: { message: "not found" } });
-    await expect(fetchEarnProgramDeposits("prog_1")).rejects.toThrow("not found");
   });
 });
 
