@@ -601,14 +601,12 @@ export function useCounterpartyRequirements(
     requirementsData !== undefined && requirementsData.status === "counterparty_collect_agreement"
       ? requirementsData.agreements
       : null;
+  const accepted = new Set(acceptedAgreements);
   const allAgreementsAccepted =
     pendingAgreements !== null &&
     pendingAgreements.every((agreement) => {
       const keys = bvnkAgreementConsentKeys(agreement);
-      return (
-        acceptedAgreements.includes(keys.agreement) &&
-        acceptedAgreements.includes(keys.privacyPolicy)
-      );
+      return accepted.has(keys.agreement) && accepted.has(keys.privacyPolicy);
     });
   const freshTree = payoutTreeOf(data);
   const payout = freshTree !== null ? freshTree : payoutTreeOf(requirementsData);

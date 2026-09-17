@@ -54,15 +54,20 @@ const individual = bvnkIndividualCustomer();
 const session = bvnkAgreementSession();
 
 describe("BvnkRampClient v1 customer surfaces", () => {
-  it("creates an agreement session for the residence country", async () => {
+  it("creates an agreement session for the residence country with the row-uuid idempotency header", async () => {
     const { requests } = queueFetch(respond(session, 201));
 
     const result = await new BvnkRampClient().createAgreementSession(runtimeContext, {
       countryCode: "US",
+      idempotencyKey: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
     });
 
     assert.deepEqual(result, session);
     assert.equal(new URL(requests[0].url).pathname, "/platform/v1/customers/agreement/sessions");
+    assert.equal(
+      new Headers(requests[0].init.headers).get("X-Idempotency-Key"),
+      "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3"
+    );
     assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
       customerType: "INDIVIDUAL",
       countryCode: "US",

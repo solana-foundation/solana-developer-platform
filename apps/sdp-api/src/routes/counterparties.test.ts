@@ -6,10 +6,17 @@ import {
   BVNK_US_MTL_STATES,
   bvnkOnrampFields,
 } from "@sdp/payments/ramps/providers/bvnk/requirements";
-import { bvnkAgreementSession } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
+import {
+  bvnkAgreementSession,
+  bvnkCustomer,
+} from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
+import {
+  createPostgresCounterpartiesRepository,
+  createPostgresCounterpartyProviderAccountsRepository,
+} from "@/db/repositories";
+import { counterpartyProviderAccountUuid } from "@/db/repositories/counterparty-provider-account.repository";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import {
@@ -49,17 +56,12 @@ const BVNK_STORED_AGREEMENT = {
   privacyPolicyUrl: BVNK_SESSION_AGREEMENT.privacyPolicyUrl,
 } as const;
 const BVNK_CUSTOMER_DETAIL = {
-  reference: BVNK_CUSTOMER_REFERENCE,
-  externalReference: "probe_v1_1789564047204",
-  status: "INFO_REQUIRED",
-  type: "INDIVIDUAL",
-  flowType: "API",
+  ...bvnkCustomer({ reference: BVNK_CUSTOMER_REFERENCE }),
   verification: {
     status: "init",
     url: "https://in.sumsub.com/websdk/p/sbx_EDHeJPPmWnBSU2Es",
-    expiresAt: "2026-10-16T13:07:54.354482408Z",
   },
-} as const;
+};
 
 describe("Counterparties Routes", () => {
   let apiKeyHash: string;
@@ -1028,11 +1030,13 @@ describe("Counterparties Routes", () => {
       const counterparty = (await created.json()).data.counterparty;
       const requests: string[] = [];
       const sessionBodies: unknown[] = [];
+      let sessionIdempotencyKey: string | null = null;
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
         const path = new URL(String(input)).pathname;
         requests.push(path);
         if (init !== undefined && init.body !== undefined) {
           sessionBodies.push(JSON.parse(String(init.body)));
+          sessionIdempotencyKey = new Headers(init.headers).get("X-Idempotency-Key");
         }
         if (path === "/platform/v1/customers/agreement/sessions") {
           return new Response(
@@ -1060,11 +1064,16 @@ describe("Counterparties Routes", () => {
             `INSERT INTO counterparty_provider_accounts (
                id, organization_id, project_id, counterparty_id, provider,
                provider_customer_reference, kind, status, metadata
-             ) VALUES (?, ?, ?, ?, 'bvnk', 'stale-working-set', 'customer_link', 'archived', ?)`
+             ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', 'archived', ?)`
           )
-          .bind(`cpa_archived_${counterparty.id}`, TEST_ORG.id, TEST_PROJECT_ID, counterparty.id, {
-            residenceCountryCode: "US",
-          })
+          .bind(
+            `counterparty_provider_account_9f3e2a1c-4d7b-4a8e-9c1f-2b3c4d5e6f70`,
+            TEST_ORG.id,
+            TEST_PROJECT_ID,
+            counterparty.id,
+            buildBvnkCustomerExternalReference(counterparty.id),
+            { residenceCountryCode: "US" }
+          )
           .run();
         const response = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements`,
@@ -1122,6 +1131,7 @@ describe("Counterparties Routes", () => {
             agreements: [BVNK_STORED_AGREEMENT],
           },
         });
+        expect(sessionIdempotencyKey).toBe(counterpartyProviderAccountUuid(row.id));
         const accountsResponse = await app.request(
           `/v1/counterparties/${counterparty.id}/provider-accounts`,
           { headers: { Authorization: authHeader } },
@@ -1160,6 +1170,193 @@ describe("Counterparties Routes", () => {
               },
             },
           ],
+        });
+      } finally {
+        fetchSpy.mockRestore();
+        env.BVNK_SANDBOX_WALLET_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+      }
+    });
+
+    it("mints the session from a claimed row whose crash left it unminted", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_claimed" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await createPostgresCounterpartiesRepository(getDb(env)).upsertBvnkCustomerProviderData({
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        customer: {
+          customerReference: buildBvnkCustomerExternalReference(counterparty.id),
+          residenceCountryCode: "US",
+        },
+      });
+      const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+      const claimed = await repository.getProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      });
+      if (!claimed) throw new Error("Expected claimed BVNK customer-link row");
+      expect(claimed.metadata).toEqual({ residenceCountryCode: "US" });
+
+      const requirements = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_counterparties_test`,
+        {
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+        },
+        env
+      );
+      expect(requirements.status).toBe(200);
+      expect((await requirements.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "collect_counterparty_residence",
+        fields: BVNK_RESIDENCE_FIELDS,
+      });
+
+      let sessionIdempotencyKey: string | null = null;
+      const requests: string[] = [];
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        requests.push(path);
+        sessionIdempotencyKey =
+          init === undefined ? null : new Headers(init.headers).get("X-Idempotency-Key");
+        if (path === "/platform/v1/customers/agreement/sessions") {
+          return new Response(
+            JSON.stringify({
+              reference: BVNK_SESSION_REFERENCE,
+              accountReference: "07f1fe9b-c14e-4a1d-a3fa-0768bac98033",
+              status: "PENDING",
+              customerType: "INDIVIDUAL",
+              useCase: "EMBEDDED_FIAT_ACCOUNTS",
+              countryCode: "US",
+              expiresOn: "2027-09-16T13:07:34.439862563Z",
+              agreements: [BVNK_SESSION_AGREEMENT],
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        throw new Error(`unexpected fetch: ${path}`);
+      });
+      env.BVNK_SANDBOX_WALLET_ID = "wallet";
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      try {
+        const response = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "bvnk",
+              direction: "onramp",
+              assetRail: "usdc.solana",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
+              fiatCurrency: "USD",
+              collectedData: { "taxIdentification.taxResidenceCountryCode": "US" },
+            }),
+          },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect((await response.json()).data).toEqual({
+          provider: "bvnk",
+          direction: "onramp",
+          status: "counterparty_collect_agreement",
+          agreements: [BVNK_STORED_AGREEMENT],
+        });
+        expect(requests).toEqual(["/platform/v1/customers/agreement/sessions"]);
+        expect(sessionIdempotencyKey).toBe(counterpartyProviderAccountUuid(claimed.id));
+        const row = await repository.getProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: counterparty.id,
+          provider: "bvnk",
+        });
+        expect(row?.id).toBe(claimed.id);
+        expect(row?.metadata).toEqual({
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
+          },
+        });
+      } finally {
+        fetchSpy.mockRestore();
+        env.BVNK_SANDBOX_WALLET_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+      }
+    });
+
+    it("re-posting residence on a row that already holds a session makes no BVNK call", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_session_stored" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+      await repository.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        providerCustomerReference: buildBvnkCustomerExternalReference(counterparty.id),
+        metadata: {
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
+          },
+        },
+      });
+      const requests: string[] = [];
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const path = new URL(String(input)).pathname;
+        requests.push(path);
+        throw new Error(`unexpected fetch: ${path}`);
+      });
+      env.BVNK_SANDBOX_WALLET_ID = "wallet";
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      try {
+        const response = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "bvnk",
+              direction: "onramp",
+              assetRail: "usdc.solana",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
+              fiatCurrency: "USD",
+              collectedData: { "taxIdentification.taxResidenceCountryCode": "US" },
+            }),
+          },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect((await response.json()).data).toEqual({
+          provider: "bvnk",
+          direction: "onramp",
+          status: "counterparty_collect_agreement",
+          agreements: [BVNK_STORED_AGREEMENT],
+        });
+        expect(requests).toEqual([]);
+        const row = await repository.getProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: counterparty.id,
+          provider: "bvnk",
+        });
+        expect(row?.metadata).toEqual({
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
+          },
         });
       } finally {
         fetchSpy.mockRestore();

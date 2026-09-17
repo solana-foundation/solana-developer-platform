@@ -18,13 +18,6 @@ const agreements: Extract<
     url: "https://help.bvnk.com/en/articles/platform-agreement",
     privacyPolicyUrl: "https://www.bvnk.com/privacy-policy",
   },
-  {
-    name: "fee_schedule",
-    displayName: "Fee Schedule",
-    description: "Fee Schedule",
-    url: "https://help.bvnk.com/en/articles/fee-schedule",
-    privacyPolicyUrl: "https://www.bvnk.com/privacy-policy",
-  },
 ];
 
 function renderConsent(onToggle: (name: string, accepted: boolean) => void) {
@@ -41,15 +34,36 @@ function renderConsent(onToggle: (name: string, accepted: boolean) => void) {
 }
 
 describe("BvnkAgreementConsent", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("renders an agreement row and a privacy-policy row per agreement", () => {
     renderConsent(() => {});
 
-    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Platform Agreement" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Fee Schedule" })).not.toBeNull();
-    expect(screen.getAllByRole("button", { name: "privacy policy" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "privacy policy" })).not.toBeNull();
+  });
+
+  it("opens the agreement and privacy-policy links in a new tab", () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    renderConsent(() => {});
+
+    fireEvent.click(screen.getByRole("button", { name: "Platform Agreement" }));
+    fireEvent.click(screen.getByRole("button", { name: "privacy policy" }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://help.bvnk.com/en/articles/platform-agreement",
+      "_blank",
+      "noopener"
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://www.bvnk.com/privacy-policy",
+      "_blank",
+      "noopener"
+    );
   });
 
   it("reports each checkbox as its own consent key", () => {

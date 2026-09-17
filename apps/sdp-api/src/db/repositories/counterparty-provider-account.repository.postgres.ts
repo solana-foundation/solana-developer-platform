@@ -16,6 +16,7 @@ import type {
   ListExternalAccountsInput,
   ListProviderAccountsInput,
   PatchAccountMetadataInput,
+  SetCustomerLinkSessionInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
@@ -341,6 +342,34 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND kind = 'payout_account'`
         )
         .bind(input.id, input.organizationId, input.projectId, input.counterpartyId, input.provider)
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async setCustomerLinkSession(input: SetCustomerLinkSessionInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET metadata = metadata || jsonb_build_object('session', ?::jsonb),
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'customer_link'
+             AND NOT (metadata ? 'session')
+           RETURNING *`
+        )
+        .bind(
+          input.session,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
         .first<Record<string, unknown>>();
 
       return row === null ? null : parseProviderAccountRow(row);

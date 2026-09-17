@@ -2,6 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   buildBvnkCustomerRequest,
+  bvnkResidenceRequired,
   parseBvnkResidenceCountry,
 } from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import {
@@ -69,6 +70,7 @@ import type {
 import {
   type BvnkCustomerProviderAccountMetadata,
   bvnkCustomerProviderAccountMetadataSchema,
+  counterpartyProviderAccountUuid,
 } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type {
@@ -451,7 +453,7 @@ function requireBvnkResidenceCountry(metadata: BvnkCustomerProviderAccountMetada
   return residenceCountryCode;
 }
 
-export type BvnkStoredSessionAgreements = NonNullable<
+type BvnkStoredSessionAgreements = NonNullable<
   BvnkCustomerProviderAccountMetadata["session"]
 >["agreements"];
 
@@ -487,6 +489,10 @@ export type BvnkStoredStage =
       kind: "collect_counterparty";
       sessionReference: string;
       residenceCountryCode: CountryCode;
+    }
+  | {
+      kind: "session_pending";
+      residenceCountryCode: CountryCode;
     };
 
 /**
@@ -495,8 +501,8 @@ export type BvnkStoredStage =
  * whether the stage is actually presented to the client.
  *
  * @param metadata - Stored BVNK customer-link metadata.
- * @returns The pending agreements, the collect step, or null once the customer exists.
- * @throws When the link predates the v1 session flow.
+ * @returns The pending agreements, the collect step, the claimed-but-unminted
+ * session step, or null once the customer exists.
  */
 export function bvnkStoredStage(
   metadata: BvnkCustomerProviderAccountMetadata
@@ -506,7 +512,10 @@ export function bvnkStoredStage(
   }
   const session = metadata.session;
   if (session === undefined) {
-    throw internalError("BVNK customer-link metadata is missing session state.");
+    return {
+      kind: "session_pending",
+      residenceCountryCode: requireBvnkResidenceCountry(metadata),
+    };
   }
   if (session.signedAt === undefined) {
     return {
@@ -545,6 +554,8 @@ export function presentBvnkStoredStage(
       };
     case "collect_counterparty":
       return bvnkCollectCounterparty(direction, stage.residenceCountryCode);
+    case "session_pending":
+      return bvnkResidenceRequired(direction);
     default: {
       const exhaustive: never = stage;
       throw internalError(`Unhandled BVNK stored stage: ${String(exhaustive)}`);
@@ -561,34 +572,89 @@ export function bvnkCustomerRequirementsFromMetadata(
 }
 
 /**
- * Persists the BVNK customer link at session mint, before any PII besides
- * the residence country is known. The partner-supplied externalReference is
- * the provider_customer_reference until the v1 customer exists.
+ * Claims, mints, and stores a BVNK agreement session for a residence country.
+ * The row reservation is claimed before the provider call and the minted
+ * session is CAS-written onto it, so a concurrent mint either loses the CAS
+ * and converges on the winner's session, or a crash leaves a claimed row that
+ * the next residence submit mints from.
  *
- * @param c - Request context used for repository access.
- * @param counterparty - Counterparty receiving the BVNK customer link.
- * @param projectId - Project that owns the counterparty.
- * @param session - Session reference and the stored subset of its agreements.
- * @param residenceCountryCode - Residence country the session was minted for.
- * @returns Nothing.
+ * @param c - Request context used for provider and repository access.
+ * @param input - Provider client, runtime context, counterparty, project, ramp
+ * direction, and the residence country the session is minted for.
+ * @returns The client-facing agreement requirement for the stored session.
  */
-async function persistBvnkAgreementSession(
+async function mintBvnkAgreementSession(
   c: AppContext,
-  counterparty: CounterpartyRow,
-  projectId: string,
-  session: { reference: string; agreements: BvnkStoredSessionAgreements },
-  residenceCountryCode: CountryCode
-): Promise<void> {
+  input: {
+    client: typeof RAMP_PROVIDER_CLIENTS.bvnk;
+    ctx: RampRuntimeContext;
+    counterparty: CounterpartyRow;
+    projectId: string;
+    direction: RampDirection;
+    residenceCountry: CountryCode;
+  }
+): Promise<{ requirements: CounterpartyRequirements }> {
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  const scope = {
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "bvnk" as const,
+  };
+  const present = (
+    metadata: BvnkCustomerProviderAccountMetadata,
+    outcome: "assigned" | "converged"
+  ): { requirements: CounterpartyRequirements } => {
+    const stage = bvnkStoredStage(metadata);
+    if (stage === null || stage.kind === "session_pending") {
+      throw internalError("BVNK customer-link row has no minted session to present.");
+    }
+    getLogger().info(
+      {
+        counterparty_id: input.counterparty.id,
+        session_reference: stage.sessionReference,
+        outcome,
+      },
+      "[bvnk consent] agreement session minted"
+    );
+    return { requirements: presentBvnkStoredStage(input.direction, stage) };
+  };
+
   await getCounterpartiesRepository(c).upsertBvnkCustomerProviderData({
-    counterpartyId: counterparty.id,
-    organizationId: counterparty.organization_id,
-    projectId,
+    ...scope,
     customer: {
-      customerReference: buildBvnkCustomerExternalReference(counterparty.id),
-      residenceCountryCode,
-      session,
+      customerReference: buildBvnkCustomerExternalReference(input.counterparty.id),
+      residenceCountryCode: input.residenceCountry,
     },
   });
+  const row = await accounts.getProviderAccount(scope);
+  if (row === null) {
+    throw internalError("BVNK customer-link claim produced no row.");
+  }
+  const claimed = bvnkCustomerProviderAccountMetadataSchema.parse(row.metadata);
+  if (claimed.session !== undefined) {
+    return present(claimed, "converged");
+  }
+  const session = await input.client.createAgreementSession(input.ctx, {
+    countryCode: input.residenceCountry,
+    idempotencyKey: counterpartyProviderAccountUuid(row.id),
+  });
+  const assigned = await accounts.setCustomerLinkSession({
+    ...scope,
+    id: row.id,
+    session: {
+      reference: session.reference,
+      agreements: toStoredSessionAgreements(session.agreements),
+    },
+  });
+  if (assigned !== null) {
+    return present(bvnkCustomerProviderAccountMetadataSchema.parse(assigned.metadata), "assigned");
+  }
+  const current = await accounts.getProviderAccount(scope);
+  if (current === null) {
+    throw internalError("BVNK customer-link row vanished underneath the session write.");
+  }
+  return present(bvnkCustomerProviderAccountMetadataSchema.parse(current.metadata), "converged");
 }
 
 /**
@@ -805,7 +871,8 @@ export async function refreshBvnkCustomerAccount(
  * @param projectId - Project that owns the counterparty.
  * @param direction - Ramp direction used when returning an intermediate requirement.
  * @param collectedData - Residence country on the first step; the full PII pack
- * once the session is signed. Never persisted.
+ *   once the session is signed. Only the residence country is stored (the
+ *   claim); the PII pack is never persisted.
  * @param agreementConsent - Signs the stored agreement session when true.
  * @returns A refreshed customer or the next agreement requirement.
  */
@@ -883,6 +950,16 @@ export async function ensureBvnkCustomer(
           requirements: bvnkCollectCounterparty(direction, requireBvnkResidenceCountry(metadata)),
         };
       }
+      if (stage.kind === "session_pending" && collectedData !== undefined) {
+        return mintBvnkAgreementSession(c, {
+          client,
+          ctx,
+          counterparty,
+          projectId,
+          direction,
+          residenceCountry: parseBvnkResidenceCountry(collectedData),
+        });
+      }
       return { requirements: presentBvnkStoredStage(direction, stage) };
     }
     const refreshed = await refreshBvnkCustomerAccount(c.env, ctx, {
@@ -897,20 +974,14 @@ export async function ensureBvnkCustomer(
   if (collectedData === undefined) {
     throw badRequest("collectedData with the BVNK residence country is required.");
   }
-  const residenceCountry = parseBvnkResidenceCountry(collectedData);
-  const session = await client.createAgreementSession(ctx, { countryCode: residenceCountry });
-  const stored = {
-    reference: session.reference,
-    agreements: toStoredSessionAgreements(session.agreements),
-  };
-  await persistBvnkAgreementSession(c, counterparty, projectId, stored, residenceCountry);
-  return {
-    requirements: presentBvnkStoredStage(direction, {
-      kind: "agreements_pending",
-      sessionReference: stored.reference,
-      agreements: stored.agreements,
-    }),
-  };
+  return mintBvnkAgreementSession(c, {
+    client,
+    ctx,
+    counterparty,
+    projectId,
+    direction,
+    residenceCountry: parseBvnkResidenceCountry(collectedData),
+  });
 }
 
 /**

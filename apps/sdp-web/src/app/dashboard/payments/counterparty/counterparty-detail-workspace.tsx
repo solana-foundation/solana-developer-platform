@@ -261,23 +261,16 @@ function CustomerLinkAgreements({
   );
 }
 
-function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
+/** Provider logo, label, "Customer" tag, status badge, and BVNK residence flag. */
+function ProviderCustomerHeader({
+  provider,
+  customerLink,
+}: {
+  provider: RampProviderId;
+  customerLink: CounterpartyProviderCustomerLink | undefined;
+}) {
   const t = useTranslations();
-  const [open, setOpen] = useState(true);
-  const { copied, copy } = useCopy();
-  const { provider, customerLink, payoutAccounts } = group;
-  const customerReference =
-    customerLink !== undefined ? customerLink.providerCustomerReference : null;
-  const expandable = payoutAccounts.length > 0 || RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
-  const headers = [
-    t("DashboardPayments.counterparty.providerAccountCorridor"),
-    t("DashboardPayments.counterparty.providerAccountRail"),
-    t("DashboardPayments.counterparty.providerAccountBank"),
-    t("DashboardPayments.counterparty.providerAccountNumber"),
-    t("DashboardPayments.counterparty.providerAccountStatus"),
-  ];
-
-  const headerContent = (
+  return (
     <>
       <Image
         src={RAMP_PROVIDER_LOGOS[provider]}
@@ -306,6 +299,57 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
       ) : null}
     </>
   );
+}
+
+/** Provider customer reference with copy button (once the customer exists) and the link's age. */
+function CustomerLinkMeta({ customerLink }: { customerLink: CounterpartyProviderCustomerLink }) {
+  const t = useTranslations();
+  const { copied, copy } = useCopy();
+  const customerReference = customerLink.providerCustomerReference;
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      {customerReference !== null ? (
+        <>
+          <span className="max-w-40 truncate text-xs text-tertiary">{customerReference}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="size-5"
+            aria-label={t("DashboardPayments.counterparty.copyCustomerId")}
+            onClick={() => {
+              void copy(customerReference);
+              toast.success(t("DashboardPayments.counterparty.customerIdCopied"), {
+                position: "bottom-right",
+              });
+            }}
+          >
+            {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
+          </Button>
+        </>
+      ) : null}
+      <span
+        className="whitespace-nowrap text-xs text-tertiary"
+        title={formatTimestamp(customerLink.createdAt, t)}
+      >
+        {formatRelativeTime(customerLink.createdAt)}
+      </span>
+    </div>
+  );
+}
+
+function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(true);
+  const { provider, customerLink, payoutAccounts } = group;
+  const expandable = payoutAccounts.length > 0 || RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
+  const headers = [
+    t("DashboardPayments.counterparty.providerAccountCorridor"),
+    t("DashboardPayments.counterparty.providerAccountRail"),
+    t("DashboardPayments.counterparty.providerAccountBank"),
+    t("DashboardPayments.counterparty.providerAccountNumber"),
+    t("DashboardPayments.counterparty.providerAccountStatus"),
+  ];
 
   return (
     <div className="rounded-lg border border-border-default bg-surface-raised">
@@ -323,46 +367,14 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
                 !open && "-rotate-90"
               )}
             />
-            {headerContent}
+            <ProviderCustomerHeader provider={provider} customerLink={customerLink} />
           </button>
         ) : (
-          <div className="flex min-w-0 flex-1 items-center gap-2">{headerContent}</div>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <ProviderCustomerHeader provider={provider} customerLink={customerLink} />
+          </div>
         )}
-        {customerLink !== undefined ? (
-          customerReference !== null ? (
-            <div className="flex min-w-0 items-center gap-1">
-              <span className="max-w-40 truncate text-xs text-tertiary">{customerReference}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="size-5"
-                aria-label={t("DashboardPayments.counterparty.copyCustomerId")}
-                onClick={() => {
-                  void copy(customerReference);
-                  toast.success(t("DashboardPayments.counterparty.customerIdCopied"), {
-                    position: "bottom-right",
-                  });
-                }}
-              >
-                {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
-              </Button>
-              <span
-                className="whitespace-nowrap text-xs text-tertiary"
-                title={formatTimestamp(customerLink.createdAt, t)}
-              >
-                {formatRelativeTime(customerLink.createdAt)}
-              </span>
-            </div>
-          ) : (
-            <span
-              className="whitespace-nowrap text-xs text-tertiary"
-              title={formatTimestamp(customerLink.createdAt, t)}
-            >
-              {formatRelativeTime(customerLink.createdAt)}
-            </span>
-          )
-        ) : null}
+        {customerLink !== undefined ? <CustomerLinkMeta customerLink={customerLink} /> : null}
       </div>
       {customerLink !== undefined && customerLink.provider === "bvnk" ? (
         <CustomerLinkAgreements agreements={customerLink.agreements} />

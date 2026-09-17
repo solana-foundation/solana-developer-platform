@@ -105,7 +105,7 @@ export function buildBvnkCustomerRequest(
  * @param direction - Ramp direction the residence requirement is answered for.
  * @returns The first-step BVNK residence-collection requirement.
  */
-function bvnkResidenceRequired(direction: RampDirection): CounterpartyRequirements {
+export function bvnkResidenceRequired(direction: RampDirection): CounterpartyRequirements {
   return {
     provider: "bvnk",
     direction,

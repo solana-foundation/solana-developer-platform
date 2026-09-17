@@ -182,6 +182,7 @@ export type BvnkCustomerIndividual = z.infer<typeof bvnkIndividualSchema>;
 
 export interface CreateBvnkAgreementSessionInput {
   countryCode: CountryCode;
+  idempotencyKey: string;
 }
 
 export interface SignBvnkAgreementSessionInput {

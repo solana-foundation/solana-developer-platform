@@ -11,9 +11,19 @@ import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
+import { internalError } from "@/lib/errors";
 
 export function generateCounterpartyProviderAccountId(): string {
   return `counterparty_provider_account_${crypto.randomUUID()}`;
+}
+
+/** Strips the `counterparty_provider_account_` prefix, returning the row's 36-char uuid. */
+export function counterpartyProviderAccountUuid(id: string): string {
+  const match = /^counterparty_provider_account_([0-9a-f-]{36})$/.exec(id);
+  if (match === null) {
+    throw internalError("Counterparty provider-account id is not a prefixed uuid.");
+  }
+  return match[1];
 }
 
 export const counterpartyProviderAccountRowSchema = z.object({
@@ -156,6 +166,12 @@ export interface GetExternalAccountByIdInput extends GetCounterpartyProviderAcco
   id: string;
 }
 
+export interface SetCustomerLinkSessionInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  /** The minted agreement session, CAS-written only while the row carries none yet. */
+  session: NonNullable<BvnkCustomerProviderAccountMetadata["session"]>;
+}
+
 export interface InsertPendingExternalAccountInput extends ListActiveExternalAccountsInput {
   providerCustomerReference: string;
   paymentRail: string;
@@ -276,6 +292,19 @@ export interface CounterpartyProviderAccountsRepository {
    */
   getExternalAccountById(
     input: GetExternalAccountByIdInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * CAS-writes the minted agreement session onto a customer-link row. The
+   * update matches only while the row still carries no session, so a
+   * concurrent mint that stored one first makes this return null instead of
+   * overwriting it — the caller must re-read and present the winner's row.
+   *
+   * @param input - Tenant scope, row id, and the session to store.
+   * @returns The updated row, or null when a concurrent mint already stored a session.
+   */
+  setCustomerLinkSession(
+    input: SetCustomerLinkSessionInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

@@ -98,6 +98,7 @@ export function BvnkAgreementConsent({
   disabled: boolean;
 }) {
   const t = useTranslations();
+  const accepted = new Set(acceptedAgreements);
   return (
     <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
       <ShieldCheckIcon className="size-10 text-primary" />
@@ -113,18 +114,18 @@ export function BvnkAgreementConsent({
           return [
             <ConsentRow
               key={keys.agreement}
-              checked={acceptedAgreements.includes(keys.agreement)}
+              checked={accepted.has(keys.agreement)}
               disabled={disabled}
-              onChange={(accepted) => onToggle(keys.agreement, accepted)}
+              onChange={(checked) => onToggle(keys.agreement, checked)}
             >
               {t("DashboardPayments.bvnk.agreementConsentPrefix")}{" "}
               <AgreementLink url={agreement.url}>{agreement.displayName}</AgreementLink>.
             </ConsentRow>,
             <ConsentRow
               key={keys.privacyPolicy}
-              checked={acceptedAgreements.includes(keys.privacyPolicy)}
+              checked={accepted.has(keys.privacyPolicy)}
               disabled={disabled}
-              onChange={(accepted) => onToggle(keys.privacyPolicy, accepted)}
+              onChange={(checked) => onToggle(keys.privacyPolicy, checked)}
             >
               {t("DashboardPayments.bvnk.agreementConsentPrefix")}{" "}
               <AgreementLink url={agreement.privacyPolicyUrl}>

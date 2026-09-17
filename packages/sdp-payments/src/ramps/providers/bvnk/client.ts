@@ -238,9 +238,12 @@ export class BvnkRampClient implements RampProvider {
   /**
    * Creates a v1 agreement session for a prospective BVNK customer. The
    * customer type and use case are fixed constants of the SDP individual on-ramp.
+   * The idempotency header is sent as best-effort provider-side dedupe — BVNK
+   * does not document it for this endpoint, so the customer-link row
+   * reservation is the authority on duplicate mints.
    *
    * @param ctx - Runtime provider credentials and environment.
-   * @param input - Residence country whose agreement set the session mints.
+   * @param input - Residence country whose agreement set the session mints, and the row-uuid idempotency key.
    * @returns The created agreement session with its static document links.
    */
   async createAgreementSession(
@@ -250,6 +253,7 @@ export class BvnkRampClient implements RampProvider {
     const config = readBvnkConfig(env, mode);
     const response = await this.request(config, "/platform/v1/customers/agreement/sessions", {
       method: "POST",
+      headers: { "X-Idempotency-Key": input.idempotencyKey },
       body: {
         customerType: "INDIVIDUAL",
         countryCode: input.countryCode,

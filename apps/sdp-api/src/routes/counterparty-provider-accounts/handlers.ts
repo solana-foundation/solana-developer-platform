@@ -6,7 +6,10 @@ import {
   type ListCounterpartyProviderAccountsResponse,
 } from "@sdp/types";
 import { z } from "zod";
-import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import type {
+  BvnkCustomerProviderAccountMetadata,
+  CounterpartyProviderAccountRow,
+} from "@/db/repositories/counterparty-provider-account.repository";
 import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, internalError, notFound } from "@/lib/errors";
@@ -200,12 +203,14 @@ function mapCustomerLink(
 }
 
 /**
- * Maps a BVNK customer-link row into its public shape. Before the v1 customer
+ * Maps a BVNK customer-link row to its public shape. Before the v1 customer
  * exists, the reference column carries SDP's outbound externalReference alias,
  * so the stage comes from the stored agreement session (PENDING_AGREEMENT until
  * consent, PENDING_DETAILS once signed) and the reference stays null until the
- * v1 create replaces the alias. The residence country and session are kept on
- * the row through the create, so they stay visible afterwards.
+ * v1 create replaces the alias. A claimed row whose session is not yet minted
+ * (crash or concurrent window) reads as PENDING_AGREEMENT with no agreements.
+ * The residence country and session are kept on the row through the create,
+ * so they stay visible afterwards.
  *
  * @param row - Parent-scoped BVNK customer-link row.
  * @returns Public BVNK customer-link object.
@@ -214,37 +219,49 @@ function mapBvnkCustomerLink(
   row: CounterpartyProviderAccountRow
 ): BvnkCounterpartyProviderCustomerLink {
   const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(row.metadata);
-  const session = metadata.session;
   const residenceCountryCode = metadata.residenceCountryCode;
-  if (session === undefined || residenceCountryCode === undefined) {
-    throw internalError("BVNK customer-link metadata is missing session state.");
+  if (residenceCountryCode === undefined) {
+    throw internalError("BVNK customer-link metadata is missing residence country.");
   }
-  let providerStatus: string;
-  let providerCustomerReference: string | null;
-  if (metadata.status !== undefined) {
-    providerStatus = metadata.status;
-    providerCustomerReference = row.provider_customer_reference;
-  } else if (session.signedAt !== undefined) {
-    providerStatus = BVNK_CUSTOMER_LINK_STAGE.pendingDetails;
-    providerCustomerReference = null;
-  } else {
-    providerStatus = BVNK_CUSTOMER_LINK_STAGE.pendingAgreement;
-    providerCustomerReference = null;
+  const session = metadata.session;
+  if (metadata.status !== undefined && session === undefined) {
+    throw internalError("BVNK customer-link metadata is missing session state.");
   }
   return {
     provider: "bvnk",
     id: row.id,
-    providerCustomerReference,
+    providerCustomerReference:
+      metadata.status === undefined ? null : row.provider_customer_reference,
     status: row.status,
-    providerStatus,
+    providerStatus: bvnkCustomerLinkProviderStatus(metadata),
     createdAt: row.created_at,
     residenceCountryCode,
-    agreements: session.agreements.map((agreement) => ({
-      name: agreement.name,
-      displayName: agreement.displayName,
-      url: agreement.url,
-      privacyPolicyUrl: agreement.privacyPolicyUrl,
-      signedAt: session.signedAt === undefined ? null : session.signedAt,
-    })),
+    agreements:
+      session === undefined
+        ? []
+        : session.agreements.map((agreement) => ({
+            name: agreement.name,
+            displayName: agreement.displayName,
+            url: agreement.url,
+            privacyPolicyUrl: agreement.privacyPolicyUrl,
+            signedAt: session.signedAt === undefined ? null : session.signedAt,
+          })),
   };
+}
+
+/**
+ * Derives the public provider status of a BVNK customer link: the v1 customer
+ * status once the customer exists, otherwise the pre-customer stage.
+ *
+ * @param metadata - Parsed BVNK customer-link metadata.
+ * @returns The BVNK customer status or the pre-customer stage label.
+ */
+function bvnkCustomerLinkProviderStatus(metadata: BvnkCustomerProviderAccountMetadata): string {
+  if (metadata.status !== undefined) {
+    return metadata.status;
+  }
+  if (metadata.session === undefined || metadata.session.signedAt === undefined) {
+    return BVNK_CUSTOMER_LINK_STAGE.pendingAgreement;
+  }
+  return BVNK_CUSTOMER_LINK_STAGE.pendingDetails;
 }
