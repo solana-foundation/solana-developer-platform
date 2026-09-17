@@ -566,7 +566,13 @@
       "statusFundedTooEarly": "Financé",
       "toastReclaimed": "Votre dépôt est en cours de retour.",
       "txFundingSent": "Envoyé depuis votre Wallet",
-      "viewTransaction": "Voir la transaction"
+      "viewTransaction": "Voir la transaction",
+      "legRefusedTradeClosing": "Cette opération est en cours de règlement ou d'annulation. Rien n'a donc été envoyé.",
+      "closeRefusedFailedOnChain": "Le réseau a refusé l'opération, donc rien n'a bougé. Actualisez l'opération pour voir où elle en est.",
+      "closeRefusedInProgress": "Cette opération est déjà en cours de règlement ou d'annulation. Revenez dans un instant.",
+      "closeRefusedLegMoving": "Une jambe est encore en cours de financement ou de retour. Réessayez une fois qu'elle est confirmée.",
+      "toastCancelSent": "Annulation envoyée. L'opération se met à jour une fois la transaction confirmée.",
+      "toastSettleSent": "Règlement envoyé. L'opération se met à jour une fois la transaction confirmée."
     }
   },
   "DashboardEarn": {
