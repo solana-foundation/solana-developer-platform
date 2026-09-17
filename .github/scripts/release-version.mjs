@@ -3,6 +3,14 @@ export const nonBreakingCommitOverrides = new Set([
   // immutable history intact while excluding only that commit from bump selection.
   // biome-ignore lint/security/noSecrets: Public Git commit SHA, not a secret.
   "c3485d8c035d57cbd58c4058e2f4203369441459",
+  // The commit that ADDED breaking-change reporting. Its body explains the
+  // feature in prose ("a breaking commit keeps its entry in its type section
+  // and also surfaces in a BREAKING CHANGES section on top"), and the footer
+  // detector matched that prose, so the first changelog the new renderer
+  // produced announced its own PR as a breaking change. 0.79.0 carries no
+  // breaking commit: the range has no "!" subject marker.
+  // biome-ignore lint/security/noSecrets: Public Git commit SHA, not a secret.
+  "f87bb92d2d7cc5fccabae6ec836cbd0c9b39006c",
 ]);
 
 function parseVersion(version) {
