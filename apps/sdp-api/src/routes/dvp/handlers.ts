@@ -32,6 +32,7 @@ import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbou
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import {
   type DvpLegActionResult,
+  runDvpCloseOnce,
   runDvpLegActionOnce,
 } from "@/services/dvp/leg-action-idempotency";
 import { deriveDvpLegOutcome, observedAfterClose } from "@/services/dvp/leg-outcome";
@@ -522,7 +523,18 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     "payments:write",
   ]);
 
-  const result = await closeDvpTrade(c, trade, action, settlement);
+  const { result, replayed } = await runDvpCloseOnce(
+    c.env,
+    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+    {
+      action,
+      tradeId: trade.id,
+      organizationId: auth.organizationId,
+      projectId,
+      custodyWalletId: settlement.custodyWalletId,
+    },
+    (recordAttempt) => closeDvpTrade(c, trade, action, settlement, recordAttempt)
+  );
 
   // An exit, so the record is written after the effect and cannot refuse it.
   // `confirmed: false` is a broadcast whose outcome the request could not read,
@@ -532,6 +544,7 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     settlementCustodyWalletId: settlement.custodyWalletId,
     signature: result.signature,
     confirmed: result.landed,
+    replayed,
   });
 
   // Recorded only once the close is confirmed: a second close can be accepted by

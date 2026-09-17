@@ -108,7 +108,24 @@ vi.mock("@sdp/rpc/solana", () => ({
   sendTransaction,
 }));
 
-const { closeDvpTrade } = await import("./settle");
+const { closeDvpTrade: closeDvpTradeWithRecorder } = await import("./settle");
+
+type CloseArgs = Parameters<typeof closeDvpTradeWithRecorder>;
+
+/**
+ * The close records its transaction before broadcast (PRO-1993). These suites
+ * are about what the close itself does, so they let the recorder default to a
+ * no-op; the cases that are about the recording pass their own.
+ */
+function closeDvpTrade(
+  c: CloseArgs[0],
+  trade: CloseArgs[1],
+  action: CloseArgs[2],
+  settlement: CloseArgs[3],
+  recordAttempt: CloseArgs[4] = async () => {}
+) {
+  return closeDvpTradeWithRecorder(c, trade, action, settlement, recordAttempt);
+}
 
 let SETTLEMENT_AUTHORITY = DVP_TEST_AUTHORITY;
 

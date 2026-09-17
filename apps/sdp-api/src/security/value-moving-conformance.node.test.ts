@@ -392,7 +392,9 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/dvp/handlers.ts",
       section: "const closeTrade =",
       before: "await assertFreshApiKeyCustodyWalletAccess(",
-      after: "const result = await closeDvpTrade(",
+      // The close is now entered through its Idempotency-Key gate (PRO-1993),
+      // which is what reaches the signing path.
+      after: "const { result, replayed } = await runDvpCloseOnce(",
     },
     replay: [
       {
@@ -404,6 +406,11 @@ const contracts: ValueMovingContract[] = [
         mode: "fresh_blockhash_per_attempt",
         file: "apps/sdp-api/src/services/dvp/settle.test.ts",
         evidence: "fetches a fresh blockhash for every attempt",
+      },
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/dvp/leg-action-idempotency.test.ts",
+        evidence: "answers a retry with the signature the first close sent, without closing again",
       },
     ],
   },
