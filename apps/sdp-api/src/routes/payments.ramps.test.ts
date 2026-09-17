@@ -2038,3 +2038,105 @@ describe("onrampQuoteExecutionRequestBody", () => {
     expect(recorded.domain).toBe("x.example");
   });
 });
+
+describe("Payments routes — Coinbase quotes under an approval policy", () => {
+  installPaymentsRouteTestHooks();
+
+  async function requireApprovalForRamps() {
+    // A provider has to clear the availability check before the request reaches the
+    // gate at all, so both providers under test need credentials. Nothing calls
+    // either provider: the gate resolves before any handler runs.
+    (env as Record<string, unknown>).COINBASE_CDP_API_KEY_ID = "test-key-id";
+    (env as Record<string, unknown>).COINBASE_CDP_API_KEY_SECRET = "test-key-secret";
+    (env as Record<string, unknown>).STRIPE_SECRET_KEY = "test-secret";
+    (env as Record<string, unknown>).STRIPE_PUBLISHABLE_KEY = "test-publishable";
+    (env as Record<string, unknown>).STRIPE_WEBHOOK_SECRET = "test-webhook";
+
+    // The wallet's custody config has to belong to the project before policy
+    // resolution finds the profile, same as the transfers policy suite does.
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
+      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
+      .run();
+
+    const response = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          defaultAction: "allow",
+          rules: [
+            {
+              id: "approve-ramps",
+              kind: "operation_family",
+              families: ["ramp"],
+              action: "approval_required",
+            },
+          ],
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(200);
+  }
+
+  async function quote(provider: string, extra: Record<string, unknown> = {}) {
+    const counterpartyId = await seedCounterparty({
+      externalId: `approval_policy_${provider}`,
+    });
+
+    return app.request(
+      "/v1/payments/ramps/onramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider,
+          counterpartyId,
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
+          fiatCurrency: "USD",
+          fiatAmount: "100.00",
+          ...extra,
+        }),
+      },
+      env
+    );
+  }
+
+  it("refuses a Coinbase quote outright instead of queueing one that can never execute", async () => {
+    // Executing a Coinbase quote needs the buyer's email and phone, and those are
+    // deliberately absent from the execution request a replay rebuilds from. So an
+    // approved replay would reach the provider without them and be refused. Better
+    // to say so now than to park an approval nobody can satisfy.
+    await requireApprovalForRamps();
+
+    const response = await quote("coinbase", {
+      email: "buyer@example.com",
+      phone: "+15551234567",
+    });
+
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.message).toContain("cannot be queued for approval");
+  });
+
+  it("leaves every other provider free to queue for approval", async () => {
+    // The refusal is Coinbase-only. Nothing else about what is gated changes.
+    await requireApprovalForRamps();
+
+    const response = await quote("stripe");
+
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("SIGNING_PENDING");
+  });
+});

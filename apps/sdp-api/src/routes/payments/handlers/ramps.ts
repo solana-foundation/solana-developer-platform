@@ -44,6 +44,7 @@ import {
   type PaymentRampEstimate,
   type PaymentRampInstruction,
   type PaymentRampQuote,
+  type PolicyCandidate,
   type RampProviderEstimateResult,
   type SdpEnvironment,
 } from "@sdp/types";
@@ -85,12 +86,14 @@ import {
   badRequestQuery,
   conflict,
   counterpartyNotProvisioned,
+  forbidden,
   internalError,
   notFound,
   redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -99,6 +102,7 @@ import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
 import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
+import { dryRunPolicyCandidate } from "@/services/policy/candidate-evaluation.service";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import {
   assertProviderAvailable,
@@ -391,23 +395,43 @@ export async function extractOnrampQuotePolicyCandidate(
     input.destinationCustodyWalletId
   );
 
+  const candidate: PolicyCandidate = {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    custodyWalletId: wallet.id,
+    walletId: wallet.walletId,
+    apiKeyId: scope.auth.apiKeyId,
+    actor: walletOperationActorFromAuth(scope.auth),
+    source: "api",
+    operationFamily: "ramp",
+    operationType: "ramp_onramp_quote",
+    asset: rampTransferTokenMint(input.assetRail, c.env),
+    amount: input.fiatAmount,
+    destination: walletAddress,
+    context: {},
+    providerExtensions: { provider: input.provider },
+  };
+
+  // A Coinbase quote cannot survive approval. Its create-order needs the buyer's
+  // email and phone, and those are deliberately absent from the execution
+  // request the replay rebuilds from, because a policy audit row is not a place
+  // to keep a buyer's contact details. Judge the policy here without persisting
+  // anything and refuse outright, rather than parking a pending_approval row
+  // that could only ever replay into a refusal.
+  //
+  // Same shape as the deploy secondary-signer refusal: anything short of a
+  // plain allow refuses, because there is no approval flow this can enter.
+  if (input.provider === "coinbase") {
+    const verdict = await dryRunPolicyCandidate(c.env, getRequestTenantScope(c), candidate, []);
+    if (verdict.decision !== "allow") {
+      throw forbidden(
+        "Wallet policy does not allow this Coinbase quote. Coinbase quotes cannot be queued for approval, because the buyer contact they require to execute is not retained in the approval record."
+      );
+    }
+  }
+
   return {
-    candidate: {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      custodyWalletId: wallet.id,
-      walletId: wallet.walletId,
-      apiKeyId: scope.auth.apiKeyId,
-      actor: walletOperationActorFromAuth(scope.auth),
-      source: "api",
-      operationFamily: "ramp",
-      operationType: "ramp_onramp_quote",
-      asset: rampTransferTokenMint(input.assetRail, c.env),
-      amount: input.fiatAmount,
-      destination: walletAddress,
-      context: {},
-      providerExtensions: { provider: input.provider },
-    },
+    candidate,
     legs: [],
     body: input,
     executionRequestBody: onrampQuoteExecutionRequestBody(input),
