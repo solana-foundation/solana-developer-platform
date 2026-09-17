@@ -154,6 +154,9 @@ describe("BvnkRampClient v3 contact surfaces", () => {
     assert.deepEqual(result.entity.address, {
       addressLine1: "10 Downing Street",
       city: "London",
+      region: undefined,
+      stateCode: undefined,
+      postalCode: undefined,
       country: "GB",
     });
   });
