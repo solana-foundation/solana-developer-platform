@@ -12,3 +12,13 @@ ALTER TABLE ramp_webhook_events
 
 COMMENT ON COLUMN ramp_webhook_events.parked_app_revision IS
   'Image build SHA (SDP_BUILD_SHA) that exhausted this event''s replay attempts. Compared on each replay pass: a mismatch re-arms the row.';
+
+-- A terminal failure (the event can NEVER apply: unknown or inactive
+-- customer/counterparty) is excluded from the re-arm: a new build does not
+-- change what does not exist, and re-arming it would page once per deploy.
+
+ALTER TABLE ramp_webhook_events
+  ADD COLUMN IF NOT EXISTS terminal BOOLEAN NOT NULL DEFAULT FALSE;
+
+COMMENT ON COLUMN ramp_webhook_events.terminal IS
+  'True when the last failure was permanent (TerminalRampWebhookError); such a park is never re-armed by a deploy.';

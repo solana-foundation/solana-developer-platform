@@ -300,6 +300,32 @@ describe("Ramp webhook event inbox", () => {
     expect(byId.get(fromCurrentDeploy.id)).toMatchObject({ status: "failed" });
   });
 
+  it("never re-arms a terminal park, even one from another revision", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const stored = await events.insertEvent({
+      provider: "moonpay",
+      environment: "production",
+      payload: completedPayload,
+    });
+    await getDb(env)
+      .prepare(
+        `UPDATE ramp_webhook_events
+           SET status = 'failed', attempts = 10, terminal = TRUE,
+               parked_app_revision = 'rev-previous'
+         WHERE id = ?`
+      )
+      .bind(stored.id)
+      .run();
+
+    await replayRampWebhookEvents(env);
+
+    const row = await getDb(env)
+      .prepare("SELECT status, attempts FROM ramp_webhook_events WHERE id = ?")
+      .bind(stored.id)
+      .first<{ status: string; attempts: number }>();
+    expect(row).toMatchObject({ status: "failed", attempts: 10 });
+  });
+
   it("keeps a failing event pending with its error, then parks it after the last attempt", async () => {
     // A payload `parse` rejects stands in for any deterministic apply failure.
     const events = createPostgresRampWebhookEventsRepository(getDb(env));

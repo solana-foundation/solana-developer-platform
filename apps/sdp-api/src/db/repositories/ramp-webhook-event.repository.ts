@@ -47,6 +47,8 @@ export interface RecordRampWebhookEventFailureInput {
   /** The application revision doing the parking; stamped only when the row
    * parks, so the replay job can re-arm it after the next deploy. */
   appRevision: string;
+  /** A permanent failure: the row parks as terminal and no deploy re-arms it. */
+  terminal?: boolean;
 }
 
 export interface ParkExhaustedRampWebhookEventsInput {
@@ -144,6 +146,7 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
                  last_error = ?,
                  status = CASE WHEN GREATEST(attempts, ?) >= ? THEN 'failed' ELSE status END,
                  parked_app_revision = CASE WHEN GREATEST(attempts, ?) >= ? THEN ? ELSE parked_app_revision END,
+                 terminal = ?,
                  updated_at = sdp_iso_now()
            WHERE id = ?`
         )
@@ -155,6 +158,7 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
           input.attempts,
           input.maxAttempts,
           input.appRevision,
+          input.terminal === true,
           input.id
         )
         .run();
@@ -204,7 +208,7 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
                  updated_at = sdp_iso_now()
            WHERE id IN (
              SELECT id FROM ramp_webhook_events
-              WHERE status = 'failed' AND parked_app_revision IS DISTINCT FROM ?
+              WHERE status = 'failed' AND NOT terminal AND parked_app_revision IS DISTINCT FROM ?
               ORDER BY created_at ASC
               LIMIT 100
               FOR UPDATE SKIP LOCKED

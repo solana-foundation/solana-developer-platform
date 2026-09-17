@@ -72,6 +72,7 @@ export async function applyStoredRampWebhookEvent(
       attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       appRevision: currentAppRevision(env),
+      terminal: true,
     });
     return false;
   }
@@ -104,6 +105,7 @@ export async function applyStoredRampWebhookEvent(
       attempts: spentAttempts,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       appRevision: currentAppRevision(env),
+      terminal,
     });
     if (spentAttempts >= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS) {
       logEvent("error", {
