@@ -88,6 +88,7 @@ describe("BvnkRampClient v2 customer surfaces", () => {
     });
 
     assert.deepEqual(result, customerSummary);
+    assert.equal(new URL(requests[0].url).origin, "https://api.sandbox.bvnk.com");
     assert.equal(new URL(requests[0].url).pathname, "/platform/v2/customers");
     assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "customer-key");
     assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
@@ -311,5 +312,73 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
     const result = await new BvnkRampClient().listLedgerWalletProfilesV2(runtimeContext);
 
     assert.deepEqual(result, response);
+  });
+});
+
+describe("BvnkRampClient response parsing", () => {
+  it("treats a malformed v2 customer response as provider-unavailable", async () => {
+    queueFetch(respond({ unexpected: "shape" }));
+
+    await assert.rejects(
+      () =>
+        new BvnkRampClient().createCustomerV2(runtimeContext, {
+          idempotencyKey: "customer-key",
+          useCase: "STABLECOIN_PAYOUTS",
+          individual,
+        }),
+      (error: unknown) => {
+        assert.equal(error instanceof SdpPaymentsError, true);
+        if (!(error instanceof SdpPaymentsError)) return false;
+        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(error.message, "BVNK response is malformed.");
+        return true;
+      }
+    );
+  });
+});
+
+describe("BvnkRampClient estimate and simulation surfaces", () => {
+  it("computes off-ramp net fiat and total fees with exact decimal math", async () => {
+    queueFetch(
+      respond({
+        walletCurrency: "USD",
+        walletRequiredAmount: 100.5,
+        paidCurrency: "USDC",
+        paidRequiredAmount: 1,
+        feeCurrency: "USD",
+        feePredictedAmount: 0.25,
+        networkFeeCurrency: "USD",
+        networkFeePredictedAmount: 0.05,
+        totalWalletAmount: 100.8,
+        exchangeRate: 100.8,
+      })
+    );
+
+    const result = await new BvnkRampClient().estimateOfframp(runtimeContext, {
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      cryptoAmount: "1",
+    });
+
+    assert.equal(result.fiatAmount, "100.2");
+    assert.equal(result.fees.total, "0.3");
+    assert.equal(result.fees.provider, "0.25");
+    assert.equal(result.fees.network, "0.05");
+    assert.equal(result.exchangeRate, "100.2");
+  });
+
+  it("forwards the SDP transfer id verbatim as the remittance reference", async () => {
+    const { requests } = queueFetch(respond({ ok: true }));
+
+    await new BvnkRampClient().simulatePayin(runtimeContext, {
+      walletId: "wallet_id",
+      amount: 100,
+      currency: "USD",
+      originatorName: "Jane Doe",
+      remittanceInformation: "xfr_9f3b1c2d4e5f",
+    });
+
+    const body = JSON.parse(String(requests[0].init.body));
+    assert.equal(body.remittanceInformation, "xfr_9f3b1c2d4e5f");
   });
 });

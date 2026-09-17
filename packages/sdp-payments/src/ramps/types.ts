@@ -25,16 +25,16 @@ import type {
   PayoutRequirementAccount,
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
+import type { BvnkComplianceInput } from "./providers/bvnk/schemas";
 import type { LightsparkPurposeOfPayment } from "./providers/lightspark/provider-data";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export type {
-  BvnkComplianceInput,
   BvnkCustomerResolution,
   BvnkPaymentRuleResolution,
   BvnkRuleEntity,
 } from "./providers/bvnk/provider-data";
+export type { BvnkComplianceInput } from "./providers/bvnk/schemas";
 export type { LightsparkCustomerResolution } from "./providers/lightspark/client";
 export type {
   MuralAccountResolution,

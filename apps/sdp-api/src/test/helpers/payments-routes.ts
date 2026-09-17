@@ -165,8 +165,6 @@ const TEST_BVNK_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
 
 const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
 
-export const TEST_BVNK_API_BASE_URL = "https://api.sandbox.bvnk.test";
-
 export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 export const TEST_MONEYGRAM_PUBLIC_KEY = "moneygram_sandbox_public_key";
@@ -204,8 +202,6 @@ let originalBvnkHawkAuthId: string | undefined;
 let originalBvnkHawkSecretKey: string | undefined;
 
 let originalBvnkWalletId: string | undefined;
-
-let originalBvnkApiBaseUrl: string | undefined;
 
 let originalMoneygramSandboxPublicKey: string | undefined;
 
@@ -621,7 +617,6 @@ export function installPaymentsRouteTestHooks(): void {
     originalBvnkHawkAuthId = env.BVNK_HAWK_AUTH_ID;
     originalBvnkHawkSecretKey = env.BVNK_HAWK_SECRET_KEY;
     originalBvnkWalletId = env.BVNK_WALLET_ID;
-    originalBvnkApiBaseUrl = env.BVNK_API_BASE_URL;
     originalMoneygramSandboxPublicKey = env.MONEYGRAM_SANDBOX_PUBLIC_KEY;
     originalMoneygramSandboxSecretKey = env.MONEYGRAM_SANDBOX_SECRET_KEY;
 
@@ -641,7 +636,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.BVNK_HAWK_AUTH_ID = undefined;
     env.BVNK_HAWK_SECRET_KEY = undefined;
     env.BVNK_WALLET_ID = undefined;
-    env.BVNK_API_BASE_URL = TEST_BVNK_API_BASE_URL;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = TEST_MONEYGRAM_PUBLIC_KEY;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = TEST_MONEYGRAM_SECRET_KEY;
 
@@ -666,7 +660,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.BVNK_HAWK_AUTH_ID = originalBvnkHawkAuthId;
     env.BVNK_HAWK_SECRET_KEY = originalBvnkHawkSecretKey;
     env.BVNK_WALLET_ID = originalBvnkWalletId;
-    env.BVNK_API_BASE_URL = originalBvnkApiBaseUrl;
     env.MONEYGRAM_SANDBOX_PUBLIC_KEY = originalMoneygramSandboxPublicKey;
     env.MONEYGRAM_SANDBOX_SECRET_KEY = originalMoneygramSandboxSecretKey;
 
