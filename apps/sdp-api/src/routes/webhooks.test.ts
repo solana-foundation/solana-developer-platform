@@ -1759,8 +1759,9 @@ describe("BVNK ramp webhook", () => {
 
   it("records a SIGNED agreement session and advances its stored requirements", async () => {
     await seedAgreementSession();
+    const event = bvnkAgreementSessionStatusChangeEvent();
 
-    const res = await sendBvnkWebhook(bvnkAgreementSessionStatusChangeEvent());
+    const res = await sendBvnkWebhook(event);
 
     expect(res.status).toBe(200);
     const row = await getDb(env)
@@ -1776,7 +1777,7 @@ describe("BVNK ramp webhook", () => {
     if (row.metadata.session === undefined) {
       throw new Error("Expected BVNK agreement-session metadata");
     }
-    expect(row.metadata.session.signedAt).toBe("2026-09-16T17:19:03.631Z");
+    expect(row.metadata.session.signedAt).toBe(new Date(event.timestamp).toISOString());
     expect(bvnkCustomerLinkProviderStatus(row.metadata)).toBe("AGREEMENT_SIGNED");
     expect(bvnkCustomerRequirementsFromMetadata("onramp", row.metadata)).toMatchObject({
       status: "collect_counterparty",
@@ -1807,14 +1808,27 @@ describe("BVNK ramp webhook", () => {
     expect(after).toEqual(before);
   });
 
-  it("fails a SIGNED agreement session webhook with an unknown reference", async () => {
-    const res = await sendBvnkWebhook(
-      bvnkAgreementSessionStatusChangeEvent({
-        data: { status: "SIGNED", reference: "unknown-agreement-session" },
-      })
-    );
+  it("acks a SIGNED agreement session webhook with an unknown reference and records the failure for replay", async () => {
+    const event = bvnkAgreementSessionStatusChangeEvent({
+      data: { status: "SIGNED", reference: "unknown-agreement-session" },
+    });
+    const res = await sendBvnkWebhook(event);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    const stored = await getDb(env)
+      .prepare(
+        `SELECT status, last_error FROM ramp_webhook_events
+         WHERE provider = 'bvnk'
+           AND environment = 'sandbox'
+           AND payload->>'eventId' = ?`
+      )
+      .bind(event.eventId)
+      .first<{ status: string; last_error: string | null }>();
+    if (stored === null) {
+      throw new Error("Expected stored BVNK webhook failure");
+    }
+    expect(stored.status).toBe("pending");
+    expect(stored.last_error).toContain("unknown-agreement-session");
   });
 
   it("acknowledges a non-SIGNED agreement session without changing the row", async () => {

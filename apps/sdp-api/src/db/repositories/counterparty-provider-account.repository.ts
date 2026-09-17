@@ -196,6 +196,12 @@ export interface MarkCustomerLinkSessionSignedInput extends GetCounterpartyProvi
   signedAt: string;
 }
 
+export interface MarkCustomerLinkConsentSubmittedInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  sessionReference: string;
+  consentSubmittedAt: string;
+}
+
 export interface InsertPendingExternalAccountInput extends ListActiveExternalAccountsInput {
   providerCustomerReference: string;
   paymentRail: string;
@@ -352,6 +358,16 @@ export interface CounterpartyProviderAccountsRepository {
    */
   markCustomerLinkSessionSigned(
     input: MarkCustomerLinkSessionSignedInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * CAS-marks an active customer-link agreement session as consent submitted.
+   *
+   * @param input - Tenant scope, row id, provider, session reference, and consent submission timestamp.
+   * @returns The consent-submitted row, or null when consent was already submitted or the row is outside the scope.
+   */
+  markCustomerLinkConsentSubmitted(
+    input: MarkCustomerLinkConsentSubmittedInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

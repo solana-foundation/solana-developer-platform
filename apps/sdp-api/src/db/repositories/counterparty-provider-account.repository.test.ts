@@ -853,6 +853,74 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     expect(await repository.markCustomerLinkSessionSigned(input)).toBeNull();
   });
 
+  it("CAS-marks agreement consent without replacing a recorded signature", async () => {
+    const counterparty = await seedCounterparty("cpacc_session_consent");
+    const otherCounterparty = await seedCounterparty("cpacc_session_consent_other");
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "cp_cpacc_session_consent",
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_consent",
+          agreements: [],
+          signedAt: "2026-09-16T17:19:03.631Z",
+        },
+      },
+    });
+    const input = {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk" as const,
+      id: seeded.id,
+      sessionReference: "bvnk_session_consent",
+      consentSubmittedAt: "2026-09-16T17:20:03.631Z",
+    };
+
+    expect(
+      await repository.markCustomerLinkConsentSubmitted({
+        ...input,
+        counterpartyId: otherCounterparty.id,
+      })
+    ).toBeNull();
+    const unchanged = await repository.getProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+    });
+    if (unchanged === null) {
+      throw new Error("Expected BVNK customer link");
+    }
+    expect(unchanged.metadata).toEqual({
+      residenceCountryCode: "US",
+      session: {
+        reference: "bvnk_session_consent",
+        agreements: [],
+        signedAt: "2026-09-16T17:19:03.631Z",
+      },
+    });
+
+    const updated = await repository.markCustomerLinkConsentSubmitted(input);
+    if (updated === null) {
+      throw new Error("Expected BVNK customer link consent submission");
+    }
+    expect(updated.metadata).toEqual({
+      residenceCountryCode: "US",
+      session: {
+        reference: "bvnk_session_consent",
+        agreements: [],
+        signedAt: "2026-09-16T17:19:03.631Z",
+        consentSubmittedAt: "2026-09-16T17:20:03.631Z",
+      },
+    });
+    expect(await repository.markCustomerLinkConsentSubmitted(input)).toBeNull();
+  });
+
   it("lists active and archived external rows with parent and tenant filters", async () => {
     const counterparty = await seedCounterparty("cpacc_list_provider_accounts");
     const otherCounterparty = await seedCounterparty("cpacc_list_provider_accounts_other");

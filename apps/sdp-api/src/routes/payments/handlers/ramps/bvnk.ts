@@ -891,6 +891,90 @@ export async function refreshBvnkCustomerAccount(
 }
 
 /**
+ * Presents the stored pre-customer stage of a customer-link row.
+ *
+ * @param direction - Ramp direction used in the requirement response.
+ * @param metadata - Stored customer-link metadata to derive the stage from.
+ * @param context - Message naming the write that expected a pre-customer stage.
+ * @returns The client-facing requirement for the stored stage.
+ */
+function presentBvnkStoredMetadata(
+  direction: RampDirection,
+  metadata: Record<string, unknown>,
+  context: string
+): { requirements: CounterpartyRequirements } {
+  const stage = bvnkStoredStage(bvnkCustomerProviderAccountMetadataSchema.parse(metadata));
+  if (stage === null) {
+    throw internalError(`${context} produced no stored stage.`);
+  }
+  return { requirements: presentBvnkStoredStage(direction, stage) };
+}
+
+/**
+ * Signs the stored agreement session at BVNK with the consenting user's IP and
+ * CAS-records `session.consentSubmittedAt` without touching a `signedAt` the
+ * status webhook may already have written. A lost CAS means a concurrent
+ * consent already recorded it, so the row is re-read and its stage presented.
+ *
+ * @param c - Request context used for the client IP and repository access.
+ * @param input - Provider client, runtime context, counterparty, project, ramp
+ * direction, customer-link row id, and the session being consented to.
+ * @returns The client-facing requirement for the row's stage after consent.
+ */
+async function recordBvnkAgreementConsent(
+  c: AppContext,
+  input: {
+    client: typeof RAMP_PROVIDER_CLIENTS.bvnk;
+    ctx: RampRuntimeContext;
+    counterparty: CounterpartyRow;
+    projectId: string;
+    direction: RampDirection;
+    providerAccountId: string;
+    sessionReference: string;
+  }
+): Promise<{ requirements: CounterpartyRequirements }> {
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  const scope = {
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "bvnk" as const,
+  };
+  const ipAddress = getClientIp(c);
+  await input.client.signAgreementSession(input.ctx, {
+    reference: input.sessionReference,
+    ipAddress: ipAddress === null ? BVNK_UNRESOLVED_CONSENT_IP : ipAddress,
+  });
+  const consentSubmittedAt = new Date().toISOString();
+  const updated = await accounts.markCustomerLinkConsentSubmitted({
+    ...scope,
+    id: input.providerAccountId,
+    sessionReference: input.sessionReference,
+    consentSubmittedAt,
+  });
+  if (updated !== null) {
+    getLogger().info(
+      {
+        counterparty_id: input.counterparty.id,
+        session_reference: input.sessionReference,
+        consent_submitted_at: consentSubmittedAt,
+      },
+      "[bvnk consent] agreement session consent submitted"
+    );
+    return presentBvnkStoredMetadata(
+      input.direction,
+      updated.metadata,
+      "BVNK agreement consent update"
+    );
+  }
+  const current = await accounts.getProviderAccount(scope);
+  if (current === null) {
+    throw internalError("BVNK agreement consent CAS lost its customer-link row.");
+  }
+  return presentBvnkStoredMetadata(input.direction, current.metadata, "BVNK agreement consent CAS");
+}
+
+/**
  * Advances the BVNK customer lifecycle: mints an agreement session on the
  * first residence step, signs it on consent with the consenting user's IP,
  * creates the v1 customer from the collected PII pack, or refreshes the
@@ -945,44 +1029,15 @@ export async function ensureBvnkCustomer(
         });
       }
       if (stage.kind === "agreements_pending" && agreementConsent !== undefined) {
-        const ipAddress = getClientIp(c);
-        await client.signAgreementSession(ctx, {
-          reference: stage.sessionReference,
-          ipAddress: ipAddress === null ? BVNK_UNRESOLVED_CONSENT_IP : ipAddress,
-        });
-        const consentSubmittedAt = new Date().toISOString();
-        const updated = await accounts.patchAccountMetadata({
-          organizationId: counterparty.organization_id,
+        return recordBvnkAgreementConsent(c, {
+          client,
+          ctx,
+          counterparty,
           projectId,
-          counterpartyId: counterparty.id,
-          provider: "bvnk",
-          id: existing.id,
-          set: {
-            session: {
-              reference: stage.sessionReference,
-              agreements: stage.agreements,
-              consentSubmittedAt,
-            },
-          },
-          unset: [],
+          direction,
+          providerAccountId: existing.id,
+          sessionReference: stage.sessionReference,
         });
-        if (!updated) {
-          throw internalError("BVNK agreement consent update escaped its tenant scope.");
-        }
-        getLogger().info(
-          {
-            counterparty_id: counterparty.id,
-            session_reference: stage.sessionReference,
-            consent_submitted_at: consentSubmittedAt,
-          },
-          "[bvnk consent] agreement session consent submitted"
-        );
-        return {
-          requirements: presentBvnkStoredStage(direction, {
-            kind: "agreements_submitted",
-            sessionReference: stage.sessionReference,
-          }),
-        };
       }
       if (stage.kind === "session_pending" && collectedData !== undefined) {
         return mintBvnkAgreementSession(c, {

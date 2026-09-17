@@ -16,6 +16,7 @@ import type {
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
+  MarkCustomerLinkConsentSubmittedInput,
   MarkCustomerLinkSessionSignedInput,
   PatchAccountMetadataInput,
   SetCustomerLinkSessionInput,
@@ -428,6 +429,44 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         )
         .bind(
           input.signedAt,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.sessionReference
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    /**
+     * CAS-records an agreement-session consent submission without replacing
+     * sibling session metadata such as a concurrent provider signature.
+     *
+     * @param input - Tenant scope, customer-link id, session reference, and consent submission timestamp.
+     * @returns The consent-submitted row, or null when the expected unsigned row no longer exists.
+     */
+    async markCustomerLinkConsentSubmitted(input: MarkCustomerLinkConsentSubmittedInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET metadata = jsonb_set(metadata, '{session,consentSubmittedAt}', to_jsonb(?::text)),
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'customer_link'
+             AND status = 'active'
+             AND metadata->'session'->>'reference' = ?
+             AND NOT jsonb_exists(metadata->'session', 'consentSubmittedAt')
+           RETURNING *`
+        )
+        .bind(
+          input.consentSubmittedAt,
           input.id,
           input.organizationId,
           input.projectId,

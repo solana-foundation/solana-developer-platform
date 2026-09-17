@@ -22,9 +22,8 @@ export function getBvnkOnboardingCopy(
       iconClassName: "animate-spin text-secondary",
     },
     counterparty_agreement_signing: {
-      title: "Confirming agreement",
-      description:
-        "Waiting for the provider to confirm the signed agreement. This usually takes a few seconds.",
+      title: t("DashboardPayments.bvnk.agreementSigningTitle"),
+      description: t("DashboardPayments.bvnk.agreementSigningDescription"),
       icon: Loader2Icon,
       iconClassName: "animate-spin text-secondary",
     },

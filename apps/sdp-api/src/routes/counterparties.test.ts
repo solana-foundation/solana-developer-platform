@@ -16,7 +16,10 @@ import {
   createPostgresCounterpartiesRepository,
   createPostgresCounterpartyProviderAccountsRepository,
 } from "@/db/repositories";
-import { counterpartyProviderAccountUuid } from "@/db/repositories/counterparty-provider-account.repository";
+import {
+  bvnkCustomerProviderAccountMetadataSchema,
+  counterpartyProviderAccountUuid,
+} from "@/db/repositories/counterparty-provider-account.repository";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import {
@@ -1565,6 +1568,70 @@ describe("Counterparties Routes", () => {
       }
     });
 
+    it("presents counterparty collection when the agreement signature arrives before consent persistence", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_signed_before_consent",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+      await repository.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        providerCustomerReference: buildBvnkCustomerExternalReference(counterparty.id),
+        metadata: {
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
+            signedAt: "2026-09-16T17:19:03.631Z",
+          },
+        },
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        throw new Error("Unexpected BVNK agreement signing request");
+      });
+      try {
+        const response = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "bvnk",
+              direction: "onramp",
+              assetRail: "usdc.solana",
+              destinationCustodyWalletId: "cwlt_counterparties_test",
+              fiatCurrency: "USD",
+              agreementConsent: true,
+            }),
+          },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect((await response.json()).data.status).toBe("counterparty_collect");
+        expect(fetchSpy).toHaveBeenCalledTimes(0);
+        const row = await repository.getProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: counterparty.id,
+          provider: "bvnk",
+        });
+        if (row === null) {
+          throw new Error("Expected BVNK customer-link row");
+        }
+        const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(row.metadata);
+        if (metadata.session === undefined) {
+          throw new Error("Expected BVNK agreement-session metadata");
+        }
+        expect(metadata.session.signedAt).toBe("2026-09-16T17:19:03.631Z");
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it("does not resubmit agreement consent after it has already been submitted", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_consent_repeat" });
       expect(created.status).toBe(201);
@@ -1596,10 +1663,15 @@ describe("Counterparties Routes", () => {
       env.BVNK_SANDBOX_WALLET_ID = "wallet";
       env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      env.K_SERVICE = "test-service";
       try {
         const request = {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: authHeader,
+            "x-forwarded-for": "203.0.113.9, 10.0.0.1",
+          },
           body: JSON.stringify({
             provider: "bvnk",
             direction: "onramp",
@@ -1630,6 +1702,7 @@ describe("Counterparties Routes", () => {
         env.BVNK_SANDBOX_WALLET_ID = undefined;
         env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
         env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+        env.K_SERVICE = undefined;
       }
     });
 

@@ -219,7 +219,7 @@ export function bvnkAgreementSessionStatusChangeEvent(
   return {
     event: "bvnk:platform:customer:agreement-session-status-change",
     eventId: "01a0ab3a-a9cf-7b71-ab7c-f7903f653099",
-    timestamp: "2026-09-16T17:19:03.631766428Z",
+    timestamp: new Date().toISOString(),
     data: {
       status: "SIGNED",
       reference: "95d360c0-65dd-4598-acc0-89cab6b249da",
