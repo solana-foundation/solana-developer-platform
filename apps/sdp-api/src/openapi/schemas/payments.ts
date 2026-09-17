@@ -1579,13 +1579,31 @@ function documentOnrampQuoteArm<A extends (typeof createOnrampQuoteSchemaBase)["
   });
 }
 
+/**
+ * Coinbase carries two fields the other arms do not, so it is documented on top
+ * of the shared decoration rather than alongside it.
+ */
+const coinbaseOnrampQuoteArm = createOnrampQuoteSchemaBase.options[4];
+const documentedCoinbaseOnrampQuoteArm = documentOnrampQuoteArm(coinbaseOnrampQuoteArm).extend({
+  email: withOpenApi(coinbaseOnrampQuoteArm.shape.email, {
+    description:
+      "Buyer email. Required by Coinbase's headless create-order and rejected on every other provider. Passed to the provider and not persisted.",
+    example: "buyer@example.com",
+  }),
+  phone: withOpenApi(coinbaseOnrampQuoteArm.shape.phone, {
+    description:
+      "Buyer phone number. Required by Coinbase's headless create-order; spaces, parentheses and hyphens are stripped before it is sent. Passed to the provider and not persisted.",
+    example: "+15551234567",
+  }),
+});
+
 export const createOnrampQuoteRequestSchema = withOpenApi(
   z.discriminatedUnion("provider", [
     documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[0]),
     documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[1]),
     documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[2]),
     documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[3]),
-    documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[4]),
+    documentedCoinbaseOnrampQuoteArm,
     documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[5]),
     documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[6]),
   ]),

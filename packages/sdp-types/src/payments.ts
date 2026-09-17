@@ -1293,6 +1293,13 @@ export interface PaymentOnrampQuoteRequest {
   fiatAmount: string;
   domain?: string;
   rampsMemo?: Record<string, string>;
+  /**
+   * Coinbase only. Its headless create-order requires the buyer's contact
+   * details; the API rejects these on any other provider. Passed to the
+   * provider and not persisted.
+   */
+  email?: string;
+  phone?: string;
 }
 
 interface PaymentOfframpQuoteRequestBase {

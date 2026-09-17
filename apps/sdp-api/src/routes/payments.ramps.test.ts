@@ -3,6 +3,7 @@ import { RAMP_PROVIDERS } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { onrampQuoteExecutionRequestBody } from "@/routes/payments/handlers/ramps";
 import { createOnrampQuoteSchema } from "@/routes/payments/schemas";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -1936,5 +1937,104 @@ describe("createOnrampQuoteSchema", () => {
   it("still rejects a body missing a required field", () => {
     const { fiatAmount: _omitted, ...withoutAmount } = validBody("coinbase");
     expect(createOnrampQuoteSchema.safeParse(withoutAmount).success).toBe(false);
+  });
+});
+
+describe("createOnrampQuoteSchema, Coinbase buyer contact", () => {
+  const coinbaseBody = (extra: Record<string, unknown> = {}) => ({
+    provider: "coinbase",
+    counterpartyId: "cpty_x",
+    destinationCustodyWalletId: "cwlt_x",
+    assetRail: "usdc.solana",
+    fiatCurrency: "USD",
+    fiatAmount: "100.00",
+    ...extra,
+  });
+
+  it("accepts email and phone on the Coinbase arm", () => {
+    const parsed = createOnrampQuoteSchema.safeParse(
+      coinbaseBody({ email: "buyer@example.com", phone: "+1 (555) 123-4567" })
+    );
+    expect(parsed.success).toBe(true);
+  });
+
+  it("leaves them optional, so a body without them fails where it did before", () => {
+    // The provider client already refuses a quote with no contact details, so
+    // omitting them has to reach that refusal rather than a new schema error.
+    expect(createOnrampQuoteSchema.safeParse(coinbaseBody()).success).toBe(true);
+  });
+
+  it("rejects an invalid email", () => {
+    expect(createOnrampQuoteSchema.safeParse(coinbaseBody({ email: "not-an-email" })).success).toBe(
+      false
+    );
+  });
+
+  it("rejects the contact fields on every other provider", () => {
+    for (const provider of RAMP_PROVIDERS) {
+      if (provider === "coinbase") {
+        continue;
+      }
+      const body = {
+        ...coinbaseBody({ email: "buyer@example.com", phone: "+15551234567" }),
+        provider,
+      };
+      expect(createOnrampQuoteSchema.safeParse(body).success, provider).toBe(false);
+    }
+  });
+});
+
+describe("onrampQuoteExecutionRequestBody", () => {
+  // The policy gate embeds this into rawPayload.executionRequest, and rawPayload
+  // is persisted on the wallet-operation row. Without the allowlist the gate
+  // falls back to the whole body, which for Coinbase carries buyer contact
+  // details. This is the pin: a policy audit record must not become a PII store.
+  const parsed = createOnrampQuoteSchema.parse({
+    provider: "coinbase",
+    counterpartyId: "cpty_x",
+    destinationCustodyWalletId: "cwlt_x",
+    assetRail: "usdc.solana",
+    fiatCurrency: "USD",
+    fiatAmount: "100.00",
+    email: "buyer@example.com",
+    phone: "+15551234567",
+  });
+
+  it("omits the buyer contact details", () => {
+    const recorded = onrampQuoteExecutionRequestBody(parsed);
+    expect(recorded).not.toHaveProperty("email");
+    expect(recorded).not.toHaveProperty("phone");
+    expect(JSON.stringify(recorded)).not.toContain("buyer@example.com");
+    expect(JSON.stringify(recorded)).not.toContain("15551234567");
+  });
+
+  it("records exactly the fields a policy decision needs", () => {
+    // Serialized, because that is what reaches the row: an absent optional is
+    // dropped rather than stored as null.
+    const recorded = JSON.parse(JSON.stringify(onrampQuoteExecutionRequestBody(parsed)));
+    expect(Object.keys(recorded).sort()).toEqual([
+      "assetRail",
+      "counterpartyId",
+      "destinationCustodyWalletId",
+      "fiatAmount",
+      "fiatCurrency",
+      "provider",
+    ]);
+  });
+
+  it("carries the optional fields when they are present", () => {
+    const withOptional = createOnrampQuoteSchema.parse({
+      provider: "moonpay",
+      counterpartyId: "cpty_x",
+      destinationCustodyWalletId: "cwlt_x",
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      fiatAmount: "100.00",
+      rampsMemo: { invoice: "INV-1" },
+      domain: "x.example",
+    });
+    const recorded = onrampQuoteExecutionRequestBody(withOptional);
+    expect(recorded.rampsMemo).toEqual({ invoice: "INV-1" });
+    expect(recorded.domain).toBe("x.example");
   });
 });

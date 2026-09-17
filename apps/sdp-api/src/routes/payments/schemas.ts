@@ -650,7 +650,21 @@ export const createOnrampQuoteSchema = z.discriminatedUnion("provider", [
   z.strictObject({ provider: z.literal("lightspark"), ...onrampQuoteFields }),
   z.strictObject({ provider: z.literal("bvnk"), ...onrampQuoteFields }),
   z.strictObject({ provider: z.literal("moneygram"), ...onrampQuoteFields }),
-  z.strictObject({ provider: z.literal("coinbase"), ...onrampQuoteFields }),
+  z.strictObject({
+    provider: z.literal("coinbase"),
+    ...onrampQuoteFields,
+    /**
+     * Coinbase's headless create-order requires the buyer's contact details and
+     * attestations that they accepted its user agreement and passed phone
+     * verification. Optional here rather than required: the provider client
+     * already refuses a quote without them, so an omitted pair fails exactly as
+     * it does today rather than changing the error a caller sees.
+     *
+     * Neither value is persisted. They are passed to the provider and dropped.
+     */
+    email: z.string().email().optional(),
+    phone: z.string().min(1).optional(),
+  }),
   z.strictObject({ provider: z.literal("mural"), ...onrampQuoteFields }),
   z.strictObject({ provider: z.literal("stripe"), ...onrampQuoteFields }),
 ]);
