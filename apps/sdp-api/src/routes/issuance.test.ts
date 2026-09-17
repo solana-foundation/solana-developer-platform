@@ -1030,6 +1030,164 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("stops a denied freeze before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_freeze_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_freeze_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        freezeAuthority: policyMintAuthority,
+      });
+      const aclSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: policyMintAuthority },
+      } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      const targetSpy = vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+        tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
+        isInitialized: true,
+        isFrozen: false,
+        balance: 0n,
+        uiBalance: 0,
+      } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-freeze", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/freeze`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_freeze_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        aclSpy.mockRestore();
+        targetSpy.mockRestore();
+      }
+    });
+
+    it("replays an approved metadata-update PATCH through to the token", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_metadata_approved",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_metadata_approved",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        metadataAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [
+              {
+                id: "approve-issuance-metadata",
+                kind: "approval",
+                operationTypes: ["issuance_metadata_update_execute"],
+              },
+            ],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const updateMetadataSpy = vi
+        .spyOn(MosaicService.prototype, "updateMetadata")
+        .mockResolvedValue({ signature: "sig_metadata_approved", slot: 42n });
+
+      try {
+        const pendingResponse = await app.request(
+          `/v1/issuance/tokens/${token.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ name: "Approved metadata rename" }),
+          },
+          env
+        );
+        expect(pendingResponse.status).toBe(202);
+        const pendingBody = (await pendingResponse.json()) as {
+          error: { details: { approvalRequestId: string; walletOperationId: string } };
+        };
+        const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+        const repository = createPostgresPolicyRepository(
+          getDb(env),
+          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+        );
+        await repository.updateApprovalRequestStatus({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId,
+          status: "approved",
+          operationStatus: "executing",
+          resolvedBy: TEST_PROJECT_API_KEY.id,
+        });
+
+        // The stored envelope must replay as a PATCH against the same route —
+        // this is what a POST-only envelope silently broke.
+        expect(await recoverApprovedWalletOperations(env)).toBe(1);
+        expect(await repository.getWalletOperationById(walletOperationId)).toMatchObject({
+          status: "completed",
+        });
+        expect(updateMetadataSpy).toHaveBeenCalledTimes(1);
+        const stored = await getDb(env)
+          .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{ name: string }>();
+        expect(stored).toEqual({ name: "Approved metadata rename" });
+      } finally {
+        updateMetadataSpy.mockRestore();
+      }
+    });
+
     it("stops a denied metadata update before signer and token mutation", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_metadata_denied",
