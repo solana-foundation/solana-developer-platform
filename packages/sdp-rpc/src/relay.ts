@@ -287,7 +287,7 @@ function collectRpcApiKeys(env: RpcEnv): string[] {
  * endpoint carries a secret we cannot know by value — the known-key pass
  * below only covers the platform's own keys.
  */
-function isCredentialPathSegment(segment: string): boolean {
+export function isCredentialPathSegment(segment: string): boolean {
   // Percent-encoded segments decode first, so a Base64-style credential
   // carrying +, / or = (spelled %2B/%2F/%3D in the URL) is classified by its
   // real content instead of slipping past on the % characters.
@@ -318,8 +318,18 @@ export function maskEndpoint(url: string, env: RpcEnv): string {
     }
   }
 
+  return maskCredentialShapes(masked);
+}
+
+/**
+ * The value-blind half of endpoint masking: credential-looking query values
+ * (`key`/`token` names) and credential-shaped path segments. Shared by the
+ * platform masker above and the tenant masker in `byok.ts`, so the two cannot
+ * drift on what counts as a credential shape.
+ */
+export function maskCredentialShapes(url: string): string {
   try {
-    const parsed = new URL(masked);
+    const parsed = new URL(url);
     for (const key of parsed.searchParams.keys()) {
       if (key.toLowerCase().includes("key") || key.toLowerCase().includes("token")) {
         parsed.searchParams.set(key, "***");
@@ -331,7 +341,7 @@ export function maskEndpoint(url: string, env: RpcEnv): string {
       .join("/");
     return parsed.toString();
   } catch {
-    return masked;
+    return url;
   }
 }
 
