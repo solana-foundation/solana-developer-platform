@@ -10,6 +10,7 @@ import {
   type PaymentRecurringPaymentRow,
   type RecoverableCollectionRecurringPaymentRow,
 } from "@/db/repositories";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -22,6 +23,13 @@ import {
 } from "@/services/payments/recurring-payments";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
+
+// Rows are independent: collection, activation, and lifecycle recovery each
+// claim their recurring payment under a row lock before touching the chain,
+// so the fan-out only has to bound paid upstream (RPC) concurrency.
+const COLLECTION_ROW_CONCURRENCY = 8;
+
+type CollectionRowOutcome = "ok" | "failed" | "skipped";
 
 export interface CollectDueRecurringPaymentsResult {
   recovered: number;
@@ -215,6 +223,22 @@ function addOutcome(
   }
 }
 
+async function processRowsConcurrently<T extends PaymentRecurringPaymentRow>(
+  result: CollectDueRecurringPaymentsResult,
+  rows: T[],
+  okKey: "recovered" | "collected",
+  run: (row: T) => Promise<CollectionRowOutcome>
+): Promise<void> {
+  const settled = await mapSettledWithConcurrency(rows, COLLECTION_ROW_CONCURRENCY, run);
+  for (const outcome of settled) {
+    if (outcome.status === "fulfilled") {
+      addOutcome(result, outcome.value, okKey);
+      continue;
+    }
+    throw outcome.reason;
+  }
+}
+
 export async function collectDueRecurringPayments(
   env: Env,
   now: Date
@@ -234,9 +258,9 @@ export async function collectDueRecurringPayments(
     staleBefore,
     limit,
   });
-  for (const row of staleLifecyclePayments) {
-    addOutcome(result, await recoverLifecycleRow(env, row), "recovered");
-  }
+  await processRowsConcurrently(result, staleLifecyclePayments, "recovered", (row) =>
+    recoverLifecycleRow(env, row)
+  );
 
   const staleUpdatePayments = await recurringPaymentsRepo.listStaleUpdatePayments({
     staleBefore,
@@ -265,18 +289,16 @@ export async function collectDueRecurringPayments(
     staleBefore,
     limit,
   });
-  for (const row of staleCollectionPayments) {
-    addOutcome(result, await collectRow(env, row), "recovered");
-  }
+  await processRowsConcurrently(result, staleCollectionPayments, "recovered", (row) =>
+    collectRow(env, row)
+  );
 
   const duePayments = await recurringPaymentsRepo.listDueCollectionPayments({
     dueBefore,
     retryBefore,
     limit,
   });
-  for (const row of duePayments) {
-    addOutcome(result, await collectRow(env, row), "collected");
-  }
+  await processRowsConcurrently(result, duePayments, "collected", (row) => collectRow(env, row));
 
   return result;
 }
