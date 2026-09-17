@@ -17,12 +17,16 @@ import {
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
 } from "@sdp/types";
-import type { PayoutRequirementAccount } from "@sdp/types/ramp-requirements";
+import type {
+  CounterpartyRequirements,
+  PayoutRequirementAccount,
+} from "@sdp/types/ramp-requirements";
 import { isCollectFieldsRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import {
@@ -235,6 +239,73 @@ export const getCounterparty = async (c: AppContext) => {
   return success(c, response);
 };
 
+/**
+ * Resolves the BVNK requirement read model: fiat gate, contact collection,
+ * then wallet readiness for the requested direction. The on-ramp arm asserts
+ * access to the destination custody wallet before reading the funding wallet.
+ *
+ * @param c - Request context.
+ * @param input.organizationId - Tenant organization.
+ * @param input.projectId - Tenant project.
+ * @param input.counterparty - Counterparty row the requirements belong to.
+ * @param input.query - Parsed requirements query.
+ * @param input.providerAccount - The counterparty's BVNK `customer_link` row, or null before identity collection.
+ * @returns The requirement status for the direction.
+ */
+async function readBvnkRequirements(
+  c: AppContext,
+  input: {
+    organizationId: string;
+    projectId: string;
+    counterparty: CounterpartyRow;
+    query: z.infer<typeof counterpartyRequirementsQuerySchema>;
+    providerAccount: CounterpartyProviderAccountRow | null;
+  }
+): Promise<CounterpartyRequirements> {
+  const { counterparty, query } = input;
+  if (!isBvnkFiatCurrency(query.fiatCurrency)) {
+    return {
+      provider: "bvnk",
+      direction: query.direction,
+      status: "unsupported",
+      reason: `BVNK does not support ${query.fiatCurrency} in this environment.`,
+    };
+  }
+  if (input.providerAccount === null) {
+    return bvnkCollectRequirements(query.direction, counterparty.entity_type);
+  }
+  if (query.direction === "offramp") {
+    const wallet = readBvnkOfframpWallet(counterparty.provider_data, query.fiatCurrency);
+    if (wallet !== undefined && isBvnkWalletActive(wallet.status)) {
+      return readyCounterparty("bvnk", query.direction);
+    }
+    return { provider: "bvnk", direction: query.direction, status: "provisioning" };
+  }
+  const scope = await resolveScope(c);
+  const destinationWallet = resolveWalletByCustodyWalletId(
+    scope.wallets,
+    query.destinationCustodyWalletId
+  );
+  assertPaymentWalletExactAccess(c, destinationWallet.id, []);
+  const walletRow = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getVirtualFundingWallet({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    counterpartyId: counterparty.id,
+    provider: "bvnk",
+    fiatCurrency: query.fiatCurrency,
+  });
+  if (
+    walletRow !== null &&
+    walletRow.external_account_reference !== null &&
+    isBvnkWalletActive(walletRow.provider_status)
+  ) {
+    return readyCounterparty("bvnk", query.direction);
+  }
+  return { provider: "bvnk", direction: query.direction, status: "provisioning" };
+}
+
 export const getCounterpartyRequirements = async (c: AppContext) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -282,28 +353,16 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   });
 
   if (query.data.provider === "bvnk") {
-    if (!isBvnkFiatCurrency(query.data.fiatCurrency)) {
-      return success(c, {
-        provider: "bvnk",
-        direction: query.data.direction,
-        status: "unsupported",
-        reason: `BVNK does not support ${query.data.fiatCurrency} in this environment.`,
-      });
-    }
-    if (providerAccount === null) {
-      return success(c, bvnkCollectRequirements(query.data.direction, counterparty.entity_type));
-    }
-    if (query.data.direction === "offramp") {
-      const wallet = readBvnkOfframpWallet(counterparty.provider_data, query.data.fiatCurrency);
-      if (wallet !== undefined && isBvnkWalletActive(wallet.status)) {
-        return success(c, readyCounterparty("bvnk", query.data.direction));
-      }
-      return success(c, {
-        provider: "bvnk",
-        direction: query.data.direction,
-        status: "provisioning",
-      });
-    }
+    return success(
+      c,
+      await readBvnkRequirements(c, {
+        organizationId: auth.organizationId,
+        projectId,
+        counterparty,
+        query: query.data,
+        providerAccount,
+      })
+    );
   }
 
   let payoutAccounts: PayoutRequirementAccount[] | undefined;
@@ -329,29 +388,6 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     );
     assertPaymentWalletExactAccess(c, destinationWallet.id, []);
     const destinationWalletAddress = destinationWallet.publicKey;
-    if (query.data.provider === "bvnk") {
-      const walletRow = await createPostgresCounterpartyProviderAccountsRepository(
-        getDb(c.env)
-      ).getVirtualFundingWallet({
-        organizationId: auth.organizationId,
-        projectId,
-        counterpartyId: counterparty.id,
-        provider: "bvnk",
-        fiatCurrency: query.data.fiatCurrency,
-      });
-      if (
-        walletRow !== null &&
-        walletRow.external_account_reference !== null &&
-        isBvnkWalletActive(walletRow.provider_status)
-      ) {
-        return success(c, readyCounterparty("bvnk", query.data.direction));
-      }
-      return success(c, {
-        provider: "bvnk",
-        direction: query.data.direction,
-        status: "provisioning",
-      });
-    }
     const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
       mapToCounterparty(counterparty),
       {
