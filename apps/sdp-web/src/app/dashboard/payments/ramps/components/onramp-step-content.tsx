@@ -7,6 +7,7 @@ import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
+import { BuyerContactFields } from "./coinbase/buyer-contact-fields";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
@@ -101,6 +102,14 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           onPairChange={handlePairChange}
           onProviderSelect={selectProvider}
         />
+        {fields.provider === "coinbase" ? (
+          <BuyerContactFields
+            email={fields.buyerEmail}
+            phone={fields.buyerPhone}
+            onEmailChange={(value) => setField("buyerEmail", value)}
+            onPhoneChange={(value) => setField("buyerPhone", value)}
+          />
+        ) : null}
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
             {requirementsBlocker}

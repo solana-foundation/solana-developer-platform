@@ -44,21 +44,74 @@ const withdrawAmount = z
   .transform(Number)
   .refine((value) => value > 0, "Enter an amount greater than 0.");
 
-export const depositSelectionSchema = makeRampSelectionSchema(
+/**
+ * Coinbase's headless create-order refuses a quote without buyer contact, so the
+ * deposit step gates on them for that provider alone. Required by provider
+ * rather than outright: making them mandatory for all seven would block six
+ * providers that never send them.
+ */
+const BUYER_PHONE_PATTERN = /^\+?[0-9 ()-]{7,20}$/;
+
+const depositSelectionBase = makeRampSelectionSchema(
   "Select a destination wallet.",
   depositAmount
-);
+).extend({
+  buyerEmail: z.string().trim(),
+  buyerPhone: z.string().trim(),
+});
+
+const buyerEmailSchema = z.string().email();
+
+export const BUYER_EMAIL_MESSAGE = "Enter the buyer's email address.";
+export const BUYER_PHONE_MESSAGE = "Enter the buyer's phone number.";
+
+/** Null when the value would satisfy Coinbase, the message to show otherwise. */
+export function buyerEmailError(value: string): string | null {
+  return buyerEmailSchema.safeParse(value.trim()).success ? null : BUYER_EMAIL_MESSAGE;
+}
+
+export function buyerPhoneError(value: string): string | null {
+  return BUYER_PHONE_PATTERN.test(value.trim()) ? null : BUYER_PHONE_MESSAGE;
+}
+
+/**
+ * Shared by the deposit step gate and the full selection schema, so the Next
+ * button and the quote agree on what a complete Coinbase selection is.
+ */
+function requireCoinbaseBuyerContact(
+  value: { provider: RampProviderId | null; buyerEmail: string; buyerPhone: string },
+  ctx: z.RefinementCtx
+): void {
+  if (value.provider !== "coinbase") {
+    return;
+  }
+  const emailError = buyerEmailError(value.buyerEmail);
+  if (emailError !== null) {
+    ctx.addIssue({ code: "custom", path: ["buyerEmail"], message: emailError });
+  }
+  const phoneError = buyerPhoneError(value.buyerPhone);
+  if (phoneError !== null) {
+    ctx.addIssue({ code: "custom", path: ["buyerPhone"], message: phoneError });
+  }
+}
+
+export const depositSelectionSchema = depositSelectionBase.superRefine(requireCoinbaseBuyerContact);
+
 export const withdrawSelectionSchema = makeRampSelectionSchema(
   "Select a source wallet.",
   withdrawAmount
 );
 
 // Per-step gating schemas.
-export const depositAmountSchema = depositSelectionSchema.pick({
-  walletId: true,
-  amount: true,
-  provider: true,
-});
+export const depositAmountSchema = depositSelectionBase
+  .pick({
+    walletId: true,
+    amount: true,
+    provider: true,
+    buyerEmail: true,
+    buyerPhone: true,
+  })
+  .superRefine(requireCoinbaseBuyerContact);
 export const sourceWalletSchema = withdrawSelectionSchema.pick({ walletId: true });
 export const withdrawAmountSchema = withdrawSelectionSchema.pick({
   amount: true,
@@ -75,6 +128,11 @@ export const rampSelectionSchema = z.object({
   amount: z.string(),
   provider: z.enum(RAMP_PROVIDERS).nullable(),
   counterpartyId: z.string(),
+  // Coinbase only. Collected on the deposit step because its headless
+  // create-order requires them; every other provider leaves them empty and the
+  // API rejects them as unknown keys.
+  buyerEmail: z.string(),
+  buyerPhone: z.string(),
 });
 
 export type RampFields = z.input<typeof rampSelectionSchema>;

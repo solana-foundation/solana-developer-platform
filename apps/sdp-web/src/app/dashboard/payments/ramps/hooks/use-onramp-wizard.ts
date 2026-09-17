@@ -88,9 +88,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       selectedRampPair,
       assetRail,
       rampsMemo,
-    }) =>
-      ({
-        provider,
+    }) => {
+      const common = {
         counterpartyId: fields.counterpartyId,
         destinationCustodyWalletId: selectedWallet.id,
         assetRail,
@@ -99,7 +98,19 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
         domain: window.location.hostname,
         rampsMemo,
-      }) satisfies PaymentOnrampQuoteRequest,
+      };
+      // Buyer contact belongs to the Coinbase arm alone. Every other provider
+      // rejects the keys as unknown, so they are absent rather than empty.
+      if (provider === "coinbase") {
+        return {
+          ...common,
+          provider,
+          email: fields.buyerEmail.trim(),
+          phone: fields.buyerPhone.trim(),
+        } satisfies PaymentOnrampQuoteRequest;
+      }
+      return { ...common, provider } satisfies PaymentOnrampQuoteRequest;
+    },
     onQuoteCreated: () => {
       setQuoteSimulationLoading(false);
       setQuoteSimulationSucceeded(false);
