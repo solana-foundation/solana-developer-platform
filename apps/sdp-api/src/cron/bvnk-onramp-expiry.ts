@@ -85,7 +85,7 @@ export async function reconcileBvnkOnrampExpiry(env: Env): Promise<void> {
       WHERE provider = 'bvnk'
         AND type = 'onramp'
         AND status = 'awaiting_payment'
-        AND created_at < now() - make_interval(hours => ?)`
+        AND created_at::timestamptz < now() - make_interval(hours => ?)`
     )
     .bind(BVNK_ONRAMP_QUOTE_TTL_HOURS)
     .run();
