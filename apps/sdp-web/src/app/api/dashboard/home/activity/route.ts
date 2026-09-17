@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  buildHomeActivityRows,
-  computeTodaysVolume,
-  fetchOrgIssuanceActivity,
-} from "@/app/dashboard/home-page.data";
+import { buildHomeActivityRows, fetchOrgIssuanceActivity } from "@/app/dashboard/home-page.data";
 import {
   fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols,
@@ -65,10 +61,6 @@ export async function GET(request: Request) {
           (transfersPartial ? t("Shared.homeWorkspace.paymentsActivityUnavailable") : null) ??
           issuanceActivityError)
         : null;
-    // Today's volume sums every wallet's transfers. With any wallet missing, the sum is a
-    // lower number, not the volume, so it is reported unavailable rather than understated.
-    const todaysVolumeKnown =
-      transfersResult.ok && transfersResult.walletsNotLoaded === 0 && transfersResult.data;
     const activityNotice = [transfersError, transfersPartial, issuanceActivityError]
       .filter(Boolean)
       .join(" ");
@@ -76,10 +68,6 @@ export async function GET(request: Request) {
     const response = NextResponse.json(
       {
         data: {
-          todaysVolume: todaysVolumeKnown ? computeTodaysVolume(todaysVolumeKnown) : null,
-          todaysVolumeError: todaysVolumeKnown
-            ? null
-            : t("Shared.homeWorkspace.paymentsActivityUnavailable"),
           activityRows,
           activityError,
           activityNotice: activityNotice || null,

@@ -42,7 +42,7 @@ import {
 } from "./home-page.data";
 import { seriesColorForMint } from "./home-series-color";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
-import { fetchHomeActivity } from "./home-workspace.data";
+import { fetchHomeActivity, fetchHomeVolume } from "./home-workspace.data";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -66,6 +66,7 @@ interface HomeWorkspaceProps {
 
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
 const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
+const HOME_VOLUME_KEY = "dashboard-home-volume";
 
 /** Table text that ellipsizes, with a full-value tooltip only while it actually overflows. */
 function TruncatedTableText({ value, className }: { value: string; className?: string }) {
@@ -436,6 +437,7 @@ function BalanceHero({
   hasPricedValue,
   todaysVolume,
   todaysVolumeError,
+  todaysVolumeLoading,
   walletCount,
   heldTokenCount,
   balances,
@@ -450,6 +452,8 @@ function BalanceHero({
   hasPricedValue: boolean;
   todaysVolume: number | null;
   todaysVolumeError: string | null;
+  /** The volume read has not answered yet; shown as a dash, never as $0.00. */
+  todaysVolumeLoading: boolean;
   walletCount: number;
   heldTokenCount: number;
   balances: CustodyWalletTokenBalance[];
@@ -515,7 +519,7 @@ function BalanceHero({
           <HeroStat
             label={t("Shared.homeWorkspace.todaysVolume")}
             value={
-              todaysVolumeError
+              todaysVolumeLoading || todaysVolumeError
                 ? t("Shared.homeWorkspace.holdingsShareUnmeasured")
                 : formatCurrencyAmount(todaysVolume, locale)
             }
@@ -706,6 +710,33 @@ function HomeActivityCard({
   );
 }
 
+/**
+ * Today's volume, read apart from the activity list: it waits on every wallet so
+ * the total is never a sum over some of them, and the list does not wait on it.
+ */
+function useHomeVolume() {
+  const t = useTranslations();
+  const { data: volumeSnapshot, error: volumeRequestError } = usePersistedDashboardSWR(
+    HOME_VOLUME_KEY,
+    () => fetchHomeVolume(),
+    {
+      revalidateOnFocus: true,
+      refreshInterval: 20_000,
+    },
+    {
+      key: "home-volume",
+      ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
+    }
+  );
+  return {
+    todaysVolume: volumeSnapshot?.todaysVolume ?? null,
+    todaysVolumeError: volumeRequestError
+      ? readApiErrorMessage(volumeRequestError) || t("Shared.homeWorkspace.activityUnavailable")
+      : (volumeSnapshot?.todaysVolumeError ?? null),
+    todaysVolumeLoading: volumeSnapshot === undefined && !volumeRequestError,
+  };
+}
+
 function useHomeActivity(
   balances: CustodyWalletTokenBalance[],
   issuanceEnabled: boolean,
@@ -724,7 +755,6 @@ function useHomeActivity(
       ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
     }
   );
-  const todaysVolume = activitySnapshot?.todaysVolume ?? null;
   const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
     issuance: issuanceEnabled,
   });
@@ -740,8 +770,6 @@ function useHomeActivity(
       : t("Shared.homeWorkspace.loadingRecentActivity");
 
   return {
-    todaysVolume,
-    todaysVolumeError: activityError ?? activitySnapshot?.todaysVolumeError ?? null,
     activityRows,
     symbolsByMint,
     activityError,
@@ -784,15 +812,9 @@ export function HomeWorkspace({
   const issuedTokensByMint = Object.fromEntries(
     issuedTokens.map((token) => [token.mintAddress, token])
   );
-  const {
-    todaysVolume,
-    todaysVolumeError,
-    activityRows,
-    symbolsByMint,
-    activityError,
-    activityNotice,
-    emptyActivityMessage,
-  } = useHomeActivity(balances, issuanceEnabled, isWalletEmptyState);
+  const { todaysVolume, todaysVolumeError, todaysVolumeLoading } = useHomeVolume();
+  const { activityRows, symbolsByMint, activityError, activityNotice, emptyActivityMessage } =
+    useHomeActivity(balances, issuanceEnabled, isWalletEmptyState);
 
   return (
     <div className="w-full space-y-8 py-2">
@@ -804,6 +826,7 @@ export function HomeWorkspace({
             totalBalanceHint={totalBalanceHint}
             todaysVolume={todaysVolume}
             todaysVolumeError={todaysVolumeError}
+            todaysVolumeLoading={todaysVolumeLoading}
             walletCount={walletCount}
             heldTokenCount={heldTokenCount}
             balances={balances}
