@@ -18,8 +18,9 @@ import { Toaster } from "@/components/ui/sonner";
 import { createDeposit, createWithdrawal, getDashboard } from "@/lib/api";
 import {
   isPendingMovement,
-  reconcilePendingMovementIds,
-  shouldPollMovements,
+  type MovementPolling,
+  reconcileMovementPolling,
+  startMovementPolling,
 } from "@/lib/movements";
 import type { DashboardData } from "@/types";
 
@@ -28,39 +29,56 @@ export function App() {
   const [error, setError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [pendingMovementIds, setPendingMovementIds] = useState<string[]>([]);
+  const [movementPolling, setMovementPolling] = useState<MovementPolling>();
+  const movementPollingRef = useRef<MovementPolling | undefined>(undefined);
   const requestId = useRef(0);
 
-  const refresh = useCallback(async (background = false) => {
-    const id = ++requestId.current;
-    if (background) setRefreshing(true);
-    try {
-      const next = await getDashboard();
-      if (id !== requestId.current) return;
-      setData(next);
-      setPendingMovementIds((current) =>
-        reconcilePendingMovementIds(current, next.movements)
-      );
-      setError(undefined);
-    } catch (caught) {
-      if (id !== requestId.current) return;
-      setError(
-        caught instanceof Error ? caught.message : "Unable to load the demo"
-      );
-    } finally {
-      if (id === requestId.current) setRefreshing(false);
-    }
+  const updateMovementPolling = useCallback((next?: MovementPolling) => {
+    movementPollingRef.current = next;
+    setMovementPolling(next);
   }, []);
+
+  const refresh = useCallback(
+    async (background = false) => {
+      const id = ++requestId.current;
+      if (background) setRefreshing(true);
+      try {
+        const next = await getDashboard();
+        if (id !== requestId.current) return;
+        setData(next);
+        const reconciliation = reconcileMovementPolling(
+          movementPollingRef.current,
+          next.movements
+        );
+        updateMovementPolling(reconciliation.polling);
+        if (reconciliation.timedOut) {
+          toast.warning("Settlement is taking longer than expected", {
+            id: "settlement-timeout",
+            description: "Automatic refresh paused. Refresh to check again.",
+          });
+        }
+        setError(undefined);
+      } catch (caught) {
+        if (id !== requestId.current) return;
+        setError(
+          caught instanceof Error ? caught.message : "Unable to load the demo"
+        );
+      } finally {
+        if (id === requestId.current) setRefreshing(false);
+      }
+    },
+    [updateMovementPolling]
+  );
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   useEffect(() => {
-    if (!shouldPollMovements(pendingMovementIds, data?.movements ?? [])) return;
+    if (!movementPolling) return;
     const timer = window.setInterval(() => void refresh(true), 4_000);
     return () => window.clearInterval(timer);
-  }, [data?.movements, pendingMovementIds, refresh]);
+  }, [movementPolling, refresh]);
 
   async function runMovement(
     label: "Deposit" | "Withdrawal",
@@ -76,10 +94,11 @@ export function App() {
         );
       }
       if (isPendingMovement(result.movement)) {
-        setPendingMovementIds((current) =>
-          current.includes(result.movement.movementId)
-            ? current
-            : [...current, result.movement.movementId]
+        updateMovementPolling(
+          startMovementPolling(
+            movementPollingRef.current,
+            result.movement.movementId
+          )
         );
       }
       toast.success(

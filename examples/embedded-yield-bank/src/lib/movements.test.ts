@@ -1,22 +1,43 @@
 import { describe, expect, it } from "vitest";
 import type { YieldMovement } from "@/types";
-import { reconcilePendingMovementIds, shouldPollMovements } from "./movements";
+import {
+  reconcileMovementPolling,
+  SETTLEMENT_POLL_TIMEOUT_MS,
+  startMovementPolling,
+} from "./movements";
 
 describe("movement polling", () => {
   it("keeps polling while a submitted movement is absent from a stale read", () => {
-    expect(shouldPollMovements(["movement-1"], [])).toBe(true);
-    expect(reconcilePendingMovementIds(["movement-1"], [])).toEqual([
-      "movement-1",
-    ]);
+    const polling = startMovementPolling(undefined, "movement-1", 0);
+    const result = reconcileMovementPolling(
+      polling,
+      [],
+      SETTLEMENT_POLL_TIMEOUT_MS - 1
+    );
+
+    expect(result.polling?.movementIds).toEqual(["movement-1"]);
+    expect(result.timedOut).toBe(false);
+  });
+
+  it("stops polling and reports a movement after the settlement deadline", () => {
+    const polling = startMovementPolling(undefined, "movement-1", 0);
+    const result = reconcileMovementPolling(
+      polling,
+      [],
+      SETTLEMENT_POLL_TIMEOUT_MS
+    );
+
+    expect(result.polling).toBeUndefined();
+    expect(result.timedOut).toBe(true);
   });
 
   it("stops tracking a submitted movement after it becomes terminal", () => {
     const movement = createMovement("finalized");
+    const polling = startMovementPolling(undefined, movement.movementId, 0);
+    const result = reconcileMovementPolling(polling, [movement], 1);
 
-    expect(
-      reconcilePendingMovementIds([movement.movementId], [movement])
-    ).toEqual([]);
-    expect(shouldPollMovements([], [movement])).toBe(false);
+    expect(result.polling).toBeUndefined();
+    expect(result.timedOut).toBe(false);
   });
 });
 
