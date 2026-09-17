@@ -35,9 +35,16 @@ export function AddConnectionModal({
   const router = useRouter();
   const formId = useId();
   const [submitting, setSubmitting] = useState(false);
+  // Once the form has swapped its fields for a recovery panel there is no
+  // `<form id={formId}>` left for this footer to submit, and the panel carries
+  // the only action that can still converge. Keeping the primary on screen gave
+  // the user a live-looking button that did nothing when Privy stopped
+  // answering — exactly when they most needed the one that works.
+  const [inRecovery, setInRecovery] = useState(false);
 
   const handleSuccess = (connectionId: string) => {
     setSubmitting(false);
+    setInRecovery(false);
     onClose();
     router.push(
       `/dashboard/integrations/${provider}/connections/${encodeURIComponent(connectionId)}`
@@ -64,23 +71,26 @@ export function AddConnectionModal({
           formId={formId}
           onSuccess={handleSuccess}
           onPendingChange={setSubmitting}
+          onRecoveryChange={setInRecovery}
           showSubmitButton={false}
         />
 
         <div className="flex items-center justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
-            {t("DashboardCustody.cancel")}
+            {inRecovery ? t("DashboardCustody.close") : t("DashboardCustody.cancel")}
           </Button>
-          <Button
-            type="submit"
-            form={formId}
-            disabled={submitting}
-            iconLeft={
-              submitting ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
-            }
-          >
-            {submitting ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
-          </Button>
+          {inRecovery ? null : (
+            <Button
+              type="submit"
+              form={formId}
+              disabled={submitting}
+              iconLeft={
+                submitting ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
+              }
+            >
+              {submitting ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
+            </Button>
+          )}
         </div>
       </div>
     </Modal>

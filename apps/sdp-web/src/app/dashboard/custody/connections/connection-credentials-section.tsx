@@ -367,7 +367,9 @@ export function ConnectionCredentialsSection({
   };
 
   return (
-    <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
+    // The named container the two-up credential grid below measures. Undeclared,
+    // its `@3xl` query never matched and the cards stayed stacked at every width.
+    <section className="@container/connection-credentials rounded-2xl border border-border-default bg-surface-raised p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-medium text-primary">
           {t("DashboardCustody.credentialsTitle")}

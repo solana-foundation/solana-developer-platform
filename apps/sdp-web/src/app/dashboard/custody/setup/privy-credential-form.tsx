@@ -174,6 +174,7 @@ function RecoveryPanel({
 export function PrivyCredentialForm({
   formId,
   onRecoveryLockChange,
+  onRecoveryChange,
   onSuccess,
   showSubmitButton = true,
   onPendingChange,
@@ -181,6 +182,15 @@ export function PrivyCredentialForm({
   formId: string;
   /** True while leaving this form would strand a stored credential or key. */
   onRecoveryLockChange?: (locked: boolean) => void;
+  /**
+   * True once a recovery panel has replaced the fields, which also removes the
+   * `<form>` a host's footer submits through.
+   *
+   * A host that renders its own primary has to know: left alone, the modal's
+   * "Connect and verify" stayed enabled next to the panel's own button and did
+   * nothing at all on click, because the form it targeted no longer existed.
+   */
+  onRecoveryChange?: (inRecovery: boolean) => void;
   /**
    * Where a completed install goes. Defaults to the wallets list, which is
    * where the setup wizard belongs afterwards; the provider page's Add
@@ -218,6 +228,16 @@ export function PrivyCredentialForm({
     labelField && "defaultValue" in labelField ? (labelField.defaultValue ?? "") : "";
 
   const applyResult = (result: PrivyByokSubmitResult) => {
+    // Reported once, up front, from the handler that settles the attempt: these
+    // four statuses are exactly the ones whose render replaces the form with a
+    // recovery panel, and a host's own primary has to go with it.
+    onRecoveryChange?.(
+      result.status === "retry_unknown" ||
+        result.status === "refused" ||
+        result.status === "unrecoverable" ||
+        result.status === "error"
+    );
+
     if (result.status === "success") {
       onRecoveryLockChange?.(false);
       refreshWalletInventory();

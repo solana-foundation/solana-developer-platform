@@ -313,7 +313,23 @@ export function ConnectionDetailView({
         <Callout variant="neutral">{t("DashboardCustody.connectionDeactivatedExplainer")}</Callout>
       ) : null}
 
-      {isUnfinished ? (
+      {/* One banner, not two. The outcome names *why* the last check ended the
+          way it did, the unfinished state names *what is left to do*, and they
+          were rendered one under the other — near-identical words, and two
+          buttons that both re-ran the same check. The outcome is the more
+          specific of the two, so when there is one it carries the actions; the
+          generic banner is what a connection with no recorded attempt gets. */}
+      {outcome ? (
+        <VerificationOutcomeCallout
+          outcome={outcome}
+          connectionId={connection.id}
+          onRecheck={canManageCustody && connection.canComplete ? handleRecheck : undefined}
+          rechecking={rechecking}
+          onCancelSetup={
+            canManageCustody && connection.canCancel ? () => setCancelSetupOpen(true) : undefined
+          }
+        />
+      ) : isUnfinished ? (
         <UnfinishedSetupCallout
           canCancel={connection.canCancel}
           canComplete={connection.canComplete}
@@ -323,10 +339,6 @@ export function ConnectionDetailView({
           rechecking={rechecking}
           t={t}
         />
-      ) : null}
-
-      {outcome ? (
-        <VerificationOutcomeCallout outcome={outcome} connectionId={connection.id} />
       ) : null}
 
       <ConnectionWalletsCard
@@ -369,7 +381,11 @@ export function ConnectionDetailView({
         label={connection.label}
         provider={provider}
         projectName={projectName}
+        // This page reads one connection, so it cannot see which of the others
+        // is the project default. Saying "the project has no default today"
+        // from here would be a guess; the dialog has copy for not knowing.
         currentDefaultLabel={null}
+        currentDefaultKnown={false}
       />
       <DeactivateConnectionDialog
         isOpen={deactivateOpen}

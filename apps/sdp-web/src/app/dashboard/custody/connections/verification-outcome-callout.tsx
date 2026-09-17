@@ -1,9 +1,6 @@
 "use client";
 
 import { RefreshCwIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTransition } from "react";
-import { recheckPrivyCredentialAction } from "@/app/dashboard/custody/byok-actions";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { docsHref } from "@/components/dashboard-nav";
 import { Button } from "@/components/ui/button";
@@ -52,8 +49,25 @@ function outcomeBody(kind: CustodyOutcomeKind, t: Translate): string {
   }
 }
 
+function recheckLabel(kind: CustodyOutcomeKind, t: Translate): string {
+  switch (kind) {
+    case "conflict":
+      return t("DashboardCustody.outcomeReload");
+    case "unknown":
+      return t("DashboardCustody.outcomeCheckCurrentState");
+    default:
+      return t("DashboardCustody.byokCheckAgain");
+  }
+}
+
 /**
  * Why the last credential check ended the way it did, and what to do next.
+ *
+ * This is the *only* callout an unfinished connection gets. It used to sit
+ * under a second one that announced the setup was unfinished and offered its
+ * own re-check: two banners, overlapping words, and two buttons doing one
+ * thing. The diagnosis here is the more specific of the two, so it absorbed the
+ * other one's actions instead of being stacked under it.
  *
  * The tone carries as much meaning as the text. A temporary transport problem
  * is blue, a concurrent change amber, and an outcome nobody could confirm is
@@ -67,28 +81,23 @@ function outcomeBody(kind: CustodyOutcomeKind, t: Translate): string {
 export function VerificationOutcomeCallout({
   outcome,
   connectionId,
+  onRecheck,
+  rechecking = false,
+  onCancelSetup,
 }: {
   outcome: CustodyOutcome;
   connectionId: string;
+  /**
+   * Continue this same setup. Withheld when the API says the connection cannot
+   * be continued, or the viewer may not act — the caller owns both answers, so
+   * the presence of the handler is what decides whether the control appears.
+   */
+  onRecheck?: () => void;
+  rechecking?: boolean;
+  /** Abandon the setup instead, withheld on the same terms. */
+  onCancelSetup?: () => void;
 }) {
   const t = useTranslations();
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-
-  const recheck = () => {
-    startTransition(async () => {
-      try {
-        await recheckPrivyCredentialAction(connectionId);
-      } catch {
-        // The completion is replay-safe: the connection survives server-side,
-        // so a lost response leaves this same step valid.
-      }
-      router.refresh();
-    });
-  };
-
-  const showRecheck =
-    outcome.kind === "temporary" || outcome.kind === "unknown" || outcome.kind === "conflict";
 
   return (
     <Callout
@@ -100,18 +109,21 @@ export function VerificationOutcomeCallout({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p>{outcomeBody(outcome.kind, t)}</p>
         <span className="flex shrink-0 items-center gap-2">
-          {showRecheck ? (
+          {/* `retryable` excludes the one outcome no amount of re-checking can
+              settle; everything else is the caller's call. */}
+          {onRecheck && outcome.retryable ? (
             <Button
               size="sm"
-              onClick={recheck}
-              disabled={pending}
+              onClick={onRecheck}
+              disabled={rechecking}
               iconLeft={<RefreshCwIcon className="size-4" />}
             >
-              {outcome.kind === "conflict"
-                ? t("DashboardCustody.outcomeReload")
-                : outcome.kind === "unknown"
-                  ? t("DashboardCustody.outcomeCheckCurrentState")
-                  : t("DashboardCustody.byokCheckAgain")}
+              {recheckLabel(outcome.kind, t)}
+            </Button>
+          ) : null}
+          {onCancelSetup ? (
+            <Button size="sm" variant="secondary" onClick={onCancelSetup} disabled={rechecking}>
+              {t("DashboardCustody.cancelSetupAction")}
             </Button>
           ) : null}
           {outcome.kind === "wallet_conflict" ? (

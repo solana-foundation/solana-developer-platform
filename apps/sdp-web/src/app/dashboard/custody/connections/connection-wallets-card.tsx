@@ -58,7 +58,10 @@ export function ConnectionWalletsCard({
   return (
     <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
       <h2 className="text-base font-medium text-primary">{t("DashboardCustody.wallets")}</h2>
-      <div className="mt-3 overflow-hidden rounded-xl border border-border-default">
+      {/* The named container the Created column's `@2xl` query measures. Without
+          it the query has nothing to resolve against, so that column stayed
+          hidden at every width and the table rendered a column short. */}
+      <div className="@container/connection-wallets mt-3 overflow-hidden rounded-xl border border-border-default">
         <Table className="[&_table]:w-full [&_table]:min-w-0 [&_table]:table-fixed">
           <TableHeader>
             <TableRow>
@@ -118,13 +121,18 @@ export function ConnectionWalletsCard({
             ))}
             {wallets.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="py-8 text-center text-sm text-tertiary">
+                <TableCell colSpan={3} className="py-8 text-center text-sm text-tertiary">
                   {walletsUnavailable
                     ? t("DashboardCustody.connectionWalletsUnavailable")
                     : pendingWalletLabel
                       ? t("DashboardCustody.walletsPendingSetup")
                       : t("DashboardCustody.connectionNoWallets")}
                 </TableCell>
+                {/* Hides with the column it belongs to. A `colSpan` is a fixed
+                    number and cannot follow a container query, so spanning all
+                    four while Created was hidden gave the table a phantom
+                    fourth column: the header tint stopped short of this row. */}
+                <TableCell className="hidden @2xl/connection-wallets:table-cell" />
               </TableRow>
             ) : null}
           </TableBody>
