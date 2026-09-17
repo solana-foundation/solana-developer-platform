@@ -1,17 +1,17 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  BVNK_ONRAMP_EXPIRY_CRON,
+  BVNK_ONRAMP_EXPIRY_MONITOR,
+  runBvnkOnrampExpiryReconciliation,
+} from "@/cron/bvnk-onramp-expiry";
 import { getDb } from "@/db";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
-import {
-  BVNK_ONRAMP_EXPIRY_CRON,
-  BVNK_ONRAMP_EXPIRY_MONITOR,
-  reconcileBvnkOnrampExpiry,
-  runBvnkOnrampExpiryReconciliation,
-} from "./bvnk-onramp-expiry";
+import { reconcileBvnkOnrampExpiry } from "./bvnk-onramp-expiry";
 
 const loggerMocks = vi.hoisted(() => ({
   trace: vi.fn(),
@@ -76,9 +76,13 @@ async function insertTransfer(input: {
     .run();
 }
 
-function bvnkOnrampProviderData(ruleId: string, ruleStatus: string): Record<string, unknown> {
+function bvnkOnrampProviderData(
+  ruleId: string,
+  ruleStatus: string,
+  fundingWalletAccountId: string = "counterparty_provider_account_funding"
+): Record<string, unknown> {
   return {
-    bvnk: { fundingWalletAccountId: "counterparty_provider_account_funding", ruleId, ruleStatus },
+    bvnk: { fundingWalletAccountId, ruleId, ruleStatus },
   };
 }
 
@@ -116,7 +120,11 @@ describe("reconcileBvnkOnrampExpiry", () => {
       type: "onramp",
       direction: "inbound",
       status: "awaiting_payment",
-      providerData: bvnkOnrampProviderData("rule_expire_1", "ACTIVE"),
+      providerData: bvnkOnrampProviderData(
+        "rule_expire_1",
+        "ACTIVE",
+        "counterparty_provider_account_expire_1"
+      ),
       createdAt: OLD,
     });
     await insertTransfer({
@@ -125,7 +133,11 @@ describe("reconcileBvnkOnrampExpiry", () => {
       type: "onramp",
       direction: "inbound",
       status: "awaiting_payment",
-      providerData: bvnkOnrampProviderData("rule_expire_2", "ACTIVE"),
+      providerData: bvnkOnrampProviderData(
+        "rule_expire_2",
+        "ACTIVE",
+        "counterparty_provider_account_expire_2"
+      ),
       createdAt: OLD,
     });
     await insertTransfer({
@@ -134,7 +146,11 @@ describe("reconcileBvnkOnrampExpiry", () => {
       type: "onramp",
       direction: "inbound",
       status: "awaiting_payment",
-      providerData: bvnkOnrampProviderData("rule_expire_3", "DEACTIVATED"),
+      providerData: bvnkOnrampProviderData(
+        "rule_expire_3",
+        "DEACTIVATED",
+        "counterparty_provider_account_expire_3"
+      ),
       createdAt: OLD,
     });
     await insertTransfer({
@@ -143,7 +159,11 @@ describe("reconcileBvnkOnrampExpiry", () => {
       type: "onramp",
       direction: "inbound",
       status: "awaiting_payment",
-      providerData: bvnkOnrampProviderData("rule_fresh_1", "ACTIVE"),
+      providerData: bvnkOnrampProviderData(
+        "rule_fresh_1",
+        "ACTIVE",
+        "counterparty_provider_account_fresh_1"
+      ),
       createdAt: new Date().toISOString(),
     });
     await insertTransfer({
@@ -222,6 +242,13 @@ describe("reconcileBvnkOnrampExpiry", () => {
       ]);
     const PROJECT_ID = "prj_bvnk_expiry_recovery";
     const COUNTERPARTY_ID = "cpty_bvnk_expiry_recovery";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
+         VALUES (?, ?, ?, 'individual', 'BVNK Expiry Recovery')`
+      )
+      .bind(COUNTERPARTY_ID, ORG_ID, PROJECT_ID)
+      .run();
     await getDb(env)
       .prepare(
         `INSERT INTO counterparty_provider_accounts (

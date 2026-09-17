@@ -60,7 +60,7 @@ import type {
 import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import { createSystemTransactionalPaymentsRepository } from "@/db/repositories";
+import { createPostgresPaymentsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
@@ -77,6 +77,7 @@ import {
   internalError,
   providerUnavailable,
 } from "@/lib/errors";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
@@ -1029,7 +1030,7 @@ export async function bvnkOnrampQuote(
   try {
     transfer = await getDb(c.env).transaction(async (transaction) => {
       const db = asTransactionalClient(transaction);
-      const txPayments = createSystemTransactionalPaymentsRepository(db);
+      const txPayments = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
       const created = await txPayments.createTransfer({
         id: transferId,
         organizationId,

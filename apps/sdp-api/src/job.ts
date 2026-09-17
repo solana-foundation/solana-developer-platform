@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import * as solanaRpc from "@sdp/rpc/solana";
 
 import { parse as parseCron, validate as validateCron } from "node-cron";
-import { BVNK_ONRAMP_EXPIRY_MONITOR, reconcileBvnkOnrampExpiry } from "@/cron/bvnk-onramp-expiry";
+import { BVNK_ONRAMP_EXPIRY_MONITOR } from "@/cron/bvnk-onramp-expiry";
 import { DVP_TRADES_MONITOR } from "@/cron/dvp-trades";
 import { EARN_CATALOGUE_SYNC_MONITOR, runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import {
@@ -27,6 +27,7 @@ import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
+import { reconcileBvnkOnrampExpiry } from "@/services/jobs/bvnk-onramp-expiry";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";

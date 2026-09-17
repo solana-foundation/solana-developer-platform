@@ -1206,7 +1206,7 @@ describe("Payments routes — ramps", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `*** ${TEST_API_KEY.raw}`,
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
           provider: "bvnk",
@@ -1239,7 +1239,7 @@ describe("Payments routes — ramps", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `*** ${TEST_API_KEY.raw}`,
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
           provider: "bvnk",
@@ -1269,7 +1269,7 @@ describe("Payments routes — ramps", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `*** ${TEST_API_KEY.raw}`,
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
           provider: "bvnk",
@@ -1299,7 +1299,7 @@ describe("Payments routes — ramps", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `*** ${TEST_API_KEY.raw}`,
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
           provider: "bvnk",

@@ -3,6 +3,7 @@ import { buildBvnkOnrampRuleReference } from "@sdp/payments/ramps/providers/bvnk
 import type { RequirementField } from "@sdp/types/ramp-requirements";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import { mockBvnkContact } from "@/test/helpers/bvnk";
 import { env as testEnv } from "@/test/helpers/env";
 import type { AppContext } from "../../context";
 import { advanceBvnkContact, bvnkContactFields, bvnkOnrampQuote } from "./bvnk";
@@ -708,7 +709,10 @@ describe("bvnkOnrampQuote", () => {
     createLedgerWalletV2 = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createLedgerWalletV2");
     listLedgerWalletProfilesV2 = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listLedgerWalletProfilesV2");
     listOnrampRulesByWallet.mockResolvedValue([]);
-    getContactV3.mockResolvedValue(bvnkContact());
+    // The rule path reads contact.entity.type to build the THIRD_PARTY rule
+    // entity, so the JIT contact read must return the full entity block.
+    getContactV3.mockResolvedValue(mockBvnkContact());
+    deactivateOnrampRule.mockResolvedValue(undefined);
     getLedgerWalletV2.mockResolvedValue(bvnkLedgerWallet());
     createOnrampRule.mockResolvedValue({
       id: "rule_created_1",

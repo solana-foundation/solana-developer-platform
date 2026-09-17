@@ -203,7 +203,9 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
       profileId: "fiat:usd:profile",
     });
 
-    assert.deepEqual(result, wallet);
+    // The raw wire balance is numeric; the client converts it to a decimal
+    // string at the boundary, so the typed result carries the converted value.
+    assert.deepEqual(result, { ...wallet, balance: { amount: "0", currency: "USD" } });
     assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "wallet-key");
     const body = JSON.parse(String(requests[0].init.body)) as Record<string, unknown>;
     assert.equal(body.customerId, undefined);

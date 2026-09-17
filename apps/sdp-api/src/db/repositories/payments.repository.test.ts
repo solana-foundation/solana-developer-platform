@@ -999,6 +999,18 @@ describe("PaymentsRepository.getInFlightBvnkOnrampTransferByFundingWallet (postg
     providerData?: Record<string, unknown>;
   }): Promise<void> {
     const now = new Date().toISOString();
+    // The transfer's scope FK requires the counterparty row to exist; the
+    // beforeEach wipes projects (and, with them, counterparties), so the
+    // seed recreates the counterparty it references.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparties
+          (id, organization_id, project_id, entity_type, display_name, email)
+         VALUES (?, ?, ?, 'individual', 'BVNK Onramp Lookup', 'onramp-lookup@example.com')
+         ON CONFLICT (id) DO NOTHING`
+      )
+      .bind("cpty_bvnk_onramp_lookup", TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers
