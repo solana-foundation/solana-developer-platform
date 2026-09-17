@@ -214,7 +214,7 @@ export function EarnScreen({
             {phase === "pressing" ? (
               <>
                 <LoaderCircleIcon className="size-4 animate-spin" />
-                Opening Earn…
+                Enabling Yield…
               </>
             ) : (
               <>
