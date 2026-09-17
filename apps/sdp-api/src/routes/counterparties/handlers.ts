@@ -7,6 +7,7 @@ import {
   isBvnkCustomerVerified,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
+import type { CounterpartyRequirements, RampDirection } from "@sdp/types";
 import {
   COUNTERPARTY_ENTITY_TYPES,
   COUNTRIES,
