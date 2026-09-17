@@ -2,7 +2,7 @@
 
 import type { CustodyProvider } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,10 +28,7 @@ import { useCustodyAction } from "./use-custody-action";
 export function AddWalletDialog({
   isOpen,
   onClose,
-  connectionId,
-  connectionLabel,
-  provider,
-  projectName,
+  ...fields
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -42,11 +39,43 @@ export function AddWalletDialog({
 }) {
   const t = useTranslations();
   const { pending, run } = useCustodyAction();
-  const [label, setLabel] = useState("");
 
-  useEffect(() => {
-    if (!isOpen) setLabel("");
-  }, [isOpen]);
+  // The form is mounted only while the dialog is open, so a half-typed name
+  // leaves with it and the next open starts clean. Clearing the field by hand
+  // on close would show the old value for a frame on the way out.
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={pending ? undefined : onClose}
+      closeDisabled={pending}
+      size="lg"
+      ariaLabel={t("DashboardCustody.addWalletTitle")}
+    >
+      <AddWalletForm {...fields} onClose={onClose} pending={pending} run={run} t={t} />
+    </Modal>
+  );
+}
+
+function AddWalletForm({
+  connectionId,
+  connectionLabel,
+  onClose,
+  pending,
+  projectName,
+  provider,
+  run,
+  t,
+}: {
+  connectionId: string;
+  connectionLabel: string;
+  onClose: () => void;
+  pending: boolean;
+  projectName: string;
+  provider: CustodyProvider;
+  run: ReturnType<typeof useCustodyAction>["run"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const [label, setLabel] = useState("");
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -67,59 +96,47 @@ export function AddWalletDialog({
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={pending ? undefined : onClose}
-      closeDisabled={pending}
-      size="lg"
-      ariaLabel={t("DashboardCustody.addWalletTitle")}
-    >
-      <form onSubmit={handleSubmit} className="space-y-5 p-6" data-custody-add-wallet-form>
-        <h2 className="text-lg font-medium text-primary">{t("DashboardCustody.addWalletTitle")}</h2>
+    <form onSubmit={handleSubmit} className="space-y-5 p-6" data-custody-add-wallet-form>
+      <h2 className="text-lg font-medium text-primary">{t("DashboardCustody.addWalletTitle")}</h2>
 
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-primary">
-            {t("DashboardCustody.connectionColumn")}
-          </p>
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-3">
-            <span className="flex min-w-0 items-center gap-2">
-              <WalletProviderMark provider={provider} size="xs" />
-              <span className="truncate text-sm text-primary">{connectionLabel}</span>
-            </span>
-            <span className="shrink-0 text-sm text-tertiary">{projectName}</span>
-          </div>
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-primary">{t("DashboardCustody.connectionColumn")}</p>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-3">
+          <span className="flex min-w-0 items-center gap-2">
+            <WalletProviderMark provider={provider} size="xs" />
+            <span className="truncate text-sm text-primary">{connectionLabel}</span>
+          </span>
+          <span className="shrink-0 text-sm text-tertiary">{projectName}</span>
         </div>
+      </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="custody-add-wallet-label">
-            {t("DashboardCustody.addWalletNameLabel")}
-          </Label>
-          <Input
-            id="custody-add-wallet-label"
-            name="label"
-            disabled={pending}
-            placeholder={t("DashboardCustody.addWalletNamePlaceholder")}
-            value={label}
-            onChange={(event) => setLabel(event.target.value)}
-          />
-          <p className="text-sm leading-5 text-tertiary">{t("DashboardCustody.addWalletHint")}</p>
-        </div>
+      <div className="space-y-2">
+        <Label htmlFor="custody-add-wallet-label">{t("DashboardCustody.addWalletNameLabel")}</Label>
+        <Input
+          id="custody-add-wallet-label"
+          name="label"
+          disabled={pending}
+          placeholder={t("DashboardCustody.addWalletNamePlaceholder")}
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
+        />
+        <p className="text-sm leading-5 text-tertiary">{t("DashboardCustody.addWalletHint")}</p>
+      </div>
 
-        <div className="flex items-center justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
-            {t("DashboardCustody.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            disabled={pending}
-            iconLeft={
-              pending ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
-            }
-          >
-            {t("DashboardCustody.addWalletConfirm")}
-          </Button>
-        </div>
-      </form>
-    </Modal>
+      <div className="flex items-center justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
+          {t("DashboardCustody.cancel")}
+        </Button>
+        <Button
+          type="submit"
+          disabled={pending}
+          iconLeft={
+            pending ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
+          }
+        >
+          {t("DashboardCustody.addWalletConfirm")}
+        </Button>
+      </div>
+    </form>
   );
 }

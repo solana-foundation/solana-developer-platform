@@ -5,7 +5,7 @@ import { formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { useTranslations } from "@/i18n/provider";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";
-import { statusLabel } from "./connection-status";
+import { statusLabel } from "./connection-status-presentation";
 
 /**
  * Every connection these credentials currently sign for, across every project

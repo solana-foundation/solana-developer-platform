@@ -7,6 +7,7 @@ import { useState, useTransition } from "react";
 import { recheckPrivyCredentialAction } from "@/app/dashboard/custody/byok-actions";
 import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { formatCreatedDate } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,8 @@ import type {
   CustodyCredentialLifecycle,
   CustodyInstallationConnection,
 } from "./connection-detail.data";
-import { SigningLine, STATUS_BADGE_VARIANTS, statusLabel } from "./connection-status";
+import { SigningLine } from "./connection-status";
+import { STATUS_BADGE_VARIANTS, statusLabel } from "./connection-status-presentation";
 import { ConnectionWalletsCard } from "./connection-wallets-card";
 import type { CustodyConnectionListItem } from "./connections.data";
 import { DeactivateConnectionDialog } from "./deactivate-connection-dialog";
@@ -132,6 +134,108 @@ function ConnectionHeaderCard({
 }
 
 /**
+ * An install that never finished, and the two ways out of it.
+ *
+ * Checking again continues the *same* connection rather than starting a second
+ * one — the completion is replay-safe server-side — which is why the button is
+ * offered at all rather than sending the user back to Add connection. Each
+ * action appears only when the API says it applies.
+ */
+function UnfinishedSetupCallout({
+  canCancel,
+  canComplete,
+  canManageCustody,
+  onCancelSetup,
+  onRecheck,
+  rechecking,
+  t,
+}: {
+  canCancel: boolean;
+  canComplete: boolean;
+  canManageCustody: boolean;
+  onCancelSetup: () => void;
+  onRecheck: () => void;
+  rechecking: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <Callout variant="warning" title={t("DashboardCustody.setupUnfinishedTitle")}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p>{t("DashboardCustody.setupUnfinishedBody")}</p>
+        {canManageCustody ? (
+          <span className="flex shrink-0 items-center gap-2">
+            {canComplete ? (
+              <Button
+                size="sm"
+                onClick={onRecheck}
+                disabled={rechecking}
+                iconLeft={<RefreshCwIcon className="size-4" />}
+              >
+                {t("DashboardCustody.byokCheckAgain")}
+              </Button>
+            ) : null}
+            {canCancel ? (
+              <Button size="sm" variant="secondary" onClick={onCancelSetup}>
+                {t("DashboardCustody.cancelSetupAction")}
+              </Button>
+            ) : null}
+          </span>
+        ) : null}
+      </div>
+    </Callout>
+  );
+}
+
+/**
+ * Ending the connection for good.
+ *
+ * The button stays enabled even when deactivation would be refused, because the
+ * dialog behind it is where the refusal is explained — a disabled control
+ * cannot open the thing that would tell you why it is disabled. The inline line
+ * above it is the at-a-glance version of the same reason.
+ */
+function DeactivateConnectionCard({
+  activeWalletCount,
+  canManageCustody,
+  isUnfinished,
+  onDeactivate,
+  t,
+}: {
+  activeWalletCount: number;
+  canManageCustody: boolean;
+  isUnfinished: boolean;
+  onDeactivate: () => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const blockingReason = isUnfinished
+    ? t("DashboardCustody.deactivateNotApplicableUnfinished")
+    : activeWalletCount > 0
+      ? t("DashboardCustody.deactivateBlockedByWallets", { count: activeWalletCount })
+      : null;
+
+  return (
+    <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 space-y-1">
+          <h2 className="text-base font-medium text-primary">
+            {t("DashboardCustody.deactivateConnectionSectionTitle")}
+          </h2>
+          <p className="text-sm text-secondary">
+            {t("DashboardCustody.deactivateConnectionSectionBody")}
+          </p>
+          {blockingReason ? <p className="text-sm text-warning">{blockingReason}</p> : null}
+        </div>
+        {canManageCustody && !isUnfinished ? (
+          <Button variant="destructive" className="shrink-0" onClick={onDeactivate}>
+            {t("DashboardCustody.deactivateConnectionConfirm")}
+          </Button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/**
  * Everything one custody connection is and everything that can be done to it,
  * on one scrolling page.
  *
@@ -177,13 +281,7 @@ export function ConnectionDetailView({
   const outcome = resolveCompletionOutcome(connection.completion);
 
   const createdAt = listItem?.createdAt ?? null;
-  const formattedCreated = createdAt
-    ? new Date(createdAt).toLocaleDateString(locale, {
-        month: "short",
-        day: "2-digit",
-        year: "numeric",
-      })
-    : null;
+  const formattedCreated = createdAt ? formatCreatedDate(createdAt, locale) : null;
 
   const handleRecheck = () => {
     startRecheck(async () => {
@@ -216,30 +314,15 @@ export function ConnectionDetailView({
       ) : null}
 
       {isUnfinished ? (
-        <Callout variant="warning" title={t("DashboardCustody.setupUnfinishedTitle")}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p>{t("DashboardCustody.setupUnfinishedBody")}</p>
-            {canManageCustody ? (
-              <span className="flex shrink-0 items-center gap-2">
-                {connection.canComplete ? (
-                  <Button
-                    size="sm"
-                    onClick={handleRecheck}
-                    disabled={rechecking}
-                    iconLeft={<RefreshCwIcon className="size-4" />}
-                  >
-                    {t("DashboardCustody.byokCheckAgain")}
-                  </Button>
-                ) : null}
-                {connection.canCancel ? (
-                  <Button size="sm" variant="secondary" onClick={() => setCancelSetupOpen(true)}>
-                    {t("DashboardCustody.cancelSetupAction")}
-                  </Button>
-                ) : null}
-              </span>
-            ) : null}
-          </div>
-        </Callout>
+        <UnfinishedSetupCallout
+          canCancel={connection.canCancel}
+          canComplete={connection.canComplete}
+          canManageCustody={canManageCustody}
+          onCancelSetup={() => setCancelSetupOpen(true)}
+          onRecheck={handleRecheck}
+          rechecking={rechecking}
+          t={t}
+        />
       ) : null}
 
       {outcome ? (
@@ -261,40 +344,15 @@ export function ConnectionDetailView({
         canManageCustody={canManageCustody}
       />
 
-      {!isDeactivated ? (
-        <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0 space-y-1">
-              <h2 className="text-base font-medium text-primary">
-                {t("DashboardCustody.deactivateConnectionSectionTitle")}
-              </h2>
-              <p className="text-sm text-secondary">
-                {t("DashboardCustody.deactivateConnectionSectionBody")}
-              </p>
-              {isUnfinished ? (
-                <p className="text-sm text-warning">
-                  {t("DashboardCustody.deactivateNotApplicableUnfinished")}
-                </p>
-              ) : activeWallets.length > 0 ? (
-                <p className="text-sm text-warning">
-                  {t("DashboardCustody.deactivateBlockedByWallets", {
-                    count: activeWallets.length,
-                  })}
-                </p>
-              ) : null}
-            </div>
-            {canManageCustody && !isUnfinished ? (
-              <Button
-                variant="destructive"
-                className="shrink-0"
-                onClick={() => setDeactivateOpen(true)}
-              >
-                {t("DashboardCustody.deactivateConnectionConfirm")}
-              </Button>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
+      {isDeactivated ? null : (
+        <DeactivateConnectionCard
+          activeWalletCount={activeWallets.length}
+          canManageCustody={canManageCustody}
+          isUnfinished={isUnfinished}
+          onDeactivate={() => setDeactivateOpen(true)}
+          t={t}
+        />
+      )}
 
       <AddWalletDialog
         isOpen={addWalletOpen}

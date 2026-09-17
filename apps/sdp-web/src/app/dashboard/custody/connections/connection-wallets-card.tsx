@@ -3,7 +3,7 @@
 import type { CustodyWalletSummary } from "@sdp/types";
 import Link from "next/link";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
-import { formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
+import { formatCreatedDate, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -22,16 +22,6 @@ import { useLocale, useTranslations } from "@/i18n/provider";
  * assets and summing them would invent a number. Wallets whose balances could
  * not be read show nothing rather than a zero, which would be a claim.
  */
-function formatCreated(value: string, locale: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(locale, {
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-  });
-}
-
 function balanceLabel(wallet: CustodyWalletSummary): string | null {
   const balances = wallet.balances;
   if (!balances || balances.length === 0) return null;
@@ -122,7 +112,7 @@ export function ConnectionWalletsCard({
                   )}
                 </TableCell>
                 <TableCell className="hidden text-xs text-secondary @2xl/connection-wallets:table-cell">
-                  {formatCreated(wallet.createdAt, locale)}
+                  {formatCreatedDate(wallet.createdAt, locale)}
                 </TableCell>
               </TableRow>
             ))}

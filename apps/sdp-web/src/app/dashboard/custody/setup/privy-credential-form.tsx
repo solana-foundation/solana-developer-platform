@@ -39,6 +39,127 @@ const FIELD_INPUT_CLASS =
   "h-12 rounded-2xl border-border-default bg-surface-raised px-4 shadow-none";
 
 /**
+ * The four inputs, in the order the Privy dashboard presents them.
+ *
+ * Only the secret is controlled, and only so it can be cleared on a terminal
+ * failure — it is never read back from the API, so a stale value left in a
+ * mounted input is the one way it could reappear.
+ */
+function CredentialFields({
+  appSecret,
+  defaultLabel,
+  onAppSecretChange,
+  t,
+}: {
+  appSecret: string;
+  defaultLabel: string;
+  onAppSecretChange: (value: string) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="byok-credential-label">
+          {t("DashboardCustody.providerCredentialLabel")}
+        </Label>
+        <Input
+          id="byok-credential-label"
+          name="credentialLabel"
+          defaultValue={defaultLabel}
+          required
+          className={FIELD_INPUT_CLASS}
+        />
+        <p className="text-sm leading-5 text-tertiary">
+          {t("DashboardCustody.providerCredentialLabelDescription")}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="byok-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
+        <Input id="byok-app-id" name="appId" required className={FIELD_INPUT_CLASS} />
+        <p className="text-sm leading-5 text-tertiary">
+          {t("DashboardCustody.providerPrivyAppIdDescription")}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="byok-app-secret">{t("DashboardCustody.providerPrivyAppSecret")}</Label>
+        <Input
+          id="byok-app-secret"
+          name="appSecret"
+          type="password"
+          autoComplete="off"
+          required
+          value={appSecret}
+          onChange={(event) => onAppSecretChange(event.currentTarget.value)}
+          className={FIELD_INPUT_CLASS}
+        />
+        <p className="text-sm leading-5 text-tertiary">
+          {t("DashboardCustody.providerPrivyAppSecretDescription")}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="byok-wallet-label">
+          {t("DashboardCustody.providerInitialWalletLabel")}
+        </Label>
+        <Input id="byok-wallet-label" name="walletLabel" className={FIELD_INPUT_CLASS} />
+        <p className="text-sm leading-5 text-tertiary">
+          {t("DashboardCustody.providerInitialWalletLabelDescription")}
+        </p>
+      </div>
+    </>
+  );
+}
+
+/**
+ * A recovery state: what happened, and at most one way forward.
+ *
+ * The four of them differ only in tone and in which action they offer, so they
+ * share one shape. Tone is load-bearing, not decorative: an *unknown* outcome
+ * is neutral, never red, because nothing has been established to have gone
+ * wrong — the result is simply not known yet, and colouring it as a failure
+ * would tell the user something untrue.
+ *
+ * `marker` carries the per-state `data-` attribute the wizard and the tests
+ * key off.
+ */
+function RecoveryPanel({
+  marker,
+  message,
+  tone,
+  action,
+}: {
+  marker: string;
+  message: string;
+  tone: "neutral" | "error";
+  action?: { label: string; onClick: () => void; disabled: boolean };
+}) {
+  const isError = tone === "error";
+  return (
+    <div className="grid gap-4" {...{ [marker]: "true" }}>
+      <p
+        {...(isError ? { role: "alert" as const } : {})}
+        className={
+          isError
+            ? "rounded-2xl border border-error-border bg-error-bg px-5 py-4 text-sm leading-6 text-error"
+            : "rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
+        }
+      >
+        {message}
+      </p>
+      {action ? (
+        <div>
+          <Button type="button" onClick={action.onClick} disabled={action.disabled}>
+            {action.label}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * The Privy install step: credential in, connection checked, wallet provisioned.
  *
  * Three rules this form owns:
@@ -228,130 +349,57 @@ export function PrivyCredentialForm({
 
   if (check.kind === "submit_unknown") {
     return (
-      <div className="grid gap-4" data-privy-byok-submit-retry="true">
-        <p className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary">
-          {t("DashboardCustody.byokRetryUnknown")}
-        </p>
-        {/* Replay is the only safe exit: the submission may have committed as a
-            pending connection, which the server will not let a fresh
-            submission replace, so abandoning the key here would strand the
-            install. The idempotent replay always converges on the real
-            outcome. */}
-        <div>
-          <Button type="button" onClick={() => handleReplay(check.payload)} disabled={isPending}>
-            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokRetrySubmit")}
-          </Button>
-        </div>
-      </div>
+      /* Replay is the only safe exit: the submission may have committed as a
+         pending connection, which the server will not let a fresh submission
+         replace, so abandoning the key here would strand the install. The
+         idempotent replay always converges on the real outcome. */
+      <RecoveryPanel
+        marker="data-privy-byok-submit-retry"
+        message={t("DashboardCustody.byokRetryUnknown")}
+        tone="neutral"
+        action={{
+          label: isPending
+            ? t("DashboardCustody.byokChecking")
+            : t("DashboardCustody.byokRetrySubmit"),
+          onClick: () => handleReplay(check.payload),
+          disabled: isPending,
+        }}
+      />
     );
   }
 
   if (check.kind === "unrecoverable") {
     return (
-      <div className="grid gap-4" data-privy-byok-unrecoverable="true">
-        <p
-          role="alert"
-          className="rounded-2xl border border-error-border bg-error-bg px-5 py-4 text-sm leading-6 text-error"
-        >
-          {check.message}
-        </p>
-      </div>
+      <RecoveryPanel marker="data-privy-byok-unrecoverable" message={check.message} tone="error" />
     );
   }
 
-  if (check.kind === "refused") {
+  if (check.kind === "refused" || check.kind === "retry_unknown") {
+    const isRefusal = check.kind === "refused";
     return (
-      <div className="grid gap-4" data-privy-byok-refused="true">
-        <p
-          role="alert"
-          className="rounded-2xl border border-error-border bg-error-bg px-5 py-4 text-sm leading-6 text-error"
-        >
-          {check.message}
-        </p>
-        <div>
-          <Button
-            type="button"
-            onClick={() => handleRecheck(check.connectionId)}
-            disabled={isPending}
-          >
-            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokCheckAgain")}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (check.kind === "retry_unknown") {
-    return (
-      <div className="grid gap-4" data-privy-byok-retry="true">
-        <p className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary">
-          {t("DashboardCustody.byokRetryUnknown")}
-        </p>
-        <div>
-          <Button
-            type="button"
-            onClick={() => handleRecheck(check.connectionId)}
-            disabled={isPending}
-          >
-            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokCheckAgain")}
-          </Button>
-        </div>
-      </div>
+      <RecoveryPanel
+        marker={isRefusal ? "data-privy-byok-refused" : "data-privy-byok-retry"}
+        message={isRefusal ? check.message : t("DashboardCustody.byokRetryUnknown")}
+        tone={isRefusal ? "error" : "neutral"}
+        action={{
+          label: isPending
+            ? t("DashboardCustody.byokChecking")
+            : t("DashboardCustody.byokCheckAgain"),
+          onClick: () => handleRecheck(check.connectionId),
+          disabled: isPending,
+        }}
+      />
     );
   }
 
   return (
     <form id={formId} onSubmit={handleSubmit} className="grid gap-4" data-privy-byok-form="true">
-      <div className="space-y-2">
-        <Label htmlFor="byok-credential-label">
-          {t("DashboardCustody.providerCredentialLabel")}
-        </Label>
-        <Input
-          id="byok-credential-label"
-          name="credentialLabel"
-          defaultValue={defaultLabel}
-          required
-          className={FIELD_INPUT_CLASS}
-        />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerCredentialLabelDescription")}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="byok-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
-        <Input id="byok-app-id" name="appId" required className={FIELD_INPUT_CLASS} />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerPrivyAppIdDescription")}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="byok-app-secret">{t("DashboardCustody.providerPrivyAppSecret")}</Label>
-        <Input
-          id="byok-app-secret"
-          name="appSecret"
-          type="password"
-          autoComplete="off"
-          required
-          value={appSecret}
-          onChange={(event) => setAppSecret(event.currentTarget.value)}
-          className={FIELD_INPUT_CLASS}
-        />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerPrivyAppSecretDescription")}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="byok-wallet-label">
-          {t("DashboardCustody.providerInitialWalletLabel")}
-        </Label>
-        <Input id="byok-wallet-label" name="walletLabel" className={FIELD_INPUT_CLASS} />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerInitialWalletLabelDescription")}
-        </p>
-      </div>
+      <CredentialFields
+        appSecret={appSecret}
+        defaultLabel={defaultLabel}
+        onAppSecretChange={setAppSecret}
+        t={t}
+      />
 
       {check.kind === "failed" ? (
         <div
