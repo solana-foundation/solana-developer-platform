@@ -436,6 +436,84 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
 };
 
 /** Submits collected requirement fields; BVNK requirements are evaluated entirely by the advance handler. */
+/**
+ * Runs the provider client's read-side requirement check ahead of an advance
+ * for providers that still validate through the client. Returns the
+ * requirements the caller must surface instead of advancing (unsupported
+ * corridor, a payout-account choice still owed, or missing collect fields),
+ * or null when the advance may proceed.
+ *
+ * @param c - Request context.
+ * @param params.input - Validated submit body, narrowed to a non-BVNK provider.
+ * @param params.counterparty - Counterparty row.
+ * @param params.organizationId - Tenant organization.
+ * @param params.projectId - Tenant project.
+ * @param params.destinationWalletAddress - Destination wallet for on-ramp submissions, when resolved.
+ * @param params.providerAccount - The counterparty's provider link row, or null.
+ * @returns Requirements to return early, or null.
+ */
+async function pendingClientRequirements(
+  c: AppContext,
+  params: {
+    input: Exclude<SubmitCounterpartyRequirementsInput, { provider: "bvnk" }>;
+    counterparty: CounterpartyRow;
+    organizationId: string;
+    projectId: string;
+    destinationWalletAddress: string | undefined;
+    providerAccount: CounterpartyProviderAccountRow | null;
+  }
+): Promise<CounterpartyRequirements | null> {
+  const { input, counterparty, providerAccount, destinationWalletAddress } = params;
+  const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
+    mapToCounterparty(counterparty),
+    {
+      direction: input.direction,
+      providerData: counterparty.provider_data,
+      ...("assetRail" in input ? { cryptoToken: getCryptoRailAssetLabel(input.assetRail) } : {}),
+      ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
+      ...(input.provider === "lightspark" && input.direction === "offramp"
+        ? { cryptoRail: input.assetRail }
+        : {}),
+      ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
+      ...(providerAccount === null || providerAccount.provider_customer_reference === null
+        ? {}
+        : { providerCustomerReference: providerAccount.provider_customer_reference }),
+      ...("collectedData" in input ? { collectedData: input.collectedData } : {}),
+    }
+  );
+
+  if (requirements.status === "unsupported") {
+    return requirements;
+  }
+
+  if (
+    requirements.status === "collect_account" &&
+    (await lightsparkPayoutSubmissionNeedsRequirements(
+      c,
+      input,
+      counterparty,
+      params.organizationId,
+      params.projectId
+    ))
+  ) {
+    return requirements;
+  }
+
+  if (isCollectFieldsRequirements(requirements)) {
+    const collectedData = "collectedData" in input ? input.collectedData : undefined;
+    const missing = requirements.fields
+      .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
+      .filter(
+        (field) =>
+          field.required && (collectedData === undefined || collectedData[field.key] === undefined)
+      );
+    if (missing.length > 0) {
+      return { ...requirements, fields: missing };
+    }
+  }
+  return null;
+}
+
 export const submitCounterpartyRequirements = async (
   c: ValidatedBodyContext<typeof submitCounterpartyRequirementsSchema>
 ) => {
@@ -483,54 +561,16 @@ export const submitCounterpartyRequirements = async (
     provider: input.provider,
   });
   if (input.provider !== "bvnk") {
-    const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
-      mapToCounterparty(counterparty),
-      {
-        direction: input.direction,
-        providerData: counterparty.provider_data,
-        ...("assetRail" in input ? { cryptoToken: getCryptoRailAssetLabel(input.assetRail) } : {}),
-        ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
-        ...(input.provider === "lightspark" && input.direction === "offramp"
-          ? { cryptoRail: input.assetRail }
-          : {}),
-        ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
-        ...(providerAccount === null || providerAccount.provider_customer_reference === null
-          ? {}
-          : { providerCustomerReference: providerAccount.provider_customer_reference }),
-        ...("collectedData" in input ? { collectedData: input.collectedData } : {}),
-      }
-    );
-
-    if (requirements.status === "unsupported") {
-      return success(c, requirements);
-    }
-
-    if (requirements.status === "collect_account") {
-      if (
-        await lightsparkPayoutSubmissionNeedsRequirements(
-          c,
-          input,
-          counterparty,
-          auth.organizationId,
-          projectId
-        )
-      ) {
-        return success(c, requirements);
-      }
-    }
-
-    if (isCollectFieldsRequirements(requirements)) {
-      const collectedData = "collectedData" in input ? input.collectedData : undefined;
-      const missing = requirements.fields
-        .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
-        .filter(
-          (field) =>
-            field.required &&
-            (collectedData === undefined || collectedData[field.key] === undefined)
-        );
-      if (missing.length > 0) {
-        return success(c, { ...requirements, fields: missing });
-      }
+    const pending = await pendingClientRequirements(c, {
+      input,
+      counterparty,
+      organizationId: auth.organizationId,
+      projectId,
+      destinationWalletAddress,
+      providerAccount,
+    });
+    if (pending !== null) {
+      return success(c, pending);
     }
   }
 
