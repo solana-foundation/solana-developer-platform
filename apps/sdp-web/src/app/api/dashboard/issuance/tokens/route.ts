@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { parseIssuanceListRequestQuery } from "@/app/dashboard/issuance/issuance-list-query";
+import {
+  DEFAULT_ISSUANCE_LIST_QUERY,
+  InvalidIssuanceSearchEncodingError,
+  parseIssuanceListRequestQuery,
+} from "@/app/dashboard/issuance/issuance-list-query";
 import {
   attachIssuanceAssetProfiles,
   fetchIssuanceTokensPage,
@@ -33,9 +37,10 @@ function emptyResponse(
 
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.issuance.tokens", request);
-  const query = parseIssuanceListRequestQuery(new URL(request.url).searchParams);
+  let query = DEFAULT_ISSUANCE_LIST_QUERY;
 
   try {
+    query = parseIssuanceListRequestQuery(new URL(request.url).searchParams);
     const [apiClient, assetProfilesEnabled] = await Promise.all([
       createSdpApiClient(trace.childContext("route.dashboard.issuance.tokens.api")),
       assetProfiles(),
@@ -78,7 +83,8 @@ export async function GET(request: Request) {
     } satisfies IssuanceTokensRouteResponse);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Request failed";
-    trace.log({ ok: false, error: message });
-    return NextResponse.json(emptyResponse(query.page, query.pageSize, message), { status: 500 });
+    const status = error instanceof InvalidIssuanceSearchEncodingError ? 400 : 500;
+    trace.log({ ok: false, error: message, status });
+    return NextResponse.json(emptyResponse(query.page, query.pageSize, message), { status });
   }
 }

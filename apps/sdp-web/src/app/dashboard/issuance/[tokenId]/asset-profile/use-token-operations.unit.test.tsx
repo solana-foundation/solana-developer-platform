@@ -256,6 +256,16 @@ describe("post-action state", () => {
     expect(result.current.effectiveFreezeDisabledReason).toBeNull();
   });
 
+  it("keeps a revoked live freeze authority disabled instead of restoring stale stored data", () => {
+    mocks.freezeAuthority = null;
+    const { result } = renderOperations({ freezeAuthority: source });
+
+    expect(result.current.permissionRows.find((row) => row.authorityRole === "freeze")?.value).toBe(
+      null
+    );
+    expect(result.current.effectiveFreezeDisabledReason).not.toBeNull();
+  });
+
   it("keeps pause available from the live pausable authority after supply is locked", () => {
     mocks.pauseAuthority = source;
     const { result } = renderOperations({

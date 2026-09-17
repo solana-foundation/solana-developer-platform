@@ -48,4 +48,20 @@ describe("GET /api/dashboard/issuance/tokens", () => {
     const [path] = mocks.apiRequest.mock.calls[0] as [string];
     expect(new URL(path, "https://api.example.test").searchParams.get("search")).toBe(search);
   });
+
+  it("rejects a malformed encoded search without issuing an unfiltered API request", async () => {
+    const url = new URL("https://dashboard.example.test/api/dashboard/issuance/tokens");
+    url.searchParams.set("searchEncoded", "%%%invalid%%%");
+
+    const response = await GET(new Request(url));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      data: [],
+      total: 0,
+      error: "Invalid encoded issuance search",
+    });
+    expect(mocks.createSdpApiClient).not.toHaveBeenCalled();
+    expect(mocks.apiRequest).not.toHaveBeenCalled();
+  });
 });

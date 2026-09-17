@@ -128,7 +128,9 @@ export function useTokenOperations({
     freezeAuthority:
       authorityOverrides.freeze !== undefined
         ? authorityOverrides.freeze
-        : (authorityWalletsData?.freezeAuthority ?? token.freezeAuthority),
+        : authorityWalletsData?.freezeAuthority !== undefined
+          ? authorityWalletsData.freezeAuthority
+          : token.freezeAuthority,
     metadataAuthority:
       authorityOverrides.metadata !== undefined
         ? authorityOverrides.metadata

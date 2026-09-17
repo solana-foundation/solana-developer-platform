@@ -156,6 +156,13 @@ export function toIssuanceListUrlParams(query: IssuanceListQuery): Record<string
 
 const ISSUANCE_SEARCH_REQUEST_PARAM = "searchEncoded";
 
+export class InvalidIssuanceSearchEncodingError extends Error {
+  constructor() {
+    super("Invalid encoded issuance search");
+    this.name = "InvalidIssuanceSearchEncodingError";
+  }
+}
+
 function encodeSearchForRequest(value: string): string {
   const bytes = new TextEncoder().encode(value);
   const binary = String.fromCharCode(...bytes);
@@ -199,7 +206,11 @@ export function parseIssuanceListRequestQuery(params: URLSearchParams): Issuance
   const encodedSearch = normalized.get(ISSUANCE_SEARCH_REQUEST_PARAM);
   normalized.delete(ISSUANCE_SEARCH_REQUEST_PARAM);
   if (encodedSearch !== null) {
-    normalized.set("search", decodeSearchFromRequest(encodedSearch) ?? "");
+    const decodedSearch = decodeSearchFromRequest(encodedSearch);
+    if (decodedSearch === null) {
+      throw new InvalidIssuanceSearchEncodingError();
+    }
+    normalized.set("search", decodedSearch);
   }
   return parseIssuanceListQuery(normalized);
 }

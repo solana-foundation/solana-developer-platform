@@ -4,6 +4,7 @@ import {
   DEFAULT_ISSUANCE_LIST_QUERY,
   getIssuanceListResultSetKey,
   hasActiveIssuanceListFilters,
+  InvalidIssuanceSearchEncodingError,
   ISSUANCE_DEFAULT_PAGE_SIZE,
   ISSUANCE_MAX_PAGE,
   ISSUANCE_MAX_PAGE_SIZE,
@@ -183,6 +184,12 @@ describe("toIssuanceListUrlParams", () => {
     expect(params.has("search")).toBe(false);
     expect(params.get("searchEncoded")).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(parseIssuanceListRequestQuery(params).search).toBe(search);
+  });
+
+  it("rejects malformed encoded searches instead of widening them to an unfiltered list", () => {
+    expect(() =>
+      parseIssuanceListRequestQuery(new URLSearchParams({ searchEncoded: "%%%invalid%%%" }))
+    ).toThrow(InvalidIssuanceSearchEncodingError);
   });
 });
 
