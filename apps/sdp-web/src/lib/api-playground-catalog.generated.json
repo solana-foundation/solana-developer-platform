@@ -3896,10 +3896,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -4370,10 +4366,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -4645,10 +4637,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -5119,10 +5107,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -5867,10 +5851,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -6341,10 +6321,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
