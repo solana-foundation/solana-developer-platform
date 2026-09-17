@@ -1284,8 +1284,7 @@ export const RAMPS_MEMO_LIMITS = {
   maxValueLength: 256,
 } as const satisfies Record<string, number>;
 
-export interface PaymentOnrampQuoteRequest {
-  provider: RampProviderId;
+interface PaymentOnrampQuoteRequestBase {
   counterpartyId: string;
   destinationCustodyWalletId: string;
   assetRail: CryptoRailId;
@@ -1293,14 +1292,25 @@ export interface PaymentOnrampQuoteRequest {
   fiatAmount: string;
   domain?: string;
   rampsMemo?: Record<string, string>;
-  /**
-   * Coinbase only. Its headless create-order requires the buyer's contact
-   * details; the API rejects these on any other provider. Passed to the
-   * provider and not persisted.
-   */
-  email?: string;
-  phone?: string;
 }
+
+/**
+ * Discriminated so the contact details Coinbase requires cannot be attached to
+ * another provider: the API rejects them as unknown keys everywhere else, and a
+ * flat interface would let a typed client build a request that compiles and is
+ * then refused. Same shape as PaymentOfframpQuoteRequest.
+ *
+ * Both values are passed to the provider and not persisted.
+ */
+export type PaymentOnrampQuoteRequest =
+  | (PaymentOnrampQuoteRequestBase & {
+      provider: "coinbase";
+      email?: string;
+      phone?: string;
+    })
+  | (PaymentOnrampQuoteRequestBase & {
+      provider: Exclude<RampProviderId, "coinbase">;
+    });
 
 interface PaymentOfframpQuoteRequestBase {
   counterpartyId: string;
