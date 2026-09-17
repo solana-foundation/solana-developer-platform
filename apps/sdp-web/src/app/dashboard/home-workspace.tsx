@@ -406,11 +406,14 @@ function BalanceAllocation({
 }
 
 /** A secondary figure beside the hero — deliberately far smaller than the balance. */
-function HeroStat({ label, value }: { label: string; value: string }) {
+function HeroStat({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
     <div className="min-w-0">
       <dt className="truncate text-[13px] text-tertiary">{label}</dt>
-      <dd className="truncate text-[22px] leading-tight font-medium tracking-[-0.02em] text-primary tabular-nums">
+      <dd
+        className="truncate text-[22px] leading-tight font-medium tracking-[-0.02em] text-primary tabular-nums"
+        title={title}
+      >
         {value}
       </dd>
     </div>
@@ -513,9 +516,10 @@ function BalanceHero({
             label={t("Shared.homeWorkspace.todaysVolume")}
             value={
               todaysVolumeError
-                ? t("Shared.homeWorkspace.unavailable")
+                ? t("Shared.homeWorkspace.holdingsShareUnmeasured")
                 : formatCurrencyAmount(todaysVolume, locale)
             }
+            title={todaysVolumeError ?? undefined}
           />
           <HeroStat
             label={t("Shared.homeWorkspace.walletsTracked")}
