@@ -145,7 +145,13 @@
     "unknownToken": "Không xác định",
     "sdpMintedToken": "SDP-Minted",
     "selectExistingOrganizationDescription": "Chọn một tổ chức hiện có để tiếp tục.",
-    "loadMore": "Tải thêm"
+    "loadMore": "Tải thêm",
+    "apiKeyValue": "Giá trị khóa API",
+    "apiKeyChecking": "Đang kiểm tra khóa",
+    "apiKeyInUse": "Đang dùng",
+    "apiKeyNotAvailable": "Khóa đó không khả dụng cho dự án này",
+    "apiKeySecretPlaceholder": "Dán khóa đầy đủ cho phiên này",
+    "apiKeySecretRequired": "Dán giá trị khóa API đầy đủ cho khóa đã chọn trước khi chạy request."
   },
   "dashboardShell": {
     "workspace": "Không gian làm việc",
