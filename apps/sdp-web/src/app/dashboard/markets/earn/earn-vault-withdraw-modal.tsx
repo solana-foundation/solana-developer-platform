@@ -31,6 +31,7 @@ import {
 } from "./earn-program-data";
 import {
   derivedMinOut,
+  floorToReplay,
   isSlippageExceededRefusal,
   parseSlippageToleranceBps,
   quoteForKey,
@@ -828,18 +829,33 @@ export function EarnVaultWithdrawModal({
     }
 
     // A HELD key must replay the floor it was MINTED with, verbatim — the
-    // deposit modal documents why. A fresh key takes the freshly derived
-    // floor, and records it for exactly that future replay.
-    const heldFloor = resolvedKey.wasHeld ? recallVaultWithdrawalFloor(fingerprint) : undefined;
-    const floorForRequest = heldFloor !== undefined ? heldFloor : (minAmountOut ?? null);
-    rememberVaultWithdrawalFloor(fingerprint, floorForRequest);
+    // deposit modal documents why. A KEPT key — one a prior ambiguous attempt
+    // (a 5xx, a lost answer) left live — must replay its minted floor too,
+    // and worse: the changed-request refusal is a 409, which retires the key
+    // and lets the next submit mint a fresh one while the first attempt may
+    // already have exited. The floor memo answers for both. A fresh key takes
+    // the freshly derived floor, and records it for exactly that future replay.
+    // A reuse whose memo LOST the floor cannot re-floor safely at all — it
+    // stops here, submitting nothing, rather than pair the live key with a
+    // changed request.
+    const replay = floorToReplay(
+      resolvedKey,
+      recallVaultWithdrawalFloor,
+      fingerprint,
+      minAmountOut ?? null
+    );
+    if (replay.kind === "unavailable") {
+      setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
+      return;
+    }
+    rememberVaultWithdrawalFloor(fingerprint, replay.floor);
 
     // No abort signal on the value-moving POST — see the deposit modal.
     const result = await createEarnVaultWithdrawal(
       {
         positionId: position.id,
         shares,
-        ...(floorForRequest === null ? {} : { minAmountOut: floorForRequest }),
+        ...(replay.floor === null ? {} : { minAmountOut: replay.floor }),
       },
       resolvedKey.key
     );

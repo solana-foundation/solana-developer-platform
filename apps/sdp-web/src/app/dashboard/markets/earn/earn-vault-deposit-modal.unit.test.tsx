@@ -114,6 +114,8 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
     "The details below are the approved deposit. If you intended a second deposit of the same amount, submit again.",
   "DashboardEarn.deposit.vaultHeldKeyUnavailable":
     "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment.",
+  "DashboardEarn.deposit.vaultFloorUnavailable":
+    "SDP could not confirm the exact terms this deposit's earlier attempt was submitted with, so nothing was sent. Check your position, then try again in a moment.",
   "DashboardEarn.deposit.vaultMinShares": "Minimum shares received",
   "DashboardEarn.deposit.vaultExpectedShares": "Expected shares",
   "DashboardEarn.deposit.vaultQuoteLoading": "Fetching the live share quote…",
@@ -1441,6 +1443,95 @@ describe("slippage-floored providers", () => {
       expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
         mocks.createEarnVaultDeposit.mock.calls[0][1]
       );
+    });
+
+    it("replays a kept key's floor verbatim — an ambiguous-failure retry must not re-floor", async () => {
+      mocks.fetchEarnVaultDepositPreview
+        .mockResolvedValueOnce(quoted("1"))
+        .mockResolvedValue(quoted("0.5"));
+      // A 5xx is the ambiguous case: the API may have recorded and broadcast
+      // the deposit, and the key stays live in the store either way.
+      mocks.createEarnVaultDeposit
+        .mockResolvedValueOnce({
+          ok: false,
+          error: "Bad gateway",
+          status: 503,
+          body: null,
+        })
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+        });
+
+      const first = render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      );
+      await armVedaDeposit();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+      first.unmount();
+
+      render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      );
+      await armVedaDeposit();
+      vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+
+      // The retry is the SAME request under the SAME key, so it must carry the
+      // floor that key was MINTED with — not a fresh floor off the moved rate.
+      // A re-derived floor would conflict with the API's recorded fingerprint
+      // (a 409), retire the key, and let the next submit deposit a second time
+      // while the first attempt may already have executed.
+      expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][0]).toMatchObject({
+        minSharesOut: "0.999",
+      });
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
+        mocks.createEarnVaultDeposit.mock.calls[0][1]
+      );
+    });
+
+    it("stops a reused key whose floor memo lost the floor: error copy, no POST", async () => {
+      mocks.fetchEarnVaultDepositPreview
+        .mockResolvedValueOnce(quoted("1"))
+        .mockResolvedValue(quoted("0.5"));
+      mocks.createEarnVaultDeposit.mockResolvedValueOnce({
+        ok: false,
+        error: "Bad gateway",
+        status: 503,
+        body: null,
+      });
+
+      const first = render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      );
+      await armVedaDeposit();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+      first.unmount();
+
+      // The floor memo is bounded and stored separately from the key store,
+      // so a busy session can evict a live key's floor while the key lives
+      // on. Simulate that eviction at the storage tier.
+      sessionStorage.removeItem("sdp:earn:vault-deposit:floor:v1");
+
+      render(
+        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      );
+      await armVedaDeposit();
+      vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+
+      // The retry must NOT go out under a freshly derived floor: that pairs
+      // the live key with a changed request, and the API's 409 retires the
+      // key while the ambiguous first attempt may already have executed. The
+      // submission stops with its own words instead, key untouched.
+      expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/could not confirm the exact terms/)).toBeTruthy();
     });
   });
 

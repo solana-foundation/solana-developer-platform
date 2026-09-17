@@ -794,7 +794,8 @@
       "vaultAbsorbedBody": "Your earlier approval for this exact deposit executed just before this submission, so the request was absorbed as a retry of it. Funds moved once, through the approval — this submission moved nothing additional.",
       "vaultAbsorbedStatus": "Handled by approval",
       "vaultAbsorbedNote": "The details below are the approved deposit. If you intended a second deposit of the same amount, submit again.",
-      "vaultHeldKeyUnavailable": "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment."
+      "vaultHeldKeyUnavailable": "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment.",
+      "vaultFloorUnavailable": "SDP could not confirm the exact terms this deposit's earlier attempt was submitted with, so nothing was sent. Check your position, then try again in a moment."
     },
     "vaultWithdraw": {
       "flowDetails": "Details",
@@ -836,6 +837,7 @@
       "submitting": "Submitting…",
       "submitError": "The vault withdrawal could not be submitted.",
       "heldKeyUnavailable": "A previous submission of this exact withdrawal is pending approval, and its status could not be checked. Try again once the connection recovers.",
+      "floorUnavailable": "SDP could not confirm the exact terms this withdrawal's earlier attempt was submitted with, so nothing was sent. Check your position, then try again in a moment.",
       "approvalTitle": "Withdrawal pending approval",
       "approvalBody": "Your organization's wallet policy requires approval for this withdrawal. Nothing has been signed; the exit executes once an approver acts.",
       "approvalStatus": "Pending approval",
