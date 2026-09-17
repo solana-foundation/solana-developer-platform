@@ -51,9 +51,10 @@ or an explicit entry there.
 
 Provider webhooks resolve tenants from provider references. Mural still
 lives on the counterparty row (`mural_organization_id`, with a
-`provider_data` JSON fallback); BVNK moved to
-`counterparty_provider_accounts` rows of kind `customer_link`
-(`provider_customer_reference`). Migration
+`provider_data` JSON fallback); BVNK lives on
+`counterparty_provider_accounts` rows of kind `customer_link`, whose
+`provider_customer_reference` stores the BVNK contact id created from the
+counterparty's collected identity. Migration
 `0080_counterparty_provider_lookup_integrity.sql` (re-scoped by
 `0082_scope_customer_link_uniqueness.sql`) makes both lookup keys unique
 among active rows: the *effective* mural key —
@@ -64,9 +65,11 @@ tenant in every migration phase; two tenants racing to claim the same
 reference get a unique-violation failure instead of a silent cross-tenant
 resolution.
 
-The customer-link uniqueness applies only to providers whose customers SDP
-creates one-per-counterparty (BVNK — which also routes webhooks by customer
-reference — and Lightspark). MoonPay settlements are matched by the
+The customer-link uniqueness applies only to providers whose counterparty
+identity SDP creates one-per-counterparty (BVNK — via the contact id on
+the link — and Lightspark). BVNK payin webhooks are routed by the BVNK
+wallet id (the provider account's external account reference), not by the
+customer reference. MoonPay settlements are matched by the
 transfer's `provider_reference` and record the customer link as a
 byproduct, and one MoonPay account legitimately links to many
 counterparties (the buyer owns the MoonPay account and can be a

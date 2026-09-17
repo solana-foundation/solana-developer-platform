@@ -1,17 +1,7 @@
-import type { CountryCode } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { CRYPTO_RAIL_ASSET_LABELS } from "@sdp/types/payment-rails";
 import { z } from "zod";
 import type { BvnkRuleEntity } from "./provider-data";
-import {
-  BVNK_EMPLOYMENT_STATUSES,
-  BVNK_EXPECTED_VOLUME_CURRENCIES,
-  BVNK_INDUSTRY_SECTORS,
-  BVNK_INTENDED_USES,
-  BVNK_PEP_STATUSES,
-  BVNK_SOURCE_OF_FUNDS,
-  BVNK_YEARLY_INCOMES,
-} from "./requirements";
 
 export const bvnkEstimateFiatCurrencySchema = z.enum(RAMP_FIAT_CURRENCIES);
 
@@ -21,11 +11,6 @@ export const bvnkEstimateFeeCurrencySchema = z
   .toUpperCase()
   .pipe(z.union([bvnkEstimateFiatCurrencySchema, z.enum(Object.values(CRYPTO_RAIL_ASSET_LABELS))]));
 
-export const bvnkComplianceDetailsSchema = z.object({
-  partyDetails: z.array(z.record(z.string(), z.unknown())).min(1),
-});
-export type BvnkComplianceInput = z.infer<typeof bvnkComplianceDetailsSchema>;
-
 export const bvnkSandboxPayinCurrencySchema = z.enum(["USD", "EUR"]);
 export type BvnkSandboxPayinCurrency = z.infer<typeof bvnkSandboxPayinCurrencySchema>;
 
@@ -34,7 +19,7 @@ export const bvnkOfframpQuoteInputSchema = z.object({
   paymentTransferId: z.string().min(1),
   bvnkOfframpWalletId: z.string().min(1),
   externalCustomerId: z.string().min(1),
-  bvnkCompliance: bvnkComplianceDetailsSchema,
+  contactId: z.string().min(1),
 });
 
 export const bvnkOnrampTransferProviderDataSchema = z.object({
@@ -110,140 +95,6 @@ export interface CreateBvnkOnrampRuleInput {
   entity: BvnkRuleEntity;
 }
 
-export const bvnkCustomerStatusSchema = z.enum([
-  "INFO_REQUIRED",
-  "PENDING",
-  "ACTIONS_REQUIRED",
-  "VERIFIED",
-  "REJECTED",
-  "TERMINATED",
-]);
-/** Customer webhooks also report terminal success as COMPLETED or APPROVED, which the v2 customer API never returns. */
-export const bvnkCustomerWebhookStatusSchema = z.enum([
-  ...bvnkCustomerStatusSchema.options,
-  "COMPLETED",
-  "APPROVED",
-]);
-
-const bvnkV2AddressSchema = z.object({
-  addressLine1: z.string().min(1),
-  addressLine2: z.string().optional(),
-  city: z.string().min(1),
-  postalCode: z.string().min(1),
-  stateCode: z.string().optional(),
-  countryCode: z.string().min(2),
-});
-
-const bvnkV2TaxIdentificationSchema = z.object({
-  number: z.string().min(1),
-  taxResidenceCountryCode: z.string().min(2),
-});
-
-const bvnkV2EmploymentStatusSchema = z.enum(BVNK_EMPLOYMENT_STATUSES);
-
-const bvnkV2SourceOfFundsSchema = z.enum([...BVNK_SOURCE_OF_FUNDS, "GIFT", "STUDENT_LOAN_GRANT"]);
-
-const bvnkV2PepStatusSchema = z.enum([...BVNK_PEP_STATUSES, "STATE_OWNED"]);
-const bvnkV2IntendedUseOfAccountSchema = z.enum(BVNK_INTENDED_USES);
-
-const bvnkV2IncomeSchema = z.enum(BVNK_YEARLY_INCOMES);
-const bvnkV2IndustrySectorSchema = z.enum(BVNK_INDUSTRY_SECTORS);
-
-const bvnkV2ExpectedMonthlyVolumeSchema = z.object({
-  amount: z.union([z.string().min(1), z.number().finite()]),
-  currency: z.enum(BVNK_EXPECTED_VOLUME_CURRENCIES),
-});
-export const bvnkV2CddSchema = z.object({
-  employmentStatus: bvnkV2EmploymentStatusSchema,
-  sourceOfFunds: bvnkV2SourceOfFundsSchema,
-  pepStatus: bvnkV2PepStatusSchema,
-  intendedUseOfAccount: bvnkV2IntendedUseOfAccountSchema,
-  expectedMonthlyVolume: bvnkV2ExpectedMonthlyVolumeSchema,
-  estimatedYearlyIncome: bvnkV2IncomeSchema.optional(),
-  employmentIndustrySector: bvnkV2IndustrySectorSchema.optional(),
-});
-
-const bvnkIndividualSchema = z.object({
-  address: bvnkV2AddressSchema,
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
-  birthCountryCode: z.string().min(2),
-  emailAddress: z.string().optional(),
-  phoneNumber: z.string().optional(),
-  description: z.string().optional(),
-  placeOfBirth: z.string().optional(),
-  documentNumber: z.string().optional(),
-  nationality: z.string().min(2),
-  taxIdentification: bvnkV2TaxIdentificationSchema,
-  cdd: bvnkV2CddSchema.optional(),
-});
-export type BvnkCustomerIndividual = z.infer<typeof bvnkIndividualSchema>;
-
-export interface CreateBvnkAgreementSessionInput {
-  countryCode: CountryCode;
-  idempotencyKey: string;
-}
-
-export interface SignBvnkAgreementSessionInput {
-  reference: string;
-  ipAddress: string;
-}
-
-/** BVNK-supplied links are persisted and re-served by the public API, so only https passes the boundary. */
-const bvnkHttpsUrlSchema = z.url({ protocol: /^https$/ });
-
-export const bvnkSessionAgreementSchema = z.object({
-  status: z.string().min(1),
-  name: z.string().min(1),
-  displayName: z.string(),
-  description: z.string(),
-  url: bvnkHttpsUrlSchema,
-  privacyPolicyUrl: bvnkHttpsUrlSchema,
-});
-export type BvnkSessionAgreement = z.infer<typeof bvnkSessionAgreementSchema>;
-
-export const bvnkAgreementSessionSchema = z.object({
-  reference: z.string().min(1),
-  status: z.enum(["PENDING", "SIGNED", "DECLINED"]),
-  agreements: z.array(bvnkSessionAgreementSchema),
-});
-export type BvnkAgreementSession = z.infer<typeof bvnkAgreementSessionSchema>;
-
-export const bvnkCustomerCreatedSchema = z.object({
-  reference: z.string().min(1),
-  status: bvnkCustomerStatusSchema,
-});
-export type BvnkCustomerCreated = z.infer<typeof bvnkCustomerCreatedSchema>;
-
-/**
- * Sumsub-side verification phase echoed by the v1 customer GET. The vocabulary is
- * undocumented and wider than init/pending/completed/failed (a value outside that set
- * surfaced live on 2026-09-16 right after details submission), and SDP never branches
- * on it: the KYC phase comes from `status`. Stored for support visibility only. The
- * block itself may arrive with neither key while Sumsub is being set up.
- */
-export const bvnkVerificationStatusSchema = z.string().min(1);
-
-export const bvnkCustomerSchema = z.object({
-  reference: z.string().min(1),
-  status: bvnkCustomerStatusSchema,
-  verification: z
-    .object({
-      status: bvnkVerificationStatusSchema.optional(),
-      url: bvnkHttpsUrlSchema.optional(),
-    })
-    .optional(),
-});
-export type BvnkCustomer = z.infer<typeof bvnkCustomerSchema>;
-
-export interface CreateBvnkCustomerInput {
-  idempotencyKey: string;
-  externalReference: string;
-  signedAgreementSessionReference: string;
-  individual: BvnkCustomerIndividual;
-}
-
 const bvnkV2PageableSchema = z
   .object({ pageNumber: z.number().int(), pageSize: z.number().int() })
   .optional();
@@ -266,11 +117,9 @@ export interface CreateBvnkLedgerWalletV2Input {
   idempotencyKey: string;
   currency: string;
   name: string;
-  customerId?: string;
   profileId?: string;
 }
 export interface ListBvnkLedgerWalletProfilesV2Input {
-  customerId?: string;
   currency?: string;
 }
 
@@ -308,3 +157,60 @@ export const bvnkRuleResponseSchema = z.object({
   status: z.string().min(1),
 });
 export type BvnkRuleResponse = z.infer<typeof bvnkRuleResponseSchema>;
+
+const bvnkContactV3AddressSchema = z.object({
+  addressLine1: z.string().min(1),
+  addressLine2: z.string().optional(),
+  city: z.string().min(1),
+  region: z.string().optional(),
+  stateCode: z.string().optional(),
+  postalCode: z.string().optional(),
+  country: z.string().min(2),
+});
+export type BvnkContactV3Address = z.infer<typeof bvnkContactV3AddressSchema>;
+
+const bvnkContactV3IndividualSchema = z.object({
+  type: z.literal("INDIVIDUAL"),
+  relationshipType: z.enum(["THIRD_PARTY", "SELF_OWNED"]),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  address: bvnkContactV3AddressSchema.optional(),
+});
+
+const bvnkContactV3CompanySchema = z.object({
+  type: z.literal("COMPANY"),
+  relationshipType: z.enum(["THIRD_PARTY", "SELF_OWNED"]),
+  legalName: z.string().min(1),
+  registrationNumber: z.string().optional(),
+  address: bvnkContactV3AddressSchema.optional(),
+});
+
+export const bvnkContactV3EntitySchema = z.discriminatedUnion("type", [
+  bvnkContactV3IndividualSchema,
+  bvnkContactV3CompanySchema,
+]);
+export type BvnkContactV3Entity = z.infer<typeof bvnkContactV3EntitySchema>;
+
+export const createBvnkContactV3InputSchema = z.object({
+  description: z.string().min(1),
+  entity: bvnkContactV3EntitySchema,
+});
+export type CreateBvnkContactV3Input = z.infer<typeof createBvnkContactV3InputSchema>;
+
+export const bvnkContactV3Schema = z.object({
+  id: z.string().min(1),
+  description: z.string().optional(),
+  category: z.string().optional(),
+  entity: bvnkContactV3EntitySchema,
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+export type BvnkContactV3 = z.infer<typeof bvnkContactV3Schema>;
+
+export const bvnkContactsV3ListResponseSchema = z.object({
+  content: z.array(bvnkContactV3Schema),
+  pageable: bvnkV2PageableSchema,
+  hasNext: z.boolean(),
+});
+export type BvnkContactsV3ListResponse = z.infer<typeof bvnkContactsV3ListResponseSchema>;

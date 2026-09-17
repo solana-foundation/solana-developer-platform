@@ -1,121 +1,75 @@
-import type { Counterparty, CountryCode } from "@sdp/types";
+import type { Counterparty } from "@sdp/types";
 import type {
-  CollectedFieldData,
   CounterpartyRequirements,
-  RampDirection,
+  RequirementField,
 } from "@sdp/types/ramp-requirements";
 import { badRequest, unsupportedCounterparty } from "../../../errors";
-import { parseCollectedFields, readyCounterparty } from "../../requirements";
+import { readyCounterparty, textField } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
 import {
+  type BvnkRuleEntity,
+  type BvnkRuleEntityAddress,
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
   readBvnkOfframpWallet,
 } from "./provider-data";
-import {
-  BVNK_RESIDENCE_FIELDS,
-  bvnkOfframpFields,
-  bvnkOnrampFields,
-  isBvnkOfframpCurrency,
-} from "./requirements";
-import { type BvnkCustomerIndividual, bvnkV2CddSchema } from "./schemas";
+import type { BvnkContactV3, BvnkContactV3Address } from "./schemas";
 
-function collectedString(data: Record<string, unknown>, key: string): string {
-  const value = data[key];
-  if (typeof value !== "string" || value.length === 0) {
-    throw badRequest(`Missing required BVNK field "${key}".`);
-  }
-  return value;
+interface BvnkOfframpSpec {
+  accountType: string;
+  fields: readonly RequirementField[];
 }
 
-/**
- * Parses the first-step residence country from collected data.
- *
- * @param collectedData - Flattened fields supplied for this request.
- * @returns The onboardable residence country. The field's options enum already
- * rejects prohibited countries, so no second check is needed.
- */
-export function parseBvnkResidenceCountry(collectedData: CollectedFieldData): CountryCode {
-  const parsed = parseCollectedFields(
-    BVNK_RESIDENCE_FIELDS,
-    collectedData,
-    "Missing or invalid BVNK residence country."
-  );
-  const value = collectedString(parsed, "taxIdentification.taxResidenceCountryCode");
-  return value as CountryCode;
+/** Verified BVNK payout corridors: each fiat maps to its bank-detail field set. */
+const BVNK_OFFRAMP_SPECS = {
+  USD: {
+    accountType: "ACH",
+    fields: [
+      textField({
+        key: "accountNumber",
+        label: "Account number",
+        required: true,
+        pattern: "^[0-9]{4,17}$",
+      }),
+      textField({
+        key: "routingNumber",
+        label: "Routing number",
+        required: true,
+        pattern: "^[0-9]{9}$",
+        placeholder: "021000021",
+      }),
+    ],
+  },
+  EUR: {
+    accountType: "SEPA_CT",
+    fields: [
+      textField({
+        key: "iban",
+        label: "IBAN",
+        required: true,
+        pattern: "^[A-Z]{2}[0-9A-Z]{13,32}$",
+        placeholder: "DE89370400440532013000",
+      }),
+    ],
+  },
+} as const satisfies Record<string, BvnkOfframpSpec>;
+
+type BvnkOfframpCurrency = keyof typeof BVNK_OFFRAMP_SPECS;
+
+export function isBvnkOfframpCurrency(value: string): value is BvnkOfframpCurrency {
+  return Object.hasOwn(BVNK_OFFRAMP_SPECS, value);
 }
 
-/**
- * Builds the BVNK individual request from transient collected fields.
- *
- * @param collectedData - Flattened PII fields supplied for this request.
- * @param residenceCountry - The counterparty's residence country, collected in
- * the first step and stored on the customer link.
- * @returns A typed BVNK individual request. No collected value is persisted.
- */
-export function buildBvnkCustomerRequest(
-  collectedData: CollectedFieldData,
-  residenceCountry: CountryCode
-): BvnkCustomerIndividual {
-  const data = parseCollectedFields(
-    bvnkOnrampFields(residenceCountry),
-    collectedData,
-    "Missing or invalid BVNK customer details."
-  );
-  const cdd = bvnkV2CddSchema.parse({
-    employmentStatus: collectedString(data, "cdd.employmentStatus"),
-    sourceOfFunds: collectedString(data, "cdd.sourceOfFunds"),
-    pepStatus: collectedString(data, "cdd.pepStatus"),
-    intendedUseOfAccount: collectedString(data, "cdd.intendedUseOfAccount"),
-    expectedMonthlyVolume: {
-      amount: collectedString(data, "cdd.expectedMonthlyVolume.amount"),
-      currency: collectedString(data, "cdd.expectedMonthlyVolume.currency"),
-    },
-    ...(residenceCountry === "US"
-      ? {
-          estimatedYearlyIncome: collectedString(data, "cdd.estimatedYearlyIncome"),
-          employmentIndustrySector: collectedString(data, "cdd.employmentIndustrySector"),
-        }
-      : {}),
-  });
-  const address = {
-    addressLine1: collectedString(data, "address.addressLine1"),
-    city: collectedString(data, "address.city"),
-    postalCode: collectedString(data, "address.postalCode"),
-    countryCode: collectedString(data, "address.countryCode"),
-    ...(residenceCountry === "US" ? { stateCode: collectedString(data, "address.stateCode") } : {}),
-  };
-  return {
-    address,
-    dateOfBirth: collectedString(data, "dateOfBirth"),
-    firstName: collectedString(data, "firstName"),
-    lastName: collectedString(data, "lastName"),
-    birthCountryCode: collectedString(data, "birthCountryCode"),
-    emailAddress: collectedString(data, "email"),
-    nationality: collectedString(data, "nationality"),
-    taxIdentification: {
-      number: collectedString(data, "taxIdentification.number"),
-      taxResidenceCountryCode: residenceCountry,
-    },
-    cdd,
-  };
+export function bvnkOfframpAccountType(fiatCurrency: BvnkOfframpCurrency): string {
+  return BVNK_OFFRAMP_SPECS[fiatCurrency].accountType;
 }
 
-/**
- * @param direction - Ramp direction the residence requirement is answered for.
- * @returns The first-step BVNK residence-collection requirement.
- */
-export function bvnkResidenceRequired(direction: RampDirection): CounterpartyRequirements {
-  return {
-    provider: "bvnk",
-    direction,
-    status: "collect_counterparty_residence",
-    fields: BVNK_RESIDENCE_FIELDS,
-  };
+export function bvnkOfframpFields(fiatCurrency: BvnkOfframpCurrency): RequirementField[] {
+  return [...BVNK_OFFRAMP_SPECS[fiatCurrency].fields];
 }
 
 export function validateBvnkCounterparty(
-  counterparty: Counterparty,
+  _counterparty: Counterparty,
   options: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
   const { direction, providerData, fiatCurrency } = options;
@@ -131,9 +85,6 @@ export function validateBvnkCounterparty(
         `BVNK off-ramp does not support payouts in ${fiatCurrency}.`
       );
     }
-    if (options.providerCustomerReference === undefined) {
-      return bvnkResidenceRequired(direction);
-    }
     if (!latestBvnkOfframpBeneficiary(providerData, fiatCurrency)) {
       return {
         provider: "bvnk",
@@ -147,18 +98,69 @@ export function validateBvnkCounterparty(
       return {
         provider: "bvnk",
         direction,
-        status: "customer_funding_account_provisioning",
+        status: "provisioning",
       };
     }
     return readyCounterparty("bvnk", direction);
   }
 
-  if (counterparty.entityType !== "individual") {
-    return unsupportedCounterparty(
-      "bvnk",
-      direction,
-      "BVNK on-ramp supports individual counterparties only."
-    );
+  return readyCounterparty("bvnk", direction);
+}
+
+/**
+ * Maps a BVNK v3 contact address onto the rule-entity address lanes. The
+ * contact's ISO country is mirrored into both `country` and `countryCode`
+ * because BVNK rule validation rejects a blank `country` while the v2 channel
+ * payload reads `countryCode`.
+ *
+ * @param address - V3 contact address; its `country` is ISO 3166-1 alpha-2.
+ * @returns The rule-entity address with every present lane carried over.
+ */
+function mapBvnkContactAddress(address: BvnkContactV3Address): BvnkRuleEntityAddress {
+  return {
+    addressLine1: address.addressLine1,
+    ...(address.addressLine2 === undefined ? {} : { addressLine2: address.addressLine2 }),
+    ...(address.postalCode === undefined ? {} : { postalCode: address.postalCode }),
+    city: address.city,
+    countryCode: address.country,
+    country: address.country,
+    ...(address.stateCode === undefined ? {} : { stateCode: address.stateCode }),
+  };
+}
+
+/**
+ * Builds the THIRD_PARTY rule entity for a BVNK v3 contact, keyed on the SDP
+ * counterparty id. The contact is fetched JIT at rule-creation time because
+ * BVNK payment rules accept an inline entity, not a contactId.
+ *
+ * @param contact - BVNK v3 contact bound to the counterparty.
+ * @param counterpartyId - SDP counterparty primary key in `cpty_<uuid>` format.
+ * @returns The rule beneficiary entity for the contact's entity type.
+ */
+export function buildBvnkThirdPartyRuleEntity(
+  contact: BvnkContactV3,
+  counterpartyId: string
+): BvnkRuleEntity {
+  const { entity } = contact;
+  if (entity.type === "INDIVIDUAL") {
+    return {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      customerIdentifier: counterpartyId,
+      firstName: entity.firstName,
+      lastName: entity.lastName,
+      ...(entity.dateOfBirth === undefined ? {} : { dateOfBirth: entity.dateOfBirth }),
+      ...(entity.address === undefined ? {} : { address: mapBvnkContactAddress(entity.address) }),
+    };
   }
-  return bvnkResidenceRequired(direction);
+  return {
+    type: "COMPANY",
+    relationshipType: "THIRD_PARTY",
+    customerIdentifier: counterpartyId,
+    legalName: entity.legalName,
+    ...(entity.registrationNumber === undefined
+      ? {}
+      : { registrationNumber: entity.registrationNumber }),
+    ...(entity.address === undefined ? {} : { address: mapBvnkContactAddress(entity.address) }),
+  };
 }

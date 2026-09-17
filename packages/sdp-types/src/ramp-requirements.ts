@@ -145,44 +145,7 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "lightspark"; status: "onboarding_not_started" }
   | { provider: "lightspark"; status: "collect_counterparty"; fields: RequirementField[] }
   | { provider: "lightspark"; status: "collect_account"; payout: PayoutRequirementTree }
-  | { provider: "bvnk"; status: "collect_counterparty"; fields: RequirementField[] }
-  | {
-      provider: "bvnk";
-      /**
-       * First BVNK step: collects only the tax-residence country so agreements
-       * can be minted for it before any other PII is requested.
-       */
-      status: "collect_counterparty_residence";
-      fields: RequirementField[];
-    }
-  | {
-      provider: "bvnk";
-      status: "counterparty_collect_agreement";
-      /**
-       * Agreements of the minted v1 session. The document links are the
-       * session's static help-centre URLs stored on the customer link; nothing
-       * is minted per response. `name` is the v1 agreement identifier (v1 has
-       * no id).
-       */
-      agreements: {
-        name: string;
-        displayName: string;
-        description: string;
-        url: string;
-        privacyPolicyUrl: string;
-      }[];
-    }
-  | {
-      provider: "bvnk";
-      status: "customer_verification_required";
-      /** The authenticated verification link is minted JIT per response. */
-      verificationUrl: string;
-    }
-  | { provider: "bvnk"; status: "customer_verifying" }
-  | { provider: "bvnk"; status: "counterparty_agreement_signing" }
-  | { provider: "bvnk"; status: "customer_verification_failed" }
-  | { provider: "bvnk"; status: "customer_funding_account_provisioning" }
-  | { provider: "bvnk"; status: "customer_funding_account_provisioning_failed" }
+  | { provider: RampProviderId; status: "provisioning" }
   | { provider: "mural"; status: "onboarding_not_started" }
   | { provider: "mural"; status: "terms_of_service_required"; termsOfServiceUrl: string }
   | { provider: "mural"; status: "customer_verification_required"; verificationUrl: string }
@@ -195,9 +158,8 @@ export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES = [
   "terms_of_service_required",
   "customer_verification_required",
   "customer_verifying",
-  "counterparty_agreement_signing",
-  "customer_funding_account_provisioning",
   "funding_account_provisioning",
+  "provisioning",
 ] as const satisfies readonly CounterpartyRequirements["status"][];
 
 export type CounterpartyRequirementsPollStatus =
@@ -217,9 +179,8 @@ export function isCounterpartyRequirementsPollStatus(
 
 export const RAMP_ONBOARDING_PENDING_STATUSES = [
   "customer_verifying",
-  "counterparty_agreement_signing",
-  "customer_funding_account_provisioning",
   "funding_account_provisioning",
+  "provisioning",
 ] as const satisfies readonly CounterpartyRequirements["status"][];
 
 export type RampOnboardingPendingStatus = (typeof RAMP_ONBOARDING_PENDING_STATUSES)[number];
@@ -237,23 +198,17 @@ export function isRampOnboardingPendingStatus(
 }
 
 /** Collect stages whose answer carries a `fields` array for the client to render. */
-export const COLLECT_FIELDS_STATUSES = [
-  "collect",
-  "collect_counterparty",
-  "collect_counterparty_residence",
-] as const;
+export const COLLECT_FIELDS_STATUSES = ["collect", "collect_counterparty"] as const;
 
 export type CollectFieldsStatus = (typeof COLLECT_FIELDS_STATUSES)[number];
 
 /**
  * Requirement statuses answered on the client's requirements step before the
- * provider can advance: field collection, payout-account selection, or
- * agreement consent.
+ * provider can advance: field collection or payout-account selection.
  */
 export const COLLECT_STAGE_STATUSES = [
   ...COLLECT_FIELDS_STATUSES,
   "collect_account",
-  "counterparty_collect_agreement",
 ] as const;
 
 export type CollectStageStatus = (typeof COLLECT_STAGE_STATUSES)[number];

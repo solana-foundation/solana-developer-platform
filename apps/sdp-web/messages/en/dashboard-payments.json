@@ -306,30 +306,11 @@
       "receiveTitle": "Receive funds onchain"
     },
     "bvnk": {
-      "agreementRequiredTitle": "Review and accept the agreements",
-      "agreementRequiredDescription": "BVNK requires the counterparty to accept the platform agreement for their tax residence before their details are collected.",
-      "acceptAgreements": "I agree and continue",
-      "agreementSigningTitle": "Confirming agreement",
-      "agreementSigningDescription": "Waiting for the provider to confirm the signed agreement. This usually takes a few seconds.",
-      "verificationRequiredTitle": "Verify your identity",
-      "verificationRequiredDescription": "BVNK partners with Sumsub to confirm your identity before activating your funding account. Hit “Complete Verification” to get started — this page refreshes automatically once you're approved, and your instructions will appear right here.",
-      "verificationInReviewTitle": "Verification in review",
-      "verificationInReviewDescription": "Sumsub is reviewing your details — this usually takes just a few minutes. Feel free to come back later; your instructions will show up here as soon as you're approved.",
-      "verificationFailedTitle": "Identity verification was not approved",
-      "verificationFailedDescription": "BVNK couldn't verify your identity, so this funding account can't be activated. Contact support if you believe this is a mistake.",
-      "fundingAccountProvisioningTitle": "Setting up your funding account",
-      "fundingAccountProvisioningDescription": "Almost there — we're provisioning your virtual account now. Your instructions will appear here in a moment.",
-      "provisioningFailedTitle": "We couldn't finish setting up your account",
-      "provisioningFailedDescription": "Something went wrong provisioning your funding account. Please try again.",
       "readyTitle": "Preparing your instructions",
       "readyDescription": "Your funding account is ready — fetching your details now.",
-      "onrampProvisioningDetail": "Provisioning a BVNK wallet and fiat→crypto payment rule for this quote.",
-      "offrampProvisioningDetail": "Provisioning a dedicated BVNK payout wallet for this currency.",
       "simulateDeposit": "Simulate Deposit",
       "simulating": "Simulating...",
-      "depositSimulated": "Deposit Simulated",
-      "agreementConsentPrefix": "I have read and agree to the",
-      "privacyPolicy": "privacy policy"
+      "depositSimulated": "Deposit Simulated"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verify your identity",
@@ -469,12 +450,6 @@
       "depositAddress": "Deposit address",
       "bankCode": "Bank code",
       "paymentReference": "Payment reference",
-      "identityVerificationRequired": "Identity verification required",
-      "completeVerification": "Complete verification",
-      "provisioningAccount": "BVNK is provisioning your virtual bank account",
-      "verificationInReview": "Verification in review",
-      "provisioningFundingAccount": "Provisioning funding account",
-      "checkingVerificationStatus": "Checking verification status",
       "manualFundingInstructions": "Manual Funding Instructions",
       "defaultDescription": "Send {amount} using one of the supported rails. Include the reference exactly so the provider can match the deposit to this quote.",
       "quotedAmount": "the quoted amount",
@@ -595,22 +570,15 @@
       "providerAccountRail": "Rail",
       "providerAccountBank": "Bank",
       "providerAccountNumber": "Account",
-      "providerAccountCustomer": "Customer",
       "providerAccountStatus": "Status",
-      "copyCustomerId": "Copy customer ID",
-      "customerIdCopied": "Customer ID copied",
-      "taxResidence": "Tax residence",
-      "agreementSigned": "Signed",
-      "agreementAwaitingSignature": "Awaiting signature",
-      "viewAgreement": "Agreement",
-      "viewPrivacyPolicy": "Privacy policy",
       "noPayoutAccounts": "No payout accounts yet.",
       "addExternalAccountTitle": "Add Crypto Address",
       "manage": "Manage",
       "details": "Details",
       "transactions": "Transactions",
       "copyAddress": "Copy address",
-      "addressCopied": "Address copied"
+      "addressCopied": "Address copied",
+      "providerAccountIdentity": "Identity · BVNK contact"
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -1040,8 +1008,14 @@
           "onramp": "Onramp",
           "offramp": "Offramp"
         },
-        "earn": { "deposit": "Deposit", "withdraw": "Withdraw" },
-        "dvp": { "fund": "Fund leg", "close": "Close leg" },
+        "earn": {
+          "deposit": "Deposit",
+          "withdraw": "Withdraw"
+        },
+        "dvp": {
+          "fund": "Fund leg",
+          "close": "Close leg"
+        },
         "private_channels": {
           "transfer": "Transfer",
           "deposit": "Deposit",

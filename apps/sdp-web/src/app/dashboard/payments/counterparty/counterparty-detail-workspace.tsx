@@ -4,8 +4,6 @@ import {
   type Counterparty,
   type CounterpartyAccount,
   type CounterpartyProviderAccount,
-  type CounterpartyProviderCustomerLink,
-  type CounterpartyProviderCustomerLinkAgreement,
   PAYMENT_TRANSFER_STATUS_TONE,
   type PaymentTransferStatus,
   type PaymentTransferSummary,
@@ -17,10 +15,8 @@ import {
   BanknoteArrowDownIcon,
   BanknoteArrowUpIcon,
   CalendarIcon,
-  CheckCircle2Icon,
   CheckIcon,
   ChevronDownIcon,
-  ClockIcon,
   CopyIcon,
   ExternalLinkIcon,
   HashIcon,
@@ -56,7 +52,6 @@ import {
   RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS,
   RAMP_PROVIDER_LOGOS,
 } from "@/lib/ramps";
-import { openBvnkCustomerLink } from "@/lib/trusted-ramp-destinations";
 import { useCopy } from "@/lib/use-copy";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
@@ -176,169 +171,55 @@ function providerAccountStatus(
   return account.providerStatus;
 }
 
-interface ProviderCustomerGroup {
+interface ProviderAccountGroup {
   provider: RampProviderId;
-  customerLink: CounterpartyProviderCustomerLink | undefined;
+  customerLink: CounterpartyProviderAccount | undefined;
   payoutAccounts: CounterpartyProviderAccount[];
 }
 
 /**
- * Groups provider-account rows by provider with the customer link lifted onto the group.
+ * Groups provider-account rows by provider, separating the customer-link
+ * identity row from the payout rows.
  *
  * @param accounts - Flat provider-account rows from the API.
  * @returns One group per provider in first-seen order.
  */
-function groupProviderAccounts(accounts: CounterpartyProviderAccount[]): ProviderCustomerGroup[] {
-  const groups = new Map<RampProviderId, ProviderCustomerGroup>();
+function groupProviderAccounts(accounts: CounterpartyProviderAccount[]): ProviderAccountGroup[] {
+  const groups = new Map<RampProviderId, ProviderAccountGroup>();
   for (const account of accounts) {
     let group = groups.get(account.provider);
     if (group === undefined) {
       group = { provider: account.provider, customerLink: undefined, payoutAccounts: [] };
       groups.set(account.provider, group);
     }
+    if (account.kind === "customer_link") {
+      group.customerLink = account;
+    }
     if (account.kind === "payout_account") {
       group.payoutAccounts.push(account);
-    }
-    if (account.customerLink !== undefined) {
-      group.customerLink = account.customerLink;
     }
   }
   return [...groups.values()];
 }
 
 /**
- * Renders the agreement session rows for a BVNK customer link: one row per
- * agreement with its signing state on the left and the document links.
+ * Renders the provider-side identity row: the counterparty's provider contact
+ * (e.g. the BVNK contact). One row with no action and no status.
  *
- * @param agreements - Signed or pending agreements from the customer link.
- * @returns The agreement rows.
+ * @returns The identity row.
  */
-function CustomerLinkAgreements({
-  agreements,
-}: {
-  agreements: CounterpartyProviderCustomerLinkAgreement[];
-}) {
+function CustomerLinkRow() {
   const t = useTranslations();
   return (
-    <>
-      {agreements.map((agreement) => (
-        <div
-          key={agreement.name}
-          className="flex min-w-0 items-center gap-2 border-t border-border-default px-4 py-2 text-sm"
-        >
-          {agreement.signedAt !== null ? (
-            <span
-              className="flex shrink-0 items-center gap-1 text-success"
-              title={formatTimestamp(agreement.signedAt, t)}
-            >
-              <CheckCircle2Icon className="size-4" />
-              {t("DashboardPayments.counterparty.agreementSigned")}
-            </span>
-          ) : (
-            <span className="flex shrink-0 items-center gap-1 text-tertiary">
-              <ClockIcon className="size-4" />
-              {t("DashboardPayments.counterparty.agreementAwaitingSignature")}
-            </span>
-          )}
-          <span className="truncate text-primary">{agreement.displayName}</span>
-          <button
-            type="button"
-            className="underline underline-offset-2 text-tertiary hover:text-primary"
-            onClick={() => openBvnkCustomerLink(agreement.url)}
-          >
-            {t("DashboardPayments.counterparty.viewAgreement")}
-          </button>
-          <button
-            type="button"
-            className="underline underline-offset-2 text-tertiary hover:text-primary"
-            onClick={() => openBvnkCustomerLink(agreement.privacyPolicyUrl)}
-          >
-            {t("DashboardPayments.counterparty.viewPrivacyPolicy")}
-          </button>
-        </div>
-      ))}
-    </>
-  );
-}
-
-/** Provider logo, label, "Customer" tag, status badge, and BVNK residence flag. */
-function ProviderCustomerHeader({
-  provider,
-  customerLink,
-}: {
-  provider: RampProviderId;
-  customerLink: CounterpartyProviderCustomerLink | undefined;
-}) {
-  const t = useTranslations();
-  return (
-    <>
-      <Image
-        src={RAMP_PROVIDER_LOGOS[provider]}
-        alt=""
-        width={20}
-        height={20}
-        className="size-5 rounded"
-      />
-      <span className="text-sm font-medium text-primary">{getRampProviderLabel(provider)}</span>
-      {customerLink !== undefined ? (
-        <>
-          <span className="text-xs uppercase tracking-wide text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountCustomer")}
-          </span>
-          <ProviderAccountStatusBadge status={providerAccountStatus(customerLink)} />
-          {customerLink.provider === "bvnk" ? (
-            <span
-              className="text-xs text-tertiary"
-              title={t("DashboardPayments.counterparty.taxResidence")}
-            >
-              <span aria-hidden="true">{regionFlagEmoji(customerLink.residenceCountryCode)}</span>{" "}
-              {customerLink.residenceCountryCode}
-            </span>
-          ) : null}
-        </>
-      ) : null}
-    </>
-  );
-}
-
-/** Provider customer reference with copy button (once the customer exists) and the link's age. */
-function CustomerLinkMeta({ customerLink }: { customerLink: CounterpartyProviderCustomerLink }) {
-  const t = useTranslations();
-  const { copied, copy } = useCopy();
-  const customerReference = customerLink.providerCustomerReference;
-  return (
-    <div className="flex min-w-0 items-center gap-1">
-      {customerReference !== null ? (
-        <>
-          <span className="max-w-40 truncate text-xs text-tertiary">{customerReference}</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="size-5"
-            aria-label={t("DashboardPayments.counterparty.copyCustomerId")}
-            onClick={() => {
-              void copy(customerReference);
-              toast.success(t("DashboardPayments.counterparty.customerIdCopied"), {
-                position: "bottom-right",
-              });
-            }}
-          >
-            {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
-          </Button>
-        </>
-      ) : null}
-      <span
-        className="whitespace-nowrap text-xs text-tertiary"
-        title={formatTimestamp(customerLink.createdAt, t)}
-      >
-        {formatRelativeTime(customerLink.createdAt)}
+    <div className="flex items-center border-t border-border-default px-4 py-2.5 text-sm">
+      <span className="truncate text-sm text-primary">
+        {t("DashboardPayments.counterparty.providerAccountIdentity")}
       </span>
     </div>
   );
 }
 
-function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
+function ProviderAccountCard({ group }: { group: ProviderAccountGroup }) {
   const t = useTranslations();
   const [open, setOpen] = useState(true);
   const { provider, customerLink, payoutAccounts } = group;
@@ -367,18 +248,33 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
                 !open && "-rotate-90"
               )}
             />
-            <ProviderCustomerHeader provider={provider} customerLink={customerLink} />
+            <Image
+              src={RAMP_PROVIDER_LOGOS[provider]}
+              alt=""
+              width={20}
+              height={20}
+              className="size-5 rounded"
+            />
+            <span className="text-sm font-medium text-primary">
+              {getRampProviderLabel(provider)}
+            </span>
           </button>
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <ProviderCustomerHeader provider={provider} customerLink={customerLink} />
+            <Image
+              src={RAMP_PROVIDER_LOGOS[provider]}
+              alt=""
+              width={20}
+              height={20}
+              className="size-5 rounded"
+            />
+            <span className="text-sm font-medium text-primary">
+              {getRampProviderLabel(provider)}
+            </span>
           </div>
         )}
-        {customerLink !== undefined ? <CustomerLinkMeta customerLink={customerLink} /> : null}
       </div>
-      {customerLink !== undefined && customerLink.provider === "bvnk" ? (
-        <CustomerLinkAgreements agreements={customerLink.agreements} />
-      ) : null}
+      {customerLink !== undefined ? <CustomerLinkRow /> : null}
       {expandable && open ? (
         payoutAccounts.length === 0 ? (
           <p className="border-t border-border-default px-4 py-3 text-sm text-tertiary">
@@ -1221,7 +1117,7 @@ export function CounterpartyDetailWorkspace({
               ) : (
                 <div className="space-y-3">
                   {groupProviderAccounts(providerAccounts).map((group) => (
-                    <ProviderCustomerCard key={group.provider} group={group} />
+                    <ProviderAccountCard key={group.provider} group={group} />
                   ))}
                 </div>
               )}

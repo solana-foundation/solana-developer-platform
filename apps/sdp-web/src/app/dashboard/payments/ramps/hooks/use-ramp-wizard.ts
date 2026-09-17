@@ -373,14 +373,11 @@ export function useRampWizard<TId extends string>(
       position: "bottom-right",
     });
     try {
-      const result = await requirements.submitRequirements(
-        {
-          assetRail: selectedRampPair.assetRail,
-          destinationCustodyWalletId: selectedWallet.id,
-          fiatCurrency: selectedRampPair.fiatCurrency,
-        },
-        requirements.pendingAgreements !== null ? "consent" : "collected"
-      );
+      const result = await requirements.submitRequirements({
+        assetRail: selectedRampPair.assetRail,
+        destinationCustodyWalletId: selectedWallet.id,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+      });
       setHostedQuoteLoading(false);
       if (result.status === "unsupported") {
         toast.error(result.reason, { id: toastId, position: "bottom-right" });
@@ -537,10 +534,6 @@ export function useRampWizard<TId extends string>(
     retryQuoteCreation,
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,
-    retryOnboarding: requirements.retryOnboarding,
-    pendingAgreements: requirements.pendingAgreements,
-    acceptedAgreements: requirements.acceptedAgreements,
-    toggleAgreement: requirements.toggleAgreement,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

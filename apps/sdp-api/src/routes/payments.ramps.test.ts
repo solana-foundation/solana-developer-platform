@@ -1,11 +1,11 @@
 import { createHmac } from "node:crypto";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
-  bvnkCachedCustomerSeed,
   bvnkOnrampProviderDataSeed,
   TEST_BVNK_OFFRAMP_WALLET_ID,
 } from "@/test/helpers/bvnk";
@@ -1016,11 +1016,160 @@ describe("Payments routes — ramps", () => {
     fetchSpy.mockRestore();
   });
 
+  it("passes the BVNK contact id and the counterparty id to the off-ramp quote", async () => {
+    const counterpartyId = await seedCounterparty({
+      externalId: "customer_contact_quote",
+      providerData: bvnkOnrampProviderDataSeed({
+        offramp: {
+          wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } },
+          beneficiaries: {
+            "USD:abc123": {
+              key: "USD:abc123",
+              fiatCurrency: "USD",
+              accountType: "ACH",
+              createdAt: "2026-06-01T00:00:00.000Z",
+            },
+          },
+        },
+      }),
+    });
+    // The customer_link row's reference is the BVNK contact id in the Direct model.
+    const contactId = "contact_offramp_quote_1";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_provider_accounts (
+           id, organization_id, project_id, counterparty_id, provider,
+           provider_customer_reference, kind, metadata
+         ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', ?)`
+      )
+      .bind(`cpa_contact_quote`, TEST_ORG.id, TEST_PROJECT.id, counterpartyId, contactId, "{}")
+      .run();
+    const createQuote = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote")
+      .mockResolvedValue({
+        provider: "bvnk",
+        id: "019f0ce4-98ab-7424-a968-fc323266b8ed",
+        status: "pending",
+        deliveryMode: "manual_instructions",
+        paymentInstructions: [
+          {
+            provider: "bvnk",
+            kind: "crypto_deposit",
+            fiatCurrency: "USD",
+            cryptoCurrency: "USDC",
+            destinationAddress: "H8j6ZdeUt1D3GexMhUs6mSrncK7r4KkspKuLVhpsA7V6",
+            network: "SOLANA",
+            reference: "sdp_offramp_quote_test",
+            instructionsNotes: "Send USDC on SOLANA to the deposit address.",
+          },
+        ],
+      } as unknown as Awaited<ReturnType<typeof RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote>>);
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "bvnk",
+          counterpartyId,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(createQuote).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ contactId, externalCustomerId: counterpartyId })
+    );
+    // The quote stamps the pending transfer's provider reference with the channel id.
+    const transfer = await getDb(env)
+      .prepare(
+        "SELECT provider_reference FROM payment_transfers WHERE counterparty_id = ? AND type = 'offramp'"
+      )
+      .bind(counterpartyId)
+      .first<{ provider_reference: string | null }>();
+    expect(transfer?.provider_reference).toBe("019f0ce4-98ab-7424-a968-fc323266b8ed");
+    createQuote.mockRestore();
+  });
+
+  it("ignores another counterparty's BVNK contact link when quoting off-ramp", async () => {
+    const linkedCounterpartyId = await seedCounterparty({ externalId: "customer_contact_owner" });
+    const counterpartyId = await seedCounterparty({
+      externalId: "customer_contact_unrelated",
+      providerData: bvnkOnrampProviderDataSeed({
+        offramp: {
+          wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } },
+          beneficiaries: {
+            "USD:abc123": {
+              key: "USD:abc123",
+              fiatCurrency: "USD",
+              accountType: "ACH",
+              createdAt: "2026-06-01T00:00:00.000Z",
+            },
+          },
+        },
+      }),
+    });
+    // Only the linked counterparty holds a customer_link row; the quoting
+    // counterparty must not resolve through it.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_provider_accounts (
+           id, organization_id, project_id, counterparty_id, provider,
+           provider_customer_reference, kind, metadata
+         ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', ?)`
+      )
+      .bind(
+        `cpa_contact_owner`,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        linkedCounterpartyId,
+        "contact_owner_1",
+        "{}"
+      )
+      .run();
+    const createQuote = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote");
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "bvnk",
+          counterpartyId,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
+          fiatCurrency: "USD",
+          cryptoAmount: "75.25",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("CONFLICT");
+    expect(createQuote).not.toHaveBeenCalled();
+    createQuote.mockRestore();
+  });
+
   it("rejects a BVNK off-ramp quote until the payout beneficiary is provisioned", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "customer_456",
       providerData: bvnkOnrampProviderDataSeed({
-        customer: bvnkCachedCustomerSeed("customer_456", { status: "VERIFIED" }),
         offramp: { wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } } },
       }),
     });

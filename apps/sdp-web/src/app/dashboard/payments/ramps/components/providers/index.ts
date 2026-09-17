@@ -2,7 +2,7 @@ import type { RampProviderId } from "@sdp/types";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { LucideIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
+import { getBvnkOnboardingCopy, getBvnkSimulateLabels } from "./bvnk";
 import {
   getLightsparkOnboardingCopy,
   getLightsparkProvisioningDetail,
@@ -28,19 +28,20 @@ type ReadyRequirement = Extract<CounterpartyRequirements, { status: "ready" }>;
 
 export type BvnkOnboardingPanelStatus = Exclude<
   BvnkRequirements["status"] | ReadyRequirement["status"],
-  | "collect"
-  | "collect_counterparty"
-  | "collect_counterparty_residence"
-  | "counterparty_collect_agreement"
-  | "unsupported"
+  "collect" | "provisioning" | "unsupported"
 >;
 export type LightsparkOnboardingPanelStatus = Exclude<
   LightsparkRequirements["status"] | ReadyRequirement["status"],
-  "collect" | "collect_counterparty" | "collect_account" | "onboarding_not_started" | "unsupported"
+  | "collect"
+  | "collect_counterparty"
+  | "collect_account"
+  | "onboarding_not_started"
+  | "provisioning"
+  | "unsupported"
 >;
 export type MuralOnboardingPanelStatus = Exclude<
   MuralRequirements["status"] | ReadyRequirement["status"],
-  "collect" | "onboarding_not_started" | "unsupported"
+  "collect" | "onboarding_not_started" | "provisioning" | "unsupported"
 >;
 
 type BvnkPanelOnboardingRequirements =
@@ -61,12 +62,6 @@ type PanelOnboardingRequirements =
   | MuralPanelOnboardingRequirements;
 
 const BVNK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> = new Set([
-  "customer_verification_required",
-  "customer_verifying",
-  "counterparty_agreement_signing",
-  "customer_verification_failed",
-  "customer_funding_account_provisioning",
-  "customer_funding_account_provisioning_failed",
   "ready",
 ]);
 
@@ -184,8 +179,6 @@ export function provisioningDetail(
   t: Translate
 ): string {
   switch (provider) {
-    case "bvnk":
-      return getBvnkProvisioningDetail(t)[direction];
     case "lightspark":
       return getLightsparkProvisioningDetail(t)[direction];
     case "mural":

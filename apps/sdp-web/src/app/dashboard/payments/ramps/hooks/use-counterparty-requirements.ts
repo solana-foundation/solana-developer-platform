@@ -16,7 +16,7 @@ import {
   isCollectStageStatus,
   isCounterpartyRequirementsPollStatus,
 } from "@sdp/types/ramp-requirements";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import {
   buildCounterpartyRequirementsKey,
@@ -182,50 +182,25 @@ export interface AdvanceRequirementsPayload {
   fiatCurrency: RampFiatCurrency;
 }
 
-/** Advance kinds select the submission body: collected field data, or a pure consent flag. */
-export type AdvanceRequirementsKind = "collected" | "consent";
+type CounterpartyRequirementsAdvanceBody = AdvanceRequirementsPayload & {
+  collectedData: CollectedFieldData;
+  providerAccountId?: string;
+};
 
 /**
- * Consent keys one pending agreement requires: the agreement text and its
- * privacy policy are acknowledged separately, so each gets its own key.
- *
- * @param agreement - Pending agreement from the requirements answer.
- * @returns The two consent keys the step gate expects for this agreement.
- */
-export function bvnkAgreementConsentKeys(agreement: { name: string }): {
-  agreement: string;
-  privacyPolicy: string;
-} {
-  return { agreement: agreement.name, privacyPolicy: `${agreement.name}:privacy-policy` };
-}
-
-type CounterpartyRequirementsAdvanceBody =
-  | (AdvanceRequirementsPayload & {
-      collectedData: CollectedFieldData;
-      providerAccountId?: string;
-    })
-  | (AdvanceRequirementsPayload & { agreementConsent: true });
-
-/**
- * Shapes the advance POST body: a consent advance carries only the consent
- * flag; a collected advance carries the client-collected fields, or the saved
+ * Shapes the advance POST body: the client-collected fields, or the saved
  * payout account's identity when one was picked instead of collecting again.
  *
  * @param payload - Corridor identity the advance answers for.
- * @param advance - Whether this advance submits collected data or consent.
  * @param collectedData - Fields collected so far for the current stage.
  * @param selectedPayoutAccount - Saved payout account picked in place of collection, or null.
  * @returns The request body for the requirements advance.
  */
 function buildAdvanceBody(
   payload: AdvanceRequirementsPayload,
-  advance: AdvanceRequirementsKind,
   collectedData: CollectedFieldData,
   selectedPayoutAccount: PayoutRequirementAccount | null
 ): CounterpartyRequirementsAdvanceBody {
-  if (advance === "consent") {
-    return { ...payload, agreementConsent: true };
-  }
   if (selectedPayoutAccount === null) {
     return { ...payload, collectedData };
   }
@@ -278,7 +253,6 @@ interface AdvanceRecord {
   corridor: string;
   advanceId: string;
   payload: AdvanceRequirementsPayload;
-  kind: AdvanceRequirementsKind;
   result: CounterpartyRequirements;
 }
 
@@ -350,35 +324,12 @@ export interface CounterpartyRequirementsState {
   resolvedProviderAccountId: string | null;
   /**
    * Advances provider provisioning; resolves to the new lifecycle state. The
-   * kind selects the submission body: collected field data, or a pure consent
-   * flag with no collected data.
+   * submission carries the collected field data, or the saved payout account's
+   * identity when one was picked in place of collection.
    */
-  submitRequirements: (
-    payload: AdvanceRequirementsPayload,
-    advance: AdvanceRequirementsKind
-  ) => Promise<CounterpartyRequirements>;
+  submitRequirements: (payload: AdvanceRequirementsPayload) => Promise<CounterpartyRequirements>;
   /** An advance POST is in flight. */
   isAdvancing: boolean;
-  /** Re-runs the advance (POST) to retry — used by the customer funding provisioning failure action. */
-  retryOnboarding: () => void;
-  /** Agreements awaiting consent on the requirements step, or null when the step collects fields. */
-  pendingAgreements:
-    | Extract<CounterpartyRequirements, { status: "counterparty_collect_agreement" }>["agreements"]
-    | null;
-  /**
-   * Consent keys (see `bvnkAgreementConsentKeys`) the user has ticked for the
-   * current corridor; cleared whenever the corridor changes so consent never
-   * leaks across subjects.
-   */
-  acceptedAgreements: readonly string[];
-  /**
-   * Records or withdraws one consent key; the step gate releases only once
-   * every pending agreement has both of its keys accepted.
-   *
-   * @param key - A consent key from `bvnkAgreementConsentKeys`.
-   * @param accepted - Whether the user checked (true) or unchecked (false) it.
-   */
-  toggleAgreement: (key: string, accepted: boolean) => void;
 }
 
 /**
@@ -392,7 +343,6 @@ export function useCounterpartyRequirements(
 ): CounterpartyRequirementsState {
   const t = useTranslations();
   const [collectedData, setCollectedData] = useState<CollectedFieldData>({});
-  const [acceptedAgreements, setAcceptedAgreements] = useState<readonly string[]>([]);
   const [selectedPayoutAccountId, setSelectedPayoutAccountId] = useState<string | null>(null);
   const setField = (key: string, value: string) => {
     setCollectedData((previous) => {
@@ -442,16 +392,10 @@ export function useCounterpartyRequirements(
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
-    setAcceptedAgreements([]);
     setSelectedPayoutAccountId(null);
     setAdvanceRecord(null);
     setCollectRecord(null);
   }
-  const toggleAgreement = useCallback((key: string, accepted: boolean) => {
-    setAcceptedAgreements((previous) =>
-      accepted ? [...previous, key] : previous.filter((acceptedKey) => acceptedKey !== key)
-    );
-  }, []);
   const advance =
     advanceRecord !== null && advanceRecord.corridor === corridorIdentity ? advanceRecord : null;
 
@@ -488,8 +432,7 @@ export function useCounterpartyRequirements(
   );
 
   const submitRequirements = async (
-    payload: AdvanceRequirementsPayload,
-    advance: AdvanceRequirementsKind
+    payload: AdvanceRequirementsPayload
   ): Promise<CounterpartyRequirements> => {
     if (!params?.provider || !params.counterpartyId) {
       throw new Error(t("DashboardPayments.workspace.requirementsContextMissing"));
@@ -497,7 +440,7 @@ export function useCounterpartyRequirements(
     const corridor = corridorIdentity;
     setIsAdvancing(true);
     try {
-      const advanceBody = buildAdvanceBody(payload, advance, collectedData, selectedPayoutAccount);
+      const advanceBody = buildAdvanceBody(payload, collectedData, selectedPayoutAccount);
       const result = await advanceCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
@@ -509,7 +452,6 @@ export function useCounterpartyRequirements(
         corridor,
         advanceId: crypto.randomUUID(),
         payload,
-        kind: advance,
         result,
       });
       if (isCollectStageStatus(result.status)) {
@@ -523,12 +465,6 @@ export function useCounterpartyRequirements(
       if (params.provider === "lightspark" && params.direction === "offramp") {
         void revalidateRequirements();
       }
-    }
-  };
-
-  const retryOnboarding = () => {
-    if (advance !== null) {
-      void submitRequirements(advance.payload, advance.kind).catch(() => {});
     }
   };
 
@@ -598,17 +534,6 @@ export function useCounterpartyRequirements(
       ? collectRecord.result
       : undefined;
   const requirementsData = collectAnswer !== undefined ? collectAnswer : data;
-  const pendingAgreements =
-    requirementsData !== undefined && requirementsData.status === "counterparty_collect_agreement"
-      ? requirementsData.agreements
-      : null;
-  const accepted = new Set(acceptedAgreements);
-  const allAgreementsAccepted =
-    pendingAgreements !== null &&
-    pendingAgreements.every((agreement) => {
-      const keys = bvnkAgreementConsentKeys(agreement);
-      return accepted.has(keys.agreement) && accepted.has(keys.privacyPolicy);
-    });
   const freshTree = payoutTreeOf(data);
   const payout = freshTree !== null ? freshTree : payoutTreeOf(requirementsData);
   const fields = useMemo<RequirementField[]>(() => {
@@ -637,10 +562,7 @@ export function useCounterpartyRequirements(
     [fields, collectedData]
   );
   const isComplete =
-    requirementsData !== undefined &&
-    (pendingAgreements !== null
-      ? allAgreementsAccepted
-      : selectedPayoutAccount !== null || fieldsComplete);
+    requirementsData !== undefined && (selectedPayoutAccount !== null || fieldsComplete);
 
   // Every status the provider can return is handled: "collect" → needsCollection,
   // "ready" → proceed, "unsupported" → block with its reason, plus fetch errors.
@@ -670,9 +592,5 @@ export function useCounterpartyRequirements(
     resolvedProviderAccountId,
     submitRequirements,
     isAdvancing,
-    retryOnboarding,
-    pendingAgreements,
-    acceptedAgreements,
-    toggleAgreement,
   };
 }

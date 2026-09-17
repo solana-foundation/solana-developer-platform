@@ -3896,10 +3896,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -4370,10 +4366,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -4645,10 +4637,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -5119,10 +5107,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -5466,6 +5450,7 @@
           {
             "key": "search",
             "label": "search",
+            "description": "Prefix match against transaction id, module id, or signature — not a substring search.",
             "required": false
           },
           {
@@ -5866,10 +5851,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -6340,10 +6321,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -7694,17 +7671,7 @@
                   "status": "active",
                   "providerStatus": "ACTIVE",
                   "createdAt": "2025-01-01T00:00:00.000Z",
-                  "providerCustomerReference": "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
-                  "residenceCountryCode": "US",
-                  "agreements": [
-                    {
-                      "name": "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
-                      "displayName": "Embedded US Partner Platform Customers Agreement",
-                      "url": "https://help.bvnk.com/hc/en-us/sections/example",
-                      "privacyPolicyUrl": "https://help.bvnk.com/hc/en-us/articles/example",
-                      "signedAt": "2025-01-01T00:00:00.000Z"
-                    }
-                  ]
+                  "providerCustomerReference": "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3"
                 }
               }
             ]

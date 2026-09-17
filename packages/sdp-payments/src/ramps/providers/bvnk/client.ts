@@ -45,19 +45,16 @@ import {
   normalizeBvnkCurrencyAndNetwork,
 } from "./provider-data";
 import {
-  type BvnkAgreementSession,
   type BvnkChannelAddress,
   type BvnkChannelResponse,
-  type BvnkCustomer,
-  type BvnkCustomerCreated,
+  type BvnkContactV3,
   type BvnkLedgerWalletProfilesV2,
   type BvnkLedgerWalletV2,
   type BvnkRuleResponse,
   type BvnkSandboxPayinCurrency,
-  bvnkAgreementSessionSchema,
   bvnkChannelResponseSchema,
-  bvnkCustomerCreatedSchema,
-  bvnkCustomerSchema,
+  bvnkContactV3Schema,
+  bvnkContactsV3ListResponseSchema,
   bvnkOfframpQuoteInputSchema,
   bvnkPayoutEstimateResponseSchema,
   bvnkQuoteEstimateResponseSchema,
@@ -65,12 +62,10 @@ import {
   bvnkSandboxPayinCurrencySchema,
   bvnkV2LedgerWalletSchema,
   bvnkV2WalletProfilesSchema,
-  type CreateBvnkAgreementSessionInput,
-  type CreateBvnkCustomerInput,
+  type CreateBvnkContactV3Input,
   type CreateBvnkLedgerWalletV2Input,
   type CreateBvnkOnrampRuleInput,
   type ListBvnkLedgerWalletProfilesV2Input,
-  type SignBvnkAgreementSessionInput,
 } from "./schemas";
 
 const BVNK_PRODUCTION_API_URL = "https://api.bvnk.com";
@@ -236,102 +231,8 @@ export class BvnkRampClient implements RampProvider {
   }
 
   /**
-   * Creates a v1 agreement session for a prospective BVNK customer. The
-   * customer type and use case are fixed constants of the SDP individual on-ramp.
-   * The idempotency header is sent as best-effort provider-side dedupe — BVNK
-   * does not document it for this endpoint, so the customer-link row
-   * reservation is the authority on duplicate mints.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - Residence country whose agreement set the session mints, and the row-uuid idempotency key.
-   * @returns The created agreement session with its static document links.
-   */
-  async createAgreementSession(
-    { env, mode }: RampRuntimeContext,
-    input: CreateBvnkAgreementSessionInput
-  ): Promise<BvnkAgreementSession> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(config, "/platform/v1/customers/agreement/sessions", {
-      method: "POST",
-      headers: { "X-Idempotency-Key": input.idempotencyKey },
-      body: {
-        customerType: "INDIVIDUAL",
-        countryCode: input.countryCode,
-        useCase: "EMBEDDED_FIAT_ACCOUNTS",
-      },
-    });
-    return parseBvnkResponse(bvnkAgreementSessionSchema, response);
-  }
-
-  /**
-   * Signs a v1 agreement session with the consenting end-user IP. BVNK returns
-   * an empty 204, which the client treats as success with no body.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - Session reference and the consenting user's IP address.
-   * @returns Nothing.
-   */
-  async signAgreementSession(
-    { env, mode }: RampRuntimeContext,
-    input: SignBvnkAgreementSessionInput
-  ): Promise<void> {
-    const config = readBvnkConfig(env, mode);
-    await this.request(
-      config,
-      `/platform/v1/customers/agreement/sessions/${encodeURIComponent(input.reference)}`,
-      { method: "PUT", body: { status: "SIGNED", ipAddress: input.ipAddress } }
-    );
-  }
-
-  /**
-   * Creates a v1 individual BVNK customer from a signed agreement session and
-   * the collected PII pack.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - Idempotency key, the partner-supplied external reference, the
-   * signed session reference, and the individual request body.
-   * @returns The created customer reference and acknowledgment status.
-   */
-  async createCustomer(
-    { env, mode }: RampRuntimeContext,
-    input: CreateBvnkCustomerInput
-  ): Promise<BvnkCustomerCreated> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(config, "/platform/v1/customers", {
-      method: "POST",
-      headers: { "X-Idempotency-Key": input.idempotencyKey },
-      body: {
-        type: "individual",
-        externalReference: input.externalReference,
-        signedAgreementSessionReference: input.signedAgreementSessionReference,
-        individual: input.individual,
-      },
-    });
-    return parseBvnkResponse(bvnkCustomerCreatedSchema, response);
-  }
-
-  /**
-   * Retrieves a v1 BVNK customer, including its current verification link.
-   *
-   * @param ctx - Runtime provider credentials and environment.
-   * @param input - BVNK customer reference (a uuid).
-   * @returns The typed customer response, including verification when present.
-   */
-  async getCustomer(
-    { env, mode }: RampRuntimeContext,
-    input: { reference: string }
-  ): Promise<BvnkCustomer> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(
-      config,
-      `/platform/v1/customers/${encodeURIComponent(input.reference)}`,
-      { method: "GET" }
-    );
-    return parseBvnkResponse(bvnkCustomerSchema, response);
-  }
-
-  /**
-   * Creates a v2 ledger wallet.
+   * Creates a v2 ledger wallet on the merchant account. Wallets are
+   * merchant-owned in the Direct model, so no customerId is ever sent.
    *
    * @param ctx - Runtime provider credentials and environment.
    * @param input - Wallet details and an idempotency key derived deterministically from canonical SDP ids.
@@ -348,7 +249,6 @@ export class BvnkRampClient implements RampProvider {
       body: {
         currency: input.currency,
         name: input.name,
-        ...(input.customerId === undefined ? {} : { customerId: input.customerId }),
         ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
       },
     });
@@ -376,10 +276,75 @@ export class BvnkRampClient implements RampProvider {
   }
 
   /**
+   * Creates a v3 contact holding the counterparty's identity for Travel Rule
+   * compliance. No idempotency key: BVNK does not document one for this
+   * endpoint, so duplicate-creation protection comes from the customer-link
+   * row reservation in the calling handler.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - The counterparty id as the contact description and the entity body.
+   * @returns The typed contact with its BVNK-assigned id.
+   */
+  async createContactV3(
+    { env, mode }: RampRuntimeContext,
+    input: CreateBvnkContactV3Input
+  ): Promise<BvnkContactV3> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(config, "/platform/v3/contacts", {
+      method: "POST",
+      body: { description: input.description, entity: input.entity },
+    });
+    return parseBvnkResponse(bvnkContactV3Schema, response);
+  }
+
+  /**
+   * Retrieves a v3 contact by its BVNK-assigned id.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - The contact id stored as the counterparty's provider customer reference.
+   * @returns The typed contact.
+   */
+  async getContactV3(
+    { env, mode }: RampRuntimeContext,
+    input: { contactId: string }
+  ): Promise<BvnkContactV3> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(
+      config,
+      `/platform/v3/contacts/${encodeURIComponent(input.contactId)}`,
+      { method: "GET" }
+    );
+    return parseBvnkResponse(bvnkContactV3Schema, response);
+  }
+
+  /**
+   * Lists v3 contacts matching a search query. The counterparty id is stored
+   * as the contact description, so listing by that id is the crash-recovery
+   * lookup for an interrupted contact creation.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - Search query and page size.
+   * @returns The matching contacts in page order.
+   */
+  async listContactsV3(
+    { env, mode }: RampRuntimeContext,
+    input: { q: string; pageSize: number }
+  ): Promise<BvnkContactV3[]> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(
+      config,
+      `/platform/v3/contacts?q=${encodeURIComponent(input.q)}&pageSize=${input.pageSize}`,
+      { method: "GET" }
+    );
+    const parsed = parseBvnkResponse(bvnkContactsV3ListResponseSchema, response);
+    return parsed.content;
+  }
+
+  /**
    * Lists v2 ledger wallet profiles and their supported payment rails.
    *
    * @param ctx - Runtime provider credentials and environment.
-   * @param input - Optional customer and currency filters.
+   * @param input - Optional currency filter.
    * @returns The paginated wallet-profile response.
    */
   async listLedgerWalletProfilesV2(
@@ -388,7 +353,6 @@ export class BvnkRampClient implements RampProvider {
   ): Promise<BvnkLedgerWalletProfilesV2> {
     const config = readBvnkConfig(env, mode);
     const filters = [
-      input?.customerId === undefined ? undefined : `customerId:${input.customerId}`,
       input?.currency === undefined ? undefined : `currency:${input.currency}`,
     ].filter((filter): filter is string => filter !== undefined);
     const path =
@@ -583,7 +547,7 @@ export class BvnkRampClient implements RampProvider {
         displayCurrency: parsed.data.fiatCurrency,
         reference,
         customerId: parsed.data.externalCustomerId,
-        complianceDetails: parsed.data.bvnkCompliance,
+        complianceDetails: { contactId: parsed.data.contactId },
       },
     });
     const channel = parseBvnkResponse(bvnkChannelResponseSchema, channelResponse);

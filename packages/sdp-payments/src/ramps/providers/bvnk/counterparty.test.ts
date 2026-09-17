@@ -1,42 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Counterparty, CountryCode } from "@sdp/types";
+import type { Counterparty } from "@sdp/types";
 import { SdpPaymentsError } from "../../../errors";
 import { countryField, parseCollectedFields } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
 import {
-  buildBvnkCustomerRequest,
-  parseBvnkResidenceCountry,
+  bvnkOfframpFields,
+  buildBvnkThirdPartyRuleEntity,
+  isBvnkOfframpCurrency,
   validateBvnkCounterparty,
 } from "./counterparty";
-import { BVNK_RESIDENCE_FIELDS, BVNK_US_MTL_STATES, bvnkOnrampFields } from "./requirements";
-
-const usCollectedData = {
-  firstName: "Ada",
-  lastName: "Lovelace",
-  dateOfBirth: "1815-12-10",
-  email: "ada@example.com",
-  "address.addressLine1": "1 Main Street",
-  "address.city": "Austin",
-  "address.postalCode": "78701",
-  "address.countryCode": "US",
-  "address.stateCode": "MO",
-  "taxIdentification.number": "123-45-6789",
-  birthCountryCode: "GB",
-  nationality: "GB",
-  "cdd.employmentStatus": "SELF_EMPLOYED",
-  "cdd.sourceOfFunds": "SALARY",
-  "cdd.pepStatus": "NOT_PEP",
-  "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
-  "cdd.expectedMonthlyVolume.amount": "1000.50",
-  "cdd.expectedMonthlyVolume.currency": "USD",
-  "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
-  "cdd.employmentIndustrySector": "INFORMATION",
-};
+import type { BvnkContactV3 } from "./schemas";
 
 function counterparty(): Counterparty {
   return {
-    id: "cp_123",
+    id: "cpty_123e4567-e89b-12d3-a456-426614174000",
     organizationId: "org_123",
     projectId: "proj_123",
     externalId: null,
@@ -49,181 +27,45 @@ function counterparty(): Counterparty {
   };
 }
 
-describe("BVNK counterparty builders", () => {
-  it("maps US identity and CDD fields into the v2 customer request", () => {
-    const customer = buildBvnkCustomerRequest(usCollectedData, "US");
-
-    assert.deepEqual(customer, {
+function individualContact(): BvnkContactV3 {
+  return {
+    id: "a3700c37-3f46-4766-b0db-3250b073fd9c",
+    description: "cpty_123e4567-e89b-12d3-a456-426614174000",
+    entity: {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      dateOfBirth: "1815-12-10",
       address: {
         addressLine1: "1 Main Street",
+        addressLine2: "Suite 400",
         city: "Austin",
+        stateCode: "TX",
         postalCode: "78701",
-        countryCode: "US",
-        stateCode: "MO",
+        region: "Texas",
+        country: "US",
       },
-      dateOfBirth: "1815-12-10",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      birthCountryCode: "GB",
-      nationality: "GB",
-      emailAddress: "ada@example.com",
-      taxIdentification: { number: "123-45-6789", taxResidenceCountryCode: "US" },
-      cdd: {
-        employmentStatus: "SELF_EMPLOYED",
-        sourceOfFunds: "SALARY",
-        pepStatus: "NOT_PEP",
-        intendedUseOfAccount: "TRANSFERS_OWN_WALLET",
-        expectedMonthlyVolume: { amount: "1000.50", currency: "USD" },
-        estimatedYearlyIncome: "INCOME_100K_TO_250K",
-        employmentIndustrySector: "INFORMATION",
-      },
-    });
-  });
+    },
+    createdAt: "2026-06-10T10:30:00Z",
+    updatedAt: "2026-06-10T10:30:00Z",
+  };
+}
 
-  it("reads the residence from the parameter, never from collected data", () => {
-    const customer = buildBvnkCustomerRequest(
-      { ...usCollectedData, "taxIdentification.taxResidenceCountryCode": "RU" },
-      "US"
-    );
-
-    assert.equal(customer.taxIdentification?.taxResidenceCountryCode, "US");
-    assert.equal(customer.taxIdentification?.number, "123-45-6789");
-  });
-
-  it("only adds US conditional fields for US residence", () => {
-    const flatKeys = (countryCode: CountryCode) =>
-      bvnkOnrampFields(countryCode).flatMap((field) =>
-        field.kind === "address" ? field.fields.map((nested) => nested.key) : [field.key]
-      );
-    const usKeys = flatKeys("US");
-    const gbKeys = flatKeys("GB");
-
-    assert.equal(usKeys.includes("address.stateCode"), true);
-    assert.equal(usKeys.includes("taxIdentification.number"), true);
-    assert.equal(usKeys.includes("cdd.estimatedYearlyIncome"), true);
-    assert.equal(usKeys.includes("taxIdentification.taxResidenceCountryCode"), false);
-    assert.equal(gbKeys.includes("address.stateCode"), false);
-    assert.equal(gbKeys.includes("taxIdentification.number"), true);
-    assert.equal(gbKeys.includes("cdd.estimatedYearlyIncome"), false);
-    for (const key of gbKeys) {
-      assert.equal(usKeys.includes(key), true);
-    }
-    assert.equal(
-      bvnkOnrampFields("DE").some((field) => field.key === "nationality"),
-      true
-    );
-  });
-
-  it("nests the 40-option MTL state select inside the US address group", () => {
-    const usAddressGroup = bvnkOnrampFields("US").find((field) => field.kind === "address");
-    assert.equal(usAddressGroup?.kind, "address");
-    const stateSelect = (usAddressGroup?.kind === "address" ? usAddressGroup.fields : []).find(
-      (part) => part.key === "address.stateCode"
-    );
-    assert.equal(stateSelect?.kind, "select");
-    const optionValues = (stateSelect?.kind === "select" ? stateSelect.options : []).map(
-      (option) => option.value
-    );
-    assert.deepEqual(optionValues, Object.keys(BVNK_US_MTL_STATES));
-    assert.equal(optionValues.length, 40);
-    assert.equal(optionValues.includes("TX"), false);
-    assert.equal(optionValues.includes("NY"), false);
-  });
-
-  it("accepts an MTL state code and rejects one outside the MTL set", () => {
-    const customer = buildBvnkCustomerRequest(usCollectedData, "US");
-
-    assert.equal(customer.address.stateCode, "MO");
-    assert.throws(
-      () => buildBvnkCustomerRequest({ ...usCollectedData, "address.stateCode": "TX" }, "US"),
-      SdpPaymentsError
-    );
-    assert.throws(
-      () => buildBvnkCustomerRequest({ ...usCollectedData, "address.stateCode": "NY" }, "US"),
-      SdpPaymentsError
-    );
-  });
-
-  it("builds the EU v2 individual without US extras", () => {
-    const customer = buildBvnkCustomerRequest(
-      {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        dateOfBirth: "1815-12-10",
-        email: "ada@example.com",
-        "address.addressLine1": "1 Main Street",
-        "address.city": "Berlin",
-        "address.postalCode": "10115",
-        "address.countryCode": "DE",
-        birthCountryCode: "GB",
-        nationality: "GB",
-        "cdd.employmentStatus": "SELF_EMPLOYED",
-        "cdd.sourceOfFunds": "SALARY",
-        "cdd.pepStatus": "NOT_PEP",
-        "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
-        "cdd.expectedMonthlyVolume.amount": "1000.50",
-        "cdd.expectedMonthlyVolume.currency": "EUR",
-        "taxIdentification.number": "12345678901",
-      },
-      "DE"
-    );
-
-    assert.deepEqual(customer, {
-      address: {
-        addressLine1: "1 Main Street",
-        city: "Berlin",
-        postalCode: "10115",
-        countryCode: "DE",
-      },
-      dateOfBirth: "1815-12-10",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      birthCountryCode: "GB",
-      nationality: "GB",
-      emailAddress: "ada@example.com",
-      taxIdentification: { number: "12345678901", taxResidenceCountryCode: "DE" },
-      cdd: {
-        employmentStatus: "SELF_EMPLOYED",
-        sourceOfFunds: "SALARY",
-        pepStatus: "NOT_PEP",
-        intendedUseOfAccount: "TRANSFERS_OWN_WALLET",
-        expectedMonthlyVolume: { amount: "1000.50", currency: "EUR" },
-      },
-    });
-  });
-});
-
-describe("parseBvnkResidenceCountry", () => {
-  it("accepts an onboardable country", () => {
-    assert.equal(
-      parseBvnkResidenceCountry({ "taxIdentification.taxResidenceCountryCode": "US" }),
-      "US"
-    );
-  });
-
-  it("rejects a prohibited country", () => {
-    assert.throws(() =>
-      parseBvnkResidenceCountry({ "taxIdentification.taxResidenceCountryCode": "RU" })
-    );
-  });
-});
-
-describe("validateBvnkCounterparty", () => {
-  it("collects only the residence country when no customer link exists", () => {
-    const options: ValidateCounterpartyOptions = {
-      direction: "onramp",
-      providerData: {},
-    };
-    const requirements = validateBvnkCounterparty(counterparty(), options);
-
-    assert.deepEqual(requirements, {
-      provider: "bvnk",
-      direction: "onramp",
-      status: "collect_counterparty_residence",
-      fields: BVNK_RESIDENCE_FIELDS,
-    });
-  });
-});
+function companyContact(): BvnkContactV3 {
+  return {
+    id: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    description: "cpty_123e4567-e89b-12d3-a456-426614174000",
+    entity: {
+      type: "COMPANY",
+      relationshipType: "THIRD_PARTY",
+      legalName: "Acme Corporation",
+      registrationNumber: "12345678",
+    },
+    createdAt: "2026-06-10T10:30:00Z",
+    updatedAt: "2026-06-10T10:30:00Z",
+  };
+}
 
 describe("country field options", () => {
   it("validates collected values against the offered subset", () => {
@@ -243,5 +85,165 @@ describe("country field options", () => {
       () => parseCollectedFields(fields, { taxResidenceCountryCode: "RU" }, "message"),
       SdpPaymentsError
     );
+  });
+});
+
+describe("BVNK off-ramp currency and fields", () => {
+  it("accepts the verified payout corridors", () => {
+    assert.equal(isBvnkOfframpCurrency("USD"), true);
+    assert.equal(isBvnkOfframpCurrency("EUR"), true);
+    assert.equal(isBvnkOfframpCurrency("GBP"), false);
+  });
+
+  it("builds the corridor field set", () => {
+    const fields = bvnkOfframpFields("USD");
+    assert.deepEqual(
+      fields.map((field) => field.key),
+      ["accountNumber", "routingNumber"]
+    );
+  });
+});
+
+describe("validateBvnkCounterparty", () => {
+  it("rejects off-ramp payouts in an unsupported currency", () => {
+    const requirements = validateBvnkCounterparty(counterparty(), {
+      direction: "offramp",
+      providerData: {},
+      fiatCurrency: "GBP",
+    });
+
+    assert.equal(requirements.status, "unsupported");
+  });
+
+  it("collects bank details when no off-ramp beneficiary is stored", () => {
+    const requirements = validateBvnkCounterparty(counterparty(), {
+      direction: "offramp",
+      providerData: {},
+      fiatCurrency: "USD",
+    });
+
+    assert.equal(requirements.status, "collect");
+    assert.deepEqual(requirements.fields, bvnkOfframpFields("USD"));
+  });
+
+  it("reports provisioning while the off-ramp wallet is inactive", () => {
+    const requirements = validateBvnkCounterparty(counterparty(), {
+      direction: "offramp",
+      providerData: {
+        bvnk: {
+          offramp: {
+            beneficiaries: {
+              "USD:abc123": {
+                key: "USD:abc123",
+                fiatCurrency: "USD",
+                accountType: "ACH",
+                createdAt: "2026-06-11T00:00:00.000Z",
+              },
+            },
+            wallets: { USD: { id: "wallet-id", status: "INACTIVE" } },
+          },
+        },
+      },
+      fiatCurrency: "USD",
+    });
+
+    assert.deepEqual(requirements, {
+      provider: "bvnk",
+      direction: "offramp",
+      status: "provisioning",
+    });
+  });
+
+  it("reports ready once the off-ramp wallet is active", () => {
+    const requirements = validateBvnkCounterparty(counterparty(), {
+      direction: "offramp",
+      providerData: {
+        bvnk: {
+          offramp: {
+            beneficiaries: {
+              "USD:abc123": {
+                key: "USD:abc123",
+                fiatCurrency: "USD",
+                accountType: "ACH",
+                createdAt: "2026-06-11T00:00:00.000Z",
+              },
+            },
+            wallets: { USD: { id: "wallet-id", status: "ACTIVE" } },
+          },
+        },
+      },
+      fiatCurrency: "USD",
+    });
+
+    assert.deepEqual(requirements, {
+      provider: "bvnk",
+      direction: "offramp",
+      status: "ready",
+    });
+  });
+
+  it("requires a fiat currency for off-ramp validation", () => {
+    assert.throws(
+      () =>
+        validateBvnkCounterparty(
+          counterparty(),
+          { direction: "offramp", providerData: {} } as unknown as ValidateCounterpartyOptions
+        ),
+      SdpPaymentsError
+    );
+  });
+});
+
+describe("buildBvnkThirdPartyRuleEntity", () => {
+  it("maps an individual contact onto a THIRD_PARTY INDIVIDUAL rule entity", () => {
+    const entity = buildBvnkThirdPartyRuleEntity(individualContact(), counterparty().id);
+
+    assert.deepEqual(entity, {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      customerIdentifier: counterparty().id,
+      firstName: "Ada",
+      lastName: "Lovelace",
+      dateOfBirth: "1815-12-10",
+      address: {
+        addressLine1: "1 Main Street",
+        addressLine2: "Suite 400",
+        city: "Austin",
+        stateCode: "TX",
+        postalCode: "78701",
+        countryCode: "US",
+        country: "US",
+      },
+    });
+  });
+
+  it("omits optional identity lanes when the contact has no address or birth date", () => {
+    const minimal: BvnkContactV3 = {
+      ...individualContact(),
+      entity: {
+        type: "INDIVIDUAL",
+        relationshipType: "THIRD_PARTY",
+        firstName: "Ada",
+        lastName: "Lovelace",
+      },
+    };
+
+    const entity = buildBvnkThirdPartyRuleEntity(minimal, counterparty().id);
+
+    assert.equal(entity.type, "INDIVIDUAL");
+    assert.equal(entity.address, undefined);
+    assert.equal(entity.dateOfBirth, undefined);
+  });
+
+  it("maps a company contact onto a THIRD_PARTY COMPANY rule entity", () => {
+    const entity = buildBvnkThirdPartyRuleEntity(companyContact(), counterparty().id);
+
+    assert.deepEqual(entity, {
+      type: "COMPANY",
+      relationshipType: "THIRD_PARTY",
+      customerIdentifier: counterparty().id,
+      legalName: "Acme Corporation",
+      registrationNumber: "12345678",
+    });
   });
 });

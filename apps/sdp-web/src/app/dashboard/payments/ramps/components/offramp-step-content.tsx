@@ -10,7 +10,6 @@ import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
-import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
@@ -100,10 +99,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     retryQuoteCreation,
     onboarding,
     isAdvancing,
-    retryOnboarding,
-    pendingAgreements,
-    acceptedAgreements,
-    toggleAgreement,
     memoRows,
     setMemoRows,
     sourceWalletHint,
@@ -195,17 +190,10 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     // edits can't desync the form from what the provider was sent. A corridor
     // blocker renders above STILL-ENABLED fields: the country select is the only
     // way out of a blocked corridor, so it must stay interactive.
-    return pendingAgreements !== null ? (
-      <BvnkAgreementConsent
-        agreements={pendingAgreements}
-        acceptedAgreements={acceptedAgreements}
-        onToggle={toggleAgreement}
-        disabled={isAdvancing}
-      />
-    ) : onboarding !== null &&
+    return onboarding !== null &&
       hasOnboardingLifecycle(onboarding.provider) &&
       isOnboardingPanelStatus(onboarding) ? (
-      <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />
+      <RampOnboardingPanel direction="offramp" onboarding={onboarding} />
     ) : (
       <div className="space-y-4">
         {requirementsBlocker ? (
@@ -249,7 +237,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     isOnboardingPanelStatus(onboarding)
   ) {
     return (
-      <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />
+      <RampOnboardingPanel direction="offramp" onboarding={onboarding} />
     );
   }
 

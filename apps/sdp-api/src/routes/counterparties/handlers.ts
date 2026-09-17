@@ -1,13 +1,13 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
-  bvnkOnboardingRequirements,
-  bvnkOnrampPaymentRuleResolutionFromProviderData,
-  bvnkUnverifiedOnboardingStatus,
-  isBvnkCustomerVerified,
+  buildBvnkOnrampPaymentRuleKey,
+  isBvnkWalletActive,
+  normalizeBvnkCurrencyAndNetwork,
+  readBvnkOfframpWallet,
+  readBvnkOnrampPaymentRuleState,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
-import type { RampDirection } from "@sdp/types";
+import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import {
   COUNTERPARTY_ENTITY_TYPES,
   COUNTRIES,
@@ -19,16 +19,12 @@ import {
   type ListCounterpartiesResponse,
   type ListProjectCounterpartyAccountsResponse,
 } from "@sdp/types";
-import type {
-  CounterpartyRequirements,
-  PayoutRequirementAccount,
-} from "@sdp/types/ramp-requirements";
+import type { PayoutRequirementAccount } from "@sdp/types/ramp-requirements";
 import { isCollectFieldsRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import {
@@ -47,13 +43,7 @@ import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
 } from "@/routes/payments/handlers/ramps";
-import {
-  type BvnkStoredStage,
-  bvnkCustomerRequirementsFromMetadata,
-  bvnkStoredStage,
-  presentBvnkStoredStage,
-  refreshBvnkCustomerAccount,
-} from "@/routes/payments/handlers/ramps/bvnk";
+import { bvnkCollectRequirements } from "@/routes/payments/handlers/ramps/bvnk";
 import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
 import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import {
@@ -293,38 +283,16 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     provider: query.data.provider,
   });
 
-  let refreshedBvnkCustomer:
-    | { customer: BvnkCustomerResolution; verificationUrl: string | undefined }
-    | undefined;
-  if (query.data.provider === "bvnk" && providerAccount !== null) {
-    const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(providerAccount.metadata);
-    const storedRequirements = bvnkCustomerRequirementsFromMetadata(query.data.direction, metadata);
-    if (storedRequirements) {
-      return success(c, storedRequirements);
+  if (query.data.provider === "bvnk" && providerAccount === null) {
+    return success(c, bvnkCollectRequirements(query.data.direction, counterparty.entity_type));
+  }
+
+  if (query.data.provider === "bvnk" && query.data.direction === "offramp") {
+    const wallet = readBvnkOfframpWallet(counterparty.provider_data, query.data.fiatCurrency);
+    if (wallet !== undefined && isBvnkWalletActive(wallet.status)) {
+      return success(c, readyCounterparty("bvnk", query.data.direction));
     }
-    refreshedBvnkCustomer = await refreshBvnkCustomerAccount(c.env, rampRuntime(c), {
-      counterparty,
-      projectId,
-      providerAccountId: providerAccount.id,
-      customerReference: providerAccount.provider_customer_reference,
-    });
-    if (!isBvnkCustomerVerified(refreshedBvnkCustomer.customer.status)) {
-      const onboardingStatus = bvnkUnverifiedOnboardingStatus(
-        refreshedBvnkCustomer.customer.status
-      );
-      return success(
-        c,
-        bvnkOnboardingRequirements(
-          {
-            customer: refreshedBvnkCustomer.customer,
-            entry: {},
-            onboardingStatus,
-          },
-          query.data.direction,
-          refreshedBvnkCustomer.verificationUrl
-        )
-      );
-    }
+    return success(c, { provider: "bvnk", direction: query.data.direction, status: "provisioning" });
   }
 
   let payoutAccounts: PayoutRequirementAccount[] | undefined;
@@ -350,23 +318,23 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     );
     assertPaymentWalletExactAccess(c, destinationWallet.id, []);
     const destinationWalletAddress = destinationWallet.publicKey;
-    if (query.data.provider === "bvnk" && refreshedBvnkCustomer !== undefined) {
-      const resolution = bvnkOnrampPaymentRuleResolutionFromProviderData(
-        counterparty.provider_data,
-        {
-          cryptoToken: getCryptoRailAssetLabel(query.data.assetRail),
-          fiatCurrency: query.data.fiatCurrency,
-          destinationWalletAddress,
-        },
-        refreshedBvnkCustomer.customer
+    if (query.data.provider === "bvnk") {
+      const { currency, network } = normalizeBvnkCurrencyAndNetwork(
+        getCryptoRailAssetLabel(query.data.assetRail)
       );
+      const key = buildBvnkOnrampPaymentRuleKey(
+        query.data.fiatCurrency,
+        currency,
+        network,
+        destinationWalletAddress
+      );
+      const entry = readBvnkOnrampPaymentRuleState(counterparty.provider_data, key);
+      if (entry.ruleId && entry.bankAccount?.accountNumber) {
+        return success(c, readyCounterparty("bvnk", query.data.direction));
+      }
       return success(
         c,
-        bvnkOnboardingRequirements(
-          resolution,
-          query.data.direction,
-          refreshedBvnkCustomer.verificationUrl
-        )
+        { provider: "bvnk", direction: query.data.direction, status: "provisioning" }
       );
     }
     const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
@@ -406,36 +374,6 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   );
   return success(c, requirements);
 };
-
-/**
- * Requirements a BVNK submit presents instead of the provider client's
- * stage-blind validation: the stored collect form once the session is signed,
- * or the signing wait state while consent awaits the provider's confirmation.
- *
- * @param direction - Ramp direction used in the requirement response.
- * @param stage - Stored pre-customer stage of the customer-link row, or null once the customer exists.
- * @returns The stage-derived requirement, or null when the client validation stands.
- */
-function bvnkStoredSubmitRequirements(
-  direction: RampDirection,
-  stage: BvnkStoredStage | null
-): CounterpartyRequirements | null {
-  if (stage === null) {
-    return null;
-  }
-  switch (stage.kind) {
-    case "collect_counterparty":
-    case "agreements_submitted":
-      return presentBvnkStoredStage(direction, stage);
-    case "agreements_pending":
-    case "session_pending":
-      return null;
-    default: {
-      const exhaustive: never = stage;
-      throw internalError(`Unhandled BVNK stored stage: ${String(exhaustive)}`);
-    }
-  }
-}
 
 export const submitCounterpartyRequirements = async (
   c: ValidatedBodyContext<typeof submitCounterpartyRequirementsSchema>
@@ -505,18 +443,6 @@ export const submitCounterpartyRequirements = async (
     return success(c, requirements);
   }
 
-  let gateOnCollectedFields = true;
-  if (input.provider === "bvnk" && providerAccount !== null) {
-    const stage = bvnkStoredStage(
-      bvnkCustomerProviderAccountMetadataSchema.parse(providerAccount.metadata)
-    );
-    const stored = bvnkStoredSubmitRequirements(input.direction, stage);
-    if (stored !== null) {
-      requirements = stored;
-    }
-    gateOnCollectedFields = stage === null || stage.kind !== "agreements_pending";
-  }
-
   if (requirements.status === "collect_account") {
     if (
       await lightsparkPayoutSubmissionNeedsRequirements(
@@ -531,7 +457,7 @@ export const submitCounterpartyRequirements = async (
     }
   }
 
-  if (gateOnCollectedFields && isCollectFieldsRequirements(requirements)) {
+  if (isCollectFieldsRequirements(requirements)) {
     const collectedData = "collectedData" in input ? input.collectedData : undefined;
     const missing = requirements.fields
       .flatMap((field) => (field.kind === "address" ? field.fields : [field]))

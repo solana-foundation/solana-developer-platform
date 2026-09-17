@@ -119,6 +119,13 @@ const COLLECT_COUNTERPARTY: CounterpartyRequirements = {
   fields: [{ kind: "text", key: "fullName", label: "Full name", required: true }],
 };
 
+const BVNK_COLLECT: CounterpartyRequirements = {
+  provider: "bvnk",
+  direction: "offramp",
+  status: "collect",
+  fields: [{ kind: "text", key: "identity.firstName", label: "First name", required: true }],
+};
+
 const COLLECT_ACCOUNT: CounterpartyRequirements = {
   provider: "lightspark",
   direction: "offramp",
@@ -131,28 +138,6 @@ const READY_US_ADVANCE: CounterpartyRequirements = {
   direction: "offramp",
   status: "ready",
   providerAccountId: "cpa_us_primary",
-};
-
-const COLLECT_AGREEMENTS: CounterpartyRequirements = {
-  provider: "bvnk",
-  direction: "onramp",
-  status: "counterparty_collect_agreement",
-  agreements: [
-    {
-      name: "bvnk_platform_agreement",
-      displayName: "BVNK Platform Agreement",
-      description: "BVNK Platform Agreement",
-      url: "https://help.bvnk.com/en/articles/platform-agreement",
-      privacyPolicyUrl: "https://www.bvnk.com/privacy-policy",
-    },
-    {
-      name: "bvnk_privacy_policy",
-      displayName: "BVNK Privacy Policy",
-      description: "BVNK Privacy Policy",
-      url: "https://www.bvnk.com/privacy-policy",
-      privacyPolicyUrl: "https://www.bvnk.com/privacy-policy",
-    },
-  ],
 };
 
 const OFFRAMP_PARAMS: CounterpartyRequirementsParams = {
@@ -212,8 +197,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     await release("POST", COLLECT_ACCOUNT);
@@ -259,8 +243,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     const reuseRequest = await release("POST", READY_US_ADVANCE);
@@ -285,8 +268,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     await release("POST", COLLECT_ACCOUNT);
@@ -311,8 +293,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     await release("POST", READY_US_ADVANCE);
@@ -345,8 +326,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     expect(result.current.isAdvancing).toBe(true);
@@ -372,8 +352,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     await release("POST", READY_US_ADVANCE);
@@ -396,8 +375,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     const newAccountRequest = await release("POST", READY_US_ADVANCE);
@@ -414,16 +392,16 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
   it("never surfaces a poll result issued for an abandoned corridor", async () => {
     const onrampParams: CounterpartyRequirementsParams = {
       counterpartyId: "cpty_behavior",
-      provider: "bvnk",
+      provider: "mural",
       direction: "onramp",
       assetRail: "usdc.solana",
       destinationCustodyWalletId: "wlt_behavior",
       fiatCurrency: "USD",
     };
     const provisioning: CounterpartyRequirements = {
-      provider: "bvnk",
+      provider: "mural",
       direction: "onramp",
-      status: "customer_funding_account_provisioning",
+      status: "customer_verifying",
     };
     const rendered = renderHook(
       (props: CounterpartyRequirementsParams) => useCounterpartyRequirements(props),
@@ -439,8 +417,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "wlt_behavior",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     await release("POST", provisioning);
@@ -452,16 +429,16 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
 
     rendered.rerender({ ...onrampParams, fiatCurrency: "EUR" });
     await release("GET", {
-      provider: "bvnk",
+      provider: "mural",
       direction: "onramp",
-      status: "collect_counterparty",
+      status: "collect",
       fields: [],
     });
 
     // The parked USD poll tick resolves ready AFTER the corridor moved to EUR:
     // its data belongs to the dead USD key and must never surface.
     await release("GET", {
-      provider: "bvnk",
+      provider: "mural",
       direction: "onramp",
       status: "ready",
     });
@@ -480,8 +457,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
 
@@ -499,19 +475,19 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
   it("never lets an earlier advance's poll verdict answer for a later same-corridor advance", async () => {
     const onrampParams: CounterpartyRequirementsParams = {
       counterpartyId: "cpty_behavior",
-      provider: "bvnk",
+      provider: "mural",
       direction: "onramp",
       assetRail: "usdc.solana",
       destinationCustodyWalletId: "wlt_behavior",
       fiatCurrency: "USD",
     };
     const provisioning: CounterpartyRequirements = {
-      provider: "bvnk",
+      provider: "mural",
       direction: "onramp",
-      status: "customer_funding_account_provisioning",
+      status: "customer_verifying",
     };
     const ready: CounterpartyRequirements = {
-      provider: "bvnk",
+      provider: "mural",
       direction: "onramp",
       status: "ready",
     };
@@ -529,8 +505,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "wlt_behavior",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     await release("POST", provisioning);
@@ -549,47 +524,13 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
           assetRail: "usdc.solana",
           destinationCustodyWalletId: "wlt_behavior",
           fiatCurrency: "USD",
-        },
-        "collected"
+        }
       );
     });
     await release("POST", provisioning);
     await secondSubmit;
 
     expect(rendered.result.current.onboarding).toEqual(provisioning);
-  });
-
-  it("gates completion on every pending agreement being accepted", async () => {
-    const onrampParams: CounterpartyRequirementsParams = {
-      counterpartyId: "cpty_behavior",
-      provider: "bvnk",
-      direction: "onramp",
-      assetRail: "usdc.solana",
-      destinationCustodyWalletId: "wlt_behavior",
-      fiatCurrency: "USD",
-    };
-    const rendered = renderHook(
-      (props: CounterpartyRequirementsParams) => useCounterpartyRequirements(props),
-      { wrapper, initialProps: onrampParams }
-    );
-    await release("GET", COLLECT_AGREEMENTS);
-    await waitFor(() => expect(rendered.result.current.isResolved).toBe(true));
-
-    expect(rendered.result.current.pendingAgreements).toHaveLength(2);
-    expect(rendered.result.current.isComplete).toBe(false);
-
-    act(() => rendered.result.current.toggleAgreement("bvnk_platform_agreement", true));
-    act(() => rendered.result.current.toggleAgreement("bvnk_privacy_policy", true));
-    act(() => rendered.result.current.toggleAgreement("bvnk_privacy_policy:privacy-policy", true));
-    expect(rendered.result.current.isComplete).toBe(false);
-
-    act(() =>
-      rendered.result.current.toggleAgreement("bvnk_platform_agreement:privacy-policy", true)
-    );
-    expect(rendered.result.current.isComplete).toBe(true);
-
-    act(() => rendered.result.current.toggleAgreement("bvnk_platform_agreement", false));
-    expect(rendered.result.current.isComplete).toBe(false);
   });
 
   /**
@@ -640,7 +581,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     await release("GET", COLLECT_COUNTERPARTY);
 
     rendered.rerender(bvnkParams);
-    const bvnkRequest = await release("GET", COLLECT_COUNTERPARTY);
+    const bvnkRequest = await release("GET", BVNK_COLLECT);
     expect(bvnkRequest.url).toContain("provider=bvnk");
 
     act(() => {
@@ -650,7 +591,7 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     // The purge revalidates the still-mounted bvnk key, then the switch back to
     // lightspark finds an empty cache and must fetch — two requests, in order.
     await waitFor(() => expect(held).toHaveLength(2));
-    const revalidatedBvnk = await release("GET", COLLECT_COUNTERPARTY);
+    const revalidatedBvnk = await release("GET", BVNK_COLLECT);
     expect(revalidatedBvnk.url).toContain("provider=bvnk");
     const lightsparkRequest = await release("GET", READY_US_ADVANCE);
     expect(lightsparkRequest.url).toContain("provider=lightspark");

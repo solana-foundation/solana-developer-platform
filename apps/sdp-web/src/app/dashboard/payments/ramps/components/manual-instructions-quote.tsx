@@ -10,8 +10,6 @@ import {
   CopyIcon,
   DollarSignIcon,
   LandmarkIcon,
-  Loader2,
-  ShieldCheckIcon,
   WalletIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -24,7 +22,6 @@ import {
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
-import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { cn } from "@/lib/utils";
 
 type ManualQuote = Extract<PaymentRampQuote, { deliveryMode: "manual_instructions" }>;
@@ -381,11 +378,7 @@ function BvnkInstruction({
     return <BvnkCryptoDepositInstruction instruction={instruction} action={action} />;
   }
 
-  const isReady = instruction.onboardingStatus === "ready";
-  const needsVerification = instruction.onboardingStatus === "verification_required";
-  const isProvisioning = instruction.onboardingStatus === "provisioning";
   const bank = instruction.bankAccount;
-  const verificationUrl = instruction.verificationUrl;
 
   return (
     <div className="space-y-4">
@@ -398,92 +391,33 @@ function BvnkInstruction({
           </InstructionBadge>
           <InstructionBadge>{instruction.network}</InstructionBadge>
         </InstructionBadges>
-        {isReady && action ? <InstructionActionButton action={action} /> : null}
+        {action ? <InstructionActionButton action={action} /> : null}
       </div>
 
-      {needsVerification ? (
-        <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-primary">
-            <ShieldCheckIcon className="size-5" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-primary">
-                  {t("DashboardPayments.manualInstructions.identityVerificationRequired")}
-                </p>
-                <p className="mt-1 text-sm leading-relaxed text-tertiary">
-                  {instruction.instructionsNotes}
-                </p>
-              </div>
-              {verificationUrl ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="xs"
-                  className="shrink-0"
-                  onClick={() => openExternalRampUrl(verificationUrl)}
-                >
-                  {t("DashboardPayments.manualInstructions.completeVerification")}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {!isReady && !needsVerification ? (
-        <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-            <Clock3 className="size-5" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-primary">
-              {isProvisioning
-                ? t("DashboardPayments.manualInstructions.provisioningAccount")
-                : t("DashboardPayments.manualInstructions.verificationInReview")}
-            </p>
-            <p className="mt-1 text-sm leading-relaxed text-tertiary">
-              {instruction.instructionsNotes}
-            </p>
-            <p className="mt-3 flex items-center gap-2 text-xs font-medium text-secondary">
-              <Loader2 className="size-3.5 animate-spin" />
-              {isProvisioning
-                ? t("DashboardPayments.manualInstructions.provisioningFundingAccount")
-                : t("DashboardPayments.manualInstructions.checkingVerificationStatus")}
-            </p>
-          </div>
-        </div>
-      ) : null}
-
-      {isReady ? (
-        <>
-          <div className="grid gap-3 lg:grid-cols-2">
-            <PaymentInstructionField
-              label={t("DashboardPayments.manualInstructions.bankName")}
-              value={bank?.bankName}
-            />
-            <PaymentInstructionField
-              label={t("DashboardPayments.manualInstructions.accountNumber")}
-              value={bank?.accountNumber}
-            />
-            <PaymentInstructionField
-              label={t("DashboardPayments.manualInstructions.bankCode")}
-              value={bank?.code}
-            />
-            <PaymentInstructionField
-              label={t("DashboardPayments.manualInstructions.paymentReference")}
-              value={bank?.paymentReference}
-            />
-          </div>
-          <div className="rounded-xl bg-fill-subtle px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
-              {t("DashboardPayments.manualInstructions.notes")}
-            </p>
-            <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
-          </div>
-        </>
-      ) : null}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.bankName")}
+          value={bank?.bankName}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.accountNumber")}
+          value={bank?.accountNumber}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.bankCode")}
+          value={bank?.code}
+        />
+        <PaymentInstructionField
+          label={t("DashboardPayments.manualInstructions.paymentReference")}
+          value={bank?.paymentReference}
+        />
+      </div>
+      <div className="rounded-xl bg-fill-subtle px-4 py-3">
+        <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
+          {t("DashboardPayments.manualInstructions.notes")}
+        </p>
+        <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
+      </div>
     </div>
   );
 }

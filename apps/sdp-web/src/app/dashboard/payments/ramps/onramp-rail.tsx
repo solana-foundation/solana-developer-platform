@@ -28,8 +28,6 @@ function onrampPrimaryLabel(
       return t("DashboardPayments.verificationPending");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
-    case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
-      return t("DashboardPayments.bvnk.acceptAgreements");
     default:
       return t("DashboardPayments.counterparty.next");
   }

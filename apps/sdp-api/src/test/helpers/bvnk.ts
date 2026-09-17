@@ -4,7 +4,6 @@ import {
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { BvnkOnrampTransferProviderData } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type { z } from "zod";
-import type { BvnkCustomerProviderAccountMetadata } from "@/db/repositories/counterparty-provider-account.repository";
 import type { bvnkWebhookSchema } from "@/routes/webhooks/ramps/bvnk.schema";
 import type { Env } from "@/types/env";
 
@@ -63,25 +62,6 @@ const ONRAMP_WALLET_NAME = buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY);
  * from the schema that owns them.
  */
 type BvnkWebhookInput = z.input<typeof bvnkWebhookSchema>;
-
-type BvnkCustomerStatusChangeData = Extract<
-  BvnkWebhookInput,
-  { event: "bvnk:customers:status-change" }
->["data"];
-
-export function bvnkCustomerStatusChangeEvent(overrides?: Partial<BvnkCustomerStatusChangeData>): {
-  event: "bvnk:customers:status-change";
-  data: BvnkCustomerStatusChangeData;
-} {
-  return {
-    event: "bvnk:customers:status-change",
-    data: {
-      customerId: "customer_1",
-      status: "VERIFIED",
-      ...overrides,
-    },
-  };
-}
 
 type BvnkWalletStatusChangeData = Extract<
   BvnkWebhookInput,
@@ -185,49 +165,6 @@ export function bvnkChannelTransactionEvent(
   };
 }
 
-type BvnkPlatformCustomerUpdateData = Extract<
-  BvnkWebhookInput,
-  { event: "bvnk:platform:customer:update" }
->["data"];
-
-export function bvnkPlatformCustomerUpdateEvent(
-  overrides?: Partial<BvnkPlatformCustomerUpdateData>
-): { event: "bvnk:platform:customer:update"; data: BvnkPlatformCustomerUpdateData } {
-  return {
-    event: "bvnk:platform:customer:update",
-    data: {
-      reference: "123e4567-e89b-12d3-a456-426614174000",
-      ...overrides,
-    },
-  };
-}
-
-type BvnkAgreementSessionStatusChangeEvent = Extract<
-  BvnkWebhookInput,
-  { event: "bvnk:platform:customer:agreement-session-status-change" }
->;
-
-/**
- * Builds the observed BVNK agreement-session status-change webhook payload.
- *
- * @param overrides - Event fields to replace for a test case.
- * @returns A fully shaped agreement-session status-change event.
- */
-export function bvnkAgreementSessionStatusChangeEvent(
-  overrides?: Partial<BvnkAgreementSessionStatusChangeEvent>
-): BvnkAgreementSessionStatusChangeEvent {
-  return {
-    event: "bvnk:platform:customer:agreement-session-status-change",
-    eventId: "01a0ab3a-a9cf-7b71-ab7c-f7903f653099",
-    timestamp: new Date().toISOString(),
-    data: {
-      status: "SIGNED",
-      reference: "95d360c0-65dd-4598-acc0-89cab6b249da",
-    },
-    ...overrides,
-  };
-}
-
 export function bvnkOnrampRequest(
   overrides?: Partial<BvnkOnrampRequestSpec>
 ): BvnkOnrampRequestSpec {
@@ -236,27 +173,6 @@ export function bvnkOnrampRequest(
     currency: "USDC",
     network: "SOLANA",
     destinationWalletAddress: "dest",
-    ...overrides,
-  };
-}
-
-/**
- * The BVNK customer cached on `counterparties.provider_data.bvnk.customer`;
- * no zod schema models provider_data in the API, so the shape stays local.
- */
-export interface BvnkCachedCustomer {
-  customerReference: string;
-  externalReference?: string;
-  status: string;
-}
-
-export function bvnkCachedCustomerSeed(
-  ref: string,
-  overrides?: Partial<BvnkCachedCustomer>
-): BvnkCachedCustomer {
-  return {
-    customerReference: ref,
-    status: "PENDING",
     ...overrides,
   };
 }
@@ -290,21 +206,18 @@ export interface BvnkOfframpProviderData {
 
 export type BvnkOnrampProviderData = {
   bvnk: {
-    customer?: BvnkCachedCustomer;
     wallets?: Record<string, Record<string, unknown>>;
     offramp?: BvnkOfframpProviderData;
   };
 };
 
 export function bvnkOnrampProviderDataSeed(input: {
-  customer?: BvnkCachedCustomer;
   wallets?: Record<string, unknown>;
   offramp?: BvnkOfframpProviderData;
   onrampKey?: string;
 }): BvnkOnrampProviderData {
   return {
     bvnk: {
-      ...(input.customer === undefined ? {} : { customer: input.customer }),
       ...(input.wallets === undefined
         ? {}
         : {
@@ -314,16 +227,5 @@ export function bvnkOnrampProviderDataSeed(input: {
           }),
       ...(input.offramp === undefined ? {} : { offramp: input.offramp }),
     },
-  };
-}
-
-export function bvnkCustomerLinkSeed(
-  ref: string,
-  metadata?: BvnkCustomerProviderAccountMetadata
-): { provider: "bvnk"; providerCustomerReference: string; metadata?: Record<string, unknown> } {
-  return {
-    provider: "bvnk",
-    providerCustomerReference: ref,
-    ...(metadata === undefined ? {} : { metadata }),
   };
 }

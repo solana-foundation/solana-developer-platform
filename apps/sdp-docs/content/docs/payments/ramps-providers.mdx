@@ -20,7 +20,7 @@ Configure both credential pairs for any provider you want to expose to test and 
 | --- | --- | --- | --- | --- | --- |
 | MoonPay | ✓ | ✓ | ✓ | `hosted` | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
 | Lightspark | ✓ | ✓ | ✓ | `manual_instructions` | Grid API. Same per-request sandbox/production selection as MoonPay. |
-| BVNK | ✓ | ✓ | ✓ | `manual_instructions` | Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request. |
+| BVNK | ✓ | ✓ | ✓ | `manual_instructions` | Hawk auth. Compliance party details are built from the BVNK contact, not passed on the request. |
 | MoneyGram | ✓ | ✓ | ✓ | `session_widget` | Sandbox-only pilot integration — there is no production credential path yet. |
 | Coinbase | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Rate estimates work in production; order creation is sandbox-only. Onramp only. |
 | Mural | ✓ | ✗ (estimate only) | ✓ | `manual_instructions` | Off-ramp rate estimate works; off-ramp quote creation is not implemented yet. |
@@ -50,7 +50,7 @@ MoonPay normalizes provider currency codes internally — SDP accepts the canoni
 
 Lightspark is integrated against the Grid API (`https://api.lightspark.com/grid/2025-10-13`); the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). `destinationCustodyWalletId` / `sourceCustodyWalletId` are your own custody wallet, same as every other provider — Lightspark's customer id and payout account are resolved server-side from the counterparty's Provider Requirements, not passed on the quote request.
 
-Counterparties no longer store identity or email fields. Existing Lightspark customers continue to resolve from provider data, but first-time customer creation currently fails with a clear error until just-in-time identity collection is connected.
+Counterparties no longer store identity or email fields. Existing Lightspark customers continue to resolve from provider data, but first-time customer onboarding currently fails with a clear error until just-in-time identity collection is connected.
 
 Lightspark quotes always return `deliveryMode: "manual_instructions"` — the response carries funding instructions to display to the payer, not a redirect URL.
 
@@ -67,7 +67,7 @@ Lightspark quotes always return `deliveryMode: "manual_instructions"` — the re
 
 BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
 
-BVNK is a travel-rule / compliance-sharing provider and requires party details such as name and address. Counterparties no longer store those fields, so customer creation, payment-rule creation, and off-ramp compliance payloads currently fail with a clear error at the pending just-in-time collection seam.
+BVNK is a travel-rule / compliance-sharing provider and requires party details such as name and address. The requirements step therefore collects the counterparty's identity once — first name and last name for individuals, legal name for companies — and creates a BVNK contact for it. There is no BVNK customer, KYC, or agreement flow: wallets are merchant-owned, and payment rules and channels declare the counterparty as a `THIRD_PARTY` entity, referencing the contact via `complianceDetails.contactId`.
 
 BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
 
@@ -126,7 +126,7 @@ Even when all seven providers' env vars are populated, an org can be restricted 
 | Need | Lean towards |
 | --- | --- |
 | Fastest sandbox iteration | MoonPay or BVNK. |
-| Travel-rule / compliance party metadata | BVNK. |
+| Travel-rule / compliance party metadata | BVNK — party identity declared via the collected contact. |
 | Lightning-aware fiat settlement | Lightspark. |
 | Broadest payment-method coverage | MoonPay (corridor-dependent). |
 | Business-entity onramp counterparties | Mural (its only supported entity type). |

@@ -1,81 +1,23 @@
 import type {
-  BvnkAgreementSession,
-  BvnkCustomer,
-  BvnkCustomerCreated,
-  BvnkCustomerIndividual,
+  BvnkContactV3,
   BvnkLedgerWalletProfilesV2,
   BvnkLedgerWalletV2,
 } from "./schemas";
 
-export function bvnkIndividualCustomer(
-  overrides?: Partial<BvnkCustomerIndividual>
-): BvnkCustomerIndividual {
+export function bvnkContactV3(overrides?: Partial<BvnkContactV3>): BvnkContactV3 {
   return {
-    address: {
-      addressLine1: "1 Main Street",
-      city: "Austin",
-      postalCode: "78701",
-      stateCode: "TX",
-      countryCode: "US",
+    id: "a3700c37-3f46-4766-b0db-3250b073fd9c",
+    description: "cpty_123e4567-e89b-12d3-a456-426614174000",
+    entity: {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      firstName: "Jane",
+      lastName: "Doe",
     },
-    dateOfBirth: "1984-06-30",
-    firstName: "Jane",
-    lastName: "Doe",
-    birthCountryCode: "US",
-    nationality: "US",
-    taxIdentification: { number: "123-45-6789", taxResidenceCountryCode: "US" },
-    cdd: {
-      employmentStatus: "SALARIED",
-      sourceOfFunds: "SALARY",
-      pepStatus: "NOT_PEP",
-      intendedUseOfAccount: "TRANSFERS_OWN_WALLET",
-      expectedMonthlyVolume: { amount: "1000", currency: "USD" },
-      estimatedYearlyIncome: "INCOME_0_TO_50K",
-      employmentIndustrySector: "INVESTMENT",
-    },
+    createdAt: "2026-06-10T10:30:00Z",
+    updatedAt: "2026-06-10T10:30:00Z",
     ...overrides,
-  } satisfies BvnkCustomerIndividual;
-}
-
-export function bvnkAgreementSession(
-  overrides?: Partial<BvnkAgreementSession>
-): BvnkAgreementSession {
-  return {
-    reference: "c1d91c8b-f4a6-469e-953d-7344fdb6858c",
-    status: "PENDING",
-    agreements: [
-      {
-        status: "PENDING",
-        name: "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
-        displayName: "Embedded US Partner Platform Customers Agreement",
-        description: "Embedded US Partner Platform Customers Agreement",
-        url: "https://help.bvnk.com/hc/en-us/sections/27816998470930-BVNK-US-Partner-Platform-Customers",
-        privacyPolicyUrl: "https://help.bvnk.com/hc/en-us/articles/7662076884882-Privacy-Policy",
-      },
-    ],
-    ...overrides,
-  } satisfies BvnkAgreementSession;
-}
-
-export function bvnkCustomerCreated(overrides?: Partial<BvnkCustomerCreated>): BvnkCustomerCreated {
-  return {
-    reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
-    status: "PENDING",
-    ...overrides,
-  } satisfies BvnkCustomerCreated;
-}
-
-export function bvnkCustomer(overrides?: Partial<BvnkCustomer>): BvnkCustomer {
-  return {
-    reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
-    status: "INFO_REQUIRED",
-    verification: {
-      status: "init",
-      // biome-ignore lint/security/noSecrets: synthetic sandbox Sumsub link, not a credential
-      url: "https://in.sumsub.com/websdk/p/sbx_EDHeJPPmWnBSU2Es",
-    },
-    ...overrides,
-  } satisfies BvnkCustomer;
+  } satisfies BvnkContactV3;
 }
 
 export function bvnkLedgerWallet(overrides?: Partial<BvnkLedgerWalletV2>): BvnkLedgerWalletV2 {

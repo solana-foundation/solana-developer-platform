@@ -3,14 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "../../../errors";
 import type { RampRuntimeContext } from "../../types";
 import { BvnkRampClient } from "./client";
-import {
-  bvnkAgreementSession,
-  bvnkCustomer,
-  bvnkCustomerCreated,
-  bvnkIndividualCustomer,
-  bvnkLedgerWallet,
-  bvnkWalletProfilesResponse,
-} from "./test-fixtures";
+import { bvnkContactV3, bvnkLedgerWallet, bvnkWalletProfilesResponse } from "./test-fixtures";
 
 const runtimeContext: RampRuntimeContext = {
   env: {
@@ -49,124 +42,121 @@ function queueFetch(...responses: Response[]): { requests: { url: string; init: 
   return { requests };
 }
 
-const individual = bvnkIndividualCustomer();
+describe("BvnkRampClient v3 contact surfaces", () => {
+  const contact = bvnkContactV3();
 
-const session = bvnkAgreementSession();
+  it("creates a contact from the counterparty id and entity, without an idempotency header", async () => {
+    const { requests } = queueFetch(respond(contact, 201));
 
-describe("BvnkRampClient v1 customer surfaces", () => {
-  it("creates an agreement session for the residence country with the row-uuid idempotency header", async () => {
-    const { requests } = queueFetch(respond(session, 201));
-
-    const result = await new BvnkRampClient().createAgreementSession(runtimeContext, {
-      countryCode: "US",
-      idempotencyKey: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+    const result = await new BvnkRampClient().createContactV3(runtimeContext, {
+      description: "cpty_123e4567-e89b-12d3-a456-426614174000",
+      entity: {
+        type: "INDIVIDUAL",
+        relationshipType: "THIRD_PARTY",
+        firstName: "Jane",
+        lastName: "Doe",
+      },
     });
 
-    assert.deepEqual(result, session);
-    assert.equal(new URL(requests[0].url).pathname, "/platform/v1/customers/agreement/sessions");
-    assert.equal(
-      new Headers(requests[0].init.headers).get("X-Idempotency-Key"),
-      "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3"
-    );
+    assert.deepEqual(result, contact);
+    assert.equal(new URL(requests[0].url).pathname, "/platform/v3/contacts");
+    assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), null);
+    assert.equal(new Headers(requests[0].init.headers).get("X-Idempotency-Key"), null);
     assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
-      customerType: "INDIVIDUAL",
-      countryCode: "US",
-      useCase: "EMBEDDED_FIAT_ACCOUNTS",
+      description: "cpty_123e4567-e89b-12d3-a456-426614174000",
+      entity: {
+        type: "INDIVIDUAL",
+        relationshipType: "THIRD_PARTY",
+        firstName: "Jane",
+        lastName: "Doe",
+      },
     });
   });
 
-  it("signs an agreement session with the consenting IP and accepts the empty 204", async () => {
-    const { requests } = queueFetch(new Response(null, { status: 204 }));
+  it("creates a company contact", async () => {
+    const company = bvnkContactV3({
+      entity: {
+        type: "COMPANY",
+        relationshipType: "THIRD_PARTY",
+        legalName: "Acme Corporation",
+        registrationNumber: "12345678",
+      },
+    });
+    const { requests } = queueFetch(respond(company, 201));
 
-    const result = await new BvnkRampClient().signAgreementSession(runtimeContext, {
-      reference: session.reference,
-      ipAddress: "203.0.113.10",
+    const result = await new BvnkRampClient().createContactV3(runtimeContext, {
+      description: "cpty_123e4567-e89b-12d3-a456-426614174000",
+      entity: {
+        type: "COMPANY",
+        relationshipType: "THIRD_PARTY",
+        legalName: "Acme Corporation",
+        registrationNumber: "12345678",
+      },
     });
 
-    assert.equal(result, undefined);
-    assert.equal(
-      new URL(requests[0].url).pathname,
-      `/platform/v1/customers/agreement/sessions/${session.reference}`
-    );
-    assert.equal(requests[0].init.method, "PUT");
+    assert.deepEqual(result, company);
     assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
-      status: "SIGNED",
-      ipAddress: "203.0.113.10",
+      description: "cpty_123e4567-e89b-12d3-a456-426614174000",
+      entity: {
+        type: "COMPANY",
+        relationshipType: "THIRD_PARTY",
+        legalName: "Acme Corporation",
+        registrationNumber: "12345678",
+      },
     });
   });
 
-  it("creates a v1 customer with the idempotency header and no useCase", async () => {
-    const response = bvnkCustomerCreated();
-    const { requests } = queueFetch(respond(response, 201));
+  it("gets a contact by id", async () => {
+    const { requests } = queueFetch(respond(contact));
 
-    const result = await new BvnkRampClient().createCustomer(runtimeContext, {
-      idempotencyKey: "customer-key",
-      externalReference: "probe_v1_1789564047204",
-      signedAgreementSessionReference: session.reference,
-      individual,
+    const result = await new BvnkRampClient().getContactV3(runtimeContext, {
+      contactId: contact.id,
     });
 
-    assert.deepEqual(result, response);
-    assert.equal(new URL(requests[0].url).pathname, "/platform/v1/customers");
-    assert.equal(new Headers(requests[0].init.headers).get("X-Idempotency-Key"), "customer-key");
-    const body = JSON.parse(String(requests[0].init.body)) as Record<string, unknown>;
-    assert.equal(body.useCase, undefined);
-    assert.equal(body.description, undefined);
-    assert.deepEqual(body, {
-      type: "individual",
-      externalReference: "probe_v1_1789564047204",
-      signedAgreementSessionReference: session.reference,
-      individual,
-    });
+    assert.deepEqual(result, contact);
+    assert.equal(new URL(requests[0].url).pathname, `/platform/v3/contacts/${contact.id}`);
   });
 
-  it("returns the typed v1 customer including its verification link", async () => {
-    const response = bvnkCustomer();
-    const { requests } = queueFetch(respond(response));
-
-    const result = await new BvnkRampClient().getCustomer(runtimeContext, {
-      reference: response.reference,
-    });
-
-    assert.deepEqual(result, response);
-    assert.equal(new URL(requests[0].url).pathname, `/platform/v1/customers/${response.reference}`);
-  });
-
-  it("resolves a PENDING v1 customer whose verification block has no Sumsub link", async () => {
-    queueFetch(
-      respond({
-        reference: session.reference,
-        status: "PENDING",
-        verification: { status: "pending" },
-      })
+  it("lists contacts by the description query and returns the content array", async () => {
+    const { requests } = queueFetch(
+      respond({ content: [contact], pageable: { pageNumber: 0, pageSize: 5 }, hasNext: false })
     );
 
-    const result = await new BvnkRampClient().getCustomer(runtimeContext, {
-      reference: session.reference,
+    const result = await new BvnkRampClient().listContactsV3(runtimeContext, {
+      q: "cpty_123e4567-e89b-12d3-a456-426614174000",
+      pageSize: 5,
     });
 
-    const verification = result.verification;
-    assert.equal(verification === undefined ? undefined : verification.url, undefined);
-    assert.equal(verification === undefined ? undefined : verification.status, "pending");
+    assert.deepEqual(result, [contact]);
+    const url = new URL(requests[0].url);
+    assert.equal(url.pathname, "/platform/v3/contacts");
+    assert.equal(url.searchParams.get("q"), "cpty_123e4567-e89b-12d3-a456-426614174000");
+    assert.equal(url.searchParams.get("pageSize"), "5");
   });
 });
 
 describe("BvnkRampClient v2 ledger surfaces", () => {
   const wallet = bvnkLedgerWallet();
 
-  it("creates a ledger wallet", async () => {
+  it("creates a merchant-owned ledger wallet without a customerId", async () => {
     const { requests } = queueFetch(respond(wallet, 201));
 
     const result = await new BvnkRampClient().createLedgerWalletV2(runtimeContext, {
       idempotencyKey: "wallet-key",
       currency: "USD",
       name: "USD Wallet",
-      customerId: "customer-id",
       profileId: "fiat:usd:profile",
     });
 
     assert.deepEqual(result, wallet);
     assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "wallet-key");
+    const body = JSON.parse(String(requests[0].init.body)) as Record<string, unknown>;
+    assert.equal(body.customerId, undefined);
+    assert.deepEqual(body, {
+      currency: "USD",
+      name: "USD Wallet",
+      profileId: "fiat:usd:profile",
+    });
   });
 
   it("gets a ledger wallet with typed payment instruments", async () => {
@@ -182,24 +172,32 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
     });
   });
 
-  it("lists ledger wallet profiles and rails", async () => {
+  it("lists ledger wallet profiles without a customerId filter", async () => {
     const response = bvnkWalletProfilesResponse();
-    queueFetch(respond(response));
+    const { requests } = queueFetch(respond(response));
 
-    const result = await new BvnkRampClient().listLedgerWalletProfilesV2(runtimeContext);
+    const result = await new BvnkRampClient().listLedgerWalletProfilesV2(runtimeContext, {
+      currency: "USD",
+    });
 
     assert.deepEqual(result, response);
+    assert.equal(
+      new URL(requests[0].url).searchParams.get("q"),
+      "currency:USD"
+    );
+    assert.equal(new URL(requests[0].url).searchParams.get("q")?.includes("customerId"), false);
   });
 });
 
 describe("BvnkRampClient response parsing", () => {
-  it("treats a malformed v1 customer response as provider-unavailable", async () => {
+  it("treats a malformed contact list response as provider-unavailable", async () => {
     queueFetch(respond({ unexpected: "shape" }));
 
     await assert.rejects(
       () =>
-        new BvnkRampClient().getCustomer(runtimeContext, {
-          reference: session.reference,
+        new BvnkRampClient().listContactsV3(runtimeContext, {
+          q: "cpty_123e4567-e89b-12d3-a456-426614174000",
+          pageSize: 5,
         }),
       (error: unknown) => {
         assert.equal(error instanceof SdpPaymentsError, true);

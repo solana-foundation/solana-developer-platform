@@ -31,8 +31,6 @@ function offrampPrimaryLabel(
       return t("DashboardPayments.verificationPending");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
-    case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
-      return t("DashboardPayments.bvnk.acceptAgreements");
     case wizard.isLastStep:
       return t("DashboardPayments.counterparty.done");
     default:

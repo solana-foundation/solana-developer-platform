@@ -1,11 +1,8 @@
 import { buildBvnkOnrampWalletName } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { describe, expect, it } from "vitest";
 import {
-  bvnkAgreementSessionStatusChangeEvent,
   bvnkChannelTransactionEvent,
-  bvnkCustomerStatusChangeEvent,
   bvnkPayinStatusChangeEvent,
-  bvnkPlatformCustomerUpdateEvent,
   bvnkWalletStatusChangeEvent,
 } from "@/test/helpers/bvnk";
 import { BvnkWebhookProcessor } from "./bvnk";
@@ -13,56 +10,6 @@ import { BvnkWebhookProcessor } from "./bvnk";
 const ONRAMP_KEY = "USD:USDC_SOLANA:dest";
 
 describe("BvnkWebhookProcessor.parse", () => {
-  it("parses a customer status-change webhook", () => {
-    const processor = new BvnkWebhookProcessor();
-
-    expect(processor.parse(bvnkCustomerStatusChangeEvent())).toEqual({
-      event: "bvnk:customers:status-change",
-      data: {
-        customerId: "customer_1",
-        status: "VERIFIED",
-      },
-    });
-  });
-
-  it("accepts the terminal-success statuses customer webhooks report", () => {
-    const processor = new BvnkWebhookProcessor();
-
-    for (const status of ["COMPLETED", "APPROVED"] as const) {
-      expect(processor.parse(bvnkCustomerStatusChangeEvent({ status }))).toEqual({
-        event: "bvnk:customers:status-change",
-        data: { customerId: "customer_1", status },
-      });
-    }
-  });
-
-  it("rejects a customer status-change whose status is not the uppercase enum", () => {
-    const processor = new BvnkWebhookProcessor();
-
-    expect(() =>
-      processor.parse({
-        event: "bvnk:customers:status-change",
-        data: { customerId: "customer_1", status: "verified" },
-      })
-    ).toThrow(/failed validation/);
-  });
-
-  it("parses a platform customer update webhook", () => {
-    const processor = new BvnkWebhookProcessor();
-
-    expect(processor.parse(bvnkPlatformCustomerUpdateEvent())).toEqual({
-      event: "bvnk:platform:customer:update",
-      data: { reference: "123e4567-e89b-12d3-a456-426614174000" },
-    });
-  });
-
-  it("parses an agreement-session status-change webhook", () => {
-    const processor = new BvnkWebhookProcessor();
-    const event = bvnkAgreementSessionStatusChangeEvent();
-
-    expect(processor.parse(event)).toEqual(event);
-  });
-
   it("parses a ledger wallet status-change webhook", () => {
     const processor = new BvnkWebhookProcessor();
 
@@ -190,8 +137,8 @@ describe("BvnkWebhookProcessor.parse", () => {
   it("rejects a handled BVNK event missing its data object with a 400", () => {
     const processor = new BvnkWebhookProcessor();
 
-    expect(() => processor.parse({ event: "bvnk:customers:status-change" })).toThrowError(
-      'BVNK webhook "bvnk:customers:status-change" is missing a data object'
+    expect(() => processor.parse({ event: "bvnk:payment:payin:status-change" })).toThrowError(
+      'BVNK webhook "bvnk:payment:payin:status-change" is missing a data object'
     );
   });
 });

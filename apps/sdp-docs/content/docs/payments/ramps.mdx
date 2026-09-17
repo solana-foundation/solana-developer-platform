@@ -5,12 +5,12 @@ description: Fiat on-ramps and off-ramps — discover corridors, price a Ramp Qu
 
 SDP wraps ramp providers behind a single pricing step: a **Ramp Quote**, priced just-in-time against the provider. There is no execute endpoint — SDP quotes the ramp and hands the end-user to the provider's own flow (hosted redirect or funding instructions) to complete it.
 
-Every quote is tied to a **Counterparty** — the KYC subject for the ramp — and a custody wallet you control. For per-provider configuration, see [Ramp providers](/docs/payments/ramps-providers).
+Every quote is tied to a **Counterparty** and a custody wallet you control. Providers that need a party identity (such as BVNK) collect the counterparty's identity once and resolve it to a provider-side contact. For per-provider configuration, see [Ramp providers](/docs/payments/ramps-providers).
 
 ## Prerequisites
 
 1. **A Counterparty.** Create one with `POST /v1/counterparties` before requesting a quote.
-2. **Provider Requirements satisfied**, if the provider needs them. Some providers require KYC or bank details collected against the counterparty before they will price or accept a quote. Check `GET /v1/counterparties/{counterpartyId}/requirements?provider=…&direction=…` and submit collected fields with `POST` to the same path until `status` reads `ready`.
+2. **Provider Requirements satisfied**, if the provider needs them. Some providers require identity or bank details collected against the counterparty before they will price or accept a quote. Check `GET /v1/counterparties/{counterpartyId}/requirements?provider=…&direction=…` and submit collected fields with `POST` to the same path until `status` reads `ready` — BVNK moves through `collect` → `provisioning` → `ready`.
 3. **A custody wallet you control**, used as the crypto leg — the onramp destination or the offramp source.
 
 ## Discovering corridors
@@ -145,7 +145,7 @@ HttpRequest request = HttpRequest.newBuilder()
 | Field | Required | Notes |
 | --- | --- | --- |
 | `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `mural`, `stripe`. |
-| `counterpartyId` | yes | An existing Counterparty. Provider-side customer and payout-account state is resolved server-side from it, not passed on the request. Counterparties do not store identity or email fields. |
+| `counterpartyId` | yes | An existing Counterparty. Provider-side contact and payout-account state is resolved server-side from it, not passed on the request — for BVNK, the `customer_link` provider-account row stores the BVNK contact id. Counterparties do not store identity or email fields. |
 | `destinationCustodyWalletId` (onramp) / `sourceCustodyWalletId` (offramp) | yes | A custody wallet you control — its `id` (the `id` returned by `GET /v1/wallets`), resolved against your API key's wallet scope. Same shape for every provider. |
 | `assetRail` | yes | Canonical SDP crypto asset rail (`usdc.solana`, `usdt.solana`, `sol.solana`, …). |
 | `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp and for Lightspark/BVNK offramp; providers that resolve fiat currency during their own flow (MoneyGram) can omit it on offramp. |

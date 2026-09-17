@@ -6,7 +6,6 @@ import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
-import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
@@ -46,10 +45,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     selectedRampPair,
     onboarding,
     isAdvancing,
-    retryOnboarding,
-    pendingAgreements,
-    acceptedAgreements,
-    toggleAgreement,
     quote,
     transferStatus,
     quoteSimulationLoading,
@@ -114,17 +109,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     // Native fieldset[disabled] freezes every nested input and combobox trigger
     // while the advance POST is in flight, so mid-flight edits can't desync the
     // form from what the provider was sent.
-    return pendingAgreements !== null ? (
-      <BvnkAgreementConsent
-        agreements={pendingAgreements}
-        acceptedAgreements={acceptedAgreements}
-        onToggle={toggleAgreement}
-        disabled={isAdvancing}
-      />
-    ) : onboarding !== null &&
+    return onboarding !== null &&
       hasOnboardingLifecycle(onboarding.provider) &&
       isOnboardingPanelStatus(onboarding) ? (
-      <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
+      <RampOnboardingPanel direction="onramp" onboarding={onboarding} />
     ) : (
       <fieldset disabled={isAdvancing} className="min-w-0">
         <RequirementsFields
@@ -155,7 +143,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     isOnboardingPanelStatus(onboarding)
   ) {
     return (
-      <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
+      <RampOnboardingPanel direction="onramp" onboarding={onboarding} />
     );
   }
 

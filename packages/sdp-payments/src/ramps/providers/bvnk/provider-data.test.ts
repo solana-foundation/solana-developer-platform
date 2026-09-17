@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { BvnkContactV3 } from "./schemas";
+import { buildBvnkThirdPartyRuleEntity } from "./counterparty";
 import {
-  buildBvnkCustomerExternalReference,
   buildBvnkOfframpWalletName,
   buildBvnkOnrampPaymentRuleKey,
   buildBvnkOnrampWalletName,
   buildBvnkWalletIdempotencyKey,
-  bvnkUnverifiedOnboardingStatus,
   parseBvnkOfframpWalletName,
   parseBvnkOnrampPaymentRuleKey,
   parseBvnkOnrampWalletName,
@@ -14,56 +14,130 @@ import {
 
 const ONRAMP_KEY = "USD:USDC_SOLANA:dest";
 
-describe("bvnkUnverifiedOnboardingStatus", () => {
-  it("maps PENDING (submitted, in review) to verifying", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("PENDING"), "verifying");
-  });
+function bvnkContactV3Fixture(id: string, entity: BvnkContactV3["entity"]): BvnkContactV3 {
+  return {
+    id,
+    entity,
+    createdAt: "2026-09-17T00:00:00.000Z",
+    updatedAt: "2026-09-17T00:00:00.000Z",
+  };
+}
 
-  it("maps INFO_REQUIRED / ACTIONS_REQUIRED to verification_required", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("INFO_REQUIRED"), "verification_required");
-    assert.equal(bvnkUnverifiedOnboardingStatus("ACTIONS_REQUIRED"), "verification_required");
-  });
+describe("buildBvnkThirdPartyRuleEntity", () => {
+  const COUNTERPARTY_ID = "cpty_123e4567-e89b-12d3-a456-426614174000";
 
-  it("maps the terminal REJECTED status to verification_failed", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("REJECTED"), "verification_failed");
-  });
+  it("maps an individual contact to a THIRD_PARTY rule entity keyed to the counterparty", () => {
+    const contact = bvnkContactV3Fixture("contact_individual_1", {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      dateOfBirth: "1815-12-10",
+      address: {
+        addressLine1: "1 Analytical Engine Way",
+        city: "Austin",
+        postalCode: "78701",
+        country: "US",
+      },
+    });
 
-  it("maps the terminal TERMINATED status to verification_failed", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("TERMINATED"), "verification_failed");
-  });
-
-  it("is case-insensitive", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("pending"), "verifying");
-  });
-
-  it("throws on an unmapped status", () => {
-    assert.throws(() => bvnkUnverifiedOnboardingStatus("WAT"));
-  });
-
-  it("throws on a missing status", () => {
-    assert.throws(() => bvnkUnverifiedOnboardingStatus(undefined));
-  });
-});
-
-describe("buildBvnkCustomerExternalReference", () => {
-  it("drops the cpty_ prefix to fit BVNK's 36-character externalReference", () => {
-    assert.equal(
-      buildBvnkCustomerExternalReference("cpty_123e4567-e89b-12d3-a456-426614174000"),
-      "123e4567-e89b-12d3-a456-426614174000"
-    );
-  });
-
-  it("rejects a malformed counterparty id", () => {
-    assert.throws(() => buildBvnkCustomerExternalReference("cpty_123"), {
-      message: /Malformed SDP counterparty id for BVNK externalReference/,
+    assert.deepEqual(buildBvnkThirdPartyRuleEntity(contact, COUNTERPARTY_ID), {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      customerIdentifier: COUNTERPARTY_ID,
+      firstName: "Ada",
+      lastName: "Lovelace",
+      dateOfBirth: "1815-12-10",
+      address: {
+        addressLine1: "1 Analytical Engine Way",
+        city: "Austin",
+        postalCode: "78701",
+        country: "US",
+        countryCode: "US",
+      },
     });
   });
 
-  it("rejects a retired-prefix counterparty id", () => {
-    assert.throws(
-      () => buildBvnkCustomerExternalReference("counterparty_123e4567-e89b-12d3-a456-426614174000"),
-      { message: /Malformed SDP counterparty id for BVNK externalReference/ }
-    );
+  it("omits the optional individual fields when the contact does not carry them", () => {
+    const contact = bvnkContactV3Fixture("contact_individual_2", {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      firstName: "Ada",
+      lastName: "Lovelace",
+    });
+
+    assert.deepEqual(buildBvnkThirdPartyRuleEntity(contact, COUNTERPARTY_ID), {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      customerIdentifier: COUNTERPARTY_ID,
+      firstName: "Ada",
+      lastName: "Lovelace",
+    });
+  });
+
+  it("maps a company contact to a THIRD_PARTY rule entity with legal entity fields", () => {
+    const contact = bvnkContactV3Fixture("contact_company_1", {
+      type: "COMPANY",
+      relationshipType: "THIRD_PARTY",
+      legalName: "Acme Widgets Ltd",
+      registrationNumber: "01234567",
+      address: {
+        addressLine1: "20 Finsbury Circus",
+        city: "London",
+        postalCode: "EC2M 7DT",
+        country: "GB",
+      },
+    });
+
+    assert.deepEqual(buildBvnkThirdPartyRuleEntity(contact, COUNTERPARTY_ID), {
+      type: "COMPANY",
+      relationshipType: "THIRD_PARTY",
+      customerIdentifier: COUNTERPARTY_ID,
+      legalName: "Acme Widgets Ltd",
+      registrationNumber: "01234567",
+      address: {
+        addressLine1: "20 Finsbury Circus",
+        city: "London",
+        postalCode: "EC2M 7DT",
+        country: "GB",
+        countryCode: "GB",
+      },
+    });
+  });
+
+  it("omits the optional company fields when the contact does not carry them", () => {
+    const contact = bvnkContactV3Fixture("contact_company_2", {
+      type: "COMPANY",
+      relationshipType: "THIRD_PARTY",
+      legalName: "Acme Widgets Ltd",
+    });
+
+    assert.deepEqual(buildBvnkThirdPartyRuleEntity(contact, COUNTERPARTY_ID), {
+      type: "COMPANY",
+      relationshipType: "THIRD_PARTY",
+      customerIdentifier: COUNTERPARTY_ID,
+      legalName: "Acme Widgets Ltd",
+    });
+  });
+
+  it("mirrors the contact address country into country and countryCode", () => {
+    const contact = bvnkContactV3Fixture("contact_country_1", {
+      type: "INDIVIDUAL",
+      relationshipType: "THIRD_PARTY",
+      firstName: "Gottfried",
+      lastName: "Leibniz",
+      address: {
+        addressLine1: "1 Philosophiengasse",
+        city: "Leipzig",
+        postalCode: "04109",
+        country: "DE",
+      },
+    });
+
+    const entity = buildBvnkThirdPartyRuleEntity(contact, COUNTERPARTY_ID);
+
+    assert.equal(entity.address?.country, "DE");
+    assert.equal(entity.address?.countryCode, "DE");
   });
 });
 

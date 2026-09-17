@@ -2,31 +2,30 @@ import type { AppDb } from "@/db";
 import { internalError } from "@/lib/errors";
 import type {
   ArchiveExternalAccountInput,
-  AssignCustomerLinkReferenceInput,
+  CompleteCustomerLinkInput,
   CompleteExternalAccountInput,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
-  FindCustomerLinkBySessionReferenceInput,
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
+  GetFundingWalletByExternalAccountReferenceInput,
   GetFundingWalletByOnrampKeyInput,
   InsertPendingExternalAccountInput,
   InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
-  MarkCustomerLinkSessionTimestampInput,
   PatchAccountMetadataInput,
-  SetCustomerLinkSessionInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
-  type BvnkSessionTimestampField,
+  bvnkCustomerLinkMetadataSchema,
   bvnkFundingWalletMetadataSchema,
   counterpartyProviderAccountRowSchema,
   generateCounterpartyProviderAccountId,
+  pendingCustomerLinkRowSchema,
 } from "./counterparty-provider-account.repository";
 
 /**
@@ -45,6 +44,9 @@ function assertProviderAccountMetadata(
   if (kind === "funding_wallet" && provider === "bvnk") {
     bvnkFundingWalletMetadataSchema.parse(metadata);
   }
+  if (kind === "customer_link" && provider === "bvnk") {
+    bvnkCustomerLinkMetadataSchema.parse(metadata);
+  }
 }
 
 function parseProviderAccountRow(row: Record<string, unknown>): CounterpartyProviderAccountRow {
@@ -57,43 +59,6 @@ function parseProviderAccountRows(
   rows: Record<string, unknown>[]
 ): CounterpartyProviderAccountRow[] {
   return rows.map((row) => parseProviderAccountRow(row));
-}
-
-function sessionTimestampUpdateSql(field: BvnkSessionTimestampField): string {
-  switch (field) {
-    case "signedAt":
-      return `UPDATE counterparty_provider_accounts
-             SET metadata = jsonb_set(metadata, '{session,signedAt}', to_jsonb(?::text)),
-                 updated_at = sdp_iso_now()
-             WHERE id = ?
-               AND organization_id = ?
-               AND project_id = ?
-               AND counterparty_id = ?
-               AND provider = ?
-               AND kind = 'customer_link'
-               AND status = 'active'
-               AND metadata->'session'->>'reference' = ?
-               AND NOT jsonb_exists(metadata->'session', 'signedAt')
-             RETURNING *`;
-    case "consentSubmittedAt":
-      return `UPDATE counterparty_provider_accounts
-             SET metadata = jsonb_set(metadata, '{session,consentSubmittedAt}', to_jsonb(?::text)),
-                 updated_at = sdp_iso_now()
-             WHERE id = ?
-               AND organization_id = ?
-               AND project_id = ?
-               AND counterparty_id = ?
-               AND provider = ?
-               AND kind = 'customer_link'
-               AND status = 'active'
-               AND metadata->'session'->>'reference' = ?
-               AND NOT jsonb_exists(metadata->'session', 'consentSubmittedAt')
-             RETURNING *`;
-    default: {
-      const exhaustive: never = field;
-      return exhaustive;
-    }
-  }
 }
 
 export function createPostgresCounterpartyProviderAccountsRepository(
@@ -213,6 +178,97 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return row === null ? null : parseProviderAccountRow(row);
     },
 
+    async getFundingWalletByExternalAccountReference(
+      input: GetFundingWalletByExternalAccountReferenceInput
+    ) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE provider = ?
+             AND kind = 'funding_wallet'
+             AND external_account_reference = ?
+             AND status = 'active'
+           LIMIT 1`
+        )
+        .bind(input.provider, input.externalAccountReference)
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async claimPendingCustomerLink(input: GetCounterpartyProviderAccountInput) {
+      const row = await db
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+             id, organization_id, project_id, counterparty_id, provider,
+             provider_customer_reference, kind, status
+           ) VALUES (?, ?, ?, ?, ?, NULL, 'customer_link', 'pending')
+           RETURNING *`
+        )
+        .bind(
+          generateCounterpartyProviderAccountId(),
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      if (row === null) {
+        throw internalError("Counterparty customer-link claim escaped its tenant scope.");
+      }
+      return pendingCustomerLinkRowSchema.parse(row);
+    },
+
+    async getPendingCustomerLink(input: GetCounterpartyProviderAccountInput) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'customer_link'
+             AND status = 'pending'
+             AND provider_customer_reference IS NULL
+           LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.counterpartyId, input.provider)
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : pendingCustomerLinkRowSchema.parse(row);
+    },
+
+    async completeCustomerLink(input: CompleteCustomerLinkInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET provider_customer_reference = ?,
+               status = 'active',
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'customer_link'
+             AND status = 'pending'
+             AND provider_customer_reference IS NULL
+           RETURNING *`
+        )
+        .bind(
+          input.providerCustomerReference,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
     async insertProviderResourceAccount(input: InsertProviderResourceAccountInput) {
       // The onramp-key unique index and lookup are expression-based; a row
       // missing metadata.onrampKey would commit but be unreachable and
@@ -309,38 +365,6 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       });
     },
 
-    async assignCustomerLinkReference(input: AssignCustomerLinkReferenceInput) {
-      const row = await db
-        .prepare(
-          `UPDATE counterparty_provider_accounts
-           SET provider_customer_reference = ?,
-               metadata = ?::jsonb,
-               status = 'active',
-               updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND counterparty_id = ?
-             AND provider = ?
-             AND kind = 'customer_link'
-             AND provider_customer_reference = ?
-           RETURNING *`
-        )
-        .bind(
-          input.providerCustomerReference,
-          input.metadata,
-          input.id,
-          input.organizationId,
-          input.projectId,
-          input.counterpartyId,
-          input.provider,
-          input.fromProviderCustomerReference
-        )
-        .first<Record<string, unknown>>();
-
-      return row === null ? null : parseProviderAccountRow(row);
-    },
-
     async listActiveExternalAccounts(input: ListActiveExternalAccountsInput) {
       const result = await db
         .prepare(
@@ -387,73 +411,6 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return row === null ? null : parseProviderAccountRow(row);
     },
 
-    async setCustomerLinkSession(input: SetCustomerLinkSessionInput) {
-      const row = await db
-        .prepare(
-          `UPDATE counterparty_provider_accounts
-           SET metadata = metadata || jsonb_build_object('session', ?::jsonb),
-               updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND counterparty_id = ?
-             AND provider = ?
-             AND kind = 'customer_link'
-             AND NOT jsonb_exists(metadata, 'session')
-           RETURNING *`
-        )
-        .bind(
-          input.session,
-          input.id,
-          input.organizationId,
-          input.projectId,
-          input.counterpartyId,
-          input.provider
-        )
-        .first<Record<string, unknown>>();
-
-      return row === null ? null : parseProviderAccountRow(row);
-    },
-
-    /**
-     * Finds a webhook-targeted customer link without tenant scope.
-     *
-     * @param input - Provider and stored agreement-session reference.
-     * @returns The matching active customer-link row, or null when it is absent.
-     */
-    async findCustomerLinkBySessionReference(input: FindCustomerLinkBySessionReferenceInput) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM counterparty_provider_accounts
-           WHERE provider = ?
-             AND kind = 'customer_link'
-             AND status = 'active'
-             AND metadata->'session'->>'reference' = ?
-           LIMIT 1`
-        )
-        .bind(input.provider, input.sessionReference)
-        .first<Record<string, unknown>>();
-
-      return row === null ? null : parseProviderAccountRow(row);
-    },
-
-    async markCustomerLinkSessionTimestamp(input: MarkCustomerLinkSessionTimestampInput) {
-      const row = await db
-        .prepare(sessionTimestampUpdateSql(input.field))
-        .bind(
-          input.timestamp,
-          input.id,
-          input.organizationId,
-          input.projectId,
-          input.counterpartyId,
-          input.provider,
-          input.sessionReference
-        )
-        .first<Record<string, unknown>>();
-
-      return row === null ? null : parseProviderAccountRow(row);
-    },
-
     async listExternalAccounts(input: ListExternalAccountsInput) {
       const result = await db
         .prepare(
@@ -487,6 +444,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         "project_id = ?",
         "counterparty_id = ?",
         "kind IN ('payout_account', 'customer_link')",
+        "status IN ('active', 'archived')",
       ];
       const bindings: string[] = [input.organizationId, input.projectId, input.counterpartyId];
 

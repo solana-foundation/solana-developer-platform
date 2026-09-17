@@ -3,10 +3,6 @@ import {
   BVNK_NETWORKS,
   type BvnkOnrampRequestSpec,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import {
-  bvnkSessionAgreementSchema,
-  bvnkVerificationStatusSchema,
-} from "@sdp/payments/ramps/providers/bvnk/schemas";
 import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
@@ -63,22 +59,8 @@ export const bvnkFundingWalletMetadataSchema = z.object({
 });
 export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadataSchema>;
 
-export const bvnkCustomerProviderAccountMetadataSchema = z.object({
-  status: z.string().optional(),
-  verificationStatus: bvnkVerificationStatusSchema.optional(),
-  residenceCountryCode: z.enum(COUNTRY_CODES).optional(),
-  session: z
-    .object({
-      reference: z.string().min(1),
-      signedAt: z.string().datetime().optional(),
-      consentSubmittedAt: z.string().datetime().optional(),
-      agreements: z.array(bvnkSessionAgreementSchema.omit({ status: true })),
-    })
-    .optional(),
-});
-export type BvnkCustomerProviderAccountMetadata = z.infer<
-  typeof bvnkCustomerProviderAccountMetadataSchema
->;
+export const bvnkCustomerLinkMetadataSchema = z.strictObject({});
+export type BvnkCustomerLinkMetadata = z.infer<typeof bvnkCustomerLinkMetadataSchema>;
 
 export interface UpsertCounterpartyProviderAccountInput {
   organizationId: string;
@@ -123,6 +105,27 @@ export interface GetFundingWalletByOnrampKeyInput extends GetCounterpartyProvide
   onrampKey: string;
 }
 
+export interface GetFundingWalletByExternalAccountReferenceInput {
+  provider: RampProviderId;
+  externalAccountReference: string;
+}
+
+export interface CompleteCustomerLinkInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  providerCustomerReference: string;
+}
+
+export const pendingCustomerLinkRowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  counterparty_id: z.string(),
+  provider: z.enum(RAMP_PROVIDERS),
+  kind: z.literal("customer_link"),
+  status: z.literal("pending"),
+});
+export type PendingCustomerLinkRow = z.infer<typeof pendingCustomerLinkRowSchema>;
+
 interface InsertProviderResourceAccountBase extends GetCounterpartyProviderAccountInput {
   providerCustomerReference: string;
   fiatCurrency: string;
@@ -153,38 +156,8 @@ export interface PatchAccountMetadataInput extends GetCounterpartyProviderAccoun
   unset: readonly string[];
 }
 
-export interface AssignCustomerLinkReferenceInput extends GetCounterpartyProviderAccountInput {
-  id: string;
-  /** CAS: the customer-link alias the row must still carry for the assignment to land. */
-  fromProviderCustomerReference: string;
-  /** The v1 customer reference replacing the alias. */
-  providerCustomerReference: string;
-  /** Replaces the row's metadata (the caller passes the parsed `{status}` shape). */
-  metadata: Record<string, unknown>;
-}
-
 export interface GetExternalAccountByIdInput extends GetCounterpartyProviderAccountInput {
   id: string;
-}
-
-export interface SetCustomerLinkSessionInput extends GetCounterpartyProviderAccountInput {
-  id: string;
-  /** The minted agreement session, CAS-written only while the row carries none yet. */
-  session: NonNullable<BvnkCustomerProviderAccountMetadata["session"]>;
-}
-
-export interface FindCustomerLinkBySessionReferenceInput {
-  provider: RampProviderId;
-  sessionReference: string;
-}
-
-export type BvnkSessionTimestampField = "signedAt" | "consentSubmittedAt";
-
-export interface MarkCustomerLinkSessionTimestampInput extends GetCounterpartyProviderAccountInput {
-  id: string;
-  sessionReference: string;
-  field: BvnkSessionTimestampField;
-  timestamp: string;
 }
 
 export interface InsertPendingExternalAccountInput extends ListActiveExternalAccountsInput {
@@ -255,6 +228,55 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
+   * Reads an active funding wallet by its provider-side external account
+   * reference (the BVNK wallet id). System-scoped because webhook payloads
+   * carry no tenant identity; the row supplies the tenant scope.
+   *
+   * @param input - Provider and the external account reference to resolve.
+   * @returns The active funding-wallet row, or null when none exists.
+   */
+  getFundingWalletByExternalAccountReference(
+    input: GetFundingWalletByExternalAccountReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Claims a counterparty's BVNK customer-link slot as a pending row before
+   * the provider contact is created: one row per counterparty and provider is
+   * allowed across pending and active states, so the claim fences concurrent
+   * advances. The row carries no provider reference until the contact exists.
+   *
+   * @param input - Tenant scope, counterparty, and provider.
+   * @returns The claimed pending customer-link row.
+   */
+  claimPendingCustomerLink(
+    input: GetCounterpartyProviderAccountInput
+  ): Promise<PendingCustomerLinkRow>;
+
+  /**
+   * Reads the counterparty's pending customer-link row, if a crash left one
+   * claimed but not yet bound to a contact.
+   *
+   * @param input - Tenant scope, counterparty, and provider.
+   * @returns The pending row, or null when none exists.
+   */
+  getPendingCustomerLink(
+    input: GetCounterpartyProviderAccountInput
+  ): Promise<PendingCustomerLinkRow | null>;
+
+  /**
+   * Activates a pending customer-link row with the provider contact id via a
+   * compare-and-swap that matches only while the row is pending and carries
+   * no reference, so a concurrent completion never overwrites a newer
+   * reference.
+   *
+   * @param input - Tenant scope, row id, and the contact id to bind.
+   * @returns The active customer-link row, or null when the CAS missed.
+   */
+  completeCustomerLink(
+    input: CompleteCustomerLinkInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
    * Inserts an active non-customer provider resource account.
    *
    * @param input - Tenant scope, resource kind, provider references, and metadata.
@@ -278,20 +300,6 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Replaces the provider customer reference on a customer-link row via a
-   * compare-and-swap against the stored pre-customer alias, replacing the
-   * metadata with the caller's blob. A concurrent create that already
-   * assigned the reference makes the update match zero rows and return null
-   * instead of overwriting the newer reference.
-   *
-   * @param input - Tenant scope, row id, the alias to swap from, the v1 reference to swap to, and the replacement metadata.
-   * @returns The updated row, or null when the CAS alias is gone.
-   */
-  assignCustomerLinkReference(
-    input: AssignCustomerLinkReferenceInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
    * Lists active external accounts for one payout corridor.
    *
    * @param input - Tenant scope, counterparty, provider, currency, and country.
@@ -309,43 +317,6 @@ export interface CounterpartyProviderAccountsRepository {
    */
   getExternalAccountById(
     input: GetExternalAccountByIdInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
-   * CAS-writes the minted agreement session onto a customer-link row. The
-   * update matches only while the row still carries no session, so a
-   * concurrent mint that stored one first makes this return null instead of
-   * overwriting it — the caller must re-read and present the winner's row.
-   *
-   * @param input - Tenant scope, row id, and the session to store.
-   * @returns The updated row, or null when a concurrent mint already stored a session.
-   */
-  setCustomerLinkSession(
-    input: SetCustomerLinkSessionInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
-   * Finds an active customer link by its BVNK agreement-session reference.
-   * This is system-scoped because webhook payloads carry no tenant identity.
-   *
-   * @param input - Provider and stored agreement-session reference.
-   * @returns The matching customer-link row, or null when no active row owns the session.
-   */
-  findCustomerLinkBySessionReference(
-    input: FindCustomerLinkBySessionReferenceInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
-   * CAS-marks an agreement-session timestamp field on an active customer link.
-   * The write lands only while the session still lacks that field, so a
-   * replayed signature or consent event loses the CAS instead of overwriting
-   * the earlier record.
-   *
-   * @param input - Tenant scope, row id, provider, session reference, the timestamp field to record, and its value.
-   * @returns The updated row, or null when the field was already set or the row is outside the scope.
-   */
-  markCustomerLinkSessionTimestamp(
-    input: MarkCustomerLinkSessionTimestampInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

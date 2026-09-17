@@ -165,7 +165,6 @@ export function createCounterpartiesRepository(
     "CounterpartiesRepository",
     [
       "findActiveCounterpartyById",
-      "findActiveCounterpartyByProviderCustomerReference",
       "findCounterpartyByMuralOrganizationId",
       "patchMuralOrganizationById",
     ]

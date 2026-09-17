@@ -1,7 +1,6 @@
 import type { CounterpartyRow } from "@sdp/payments";
-import type { CounterpartyEntityType, CounterpartyProviderData, RampProviderId } from "@sdp/types";
+import type { CounterpartyEntityType, CounterpartyProviderData } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
-import type { BvnkCustomerProviderAccountMetadata } from "./counterparty-provider-account.repository";
 
 export type { CounterpartyRow } from "@sdp/payments";
 export { generateCounterpartyId } from "@sdp/payments";
@@ -45,17 +44,6 @@ export interface ListCounterpartiesResult {
   total: number;
 }
 
-export interface UpsertBvnkCustomerProviderDataInput {
-  counterpartyId: string;
-  organizationId: string;
-  projectId: string;
-  customer: {
-    customerReference: string;
-    residenceCountryCode?: BvnkCustomerProviderAccountMetadata["residenceCountryCode"];
-    session?: BvnkCustomerProviderAccountMetadata["session"];
-  };
-}
-
 export interface MutateCounterpartyProviderDataInput {
   counterpartyId: string;
   organizationId: string;
@@ -82,13 +70,8 @@ export interface CounterpartiesRepository {
     projectId: string;
   }): Promise<CounterpartyRow | null>;
   findActiveCounterpartyById(counterpartyId: string): Promise<CounterpartyRow | null>;
-  findActiveCounterpartyByProviderCustomerReference(params: {
-    provider: RampProviderId;
-    providerCustomerReference: string;
-  }): Promise<CounterpartyRow | null>;
   findCounterpartyByMuralOrganizationId(organizationId: string): Promise<CounterpartyRow | null>;
   mutateProviderData(params: MutateCounterpartyProviderDataInput): Promise<CounterpartyRow | null>;
-  upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput): Promise<void>;
   patchMuralOrganizationById(params: {
     organizationId: string;
     organization: Record<string, unknown>;

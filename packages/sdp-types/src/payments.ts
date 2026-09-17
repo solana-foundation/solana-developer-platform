@@ -1160,13 +1160,6 @@ export type LightsparkPaymentRampInstruction =
   | LightsparkProviderPaymentRampInstruction
   | LightsparkCryptoDepositPaymentRampInstruction;
 
-export type BvnkOnboardingStatus =
-  | "verification_required"
-  | "verifying"
-  | "verification_failed"
-  | "provisioning"
-  | "ready";
-
 export interface BvnkBankFundingDetails {
   accountNumber?: string;
   code?: string;
@@ -1179,8 +1172,6 @@ export interface BvnkBankFundingDetails {
 export interface BvnkFiatFundingInstruction {
   provider: "bvnk";
   kind: "fiat_funding";
-  onboardingStatus: BvnkOnboardingStatus;
-  verificationUrl?: string;
   ruleId?: string;
   ruleStatus?: string;
   fundingWalletId?: string;
