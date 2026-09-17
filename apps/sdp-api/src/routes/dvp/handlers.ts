@@ -14,7 +14,7 @@ import {
   type DvpLegFundingClaim,
 } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, forbidden, notFound } from "@/lib/errors";
+import { badRequest, forbidden, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
@@ -940,7 +940,13 @@ export const inspectMint = async (c: AppContext) => {
     throw notFound("Mint not found");
   }
 
-  const inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
+  let inspection: Awaited<ReturnType<typeof inspectDvpMint>>;
+  try {
+    inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
+  } catch {
+    // The read failed, so nothing is known about the mint: retryable, never "not found".
+    throw solanaRpcError("Could not read the mint from Solana. Try again.");
+  }
   if (!inspection) {
     throw notFound("Mint not found");
   }

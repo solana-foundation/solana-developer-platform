@@ -128,6 +128,20 @@ describe("inspectDvpMint", () => {
       await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toBeNull();
     });
 
+    // An outage is not an answer about the mint: calling it missing or
+    // unreadable would refuse a valid token until someone retried.
+    it("throws when the account read fails, rather than judging the mint", async () => {
+      const rpc = {
+        getAccountInfo: () => ({
+          send: async () => {
+            throw new Error("rpc down");
+          },
+        }),
+      } as never;
+
+      await expect(inspectDvpMint(rpc, ATD_MINT as never)).rejects.toThrow("rpc down");
+    });
+
     // Not "nothing is there": SDP cannot rule a transfer hook out of a mint it
     // cannot read, so create refuses it and the form is told the same reason.
     it("reports an undecodable token-2022 mint as ineligible, not missing", async () => {
