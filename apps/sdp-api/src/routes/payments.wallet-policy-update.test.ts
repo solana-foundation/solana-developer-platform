@@ -139,6 +139,36 @@ describe("Payments routes — wallet policy concurrent updates", () => {
     expect(policy.controlProfile?.revisionNumber).toBe(2);
   });
 
+  it("writes a fail-closed audit entry for every policy rewrite", async () => {
+    const seeded = await seedRestrictivePolicy();
+
+    const res = await putPolicy({
+      defaultAction: "allow",
+      rules: [],
+      expectedRevisionId: seeded.controlProfile?.revisionId,
+    });
+    expect(res.status).toBe(200);
+    const policy = ((await res.json()) as WalletPolicyBody).data.policy;
+
+    const rows = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM audit_logs
+         WHERE action = 'update' AND resource_type = 'custody_wallet'
+           AND metadata::jsonb ->> 'action' = 'update_wallet_policy'
+         ORDER BY created_at ASC`
+      )
+      .all<{ metadata: string }>();
+    // One entry per rewrite: the seed and the loosening update.
+    expect(rows.results).toHaveLength(2);
+    const loosened = JSON.parse(rows.results[1]?.metadata ?? "{}") as Record<string, unknown>;
+    expect(loosened).toMatchObject({
+      action: "update_wallet_policy",
+      defaultAction: "allow",
+      ruleCount: 0,
+      revisionId: policy.controlProfile?.revisionId,
+    });
+  });
+
   it("rejects a stale expectedRevisionId with 409 and changes nothing", async () => {
     const seeded = await seedRestrictivePolicy();
     const staleRevisionId = seeded.controlProfile?.revisionId;

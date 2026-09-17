@@ -37,7 +37,9 @@ import {
   readBvnkCustomerLink,
   refreshBvnkCustomerAccount,
 } from "@/routes/payments/handlers/ramps/bvnk";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 import {
   type BvnkWalletWebhookData,
@@ -367,7 +369,38 @@ async function provisionPendingBvnkOnramps(
         reloadedCounterparty,
         reloadedCounterparty.project_id,
         customer,
-        entry.request
+        entry.request,
+        // Webhook-driven provisioning has no request actor; the system
+        // intent/outcome pair still records what was created and why, and an
+        // unresolved intent pages like any other.
+        {
+          begin: async ({ action, metadata }) =>
+            new AuditService(getDb(env), createKVStoreSet(env).cache).beginCriticalSystem({
+              organizationId: reloadedCounterparty.organization_id,
+              action: "update",
+              resourceType: "counterparty",
+              resourceId: reloadedCounterparty.id,
+              metadata: { action, provider: "bvnk", trigger: "bvnk_webhook", ...metadata },
+            }),
+          complete: async (intent, metadata = {}) => {
+            await new AuditService(getDb(env), createKVStoreSet(env).cache).completeCriticalSystem(
+              intent,
+              { metadata }
+            );
+          },
+          fail: async (intent, error) => {
+            await new AuditService(getDb(env), createKVStoreSet(env).cache).completeCriticalSystem(
+              intent,
+              {
+                status: "failure",
+                metadata: {
+                  error: error instanceof Error ? error.message : String(error),
+                  providerOutcome: "unverified",
+                },
+              }
+            );
+          },
+        }
       );
     } catch (error) {
       await updateBvnkOnrampPaymentRuleState(repo, reloadedCounterparty, key, {
