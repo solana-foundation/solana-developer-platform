@@ -53,7 +53,7 @@ function ConsentRow({
 }) {
   return (
     <li>
-      <label className="group flex cursor-pointer items-center gap-3 py-1.5 text-left whitespace-nowrap has-disabled:cursor-default">
+      <label className="group flex cursor-pointer items-start gap-3 py-1.5 text-left has-disabled:cursor-default">
         <input
           type="checkbox"
           className="peer sr-only"
@@ -63,11 +63,11 @@ function ConsentRow({
         />
         <span
           aria-hidden="true"
-          className="flex size-5 shrink-0 items-center justify-center rounded-md border border-[var(--input-border-idle)] transition-colors duration-150 peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:shadow-[0_0_0_2px_var(--input-focus-ring)] motion-reduce:transition-none"
+          className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border border-[var(--input-border-idle)] transition-colors duration-150 peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:shadow-[0_0_0_2px_var(--input-focus-ring)] motion-reduce:transition-none"
         >
           <CheckIcon className="size-3.5 scale-50 text-on-primary opacity-0 transition duration-150 ease-out motion-reduce:transition-none group-has-checked:scale-100 group-has-checked:opacity-100" />
         </span>
-        <span className="text-sm leading-relaxed text-tertiary transition-colors duration-150 group-has-checked:text-primary">
+        <span className="text-balance text-sm leading-relaxed text-tertiary transition-colors duration-150 group-has-checked:text-primary">
           {children}
         </span>
       </label>
@@ -107,7 +107,7 @@ export function BvnkAgreementConsent({
       <p className="max-w-md text-sm leading-relaxed text-tertiary">
         {t("DashboardPayments.bvnk.agreementRequiredDescription")}
       </p>
-      <ul className="flex w-full max-w-2xl flex-col">
+      <ul className="flex w-full max-w-md flex-col">
         {agreements.flatMap((agreement) => {
           const keys = bvnkAgreementConsentKeys(agreement);
           return [
