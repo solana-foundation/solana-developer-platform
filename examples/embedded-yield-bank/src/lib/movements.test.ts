@@ -3,6 +3,7 @@ import type { DashboardData, YieldMovement } from "@/types";
 import {
   applyInFlight,
   foldSettledTransfers,
+  reconcileInFlight,
   reconcileMovementPolling,
   SETTLEMENT_POLL_TIMEOUT_MS,
   startMovementPolling,
@@ -108,6 +109,30 @@ describe("in-flight transfers", () => {
     expect(view.checking.balance).toBe("14");
     expect(view.savings.balance).toBe("6");
     expect(view.total).toBe("20");
+  });
+
+  it("folds only finalized transfers and drops failed ones without applying them", () => {
+    const inFlight = [
+      { movementId: "ok", direction: "deposit" as const, amount: "2" },
+      { movementId: "bad", direction: "deposit" as const, amount: "5" },
+      { movementId: "slow", direction: "deposit" as const, amount: "1" },
+      { movementId: "unseen", direction: "deposit" as const, amount: "3" },
+    ];
+    const movements = [
+      { ...createMovement("finalized"), movementId: "ok" },
+      { ...createMovement("failed"), movementId: "bad" },
+      { ...createMovement("submitted"), movementId: "slow" },
+    ];
+
+    const { finalized, remaining } = reconcileInFlight(inFlight, movements);
+
+    expect(finalized.map((transfer) => transfer.movementId)).toEqual(["ok"]);
+    expect(remaining.map((transfer) => transfer.movementId)).toEqual([
+      "slow",
+      "unseen",
+    ]);
+    const base = dashboard({ checking: "19", savings: "1", total: "20" });
+    expect(foldSettledTransfers(base, finalized).checking.balance).toBe("17");
   });
 
   it("returns live data untouched once nothing is in flight", () => {

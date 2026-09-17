@@ -28,6 +28,7 @@ import {
   type InFlightTransfer,
   isPendingMovement,
   type MovementPolling,
+  reconcileInFlight,
   reconcileMovementPolling,
   startMovementPolling,
 } from "@/lib/movements";
@@ -97,28 +98,23 @@ export function App() {
           next.movements
         );
         updateMovementPolling(reconciliation.polling);
-        const settled = new Set(
-          next.movements
-            .filter((movement) => !isPendingMovement(movement))
-            .map((movement) => movement.movementId)
-        );
         const current = inFlightRef.current;
         if (current.length) {
-          const settledNow = current.filter((transfer) =>
-            settled.has(transfer.movementId)
+          const { finalized, remaining } = reconcileInFlight(
+            current,
+            next.movements
           );
-          const remaining = reconciliation.timedOut
-            ? []
-            : current.filter((transfer) => !settled.has(transfer.movementId));
-          // Overlapping transfers: what just settled becomes part of the base
-          // so the ones still pending project from the balances it produced.
-          if (settledNow.length && remaining.length && inFlightBase.current) {
+          const keep = reconciliation.timedOut ? [] : remaining;
+          // Overlapping transfers: what just finalized becomes part of the
+          // base so the ones still pending project from the balances it
+          // produced. A failed transfer moved nothing and is simply dropped.
+          if (finalized.length && keep.length && inFlightBase.current) {
             inFlightBase.current = foldSettledTransfers(
               inFlightBase.current,
-              settledNow
+              finalized
             );
           }
-          updateInFlight(remaining);
+          updateInFlight(keep);
         }
         if (reconciliation.timedOut) {
           toast.warning("Settlement is taking longer than expected", {

@@ -106,9 +106,33 @@ export function applyInFlight(
 }
 
 /**
- * When one of several overlapping transfers settles, move its effect into the
- * base so the transfers still pending project from the balances that transfer
- * actually produced, not from the snapshot taken before it started.
+ * Split this tab's in-flight transfers by what the ledger now says: the ones
+ * that finalized (their effect is real and belongs in the base), and the ones
+ * still pending or not yet listed. A failed transfer is in neither: it moved
+ * nothing, so it is dropped without touching any balance.
+ */
+export function reconcileInFlight(
+  inFlight: readonly InFlightTransfer[],
+  movements: readonly YieldMovement[]
+): { finalized: InFlightTransfer[]; remaining: InFlightTransfer[] } {
+  const status = new Map(
+    movements.map((movement) => [movement.movementId, movement.status])
+  );
+  return {
+    finalized: inFlight.filter(
+      (transfer) => status.get(transfer.movementId) === "finalized"
+    ),
+    remaining: inFlight.filter((transfer) => {
+      const current = status.get(transfer.movementId);
+      return current !== "finalized" && current !== "failed";
+    }),
+  };
+}
+
+/**
+ * When one of several overlapping transfers finalizes, move its effect into
+ * the base so the transfers still pending project from the balances that
+ * transfer actually produced, not from the snapshot taken before it started.
  */
 export function foldSettledTransfers(
   base: DashboardData,
