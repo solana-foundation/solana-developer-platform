@@ -184,6 +184,7 @@ function IssuanceTokenGridCard({
   locale: ReturnType<typeof useLocale>;
 }) {
   const statusBadge = deploymentStatusBadge(getDeploymentStatus(token), t);
+  const supplyLocked = Boolean(token.mintAddress && (!token.isMintable || !token.mintAuthority));
   const smartDate = buildSmartDate(token, t, locale);
 
   return (
@@ -223,15 +224,22 @@ function IssuanceTokenGridCard({
             </h3>
           </div>
         </div>
-        <span
-          data-testid={`token-card-status-${token.id}`}
-          className={cn(
-            "inline-flex shrink-0 items-center self-start rounded-full px-2.5 py-1 text-xs font-medium capitalize",
-            statusBadge.badge
-          )}
-        >
-          {statusBadge.label}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span
+            data-testid={`token-card-status-${token.id}`}
+            className={cn(
+              "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize",
+              statusBadge.badge
+            )}
+          >
+            {statusBadge.label}
+          </span>
+          {supplyLocked ? (
+            <span className="inline-flex items-center rounded-full bg-fill px-2.5 py-1 text-xs font-medium text-secondary">
+              {t("DashboardIssuance.management.supplyLocked")}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-5 space-y-1.5">

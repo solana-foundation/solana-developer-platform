@@ -49,10 +49,12 @@ export function useAssetProfileForm({
     }
   }, [initialAssetProfile, assetProfile.updatedAt]);
 
-  const storedBaseline = useMemo(
-    () => profileToDraftState(assetProfile, token),
-    [assetProfile, token]
-  );
+  const storedBaseline = useMemo(() => {
+    const next = profileToDraftState(assetProfile, token);
+    return !token.mintAddress && token.template === "stablecoin"
+      ? { ...next, decimals: "6" }
+      : next;
+  }, [assetProfile, token]);
   const [storedDraft, setDraft] = useState<DraftState>(storedBaseline);
   const baseline = token.mintAddress
     ? storedBaseline
@@ -93,7 +95,11 @@ export function useAssetProfileForm({
     if (saving) {
       return;
     }
-    setDraft((previous) => ({ ...previous, ...patch }));
+    setDraft((previous) => ({
+      ...previous,
+      ...patch,
+      ...(!token.mintAddress && token.template === "stablecoin" ? { decimals: "6" } : {}),
+    }));
   };
 
   // The cap is frozen once the mint authority is revoked; until then it stays
@@ -167,7 +173,7 @@ export function useAssetProfileForm({
             : {
                 symbol: draft.symbol.trim(),
                 ...(draft.signingWalletId ? { signingCustodyWalletId: draft.signingWalletId } : {}),
-                decimals: Number(draft.decimals),
+                decimals: token.template === "stablecoin" ? 6 : Number(draft.decimals),
                 requiresAllowlist: draft.accessControl === "allowlist",
               }),
           // Blank means uncapped. Withheld once the supply is locked on-chain:

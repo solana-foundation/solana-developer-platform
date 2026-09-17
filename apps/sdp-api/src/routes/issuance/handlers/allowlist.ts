@@ -7,10 +7,17 @@ import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
+import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
+import {
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+  runApprovedWalletOperationEffectTransaction,
+} from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
+
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -28,6 +35,7 @@ import {
   resolveAllowlistAuthority,
   resolveAuthorityWallet,
 } from "./authority-resolution";
+import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -175,6 +183,8 @@ async function resolveAllowlistAuthoritySigner(
     requestedCustodyWalletId: signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:write"],
   });
+  assertJudgedCustodyWallet(c, authorityWallet.custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, authorityWallet.custodyWalletId);
   await admitIssuanceRuntimeExecution({
     env: c.env,
     auth,
@@ -275,13 +285,18 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
         )
       : null;
 
-    let { entry } = await tokenService.addAllowlistEntry({
-      tokenId,
-      address: body.address,
-      addedBy: auth.id,
-      label: body.label,
-      initialStatus: token.ablListAddress ? "pending" : "active",
-    });
+    // The effect fence and the first durable allowlist row commit together:
+    // a crash between them must leave either both or neither, so recovery can
+    // retry instead of paging for manual reconciliation.
+    let { entry } = await runApprovedWalletOperationEffectTransaction(c, (db) =>
+      getTenantTokenService(c, db).addAllowlistEntry({
+        tokenId,
+        address: body.address,
+        addedBy: auth.id,
+        label: body.label,
+        initialStatus: token.ablListAddress ? "pending" : "active",
+      })
+    );
 
     const auditService = new AuditService(getDb(c.env));
     if (list && authorityWallet) {
@@ -403,6 +418,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     // reading membership, so a timeout that landed still completes, while a
     // definite failure leaves the entry accurately active and safely retryable.
     if (list && authorityWallet) {
+      await beginApprovedWalletOperationEffect(c);
       await removeExistingAllowlistEntryOnChain({
         c,
         signer: authorityWallet.signer,
@@ -410,9 +426,14 @@ export const removeAllowlistEntry = async (c: AppContext) => {
         wallet: assertValidAddress(entry.address, "address"),
       });
       authoritativeEffectCompleted = true;
+      await tokenService.revokeAllowlistEntry(entryId);
+    } else {
+      // Database-only removal: the fence and the revoke are one transaction,
+      // so a crash between them cannot strand a fenced-but-unapplied effect.
+      await runApprovedWalletOperationEffectTransaction(c, (db) =>
+        getTenantTokenService(c, db).revokeAllowlistEntry(entryId)
+      );
     }
-
-    await tokenService.revokeAllowlistEntry(entryId);
     authoritativeEffectCompleted = true;
     await auditService.completeCritical(c, auditIntent);
 
@@ -427,3 +448,125 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     throw error;
   }
 };
+
+async function extractAllowlistMutationPolicyCandidate(options: {
+  c: AppContext;
+  operationType: "issuance_allowlist_add_execute" | "issuance_allowlist_remove_execute";
+  action: "add" | "remove";
+  address: string;
+  signingCustodyWalletId: string | undefined;
+  body: Record<string, unknown>;
+}): Promise<PolicyGateExtraction> {
+  const { c, operationType, action, address, signingCustodyWalletId, body } = options;
+  const { tokenId } = c.req.param();
+  const { auth, projectId, orgId } = requireProjectScope(c);
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+
+  const emptyExtraction = {
+    legs: [],
+    body,
+    resolved: {},
+    rawPayload: {
+      tokenId: token.id,
+      mintAddress: token.mintAddress,
+      action,
+      address,
+    },
+    idempotencyKey: null,
+  };
+
+  // A token without an on-chain control list mutates only the database rows;
+  // no custody wallet signs, so there is no wallet operation to judge.
+  if (!token.ablListAddress) {
+    return { ...emptyExtraction, candidate: null };
+  }
+
+  const list = assertValidAddress(token.ablListAddress, "ablListAddress");
+  const authority = await resolveAllowlistAuthority(c.env, list);
+  const wallet = await resolveAuthorityWallet({
+    env: c.env,
+    auth,
+    currentAuthority: authority,
+    requestedCustodyWalletId: signingCustodyWalletId,
+    requiredWalletPermissions: ["tokens:write"],
+  });
+
+  await admitIssuanceRuntimeExecution({
+    env: c.env,
+    auth,
+    custodyWalletId: wallet.custodyWalletId,
+    tokenService,
+  });
+
+  return {
+    ...emptyExtraction,
+    resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
+    candidate: buildIssuancePolicyCandidate({
+      auth,
+      token,
+      custodyWalletId: wallet.custodyWalletId,
+      walletId: wallet.providerWalletId,
+      operationType,
+      amount: null,
+      destination: address,
+    }),
+  };
+}
+
+export async function extractAllowlistAddPolicyCandidate(
+  c: ValidatedBodyContext<typeof addAllowlistSchema>
+): Promise<PolicyGateExtraction> {
+  const body = c.req.valid("json");
+  return extractAllowlistMutationPolicyCandidate({
+    c,
+    operationType: "issuance_allowlist_add_execute",
+    action: "add",
+    address: body.address,
+    signingCustodyWalletId: body.signingCustodyWalletId,
+    body,
+  });
+}
+
+export async function extractAllowlistRemovePolicyCandidate(
+  c: AppContext
+): Promise<PolicyGateExtraction> {
+  const { tokenId, entryId } = c.req.param();
+  const { projectId, orgId } = requireProjectScope(c);
+  const parsed = removeAllowlistQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
+  const tokenService = getTenantTokenService(c);
+  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
+  if (!token) {
+    throw notFound("Token");
+  }
+  const entry = await tokenService.getAllowlistEntry(entryId);
+  if (!entry || entry.tokenId !== tokenId) {
+    throw notFound("Allowlist entry");
+  }
+  // An already-revoked entry is a no-op replay the handler acknowledges
+  // without signing anything.
+  if (entry.status === "revoked") {
+    return {
+      legs: [],
+      body: { entryId },
+      resolved: {},
+      rawPayload: { tokenId, entryId, action: "remove", address: entry.address },
+      idempotencyKey: null,
+      candidate: null,
+    };
+  }
+  return extractAllowlistMutationPolicyCandidate({
+    c,
+    operationType: "issuance_allowlist_remove_execute",
+    action: "remove",
+    address: entry.address,
+    signingCustodyWalletId: parsed.data.signingCustodyWalletId,
+    body: { entryId },
+  });
+}

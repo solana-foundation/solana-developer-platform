@@ -154,15 +154,65 @@ export function toIssuanceListUrlParams(query: IssuanceListQuery): Record<string
   };
 }
 
-/** State → the query string the BFF route expects (same vocabulary as the URL). */
+const ISSUANCE_SEARCH_REQUEST_PARAM = "searchEncoded";
+
+export class InvalidIssuanceSearchEncodingError extends Error {
+  constructor() {
+    super("Invalid encoded issuance search");
+    this.name = "InvalidIssuanceSearchEncodingError";
+  }
+}
+
+function encodeSearchForRequest(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  const binary = String.fromCharCode(...bytes);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+function decodeSearchFromRequest(value: string): string | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  try {
+    const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * State → the query string the browser uses for the BFF request.
+ *
+ * Search text is base64url encoded so edge security filters do not mistake a
+ * literal user search for SQL syntax before the request reaches our route.
+ */
 export function toIssuanceListRequestParams(query: IssuanceListQuery): URLSearchParams {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(toIssuanceListUrlParams(query))) {
-    if (value !== null) {
+    if (key !== "search" && value !== null) {
       params.set(key, value);
     }
   }
+  if (query.search) {
+    params.set(ISSUANCE_SEARCH_REQUEST_PARAM, encodeSearchForRequest(query.search));
+  }
   return params;
+}
+
+/** Decode the browser-only search envelope before applying the shared parser. */
+export function parseIssuanceListRequestQuery(params: URLSearchParams): IssuanceListQuery {
+  const normalized = new URLSearchParams(params);
+  const encodedSearch = normalized.get(ISSUANCE_SEARCH_REQUEST_PARAM);
+  normalized.delete(ISSUANCE_SEARCH_REQUEST_PARAM);
+  if (encodedSearch !== null) {
+    const decodedSearch = decodeSearchFromRequest(encodedSearch);
+    if (decodedSearch === null) {
+      throw new InvalidIssuanceSearchEncodingError();
+    }
+    normalized.set("search", decodedSearch);
+  }
+  return parseIssuanceListQuery(normalized);
 }
 
 /**

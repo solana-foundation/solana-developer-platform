@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createCommitOnBranch, githubGraphqlRequest } from "./github-commit-on-branch.mjs";
 import { reconcileReleaseAutoMerge } from "./release-automerge.mjs";
+import { buildSectionMarkdown } from "./release-changelog.mjs";
 import { nextReleaseVersion, releaseCommitSemantics } from "./release-version.mjs";
 
 const mode = process.argv[2];
@@ -34,16 +35,6 @@ const repoRoot = process.cwd();
 const packageJsonPath = path.join(repoRoot, "package.json");
 const changelogPath = path.join(repoRoot, "CHANGELOG.md");
 const manifestPath = path.join(repoRoot, ".github/.release-please-manifest.json");
-
-const changelogSections = [
-  { key: "feat", heading: "Features" },
-  { key: "fix", heading: "Bug Fixes" },
-  { key: "perf", heading: "Performance Improvements" },
-  { key: "docs", heading: "Documentation" },
-  { key: "refactor", heading: "Refactors" },
-  { key: "maintenance", heading: "Maintenance" },
-  { key: "other", heading: "Other Changes" },
-];
 
 function git(args, options = {}) {
   const capture = options.capture !== false;
@@ -159,75 +150,6 @@ function parseConventionalCommit(subject, body) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function compareUrl(fromTag, toTag) {
-  if (!fromTag) {
-    return `https://github.com/${repo}/releases/tag/${toTag}`;
-  }
-  return `https://github.com/${repo}/compare/${fromTag}...${toTag}`;
-}
-
-function commitUrl(sha) {
-  return `https://github.com/${repo}/commit/${sha}`;
-}
-
-function prUrl(number) {
-  return `https://github.com/${repo}/pull/${number}`;
-}
-
-function categorizeCommit(type) {
-  if (type === "feat") {
-    return "feat";
-  }
-  if (type === "fix") {
-    return "fix";
-  }
-  if (type === "perf") {
-    return "perf";
-  }
-  if (type === "docs") {
-    return "docs";
-  }
-  if (type === "refactor") {
-    return "refactor";
-  }
-  if (["ci", "build", "chore", "test"].includes(type)) {
-    return "maintenance";
-  }
-  return "other";
-}
-
-function buildSectionMarkdown(version, previousTag, commits) {
-  const releaseTag = `v${version}`;
-  const date = new Date().toISOString().slice(0, 10);
-  const grouped = new Map(changelogSections.map((section) => [section.key, []]));
-
-  for (const commit of commits) {
-    const bucket = categorizeCommit(commit.type);
-    const shortSha = commit.sha.slice(0, 7);
-    const prLink = commit.prNumber ? ` ([#${commit.prNumber}](${prUrl(commit.prNumber)}))` : "";
-    grouped
-      .get(bucket)
-      ?.push(`* ${commit.description}${prLink} ([${shortSha}](${commitUrl(commit.sha)}))`);
-  }
-
-  const lines = [`## [${version}](${compareUrl(previousTag, releaseTag)}) (${date})`, ""];
-
-  for (const section of changelogSections) {
-    const entries = grouped.get(section.key) || [];
-    if (entries.length === 0) {
-      continue;
-    }
-    lines.push(`### ${section.heading}`, "");
-    lines.push(...entries, "");
-  }
-
-  while (lines.at(-1) === "") {
-    lines.pop();
-  }
-
-  return `${lines.join("\n")}\n`;
 }
 
 function prependChangelog(sectionMarkdown) {
@@ -715,7 +637,7 @@ async function prepareRelease(attempt = 1) {
   }
 
   const nextVersion = nextReleaseVersion(packageJson.version, parsedCommits);
-  const sectionMarkdown = buildSectionMarkdown(nextVersion, previousTag, parsedCommits);
+  const sectionMarkdown = buildSectionMarkdown(repo, nextVersion, previousTag, parsedCommits);
 
   console.log(`Preparing release ${nextVersion}`);
   if (dryRun) {

@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { isProviderCredentialCreationInProgress } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -157,19 +158,65 @@ export async function rotateProviderCredential(
     throw conflict(ROTATION_UNAVAILABLE);
   }
 
+  return submitRotationCandidate(context, current, fields, idempotencyKey, fingerprint);
+}
+
+async function submitRotationCandidate(
+  context: LifecycleContext,
+  current: AuthorizedCredential,
+  fields: { appId: string; appSecret: string },
+  idempotencyKey: string,
+  fingerprint: string
+): Promise<ProviderCredentialRotationResult> {
+  const c = context.c;
   const candidateId = `pcred_${crypto.randomUUID()}`;
-  const secretStore = createStoredSecretStore(c, candidateId);
+  const auditIntent = await context.audit.beginCritical(c, {
+    organizationId: context.organizationId,
+    userId: context.userId,
+    action: "submit",
+    resourceType: "provider_credential",
+    resourceId: candidateId,
+    metadata: {
+      event: "provider_credential_rotation_submission_started",
+      provider: "privy",
+      scope: current.credential.scope,
+      predecessorCredentialId: current.credential.id,
+    },
+  });
+  let secretStore: CredentialSecretStore;
+  let stored: StoredCredentialSecret;
+  let existingSecretRef: string | null = null;
+  try {
+    secretStore = createStoredSecretStore(c, candidateId);
+    if (secretStore.storageBackend === "gcp_secret_manager") {
+      existingSecretRef = await context.store.findGcpContainerRef(
+        context.organizationId,
+        current.credential.id
+      );
+      stored = existingSecretRef
+        ? { storageBackend: "gcp_secret_manager", secretRef: existingSecretRef }
+        : prepareGcpCredentialSecret(c.env, candidateId);
+    } else {
+      stored = await writeRotationSecret(
+        context,
+        secretStore,
+        candidateId,
+        fields.appId,
+        fields.appSecret
+      );
+    }
+  } catch (error) {
+    await closeRejectedIntent(
+      context,
+      auditIntent,
+      "provider_credential_rotation_submission_failed"
+    );
+    throw error;
+  }
   const creating = secretStore.storageBackend === "gcp_secret_manager";
-  const existingSecretRef = creating
-    ? await context.store.findGcpContainerRef(context.organizationId, current.credential.id)
-    : null;
-  const stored = creating
-    ? existingSecretRef
-      ? { storageBackend: "gcp_secret_manager" as const, secretRef: existingSecretRef }
-      : prepareGcpCredentialSecret(c.env, candidateId)
-    : await writeRotationSecret(context, secretStore, candidateId, fields.appId, fields.appSecret);
 
   let candidate: LifecycleCredentialRow;
+  let replay = false;
   try {
     const transaction = await getDb(c.env).transaction(async (tx) => {
       const store = new ProviderCredentialStore(tx);
@@ -218,23 +265,53 @@ export async function rotateProviderCredential(
     if (!loaded) throw internalError();
     candidate = loaded;
     // A replay never owns the external write, even if the winning row is still creating.
-    if (transaction.kind === "replay")
-      return replayRotationCandidate(c, await loadAuthorizedCandidate(context, candidate.id, true));
+    replay = transaction.kind === "replay";
   } catch (error) {
     let recovered: ProviderCredentialRow | null;
     try {
       recovered = await context.store.findReplayByKey(context.organizationId, idempotencyKey);
     } catch (reconciliationError) {
       logLifecycleFailure(c, "candidate_insert_reconcile", candidateId, reconciliationError);
+      logUnresolvedAuditIntent(context, auditIntent, candidateId);
       throw error;
     }
     if (recovered?.idempotency_fingerprint === fingerprint) {
+      if (recovered.id !== candidateId) {
+        await closeRejectedIntent(
+          context,
+          auditIntent,
+          "provider_credential_rotation_submission_replayed"
+        );
+      } else if (isProviderCredentialCreationInProgress(recovered.status)) {
+        logUnresolvedAuditIntent(context, auditIntent, candidateId);
+      } else if (recovered.last_failure_code === "secret_creation_abandoned") {
+        await closeRejectedIntent(
+          context,
+          auditIntent,
+          "provider_credential_rotation_submission_failed"
+        );
+      } else {
+        await completeRotationSubmissionAudit(context, auditIntent, recovered);
+      }
       return completeRotationCandidate(c, recovered.id);
     }
+    await closeRejectedIntent(
+      context,
+      auditIntent,
+      "provider_credential_rotation_submission_failed"
+    );
     if (isPostgresUniqueViolation(error)) throw conflict(ROTATION_UNAVAILABLE);
     throw error;
   }
 
+  if (replay) {
+    await closeRejectedIntent(
+      context,
+      auditIntent,
+      "provider_credential_rotation_submission_replayed"
+    );
+    return replayRotationCandidate(c, await loadAuthorizedCandidate(context, candidate.id, true));
+  }
   if (creating)
     return finishGcpRotationCreation(
       context,
@@ -242,9 +319,24 @@ export async function rotateProviderCredential(
       candidate,
       secretStore,
       fields,
+      auditIntent,
       existingSecretRef ?? undefined
     );
+  await completeRotationSubmissionAudit(context, auditIntent, candidate);
   return completeRotationCandidate(c, candidate.id);
+}
+
+async function completeRotationSubmissionAudit(
+  context: LifecycleContext,
+  intent: AuditIntent,
+  credential: ProviderCredentialRow
+): Promise<void> {
+  await context.audit.completeCritical(context.c, intent, {
+    metadata: {
+      event: "provider_credential_rotation_submitted",
+      credentialStatus: credential.status,
+    },
+  });
 }
 
 async function finishGcpRotationCreation(
@@ -253,11 +345,19 @@ async function finishGcpRotationCreation(
   candidate: LifecycleCredentialRow,
   secretStore: CredentialSecretStore,
   fields: { appId: string; appSecret: string },
+  auditIntent: AuditIntent,
   existingSecretRef?: string
 ): Promise<ProviderCredentialRotationResult> {
   const c = context.c;
   const candidateId = candidate.id;
-  if (candidate.status !== "creating") throw conflict(ROTATION_UNAVAILABLE);
+  if (!isProviderCredentialCreationInProgress(candidate.status)) {
+    await closeRejectedIntent(
+      context,
+      auditIntent,
+      "provider_credential_rotation_submission_failed"
+    );
+    throw conflict(ROTATION_UNAVAILABLE);
+  }
   let written: StoredCredentialSecret | undefined;
   try {
     written = await writeRotationSecret(
@@ -288,12 +388,22 @@ async function finishGcpRotationCreation(
       candidateId,
       written
     );
-    if (recovered.kind === "adopted") return completeRotationCandidate(c, candidateId);
+    if (recovered.kind === "adopted") {
+      await completeRotationSubmissionAudit(context, auditIntent, recovered.credential);
+      return completeRotationCandidate(c, candidateId);
+    }
     if (recovered.kind === "unknown") {
+      logUnresolvedAuditIntent(context, auditIntent, candidateId);
       throw providerUnavailable("Credential creation outcome is temporarily unknown");
     }
+    await closeRejectedIntent(
+      context,
+      auditIntent,
+      "provider_credential_rotation_submission_failed"
+    );
     throw error;
   }
+  await completeRotationSubmissionAudit(context, auditIntent, { ...candidate, status: "pending" });
   return completeRotationCandidate(c, candidate.id);
 }
 
@@ -336,6 +446,22 @@ export async function completeRotationCandidate(
     throw conflict(ROTATION_UNAVAILABLE);
   }
 
+  const auditIntent = await context.audit.beginCritical(c, {
+    organizationId: context.organizationId,
+    userId: context.userId,
+    action: "rotate",
+    resourceType: "provider_credential",
+    resourceId: loaded.candidate.id,
+    metadata: {
+      event: "provider_credential_rotation_started",
+      provider: "privy",
+      scope: loaded.candidate.scope,
+      fromProviderCredentialId: loaded.predecessor.id,
+      toProviderCredentialId: loaded.candidate.id,
+      connectionIds: referenceIds(loaded.references),
+      projectIds: [...new Set(loaded.references.map((row) => row.project_id))].sort(),
+    },
+  });
   let candidateSecret: LifecycleCredentialWithSecretRow;
   let authentication: PrivyCredentialAuthentication;
   try {
@@ -343,11 +469,11 @@ export async function completeRotationCandidate(
     const secretStore = createPersistedSecretStore(c, candidateSecret.storage_backend, candidateId);
     authentication = await readPrivyCredential(secretStore, context, candidateSecret);
   } catch (error) {
-    return reconcileCandidateSecretReadFailure(c, context, loaded.candidate.id, error);
+    return reconcileCandidateSecretReadFailure(c, context, loaded.candidate.id, error, auditIntent);
   }
   const check = await checkPrivyCredential(c.env, authentication);
   if (check === "retry_unknown") {
-    const race = await settleCandidateOutcome(context, loaded, "retry_unknown");
+    const race = await settleCandidateOutcome(context, loaded, "retry_unknown", auditIntent);
     if (race) return race;
     return rotationResult(loaded.candidate, "retry_unknown", "provider_response_unknown");
   }
@@ -359,21 +485,13 @@ export async function completeRotationCandidate(
   if (check === "failed" || !accountMatches) {
     const code: RotationFailureCode =
       check === "failed" ? "invalid_credentials" : "provider_account_mismatch";
-    const race = await settleCandidateOutcome(context, loaded, code);
+    const race = await settleCandidateOutcome(context, loaded, code, auditIntent);
     if (race?.rotation.status === "success") return race;
     await cleanupTerminalCredential(c, candidateSecret);
     if (race) return race;
     return rotationResult({ ...loaded.candidate, status: "failed_validation" }, "failed", code);
   }
 
-  const auditIntent = await context.audit.beginCritical(c, {
-    organizationId: context.organizationId,
-    userId: context.userId,
-    action: "rotate",
-    resourceType: "provider_credential",
-    resourceId: loaded.candidate.id,
-    metadata: { event: "provider_credential_rotation_started", provider: "privy" },
-  });
   let applied = false;
   try {
     await getDb(c.env).transaction(async (tx) => {
@@ -452,50 +570,68 @@ export async function rollbackProviderCredential(
   const predecessor = await loadRollbackTarget(context, current.credential);
   if (!predecessor) throw conflict(ROLLBACK_UNAVAILABLE);
 
-  let authentication: PrivyCredentialAuthentication;
-  try {
-    const predecessorSecret = await requireLifecycleCredentialSecret(context, predecessor.id);
-    const secretStore = createPersistedSecretStore(
-      c,
-      predecessorSecret.storage_backend,
-      predecessor.id
-    );
-    authentication = await readPrivyCredential(secretStore, context, predecessorSecret);
-  } catch (error) {
-    const refreshedCurrent = await loadAuthorizedCurrent(
-      context,
-      currentCredentialId,
-      ROLLBACK_UNAVAILABLE
-    );
-    const refreshedPredecessor = await loadRollbackTarget(context, refreshedCurrent.credential);
-    if (
-      refreshedPredecessor?.id !== predecessor.id ||
-      !sameReferences(refreshedCurrent.references, current.references)
-    ) {
-      throw conflict(ROLLBACK_UNAVAILABLE);
-    }
-    throw error;
-  }
-  const check = await checkPrivyCredential(c.env, authentication);
-  if (check === "retry_unknown") {
-    throw providerUnavailable("Credential provider is temporarily unavailable");
-  }
-  if (
-    check === "failed" ||
-    (await continuityFingerprint(authentication.appId)) !==
-      uniqueReferenceFingerprint(current.references)
-  ) {
-    throw conflict(ROLLBACK_UNAVAILABLE);
-  }
-
   const auditIntent = await context.audit.beginCritical(c, {
     organizationId: context.organizationId,
     userId: context.userId,
     action: "rollback",
     resourceType: "provider_credential",
     resourceId: predecessor.id,
-    metadata: { event: "provider_credential_rollback_started", provider: "privy" },
+    metadata: {
+      event: "provider_credential_rollback_started",
+      provider: "privy",
+      scope: current.credential.scope,
+      fromProviderCredentialId: current.credential.id,
+      toProviderCredentialId: predecessor.id,
+      connectionIds: referenceIds(current.references),
+      projectIds: [...new Set(current.references.map((row) => row.project_id))].sort(),
+    },
   });
+  let failureCode = "credential_storage_unavailable";
+  try {
+    let authentication: PrivyCredentialAuthentication;
+    try {
+      const predecessorSecret = await requireLifecycleCredentialSecret(context, predecessor.id);
+      const secretStore = createPersistedSecretStore(
+        c,
+        predecessorSecret.storage_backend,
+        predecessor.id
+      );
+      authentication = await readPrivyCredential(secretStore, context, predecessorSecret);
+    } catch (error) {
+      const refreshedCurrent = await loadAuthorizedCurrent(
+        context,
+        currentCredentialId,
+        ROLLBACK_UNAVAILABLE
+      );
+      const refreshedPredecessor = await loadRollbackTarget(context, refreshedCurrent.credential);
+      if (
+        refreshedPredecessor?.id !== predecessor.id ||
+        !sameReferences(refreshedCurrent.references, current.references)
+      ) {
+        throw conflict(ROLLBACK_UNAVAILABLE);
+      }
+      throw error;
+    }
+    failureCode = "provider_response_unknown";
+    const check = await checkPrivyCredential(c.env, authentication);
+    if (check === "retry_unknown") {
+      throw providerUnavailable("Credential provider is temporarily unavailable");
+    }
+    failureCode = check === "failed" ? "invalid_credentials" : "provider_account_mismatch";
+    if (
+      check === "failed" ||
+      (await continuityFingerprint(authentication.appId)) !==
+        uniqueReferenceFingerprint(current.references)
+    ) {
+      throw conflict(ROLLBACK_UNAVAILABLE);
+    }
+  } catch (error) {
+    await context.audit.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { event: "provider_credential_rollback_failed", failureCode },
+    });
+    throw error;
+  }
   let applied = false;
   try {
     await getDb(c.env).transaction(async (tx) => {
@@ -582,6 +718,7 @@ export async function deactivateProviderCredential(
     expectedStatus !== "active" &&
     expectedStatus !== "creating"
   ) {
+    await auditCredentialDeactivationRefusal(context, loaded, "invalid_state");
     throw conflict(CREDENTIAL_DEACTIVATION_UNAVAILABLE);
   }
   // Keep A's cancellation path for an in-flight rotation, not unfinished initial setup.
@@ -589,12 +726,15 @@ export async function deactivateProviderCredential(
     expectedStatus === "creating" &&
     (loaded.predecessor?.status !== "active" || loaded.authorizationReferences.length === 0)
   ) {
+    await auditCredentialDeactivationRefusal(context, loaded, "invalid_state");
     throw conflict(CREDENTIAL_DEACTIVATION_UNAVAILABLE);
   }
-  if (
-    loaded.references.length > 0 ||
-    (await context.store.hasActiveCredentialWallet(context.organizationId, credentialId))
-  ) {
+  if (loaded.references.length > 0) {
+    await auditCredentialDeactivationRefusal(context, loaded, "credential_in_use");
+    throw conflict(CREDENTIAL_IN_USE);
+  }
+  if (await context.store.hasActiveCredentialWallet(context.organizationId, credentialId)) {
+    await auditCredentialDeactivationRefusal(context, loaded, "active_wallets");
     throw conflict(CREDENTIAL_IN_USE);
   }
   const secret = await requireLifecycleCredentialSecret(context, credentialId);
@@ -620,6 +760,8 @@ export async function deactivateProviderCredential(
     },
   });
   let applied = false;
+  let refusalReason: "concurrent_change" | "credential_in_use" | null = null;
+  let refusalTarget = loaded;
   try {
     await getDb(c.env).transaction(async (tx) => {
       const store = new ProviderCredentialStore(tx);
@@ -646,6 +788,8 @@ export async function deactivateProviderCredential(
         lockedCredential.rotated_from_provider_credential_id !==
           loaded.credential.rotated_from_provider_credential_id
       ) {
+        refusalReason = "concurrent_change";
+        if (lockedCredential) refusalTarget = { ...loaded, credential: lockedCredential };
         throw conflict(CREDENTIAL_DEACTIVATION_UNAVAILABLE);
       }
       const lockedPredecessor = loaded.predecessor
@@ -668,6 +812,7 @@ export async function deactivateProviderCredential(
         (expectedStatus === "creating" &&
           (lockedPredecessor?.status !== "active" || authorizationReferences.length === 0))
       ) {
+        refusalReason = "concurrent_change";
         throw conflict(CREDENTIAL_DEACTIVATION_UNAVAILABLE);
       }
       const changed =
@@ -682,7 +827,10 @@ export async function deactivateProviderCredential(
               expectedStatus,
               predecessorId: loaded.credential.rotated_from_provider_credential_id,
             });
-      if (!changed) throw conflict(CREDENTIAL_IN_USE);
+      if (!changed) {
+        refusalReason = "credential_in_use";
+        throw conflict(CREDENTIAL_IN_USE);
+      }
       applied = true;
     });
   } catch (error) {
@@ -723,6 +871,9 @@ export async function deactivateProviderCredential(
       auditIntent,
       "provider_credential_deactivation_not_committed"
     );
+    if (refusalReason) {
+      await auditCredentialDeactivationRefusal(context, refusalTarget, refusalReason);
+    }
     if (error instanceof AppError) throw error;
     throw providerUnavailable("Credential deactivation is temporarily unavailable");
   }
@@ -733,6 +884,44 @@ export async function deactivateProviderCredential(
   return {
     providerCredential: mapProviderCredential({ ...loaded.credential, status: "deactivated" }),
   };
+}
+
+async function auditCredentialDeactivationRefusal(
+  context: LifecycleContext,
+  target: DeactivationTarget,
+  reasonCode: "invalid_state" | "credential_in_use" | "active_wallets" | "concurrent_change"
+): Promise<void> {
+  try {
+    await context.audit.log(context.c, {
+      organizationId: context.organizationId,
+      userId: context.userId,
+      action: "blocked_deactivation",
+      resourceType: "provider_credential",
+      resourceId: target.credential.id,
+      status: "failure",
+      metadata: {
+        event: "provider_credential_deactivation_blocked",
+        provider: "privy",
+        scope: target.credential.scope,
+        projectId: context.projectId,
+        credentialStatus: target.credential.status,
+        reasonCode,
+      },
+    });
+  } catch {
+    getLogger().error(
+      {
+        event: "audit_deactivation_refusal_persistence_failed",
+        organizationId: context.organizationId,
+        projectId: context.projectId,
+        resourceType: "provider_credential",
+        resourceId: target.credential.id,
+        requestId: context.c.get("requestId"),
+        reasonCode,
+      },
+      "Deactivation refusal was not persisted"
+    );
+  }
 }
 
 async function loadDeactivationTarget(
@@ -871,11 +1060,25 @@ async function reconcileCandidateSecretReadFailure(
   c: Context<{ Bindings: Env }>,
   context: LifecycleContext,
   candidateId: string,
-  error: unknown
+  error: unknown,
+  auditIntent: AuditIntent
 ): Promise<ProviderCredentialRotationResult> {
-  const current = await loadAuthorizedCandidate(context, candidateId, true);
-  if (current.candidate.status !== "pending") return replayRotationCandidate(c, current);
-  throw error;
+  try {
+    const current = await loadAuthorizedCandidate(context, candidateId, true);
+    if (current.candidate.status === "pending") throw error;
+    const replay = await replayRotationCandidate(c, current);
+    await closeRejectedIntent(context, auditIntent, "provider_credential_rotation_replayed");
+    return replay;
+  } catch (failure) {
+    await context.audit.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: {
+        event: "provider_credential_rotation_failed",
+        failureCode: "credential_storage_unavailable",
+      },
+    });
+    throw failure;
+  }
 }
 
 async function requireLifecycleCredential(
@@ -954,19 +1157,9 @@ async function loadRollbackTarget(
 async function settleCandidateOutcome(
   context: LifecycleContext,
   expected: Awaited<ReturnType<typeof loadAuthorizedCandidate>>,
-  outcome: "retry_unknown" | RotationFailureCode
+  outcome: "retry_unknown" | RotationFailureCode,
+  auditIntent: AuditIntent
 ): Promise<ProviderCredentialRotationResult | null> {
-  const auditIntent =
-    outcome === "retry_unknown"
-      ? null
-      : await context.audit.beginCritical(context.c, {
-          organizationId: context.organizationId,
-          userId: context.userId,
-          action: "rotate",
-          resourceType: "provider_credential",
-          resourceId: expected.candidate.id,
-          metadata: { event: "provider_credential_rotation_rejection_started", provider: "privy" },
-        });
   let applied = false;
   try {
     await getDb(context.c.env).transaction(async (tx) => {
@@ -1016,18 +1209,13 @@ async function settleCandidateOutcome(
       if (reconciliationError instanceof AppError) throw reconciliationError;
       throw providerUnavailable("Credential rotation outcome is temporarily unknown");
     }
-    if (
-      auditIntent &&
-      (!applied ||
-        current.candidate.status !== "failed_validation" ||
-        current.candidate.last_failure_code !== outcome)
-    ) {
+    if (!applied) {
       await closeRejectedIntent(
         context,
         auditIntent,
         "provider_credential_rotation_rejection_not_committed"
       );
-    } else if (auditIntent) {
+    } else {
       logUnresolvedAuditIntent(context, auditIntent, expected.candidate.id);
     }
     // A failed COMMIT followed by the expected state does not prove which
@@ -1049,16 +1237,17 @@ async function settleCandidateOutcome(
     if (error instanceof AppError) throw error;
     throw providerUnavailable("Credential rotation outcome is temporarily unknown");
   }
-  if (auditIntent) {
-    await context.audit.completeCritical(context.c, auditIntent, {
-      status: "failure",
-      metadata: {
-        event: "provider_credential_rotation_rejected",
-        provider: "privy",
-        failureCode: outcome,
-      },
-    });
-  }
+  await context.audit.completeCritical(context.c, auditIntent, {
+    status: "failure",
+    metadata: {
+      event:
+        outcome === "retry_unknown"
+          ? "provider_credential_rotation_retry_unknown"
+          : "provider_credential_rotation_rejected",
+      provider: "privy",
+      failureCode: outcome === "retry_unknown" ? "provider_response_unknown" : outcome,
+    },
+  });
   return null;
 }
 
