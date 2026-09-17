@@ -247,8 +247,7 @@ function EarnSection() {
         </div>
         <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
           *This tutorial uses the Kamino Institutional Commodity Yield strategy
-          as its example — other strategies may have other ultimate sources of
-          yield.
+          as its example — many other strategies are available too.
         </p>
       </div>
     </StepLayout>
