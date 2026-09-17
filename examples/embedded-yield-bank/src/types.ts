@@ -50,8 +50,12 @@ export interface YieldMovement {
   direction: "deposit" | "withdrawal";
   status: MovementStatus;
   signature: string;
+  /** On-chain quantity: deposit tokens for a deposit, shares for a withdrawal. */
   amount: string;
   denomination: string;
+  tokenMint: string;
+  /** Deposit-token view: the deposit amount, or a withdrawal's settled payout. */
+  tokenAmount: string | null;
   failureReason: string | null;
   createdAt: string;
   settledAt: string | null;
@@ -74,35 +78,41 @@ export interface TokenEarnings {
   earnedUnavailableReason?: string;
 }
 
+export type FeePayer = "customer" | "northstar";
+
 export interface DashboardData {
   wallet: {
     address: string;
-    solBalance: string;
     cluster: "devnet";
-    feesPaidBy: "customer" | "northstar";
+    feesPaidBy: FeePayer;
   };
-  balances: TokenBalance[];
-  strategies: YieldStrategy[];
-  positions: YieldPosition[];
-  movements: YieldMovement[];
-  earnings: TokenEarnings[];
-  totals: {
-    tokenMint: string | null;
-    tokenSymbol: string | null;
-    available: string;
-    inYield?: string;
-    portfolio?: string;
+  token: {
+    mint: string;
+    symbol: string;
+  };
+  checking: {
+    balance: string;
+  };
+  savings: {
+    /** The one Embedded Yield strategy behind the savings account. */
+    strategy: YieldStrategy;
+    position: YieldPosition | null;
+    /** Current value in the account token. Undefined while the provider valuation is unavailable. */
+    balance?: string;
+    /** Value that can move back to checking right now. */
+    withdrawable?: string;
     earned?: string;
-    unavailableYieldPositions: number;
   };
+  /** Checking plus savings. Undefined while the savings valuation is unavailable. */
+  total?: string;
+  movements: YieldMovement[];
   connection: {
     apiLabel: string;
-    projectScoped: boolean;
     checkedAt: string;
   };
 }
 
-export interface MoneyMovementResult {
+export interface TransferResult {
   movement: YieldMovement;
 }
 

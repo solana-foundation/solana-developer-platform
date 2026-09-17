@@ -1,52 +1,78 @@
 # Northstar Bank
 
-Northstar is a self-contained Next.js App Router example that shows how a
-partner can put Embedded Yield inside its own customer dashboard. The React UI
-and server API deploy together, while SDP remains the transaction builder and
-movement ledger.
+Northstar is a self-contained Next.js App Router example of a bank that offers
+**Checking** and **Savings**, where Savings is one SDP Embedded Yield strategy.
+The React UI and its server routes deploy together, while SDP builds the
+transactions and keeps the movement ledger.
 
-This is a real sandbox integration, not a fixture UI. The managed wallet's
-balances come from Solana devnet. Strategies, positions, earnings, and activity
-come from SDP. Deposits and withdrawals build, sign, and submit real devnet
-transactions.
-
-Northstar intentionally demonstrates the authenticated tier because it submits
-signed transactions to SDP and reads the resulting tenant movements and
-positions. A keyless integration can list strategies and build unsigned
-transactions, but it must broadcast and track them itself and will not appear
-in Northstar's or SDP's tenant ledger.
-
-## Screenshots
-
-| Partner overview | Fee-payer flow | SDP project portfolio |
-| --- | --- | --- |
-| ![Northstar customer dashboard](./screenshots/northstar-dashboard.jpg) | ![Northstar deposit dialog](./screenshots/northstar-deposit.jpg) | ![SDP Embedded Yield dashboard](./screenshots/sdp-embedded-yield-dashboard.jpg) |
+This is a real sandbox integration, not a fixture UI. Checking is the managed
+wallet's token balance read from Solana devnet. Savings is the customer's
+position in the featured strategy, valued by SDP. Moving money between the two
+builds, signs, and submits real devnet transactions.
 
 Only **Overview** is implemented. The other sidebar items are static navigation
 affordances for the example.
+
+## Screenshots
+
+| Overview | Move to savings | SDP project portfolio |
+| --- | --- | --- |
+| ![Northstar overview](./screenshots/northstar-dashboard.jpg) | ![Move to savings dialog](./screenshots/northstar-deposit.jpg) | ![SDP Embedded Yield dashboard](./screenshots/sdp-embedded-yield-dashboard.jpg) |
+
+## How the bank maps to SDP
+
+| Northstar | SDP |
+| --- | --- |
+| Checking balance | The demo wallet's balance of the strategy's deposit token, read over RPC |
+| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first instant-liquidity devnet USDC strategy |
+| Savings balance and earnings | The wallet's external-wallet position and earnings for that strategy |
+| Move to savings | Deposit preview when the strategy requires a floor, then build, server-side sign, submit |
+| Move to checking | Token amount converted to shares at the live share price, then withdrawal preview, build, sign, submit |
+| Recent activity | External-wallet movements for that position, shown in the deposit token |
+
+The customer never sees shares, providers, or slippage. Northstar demonstrates
+the authenticated tier because it submits signed transactions to SDP and reads
+the resulting tenant movements and positions. A keyless integration can list
+strategies and build unsigned transactions, but it must broadcast and track
+them itself and will not appear in Northstar's or SDP's tenant ledger.
+
+The SDP client lives in [`server/sdp-client.ts`](server/sdp-client.ts), the
+bank rules (strategy choice, amount to shares) in
+[`server/savings.ts`](server/savings.ts), the transaction orchestration in
+[`server/embedded-yield.ts`](server/embedded-yield.ts), and the Next.js route
+handlers in [`src/app/api`](src/app/api).
 
 ## Architecture and security
 
 - Next.js serves both the dashboard and `/api` route handlers from one origin.
 - `SDP_API_KEY`, wallet private keys, and fee-payer keys are read only by
   modules guarded with `server-only`.
-- The whole deployment, including signing routes, fails closed behind HTTP
-  Basic auth using `DEMO_ACCESS_USERNAME` and `DEMO_ACCESS_PASSWORD`.
+- The deployment, including signing routes, fails closed behind HTTP Basic
+  auth using `DEMO_ACCESS_USERNAME` and `DEMO_ACCESS_PASSWORD`.
+- Known link unfurlers (Slack, iMessage, X, Discord) may read the page shell
+  at `/` without credentials so shared links render a card. The shell holds
+  branding and metadata only; every API route still requires Basic auth. See
+  [`server/link-preview.ts`](server/link-preview.ts).
+- The favicon, social card, and `robots.txt` are public. Robots are asked not
+  to index the demo.
 - Deposit and withdrawal routes accept same-origin JSON requests only, before
   any request body can reach the server-side signer.
 - No secret uses a `NEXT_PUBLIC_` prefix and no secret is serialized into page
   props or API responses.
-- Movement routes submit promptly. The browser polls the dashboard route for
-  finality for up to two minutes, then pauses and surfaces a timeout. This
-  avoids holding a serverless function open while Solana settles.
+- Transfer routes submit promptly. The browser polls the dashboard route every
+  8 seconds while a transfer is settling (30 seconds otherwise), gives up after
+  two minutes, and backs off for exactly the `Retry-After` SDP sends on a 429.
+  This avoids holding a serverless function open while Solana settles.
+- Each refresh costs three SDP calls and one RPC read: the strategy catalogue
+  is cached server-side for five minutes.
+- While a transfer this browser submitted is pending, the page shows the
+  balances it will produce and keeps the total fixed, then hands back to live
+  data once SDP records settlement. SDP reconciles pending movements once a
+  minute, so "Settling" can show for up to about two minutes.
 - API responses and outbound SDP reads use `no-store` caching.
 - Submit retries reuse one `Idempotency-Key`.
-- Quote-derived slippage floors use exact `BigInt` arithmetic.
-
-The SDP client lives in [`server/sdp-client.ts`](server/sdp-client.ts), the
-transaction orchestration in
-[`server/embedded-yield.ts`](server/embedded-yield.ts), and the Next.js route
-handlers in [`src/app/api`](src/app/api).
+- Quote-derived slippage floors and the amount-to-shares conversion use exact
+  `BigInt` arithmetic.
 
 ## Run locally
 
@@ -112,7 +138,8 @@ development configuration described in
 
 7. Fund `PUBLIC_KEY` with devnet SOL and official devnet USDC using the
    [Solana faucet](https://faucet.solana.com/) and
-   [Circle faucet](https://faucet.circle.com/).
+   [Circle faucet](https://faucet.circle.com/). The USDC balance is the
+   customer's checking account.
 
 8. Start Northstar from the repository root:
 
@@ -135,7 +162,8 @@ Open `http://127.0.0.1:4173` and enter the configured Basic auth credentials.
 
 Keep the API key, wallet key, and optional fee-payer key limited to the Vercel
 server environment. Do not expose them as `NEXT_PUBLIC_*` values or paste them
-into client-side settings.
+into client-side settings. Shared links unfurl with the production hostname
+that Vercel exposes as `VERCEL_PROJECT_PRODUCTION_URL`.
 
 ## Configuration
 
@@ -145,8 +173,9 @@ into client-side settings.
 | `SDP_API_KEY` | Yes | Sandbox project key with Embedded Yield read and write permissions. |
 | `DEMO_ACCESS_USERNAME` | No | HTTP Basic username. Defaults to `northstar`. |
 | `DEMO_ACCESS_PASSWORD` | Yes | HTTP Basic password protecting the page and all API routes. |
-| `DEMO_WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array Solana keypair used only by the server. |
+| `DEMO_WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array Solana keypair used only by the server. Its token balance is checking. |
 | `DEMO_FEE_PAYER_PRIVATE_KEY` | No | Different funded devnet keypair that co-signs and pays network fees and account rent. |
+| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Defaults to an instant-liquidity devnet USDC strategy. |
 | `SOLANA_RPC_URL` | No | Devnet RPC used for direct wallet balance reads. |
 
 ## Local end-to-end notes
@@ -157,7 +186,10 @@ into client-side settings.
 - Enable both `MARKETS_ENABLED` and `EARN_ENABLED`.
 - Use an API key from the exact sandbox project selected in the SDP dashboard.
 - Restart Northstar after changing `.env.local`.
-- Wait for a submitted movement to finalize before comparing balances. The
+- Positions in strategies other than the featured one are hidden. Set
+  `DEMO_STRATEGY_ID` to the strategy you deposited into if a balance seems to
+  be missing.
+- Wait for a submitted transfer to finalize before comparing balances. The
   dashboard refreshes automatically for up to two minutes, then pauses and
   prompts for a manual refresh if settlement is still unresolved.
 

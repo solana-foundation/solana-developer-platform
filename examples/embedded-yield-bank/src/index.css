@@ -116,10 +116,38 @@
   color: #00875a;
 }
 
+.status-warning {
+  border-color: rgba(217, 119, 6, 0.24);
+  background: rgba(217, 119, 6, 0.08);
+  color: #b45309;
+}
+
+.status-destructive {
+  border-color: rgba(220, 38, 38, 0.2);
+  background: rgba(220, 38, 38, 0.08);
+  color: #dc2626;
+}
+
 .status-dot {
   display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 999px;
   background: currentColor;
+}
+
+.status-dot-live {
+  animation: status-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes status-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
 }

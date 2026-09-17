@@ -1,58 +1,40 @@
-export function formatMoney(
-  value: string | undefined,
-  options?: { signed?: boolean }
-): string {
-  if (value === undefined) return "Not available";
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return "Not available";
-  const formatted = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: amount < 1 ? 4 : 2,
-  }).format(Math.abs(amount));
-  if (!options?.signed || amount === 0) return formatted;
-  return amount > 0 ? `+${formatted}` : `-${formatted}`;
+const USD_STABLECOINS = new Set(["USDC", "USDG", "PYUSD", "USDT"]);
+
+/** "$" for dollar stablecoins, otherwise nothing: never imply a peg we lack. */
+export function currencyPrefix(symbol: string): string {
+  return USD_STABLECOINS.has(symbol) ? "$" : "";
 }
 
-export function formatToken(
+/**
+ * Bank-style money. Dollar stablecoins render as dollars; anything else keeps
+ * its ticker so the number is never misread.
+ */
+export function formatAmount(
   value: string,
   symbol: string,
-  maximumFractionDigits = 4
-): string {
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return `Not available ${symbol}`;
-  return `${new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits,
-  }).format(amount)} ${symbol}`;
-}
-
-export function formatAccountToken(
-  value: string | undefined,
-  symbol: string | null,
   options?: { signed?: boolean }
 ): string {
-  if (value === undefined || !symbol) return "Not available";
   const amount = Number(value);
-  if (!Number.isFinite(amount)) return "Not available";
-  const formatted = new Intl.NumberFormat("en-US", {
+  if (!Number.isFinite(amount)) return "—";
+  const magnitude = Math.abs(amount);
+  const digits = new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
-    maximumFractionDigits: Math.abs(amount) < 1 ? 4 : 2,
-  }).format(Math.abs(amount));
-  const sign = options?.signed && amount > 0 ? "+" : amount < 0 ? "-" : "";
-  return `${sign}${formatted} ${symbol}`;
+    maximumFractionDigits: magnitude > 0 && magnitude < 0.01 ? 4 : 2,
+  }).format(magnitude);
+  const sign = amount < 0 ? "-" : options?.signed && amount > 0 ? "+" : "";
+  return USD_STABLECOINS.has(symbol)
+    ? `${sign}$${digits}`
+    : `${sign}${digits} ${symbol}`;
 }
 
 export function formatApy(value: string | undefined): string {
-  if (value === undefined) return "Variable";
   const apy = Number(value);
-  if (!Number.isFinite(apy)) return "Variable";
-  return new Intl.NumberFormat("en-US", {
+  if (value === undefined || !Number.isFinite(apy)) return "Variable APY";
+  return `${new Intl.NumberFormat("en-US", {
     style: "percent",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(apy);
+  }).format(apy)} APY`;
 }
 
 export function formatDate(value: string): string {
@@ -64,13 +46,13 @@ export function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
-export function shortAddress(address: string): string {
-  return `${address.slice(0, 5)}...${address.slice(-5)}`;
+export function formatTime(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
-export function titleCase(value: string): string {
-  return value
-    .split(/[-_]/)
-    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
-    .join(" ");
+export function shortAddress(address: string): string {
+  return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }

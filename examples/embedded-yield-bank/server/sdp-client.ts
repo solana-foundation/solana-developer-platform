@@ -53,12 +53,20 @@ interface WithdrawalBuildResult {
 export class SdpApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
+  /** Seconds to wait before retrying, when SDP says so (429). */
+  readonly retryAfterSeconds: number | undefined;
 
-  constructor(status: number, code: string | undefined, message: string) {
+  constructor(
+    status: number,
+    code: string | undefined,
+    message: string,
+    retryAfterSeconds?: number
+  ) {
     super(message);
     this.name = "SdpApiError";
     this.status = status;
     this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -261,7 +269,13 @@ export class EmbeddedYieldClient {
       const code = payload?.error?.code;
       const message =
         payload?.error?.message ?? `SDP request failed with ${response.status}`;
-      throw new SdpApiError(response.status, code, message);
+      const retryAfter = Number(response.headers.get("retry-after"));
+      throw new SdpApiError(
+        response.status,
+        code,
+        message,
+        Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined
+      );
     }
     if (!payload || payload.data === undefined)
       throw new Error("SDP returned an invalid response");

@@ -1,97 +1,105 @@
 import "server-only";
 
 import type { KeyPairSigner } from "@solana/kit";
-import type {
-  DashboardData,
-  TokenBalance,
-  TokenEarnings,
-  YieldMovement,
-  YieldPosition,
-  YieldStrategy,
-} from "../src/types";
-import { addDecimals, floorForTolerance } from "./decimal";
+import { floorForTolerance, isPositiveDecimal } from "../src/lib/decimal";
+import type { DashboardData, YieldMovement, YieldStrategy } from "../src/types";
 import { getConfig, getDemoSigner, getFeePayerSigner } from "./env";
+import {
+  belongsToStrategy,
+  canDeposit,
+  isOpenPosition,
+  pickSavingsStrategy,
+  requireDepositMint,
+  sharesForAmount,
+  summarizeSavings,
+} from "./savings";
 import { EmbeddedYieldClient, SdpApiError } from "./sdp-client";
-import { readWalletBalances, signTransaction } from "./solana";
+import { readTokenBalance, signTransaction } from "./solana";
 
-const POSITIVE_DECIMAL_PATTERN = /^(?=.*[1-9])\d+(\.\d+)?$/;
 const DEFAULT_WITHDRAWAL_TOLERANCE_BPS = 10;
+const STRATEGY_CACHE_MS = 5 * 60_000;
+
+let strategyCache:
+  | { strategies: YieldStrategy[]; expiresAt: number }
+  | undefined;
+
+/**
+ * The catalogue changes rarely and the dashboard polls often. Reading it once
+ * every few minutes keeps each refresh to three SDP calls and one RPC read.
+ */
+async function listStrategies(
+  client: EmbeddedYieldClient
+): Promise<YieldStrategy[]> {
+  if (strategyCache && strategyCache.expiresAt > Date.now()) {
+    return strategyCache.strategies;
+  }
+  const strategies = await client.listStrategies();
+  strategyCache = { strategies, expiresAt: Date.now() + STRATEGY_CACHE_MS };
+  return strategies;
+}
 
 export async function loadDashboard(): Promise<DashboardData> {
   const config = getConfig();
   const { owner, feePayer } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
-  const strategies = await client.listStrategies();
+  const strategy = pickSavingsStrategy(
+    await listStrategies(client),
+    config.DEMO_STRATEGY_ID
+  );
+  const tokenMint = requireDepositMint(strategy);
 
-  const [positions, movements, earnings, walletBalances] = await Promise.all([
+  const [positions, movements, earnings, checking] = await Promise.all([
     client.listPositions(owner.address),
     client.listActivity(owner.address),
     client.getEarnings(owner.address),
-    readWalletBalances(config.SOLANA_RPC_URL, owner.address, strategies),
+    readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
   ]);
 
-  const fundedDepositMints = new Set(
-    walletBalances.tokens
-      .filter((balance) => balance.amount !== "0")
-      .map((balance) => balance.mint)
+  const strategyPositions = positions.filter((position) =>
+    belongsToStrategy(position, strategy)
   );
-  const livePositions = positions.filter((position) =>
-    position.shares === undefined
-      ? true
-      : POSITIVE_DECIMAL_PATTERN.test(position.shares)
+  const position = strategyPositions.find(isOpenPosition) ?? null;
+  const positionIds = new Set(strategyPositions.map((item) => item.id));
+  const { total, ...savings } = summarizeSavings(
+    checking,
+    position,
+    earnings.find((item) => item.tokenMint === tokenMint)
   );
+
   return {
     wallet: {
       address: owner.address,
-      solBalance: walletBalances.solBalance,
       cluster: "devnet",
       feesPaidBy: feePayer ? "northstar" : "customer",
     },
-    balances: walletBalances.tokens,
-    strategies: strategies.filter(
-      (strategy) =>
-        strategy.fundable &&
-        strategy.status === "active" &&
-        strategy.hostCluster === "devnet" &&
-        fundedDepositMints.has(strategy.depositMints[0] ?? "")
-    ),
-    positions: livePositions,
-    movements,
-    earnings,
-    totals: summarizeAccountToken(
-      walletBalances.tokens,
-      livePositions,
-      earnings
+    token: { mint: tokenMint, symbol: checking.symbol },
+    checking: { balance: checking.amount },
+    savings: { strategy, position, ...savings },
+    total,
+    movements: movements.filter((movement) =>
+      positionIds.has(movement.positionId)
     ),
     connection: {
       apiLabel: localApiLabel(config.SDP_API_BASE_URL),
-      projectScoped: true,
       checkedAt: new Date().toISOString(),
     },
   };
 }
 
-export async function deposit(
-  strategyId: string,
-  amount: string
-): Promise<YieldMovement> {
+/** Move money from checking into savings. */
+export async function deposit(amount: string): Promise<YieldMovement> {
   assertAmount(amount);
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
-  const strategy = (await client.listStrategies()).find(
-    (candidate) => candidate.id === strategyId
+  const strategy = pickSavingsStrategy(
+    await listStrategies(client),
+    config.DEMO_STRATEGY_ID
   );
-  if (
-    !strategy?.fundable ||
-    strategy.status !== "active" ||
-    strategy.hostCluster !== "devnet"
-  ) {
-    throw new Error("This strategy is not available for devnet deposits");
+  if (!canDeposit(strategy)) {
+    throw new Error(`${strategy.name} is not accepting deposits right now`);
   }
-  const sourceTokenMint = strategy.depositMints[0];
-  if (!sourceTokenMint)
-    throw new Error("This strategy does not publish a direct deposit mint");
+  const sourceTokenMint = requireDepositMint(strategy);
 
   // 1. Preview only when the strategy requires a quote-derived floor.
   let minSharesOut: string | undefined;
@@ -105,7 +113,7 @@ export async function deposit(
     );
   }
 
-  // 2. Build an unsigned transaction for the managed demo wallet.
+  // 2. Build an unsigned transaction for the customer's managed wallet.
   const built = await client.buildDeposit({
     strategyId: strategy.id,
     ownerAddress: owner.address,
@@ -116,48 +124,37 @@ export async function deposit(
   });
   assertBuiltFeePayer(built.feePayer, feePayer?.address);
 
-  // 3. The owner signs locally, joined by Northstar when it pays the fees.
+  // 3. The owner signs on the server, joined by Northstar when it pays fees.
   // Private keys never reach the browser.
   const signedTransaction = await signTransaction(built.transaction, all);
 
   // 4. Submit with a unique key. An uncertain retry must reuse this exact key.
   const idempotencyKey = `northstar-deposit-${crypto.randomUUID()}`;
-  const movement = await retryUncertainSubmit(() =>
+  return retryUncertainSubmit(() =>
     client.submitDeposit(built.transactionId, signedTransaction, idempotencyKey)
   );
-
-  // Settlement is polled by the browser through the dashboard route. Returning
-  // promptly keeps this flow safe for short-lived serverless functions.
-  return movement;
+  // Settlement is polled by the browser through the dashboard route, which
+  // keeps this handler short enough for serverless functions.
 }
 
-export async function withdraw(
-  positionId: string,
-  shares: string
-): Promise<YieldMovement> {
-  assertAmount(shares);
+/** Move money from savings back into checking. */
+export async function withdraw(amount: string): Promise<YieldMovement> {
+  assertAmount(amount);
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
-  const [positions, strategies] = await Promise.all([
+  const [strategies, positions] = await Promise.all([
+    listStrategies(client),
     client.listPositions(owner.address),
-    client.listStrategies(),
   ]);
-  const position = positions.find((candidate) => candidate.id === positionId);
-  if (!position)
-    throw new Error("The position is not available to this demo wallet");
-  if (position.withdrawableShares === undefined) {
-    throw new Error(
-      "Live withdrawable shares are unavailable; refresh before retrying"
-    );
-  }
+  const strategy = pickSavingsStrategy(strategies, config.DEMO_STRATEGY_ID);
+  const position = positions
+    .filter((candidate) => belongsToStrategy(candidate, strategy))
+    .find(isOpenPosition);
+  if (!position) throw new Error("Savings is empty");
 
-  const strategy = strategies.find(
-    (candidate) =>
-      candidate.provider === position.provider &&
-      candidate.providerReference === position.providerReference
-  );
-
+  // The customer thinks in tokens; the vault redeems shares.
+  const shares = sharesForAmount(amount, position);
   const minAmountOut = await deriveWithdrawalFloor(
     client,
     position,
@@ -183,52 +180,9 @@ export async function withdraw(
   );
 }
 
-export function summarizeAccountToken(
-  balances: readonly TokenBalance[],
-  positions: readonly YieldPosition[],
-  earnings: readonly TokenEarnings[]
-): DashboardData["totals"] {
-  const accountBalance =
-    balances.find((balance) => balance.symbol === "USDC") ?? balances[0];
-  const tokenMint = accountBalance?.mint ?? null;
-  const accountPositions = tokenMint
-    ? positions.filter((position) => position.tokenMint === tokenMint)
-    : [];
-  const accountEarnings = tokenMint
-    ? earnings.filter((item) => item.tokenMint === tokenMint)
-    : [];
-  const unavailableYieldPositions = accountPositions.filter(
-    (position) => position.tokenValue === undefined
-  ).length;
-  const available = accountBalance?.amount ?? "0";
-  const inYield = unavailableYieldPositions
-    ? undefined
-    : addDecimals(
-        accountPositions.map((position) => position.tokenValue ?? "0")
-      );
-  const earned = accountEarnings.some((item) => item.earned === undefined)
-    ? undefined
-    : addDecimals(
-        accountEarnings
-          .map((item) => item.earned)
-          .filter((value): value is string => value !== undefined)
-      );
-
-  return {
-    tokenMint,
-    tokenSymbol: accountBalance?.symbol ?? null,
-    available,
-    inYield,
-    portfolio:
-      inYield === undefined ? undefined : addDecimals([available, inYield]),
-    earned,
-    unavailableYieldPositions,
-  };
-}
-
 export async function deriveWithdrawalFloor(
   client: Pick<EmbeddedYieldClient, "previewWithdrawal">,
-  position: Pick<YieldPosition, "id">,
+  position: { id: string },
   shares: string,
   strategy: YieldStrategy | undefined
 ): Promise<string | undefined> {
@@ -300,7 +254,7 @@ async function retryUncertainSubmit(
 }
 
 function assertAmount(amount: string): void {
-  if (!POSITIVE_DECIMAL_PATTERN.test(amount))
+  if (!isPositiveDecimal(amount))
     throw new Error("Enter a positive decimal amount");
 }
 
