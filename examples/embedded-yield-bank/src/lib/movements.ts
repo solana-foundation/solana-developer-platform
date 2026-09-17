@@ -105,6 +105,18 @@ export function applyInFlight(
   };
 }
 
+/**
+ * When one of several overlapping transfers settles, move its effect into the
+ * base so the transfers still pending project from the balances that transfer
+ * actually produced, not from the snapshot taken before it started.
+ */
+export function foldSettledTransfers(
+  base: DashboardData,
+  settled: readonly InFlightTransfer[]
+): DashboardData {
+  return applyInFlight(base, base, settled);
+}
+
 function shiftBalance(
   balance: string | undefined,
   shift: string

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DashboardData, YieldMovement } from "@/types";
 import {
   applyInFlight,
+  foldSettledTransfers,
   reconcileMovementPolling,
   SETTLEMENT_POLL_TIMEOUT_MS,
   startMovementPolling,
@@ -83,6 +84,30 @@ describe("in-flight transfers", () => {
     expect(view.checking.balance).toBe("18.5");
     expect(view.savings.balance).toBe("1.5");
     expect(view.movements[0]?.tokenAmount).toBe("1.5");
+  });
+
+  it("folds a settled transfer into the base so the rest projects from fresh footing", () => {
+    const base = dashboard({ checking: "19", savings: "1", total: "20" });
+    const first = {
+      movementId: "m1",
+      direction: "deposit" as const,
+      amount: "2",
+    };
+    const second = {
+      movementId: "m2",
+      direction: "deposit" as const,
+      amount: "3",
+    };
+
+    const folded = foldSettledTransfers(base, [first]);
+    expect(folded.checking.balance).toBe("17");
+    expect(folded.savings.balance).toBe("3");
+
+    const live = dashboard({ checking: "17", savings: "3", total: "20" });
+    const view = applyInFlight(folded, live, [second]);
+    expect(view.checking.balance).toBe("14");
+    expect(view.savings.balance).toBe("6");
+    expect(view.total).toBe("20");
   });
 
   it("returns live data untouched once nothing is in flight", () => {

@@ -24,6 +24,7 @@ import {
 } from "@/lib/api";
 import {
   applyInFlight,
+  foldSettledTransfers,
   type InFlightTransfer,
   isPendingMovement,
   type MovementPolling,
@@ -66,8 +67,14 @@ export function App() {
   // Transfers submitted from this tab, plus the balances from just before the
   // first one. The view projects them until SDP reports settlement.
   const [inFlight, setInFlight] = useState<InFlightTransfer[]>([]);
+  const inFlightRef = useRef<InFlightTransfer[]>([]);
   const inFlightBase = useRef<DashboardData>(undefined);
   const latestData = useRef<DashboardData>(undefined);
+
+  const updateInFlight = useCallback((next: InFlightTransfer[]) => {
+    inFlightRef.current = next;
+    setInFlight(next);
+  }, []);
   // When SDP rate-limits us, stop polling until the moment it named.
   const pausedUntil = useRef(0);
 
@@ -95,11 +102,24 @@ export function App() {
             .filter((movement) => !isPendingMovement(movement))
             .map((movement) => movement.movementId)
         );
-        setInFlight((current) =>
-          reconciliation.timedOut
+        const current = inFlightRef.current;
+        if (current.length) {
+          const settledNow = current.filter((transfer) =>
+            settled.has(transfer.movementId)
+          );
+          const remaining = reconciliation.timedOut
             ? []
-            : current.filter((transfer) => !settled.has(transfer.movementId))
-        );
+            : current.filter((transfer) => !settled.has(transfer.movementId));
+          // Overlapping transfers: what just settled becomes part of the base
+          // so the ones still pending project from the balances it produced.
+          if (settledNow.length && remaining.length && inFlightBase.current) {
+            inFlightBase.current = foldSettledTransfers(
+              inFlightBase.current,
+              settledNow
+            );
+          }
+          updateInFlight(remaining);
+        }
         if (reconciliation.timedOut) {
           toast.warning("Settlement is taking longer than expected", {
             id: "settlement-timeout",
@@ -121,7 +141,7 @@ export function App() {
         if (id === requestId.current) setRefreshing(false);
       }
     },
-    [updateMovementPolling]
+    [updateMovementPolling, updateInFlight]
   );
 
   useEffect(() => {
@@ -173,17 +193,17 @@ export function App() {
         updateMovementPolling(
           startMovementPolling(movementPollingRef.current, movement.movementId)
         );
-        setInFlight((current) => {
-          if (!current.length) inFlightBase.current = latestData.current;
-          return [
-            ...current,
-            {
-              movementId: movement.movementId,
-              direction: direction === "to-savings" ? "deposit" : "withdrawal",
-              amount,
-            },
-          ];
-        });
+        if (!inFlightRef.current.length) {
+          inFlightBase.current = latestData.current;
+        }
+        updateInFlight([
+          ...inFlightRef.current,
+          {
+            movementId: movement.movementId,
+            direction: direction === "to-savings" ? "deposit" : "withdrawal",
+            amount,
+          },
+        ]);
       }
       toast.success(copy.done, {
         id: toastId,
