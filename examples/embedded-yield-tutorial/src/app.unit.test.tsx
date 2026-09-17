@@ -9,6 +9,7 @@ describe("App", () => {
     expect(html).toContain('id="custody"');
     expect(html).toContain('id="configure"');
     expect(html).toContain('id="earn"');
-    expect(html).toContain("Earn 8.43%");
+    expect(html).toContain("Earn");
+    expect(html).not.toContain("Earn 8.43%");
   });
 });

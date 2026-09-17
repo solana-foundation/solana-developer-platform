@@ -219,15 +219,14 @@ function EarnSection() {
         </h2>
         <p className="mt-4 leading-relaxed text-muted-foreground">
           Back in the Wallet app, the customer&rsquo;s USDC now shows an
-          &ldquo;Earn 8.43%&rdquo; button. One tap opts their stablecoins into
-          the strategies the company surfaced in step 2.
+          &ldquo;Earn&rdquo; button. One tap opts their stablecoins into the
+          strategies the company surfaced in step 2.
         </p>
         <p className="mt-4 leading-relaxed text-muted-foreground">
-          Fast-forward 30 days: yield accrues daily as the vault lends its USDC
-          through the Kamino Institutional Commodity Yield strategy,* and the
-          balance chart ticks up and to the right. Positions, earnings, and the
-          full movement history are all readable back from the Embedded Yield
-          API.
+          Fast-forward 30 days: yield accrues in real time to the strategy* that
+          is offered to end users, and the balance chart ticks up and to the
+          right. Positions, earnings, and the full movement history are all
+          readable back from the Embedded Yield API.
         </p>
         <div className="mt-5 rounded-xl border border-foreground/10 bg-background p-3">
           <div className="flex items-start gap-2.5 text-sm">

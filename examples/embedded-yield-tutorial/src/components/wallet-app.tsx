@@ -219,7 +219,7 @@ export function EarnScreen({
             ) : (
               <>
                 <TrendingUpIcon className="size-4" />
-                Earn 8.43%
+                Earn
               </>
             )}
           </button>

@@ -4,7 +4,7 @@ A standalone, interactive guide page for [`examples/embedded-yield-bank`](../emb
 
 1. **Wallet** — a faux mobile phone running the "Northstar Wallet" app, where a fintech's customers hold dollars, euros, and the USDC stablecoin. Anyone holding stablecoins is a candidate for yield, and SDP's on-ramps can convert fiat into stablecoins.
 2. **Configure** — a faux SDP Embedded Yield dashboard showing the repository's pinned mainnet Earn strategies (the curated Kamino shelf: Steakhouse High Yield USDG, Kamino Institutional Commodity Yield, Steakhouse USDC, and Steakhouse High Yield USDC). The customer's stablecoins move with one API request. Partners with existing signing infrastructure bring their own keys; SDP can also on-ramp users from fiat into stablecoins and provision wallets through self-custody solutions.
-3. **Earn** — the same faux phone with an "Earn 8.43%" button on the USDC balance. The button presses itself, a confirmation shows the stablecoins are now earning, and a fast-forwarded 30-day simulation accrues yield with a balance chart rising up and to the right.
+3. **Earn** — the same faux phone with an "Earn" button on the USDC balance. The button presses itself, a confirmation shows the stablecoins are now earning, and a fast-forwarded 30-day simulation accrues yield with a balance chart rising up and to the right.
 
 It is a pure front-end [Next.js](https://nextjs.org) app — no environment configuration, API keys, or chain access involved — so it deploys to Vercel as-is.
 
