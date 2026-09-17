@@ -63,15 +63,8 @@ function Hero() {
           Give your customers yield with one code snippet.
         </h1>
         <p className="mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground lg:text-lg">
-          An interactive companion to the{" "}
-          <a
-            href="https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/embedded-yield-bank"
-            className="font-medium text-foreground underline decoration-foreground/25 underline-offset-4"
-          >
-            embedded-yield-bank
-          </a>{" "}
-          example: a consumer wallet company adds interest-bearing stablecoins
-          for its customers, with yield backed by real-world assets.
+          A consumer wallet company adds interest-bearing stablecoins for its
+          customers, with yield backed by real-world assets.
         </p>
         <p className="mt-6 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
           <ArrowDownIcon className="size-4 animate-bounce" />
