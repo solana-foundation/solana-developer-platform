@@ -601,13 +601,21 @@ organization's own custody wallets.
     payer used to SIMULATE. Simulation matters as much as signing here, because
     it enforces that the fee payer can pay: a zero-SOL wallet simulated as its
     own fee payer dies with `AccountNotFound` and no logs, before signing.
-  - **Sponsorship is devnet-only, and the cluster gate is exit safety, not
+  - **Sponsorship is per cluster, and the cluster gate is exit safety, not
     caution.** One process serves both clusters and withdrawals are deliberately
     NOT environment-gated, so a deployment-global flag would sponsor mainnet
-    exits the instant devnet deposits were enabled, against a mainnet Kora whose
-    `allow_create_account` is false and a disabled mainnet budget policy. That is
-    a 5xx on a customer's money-OUT path, the one failure ADR 0002 rules out.
-    `isEarnVaultSponsorshipEnabled` therefore takes the cluster.
+    exits the instant devnet deposits were enabled, against a paymaster the
+    deployment may not have for that cluster. That is a 5xx on a customer's
+    money-OUT path, the one failure ADR 0002 rules out.
+    `isEarnVaultSponsorshipEnabled` therefore takes the cluster and answers
+    from CONFIGURATION: the flag, plus a Kora for that cluster
+    (`isFeePaymentConfiguredForCluster`, @sdp/payments): `KORA_RPC_URL` serves
+    the `SOLANA_NETWORK` cluster, `KORA_MAINNET_RPC_URL` / `KORA_DEVNET_RPC_URL`
+    the other. The movement's cluster rides `SponsorshipScope.cluster`, so the
+    matching Kora signs, the matching budget network is charged and the fee is
+    priced on the matching RPC (`createClusterRpc`). Opening mainnet is wiring
+    the mainnet Kora in after its policy is opened and `sbp_mainnet_global`
+    is enabled (PRO-1738); no code changes either way.
   - Sponsored signing stays sign-only, so record-before-broadcast survives
     unchanged. Turning the flag off returns both routes to `wallet-pays` with no
     code change.

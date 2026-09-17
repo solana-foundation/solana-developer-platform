@@ -1,4 +1,5 @@
 import type { CustodyProvider } from "@sdp/custody";
+import { type FeePaymentEnv, isFeePaymentConfiguredForCluster } from "@sdp/payments/fee-payment";
 import type { SolanaCluster } from "@sdp/types";
 import type { Env } from "@/types/env";
 import { isSelfHostedDeployment } from "./runtime-env";
@@ -73,22 +74,6 @@ export function isEarnEnabled(env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED">
 }
 
 /**
- * Clusters on which Kora may pay for Earn vault movements.
- *
- * TO OPEN MAINNET, all three must be in place, and none is a flag flip:
- * the Kamino program ids must reach `kora.mainnet.toml`'s `allowed_programs`
- * (landed with sdp-infra#64);
- * `fee_payer_policy.system.allow_create_account` must be opened there (today
- * `validate-policy.py` runs with no `--allow-spend` for mainnet and hard-fails
- * CI on any `true`), which is deliberately deferred until compensated pricing
- * ships; and `sbp_mainnet_global.enabled` must be turned on. Opening the policy
- * without also lowering `max_allowed_lamports` below 10,000,000 would push the
- * per-transaction reservation past the seeded budget and deny ALL sponsorship,
- * payments and issuance included.
- */
-const EARN_VAULT_SPONSORSHIP_CLUSTERS: readonly SolanaCluster[] = ["devnet"];
-
-/**
  * Whether Kora sponsors an Earn vault movement on `cluster`: both the network
  * fee and the share-ATA rent a first deposit needs.
  *
@@ -98,19 +83,27 @@ const EARN_VAULT_SPONSORSHIP_CLUSTERS: readonly SolanaCluster[] = ["devnet"];
  * but WITHDRAWALS DELIBERATELY ARE NOT (ADR 0002 forbids money-out inheriting a
  * money-in gate), and both directions share one fee decision. A single
  * deployment-global boolean would therefore flip mainnet withdrawals to
- * sponsored at the instant devnet deposits were enabled, against a mainnet Kora
- * that allowlists no Kamino program and a disabled mainnet budget policy: a 5xx
- * on a customer's exit path, which is the one failure ADR 0002 rules out.
+ * sponsored at the instant devnet deposits were enabled, against a paymaster
+ * that may not exist for that cluster: a 5xx on a customer's exit path, which
+ * is the one failure ADR 0002 rules out.
  *
- * Fail-closed on both axes: an unconfigured flag and an unlisted cluster each
- * answer false, and callers fall back to the wallet paying its own way.
+ * Which clusters are sponsored is CONFIGURATION, not a list in code: the flag
+ * must be on AND the deployment must have a fee payer for the cluster
+ * (`isFeePaymentConfiguredForCluster`: `KORA_RPC_URL` for the process network,
+ * `KORA_MAINNET_RPC_URL` / `KORA_DEVNET_RPC_URL` for the other). Opening
+ * mainnet is therefore wiring the mainnet Kora into the deployment, after its
+ * `fee_payer_policy` is opened and `sbp_mainnet_global` is enabled (PRO-1738);
+ * closing it is removing that wiring, with no code change either way.
+ *
+ * Fail-closed on both axes: an unconfigured flag and an unconfigured cluster
+ * each answer false, and callers fall back to the wallet paying its own way.
  */
 export function isEarnVaultSponsorshipEnabled(
-  env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED">,
+  env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED"> & FeePaymentEnv,
   cluster: SolanaCluster
 ): boolean {
-  if (!EARN_VAULT_SPONSORSHIP_CLUSTERS.includes(cluster)) return false;
-  return isTruthyFlag(env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED);
+  if (!isTruthyFlag(env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED)) return false;
+  return isFeePaymentConfiguredForCluster(env, cluster);
 }
 
 /**

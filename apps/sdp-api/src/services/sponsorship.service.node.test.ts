@@ -116,7 +116,27 @@ describe("sponsorship identity boundary", () => {
 
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
-      "sdp:v1:sandbox:org_1:project:project_1:user:user_1"
+      "sdp:v1:sandbox:org_1:project:project_1:user:user_1",
+      undefined
+    );
+  });
+
+  it("selects the paymaster by the scope's cluster when a flow names one", () => {
+    // Earn movements execute per cluster on one process; the cluster must reach
+    // the adapter factory or a mainnet movement is signed by the devnet Kora.
+    const env = { FEE_PAYMENT_PROVIDER: "kora" } as Env;
+    createSponsorshipFeePayment(env, {
+      environment: "production",
+      organizationId: "org_1",
+      projectId: "project_1",
+      actor: { type: "wallet", id: "cwlt_1" },
+      cluster: "mainnet-beta",
+    });
+
+    expect(createFeePaymentAdapter).toHaveBeenCalledWith(
+      env,
+      "sdp:v1:production:org_1:project:project_1:wallet:cwlt_1",
+      "mainnet-beta"
     );
   });
 
@@ -323,7 +343,8 @@ describe("sponsorship identity boundary", () => {
 
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
-      "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored"
+      "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored",
+      undefined
     );
   });
 

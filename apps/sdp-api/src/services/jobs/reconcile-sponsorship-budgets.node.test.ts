@@ -150,6 +150,46 @@ function harness(candidate: SponsorshipReconciliationReservation) {
 }
 
 describe("reconcileSponsorshipBudgets", () => {
+  it("runs one pass per cluster the deployment has a paymaster for", async () => {
+    // A devnet-default process that also sponsors mainnet (Earn, PRO-1738) has
+    // mainnet reservations too; they must be reconciled against the mainnet
+    // policies and the mainnet Kora, and a cluster with no Kora is skipped.
+    const { repository, budgetRedis, getTransaction, isBlockhashValid } = harness(reservation());
+    repository.listReconciliationCandidates.mockResolvedValue([]);
+    const getProviderConfiguration = vi.fn().mockResolvedValue(PROVIDER_CONFIGURATION);
+    const deps = {
+      repository,
+      budgetRedis,
+      getTransaction,
+      isBlockhashValid,
+      getProviderConfiguration,
+      now: () => new Date("2026-08-03T10:05:00.000Z"),
+      sleep: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await reconcileSponsorshipBudgets(
+      { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
+      deps
+    );
+    expect(repository.listReconciliationCandidates.mock.calls.map(([network]) => network)).toEqual([
+      "devnet",
+    ]);
+
+    repository.listReconciliationCandidates.mockClear();
+    await reconcileSponsorshipBudgets(
+      {
+        SOLANA_NETWORK: "devnet",
+        KORA_RPC_URL: "https://kora-devnet.example",
+        KORA_MAINNET_RPC_URL: "https://kora-mainnet.example",
+      } as Env,
+      deps
+    );
+    expect(repository.listReconciliationCandidates.mock.calls.map(([network]) => network)).toEqual([
+      "devnet",
+      "mainnet",
+    ]);
+  });
+
   it("retries terminal rows whose durable Redis settlement is incomplete", async () => {
     const candidate = reservation({
       status: "committed",

@@ -1,5 +1,9 @@
-import type { SponsorshipProviderConfiguration } from "@sdp/payments/fee-payment";
+import {
+  isFeePaymentConfiguredForCluster,
+  type SponsorshipProviderConfiguration,
+} from "@sdp/payments/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
 import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -8,6 +12,7 @@ import {
   SponsorshipBudgetRepository,
   type SponsorshipNetwork,
   type SponsorshipReconciliationReservation,
+  sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
@@ -71,14 +76,47 @@ export interface SponsorshipReconciliationDependencies {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * Reconcile every network this deployment sponsors on. One process can sponsor
+ * on both clusters (Earn movements pick the paymaster by cluster), and each
+ * network has its own reservations, policies, breaker and Kora, so each gets
+ * its own pass against its own RPC and its own provider configuration. A
+ * cluster with no paymaster configured is skipped: nothing can have reserved
+ * against it.
+ */
 export async function reconcileSponsorshipBudgets(
   env: Env,
   dependencies: SponsorshipReconciliationDependencies = {}
 ): Promise<void> {
+  const failures: unknown[] = [];
+  for (const cluster of SOLANA_CLUSTERS) {
+    if (!isFeePaymentConfiguredForCluster(env, cluster)) continue;
+    try {
+      await reconcileSponsorshipNetwork(env, cluster, dependencies);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    throw new AggregateError(
+      failures,
+      "Sponsorship reconciliation failed on more than one network"
+    );
+  }
+}
+
+async function reconcileSponsorshipNetwork(
+  env: Env,
+  cluster: SolanaCluster,
+  dependencies: SponsorshipReconciliationDependencies
+): Promise<void> {
   const repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
   const budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
   const rpc =
-    dependencies.getTransaction || dependencies.isBlockhashValid ? null : solanaRpc.createRpc(env);
+    dependencies.getTransaction || dependencies.isBlockhashValid
+      ? null
+      : solanaRpc.createClusterRpc(env, cluster);
   const getTransaction =
     dependencies.getTransaction ??
     ((signature: Signature) => solanaRpc.getTransaction(assertRpc(rpc), signature));
@@ -89,7 +127,7 @@ export async function reconcileSponsorshipBudgets(
   const sleep =
     dependencies.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const updatedBefore = new Date(now.getTime() - RECONCILIATION_DELAY_MS).toISOString();
-  const network = env.SOLANA_NETWORK === "mainnet-beta" ? "mainnet" : "devnet";
+  const network = sponsorshipNetworkForCluster(cluster);
   const reservations = await repository.listReconciliationCandidates(
     network,
     updatedBefore,
@@ -121,7 +159,7 @@ export async function reconcileSponsorshipBudgets(
 
   const getProviderConfiguration =
     dependencies.getProviderConfiguration ??
-    (() => getManagedSponsorshipProviderConfiguration(env));
+    (() => getManagedSponsorshipProviderConfiguration(env, cluster));
   let providerConfiguration: SponsorshipProviderConfiguration;
   try {
     providerConfiguration = await readProviderConfiguration(getProviderConfiguration, sleep);

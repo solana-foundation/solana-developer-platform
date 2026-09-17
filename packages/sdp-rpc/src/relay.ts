@@ -11,6 +11,7 @@ import {
 } from "@sdp/types";
 import {
   applyApiKeyTemplate,
+  resolveDefaultCluster,
   withAlchemyApiKey,
   withHeliusApiKey,
   withOptionalApiKeyTemplate,
@@ -631,7 +632,7 @@ async function resolveTenantConnection(
     return null;
   }
 
-  const network = input.env.SOLANA_NETWORK ?? "devnet";
+  const network = resolveDefaultCluster(input.env);
 
   if (projectId) {
     const resolution = await input.connections.resolve({

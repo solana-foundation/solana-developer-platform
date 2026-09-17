@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { Env } from "@/types/env";
 import {
   isAssetProfilesEnabled,
   isCustodyConnectionRuntimeEnabled,
   isEarnEnabled,
+  isEarnVaultSponsorshipEnabled,
   isMarketsEnabled,
   isPrivateChannelsEnabled,
   isPrivyByokEnabled,
@@ -159,4 +161,32 @@ describe("isEarnEnabled", () => {
       expect(isEarnEnabled({ MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(true);
     }
   );
+});
+
+describe("isEarnVaultSponsorshipEnabled", () => {
+  // Which clusters sponsor is configuration: the flag AND a paymaster for the
+  // cluster. Opening mainnet is wiring its Kora in, never a code change.
+  const devnetOnly = {
+    EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true",
+    SOLANA_NETWORK: "devnet",
+    KORA_RPC_URL: "https://kora-devnet.example",
+  } as Env;
+
+  it("is off without the flag, whatever paymasters are configured", () => {
+    const env = { ...devnetOnly, EARN_VAULT_FEE_SPONSORSHIP_ENABLED: undefined } as Env;
+    expect(isEarnVaultSponsorshipEnabled(env, "devnet")).toBe(false);
+  });
+
+  it("sponsors only the clusters that have a paymaster", () => {
+    expect(isEarnVaultSponsorshipEnabled(devnetOnly, "devnet")).toBe(true);
+    expect(isEarnVaultSponsorshipEnabled(devnetOnly, "mainnet-beta")).toBe(false);
+    const both = { ...devnetOnly, KORA_MAINNET_RPC_URL: "https://kora-mainnet.example" } as Env;
+    expect(isEarnVaultSponsorshipEnabled(both, "mainnet-beta")).toBe(true);
+  });
+
+  it("limits the native fee payer to the process default cluster", () => {
+    const env = { ...devnetOnly, FEE_PAYMENT_PROVIDER: "native" } as Env;
+    expect(isEarnVaultSponsorshipEnabled(env, "devnet")).toBe(true);
+    expect(isEarnVaultSponsorshipEnabled(env, "mainnet-beta")).toBe(false);
+  });
 });

@@ -1,5 +1,7 @@
 export {
   getSolanaConfig,
+  resolveClusterRpcUrl,
+  resolveDefaultCluster,
   resolveDefaultSolanaRpcUrl,
   resolveSolanaRpcProviderUrls,
   type SolanaConfig,

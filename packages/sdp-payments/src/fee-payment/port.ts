@@ -24,10 +24,22 @@ import type { Address, Signature } from "@solana/kit";
  */
 export interface FeePaymentEnv extends RpcEnv {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
+  /** The Kora serving the process's default cluster (`SOLANA_NETWORK`). */
   KORA_RPC_URL?: string;
   KORA_API_KEY?: string;
   KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
+  /**
+   * Per-cluster Kora endpoints, for a process that sponsors on BOTH clusters.
+   * Each trio is self-contained: a cluster with its own URL uses its own key and
+   * audience, never the default trio's. See `resolveKoraEndpoint`.
+   */
+  KORA_DEVNET_RPC_URL?: string;
+  KORA_DEVNET_API_KEY?: string;
+  KORA_DEVNET_CLOUD_RUN_AUDIENCE?: string;
+  KORA_MAINNET_RPC_URL?: string;
+  KORA_MAINNET_API_KEY?: string;
+  KORA_MAINNET_CLOUD_RUN_AUDIENCE?: string;
   FEE_PAYER_PRIVATE_KEY?: string;
   CUSTODY_PRIVATE_KEY?: string;
 }
