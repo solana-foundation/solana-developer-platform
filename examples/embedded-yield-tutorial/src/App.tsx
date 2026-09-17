@@ -135,7 +135,7 @@ function CustodySection() {
           {[
             "USD, EUR, and USDC balances in one app",
             "Yield can be surfaced to anyone holding stablecoins",
-            "SDP's on-ramp converts fiat into stablecoins",
+            "SDP's on-ramps can convert fiat into stablecoins",
           ].map((line) => (
             <li key={line} className="flex items-start gap-2.5">
               <ShieldCheckIcon className="mt-0.5 size-4 shrink-0 text-success" />
