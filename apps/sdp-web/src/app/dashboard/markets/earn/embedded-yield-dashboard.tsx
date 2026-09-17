@@ -39,12 +39,8 @@ import { explorerAddressUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
-import { earnStrategyLiquidityLabel } from "./earn-format";
-import {
-  earnMintAsset,
-  earnStrategyReferenceKey,
-  formatProviderAmount,
-} from "./earn-market-presentation";
+import { earnStrategyLiquidityLabel, formatProviderAmount } from "./earn-format";
+import { earnMintAsset, earnStrategyReferenceKey } from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 
 function PortfolioInfoTip({ label }: { label: string }) {

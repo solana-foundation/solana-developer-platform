@@ -108,14 +108,6 @@ export function earnVaultDepositOnlyEnvironment(provider: string): SdpEnvironmen
   return sandbox ? "sandbox" : "production";
 }
 
-export function isEarnVaultDepositAvailable(
-  strategy: EarnStrategy,
-  environment: SdpEnvironment,
-  providerAccess: EarnProviderAccess | null
-): boolean {
-  return earnVaultDepositAvailability(strategy, environment, providerAccess) === "available";
-}
-
 /**
  * Whether the dashboard offers CREATING a program at all.
  *

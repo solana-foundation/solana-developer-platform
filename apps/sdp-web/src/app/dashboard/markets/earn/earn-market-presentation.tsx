@@ -50,8 +50,6 @@ export function sumDecimalStrings(values: readonly string[]): string | undefined
   return formatDecimalAmount(total, scale);
 }
 
-export { formatProviderAmount } from "./earn-format";
-
 /** APY is a decimal rate (`0.062` = 6.2%); absent and malformed values stay unavailable. */
 export function formatProviderApy(value: string | undefined, locale: string): string {
   if (value === undefined || !isDecimalString(value)) return "—";

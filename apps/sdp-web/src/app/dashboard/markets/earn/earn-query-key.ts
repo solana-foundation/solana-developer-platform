@@ -1,7 +1,5 @@
 export const earnQueryKeys = {
   programs: () => "dashboard-earn-programs",
-  programDeposits: ({ programId }: { programId: string }) =>
-    ["dashboard-earn-program-deposits", programId] as const,
   strategies: ({ cluster }: { cluster: string }) => ["dashboard-earn-strategies", cluster] as const,
   vaultPositions: () => "dashboard-earn-vault-positions",
   vaultDepositsInFlight: () => "dashboard-earn-vault-deposits-in-flight",
