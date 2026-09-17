@@ -58,10 +58,9 @@ describe("BvnkWebhookProcessor.parse", () => {
 
   it("parses an agreement-session status-change webhook", () => {
     const processor = new BvnkWebhookProcessor();
+    const event = bvnkAgreementSessionStatusChangeEvent();
 
-    expect(processor.parse(bvnkAgreementSessionStatusChangeEvent())).toEqual(
-      bvnkAgreementSessionStatusChangeEvent()
-    );
+    expect(processor.parse(event)).toEqual(event);
   });
 
   it("parses a ledger wallet status-change webhook", () => {
