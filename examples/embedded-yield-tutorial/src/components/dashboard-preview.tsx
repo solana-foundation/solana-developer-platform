@@ -71,7 +71,8 @@ export function DashboardPreview() {
                 Earn strategies
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Choose which strategies your customers can enter.
+                Pick the Earn strategy solution you'd like to offer to your
+                customers.
               </p>
             </div>
             <span className="shrink-0 rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
