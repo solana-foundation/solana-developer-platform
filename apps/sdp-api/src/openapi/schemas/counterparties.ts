@@ -311,6 +311,11 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     z.object({
       ...requirementBase,
       provider: z.literal("bvnk"),
+      status: z.literal("counterparty_agreement_signing"),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("bvnk"),
       status: z.literal("customer_funding_account_provisioning"),
     }),
     z.object({
@@ -556,7 +561,7 @@ const customerLinkBaseDocFields = {
   status: counterpartyAccountStatusSchema,
   providerStatus: withOpenApi(z.string().nullable(), {
     description:
-      "Provider-side customer status when known; for BVNK links before the customer exists, one of PENDING_AGREEMENT / PENDING_DETAILS.",
+      "Provider-side customer status when known; for BVNK links before the customer exists, one of PENDING_AGREEMENT / AGREEMENT_SIGNED.",
     example: "ACTIVE",
   }),
   createdAt: withOpenApi(isoDateTimeSchema, {

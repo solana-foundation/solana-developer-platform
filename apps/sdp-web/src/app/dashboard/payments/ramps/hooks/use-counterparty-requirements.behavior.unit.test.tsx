@@ -469,6 +469,33 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     expect(rendered.result.current.onboarding).toBeNull();
   });
 
+  it("never promotes an advance collect answer that lands after the destination country changed", async () => {
+    const { result } = await renderResolvedOfframp();
+
+    act(() => result.current.setField("destinationCountry", "US"));
+    let submitPromise: Promise<CounterpartyRequirements> | null = null;
+    act(() => {
+      submitPromise = result.current.submitRequirements(
+        {
+          assetRail: "usdc.solana",
+          destinationCustodyWalletId: "",
+          fiatCurrency: "USD",
+        },
+        "collected"
+      );
+    });
+
+    act(() => result.current.setField("destinationCountry", "MX"));
+
+    await release("POST", COLLECT_COUNTERPARTY);
+    await submitPromise;
+
+    expect(result.current.fields.map((field) => field.key)).toEqual([
+      "destinationCountry",
+      "paymentRails",
+    ]);
+  });
+
   it("never lets an earlier advance's poll verdict answer for a later same-corridor advance", async () => {
     const onrampParams: CounterpartyRequirementsParams = {
       counterpartyId: "cpty_behavior",

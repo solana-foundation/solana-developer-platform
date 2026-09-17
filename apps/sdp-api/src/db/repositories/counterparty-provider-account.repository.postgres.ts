@@ -6,6 +6,7 @@ import type {
   CompleteExternalAccountInput,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
+  FindCustomerLinkBySessionReferenceInput,
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
@@ -15,12 +16,14 @@ import type {
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
+  MarkCustomerLinkSessionTimestampInput,
   PatchAccountMetadataInput,
   SetCustomerLinkSessionInput,
   UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
+  type BvnkSessionTimestampField,
   bvnkFundingWalletMetadataSchema,
   counterpartyProviderAccountRowSchema,
   generateCounterpartyProviderAccountId,
@@ -58,6 +61,43 @@ function parseProviderAccountRows(
   rows: Record<string, unknown>[]
 ): CounterpartyProviderAccountRow[] {
   return rows.map((row) => parseProviderAccountRow(row));
+}
+
+function sessionTimestampUpdateSql(field: BvnkSessionTimestampField): string {
+  switch (field) {
+    case "signedAt":
+      return `UPDATE counterparty_provider_accounts
+             SET metadata = jsonb_set(metadata, '{session,signedAt}', to_jsonb(?::text)),
+                 updated_at = sdp_iso_now()
+             WHERE id = ?
+               AND organization_id = ?
+               AND project_id = ?
+               AND counterparty_id = ?
+               AND provider = ?
+               AND kind = 'customer_link'
+               AND status = 'active'
+               AND metadata->'session'->>'reference' = ?
+               AND NOT jsonb_exists(metadata->'session', 'signedAt')
+             RETURNING *`;
+    case "consentSubmittedAt":
+      return `UPDATE counterparty_provider_accounts
+             SET metadata = jsonb_set(metadata, '{session,consentSubmittedAt}', to_jsonb(?::text)),
+                 updated_at = sdp_iso_now()
+             WHERE id = ?
+               AND organization_id = ?
+               AND project_id = ?
+               AND counterparty_id = ?
+               AND provider = ?
+               AND kind = 'customer_link'
+               AND status = 'active'
+               AND metadata->'session'->>'reference' = ?
+               AND NOT jsonb_exists(metadata->'session', 'consentSubmittedAt')
+             RETURNING *`;
+    default: {
+      const exhaustive: never = field;
+      return exhaustive;
+    }
+  }
 }
 
 export function createPostgresCounterpartyProviderAccountsRepository(
@@ -373,6 +413,45 @@ export function createPostgresCounterpartyProviderAccountsRepository(
           input.projectId,
           input.counterpartyId,
           input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    /**
+     * Finds a webhook-targeted customer link without tenant scope.
+     *
+     * @param input - Provider and stored agreement-session reference.
+     * @returns The matching active customer-link row, or null when it is absent.
+     */
+    async findCustomerLinkBySessionReference(input: FindCustomerLinkBySessionReferenceInput) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE provider = ?
+             AND kind = 'customer_link'
+             AND status = 'active'
+             AND metadata->'session'->>'reference' = ?
+           LIMIT 1`
+        )
+        .bind(input.provider, input.sessionReference)
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async markCustomerLinkSessionTimestamp(input: MarkCustomerLinkSessionTimestampInput) {
+      const row = await db
+        .prepare(sessionTimestampUpdateSql(input.field))
+        .bind(
+          input.timestamp,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.sessionReference
         )
         .first<Record<string, unknown>>();
 

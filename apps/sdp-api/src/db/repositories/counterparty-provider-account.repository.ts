@@ -72,6 +72,7 @@ export const bvnkCustomerProviderAccountMetadataSchema = z.object({
     .object({
       reference: z.string().min(1),
       signedAt: z.string().datetime().optional(),
+      consentSubmittedAt: z.string().datetime().optional(),
       agreements: z.array(bvnkSessionAgreementSchema.omit({ status: true })),
     })
     .optional(),
@@ -182,6 +183,20 @@ export interface SetCustomerLinkSessionInput extends GetCounterpartyProviderAcco
   id: string;
   /** The minted agreement session, CAS-written only while the row carries none yet. */
   session: NonNullable<BvnkCustomerProviderAccountMetadata["session"]>;
+}
+
+export interface FindCustomerLinkBySessionReferenceInput {
+  provider: RampProviderId;
+  sessionReference: string;
+}
+
+export type BvnkSessionTimestampField = "signedAt" | "consentSubmittedAt";
+
+export interface MarkCustomerLinkSessionTimestampInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  sessionReference: string;
+  field: BvnkSessionTimestampField;
+  timestamp: string;
 }
 
 export interface InsertPendingExternalAccountInput extends ListActiveExternalAccountsInput {
@@ -319,6 +334,30 @@ export interface CounterpartyProviderAccountsRepository {
    */
   setCustomerLinkSession(
     input: SetCustomerLinkSessionInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Finds an active customer link by its BVNK agreement-session reference.
+   * This is system-scoped because webhook payloads carry no tenant identity.
+   *
+   * @param input - Provider and stored agreement-session reference.
+   * @returns The matching customer-link row, or null when no active row owns the session.
+   */
+  findCustomerLinkBySessionReference(
+    input: FindCustomerLinkBySessionReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * CAS-marks an agreement-session timestamp field on an active customer link.
+   * The write lands only while the session still lacks that field, so a
+   * replayed signature or consent event loses the CAS instead of overwriting
+   * the earlier record.
+   *
+   * @param input - Tenant scope, row id, provider, session reference, the timestamp field to record, and its value.
+   * @returns The updated row, or null when the field was already set or the row is outside the scope.
+   */
+  markCustomerLinkSessionTimestamp(
+    input: MarkCustomerLinkSessionTimestampInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
