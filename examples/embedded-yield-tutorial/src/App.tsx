@@ -247,6 +247,92 @@ function EarnSection() {
   );
 }
 
+function StrategiesSection() {
+  const strategies = [
+    {
+      name: "Kamino Institutional Commodity Yield",
+      provider: "Kamino",
+      asset: "USDC",
+      apy: "8.43%",
+    },
+    {
+      name: "Steakhouse High Yield USDC",
+      provider: "Kamino",
+      asset: "USDC",
+      apy: "4.84%",
+    },
+    {
+      name: "Steakhouse High Yield USDG",
+      provider: "Kamino",
+      asset: "USDG",
+      apy: "4.34%",
+    },
+    {
+      name: "Steakhouse USDC",
+      provider: "Kamino",
+      asset: "USDC",
+      apy: "3.41%",
+    },
+  ];
+  return (
+    <section className="mx-auto max-w-6xl px-6 py-10">
+      <Reveal>
+        <h2 className="text-2xl font-semibold tracking-tight text-foreground lg:text-3xl">
+          Mainnet strategies at a glance
+        </h2>
+        <div className="mt-5 overflow-x-auto rounded-xl border border-foreground/10 bg-background">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-foreground/10 text-xs tracking-wider text-muted-foreground uppercase">
+                <th scope="col" className="px-4 py-2.5 font-semibold">
+                  Strategy
+                </th>
+                <th scope="col" className="px-4 py-2.5 font-semibold">
+                  Provider
+                </th>
+                <th scope="col" className="px-4 py-2.5 font-semibold">
+                  Asset
+                </th>
+                <th
+                  scope="col"
+                  className="px-4 py-2.5 text-right font-semibold"
+                >
+                  APY
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {strategies.map((strategy) => (
+                <tr
+                  key={strategy.name}
+                  className="border-b border-foreground/5 last:border-0"
+                >
+                  <td className="px-4 py-2.5 font-medium text-foreground">
+                    {strategy.name}
+                  </td>
+                  <td className="px-4 py-2.5 text-muted-foreground">
+                    {strategy.provider}
+                  </td>
+                  <td className="px-4 py-2.5 text-muted-foreground">
+                    {strategy.asset}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-semibold text-success tabular-nums">
+                    {strategy.apy}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+          This table may not be exhaustive. APYs were pulled from live data on
+          September 17th, 2026.
+        </p>
+      </Reveal>
+    </section>
+  );
+}
+
 export function App() {
   const [activeId, setActiveId] = useState(STEPS[0].id);
 
@@ -276,6 +362,7 @@ export function App() {
         <CustodySection />
         <ConfigureSection />
         <EarnSection />
+        <StrategiesSection />
       </main>
       <footer className="border-t border-foreground/10 px-6 py-10">
         <p className="mx-auto max-w-6xl text-xs leading-relaxed text-muted-foreground">
