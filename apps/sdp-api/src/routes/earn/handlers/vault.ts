@@ -15,7 +15,6 @@ import {
   type EarnProviderId,
   earnDepositStyle,
   earnWithdrawSlippageFloor,
-  isVaultDirectDepositEnabled,
 } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -95,7 +94,11 @@ import {
   type earnVaultWithdrawalSchema,
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
-import { assertStrategyDepositable, assertVaultDepositAdmissible } from "./admission";
+import {
+  assertStrategyDepositable,
+  assertVaultDepositAdmissible,
+  assertVaultDepositEnvironmentOpen,
+} from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
@@ -153,13 +156,7 @@ export async function createEarnVaultDepositPreview(
   }
   const provider = strategy.provider;
 
-  if (!isVaultDirectDepositEnabled(environment, provider)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `Vault deposits for ${provider} are not available from a ${environment} project.`
-    );
-  }
-
+  assertVaultDepositEnvironmentOpen(environment, provider);
   assertEarnProviderSurfaced(provider);
   if (auth) {
     await assertProviderAvailable(
@@ -408,15 +405,6 @@ export async function extractEarnVaultDepositPolicyCandidate(
     );
   }
 
-  // Jupiter is mainnet-only, while today's Kamino and Veda launch posture
-  // remains sandbox-only. Keep that distinction provider-scoped.
-  if (!isVaultDirectDepositEnabled(environment, strategy.provider)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `Vault deposits for ${strategy.provider} are not available from a ${environment} project.`
-    );
-  }
-
   // Every production deposit carries a caller-chosen share floor. The
   // dashboard derives it from a live quote and rejects stale quotes by TTL
   // (PRO-1691); the provider builder enforces the exact value on-chain.
@@ -441,6 +429,8 @@ export async function extractEarnVaultDepositPolicyCandidate(
   //
   //   shape       — a custodial provider reaching this route would silently
   //                 skip its wallet-provisioning model.
+  //   environment — capability, inside `assertVaultDepositAdmissible`: this
+  //                 project must reach the provider's deployed cluster.
   //   surfacing   — "SDP does not offer this provider", which no per-org
   //                 override can lift, and which reads differently from
   //                 entitlement. Checked first so a caller is never pointed at

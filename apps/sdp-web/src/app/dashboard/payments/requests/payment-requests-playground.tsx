@@ -10,7 +10,7 @@ import { buildPaymentRequestsPlaygroundEndpointConfigs } from "./payment-request
 
 interface PaymentRequestsPlaygroundProps {
   apiBaseUrl?: string | null;
-  apiKeyValue: string;
+  apiKeyId: string | null;
   hasActiveApiKeys: boolean;
   wallets: PaymentsDashboardWallet[];
   tokens: PaymentRequestTokenOption[];
@@ -18,7 +18,7 @@ interface PaymentRequestsPlaygroundProps {
 
 export function PaymentRequestsPlayground({
   apiBaseUrl,
-  apiKeyValue,
+  apiKeyId,
   hasActiveApiKeys,
   wallets,
   tokens,
@@ -35,7 +35,7 @@ export function PaymentRequestsPlayground({
       endpoints={endpoints}
       defaultEndpointId="list-payment-requests"
       apiBaseUrl={apiBaseUrl}
-      apiKeyValue={apiKeyValue}
+      apiKeyId={apiKeyId}
       apiKeySelector={<PlaygroundApiKeySelector />}
       requiresApiKey={!hasActiveApiKeys}
       leftMessages={[]}

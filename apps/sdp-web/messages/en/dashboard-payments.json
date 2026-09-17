@@ -308,7 +308,6 @@
     "bvnk": {
       "agreementRequiredTitle": "Review and accept the agreements",
       "agreementRequiredDescription": "BVNK requires the counterparty to accept the platform agreement for their tax residence before their details are collected.",
-      "viewAgreement": "View agreement",
       "acceptAgreements": "I agree and continue",
       "verificationRequiredTitle": "Verify your identity",
       "verificationRequiredDescription": "BVNK partners with Sumsub to confirm your identity before activating your funding account. Hit “Complete Verification” to get started — this page refreshes automatically once you're approved, and your instructions will appear right here.",
@@ -326,7 +325,25 @@
       "offrampProvisioningDetail": "Provisioning a dedicated BVNK payout wallet for this currency.",
       "simulateDeposit": "Simulate Deposit",
       "simulating": "Simulating...",
-      "depositSimulated": "Deposit Simulated"
+      "depositSimulated": "Deposit Simulated",
+      "agreementConsentPrefix": "I have read and agree to the",
+      "privacyPolicy": "privacy policy"
+    },
+    "hercle": {
+      "verificationRequiredTitle": "Verify your business",
+      "verificationRequiredDescription": "Hercle needs to verify your business before it can settle payments for you — this is Hercle's own regulatory requirement as a licensed crypto-asset service provider, and the verdict is theirs. Hit “Complete Verification” to start; this page refreshes automatically once you're approved, and your instructions will appear right here.",
+      "verificationInReviewTitle": "Verification in review",
+      "verificationInReviewDescription": "Hercle is reviewing your business details. There's nothing for you to do — feel free to come back later; your instructions will show up here as soon as you're approved.",
+      "verificationFailedTitle": "Business verification was not approved",
+      "verificationFailedDescription": "Hercle could not verify your business, so payments can't be settled through them. This isn't retryable from here — contact Hercle if you believe this is a mistake.",
+      "onrampProvisioningDetail": "Opening your dedicated account at Hercle's bank",
+      "payerAccountHolder": "Pay from an account held in the name of",
+      "offrampProvisioningDetail": "Hercle does not offer an off-ramp.",
+      "readyTitle": "Preparing your instructions",
+      "readyDescription": "Your business is verified — fetching your payment details now.",
+      "simulateDeposit": "Simulate Wire",
+      "simulating": "Simulating...",
+      "depositSimulated": "Wire Simulated"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verify your identity",
@@ -596,6 +613,11 @@
       "providerAccountStatus": "Status",
       "copyCustomerId": "Copy customer ID",
       "customerIdCopied": "Customer ID copied",
+      "taxResidence": "Tax residence",
+      "agreementSigned": "Signed",
+      "agreementAwaitingSignature": "Awaiting signature",
+      "viewAgreement": "Agreement",
+      "viewPrivacyPolicy": "Privacy policy",
       "noPayoutAccounts": "No payout accounts yet.",
       "addExternalAccountTitle": "Add Crypto Address",
       "manage": "Manage",

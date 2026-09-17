@@ -110,6 +110,12 @@ balance with a live one.
   sign-off named in the PR (who reviewed, and the threat-model row the route
   lands under), and the threat model's revisit trigger fires. Never widen the
   list just to make the test pass.
+  The current contract pins six optional-auth operations: strategy list/detail,
+  vault deposit preview, external-wallet deposit build, withdrawal preview, and
+  withdrawal build. Public OpenAPI represents each as API-key auth or an empty
+  security requirement; the internal document additionally accepts Clerk and
+  session auth. Every tenant read and signed-transaction submit remains
+  authenticated.
 
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
@@ -482,10 +488,14 @@ organization's own custody wallets.
     re-opens that live family after the earlier vocabulary trim.
   - **Provider/environment capability after strategy resolution.**
     `isVaultDirectDepositEnabled(environment, provider)`
-    (`@sdp/types/provider-access`) opens only the provider's real deployment:
-    Jupiter Lend on production/mainnet; Kamino and Veda on sandbox/devnet. The
-    dashboard reads the same map, so it never advertises an action the API will
-    refuse.
+    (`@sdp/types/provider-access`) opens a provider only where the
+    environment's cluster carries one of its deployments, DERIVED from the
+    provider's own program table (`EARN_PROVIDER_DEPLOYED_CLUSTERS`): today
+    Jupiter Lend and Ondo on production/mainnet, Kamino on both (PRO-1986),
+    Veda on sandbox/devnet until `VEDA_DEPLOYMENTS["mainnet-beta"]` is filled
+    (PRO-1777). One gate, `assertVaultDepositEnvironmentOpen` (admission.ts),
+    inside `assertVaultDepositAdmissible` and the preview. The dashboard reads
+    the same predicate, so it never advertises an action the API will refuse.
   - `minSharesOut` is required for every production deposit. Slippage-capable
     providers quote the live share rate, and their builders encode the caller's
     exact floor in the provider instruction. Jupiter Lend uses
@@ -539,9 +549,11 @@ organization's own custody wallets.
     (`earnVaultDepositWriteLockKey`) and re-checks the idempotency replay
     under it (a same-key twin that committed while this write waited is a
     replay, never a 409), then the hook re-reads the aggregate on the SAME
-    connection (`earn_vault_deposit_exposure`, migration 0101, a SQL function
-    that widens its own read to the system identity and is registered in
-    `tenant-isolation-coverage.test.ts`), and refuses with the same 409; a
+    connection (`earn_vault_deposit_exposure`, migration 0101, a plpgsql
+    function that stamps the system identity with a transaction-local
+    `set_config` and restores the caller's before returning; never a
+    function-level `SET`, which Cloud SQL cannot apply, and which
+    `tenant-isolation-coverage.test.ts` rejects), and refuses with the same 409; a
     refusal rolls the write back with nothing recorded or broadcast. Events
     carry `stage: "preview" | "admission" | "ledger_write"`. Pinned by
     `services/earn/vault-exposure.ledger-gate.test.ts` (a real two-transaction
@@ -1255,8 +1267,8 @@ produces a movement, so nothing on this surface reports it. That outcome is
 observable via `GET /v1/wallets/approval-requests/:approvalRequestId`, whose
 `status` plus nested `operation.status` distinguish rejected/canceled from
 approved-and-executed. Wiring the dashboard to it is deliberately not done
-here. `EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` scopes new deposits to
-each provider's supported deployment; withdrawals remain open independently.
+here. `EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
+each provider is deployed on; withdrawals remain open independently.
 
 **Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
 `SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
@@ -1356,8 +1368,8 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   `PROVIDER_NOT_CONFIGURED` from inside its build). Capability (501) is the
   only provider-shaped refusal, and wallet policy is the org's own custody
   control, not a provider gate. It also ignores
-  `EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`: the environment fail-close
-  guards the way IN only.
+  `assertVaultDepositEnvironmentOpen`: the environment fail-close guards the
+  way IN only.
 - **The vault deposit preview** (`POST /vault-deposit-previews`) is the one
   deliberate EXCEPTION among previews: a live read shaped like MONEY-IN,
   because a deposit quote exists only to open a new position. It takes the

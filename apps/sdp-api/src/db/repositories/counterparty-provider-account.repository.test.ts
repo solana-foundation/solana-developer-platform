@@ -1,11 +1,16 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { bvnkCustomerLinkSeed, bvnkOnrampRequest } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
-import type { CounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository";
+import {
+  type CounterpartyProviderAccountsRepository,
+  counterpartyProviderAccountUuid,
+  generateCounterpartyProviderAccountId,
+} from "./counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_cpacc_repo_test";
@@ -179,15 +184,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       kind: "funding_wallet",
       fiatCurrency: "USD",
       externalAccountReference: "wallet_resource_1",
-      metadata: {
-        onrampKey: "USD:USDC_SOLANA:dest",
-        request: {
-          currency: "USDC",
-          network: "SOLANA",
-          destinationWalletAddress: "dest",
-          fiatCurrency: "USD",
-        },
-      },
+      metadata: { onrampKey: "USD:USDC_SOLANA:dest", request: bvnkOnrampRequest() },
     });
     const merchantWallet = await repository.insertProviderResourceAccount({
       organizationId: TEST_ORG.id,
@@ -272,8 +269,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
-      provider: "bvnk",
-      providerCustomerReference: "bvnk_customer_kind_filter",
+      ...bvnkCustomerLinkSeed("bvnk_customer_kind_filter"),
     });
 
     expect(
@@ -312,8 +308,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         counterpartyId: duplicateCounterparty.id,
-        provider: "bvnk",
-        providerCustomerReference: "bvnk_customer_kind_filter",
+        ...bvnkCustomerLinkSeed("bvnk_customer_kind_filter"),
       })
     ).rejects.toMatchObject({ code: "23505" });
     expect(
@@ -322,6 +317,144 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         providerCustomerReference: "bvnk_customer_kind_filter",
       })
     ).toMatchObject({ id: counterparty.id });
+  });
+
+  it("assigns the v1 customer reference and metadata via the CAS alias", async () => {
+    const counterparty = await seedCounterparty("cpacc_assign_hit");
+    const alias = "cp_cpacc_assign_hit";
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: alias,
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_hit",
+          agreements: [],
+        },
+      },
+    });
+
+    const assigned = await repository.assignCustomerLinkReference({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: seeded.id,
+      fromProviderCustomerReference: alias,
+      providerCustomerReference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      metadata: { status: "PENDING" },
+    });
+
+    expect(assigned).toMatchObject({
+      id: seeded.id,
+      provider_customer_reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      metadata: { status: "PENDING" },
+    });
+  });
+
+  it("returns null on a CAS miss and leaves the row untouched", async () => {
+    const counterparty = await seedCounterparty("cpacc_assign_miss");
+    const alias = "cp_cpacc_assign_miss";
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: alias,
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_miss",
+          agreements: [],
+        },
+      },
+    });
+
+    const assigned = await repository.assignCustomerLinkReference({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: seeded.id,
+      fromProviderCustomerReference: "cp_someone_else",
+      providerCustomerReference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      metadata: { status: "PENDING" },
+    });
+
+    expect(assigned).toBeNull();
+    expect(
+      await repository.getProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      })
+    ).toMatchObject({
+      id: seeded.id,
+      provider_customer_reference: alias,
+      status: "active",
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_miss",
+          agreements: [],
+        },
+      },
+    });
+  });
+
+  it("scopes customer-link reference assignment to the parent tenant", async () => {
+    const counterparty = await seedCounterparty("cpacc_assign_scope");
+    const alias = "cp_cpacc_assign_scope";
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: alias,
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_scope",
+          agreements: [],
+        },
+      },
+    });
+
+    expect(
+      await repository.assignCustomerLinkReference({
+        organizationId: TEST_ORG.id,
+        projectId: `${TEST_PROJECT_ID}_production`,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        id: seeded.id,
+        fromProviderCustomerReference: alias,
+        providerCustomerReference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+        metadata: { status: "PENDING" },
+      })
+    ).toBeNull();
+    expect(
+      await repository.getProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      })
+    ).toMatchObject({
+      id: seeded.id,
+      provider_customer_reference: alias,
+      status: "active",
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_scope",
+          agreements: [],
+        },
+      },
+    });
   });
 
   it("scopes external account lookup to the parent counterparty", async () => {
@@ -487,6 +620,149 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     expect(replacement.id).not.toBe(first.id);
   });
 
+  it("keeps the first claimed residence country on a repeat claim", async () => {
+    const counterparty = await seedCounterparty("cpacc_residence_claim");
+    const first = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "cp_cpacc_residence_claim",
+      metadata: { residenceCountryCode: "US" },
+    });
+
+    const repeat = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "cp_cpacc_residence_claim",
+      metadata: { residenceCountryCode: "GB" },
+    });
+
+    expect(repeat.id).toBe(first.id);
+    expect(repeat.metadata).toEqual({ residenceCountryCode: "US" });
+  });
+
+  it("CAS-writes the minted session onto a claimed row", async () => {
+    const counterparty = await seedCounterparty("cpacc_session_hit");
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "cp_cpacc_session_hit",
+      metadata: { residenceCountryCode: "US" },
+    });
+
+    const written = await repository.setCustomerLinkSession({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: seeded.id,
+      session: {
+        reference: "bvnk_session_hit",
+        agreements: [],
+      },
+    });
+
+    expect(written).toMatchObject({
+      id: seeded.id,
+      metadata: {
+        residenceCountryCode: "US",
+        session: { reference: "bvnk_session_hit", agreements: [] },
+      },
+    });
+    expect(
+      await repository.getProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      })
+    ).toMatchObject({
+      metadata: {
+        residenceCountryCode: "US",
+        session: { reference: "bvnk_session_hit", agreements: [] },
+      },
+    });
+  });
+
+  it("returns null on a session CAS miss and leaves the row untouched", async () => {
+    const counterparty = await seedCounterparty("cpacc_session_miss");
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "cp_cpacc_session_miss",
+      metadata: {
+        residenceCountryCode: "US",
+        session: { reference: "bvnk_session_first", agreements: [] },
+      },
+    });
+
+    const written = await repository.setCustomerLinkSession({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: seeded.id,
+      session: { reference: "bvnk_session_second", agreements: [] },
+    });
+
+    expect(written).toBeNull();
+    expect(
+      await repository.getProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      })
+    ).toMatchObject({
+      id: seeded.id,
+      metadata: {
+        residenceCountryCode: "US",
+        session: { reference: "bvnk_session_first", agreements: [] },
+      },
+    });
+  });
+
+  it("scopes the session CAS write to the parent tenant", async () => {
+    const counterparty = await seedCounterparty("cpacc_session_scope");
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "cp_cpacc_session_scope",
+      metadata: { residenceCountryCode: "US" },
+    });
+
+    expect(
+      await repository.setCustomerLinkSession({
+        organizationId: TEST_ORG.id,
+        projectId: `${TEST_PROJECT_ID}_production`,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        id: seeded.id,
+        session: { reference: "bvnk_session_scope", agreements: [] },
+      })
+    ).toBeNull();
+    expect(
+      await repository.getProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      })
+    ).toMatchObject({
+      id: seeded.id,
+      metadata: { residenceCountryCode: "US" },
+    });
+  });
+
   it("lists active and archived external rows with parent and tenant filters", async () => {
     const counterparty = await seedCounterparty("cpacc_list_provider_accounts");
     const otherCounterparty = await seedCounterparty("cpacc_list_provider_accounts_other");
@@ -559,5 +835,24 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
       })
     ).toEqual([]);
+  });
+});
+
+describe("counterpartyProviderAccountUuid", () => {
+  it("strips the prefix from a generated row id", () => {
+    const id = generateCounterpartyProviderAccountId();
+    expect(counterpartyProviderAccountUuid(id)).toBe(
+      id.slice("counterparty_provider_account_".length)
+    );
+  });
+
+  it("rejects ids that are not prefixed uuids", () => {
+    expect(() => counterpartyProviderAccountUuid("cpa_archived_cpty_123")).toThrow();
+    expect(() =>
+      counterpartyProviderAccountUuid("counterparty_provider_account_not-a-uuid")
+    ).toThrow();
+    expect(() =>
+      counterpartyProviderAccountUuid("other_prefix_2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3")
+    ).toThrow();
   });
 });

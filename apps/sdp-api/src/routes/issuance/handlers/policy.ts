@@ -24,7 +24,10 @@ export function assertJudgedCustodyWallet(
 
 type IssuancePolicyOperationType = Extract<
   WalletOperationType,
+  | "issuance_allowlist_add_execute"
+  | "issuance_allowlist_remove_execute"
   | "issuance_burn_execute"
+  | "issuance_deploy_execute"
   | "issuance_force_burn_execute"
   | "issuance_freeze_execute"
   | "issuance_mint_execute"

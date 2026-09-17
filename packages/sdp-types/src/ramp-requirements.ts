@@ -60,6 +60,19 @@ export type RequirementField =
       required: boolean;
       /** Nested parts collected under dotted keys, e.g. `customer.address.line1`. */
       fields: RequirementField[];
+    }
+  | {
+      /**
+       * An affirmative acceptance of a provider document (terms of service, privacy policy), collected as
+       * the literal `"true"`. The label is the sentence up to the document's name and `documentLabel`
+       * completes it as a link to `documentUrl`, so the person reads what they accept where they accept it.
+       */
+      kind: "consent";
+      key: string;
+      label: string;
+      required: boolean;
+      documentUrl: string;
+      documentLabel?: string;
     };
 
 export type RequirementFieldKind = RequirementField["kind"];
@@ -157,13 +170,19 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
     }
   | {
       provider: "bvnk";
-      status: "customer_agreement_required";
-      /** Agreement text is an external link; `downloadUrl` is minted JIT per response and never persisted. */
+      status: "counterparty_collect_agreement";
+      /**
+       * Agreements of the minted v1 session. The document links are the
+       * session's static help-centre URLs stored on the customer link; nothing
+       * is minted per response. `name` is the v1 agreement identifier (v1 has
+       * no id).
+       */
       agreements: {
-        id: string;
         name: string;
+        displayName: string;
         description: string;
-        downloadUrl: string;
+        url: string;
+        privacyPolicyUrl: string;
       }[];
     }
   | {
@@ -182,6 +201,9 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "mural"; status: "customer_verifying" }
   | { provider: "mural"; status: "customer_verification_failed" }
   | { provider: "mural"; status: "funding_account_provisioning" }
+  | { provider: "hercle"; status: "customer_verification_required"; verificationUrl: string }
+  | { provider: "hercle"; status: "customer_verifying" }
+  | { provider: "hercle"; status: "customer_verification_failed" }
 );
 
 /** Collect stages whose answer carries a `fields` array for the client to render. */
@@ -201,7 +223,7 @@ export type CollectFieldsStatus = (typeof COLLECT_FIELDS_STATUSES)[number];
 export const COLLECT_STAGE_STATUSES = [
   ...COLLECT_FIELDS_STATUSES,
   "collect_account",
-  "customer_agreement_required",
+  "counterparty_collect_agreement",
 ] as const;
 
 export type CollectStageStatus = (typeof COLLECT_STAGE_STATUSES)[number];

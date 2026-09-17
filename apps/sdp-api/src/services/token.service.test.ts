@@ -1844,6 +1844,14 @@ describe("TokenService", () => {
       expect(literalUnderscore.total).toBe(4);
     });
 
+    it("treats punctuation, SQL-like text, and unicode as an ordinary no-match search", async () => {
+      const result = await tokenService.listTokens(TEST_PROJECT.id, {
+        search: "qa-no-match-' OR 1=1 -- 🚀",
+      });
+
+      expect(result).toMatchObject({ tokens: [], total: 0 });
+    });
+
     it("filters by the raw status column", async () => {
       const { tokens, total } = await tokenService.listTokens(TEST_PROJECT.id, {
         status: "pending",

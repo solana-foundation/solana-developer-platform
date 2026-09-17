@@ -7,6 +7,7 @@ import {
   getRemainingMintableSupply,
   isMaxSupplyBelowMintedSupply,
   isSupplyLockedOnChain,
+  isValidSolanaAddressInput,
 } from "./token-management-workspace.utils";
 
 const t = (key: MessageKey, values?: TranslationValues) =>
@@ -128,6 +129,16 @@ describe("getRemainingMintableSupply", () => {
 
   it("returns null when a figure is not a decimal string", () => {
     expect(getRemainingMintableSupply(makeToken({ totalSupply: "n/a" }))).toBeNull();
+  });
+});
+
+describe("lock-supply destination validation", () => {
+  it("rejects malformed destinations before the irreversible workflow starts", () => {
+    expect(isValidSolanaAddressInput("bad")).toBe(false);
+    expect(isValidSolanaAddressInput("qa-no-match-' OR 1=1 -- 🚀")).toBe(false);
+    expect(isValidSolanaAddressInput("z".repeat(44))).toBe(false);
+    expect(isValidSolanaAddressInput("1".repeat(44))).toBe(false);
+    expect(isValidSolanaAddressInput(" 8NjftgbiNJbaNZRYYXDAZ5SFRBTRg3is9eue1g5RW8m1 ")).toBe(true);
   });
 });
 

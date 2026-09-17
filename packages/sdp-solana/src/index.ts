@@ -16,9 +16,4 @@ export {
   type Token2022Env,
   Token2022Service,
 } from "./token-2022";
-export {
-  addressAsSigner,
-  bigIntReplacer,
-  getExtensionTypes,
-  safeStringify,
-} from "./token-2022.utils";
+export { bigIntReplacer, safeStringify } from "./token-2022.utils";

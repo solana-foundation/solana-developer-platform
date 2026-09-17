@@ -214,6 +214,11 @@ export function isTerminalRampTransferStatus(status: PaymentTransferStatus): boo
   return RAMP_TRANSFER_STATUS_TERMINAL[status];
 }
 
+/** Ramp transfer statuses that are not terminal; a settlement or cancellation can still land. */
+export const NON_TERMINAL_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => !RAMP_TRANSFER_STATUS_TERMINAL[status]
+);
+
 /** Whether a ramp transfer in each status can still be canceled: only before the customer has funded it. */
 export const RAMP_TRANSFER_STATUS_CANCELABLE = {
   pending: true,
@@ -236,6 +241,30 @@ export function isCancelableRampTransferStatus(status: PaymentTransferStatus): b
 /** The statuses a ramp transfer can be canceled from, for status-guarded updates. */
 export const CANCELABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
   (status) => RAMP_TRANSFER_STATUS_CANCELABLE[status]
+);
+
+/** Whether a ramp transfer in each status can still be funded by a pay-in: only before it settles. */
+export const RAMP_TRANSFER_STATUS_FUNDABLE = {
+  pending: true,
+  processing: false,
+  confirmed: false,
+  finalized: false,
+  failed: false,
+  awaiting_payment: true,
+  settling: true,
+  completed: false,
+  canceled: false,
+  expired: false,
+} as const satisfies Record<PaymentTransferStatus, boolean>;
+
+/** Reports whether a ramp transfer in the given status can still receive a pay-in. */
+export function isFundableRampTransferStatus(status: PaymentTransferStatus): boolean {
+  return RAMP_TRANSFER_STATUS_FUNDABLE[status];
+}
+
+/** The statuses an on-ramp pay-in can still settle a transfer from. */
+export const FUNDABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => RAMP_TRANSFER_STATUS_FUNDABLE[status]
 );
 
 /** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */
@@ -1187,10 +1216,35 @@ export interface MuralPaymentRampInstruction {
   bankDetails: Record<string, string>;
 }
 
+export interface HercleBankFundingDetails {
+  /** The business's own account at Hercle's bank; the transfer is attributed by the account it lands on. */
+  iban: string;
+  bic?: string;
+  bankName?: string;
+  accountHolder?: string;
+  /** Wire reference the sender must include so Hercle can match the payment to the order. */
+  paymentReference: string;
+  /** The name the wire must come from — the business itself; a wire from any other holder is returned by the bank and fails the order. */
+  payerAccountHolder: string;
+}
+
+/** On-ramp: wire fiat to the Hercle-issued account to receive crypto. */
+export interface HercleFiatFundingInstruction {
+  provider: "hercle";
+  kind: "fiat_funding";
+  fiatCurrency: string;
+  bankAccount: HercleBankFundingDetails;
+  instructionsNotes: string;
+}
+
+/** Hercle is on-ramp only, so the fiat-funding instruction is its whole instruction set. */
+export type HerclePaymentRampInstruction = HercleFiatFundingInstruction;
+
 export type PaymentRampInstruction =
   | LightsparkPaymentRampInstruction
   | BvnkPaymentRampInstruction
-  | MuralPaymentRampInstruction;
+  | MuralPaymentRampInstruction
+  | HerclePaymentRampInstruction;
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -1337,6 +1391,13 @@ export type PaymentRampQuote =
       provider: "mural";
       deliveryMode: "manual_instructions";
       paymentInstructions: MuralPaymentRampInstruction[];
+    })
+  | (BasePaymentRampQuote & {
+      provider: "hercle";
+      deliveryMode: "manual_instructions";
+      paymentInstructions: HerclePaymentRampInstruction[];
+      /** ISO timestamp after which the order's locked terms are no longer valid. */
+      expiresAt?: string;
     })
   | (BasePaymentRampQuote & {
       provider: "moonpay" | "bvnk";

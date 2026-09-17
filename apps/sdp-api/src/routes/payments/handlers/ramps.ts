@@ -5,7 +5,6 @@ import type {
   BvnkPaymentRuleResolution,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
-  buildBvnkOnrampPaymentRuleKey,
   buildBvnkPartyDetails,
   bvnkOnboardingRequirements,
   bvnkUnverifiedOnboardingStatus,
@@ -14,12 +13,12 @@ import {
   latestBvnkOfframpBeneficiary,
   normalizeBvnkCurrencyAndNetwork,
   readBvnkOfframpWallet,
-  readBvnkOnrampPaymentRuleState,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
   bvnkOfframpFields,
   isBvnkOfframpCurrency,
 } from "@sdp/payments/ramps/providers/bvnk/requirements";
+import { bvnkOnrampTransferProviderDataSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import {
   lightsparkCollectAccountRequirements,
   lightsparkOfframpReady,
@@ -35,12 +34,13 @@ import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provi
 import { buildRequirementSchema, readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { parseDecimalAmount, toNumberAmount } from "@sdp/solana/amount";
 import {
   CANCELABLE_RAMP_TRANSFER_STATUSES,
   getCryptoRailAssetLabel,
   isCancelableRampTransferStatus,
   isCountryCode,
+  isFundableRampTransferStatus,
   type PaymentRampEstimate,
   type PaymentRampInstruction,
   type PaymentRampQuote,
@@ -138,7 +138,9 @@ import {
   ensureBvnkOfframpWallet,
   ensureBvnkPaymentRule,
   readBvnkCustomerLink,
+  refreshBvnkCustomerAccount,
 } from "./ramps/bvnk";
+import { advanceHercleCounterparty, readReadyHercleCounterpartyLink } from "./ramps/hercle";
 import {
   ensureLightsparkCustomer,
   ensureLightsparkPayoutAccount,
@@ -695,17 +697,31 @@ async function bvnkCustomerVerificationRequirements(
   if (!customer.customerReference) {
     throw internalError("BVNK customer reference is missing while resolving verification.");
   }
-  const detail = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomerV2(rampRuntime(c), {
-    id: customer.customerReference,
+  const account = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getProviderAccount({
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "bvnk",
+  });
+  if (!account) {
+    throw internalError("BVNK customer-link row is missing while resolving verification.");
+  }
+  const refreshed = await refreshBvnkCustomerAccount(c.env, rampRuntime(c), {
+    counterparty: input.counterparty,
+    projectId: input.projectId,
+    providerAccountId: account.id,
+    customerReference: customer.customerReference,
   });
   const resolution: BvnkPaymentRuleResolution = {
-    customer: { customerReference: detail.id, status: detail.status },
+    customer: refreshed.customer,
     entry: {},
-    onboardingStatus: isBvnkCustomerVerified(detail.status)
+    onboardingStatus: isBvnkCustomerVerified(refreshed.customer.status)
       ? "ready"
-      : bvnkUnverifiedOnboardingStatus(detail.status),
+      : bvnkUnverifiedOnboardingStatus(refreshed.customer.status),
   };
-  return bvnkOnboardingRequirements(resolution, input.direction, detail.authenticatedLink.link);
+  return bvnkOnboardingRequirements(resolution, input.direction, refreshed.verificationUrl);
 }
 
 export async function advanceCounterpartyRequirements(
@@ -838,6 +854,13 @@ export async function advanceCounterpartyRequirements(
       return readyCounterparty("coinbase", input.direction);
     case "stripe":
       return readyCounterparty("stripe", input.direction);
+    case "hercle":
+      return advanceHercleCounterparty(c, {
+        counterparty: input.counterparty,
+        projectId: input.projectId,
+        direction: input.direction,
+        collectedData: input.collectedData,
+      });
     default: {
       const _exhaustive: never = input;
       throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
@@ -1108,6 +1131,23 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       });
       break;
     }
+    case "hercle": {
+      const link = await readReadyHercleCounterpartyLink(c.env, counterparty);
+      if (!link) {
+        throw counterpartyNotProvisioned("hercle", "onramp");
+      }
+      quote = await RAMP_PROVIDER_CLIENTS.hercle.createOnrampQuote(rampRuntime(c), {
+        assetRail: input.assetRail,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        // Makes the order's idempotency key unique per transfer (TS-BANK-10 OD#9/OD#11).
+        paymentTransferId: reservedTransferId,
+        // The Hercle sub-account id doubles as the on-behalf-of scope for the order.
+        externalCustomerId: link.accountId,
+      });
+      break;
+    }
     default: {
       const exhaustive: never = input.provider;
       throw new AppError(
@@ -1360,6 +1400,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       throw badRequest("Coinbase Onramp does not support off-ramp.");
     case "stripe":
       throw badRequest("Stripe off-ramp is not supported.");
+    case "hercle":
+      throw badRequest("Hercle does not offer an off-ramp.");
     default: {
       const exhaustive: never = input;
       throw internalError(
@@ -1516,52 +1558,60 @@ export async function simulateSandboxTransfer(
         body.payload
       );
       break;
+    case "hercle":
+      // The order id is the settlement reference, so no counterparty or wallet lookup
+      // is needed — Hercle answers with the same signed webhook a real deposit produces.
+      transaction = await RAMP_PROVIDER_CLIENTS.hercle.simulateSettlement(rampRuntime(c), {
+        orderId: body.payload.orderId,
+        status: body.payload.status,
+      });
+      break;
     case "bvnk": {
-      const payload = body.payload;
       const scope = await resolveScope(c);
       const projectId = requireProjectId(c);
+      const transfer = await getPaymentsRepository(c).getTransferById({
+        transferId: body.payload.transferId,
+        organizationId: scope.auth.organizationId,
+        projectId,
+      });
+      if (!transfer) {
+        throw notFound("Transfer");
+      }
+      if (transfer.provider !== "bvnk" || transfer.type !== "onramp") {
+        throw badRequest("Transfer is not a BVNK on-ramp transfer.");
+      }
+      if (!isFundableRampTransferStatus(transfer.status)) {
+        throw badRequest("Transfer is not fundable by a BVNK sandbox pay-in.");
+      }
+      if (transfer.custody_wallet_id === null) {
+        throw internalError("BVNK on-ramp transfer has no destination custody wallet.");
+      }
+      assertPaymentWalletExactAccess(c, transfer.custody_wallet_id, ["payments:write"]);
+      if (transfer.counterparty_id === null) {
+        throw internalError("BVNK on-ramp transfer has no counterparty.");
+      }
       const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
-        counterpartyId: payload.counterpartyId,
+        counterpartyId: transfer.counterparty_id,
         organizationId: scope.auth.organizationId,
         projectId,
       });
       if (!counterparty) {
-        throw new AppError("NOT_FOUND", "Counterparty not found");
+        throw notFound("Counterparty");
       }
-      const destinationWallet = resolveWalletByCustodyWalletId(
-        scope.wallets,
-        payload.destinationCustodyWalletId
-      );
-      assertPaymentWalletExactAccess(c, destinationWallet.id, ["payments:write"]);
-      const destinationWalletAddress = destinationWallet.publicKey;
-      const { currency, network } = normalizeBvnkCurrencyAndNetwork(
-        getCryptoRailAssetLabel(payload.assetRail)
-      );
-      const key = buildBvnkOnrampPaymentRuleKey(
-        payload.fiatCurrency,
-        currency,
-        network,
-        destinationWalletAddress
-      );
-      const entry = readBvnkOnrampPaymentRuleState(counterparty.provider_data, key);
-      if (!entry.walletId) {
-        throw new AppError(
-          "BAD_REQUEST",
-          "BVNK funding wallet is not provisioned yet for this destination."
-        );
+      const providerData = bvnkOnrampTransferProviderDataSchema.safeParse(transfer.provider_data);
+      if (!providerData.success) {
+        throw internalError("BVNK on-ramp transfer has no funding wallet.");
       }
-      if (!isBvnkWalletActive(entry.walletStatus)) {
-        throw new AppError(
-          "BAD_REQUEST",
-          "BVNK funding wallet is not active for this destination."
-        );
+      if (transfer.fiat_amount === null || transfer.fiat_currency === null) {
+        throw internalError("BVNK on-ramp transfer has no fiat amount.");
       }
       transaction = await RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), {
-        walletId: entry.walletId,
-        amount: payload.amount,
-        currency: payload.fiatCurrency,
+        walletId: providerData.data.bvnk.fundingWalletId,
+        amount: toNumberAmount(transfer.fiat_amount),
+        currency: transfer.fiat_currency,
         originatorName: counterparty.display_name,
-        remittanceInformation: entry.bankAccount?.paymentReference,
+        remittanceInformation: transfer.id,
+        idempotencyKey: transfer.id,
       });
       break;
     }

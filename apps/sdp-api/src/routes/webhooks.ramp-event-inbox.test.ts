@@ -4,12 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import app from "@/index";
+import { TerminalRampWebhookError } from "@/routes/webhooks/ramps/processor";
+import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/routes/webhooks/ramps/registry";
 import * as replayJobs from "@/services/jobs/replay-ramp-webhook-events";
 import {
   applyStoredRampWebhookEvent,
   RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
   replayRampWebhookEvents,
 } from "@/services/jobs/replay-ramp-webhook-events";
+import { bvnkPayinStatusChangeEvent } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -266,5 +269,57 @@ describe("Ramp webhook event inbox", () => {
     );
     rows = await readInboxRows();
     expect(rows[0]?.status).toBe("failed");
+  });
+
+  it("discards a sandbox event whose apply failed terminally instead of retrying it", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const stored = await events.insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: completedPayload,
+    });
+    const processSpy = vi
+      .spyOn(RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay, "process")
+      .mockRejectedValue(new TerminalRampWebhookError("customer was not found or is not active"));
+    try {
+      expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    } finally {
+      processSpy.mockRestore();
+    }
+    expect(await readInboxRows()).toHaveLength(0);
+  });
+
+  it("discards a sandbox BVNK settlement for an unknown customer through the real processor", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const stored = await events.insertEvent({
+      provider: "bvnk",
+      environment: "sandbox",
+      payload: bvnkPayinStatusChangeEvent({ customerReference: "customer_unknown" }),
+    });
+
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+
+    expect(await readInboxRows()).toHaveLength(0);
+  });
+
+  it("parks a production event whose apply failed terminally on the first attempt", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const stored = await events.insertEvent({
+      provider: "moonpay",
+      environment: "production",
+      payload: completedPayload,
+    });
+    const processSpy = vi
+      .spyOn(RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay, "process")
+      .mockRejectedValue(new TerminalRampWebhookError("customer was not found or is not active"));
+    try {
+      expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    } finally {
+      processSpy.mockRestore();
+    }
+    const rows = await readInboxRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe("failed");
+    expect(rows[0]?.attempts).toBe(RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS);
   });
 });

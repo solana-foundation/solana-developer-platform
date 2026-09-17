@@ -13,6 +13,15 @@ const requiredText = {
   placeholder: "123456",
 } as const satisfies RequirementField;
 
+const requiredConsent = {
+  kind: "consent",
+  key: "acceptTerms",
+  label: "I have read and accept the",
+  documentLabel: "Terms & Conditions",
+  documentUrl: "https://example.com/terms",
+  required: true,
+} as const satisfies RequirementField;
+
 describe("requirementFieldError", () => {
   it.each([
     [requiredText, undefined, "Account number is required."],
@@ -26,6 +35,13 @@ describe("requirementFieldError", () => {
       "Account number doesn't match the expected format.",
     ],
     [requiredText, "123456", null],
+    // A consent is satisfied by the affirmative literal alone; the web form clears it to "" when unticked.
+    [requiredConsent, "true", null],
+    [requiredConsent, "", "Terms & Conditions must be accepted."],
+    [requiredConsent, undefined, "Terms & Conditions must be accepted."],
+    [requiredConsent, "false", "Terms & Conditions must be accepted."],
+    [{ ...requiredConsent, required: false }, "", null],
+    [{ ...requiredConsent, required: false }, "false", "Terms & Conditions must be accepted."],
   ] satisfies [RequirementField, string | undefined, string | null][])(
     "validates provider requirement fields",
     (field, value, error) => {

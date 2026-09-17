@@ -779,7 +779,7 @@ export async function fetchCounterpartyAccounts(
   return body.data?.accounts ?? [];
 }
 
-type SandboxTransferSimulationInput =
+export type SandboxTransferSimulationInput =
   | {
       provider: "lightspark";
       payload: {
@@ -789,13 +789,16 @@ type SandboxTransferSimulationInput =
       };
     }
   | {
+      provider: "hercle";
+      payload: {
+        orderId: string;
+        status?: "awaiting_payment" | "settling" | "settled" | "failed" | "expired";
+      };
+    }
+  | {
       provider: "bvnk";
       payload: {
-        counterpartyId: string;
-        amount: number;
-        fiatCurrency: string;
-        assetRail: CryptoRailId;
-        destinationCustodyWalletId: string;
+        transferId: string;
       };
     }
   | {

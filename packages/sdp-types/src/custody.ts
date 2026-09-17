@@ -386,7 +386,9 @@ export type CustodyWalletPurpose =
    * tokens around.
    */
   | "dvp_settlement_authority";
-export type CustodyConfigStatus = "active" | "inactive";
+/** Legacy Config lifecycle states; an absent Config is not a stored status. */
+export const CUSTODY_CONFIG_STATUSES = ["active", "inactive"] as const;
+export type CustodyConfigStatus = (typeof CUSTODY_CONFIG_STATUSES)[number];
 export type CustodyWalletStatus = "active" | "inactive";
 
 export interface FireblocksCustodyOptions {
@@ -738,6 +740,10 @@ export const PROVIDER_CREDENTIAL_STATUSES = [
   "deactivated",
 ] as const;
 export type ProviderCredentialStatus = (typeof PROVIDER_CREDENTIAL_STATUSES)[number];
+
+export function isProviderCredentialCreationInProgress(status: ProviderCredentialStatus): boolean {
+  return status === "creating";
+}
 
 /**
  * Which record actually backs signing for a provider in the current scope.

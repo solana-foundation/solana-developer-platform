@@ -280,7 +280,6 @@ export interface Env {
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
   BVNK_WEBHOOK_SECRET?: string;
-  BVNK_API_BASE_URL?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
@@ -293,6 +292,16 @@ export interface Env {
   MURAL_PAY_SANDBOX_API_KEY?: string;
   MURAL_PAY_SANDBOX_TRANSFER_API_KEY?: string;
   MURAL_PAY_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
+
+  // Hercle ramps configuration (Signed Key v1; base URLs are provided at onboarding)
+  HERCLE_CLIENT_ID?: string;
+  HERCLE_CLIENT_SECRET?: string;
+  HERCLE_API_BASE_URL?: string;
+  HERCLE_WEBHOOK_PUBLIC_KEY?: string;
+  HERCLE_SANDBOX_CLIENT_ID?: string;
+  HERCLE_SANDBOX_CLIENT_SECRET?: string;
+  HERCLE_SANDBOX_API_BASE_URL?: string;
+  HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
 
   // MoneyGram ramps configuration
   MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;

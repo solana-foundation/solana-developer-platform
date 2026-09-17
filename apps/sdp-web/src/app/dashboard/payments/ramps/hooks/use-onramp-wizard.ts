@@ -146,11 +146,12 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     if (
       quote?.provider !== "lightspark" &&
       quote?.provider !== "bvnk" &&
-      quote?.provider !== "mural"
+      quote?.provider !== "mural" &&
+      quote?.provider !== "hercle"
     ) {
       return;
     }
-    if (!wizard.selectedWallet) {
+    if (!wizard.selectedWallet || wizard.quoteTransferId === null) {
       return;
     }
 
@@ -165,6 +166,15 @@ export function useOnrampWizard(props: UseRampWizardProps) {
           {
             provider: "lightspark",
             payload: { quoteId: quote.id, currencyCode: "USD" },
+          },
+          t
+        );
+      } else if (quote.provider === "hercle") {
+        // The quote id is the Hercle order id, which is also its settlement reference.
+        await simulateSandboxTransfer(
+          {
+            provider: "hercle",
+            payload: { orderId: quote.id, status: "settled" },
           },
           t
         );
@@ -192,13 +202,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         await simulateSandboxTransfer(
           {
             provider: "bvnk",
-            payload: {
-              counterpartyId: wizard.fields.counterpartyId,
-              amount: Number(wizard.fields.amount.trim()),
-              fiatCurrency: wizard.selectedRampPair.fiatCurrency,
-              assetRail: wizard.selectedRampPair.assetRail,
-              destinationCustodyWalletId: wizard.selectedWallet.id,
-            },
+            payload: { transferId: wizard.quoteTransferId },
           },
           t
         );

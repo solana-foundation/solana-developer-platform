@@ -101,13 +101,13 @@ class LookupDb extends RecordingDb {
   }
 }
 
-describe("ApiKeyService.ownsUsableApiKey", () => {
+describe("ApiKeyService.resolveUsableApiKey", () => {
   it("rejects forged organization and project claims before database access", async () => {
     const db = new LookupDb({ status: "active", expires_at: null });
     const service = new ApiKeyService(db, TEST_SCOPE);
 
     await expect(
-      service.ownsUsableApiKey({
+      service.resolveUsableApiKey({
         apiKey: "sk_test_foreign_secret",
         organizationId: "org_foreign",
         projectId: "prj_foreign",
@@ -118,19 +118,26 @@ describe("ApiKeyService.ownsUsableApiKey", () => {
   });
 
   it("matches exact key material inside the organization and project boundary", async () => {
-    const db = new LookupDb({ status: "active", expires_at: null });
+    const db = new LookupDb({
+      id: "key_1",
+      name: "smoke-test-key",
+      key_prefix: "sk_test_abc",
+      status: "active",
+      expires_at: null,
+    });
     const service = new ApiKeyService(db, TEST_SCOPE);
     const apiKey = "sk_test_owned_secret";
     const pepper = "test-pepper";
 
+    // The identity comes from the matched row, never from the supplied material.
     await expect(
-      service.ownsUsableApiKey({
+      service.resolveUsableApiKey({
         apiKey,
         organizationId: "org_1",
         projectId: "prj_1",
         pepper,
       })
-    ).resolves.toBe(true);
+    ).resolves.toEqual({ id: "key_1", name: "smoke-test-key", keyPrefix: "sk_test_abc" });
 
     expect(db.lookups).toHaveLength(1);
     expect(db.lookups[0]?.sql).toContain("key_hash = ? AND organization_id = ? AND project_id = ?");
@@ -141,29 +148,40 @@ describe("ApiKeyService.ownsUsableApiKey", () => {
     const service = new ApiKeyService(new LookupDb(null), TEST_SCOPE);
 
     await expect(
-      service.ownsUsableApiKey({
+      service.resolveUsableApiKey({
         apiKey: "sk_live_foreign_secret",
         organizationId: "org_1",
         projectId: "prj_1",
         pepper: "test-pepper",
       })
-    ).resolves.toBe(false);
+    ).resolves.toBeNull();
   });
 
   it.each([
     ["deactivated", null],
     ["active", "2000-01-01T00:00:00.000Z"],
   ])("rejects an unusable key with status %s and expiry %s", async (status, expiresAt) => {
-    const service = new ApiKeyService(new LookupDb({ status, expires_at: expiresAt }), TEST_SCOPE);
+    const service = new ApiKeyService(
+      new LookupDb({
+        id: "key_1",
+        name: "unusable",
+        key_prefix: "sk_test_abc",
+        status,
+        expires_at: expiresAt,
+      }),
+      TEST_SCOPE
+    );
 
+    // An unusable key resolves to nothing, so no identity leaks for a key the
+    // caller cannot actually use.
     await expect(
-      service.ownsUsableApiKey({
+      service.resolveUsableApiKey({
         apiKey: "sk_test_unusable_secret",
         organizationId: "org_1",
         projectId: "prj_1",
         pepper: "test-pepper",
       })
-    ).resolves.toBe(false);
+    ).resolves.toBeNull();
   });
 });
 

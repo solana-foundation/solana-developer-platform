@@ -55,18 +55,19 @@ lives on the counterparty row (`mural_organization_id`, with a
 `counterparty_provider_accounts` rows of kind `customer_link`
 (`provider_customer_reference`). Migration
 `0080_counterparty_provider_lookup_integrity.sql` (re-scoped by
-`0082_scope_customer_link_uniqueness.sql`) makes both lookup keys unique
+`0082_scope_customer_link_uniqueness.sql`, extended to Hercle by
+`0091_scope_customer_link_uniqueness_hercle.sql`) makes both lookup keys unique
 among active rows: the *effective* mural key —
 `COALESCE(mural_organization_id, provider_data JSON path)` — and the
-`(provider, provider_customer_reference)` pair for active BVNK and
-Lightspark customer links. A reference therefore resolves to at most one
+`(provider, provider_customer_reference)` pair for active BVNK, Lightspark
+and Hercle customer links. A reference therefore resolves to at most one
 tenant in every migration phase; two tenants racing to claim the same
 reference get a unique-violation failure instead of a silent cross-tenant
 resolution.
 
 The customer-link uniqueness applies only to providers whose customers SDP
-creates one-per-counterparty (BVNK — which also routes webhooks by customer
-reference — and Lightspark). MoonPay settlements are matched by the
+creates one-per-counterparty (BVNK and Hercle — which also route webhooks by
+customer reference — and Lightspark). MoonPay settlements are matched by the
 transfer's `provider_reference` and record the customer link as a
 byproduct, and one MoonPay account legitimately links to many
 counterparties (the buyer owns the MoonPay account and can be a
@@ -121,3 +122,12 @@ suite (`src/db/tenant-isolation.test.ts`,
   `runWithSystemDatabaseIdentity` wrap) and extend the registry test.
 - Ad-hoc cross-tenant operational work → `runWithOperatorDatabaseAccess`
   with a real actor and reason; the audit row is the record reviewers check.
+- Cross-tenant aggregate that must run inside a tenant-stamped transaction →
+  a plpgsql function that saves the caller's identity, stamps `system` with
+  `set_config(..., true)`, runs the one query, and restores the identity
+  (`earn_vault_deposit_exposure`, migration 0101). Never a function-level
+  `SET app.* = ...` clause: Postgres only lets a superuser (or a role granted
+  `SET ON PARAMETER`) store one, Cloud SQL has neither, so it passes CI as
+  the superuser and fails on stage with `permission denied to set parameter`.
+  The coverage test rejects any function whose `proconfig` sets an `app.*`
+  parameter.

@@ -801,9 +801,37 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(res.status).toBe(400);
   });
 
-  it("keeps production closed by the environment capability", async () => {
+  it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
-    const strategy = await seedStrategy({ environment: "production" });
+    const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+    const missingFloor = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: PROD_API_KEY.raw }
+    );
+    expect(missingFloor.status).toBe(400);
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
+      { apiKey: PROD_API_KEY.raw }
+    );
+    expect(res.status).toBe(200);
+    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ environment: "production", provider: "kamino", minSharesOut: "1" })
+    );
+  });
+
+  it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({
+      provider: "veda",
+      underlyingSource: "veda",
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
     const res = await post(
       "deposit-transactions",
       { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
@@ -813,6 +841,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("not available");
     expect(body.error.message).toContain("production");
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
