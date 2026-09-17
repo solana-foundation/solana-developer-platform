@@ -27,7 +27,11 @@ function getStorage(storage: "local" | "session" = "local"): Storage | null {
     return null;
   }
 
-  return storage === "session" ? window.sessionStorage : window.localStorage;
+  try {
+    return storage === "session" ? window.sessionStorage : window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 function buildScopedSnapshotKey(scopeKey: string, key: string): string {
@@ -44,12 +48,9 @@ function readPersistedDashboardSnapshot<Data>(
   }
 
   const storageKey = buildScopedSnapshotKey(scopeKey, config.key);
-  const rawValue = storage.getItem(storageKey);
-  if (!rawValue) {
-    return undefined;
-  }
-
   try {
+    const rawValue = storage.getItem(storageKey);
+    if (!rawValue) return undefined;
     const envelope = JSON.parse(rawValue) as PersistedDashboardSnapshotEnvelope<Data>;
     const version = config.version ?? DEFAULT_PERSISTED_SNAPSHOT_VERSION;
 
@@ -65,7 +66,7 @@ function readPersistedDashboardSnapshot<Data>(
 
     return envelope.value;
   } catch {
-    storage.removeItem(storageKey);
+    // Storage reads and eviction can both be blocked. Fresh data still loads.
     return undefined;
   }
 }

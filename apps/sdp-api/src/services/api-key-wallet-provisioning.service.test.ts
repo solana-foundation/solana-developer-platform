@@ -1,16 +1,21 @@
+import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
+import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
+import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 import { provisionApiKeyWallet } from "./api-key-wallet-provisioning.service";
 
 const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
@@ -34,6 +39,11 @@ const CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
 };
+const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/wallets"), {
+  env,
+});
+auditContext.set("apiKey", CACHED_API_KEY);
+
 const createConfigWalletMock = vi.spyOn(SigningService.prototype, "createWallet");
 const originalEnv = {
   byok: env.PRIVY_BYOK_ENABLED,
@@ -78,6 +88,8 @@ describe("provisionApiKeyWallet", () => {
       });
 
       const wallet = await provisionApiKeyWallet(getDb(env), env, {
+        auditContext,
+        creationReason: "api_key",
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
         connectionId,
@@ -117,6 +129,87 @@ describe("provisionApiKeyWallet", () => {
     }
   );
 
+  it("audits first-use DVP wallet creation with its initiating actor, and does not create on reuse", async () => {
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "dvp_settlement",
+      address: "Vote111111111111111111111111111111111111111",
+    });
+    const scope = { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID };
+    const first = await getOrCreateDvpSettlementWallet(env, auditContext, scope);
+    expect(await getOrCreateDvpSettlementWallet(env, auditContext, scope)).toEqual(first);
+    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+    const audits = await getDb(env).queryMany<{
+      api_key_id: string;
+      resource_id: string;
+      metadata: string;
+    }>(
+      "SELECT api_key_id, resource_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
+    );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ api_key_id: API_KEY.id, resource_id: first.custodyWalletId });
+    const metadata = z
+      .object({
+        result: z.string(),
+        creationReason: z.string(),
+        connectionId: z.string(),
+      })
+      .passthrough()
+      .parse(JSON.parse(audits[0].metadata));
+    expect(metadata).toMatchObject({
+      result: "created",
+      creationReason: "dvp_settlement_authority",
+      connectionId: CONNECTION_ID,
+    });
+    expect(metadata).not.toHaveProperty("assignedSettlementAuthority");
+  });
+
+  it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
+    "retains the wallet audit when later API-key creation fails through %s",
+    async (path) => {
+      provisionPrivyWalletMock.mockResolvedValueOnce({
+        walletId: "partial_success",
+        address: "Vote111111111111111111111111111111111111111",
+      });
+      const db = getDb(env);
+      await db.execute(
+        "ALTER TABLE api_keys ADD CONSTRAINT reject_created_key CHECK (name <> 'Rejected key') NOT VALID"
+      );
+      try {
+        const response = await app.request(
+          path,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${API_KEY.raw}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: "Rejected key",
+              walletScope: "selected",
+              provisionWallet: { connectionId: CONNECTION_ID },
+            }),
+          },
+          env
+        );
+        expect(response.status).toBe(500);
+        const audit = await db.queryOne<{ resource_id: string; metadata: string }>(
+          "SELECT resource_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
+        );
+        assert(audit, "Expected wallet creation audit");
+        const metadata = z
+          .object({ result: z.string(), walletId: z.string() })
+          .parse(JSON.parse(audit.metadata));
+        expect(metadata).toMatchObject({
+          result: "created",
+          walletId: "privy_partial_success",
+        });
+        expect(
+          await db.queryOne("SELECT id FROM custody_wallets WHERE id = ?", [audit.resource_id])
+        ).toEqual({ id: audit.resource_id });
+        expect(await db.queryOne("SELECT id FROM api_keys WHERE name = 'Rejected key'")).toBeNull();
+      } finally {
+        await db.execute("ALTER TABLE api_keys DROP CONSTRAINT reject_created_key");
+      }
+    }
+  );
+
   it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
     "provisions and binds a Connection wallet through %s",
     async (path) => {
@@ -151,6 +244,27 @@ describe("provisionApiKeyWallet", () => {
       );
 
       expect(response.status).toBe(201);
+      const walletAudit = await getDb(env).queryOne<{ api_key_id: string; metadata: string }>(
+        "SELECT api_key_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
+      );
+      assert(walletAudit, "Expected wallet creation audit");
+      expect(walletAudit.api_key_id).toBe(API_KEY.id);
+      const metadata = z
+        .object({
+          event: z.string(),
+          creationReason: z.string(),
+          connectionId: z.string(),
+          walletId: z.string(),
+          result: z.string(),
+        })
+        .parse(JSON.parse(walletAudit.metadata));
+      expect(metadata).toMatchObject({
+        event: "custody_wallet_created",
+        creationReason: "api_key",
+        connectionId: CONNECTION_ID,
+        walletId: "privy_endpoint_api_key_wallet",
+        result: "created",
+      });
       const body = (await response.json()) as { data: { apiKey: { id: string } } };
       const binding = await getDb(env)
         .prepare(

@@ -23,6 +23,7 @@ import { AppError, conflict, walletNotFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
@@ -403,45 +404,83 @@ export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWa
   const body = c.req.valid("json");
 
   const now = new Date().toISOString();
-  const controlProfile = await getDb(c.env).transaction(async (tx) => {
-    // Serializes per-wallet updates. Locking the profile alone is not enough:
-    // a wallet without one has no row to lock, so concurrent first writes
-    // would each insert their own profile.
-    const lockedWallet = await tx
-      .prepare(`SELECT id FROM custody_wallets WHERE id = ? FOR UPDATE`)
-      .bind(wallet.id)
-      .first<{ id: string }>();
-
-    if (!lockedWallet) {
-      throw walletNotFound();
-    }
-
-    const activeProfile = await lockActiveWalletControlProfile(tx, wallet.id);
-
-    if (
-      body.expectedRevisionId !== undefined &&
-      body.expectedRevisionId !== (activeProfile?.revision_id ?? null)
-    ) {
-      throw conflict(
-        "Wallet policy was changed by another update; refresh and retry with the current revision"
-      );
-    }
-
-    await activateWalletControlProfileRevisionInTransaction({
-      db: tx,
-      existingProfileId: activeProfile?.profile_id ?? null,
-      organizationId: auth.organizationId,
-      projectId: auth.projectId ?? null,
-      custodyWalletId: wallet.id,
-      profileName: `${wallet.label ?? wallet.walletId} controls`,
-      rules: body.rules,
+  // Wallet policies gate money movement, so rewriting one is itself an
+  // auditable security-control change. The hash-chained ledger seals entries
+  // with a session-locked post-commit action and cannot run inside the policy
+  // transaction, so the rewrite is bracketed intent/outcome instead: a
+  // refused intent aborts before anything commits, and a crash between commit
+  // and outcome leaves an unresolved intent the verification gate pages on —
+  // the change can never be both active and absent from the ledger without a
+  // trace. The mutable revision row's commitMessage is caller-authored prose;
+  // these entries are what attribution rests on.
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "update",
+    resourceType: "custody_wallet",
+    resourceId: wallet.id,
+    metadata: {
+      action: "update_wallet_policy",
+      walletId: wallet.walletId,
       defaultAction: body.defaultAction,
-      commitMessage: body.commitMessage,
-      createdBy: auth.userId ?? auth.apiKeyId ?? null,
-      activatedAt: now,
-    });
+      ruleCount: body.rules.length,
+    },
+  });
+  let controlProfile: PaymentWalletControlProfileSummary | null;
+  try {
+    controlProfile = await getDb(c.env).transaction(async (tx) => {
+      // Serializes per-wallet updates. Locking the profile alone is not enough:
+      // a wallet without one has no row to lock, so concurrent first writes
+      // would each insert their own profile.
+      const lockedWallet = await tx
+        .prepare(`SELECT id FROM custody_wallets WHERE id = ? FOR UPDATE`)
+        .bind(wallet.id)
+        .first<{ id: string }>();
 
-    return await readWalletControlProfileSummaryInTransaction(tx, wallet.id);
+      if (!lockedWallet) {
+        throw walletNotFound();
+      }
+
+      const activeProfile = await lockActiveWalletControlProfile(tx, wallet.id);
+
+      if (
+        body.expectedRevisionId !== undefined &&
+        body.expectedRevisionId !== (activeProfile?.revision_id ?? null)
+      ) {
+        throw conflict(
+          "Wallet policy was changed by another update; refresh and retry with the current revision"
+        );
+      }
+
+      await activateWalletControlProfileRevisionInTransaction({
+        db: tx,
+        existingProfileId: activeProfile?.profile_id ?? null,
+        organizationId: auth.organizationId,
+        projectId: auth.projectId ?? null,
+        custodyWalletId: wallet.id,
+        profileName: `${wallet.label ?? wallet.walletId} controls`,
+        rules: body.rules,
+        defaultAction: body.defaultAction,
+        commitMessage: body.commitMessage,
+        createdBy: auth.userId ?? auth.apiKeyId ?? null,
+        activatedAt: now,
+      });
+
+      return await readWalletControlProfileSummaryInTransaction(tx, wallet.id);
+    });
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
+    throw error;
+  }
+
+  await auditService.completeCritical(c, auditIntent, {
+    metadata: {
+      profileId: controlProfile?.id ?? null,
+      revisionId: controlProfile?.revisionId ?? null,
+      revisionNumber: controlProfile?.revisionNumber ?? null,
+    },
   });
 
   const audit = await getWalletPolicyAudit(c, {

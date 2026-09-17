@@ -3,7 +3,7 @@ import {
   createPostgresRampWebhookEventsRepository,
   type RampWebhookEventRow,
 } from "@/db/repositories/ramp-webhook-event.repository";
-import type { WebhookProcessor } from "@/routes/webhooks/ramps/processor";
+import { TerminalRampWebhookError, type WebhookProcessor } from "@/routes/webhooks/ramps/processor";
 import {
   isWebhookRampProvider,
   RAMP_PROVIDER_WEBHOOK_PROCESSOR,
@@ -31,6 +31,8 @@ export const RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS = 2 * 60 * 1000;
 export const RAMP_WEBHOOK_EVENT_REPLAY_BATCH = 50;
 
 export const RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT = "sdp_api_ramp_webhook_event_exhausted";
+
+export const RAMP_WEBHOOK_EVENT_DISCARDED_EVENT = "sdp_api_ramp_webhook_event_discarded";
 
 /**
  * Applies one persisted event and discharges its row. On failure the row
@@ -65,20 +67,35 @@ export async function applyStoredRampWebhookEvent(
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const terminal = error instanceof TerminalRampWebhookError;
+    if (terminal && row.environment === "sandbox") {
+      await events.deleteEvent(row.id);
+      logEvent("warn", {
+        event: RAMP_WEBHOOK_EVENT_DISCARDED_EVENT,
+        flow: "ramp-settlement",
+        webhook_event_id: row.id,
+        provider: row.provider,
+        environment: row.environment,
+        attempts,
+        error: message,
+      });
+      return false;
+    }
+    const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
     await events.recordFailure({
       id: row.id,
       error: message,
-      attempts,
+      attempts: spentAttempts,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
     });
-    if (attempts >= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS) {
+    if (spentAttempts >= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS) {
       logEvent("error", {
         event: RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT,
         flow: "ramp-settlement",
         webhook_event_id: row.id,
         provider: row.provider,
         environment: row.environment,
-        attempts,
+        attempts: spentAttempts,
         error: message,
       });
     }

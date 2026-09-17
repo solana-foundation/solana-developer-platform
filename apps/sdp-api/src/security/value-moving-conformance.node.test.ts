@@ -277,6 +277,86 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/tokens.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId",',
+      before: "policyGate({ extract: extractTokenUpdatePolicyCandidate })",
+      after: "  updateToken",
+    },
+    replay: [
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "rejects metadata updates while token deployment is in progress",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/deploy.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/deploy",',
+      before: "policyGate({ extract: extractDeployPolicyCandidate })",
+      after: "  deployToken",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "replays a completed direct deploy by its exact wallet without deploying again",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/allowlist.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/allowlist",',
+      before: "policyGate({ extract: extractAllowlistAddPolicyCandidate })",
+      after: "addAllowlistEntry",
+    },
+    replay: [
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "refuses to re-add an address already on the control list",
+      },
+    ],
+  },
+  {
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/allowlist.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/allowlist/:entryId",',
+      before: "policyGate({ extract: extractAllowlistRemovePolicyCandidate })",
+      after: "removeAllowlistEntry",
+    },
+    replay: [
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "acknowledges removing an already revoked allowlist entry without signing",
+      },
+    ],
+  },
+  {
     family: "ramps",
     trustedContext: {
       file: "apps/sdp-api/src/routes/payments/handlers/ramps.ts",
@@ -517,16 +597,20 @@ describe("value-moving authorization and replay conformance", () => {
   it("covers every required value-moving family", () => {
     // `earn` appears twice: money-in (vault deposits) and money-out (vault
     // withdrawals) are separately gated routes, and each carries its own
-    // authorization boundary and replay evidence. `issuance` appears four
-    // times for the same reason: authority updates, seize, force-burn, and
-    // burn are separately gated execute routes, and freeze, unfreeze, pause,
-    // and unpause each carry the same per-route gate.
+    // authorization boundary and replay evidence. `issuance` repeats for the
+    // same reason: authority updates, seize, force-burn, burn, freeze,
+    // unfreeze, pause, unpause, deploy, allowlist add and allowlist remove
+    // are separately gated execute routes.
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
       "dvp",
       "earn",
       "earn",
+      "issuance",
+      "issuance",
+      "issuance",
+      "issuance",
       "issuance",
       "issuance",
       "issuance",

@@ -39,6 +39,7 @@ import {
   getSeizeValidationReason,
   getSignerSelectionForAction,
   isPositiveAmount,
+  isValidSolanaAddressInput,
   resolveAuthorityAddressForRole,
 } from "../token-management-workspace.utils";
 import { useTokenActionRunner } from "../use-token-action-runner";
@@ -69,6 +70,10 @@ export function useTokenOperations({
   >(null);
   const [authorityModalNewAuthority, setAuthorityModalNewAuthority] = useState("");
   const [authorityModalSignerWalletId, setAuthorityModalSignerWalletId] = useState("");
+  const [authorityOverrideState, setAuthorityOverrideState] = useState<{
+    tokenUpdatedAt: string;
+    values: Partial<Record<PermissionRow["authorityRole"], string | null>>;
+  }>({ tokenUpdatedAt: token.updatedAt, values: {} });
   const [fundManagementModalAction, setFundManagementModalAction] =
     useState<FundManagementModalAction | null>(null);
   const [deployWalletDialogOpen, setDeployWalletDialogOpen] = useState(false);
@@ -113,6 +118,39 @@ export function useTokenOperations({
     token,
     shouldLoadAuthorityWallets,
   });
+  const authorityOverrides =
+    authorityOverrideState.tokenUpdatedAt === token.updatedAt ? authorityOverrideState.values : {};
+
+  const operationToken: Token = {
+    ...token,
+    mintAuthority:
+      authorityOverrides.mint !== undefined ? authorityOverrides.mint : token.mintAuthority,
+    freezeAuthority:
+      authorityOverrides.freeze !== undefined
+        ? authorityOverrides.freeze
+        : authorityWalletsData?.freezeAuthority !== undefined
+          ? authorityWalletsData.freezeAuthority
+          : token.freezeAuthority,
+    metadataAuthority:
+      authorityOverrides.metadata !== undefined
+        ? authorityOverrides.metadata
+        : token.metadataAuthority,
+    extensions: {
+      ...(token.extensions ?? {}),
+      permanentDelegate:
+        authorityOverrides.permanentDelegate !== undefined
+          ? (authorityOverrides.permanentDelegate ?? undefined)
+          : token.extensions?.permanentDelegate,
+    },
+  };
+  const applyAuthorityOverride = (role: PermissionRow["authorityRole"], authority: string | null) =>
+    setAuthorityOverrideState((current) => ({
+      tokenUpdatedAt: token.updatedAt,
+      values: {
+        ...(current.tokenUpdatedAt === token.updatedAt ? current.values : {}),
+        [role]: authority,
+      },
+    }));
   const {
     isPending,
     actionConfirmation,
@@ -164,17 +202,30 @@ export function useTokenOperations({
     effectiveFreezeDisabledReason,
     effectivePauseDisabledReason,
   } = getTokenOperationPermissions({
-    token,
+    token: operationToken,
     authorityWallets,
     authorityWalletsLoading,
     authorityWalletsError,
     canManageTokenAdmin,
+    freezeAuthorityError:
+      authorityWalletsFetchError ??
+      authorityWalletsData?.freezeAuthorityError ??
+      (authorityWalletsData?.freezeAuthority === undefined
+        ? t("DashboardIssuance.management.loadingSignerWallets")
+        : null),
+    pauseAuthority: authorityWalletsData?.pauseAuthority,
+    pauseAuthorityError:
+      authorityWalletsFetchError ??
+      authorityWalletsData?.pauseAuthorityError ??
+      (authorityWalletsData?.pauseAuthority === undefined
+        ? t("DashboardIssuance.management.loadingSignerWallets")
+        : null),
     t,
   });
   const metadataSignerSelection = withWalletLoadError(
     getSignerSelectionForAction({
       action: "metadata",
-      token,
+      token: operationToken,
       authorityWallets,
       metadataAuthority: authorityWalletsData?.metadataAuthority ?? null,
       metadataAuthorityError:
@@ -189,7 +240,7 @@ export function useTokenOperations({
   const allowlistSignerSelection = withWalletLoadError(
     getSignerSelectionForAction({
       action: "allowlist",
-      token,
+      token: operationToken,
       authorityWallets,
       metadataAuthority,
       allowlistAuthority: authorityWalletsData?.allowlistAuthority,
@@ -200,9 +251,9 @@ export function useTokenOperations({
   // Lock supply = mint the remainder, then revoke the mint authority. Both legs
   // are signed by the current mint authority, so mintSignerSelection covers the
   // whole flow and the modal needs only one signer picker.
-  const lockSupplyRemaining = getRemainingMintableSupply(token);
+  const lockSupplyRemaining = getRemainingMintableSupply(operationToken);
   const effectiveLockSupplyDisabledReason =
-    getLockSupplyDisabledReason(token, t) ?? mintSignerSelection.unavailableReason;
+    getLockSupplyDisabledReason(operationToken, t) ?? mintSignerSelection.unavailableReason;
 
   const selectedBurnSignerWallet =
     findWalletByCustodyWalletId(
@@ -325,19 +376,12 @@ export function useTokenOperations({
 
   const deployToken = (assignments?: Record<string, string>) => {
     const signingCustodyWalletId = assignments?.["mint-authority"] || token.signingCustodyWalletId;
-    if (signingCustodyWalletId) {
-      submitDeploy(signingCustodyWalletId, assignments);
-      return;
-    }
-
-    if (deploySignerSelection.unavailableReason) {
+    if (!signingCustodyWalletId && deploySignerSelection.unavailableReason) {
       toast.error(deploySignerSelection.unavailableReason);
       return;
     }
 
-    setDeployCustodyWalletId(
-      deploySignerSelection.wallets.length === 1 ? deploySignerSelection.wallets[0].id : ""
-    );
+    setDeployCustodyWalletId(signingCustodyWalletId ?? deploySignerSelection.defaultWalletId);
     setDeployAuthorities(assignments);
     setDeployWalletDialogOpen(true);
   };
@@ -604,10 +648,10 @@ export function useTokenOperations({
     const selection = withWalletLoadError(
       getSignerSelectionForAction({
         action: "authority",
-        token,
+        token: operationToken,
         authorityWallets,
         metadataAuthority,
-        permissionRow: getPermissionRows(token, metadataAuthority, t).find(
+        permissionRow: getPermissionRows(operationToken, metadataAuthority, t).find(
           (row) => row.authorityRole === authorityForm.role
         ),
         t,
@@ -638,6 +682,8 @@ export function useTokenOperations({
         confirmButtonLabel: t("DashboardIssuance.management.updateNow"),
         submitToast: t("DashboardIssuance.management.submittingAuthority"),
         successToast: t("DashboardIssuance.management.authorityFinalized"),
+        onSuccess: () =>
+          applyAuthorityOverride(authorityForm.role, authorityForm.newAuthority.trim() || null),
       }
     );
   };
@@ -792,7 +838,10 @@ export function useTokenOperations({
           label: asOptionalString(allowlistForm.label),
         },
       },
-      { signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : undefined }
+      {
+        signerWallets: token.ablListAddress ? allowlistSignerSelection.wallets : undefined,
+        onSuccess: () => setAllowlistForm(createInitialAllowlistForm()),
+      }
     );
   };
 
@@ -817,14 +866,14 @@ export function useTokenOperations({
 
   const handleAuthorityModalOpen = (row: PermissionRow) => {
     const currentAuthority = resolveAuthorityAddressForRole(
-      token,
+      operationToken,
       row.authorityRole,
       metadataAuthority
     );
     const signerSelection = withWalletLoadError(
       getSignerSelectionForAction({
         action: "authority",
-        token,
+        token: operationToken,
         authorityWallets,
         metadataAuthority,
         permissionRow: row,
@@ -881,6 +930,10 @@ export function useTokenOperations({
     );
 
     if (result.ok) {
+      applyAuthorityOverride(
+        authorityModalRow.authorityRole,
+        asOptionalString(authorityModalNewAuthority) ?? null
+      );
       handleAuthorityModalClose();
     }
   };
@@ -889,7 +942,7 @@ export function useTokenOperations({
     ? withWalletLoadError(
         getSignerSelectionForAction({
           action: "authority",
-          token,
+          token: operationToken,
           authorityWallets,
           metadataAuthority,
           permissionRow: authorityModalRow,
@@ -990,6 +1043,10 @@ export function useTokenOperations({
       toast.error(t("DashboardIssuance.management.lockSupplyDestinationRequired"));
       return;
     }
+    if (needsMint && !isValidSolanaAddressInput(destination)) {
+      toast.error(t("DashboardIssuance.forms.enterSolanaAddress"));
+      return;
+    }
 
     if (needsMint) {
       const mintResult = await runActionImmediately(
@@ -1037,6 +1094,7 @@ export function useTokenOperations({
     );
 
     if (revokeResult.ok) {
+      applyAuthorityOverride("mint", null);
       setLockSupplyRevokeFailed(false);
       setLockSupplyMinted(false);
       setLockSupplyModalOpen(false);

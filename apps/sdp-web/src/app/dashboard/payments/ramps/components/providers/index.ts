@@ -31,7 +31,7 @@ export type BvnkOnboardingPanelStatus = Exclude<
   | "collect"
   | "collect_counterparty"
   | "collect_counterparty_residence"
-  | "customer_agreement_required"
+  | "counterparty_collect_agreement"
   | "unsupported"
 >;
 export type LightsparkOnboardingPanelStatus = Exclude<
@@ -60,18 +60,20 @@ type PanelOnboardingRequirements =
   | LightsparkPanelOnboardingRequirements
   | MuralPanelOnboardingRequirements;
 
-const BVNK_ONBOARDING_PANEL_STATUSES = new Set<BvnkOnboardingPanelStatus>([
+const BVNK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> = new Set([
   "customer_verification_required",
   "customer_verifying",
+  "counterparty_agreement_signing",
   "customer_verification_failed",
   "customer_funding_account_provisioning",
   "customer_funding_account_provisioning_failed",
   "ready",
 ]);
 
-const LIGHTSPARK_ONBOARDING_PANEL_STATUSES = new Set<LightsparkOnboardingPanelStatus>(["ready"]);
+const LIGHTSPARK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> =
+  new Set(["ready"]);
 
-const MURAL_ONBOARDING_PANEL_STATUSES = new Set<MuralOnboardingPanelStatus>([
+const MURAL_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> = new Set([
   "terms_of_service_required",
   "customer_verification_required",
   "customer_verifying",
@@ -79,6 +81,22 @@ const MURAL_ONBOARDING_PANEL_STATUSES = new Set<MuralOnboardingPanelStatus>([
   "funding_account_provisioning",
   "ready",
 ]);
+
+const isBvnkPanelOnboardingRequirements = (
+  requirements: CounterpartyRequirements
+): requirements is BvnkPanelOnboardingRequirements =>
+  requirements.provider === "bvnk" && BVNK_ONBOARDING_PANEL_STATUSES.has(requirements.status);
+
+const isLightsparkPanelOnboardingRequirements = (
+  requirements: CounterpartyRequirements
+): requirements is LightsparkPanelOnboardingRequirements =>
+  requirements.provider === "lightspark" &&
+  LIGHTSPARK_ONBOARDING_PANEL_STATUSES.has(requirements.status);
+
+const isMuralPanelOnboardingRequirements = (
+  requirements: CounterpartyRequirements
+): requirements is MuralPanelOnboardingRequirements =>
+  requirements.provider === "mural" && MURAL_ONBOARDING_PANEL_STATUSES.has(requirements.status);
 
 /**
  * Whether a requirements status is an onboarding-lifecycle state the panel can
@@ -92,13 +110,11 @@ export function isOnboardingPanelStatus(
 ): requirements is PanelOnboardingRequirements {
   switch (requirements.provider) {
     case "bvnk":
-      return BVNK_ONBOARDING_PANEL_STATUSES.has(requirements.status as BvnkOnboardingPanelStatus);
+      return isBvnkPanelOnboardingRequirements(requirements);
     case "lightspark":
-      return LIGHTSPARK_ONBOARDING_PANEL_STATUSES.has(
-        requirements.status as LightsparkOnboardingPanelStatus
-      );
+      return isLightsparkPanelOnboardingRequirements(requirements);
     case "mural":
-      return MURAL_ONBOARDING_PANEL_STATUSES.has(requirements.status as MuralOnboardingPanelStatus);
+      return isMuralPanelOnboardingRequirements(requirements);
     default:
       return false;
   }

@@ -91,7 +91,15 @@ export const unifiedTransactionsQuerySchema = z
     custodyWalletId: z.string().max(128).optional(),
     counterpartyId: z.string().max(128).optional(),
     token: z.string().max(128).optional(),
-    search: z.string().trim().min(3).max(200).optional(),
+    search: z
+      .string()
+      .trim()
+      .min(3)
+      .max(200)
+      .describe(
+        "Prefix match against transaction id, module id, or signature — not a substring search."
+      )
+      .optional(),
     createdAtFrom: z.string().datetime().optional(),
     createdAtTo: z.string().datetime().optional(),
     cursor: z.string().optional(),

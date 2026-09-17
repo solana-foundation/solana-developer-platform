@@ -7,9 +7,6 @@
 
 // Signing adapters (custody providers via @solana/keychain)
 export {
-  createSigningAdapter,
-  createSigningAdapterFromConfig,
-  createSigningAdapterFromEnv,
   KeychainCoinbaseAdapter,
   KeychainDfnsAdapter,
   KeychainFireblocksAdapter,

@@ -314,7 +314,10 @@
       "liquidityFact": "{liquidity} de liquidez",
       "apyFact": "{apy} APY",
       "unavailableClusterDescription": "Esta estrategia funciona en una red diferente a la de este proyecto. Cambia a un proyecto en esa red para integrarla.",
-      "unavailableEnvironmentProductionDescription": "Este proveedor solo acepta nuevos depósitos en vaults desde proyectos de Producción. Cambia a un proyecto de Producción para integrarlo."
+      "unavailableEnvironmentProductionDescription": "Este proveedor solo acepta nuevos depósitos en vaults desde proyectos de Producción. Cambia a un proyecto de Producción para integrarlo.",
+      "apiKeyCalloutBefore": "Necesitas una",
+      "apiKeyCalloutLink": "Developer API key",
+      "apiKeyCalloutAfter": "para este proyecto (incluye earn:read y earn:write). Guárdala en tu servidor, nunca en el cliente."
     },
     "liquidity": {
       "instant": "Instantánea",

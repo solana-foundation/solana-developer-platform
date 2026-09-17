@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { KeyPairSigner } from "@solana/kit";
 import type {
   DashboardData,
@@ -6,11 +8,11 @@ import type {
   YieldMovement,
   YieldPosition,
   YieldStrategy,
-} from "../src/types.ts";
-import { addDecimals, floorForTolerance } from "./decimal.ts";
-import { getConfig, getDemoSigner, getFeePayerSigner } from "./env.ts";
-import { EmbeddedYieldClient, SdpApiError } from "./sdp-client.ts";
-import { readWalletBalances, signTransaction } from "./solana.ts";
+} from "../src/types";
+import { addDecimals, floorForTolerance } from "./decimal";
+import { getConfig, getDemoSigner, getFeePayerSigner } from "./env";
+import { EmbeddedYieldClient, SdpApiError } from "./sdp-client";
+import { readWalletBalances, signTransaction } from "./solana";
 
 const POSITIVE_DECIMAL_PATTERN = /^(?=.*[1-9])\d+(\.\d+)?$/;
 const DEFAULT_WITHDRAWAL_TOLERANCE_BPS = 10;
@@ -124,8 +126,9 @@ export async function deposit(
     client.submitDeposit(built.transactionId, signedTransaction, idempotencyKey)
   );
 
-  // 5. Poll through confirmed. Only finalized and failed are terminal.
-  return client.waitForMovement(movement.movementId);
+  // Settlement is polled by the browser through the dashboard route. Returning
+  // promptly keeps this flow safe for short-lived serverless functions.
+  return movement;
 }
 
 export async function withdraw(
@@ -171,14 +174,13 @@ export async function withdraw(
   assertBuiltFeePayer(built.feePayer, feePayer?.address);
   const signedTransaction = await signTransaction(built.transaction, all);
   const idempotencyKey = `northstar-withdrawal-${crypto.randomUUID()}`;
-  const movement = await retryUncertainSubmit(() =>
+  return retryUncertainSubmit(() =>
     client.submitWithdrawal(
       built.transactionId,
       signedTransaction,
       idempotencyKey
     )
   );
-  return client.waitForMovement(movement.movementId);
 }
 
 export function summarizeAccountToken(

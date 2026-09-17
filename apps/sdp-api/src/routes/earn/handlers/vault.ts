@@ -429,6 +429,8 @@ export async function extractEarnVaultDepositPolicyCandidate(
   //
   //   shape       — a custodial provider reaching this route would silently
   //                 skip its wallet-provisioning model.
+  //   environment — capability, inside `assertVaultDepositAdmissible`: this
+  //                 project must reach the provider's deployed cluster.
   //   surfacing   — "SDP does not offer this provider", which no per-org
   //                 override can lift, and which reads differently from
   //                 entitlement. Checked first so a caller is never pointed at
