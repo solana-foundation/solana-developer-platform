@@ -117,6 +117,47 @@ describe("BvnkRampClient v3 contact surfaces", () => {
     assert.equal(new URL(requests[0].url).pathname, `/platform/v3/contacts/${contact.id}`);
   });
 
+  it("normalizes address lanes BVNK reports as null, keeping zip lanes it does not model", async () => {
+    // Run-2 live shape: BVNK answers absent address lanes with explicit nulls,
+    // and a `postCode` lane the schema does not model at all.
+    queueFetch(
+      respond({
+        id: "a3700c37-3f46-4766-b0db-3250b073fd9c",
+        description: "cpty_123e4567-e89b-12d3-a456-426614174000",
+        entity: {
+          type: "INDIVIDUAL",
+          relationshipType: "THIRD_PARTY",
+          firstName: "Jane",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          address: {
+            addressLine1: "10 Downing Street",
+            city: "London",
+            region: null,
+            stateCode: null,
+            postalCode: null,
+            postCode: null,
+            country: "GB",
+          },
+        },
+        createdAt: "2026-06-10T10:30:00Z",
+        updatedAt: "2026-06-10T10:30:00Z",
+      })
+    );
+
+    const result = await new BvnkRampClient().getContactV3(runtimeContext, {
+      contactId: "a3700c37-3f46-4766-b0db-3250b073fd9c",
+    });
+
+    assert.equal(result.entity.type, "INDIVIDUAL");
+    assert.equal(result.entity.dateOfBirth, "1990-01-01");
+    assert.deepEqual(result.entity.address, {
+      addressLine1: "10 Downing Street",
+      city: "London",
+      country: "GB",
+    });
+  });
+
   it("lists contacts by the description query and returns the content array", async () => {
     const { requests } = queueFetch(
       respond({ content: [contact], pageable: { pageNumber: 0, pageSize: 5 }, hasNext: false })
@@ -181,10 +222,7 @@ describe("BvnkRampClient v2 ledger surfaces", () => {
     });
 
     assert.deepEqual(result, response);
-    assert.equal(
-      new URL(requests[0].url).searchParams.get("q"),
-      "currency:USD"
-    );
+    assert.equal(new URL(requests[0].url).searchParams.get("q"), "currency:USD");
     assert.equal(new URL(requests[0].url).searchParams.get("q")?.includes("customerId"), false);
   });
 });

@@ -1,6 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import { buildBvnkThirdPartyRuleEntity } from "@sdp/payments/ramps/providers/bvnk/counterparty";
+import {
+  buildBvnkThirdPartyRuleEntity,
+  bvnkOfframpAccountType,
+  bvnkOfframpFields,
+  isBvnkOfframpCurrency,
+} from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import {
   type BvnkOfframpBeneficiary,
   type BvnkOfframpWallet,
@@ -22,11 +27,6 @@ import {
   readBvnkOnrampPaymentRuleState,
   readBvnkWallets,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import {
-  bvnkOfframpAccountType,
-  bvnkOfframpFields,
-  isBvnkOfframpCurrency,
-} from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import type {
   BvnkLedgerWalletProfilesV2,
   BvnkLedgerWalletProfileV2,
@@ -34,7 +34,13 @@ import type {
   BvnkOnrampTransferProviderData,
 } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import { createBvnkContactV3InputSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { buildRequirementSchema, parseCollectedFields } from "@sdp/payments/ramps/requirements";
+import {
+  buildRequirementSchema,
+  countryField,
+  dateField,
+  parseCollectedFields,
+  textField,
+} from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type {
@@ -447,13 +453,43 @@ export async function ensureBvnkOfframpBeneficiary(
  * @returns The collect fields for the entity type.
  */
 export function bvnkContactFields(entityType: CounterpartyRow["entity_type"]): RequirementField[] {
+  const address: RequirementField = {
+    kind: "address",
+    key: "address",
+    label: entityType === "individual" ? "Residential address" : "Registered address",
+    required: true,
+    fields: [
+      textField({ key: "address.addressLine1", label: "Address line 1", required: true }),
+      textField({ key: "address.city", label: "City", required: true }),
+      textField({ key: "address.postalCode", label: "Postal code", required: true }),
+      countryField({ key: "address.country", label: "Country", required: true }),
+      textField({
+        key: "address.stateCode",
+        label: "State",
+        required: false,
+        maxLength: 2,
+        pattern: "^(?:[A-Z]{2})?$",
+      }),
+    ],
+  };
   if (entityType === "individual") {
     return [
-      { kind: "text", key: "firstName", label: "First name", required: true },
-      { kind: "text", key: "lastName", label: "Last name", required: true },
+      textField({ key: "firstName", label: "First name", required: true }),
+      textField({ key: "lastName", label: "Last name", required: true }),
+      dateField({
+        key: "dateOfBirth",
+        label: "Date of birth",
+        required: true,
+        before: new Date().toISOString().slice(0, 10),
+      }),
+      address,
     ];
   }
-  return [{ kind: "text", key: "legalName", label: "Legal name", required: true }];
+  return [
+    textField({ key: "legalName", label: "Legal name", required: true }),
+    textField({ key: "registrationNumber", label: "Registration number", required: false }),
+    address,
+  ];
 }
 
 /**
@@ -506,10 +542,34 @@ export async function advanceBvnkContact(
     counterpartyId: input.counterparty.id,
     provider: "bvnk" as const,
   };
+  const isIndividual = input.counterparty.entity_type === "individual";
+  if (collected["address.country"] === "US" && collected["address.stateCode"] === undefined) {
+    throw badRequest("State is required for US BVNK contacts.");
+  }
   const entity = createBvnkContactV3InputSchema.shape.entity.parse({
-    type: input.counterparty.entity_type === "individual" ? "INDIVIDUAL" : "COMPANY",
+    type: isIndividual ? "INDIVIDUAL" : "COMPANY",
     relationshipType: "THIRD_PARTY",
-    ...collected,
+    ...(isIndividual
+      ? {
+          firstName: collected["firstName"],
+          lastName: collected["lastName"],
+          dateOfBirth: collected["dateOfBirth"],
+        }
+      : {
+          legalName: collected["legalName"],
+          ...(collected["registrationNumber"] === undefined
+            ? {}
+            : { registrationNumber: collected["registrationNumber"] }),
+        }),
+    address: {
+      addressLine1: collected["address.addressLine1"],
+      city: collected["address.city"],
+      postalCode: collected["address.postalCode"],
+      country: collected["address.country"],
+      ...(collected["address.country"] === "US"
+        ? { stateCode: collected["address.stateCode"] }
+        : {}),
+    },
   });
   const claim = await getDb(c.env).transaction(async (transaction) => {
     const accounts = createPostgresCounterpartyProviderAccountsRepository(

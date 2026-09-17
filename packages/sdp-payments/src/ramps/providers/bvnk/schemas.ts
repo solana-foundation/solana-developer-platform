@@ -158,13 +158,23 @@ export const bvnkRuleResponseSchema = z.object({
 });
 export type BvnkRuleResponse = z.infer<typeof bvnkRuleResponseSchema>;
 
+/**
+ * Optional-string lanes BVNK reports as explicit nulls when absent; normalized
+ * to undefined at the parse boundary so consumers keep `T | undefined`.
+ */
+const bvnkNullableString = z
+  .string()
+  .nullish()
+  .transform((value) => value ?? undefined)
+  .optional();
+
 const bvnkContactV3AddressSchema = z.object({
   addressLine1: z.string().min(1),
-  addressLine2: z.string().optional(),
+  addressLine2: bvnkNullableString,
   city: z.string().min(1),
-  region: z.string().optional(),
-  stateCode: z.string().optional(),
-  postalCode: z.string().optional(),
+  region: bvnkNullableString,
+  stateCode: bvnkNullableString,
+  postalCode: bvnkNullableString,
   country: z.string().min(2),
 });
 export type BvnkContactV3Address = z.infer<typeof bvnkContactV3AddressSchema>;
@@ -174,7 +184,10 @@ const bvnkContactV3IndividualSchema = z.object({
   relationshipType: z.enum(["THIRD_PARTY", "SELF_OWNED"]),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   address: bvnkContactV3AddressSchema.optional(),
 });
 

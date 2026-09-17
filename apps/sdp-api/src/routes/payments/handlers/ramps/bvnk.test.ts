@@ -3,10 +3,11 @@ import {
   type BvnkOnrampRequestSpec,
   buildBvnkOnrampPaymentRuleKey,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import type { RequirementField } from "@sdp/types/ramp-requirements";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { AppContext } from "../../context";
-import { advanceBvnkContact, bvnkOnrampQuote } from "./bvnk";
+import { advanceBvnkContact, bvnkContactFields, bvnkOnrampQuote } from "./bvnk";
 
 const mockTransaction = vi.hoisted(() => ({}));
 
@@ -91,6 +92,39 @@ function bvnkContact(overrides?: Record<string, unknown>): Record<string, unknow
   };
 }
 
+/** Full collect pack for an individual BVNK contact: DOB plus the address block. */
+const INDIVIDUAL_COLLECTED = {
+  firstName: "Ada",
+  lastName: "Lovelace",
+  dateOfBirth: "1815-12-10",
+  "address.addressLine1": "1 Analytical Engine Way",
+  "address.city": "Austin",
+  "address.postalCode": "78701",
+  "address.country": "US",
+  "address.stateCode": "TX",
+};
+
+/** Individual collect pack without a state code, for the US-state rule cases. */
+const INDIVIDUAL_COLLECTED_NO_STATE = {
+  firstName: "Ada",
+  lastName: "Lovelace",
+  dateOfBirth: "1815-12-10",
+  "address.addressLine1": "1 Analytical Engine Way",
+  "address.city": "Austin",
+  "address.postalCode": "78701",
+  "address.country": "US",
+};
+
+/** Company collect pack: registration number plus a non-US address block. */
+const COMPANY_COLLECTED = {
+  legalName: "Acme Widgets Ltd",
+  registrationNumber: "01234567",
+  "address.addressLine1": "20 Finsbury Circus",
+  "address.city": "London",
+  "address.postalCode": "EC2M 7DT",
+  "address.country": "GB",
+};
+
 function counterpartyWithBvnkRule(ruleId: string): CounterpartyRow {
   const destinationWalletAddress = "J4t4M6zJH3M6ewN9pmRUpMt2EMWXXCFPYvnrD9ck9EEi";
   const paymentRuleKey = buildBvnkOnrampPaymentRuleKey(
@@ -146,16 +180,16 @@ describe("advanceBvnkContact", () => {
     const result = await advanceBvnkContact(fakeContext(), {
       counterparty: counterpartyRow(),
       projectId: PROJECT_ID,
-      collectedData: { firstName: "Ada", lastName: "Lovelace" },
+      collectedData: INDIVIDUAL_COLLECTED,
     });
 
     expect(result).toEqual({ contactId: CONTACT_ID });
     // The row is claimed exactly once and before any BVNK call, so a crash
     // after the provider call leaves a recoverable pending row.
     expect(mockAccounts.claimPendingCustomerLink).toHaveBeenCalledTimes(1);
-    expect(
-      mockAccounts.claimPendingCustomerLink.mock.invocationCallOrder[0]
-    ).toBeLessThan(createContact.mock.invocationCallOrder[0]);
+    expect(mockAccounts.claimPendingCustomerLink.mock.invocationCallOrder[0]).toBeLessThan(
+      createContact.mock.invocationCallOrder[0]
+    );
     expect(listContacts).not.toHaveBeenCalled();
     expect(createContact).toHaveBeenCalledWith(
       expect.anything(),
@@ -166,6 +200,14 @@ describe("advanceBvnkContact", () => {
           relationshipType: "THIRD_PARTY",
           firstName: "Ada",
           lastName: "Lovelace",
+          dateOfBirth: "1815-12-10",
+          address: {
+            addressLine1: "1 Analytical Engine Way",
+            city: "Austin",
+            postalCode: "78701",
+            country: "US",
+            stateCode: "TX",
+          },
         }),
       })
     );
@@ -195,7 +237,7 @@ describe("advanceBvnkContact", () => {
     const result = await advanceBvnkContact(fakeContext(), {
       counterparty: counterpartyRow({ entity_type: "business" }),
       projectId: PROJECT_ID,
-      collectedData: { legalName: "Acme Widgets Ltd" },
+      collectedData: COMPANY_COLLECTED,
     });
 
     expect(result).toEqual({ contactId: CONTACT_ID });
@@ -207,6 +249,13 @@ describe("advanceBvnkContact", () => {
           type: "COMPANY",
           relationshipType: "THIRD_PARTY",
           legalName: "Acme Widgets Ltd",
+          registrationNumber: "01234567",
+          address: {
+            addressLine1: "20 Finsbury Circus",
+            city: "London",
+            postalCode: "EC2M 7DT",
+            country: "GB",
+          },
         }),
       })
     );
@@ -228,7 +277,7 @@ describe("advanceBvnkContact", () => {
     const result = await advanceBvnkContact(fakeContext(), {
       counterparty: counterpartyRow(),
       projectId: PROJECT_ID,
-      collectedData: { firstName: "Ada", lastName: "Lovelace" },
+      collectedData: INDIVIDUAL_COLLECTED,
     });
 
     // Crash recovery: the single search match is adopted without creating a new contact.
@@ -259,7 +308,7 @@ describe("advanceBvnkContact", () => {
       await advanceBvnkContact(fakeContext(), {
         counterparty: counterpartyRow(),
         projectId: PROJECT_ID,
-        collectedData: { firstName: "Ada", lastName: "Lovelace" },
+        collectedData: INDIVIDUAL_COLLECTED,
       });
     } catch (error) {
       caught = error;
@@ -286,7 +335,7 @@ describe("advanceBvnkContact", () => {
     const result = await advanceBvnkContact(fakeContext(), {
       counterparty: counterpartyRow(),
       projectId: PROJECT_ID,
-      collectedData: { firstName: "Ada", lastName: "Lovelace" },
+      collectedData: INDIVIDUAL_COLLECTED,
     });
 
     expect(result).toEqual({ contactId: CONTACT_ID });
@@ -317,7 +366,7 @@ describe("advanceBvnkContact", () => {
     const winner = await advanceBvnkContact(fakeContext(), {
       counterparty: counterpartyRow(),
       projectId: PROJECT_ID,
-      collectedData: { firstName: "Ada", lastName: "Lovelace" },
+      collectedData: INDIVIDUAL_COLLECTED,
     });
     expect(winner).toEqual({ contactId: winnerContactId });
 
@@ -326,7 +375,7 @@ describe("advanceBvnkContact", () => {
       await advanceBvnkContact(fakeContext(), {
         counterparty: counterpartyRow(),
         projectId: PROJECT_ID,
-        collectedData: { firstName: "Ada", lastName: "Lovelace" },
+        collectedData: INDIVIDUAL_COLLECTED,
       });
     } catch (error) {
       caught = error;
@@ -338,6 +387,119 @@ describe("advanceBvnkContact", () => {
     expect(createContact).toHaveBeenCalledTimes(2);
     expect(deleteContact).toHaveBeenCalledTimes(1);
     expect(deleteContact).toHaveBeenCalledWith(expect.anything(), { contactId: orphanContactId });
+  });
+});
+
+describe("bvnkContactFields", () => {
+  it("collects DOB and the address block for an individual", () => {
+    const fields = bvnkContactFields("individual");
+    expect(fields.map((field) => field.key)).toEqual([
+      "firstName",
+      "lastName",
+      "dateOfBirth",
+      "address",
+    ]);
+    const address = fields.find(
+      (field): field is Extract<RequirementField, { kind: "address" }> => field.kind === "address"
+    );
+    expect(address?.fields.map((part) => part.key)).toEqual([
+      "address.addressLine1",
+      "address.city",
+      "address.postalCode",
+      "address.country",
+      "address.stateCode",
+    ]);
+    expect(address?.fields[0]).toMatchObject({
+      kind: "text",
+      key: "address.addressLine1",
+      required: true,
+    });
+    expect(address?.fields[3]).toMatchObject({
+      kind: "country",
+      key: "address.country",
+      required: true,
+    });
+    expect(address?.fields[4]).toMatchObject({
+      kind: "text",
+      key: "address.stateCode",
+      required: false,
+    });
+  });
+
+  it("collects the registration number and the address block for a company", () => {
+    const fields = bvnkContactFields("business");
+    expect(fields.map((field) => field.key)).toEqual([
+      "legalName",
+      "registrationNumber",
+      "address",
+    ]);
+  });
+});
+
+describe("advanceBvnkContact US state rule", () => {
+  let createContact: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createContact = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createContactV3");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("rejects a US contact without a state code before any claim or provider call", async () => {
+    mockAccounts.getPendingCustomerLink.mockResolvedValue(null);
+    mockAccounts.claimPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
+
+    let caught: unknown;
+    try {
+      await advanceBvnkContact(fakeContext(), {
+        counterparty: counterpartyRow(),
+        projectId: PROJECT_ID,
+        collectedData: INDIVIDUAL_COLLECTED_NO_STATE,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "State is required for US BVNK contacts.",
+    });
+    expect(mockAccounts.claimPendingCustomerLink).not.toHaveBeenCalled();
+    expect(createContact).not.toHaveBeenCalled();
+  });
+
+  it("omits the state code from the contact when the address country is not the US", async () => {
+    mockAccounts.getPendingCustomerLink.mockResolvedValue(null);
+    mockAccounts.claimPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
+    createContact.mockResolvedValue(bvnkContact({ id: CONTACT_ID }));
+    mockAccounts.completeCustomerLink.mockResolvedValue({
+      ...pendingCustomerLinkRow(),
+      provider_customer_reference: CONTACT_ID,
+      status: "active",
+    });
+
+    await advanceBvnkContact(fakeContext(), {
+      counterparty: counterpartyRow(),
+      projectId: PROJECT_ID,
+      collectedData: { ...INDIVIDUAL_COLLECTED_NO_STATE, "address.country": "GB" },
+    });
+
+    expect(createContact).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        entity: expect.objectContaining({
+          address: {
+            addressLine1: "1 Analytical Engine Way",
+            city: "Austin",
+            postalCode: "78701",
+            country: "GB",
+          },
+        }),
+      })
+    );
   });
 });
 
