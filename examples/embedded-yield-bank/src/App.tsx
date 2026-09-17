@@ -1,3 +1,5 @@
+"use client";
+
 import { AlertCircleIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Toaster } from "@/components/ui/sonner";
 import { createDeposit, createWithdrawal, getDashboard } from "@/lib/api";
 import type { DashboardData } from "@/types";
 
@@ -94,28 +97,31 @@ export function App() {
   }
 
   return (
-    <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
-      <BankSidebar />
-      <div className="min-w-0 flex-1 lg:p-1">
-        <MobileHeader />
-        <main className="min-h-[calc(100svh-57px)] bg-background lg:h-full lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-foreground/5">
-          {!data && !error ? <DashboardSkeleton /> : null}
-          {error && !data ? (
-            <SetupError message={error} onRetry={() => void refresh()} />
-          ) : null}
-          {data ? (
-            <OverviewDashboard
-              data={data}
-              refreshing={refreshing}
-              busy={busy}
-              onRefresh={() => void refresh(true)}
-              onDeposit={handleDeposit}
-              onWithdraw={handleWithdrawal}
-            />
-          ) : null}
-        </main>
+    <>
+      <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
+        <BankSidebar />
+        <div className="min-w-0 flex-1 lg:p-1">
+          <MobileHeader />
+          <main className="min-h-[calc(100svh-57px)] bg-background lg:h-full lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-foreground/5">
+            {!data && !error ? <DashboardSkeleton /> : null}
+            {error && !data ? (
+              <SetupError message={error} onRetry={() => void refresh()} />
+            ) : null}
+            {data ? (
+              <OverviewDashboard
+                data={data}
+                refreshing={refreshing}
+                busy={busy}
+                onRefresh={() => void refresh(true)}
+                onDeposit={handleDeposit}
+                onWithdraw={handleWithdrawal}
+              />
+            ) : null}
+          </main>
+        </div>
       </div>
-    </div>
+      <Toaster richColors position="bottom-right" />
+    </>
   );
 }
 
@@ -144,8 +150,8 @@ function SetupError({
             {message}
           </p>
           <p className="text-sm text-muted-foreground">
-            Add the four values in <code>.env</code>, start the local SDP API,
-            then retry. The example README contains the complete runbook.
+            Check the server environment and SDP endpoint, then retry. The
+            example README contains the complete local and Vercel runbooks.
           </p>
           <Button type="button" className="w-fit" onClick={onRetry}>
             <RefreshCwIcon data-icon="inline-start" />

@@ -1,3 +1,5 @@
+import "server-only";
+
 import {
   getBase64EncodedWireTransaction,
   getTransactionDecoder,
@@ -5,8 +7,8 @@ import {
   partiallySignTransaction,
 } from "@solana/kit";
 import { z } from "zod";
-import type { TokenBalance, YieldStrategy } from "../src/types.ts";
-import { formatAtoms } from "./decimal.ts";
+import type { TokenBalance, YieldStrategy } from "../src/types";
+import { formatAtoms } from "./decimal";
 
 const rpcEnvelopeSchema = z.object({
   result: z.unknown().optional(),
