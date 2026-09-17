@@ -22,13 +22,17 @@ describe("playground API key secrets", () => {
     storeApiKeySecret({
       value: "Bearer sk_sdp_generated",
       apiKeyId: "key-1",
-      keyPrefix: "sk_sdp_",
     });
 
     expect(getStoredApiKeySecret({ apiKeyId: "key-1" })).toBe("sk_sdp_generated");
-    expect(getStoredApiKeySecret({ keyPrefix: "sk_sdp_" })).toBe("sk_sdp_generated");
     expect(getItem).not.toHaveBeenCalled();
     expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a secret to a different API key ID", () => {
+    storeApiKeySecret({ value: "sk_sdp_workspace_a", apiKeyId: "key-workspace-a" });
+
+    expect(getStoredApiKeySecret({ apiKeyId: "key-workspace-b" })).toBeNull();
   });
 
   it("does not retain empty values and can clear all secrets", () => {

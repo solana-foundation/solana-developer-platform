@@ -90,7 +90,6 @@ export function WalletsWorkspace({
   );
   const playgroundApiKeyValue = usePlaygroundApiKeySecret({
     apiKeyId: selectedPlaygroundApiKey?.id,
-    keyPrefix: selectedPlaygroundApiKey?.keyPrefix,
   });
 
   const openWalletSetup = (provider: KnownCustodyProvider | null) => {

@@ -51,7 +51,6 @@ export function PaymentsPlaygroundWorkspace({
   );
   const playgroundApiKeyValue = usePlaygroundApiKeySecret({
     apiKeyId: selectedPlaygroundApiKey?.id,
-    keyPrefix: selectedPlaygroundApiKey?.keyPrefix,
   });
 
   return (

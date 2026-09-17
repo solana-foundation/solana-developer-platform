@@ -18,6 +18,13 @@ const workspace = vi.hoisted(() => ({
       role: "api_developer",
       environment: "sandbox",
     },
+    {
+      id: "key_other_workspace",
+      name: "Other workspace key",
+      keyPrefix: "sk_test_example",
+      role: "api_developer",
+      environment: "sandbox",
+    },
   ],
   selectedPlaygroundApiKeyId: "key_test" as string | null,
   setSelectedPlaygroundApiKeyId: vi.fn(),
@@ -30,7 +37,6 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 function SelectedSecretProbe() {
   const value = usePlaygroundApiKeySecret({
     apiKeyId: workspace.selectedPlaygroundApiKeyId,
-    keyPrefix: workspace.playgroundApiKeys[0]?.keyPrefix,
   });
   return <output data-testid="selected-secret">{value}</output>;
 }
@@ -47,6 +53,7 @@ function ui() {
 describe("PlaygroundApiKeySelector", () => {
   beforeEach(() => {
     clearStoredApiKeySecrets();
+    workspace.selectedPlaygroundApiKeyId = "key_test";
   });
 
   afterEach(() => {
@@ -65,6 +72,18 @@ describe("PlaygroundApiKeySelector", () => {
 
     fireEvent.change(secretInput, { target: { value: "" } });
 
+    expect(view.getByTestId("selected-secret").textContent).toBe("");
+  });
+
+  it("does not reuse a secret for a different key with the same display prefix", () => {
+    const view = render(ui());
+    const secretInput = view.getByLabelText("API key value") as HTMLInputElement;
+
+    fireEvent.change(secretInput, { target: { value: "sk_test_workspace_secret" } });
+    workspace.selectedPlaygroundApiKeyId = "key_other_workspace";
+    view.rerender(ui());
+
+    expect(secretInput.value).toBe("");
     expect(view.getByTestId("selected-secret").textContent).toBe("");
   });
 });

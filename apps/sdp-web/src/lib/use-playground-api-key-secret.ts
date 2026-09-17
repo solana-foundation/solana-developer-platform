@@ -5,16 +5,12 @@ import { getStoredApiKeySecret, subscribeToStoredApiKeySecrets } from "./playgro
 
 interface StoredApiKeyIdentity {
   apiKeyId?: string | null;
-  keyPrefix?: string | null;
 }
 
-export function usePlaygroundApiKeySecret({
-  apiKeyId,
-  keyPrefix,
-}: StoredApiKeyIdentity): string | null {
+export function usePlaygroundApiKeySecret({ apiKeyId }: StoredApiKeyIdentity): string | null {
   return useSyncExternalStore(
     subscribeToStoredApiKeySecrets,
-    () => getStoredApiKeySecret({ apiKeyId, keyPrefix }),
+    () => getStoredApiKeySecret({ apiKeyId }),
     () => null
   );
 }

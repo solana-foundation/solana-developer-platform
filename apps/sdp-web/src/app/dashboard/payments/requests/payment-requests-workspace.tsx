@@ -505,7 +505,6 @@ export function PaymentRequestsWorkspace({
   );
   const playgroundApiKeyValue = usePlaygroundApiKeySecret({
     apiKeyId: selectedPlaygroundApiKey?.id,
-    keyPrefix: selectedPlaygroundApiKey?.keyPrefix,
   });
 
   const payLink = selected ? `${window.location.origin}/pay/${selected.publicToken}` : null;

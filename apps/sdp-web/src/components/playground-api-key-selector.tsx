@@ -43,7 +43,6 @@ export function PlaygroundApiKeySelector() {
     playgroundApiKeys[0];
   const selectedSecret = usePlaygroundApiKeySecret({
     apiKeyId: selectedApiKey?.id,
-    keyPrefix: selectedApiKey?.keyPrefix,
   });
 
   const updateSelectedSecret = (value: string) => {
@@ -54,7 +53,6 @@ export function PlaygroundApiKeySelector() {
     if (!value.trim()) {
       clearStoredApiKeySecret({
         apiKeyId: selectedApiKey.id,
-        keyPrefix: selectedApiKey.keyPrefix,
       });
       return;
     }
@@ -62,7 +60,6 @@ export function PlaygroundApiKeySelector() {
     storeApiKeySecret({
       value,
       apiKeyId: selectedApiKey.id,
-      keyPrefix: selectedApiKey.keyPrefix,
     });
   };
 

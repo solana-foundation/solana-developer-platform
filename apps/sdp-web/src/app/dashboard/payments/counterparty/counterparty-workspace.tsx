@@ -125,7 +125,6 @@ export function CounterpartyWorkspace({
 
   const playgroundApiKeyValue = usePlaygroundApiKeySecret({
     apiKeyId: selectedPlaygroundApiKey?.id,
-    keyPrefix: selectedPlaygroundApiKey?.keyPrefix,
   });
 
   const playgroundCounterparties = useMemo<CounterpartyPlaygroundView[]>(
