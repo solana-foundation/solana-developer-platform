@@ -128,3 +128,31 @@ test("a breaking commit that is reverted in the same release is not announced as
 
   assert.doesNotMatch(markdown, /BREAKING CHANGES/);
 });
+
+test("a revert that is itself reverted restores the change to the notes", () => {
+  // Greptile on #1906: with flat suppression the original stayed hidden and both
+  // reversions were listed, so the notes omitted a change the release contains.
+  const feature = "7".repeat(40);
+  const firstRevert = "8".repeat(40);
+  const markdown = buildSectionMarkdown(REPO, "0.79.0", "v0.78.0", [
+    commit({ sha: feature, type: "feat", description: "**ramps:** add a provider" }),
+    commit({
+      sha: firstRevert,
+      type: "revert",
+      description: '"feat(ramps): add a provider"',
+      body: `This reverts commit ${feature}.`,
+    }),
+    commit({
+      sha: "9".repeat(40),
+      type: "revert",
+      description: '"revert: feat(ramps): add a provider"',
+      body: `This reverts commit ${firstRevert}.`,
+    }),
+  ]);
+
+  // The provider is in the released code, so it must be announced.
+  assert.match(markdown, /### Features/);
+  assert.match(markdown, /\*\*ramps:\*\* add a provider/);
+  // The revert that was itself undone is not news and must not be listed.
+  assert.doesNotMatch(markdown, /"feat\(ramps\): add a provider"/);
+});

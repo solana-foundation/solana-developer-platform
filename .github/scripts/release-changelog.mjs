@@ -53,32 +53,68 @@ function prUrl(repo, number) {
 
 /**
  * A revert commit names what it undoes: `git revert` writes "This reverts commit
- * <sha>.", and a hand-written one usually writes the short sha. Reading it lets
- * the notes drop a feature that no longer exists in the release instead of
- * announcing it, which is what 0.79.0 did with the Hercle provider: the feature
- * appeared under Features and its revert appeared separately under the feature's
- * own title, so nothing on the page said it had been pulled.
+ * <sha>.", and a hand-written one usually writes the short sha.
+ *
+ * Reading it lets the notes describe the FINAL state of the release rather than
+ * the path taken to it. 0.79.0 is why: the Hercle provider was added and then
+ * reverted in the same range, and the notes announced it under Features while
+ * its revert sat under the feature's own title, so nothing said it was pulled.
+ *
+ * Visibility is recursive, because a revert can itself be reverted. A change is
+ * hidden when something that reverts it is still standing; if that revert was
+ * itself reverted, the change is back in the release and must be listed again.
  */
 const REVERTED_SHA = /^This reverts(?: commit)? ([0-9a-f]{7,40})/im;
 
-function revertedShas(commits) {
-  const shas = [];
-  for (const commit of commits) {
-    if (commit.type !== "revert") {
-      continue;
-    }
-    const match = REVERTED_SHA.exec(commit.body ?? "");
-    if (match) {
-      shas.push(match[1].toLowerCase());
-    }
-  }
-  return shas;
+function shaMatches(a, b) {
+  // Either side may be abbreviated, so compare on the shorter length.
+  const x = (a ?? "").toLowerCase();
+  const y = (b ?? "").toLowerCase();
+  return x.startsWith(y) || y.startsWith(x);
 }
 
-function isReverted(sha, revertedList) {
-  const value = (sha ?? "").toLowerCase();
-  // Either side may be abbreviated, so compare on the shorter length.
-  return revertedList.some((reverted) => value.startsWith(reverted) || reverted.startsWith(value));
+function revertTarget(commit, commits) {
+  if (commit.type !== "revert") {
+    return null;
+  }
+  const match = REVERTED_SHA.exec(commit.body ?? "");
+  if (!match) {
+    return null;
+  }
+  return commits.find((candidate) => shaMatches(candidate.sha, match[1])) ?? null;
+}
+
+function buildVisibility(commits) {
+  const revertersOf = new Map();
+  for (const commit of commits) {
+    const target = revertTarget(commit, commits);
+    if (target) {
+      revertersOf.set(target.sha, [...(revertersOf.get(target.sha) ?? []), commit]);
+    }
+  }
+
+  const visible = new Map();
+  const isVisible = (commit, seen) => {
+    const cached = visible.get(commit.sha);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (seen.has(commit.sha)) {
+      // A cycle cannot describe a real history; show the commit rather than
+      // silently dropping it.
+      return true;
+    }
+    seen.add(commit.sha);
+    const standing = (revertersOf.get(commit.sha) ?? []).some((reverter) =>
+      isVisible(reverter, seen)
+    );
+    seen.delete(commit.sha);
+    const result = !standing;
+    visible.set(commit.sha, result);
+    return result;
+  };
+
+  return (commit) => isVisible(commit, new Set());
 }
 
 export function buildSectionMarkdown(repo, version, previousTag, commits) {
@@ -91,13 +127,13 @@ export function buildSectionMarkdown(repo, version, previousTag, commits) {
   // breaking changes filed silently under Features. The same override set the
   // bump honors applies, so a commit judged non-breaking is not flagged.
   const breakingEntries = [];
-  const reverted = revertedShas(commits);
+  const isVisible = buildVisibility(commits);
 
   for (const commit of commits) {
-    // A commit undone inside this same release never shipped, so listing it
-    // would advertise something the release does not contain. The revert itself
-    // still appears, under Reverts.
-    if (commit.type !== "revert" && isReverted(commit.sha, reverted)) {
+    // A change undone inside this same release never shipped, so listing it
+    // would advertise something the release does not contain. A revert that was
+    // itself reverted is equally not news, and its target comes back.
+    if (!isVisible(commit)) {
       continue;
     }
     const bucket = categorizeCommit(commit.type);
