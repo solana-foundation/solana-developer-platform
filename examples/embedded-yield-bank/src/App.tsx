@@ -16,6 +16,11 @@ import {
 } from "@/components/ui/card";
 import { Toaster } from "@/components/ui/sonner";
 import { createDeposit, createWithdrawal, getDashboard } from "@/lib/api";
+import {
+  isPendingMovement,
+  reconcilePendingMovementIds,
+  shouldPollMovements,
+} from "@/lib/movements";
 import type { DashboardData } from "@/types";
 
 export function App() {
@@ -23,6 +28,7 @@ export function App() {
   const [error, setError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pendingMovementIds, setPendingMovementIds] = useState<string[]>([]);
   const requestId = useRef(0);
 
   const refresh = useCallback(async (background = false) => {
@@ -32,6 +38,9 @@ export function App() {
       const next = await getDashboard();
       if (id !== requestId.current) return;
       setData(next);
+      setPendingMovementIds((current) =>
+        reconcilePendingMovementIds(current, next.movements)
+      );
       setError(undefined);
     } catch (caught) {
       if (id !== requestId.current) return;
@@ -48,15 +57,10 @@ export function App() {
   }, [refresh]);
 
   useEffect(() => {
-    if (
-      !data?.movements.some(
-        (movement) => !["finalized", "failed"].includes(movement.status)
-      )
-    )
-      return;
+    if (!shouldPollMovements(pendingMovementIds, data?.movements ?? [])) return;
     const timer = window.setInterval(() => void refresh(true), 4_000);
     return () => window.clearInterval(timer);
-  }, [data?.movements, refresh]);
+  }, [data?.movements, pendingMovementIds, refresh]);
 
   async function runMovement(
     label: "Deposit" | "Withdrawal",
@@ -69,6 +73,13 @@ export function App() {
       if (result.movement.status === "failed") {
         throw new Error(
           result.movement.failureReason ?? `${label} failed on devnet`
+        );
+      }
+      if (isPendingMovement(result.movement)) {
+        setPendingMovementIds((current) =>
+          current.includes(result.movement.movementId)
+            ? current
+            : [...current, result.movement.movementId]
         );
       }
       toast.success(

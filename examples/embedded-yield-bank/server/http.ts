@@ -6,6 +6,17 @@ import { SdpApiError } from "./sdp-client";
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
+export class ApiRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 export function apiSuccessResponse<T>(data: T): Response {
   return Response.json({ data }, { headers: NO_STORE_HEADERS });
 }
@@ -21,11 +32,13 @@ export function apiErrorResponse(error: unknown): Response {
   const body: ApiErrorBody = {
     error: {
       code:
-        error instanceof SdpApiError
-          ? (error.code ?? "SDP_REQUEST_FAILED")
-          : status === 400
-            ? "INVALID_REQUEST"
-            : "DEMO_REQUEST_FAILED",
+        error instanceof ApiRequestError
+          ? error.code
+          : error instanceof SdpApiError
+            ? (error.code ?? "SDP_REQUEST_FAILED")
+            : status === 400
+              ? "INVALID_REQUEST"
+              : "DEMO_REQUEST_FAILED",
       message: errorMessage(error),
     },
   };
@@ -34,6 +47,7 @@ export function apiErrorResponse(error: unknown): Response {
 }
 
 function errorStatus(error: unknown): number {
+  if (error instanceof ApiRequestError) return error.status;
   if (error instanceof z.ZodError || error instanceof SyntaxError) return 400;
   if (error instanceof SdpApiError) {
     return error.status >= 400 && error.status <= 599 ? error.status : 502;
