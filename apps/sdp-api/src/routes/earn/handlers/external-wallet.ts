@@ -715,7 +715,7 @@ async function resolveExternalWalletExit(
  * transaction for an external wallet.
  *
  * MONEY-IN GATES preserve the custody deposit order (routes/earn/CLAUDE.md,
- * "Gate asymmetry"): environment capability, production slippage floor,
+ * "Gate asymmetry"): production slippage floor, environment capability,
  * surfacing, and catalogue admission apply to both tiers. Entitlement applies
  * only when a credential supplied an organization. Everything custody-shaped
  * stays absent: no wallet resolution, binding checks, or policy extraction.
