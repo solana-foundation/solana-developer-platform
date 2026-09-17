@@ -46,7 +46,7 @@ import {
   bvnkWebhookEventSchema,
   bvnkWebhookSchema,
 } from "./bvnk.schema";
-import type { WebhookProcessor } from "./processor";
+import { TerminalRampWebhookError, type WebhookProcessor } from "./processor";
 
 type BvnkParsedWebhook = BvnkWebhook | { event: "ignore"; reason: string };
 
@@ -83,7 +83,7 @@ async function handleBvnkOnrampSettlementWebhook(
     providerCustomerReference: event.data.customerReference,
   });
   if (!counterparty) {
-    throw internalError(
+    throw new TerminalRampWebhookError(
       `BVNK webhook customer ${event.data.customerReference} was not found or is not active`
     );
   }
@@ -266,7 +266,7 @@ async function provisionPendingBvnkOnramps(
   const ctx = webhookRampContext(env, environment);
   const currentCounterparty = await repo.findActiveCounterpartyById(counterparty.id);
   if (!currentCounterparty) {
-    throw internalError(
+    throw new TerminalRampWebhookError(
       `BVNK webhook counterparty ${counterparty.id} was not found or is not active`
     );
   }
@@ -278,7 +278,7 @@ async function provisionPendingBvnkOnramps(
   for (const key of pendingKeys) {
     const reloadedCounterparty = await repo.findActiveCounterpartyById(counterparty.id);
     if (!reloadedCounterparty) {
-      throw internalError(
+      throw new TerminalRampWebhookError(
         `BVNK webhook counterparty ${counterparty.id} was not found or is not active`
       );
     }
@@ -312,7 +312,7 @@ async function handleBvnkOnrampWalletWebhook(
   const repo = createSystemCounterpartiesRepository(env);
   const counterparty = await repo.findActiveCounterpartyById(wallet.counterpartyId);
   if (!counterparty) {
-    throw internalError(
+    throw new TerminalRampWebhookError(
       `BVNK webhook counterparty ${wallet.counterpartyId} was not found or is not active`
     );
   }
@@ -342,7 +342,7 @@ async function handleBvnkOfframpWalletWebhook(
   const repo = createSystemCounterpartiesRepository(env);
   const counterparty = await repo.findActiveCounterpartyById(wallet.counterpartyId);
   if (!counterparty) {
-    throw internalError(
+    throw new TerminalRampWebhookError(
       `BVNK webhook counterparty ${wallet.counterpartyId} was not found or is not active`
     );
   }
