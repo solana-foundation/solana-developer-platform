@@ -8,7 +8,10 @@ import {
   fetchCredentialLifecycle,
 } from "@/app/dashboard/custody/connections/connection-detail.data";
 import { ConnectionDetailView } from "@/app/dashboard/custody/connections/connection-detail-view";
-import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
+import {
+  isKnownCustodyProvider,
+  providerSupportsStoredCredentialSetup,
+} from "@/app/dashboard/custody/provider-catalog";
 import { custody, privyByok } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -25,7 +28,10 @@ export default async function CustodyConnectionPage({
   params: Promise<{ provider: string; connectionId: string }>;
 }) {
   const { provider, connectionId } = await params;
-  if (!isKnownCustodyProvider(provider)) {
+  // Same gate as the provider page's connections section: a provider with no
+  // self-service credential install has no connections, so its `/connections/`
+  // subtree is not a route at all.
+  if (!isKnownCustodyProvider(provider) || !providerSupportsStoredCredentialSetup(provider)) {
     notFound();
   }
 
@@ -61,6 +67,21 @@ export default async function CustodyConnectionPage({
       notFound();
     }
     throw error;
+  }
+
+  // The URL names a provider, the connection carries its own, and only the
+  // second one is authoritative. Left unchecked, every action on this page
+  // — rotate, roll back, make default — would be submitted under the URL's
+  // provider and rejected by the API's consistency check, or worse, accepted
+  // against the wrong account. Send the user to the connection's real home
+  // rather than render it under a borrowed identity.
+  if (connection.provider !== provider) {
+    if (providerSupportsStoredCredentialSetup(connection.provider)) {
+      redirect(
+        `/dashboard/integrations/${connection.provider}/connections/${encodeURIComponent(connectionId)}`
+      );
+    }
+    notFound();
   }
 
   // Wallets and credentials are read side by side, and each degrades on its

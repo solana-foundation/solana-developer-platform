@@ -24,6 +24,7 @@ export function MakeDefaultDialog({
   provider,
   projectName,
   currentDefaultLabel,
+  currentDefaultKnown = true,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -32,6 +33,12 @@ export function MakeDefaultDialog({
   provider: CustodyProvider;
   projectName: string;
   currentDefaultLabel: string | null;
+  /**
+   * Whether the absence of a current default is a fact or just an absence of
+   * evidence. "The project has no default today" is a claim, and it is only
+   * safe to make once every connection has been looked at.
+   */
+  currentDefaultKnown?: boolean;
 }) {
   const t = useTranslations();
   const { pending, run } = useCustodyAction();
@@ -65,7 +72,9 @@ export function MakeDefaultDialog({
             ? t("DashboardCustody.makeDefaultExplainerWithCurrent", {
                 current: currentDefaultLabel,
               })
-            : t("DashboardCustody.makeDefaultExplainerNoCurrent")}
+            : currentDefaultKnown
+              ? t("DashboardCustody.makeDefaultExplainerNoCurrent")
+              : t("DashboardCustody.makeDefaultExplainerUnknownCurrent")}
         </p>
         <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-secondary">
           <li>{t("DashboardCustody.makeDefaultPointFunds")}</li>

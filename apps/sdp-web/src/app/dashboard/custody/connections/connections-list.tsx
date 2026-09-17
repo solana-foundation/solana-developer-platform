@@ -35,6 +35,7 @@ import {
   CONNECTIONS_PAGE_SIZE,
   type ConnectionsFilters,
   type ConnectionsPageResult,
+  type ConnectionsProjectSummary,
   type CustodyConnectionListItem,
 } from "./connections.data";
 import { MakeDefaultDialog } from "./make-default-dialog";
@@ -111,6 +112,7 @@ function WalletCell({
 export function ConnectionsList({
   result,
   filters,
+  summary,
   walletsByConnection,
   walletsUnavailable,
   canManageCustody,
@@ -120,6 +122,7 @@ export function ConnectionsList({
 }: {
   result: ConnectionsPageResult;
   filters: ConnectionsFilters;
+  summary: ConnectionsProjectSummary;
   walletsByConnection: Record<string, CustodyWalletSummary[]>;
   walletsUnavailable: boolean;
   canManageCustody: boolean;
@@ -135,7 +138,6 @@ export function ConnectionsList({
 
   const { connections, pagination } = result;
   const pageCount = Math.max(1, Math.ceil(pagination.total / CONNECTIONS_PAGE_SIZE));
-  const currentDefault = connections.find((connection) => connection.isDefault) ?? null;
 
   const goToPage = (page: number) => {
     const query = buildConnectionsSearchParams(filters, { page }).toString();
@@ -279,7 +281,11 @@ export function ConnectionsList({
           label={defaultTarget.label}
           provider={provider}
           projectName={projectName}
-          currentDefaultLabel={currentDefault?.label ?? null}
+          // The project's default, not this page's: found among the visible
+          // rows alone, a default on another page made the dialog tell the user
+          // the project had none.
+          currentDefaultLabel={summary.defaultConnection?.label ?? null}
+          currentDefaultKnown={summary.complete}
         />
       ) : null}
     </div>

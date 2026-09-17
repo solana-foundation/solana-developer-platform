@@ -2,7 +2,7 @@
 
 import type { CustodyProvider } from "@sdp/types";
 import { Loader2Icon, RefreshCwIcon } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -84,9 +84,15 @@ function RotateCredentialsForm({
   const [appSecret, setAppSecret] = useState("");
   // One key per user intent, reused verbatim if the same rotation is retried:
   // the server replays the original result for a repeated key instead of
-  // opening a second rotation. Never reassigned — reopening the dialog remounts
-  // this form, and that is exactly when the user has decided to start over.
-  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  // opening a second rotation. A ref rather than state because the key is
+  // never rendered — reassigning it must not cost a render.
+  //
+  // Lazily minted the way React documents for expensive ref contents, so a
+  // re-render of an open dialog does not burn a UUID per keystroke.
+  const idempotencyKeyRef = useRef("");
+  if (!idempotencyKeyRef.current) {
+    idempotencyKeyRef.current = crypto.randomUUID();
+  }
 
   const connectionCount = lifecycle.impact.connections.length;
 
@@ -96,7 +102,7 @@ function RotateCredentialsForm({
     formData.set("credentialId", lifecycle.providerCredential.id);
     formData.set("provider", provider);
     formData.set("connectionId", connectionId);
-    formData.set("idempotencyKey", idempotencyKey);
+    formData.set("idempotencyKey", idempotencyKeyRef.current);
     formData.set("appId", appId);
     formData.set("appSecret", appSecret);
 
@@ -114,6 +120,18 @@ function RotateCredentialsForm({
     // re-render must not leave it in a mounted input, and a rejected secret is
     // never the one to retry with.
     setAppSecret("");
+
+    // A conclusive refusal ends this intent along with the secret that carried
+    // it. The dialog stays open for a corrected secret, and that is a *new*
+    // rotation — submitted under the old key the server would answer the
+    // changed payload with an idempotency conflict instead of rotating. An
+    // unknown outcome is the opposite case: the first request may have
+    // committed, so its key is kept and a retry replays it rather than opening
+    // a second rotation.
+    if (result.status === "failed") {
+      idempotencyKeyRef.current = crypto.randomUUID();
+    }
+
     if (result.status === "success") {
       onClose();
     }

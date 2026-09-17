@@ -917,6 +917,7 @@
     "makeDefaultTitle": "Make “{label}” the default for {project}?",
     "makeDefaultExplainerWithCurrent": "Requests that don't name a wallet will use this connection from now on. Currently the default is {current}.",
     "makeDefaultExplainerNoCurrent": "Requests that don't name a wallet will use this connection from now on. The project has no default today.",
+    "makeDefaultExplainerUnknownCurrent": "Requests that don't name a wallet will use this connection from now on. Whichever connection is the default today stops being one.",
     "makeDefaultPointFunds": "Wallets and funds stay where they are.",
     "makeDefaultPointPinned": "Operations already pinned to a wallet are not moved.",
     "makeDefaultPointReversible": "Only one project default at a time; you can switch back any time.",

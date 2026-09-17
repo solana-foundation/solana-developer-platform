@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useRef, useState, useTransition } from "react";
+import { type FormEvent, useRef, useState, useTransition } from "react";
 import {
   type PrivyByokSubmitResult,
   recheckPrivyCredentialAction,
@@ -209,10 +209,6 @@ export function PrivyCredentialForm({
   const [appSecret, setAppSecret] = useState("");
   const lastPayloadRef = useRef(new FormData());
 
-  useEffect(() => {
-    onPendingChange?.(isPending);
-  }, [isPending, onPendingChange]);
-
   const privyFields = getCustodyProviderEntry("privy").storedCredentialSetup;
   if (privyFields.mode !== "self_service") {
     return null;
@@ -306,8 +302,16 @@ export function PrivyCredentialForm({
     // Locked from the moment the POST leaves: if it commits while the response
     // is in flight, unmounting here would discard the only replay state.
     onRecoveryLockChange?.(true);
+    // Reported from the handler that owns both edges rather than mirrored out
+    // of an effect on `isPending`: an effect made the host re-render once more
+    // for a value this component already knew, and did it a render late.
+    onPendingChange?.(true);
     startTransition(async () => {
-      applyResult(await submitSafely(formData));
+      const result = await submitSafely(formData);
+      // Cleared before the result is applied, so a host that refuses to close
+      // while a request is in flight is free by the time success closes it.
+      onPendingChange?.(false);
+      applyResult(result);
     });
   };
 

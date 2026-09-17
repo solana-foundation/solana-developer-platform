@@ -24,7 +24,12 @@ vi.mock("@/app/dashboard/custody/wallet-provider-mark", () => ({
   WalletProviderMark: () => <span>Provider mark</span>,
 }));
 
-import type { ConnectionsPageResult, CustodyConnectionListItem } from "./connections.data";
+import {
+  type ConnectionsPageResult,
+  type ConnectionsProjectSummary,
+  type CustodyConnectionListItem,
+  summarizeProviderConnections,
+} from "./connections.data";
 import { ConnectionsList } from "./connections-list";
 
 function makeConnection(
@@ -56,6 +61,9 @@ function makeResult(
 function renderList({
   result,
   page = 1,
+  // The project-level summary the section computes; defaults to the rows on
+  // screen, which is the single-page case.
+  summary = summarizeProviderConnections({ connections: result.connections, complete: true }),
   walletsByConnection = {},
   walletsUnavailable = false,
   canManageCustody = true,
@@ -63,6 +71,7 @@ function renderList({
 }: {
   result: ConnectionsPageResult;
   page?: number;
+  summary?: ConnectionsProjectSummary;
   walletsByConnection?: Record<string, CustodyWalletSummary[]>;
   walletsUnavailable?: boolean;
   canManageCustody?: boolean;
@@ -73,6 +82,7 @@ function renderList({
       <ConnectionsList
         result={result}
         filters={{ page }}
+        summary={summary}
         walletsByConnection={walletsByConnection}
         walletsUnavailable={walletsUnavailable}
         canManageCustody={canManageCustody}

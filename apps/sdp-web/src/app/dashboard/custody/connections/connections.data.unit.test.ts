@@ -4,10 +4,11 @@ import {
   ConnectionsRequestError,
   type CustodyConnectionListItem,
   fetchConnectionPickerOptions,
-  fetchConnectionsPage,
+  fetchProviderConnections,
   fetchWalletsByConnection,
   parseConnectionsFilters,
-  resolveConnectionsPage,
+  selectConnectionsPage,
+  summarizeProviderConnections,
 } from "./connections.data";
 
 function jsonResponse(body: unknown): Response {
@@ -53,20 +54,84 @@ describe("buildConnectionsSearchParams", () => {
   });
 });
 
-describe("fetchConnectionsPage", () => {
-  it("converts the page to a limit/offset query", async () => {
-    const request = vi.fn(async () =>
-      jsonResponse({
-        data: { connections: [], pagination: { limit: 20, offset: 40, total: 0 } },
-        meta: { requestId: "req-connections", timestamp: "2026-09-01T12:00:00.000Z" },
-      })
-    );
+describe("fetchProviderConnections", () => {
+  function slice(connections: CustodyConnectionListItem[], offset: number, total: number) {
+    return jsonResponse({
+      data: { connections, pagination: { limit: 50, offset, total } },
+    });
+  }
 
-    await fetchConnectionsPage(request, { page: 3 });
+  it("reads the project's connections at the endpoint's widest page size", async () => {
+    const request = vi.fn(async () => slice([], 0, 0));
 
+    await fetchProviderConnections(request, "privy");
+
+    expect(request).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith(
-      "/internal/dashboard/custody/connections?limit=20&offset=40"
+      "/internal/dashboard/custody/connections?limit=50&offset=0"
     );
+  });
+
+  it("keeps only the requested provider's connections", async () => {
+    const request = vi.fn(async () =>
+      slice(
+        [connection("conn-privy"), { ...connection("conn-turnkey"), provider: "turnkey" as const }],
+        0,
+        2
+      )
+    );
+
+    const project = await fetchProviderConnections(request, "privy");
+
+    expect(project.connections.map((row) => row.id)).toEqual(["conn-privy"]);
+    // Completeness is about the read, not about the filter: every row the
+    // project holds was seen, even though only one survived the narrowing.
+    expect(project.complete).toBe(true);
+  });
+
+  it("pages until the project's total is covered", async () => {
+    const first = Array.from({ length: 50 }, (_, index) => connection(`conn-${index}`));
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(slice(first, 0, 51))
+      .mockResolvedValueOnce(slice([connection("conn-50")], 50, 51));
+
+    const project = await fetchProviderConnections(request, "privy");
+
+    expect(project.connections).toHaveLength(51);
+    expect(project.complete).toBe(true);
+    expect(request).toHaveBeenLastCalledWith(
+      "/internal/dashboard/custody/connections?limit=50&offset=50"
+    );
+  });
+
+  it("reports an incomplete read rather than walking an unbounded list", async () => {
+    const full = (offset: number) =>
+      slice(
+        Array.from({ length: 50 }, (_, index) => connection(`conn-${offset + index}`)),
+        offset,
+        1000
+      );
+    const request = vi.fn(async (path: string) =>
+      full(Number(new URL(path, "https://sdp.test").searchParams.get("offset")))
+    );
+
+    const project = await fetchProviderConnections(request, "privy");
+
+    expect(project.connections).toHaveLength(200);
+    expect(project.complete).toBe(false);
+    expect(request).toHaveBeenCalledTimes(4);
+  });
+
+  // A short page against a nonzero total means rows moved under the read.
+  it("stops on an empty slice and admits the read was incomplete", async () => {
+    const request = vi.fn(async () => slice([], 0, 12));
+
+    const project = await fetchProviderConnections(request, "privy");
+
+    expect(project.connections).toEqual([]);
+    expect(project.complete).toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   it("accepts additive fields from a newer API response", async () => {
@@ -81,7 +146,7 @@ describe("fetchConnectionsPage", () => {
               futureField: true,
             },
           ],
-          pagination: { limit: 20, offset: 0, total: 1, futureField: true },
+          pagination: { limit: 50, offset: 0, total: 1, futureField: true },
           futureField: true,
         },
         meta: { requestId: "req-connections", futureField: true },
@@ -89,20 +154,20 @@ describe("fetchConnectionsPage", () => {
       })
     );
 
-    await expect(fetchConnectionsPage(request, { page: 1 })).resolves.toEqual({
+    await expect(fetchProviderConnections(request, "privy")).resolves.toEqual({
       connections: [expectedConnection],
-      pagination: { limit: 20, offset: 0, total: 1 },
+      complete: true,
     });
   });
 
   it("throws a typed error carrying the response status", async () => {
     const request = vi.fn(async () => new Response(null, { status: 403 }));
 
-    await expect(fetchConnectionsPage(request, { page: 1 })).rejects.toMatchObject({
+    await expect(fetchProviderConnections(request, "privy")).rejects.toMatchObject({
       name: "ConnectionsRequestError",
       status: 403,
     });
-    await expect(fetchConnectionsPage(request, { page: 1 })).rejects.toBeInstanceOf(
+    await expect(fetchProviderConnections(request, "privy")).rejects.toBeInstanceOf(
       ConnectionsRequestError
     );
   });
@@ -112,96 +177,94 @@ describe("fetchConnectionsPage", () => {
       jsonResponse({ data: { connections: [{ id: "conn-1" }], pagination: {} } })
     );
 
-    await expect(fetchConnectionsPage(request, { page: 1 })).rejects.toThrow();
+    await expect(fetchProviderConnections(request, "privy")).rejects.toThrow();
   });
 });
 
-describe("resolveConnectionsPage", () => {
-  it("clamps an out-of-range page to the last real page and refetches", async () => {
-    const request = vi.fn(async (path: string) =>
-      path.includes("offset=20")
-        ? jsonResponse({
-            data: { connections: [], pagination: { limit: 20, offset: 20, total: 4 } },
-          })
-        : jsonResponse({
-            data: {
-              connections: [connection("conn-1")],
-              pagination: { limit: 20, offset: 0, total: 4 },
-            },
-          })
-    );
+describe("selectConnectionsPage", () => {
+  const rows = Array.from({ length: 25 }, (_, index) => connection(`conn-${index}`));
 
-    const { result, filters } = await resolveConnectionsPage(request, { page: 2 });
+  it("slices the requested page and counts the whole set", () => {
+    const { result, filters } = selectConnectionsPage(rows, { page: 2 });
 
-    expect(filters.page).toBe(1);
-    expect(result.connections).toHaveLength(1);
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(filters.page).toBe(2);
+    expect(result.connections.map((row) => row.id)).toEqual([
+      "conn-20",
+      "conn-21",
+      "conn-22",
+      "conn-23",
+      "conn-24",
+    ]);
+    expect(result.pagination).toEqual({ limit: 20, offset: 20, total: 25 });
   });
 
-  it("falls back to page 1 when the total shrinks between the two reads", async () => {
-    const empty = (offset: number, total: number) =>
-      jsonResponse({ data: { connections: [], pagination: { limit: 20, offset, total } } });
-    const request = vi
-      .fn()
-      // Requested page 5: empty, total says 4 pages exist.
-      .mockResolvedValueOnce(empty(80, 70))
-      // Clamped page 4: rows were deleted meanwhile, still empty past the end.
-      .mockResolvedValueOnce(empty(60, 20))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            connections: [connection("conn-1")],
-            pagination: { limit: 20, offset: 0, total: 20 },
-          },
-        })
-      );
+  it("clamps a page past the end to the last one that exists", () => {
+    const { result, filters } = selectConnectionsPage(rows, { page: 9 });
 
-    const { result, filters } = await resolveConnectionsPage(request, { page: 5 });
-
-    expect(filters.page).toBe(1);
-    expect(result.connections).toHaveLength(1);
-    expect(request).toHaveBeenCalledTimes(3);
-    expect(request).toHaveBeenLastCalledWith(
-      "/internal/dashboard/custody/connections?limit=20&offset=0"
-    );
+    expect(filters.page).toBe(2);
+    expect(result.connections).toHaveLength(5);
   });
 
-  it("funnels an in-range page that lost its rows down to page 1", async () => {
-    const request = vi
-      .fn()
-      // Page 2 is in range per the stale total, but deletions emptied it.
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: { connections: [], pagination: { limit: 20, offset: 20, total: 25 } },
-        })
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            connections: [connection("conn-1")],
-            pagination: { limit: 20, offset: 0, total: 5 },
-          },
-        })
-      );
-
-    const { result, filters } = await resolveConnectionsPage(request, { page: 2 });
-
-    expect(filters.page).toBe(1);
-    expect(result.connections).toHaveLength(1);
-    // The clamp target equals the requested page here, so it goes straight to page 1.
-    expect(request).toHaveBeenCalledTimes(2);
-  });
-
-  it("returns a genuinely empty last page untouched", async () => {
-    const request = vi.fn(async () =>
-      jsonResponse({ data: { connections: [], pagination: { limit: 20, offset: 0, total: 0 } } })
-    );
-
-    const { result, filters } = await resolveConnectionsPage(request, { page: 1 });
+  it("leaves an empty project on page 1", () => {
+    const { result, filters } = selectConnectionsPage([], { page: 4 });
 
     expect(filters.page).toBe(1);
     expect(result.pagination.total).toBe(0);
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(result.connections).toEqual([]);
+  });
+});
+
+describe("summarizeProviderConnections", () => {
+  const paused = (id: string) => ({
+    ...connection(id),
+    isDefault: false,
+    isRuntimeExecutionAllowed: false,
+  });
+
+  it("finds a default that no single page would have shown", () => {
+    const summary = summarizeProviderConnections({
+      connections: [paused("conn-a"), connection("conn-default")],
+      complete: true,
+    });
+
+    expect(summary.defaultConnection).toEqual({ id: "conn-default", label: "Treasury" });
+    expect(summary.activeCount).toBe(2);
+  });
+
+  it("pauses signing only when every active connection is paused", () => {
+    expect(
+      summarizeProviderConnections({
+        connections: [paused("conn-a"), paused("conn-b")],
+        complete: true,
+      }).signingPaused
+    ).toBe(true);
+
+    expect(
+      summarizeProviderConnections({
+        connections: [paused("conn-a"), connection("conn-live")],
+        complete: true,
+      }).signingPaused
+    ).toBe(false);
+  });
+
+  it("ignores connections that are not active", () => {
+    const summary = summarizeProviderConnections({
+      connections: [
+        { ...connection("conn-dead"), status: "deactivated" as const },
+        { ...connection("conn-pending"), status: "pending" as const },
+      ],
+      complete: true,
+    });
+
+    expect(summary.activeCount).toBe(0);
+    expect(summary.defaultConnection).toBeNull();
+    expect(summary.signingPaused).toBe(false);
+  });
+
+  it("carries the incompleteness through, so callers can stay quiet", () => {
+    expect(
+      summarizeProviderConnections({ connections: [paused("conn-a")], complete: false }).complete
+    ).toBe(false);
   });
 });
 

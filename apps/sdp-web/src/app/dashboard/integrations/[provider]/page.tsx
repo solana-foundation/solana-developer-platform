@@ -4,11 +4,17 @@ import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import {
   type ConnectionsPageResult,
+  fetchProviderConnections,
   fetchWalletsByConnection,
   parseConnectionsFilters,
-  resolveConnectionsPage,
+  selectConnectionsPage,
+  summarizeProviderConnections,
 } from "@/app/dashboard/custody/connections/connections.data";
-import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
+import {
+  isKnownCustodyProvider,
+  type KnownCustodyProvider,
+  providerSupportsStoredCredentialSetup,
+} from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import { custody, payments, policies, privyByok } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -166,6 +172,7 @@ async function getRpcCredentialMode(
  */
 async function getCustodyConnections(
   request: SdpApiClient["request"],
+  provider: KnownCustodyProvider,
   canManage: boolean,
   searchParams: Record<string, string | string[] | undefined>
 ) {
@@ -173,23 +180,111 @@ async function getCustodyConnections(
     return "restricted" as const;
   }
   try {
-    const filters = parseConnectionsFilters(searchParams);
-    const [page, wallets] = await Promise.all([
-      resolveConnectionsPage(request, filters),
+    const [project, wallets] = await Promise.all([
+      fetchProviderConnections(request, provider),
       fetchWalletsByConnection(request).then(
         (byConnection) => ({ ok: true as const, byConnection }),
         () => ({ ok: false as const })
       ),
     ]);
+    const page = selectConnectionsPage(project.connections, parseConnectionsFilters(searchParams));
     return {
       result: page.result satisfies ConnectionsPageResult,
       filters: page.filters,
+      summary: summarizeProviderConnections(project),
       walletsByConnection: wallets.ok ? Object.fromEntries(wallets.byConnection) : {},
       walletsUnavailable: !wallets.ok,
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Which provider's connections this page owns, if any.
+ *
+ * Connections exist only where a tenant can install its own credentials from
+ * the Dashboard, which is what `self_service` means in the catalog. Gated on
+ * `isKnownCustodyProvider` instead, this provider's connections list appeared
+ * on every custody provider's page, and each row linked into the wrong
+ * provider's detail route. `null` elsewhere, and the read is then skipped
+ * entirely rather than fetched and discarded.
+ */
+function resolveConnectionsProvider(
+  provider: string,
+  custodyEnabled: boolean
+): KnownCustodyProvider | null {
+  if (!custodyEnabled || !isKnownCustodyProvider(provider)) {
+    return null;
+  }
+  return providerSupportsStoredCredentialSetup(provider) ? provider : null;
+}
+
+/** Who is asking, and what they may do. Never returns for a signed-out viewer. */
+async function resolveViewer() {
+  const { userId, orgId, orgRole } = await auth();
+  if (!userId) {
+    redirect(await getAuthEntryPath());
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+  return resolveDashboardAccess(orgRole);
+}
+
+/** The organization and project this render is scoped to. */
+async function resolveWorkspace() {
+  const { organizationClient, projectClient } = await createRequestScopedSdpApiClients();
+  const onboarding =
+    await organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
+  if (!onboarding.linked || !onboarding.organization) {
+    redirect("/dashboard");
+  }
+  if (!projectClient) {
+    throw new Error("Selected project required");
+  }
+  // The shell only routes here after onboarding, so a missing setting means
+  // the organization runs on SDP's default RPC, not "none".
+  const activeRpcProvider: OrganizationRpcProvider = onboarding.setup?.rpcProvider ?? "default";
+  return { projectClient, organizationId: onboarding.organization.id, activeRpcProvider };
+}
+
+type ProviderAvailability = Awaited<ReturnType<typeof fetchProviderAvailability>>;
+
+function resolveDetail({
+  provider,
+  connectedProviders,
+  availability,
+  activeRpcProvider,
+  byok,
+}: {
+  provider: string;
+  connectedProviders: KnownCustodyProvider[] | null;
+  availability: ProviderAvailability;
+  activeRpcProvider: OrganizationRpcProvider;
+  byok: ReturnType<typeof resolveByokProps>;
+}) {
+  return resolveIntegrationDetail({
+    provider,
+    custody:
+      connectedProviders === null
+        ? null
+        : resolveCustodyIntegrations({
+            connectedProviders,
+            enabledProviders: availability.enabledCustodyProviders,
+          }),
+    rpc: resolveRpcIntegrations({
+      selectedProvider: activeRpcProvider,
+      // The header badge answers the same question the panel under it does, so
+      // it has to read the same source. It used to read the selection alone and
+      // say Connected on a provider the project's traffic never touched.
+      servingProvider: byok.servingProvider,
+      providersWithOwnKey: byok.providersWithOwnKey,
+      entries: availability.providers.rpc,
+    }),
+    ramps: resolveRampIntegrations(availability.providers.ramps),
+    compliance: resolveComplianceIntegrations(availability.providers.compliance),
+  });
 }
 
 export default async function IntegrationDetailPage({
@@ -221,31 +316,11 @@ export default async function IntegrationDetailPage({
     notFound();
   }
 
-  const { userId, orgId, orgRole } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
-  if (!orgId) {
-    redirect("/dashboard");
-  }
-  const dashboardAccess = resolveDashboardAccess(orgRole);
+  const dashboardAccess = await resolveViewer();
+  const { projectClient, organizationId, activeRpcProvider } = await resolveWorkspace();
 
-  const { organizationClient, projectClient } = await createRequestScopedSdpApiClients();
-  const onboarding =
-    await organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
-  if (!onboarding.linked || !onboarding.organization) {
-    redirect("/dashboard");
-  }
-  if (!projectClient) {
-    throw new Error("Selected project required");
-  }
-  const organizationId = onboarding.organization.id;
-
-  // Custody connections are only a concern on a custody provider whose BYOK
-  // install path is switched on; everywhere else the read is skipped entirely
-  // rather than fetched and discarded.
-  const custodyConnectionsApply =
-    custodyEnabled && isKnownCustodyProvider(provider) && (await privyByok());
+  const connectionsProvider = resolveConnectionsProvider(provider, custodyEnabled);
+  const custodyConnectionsApply = connectionsProvider !== null && (await privyByok());
 
   const [availability, connectedProviders, credentialModeState, byokState, custodyConnections] =
     await Promise.all([
@@ -255,40 +330,23 @@ export default async function IntegrationDetailPage({
         : Promise.resolve([]),
       getRpcCredentialMode(dashboardAccess.capabilities.canManageOrgSettings),
       getByokConnections(provider, dashboardAccess.capabilities.canManageOrgSettings),
-      custodyConnectionsApply
+      custodyConnectionsApply && connectionsProvider
         ? getCustodyConnections(
             projectClient.request,
+            connectionsProvider,
             dashboardAccess.capabilities.canManageCustody,
             (await searchParams) ?? {}
           )
         : Promise.resolve(null),
     ]);
 
-  // The shell only routes here after onboarding, so a missing setting means
-  // the organization runs on SDP's default RPC, not "none".
-  const activeRpcProvider = onboarding.setup?.rpcProvider ?? "default";
   const byok = resolveByokProps(byokState);
-
-  const detail = resolveIntegrationDetail({
+  const detail = resolveDetail({
     provider,
-    custody:
-      connectedProviders === null
-        ? null
-        : resolveCustodyIntegrations({
-            connectedProviders,
-            enabledProviders: availability.enabledCustodyProviders,
-          }),
-    rpc: resolveRpcIntegrations({
-      selectedProvider: activeRpcProvider,
-      // The header badge answers the same question the panel under it does, so
-      // it has to read the same source. It used to read the selection alone and
-      // say Connected on a provider the project's traffic never touched.
-      servingProvider: byok.servingProvider,
-      providersWithOwnKey: byok.providersWithOwnKey,
-      entries: availability.providers.rpc,
-    }),
-    ramps: resolveRampIntegrations(availability.providers.ramps),
-    compliance: resolveComplianceIntegrations(availability.providers.compliance),
+    connectedProviders,
+    availability,
+    activeRpcProvider,
+    byok,
   });
 
   if (!detail) {

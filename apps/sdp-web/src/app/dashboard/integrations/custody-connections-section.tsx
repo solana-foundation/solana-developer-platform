@@ -7,6 +7,7 @@ import { AddConnectionModal } from "@/app/dashboard/custody/connections/add-conn
 import type {
   ConnectionsFilters,
   ConnectionsPageResult,
+  ConnectionsProjectSummary,
 } from "@/app/dashboard/custody/connections/connections.data";
 import { ConnectionsList } from "@/app/dashboard/custody/connections/connections-list";
 import { useSelectedProjectName } from "@/app/dashboard/custody/connections/use-selected-project-name";
@@ -46,10 +47,16 @@ export function CustodyConnectionCount({ count }: { count: number }) {
  *   deletion.
  * - Read-only viewer: naming the role and where to ask for it is more use than
  *   hiding the controls silently.
+ *
+ * The first two are claims about the project, so they read `summary` rather
+ * than the rows on screen: inferred from the visible page, a default sitting on
+ * page 2 raised "No default connection" over a project that had one, and one
+ * paused connection among twenty paused the whole table's banner.
  */
 export function CustodyConnectionsSection({
   result,
   filters,
+  summary,
   walletsByConnection,
   walletsUnavailable,
   canManageCustody,
@@ -57,6 +64,7 @@ export function CustodyConnectionsSection({
 }: {
   result: ConnectionsPageResult;
   filters: ConnectionsFilters;
+  summary: ConnectionsProjectSummary;
   walletsByConnection: Record<string, CustodyWalletSummary[]>;
   walletsUnavailable: boolean;
   canManageCustody: boolean;
@@ -66,13 +74,10 @@ export function CustodyConnectionsSection({
   const projectName = useSelectedProjectName();
   const [addOpen, setAddOpen] = useState(false);
 
-  const activeConnections = result.connections.filter(
-    (connection) => connection.status === "active"
-  );
-  const hasDefault = activeConnections.some((connection) => connection.isDefault);
-  const signingPaused =
-    activeConnections.length > 0 &&
-    activeConnections.every((connection) => !connection.isRuntimeExecutionAllowed);
+  // A summary that could not see every connection supports neither banner:
+  // both are statements about all of them, and silence beats a false alarm.
+  const signingPaused = summary.complete && summary.signingPaused;
+  const noDefault = summary.complete && summary.activeCount > 0 && !summary.defaultConnection;
 
   const addConnectionButton = canManageCustody ? (
     <Button size="sm" onClick={() => setAddOpen(true)} iconLeft={<PlusIcon className="size-4" />}>
@@ -100,7 +105,7 @@ export function CustodyConnectionsSection({
           </Callout>
         ) : null}
 
-        {activeConnections.length > 0 && !hasDefault ? (
+        {noDefault ? (
           <Callout variant="warning" title={t("DashboardCustody.noDefaultTitle")}>
             {t("DashboardCustody.noDefaultBody")}
           </Callout>
@@ -110,6 +115,7 @@ export function CustodyConnectionsSection({
           <ConnectionsList
             result={result}
             filters={filters}
+            summary={summary}
             walletsByConnection={walletsByConnection}
             walletsUnavailable={walletsUnavailable}
             canManageCustody={canManageCustody}

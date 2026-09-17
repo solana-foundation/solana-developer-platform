@@ -79,6 +79,16 @@ interface WalletSetupFlowProps {
   connections?: CustodyConnectionListItem[];
 }
 
+/**
+ * One frozen empty list for the absent-connections case.
+ *
+ * A `connections = []` default literal is a different array on every render, so
+ * it would invalidate the memo that narrows the list by provider every time the
+ * wizard re-rendered — on each keystroke in the wallet name — for a value that
+ * never changes.
+ */
+const NO_CONNECTIONS: CustodyConnectionListItem[] = [];
+
 /** Only an active connection holds verified credentials, so only it can take a wallet. */
 function isSelectableConnection(connection: CustodyConnectionListItem): boolean {
   return connection.status === "active";
@@ -256,7 +266,7 @@ export function WalletSetupFlow({
   enabledProviders,
   initialProvider = null,
   privyByokEnabled = false,
-  connections = [],
+  connections = NO_CONNECTIONS,
 }: WalletSetupFlowProps) {
   const t = useTranslations();
   const router = useRouter();
