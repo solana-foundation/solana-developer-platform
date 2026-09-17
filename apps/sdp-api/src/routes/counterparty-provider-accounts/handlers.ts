@@ -232,10 +232,13 @@ function mapCustomerLink(
   row: CounterpartyProviderAccountRow
 ): NonNullable<CounterpartyProviderAccount["customerLink"]> {
   return {
-    kind: "customer_link",
     provider: row.provider,
+    id: row.id,
     providerCustomerReference: providerCustomerReferenceSchema.parse(
       row.provider_customer_reference
     ),
+    status: row.status,
+    providerStatus: row.provider_status,
+    createdAt: row.created_at,
   } satisfies CounterpartyProviderCustomerLink;
 }

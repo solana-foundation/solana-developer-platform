@@ -8,6 +8,12 @@ export function getBvnkOnboardingCopy(
   t: Translate
 ): Record<BvnkOnboardingPanelStatus, OnboardingCopy> {
   return {
+    provisioning: {
+      title: t("DashboardPayments.bvnk.provisioningTitle"),
+      description: t("DashboardPayments.bvnk.provisioningDescription"),
+      icon: Loader2Icon,
+      iconClassName: "animate-spin text-secondary",
+    },
     ready: {
       title: t("DashboardPayments.bvnk.readyTitle"),
       description: t("DashboardPayments.bvnk.readyDescription"),

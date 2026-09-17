@@ -393,7 +393,11 @@ describe("advanceBvnkContact", () => {
   it("clears a pending row that the contact search matches exactly one contact", async () => {
     const existingContactId = "contact_existing_1";
     mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
-    listContacts.mockResolvedValue([bvnkContact({ id: existingContactId })]);
+    listContacts.mockResolvedValue({
+      content: [bvnkContact({ id: existingContactId })],
+      pageable: { pageNumber: 0, pageSize: 50 },
+      hasNext: false,
+    });
     mockAccounts.completeCustomerLink.mockResolvedValue({
       ...pendingCustomerLinkRow(),
       provider_customer_reference: existingContactId,
@@ -410,7 +414,7 @@ describe("advanceBvnkContact", () => {
     expect(result).toEqual({ contactId: existingContactId });
     expect(listContacts).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ q: COUNTERPARTY_ID, pageSize: 5 })
+      expect.objectContaining({ q: COUNTERPARTY_ID, pageSize: 50, pageNumber: 0 })
     );
     expect(createContact).not.toHaveBeenCalled();
     expect(mockAccounts.claimPendingCustomerLink).not.toHaveBeenCalled();
@@ -422,12 +426,54 @@ describe("advanceBvnkContact", () => {
     );
   });
 
+  it("adopts a contact found on the second page, failing closed across the page boundary", async () => {
+    const pageTwoContactId = "contact_page_two";
+    mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
+    listContacts
+      .mockResolvedValueOnce({
+        content: [],
+        pageable: { pageNumber: 0, pageSize: 50 },
+        hasNext: true,
+      })
+      .mockResolvedValueOnce({
+        content: [bvnkContact({ id: pageTwoContactId })],
+        pageable: { pageNumber: 1, pageSize: 50 },
+        hasNext: false,
+      });
+    mockAccounts.completeCustomerLink.mockResolvedValue({
+      ...pendingCustomerLinkRow(),
+      provider_customer_reference: pageTwoContactId,
+      status: "active",
+    });
+
+    const result = await advanceBvnkContact(fakeContext(), {
+      counterparty: counterpartyRow(),
+      projectId: PROJECT_ID,
+      collectedData: INDIVIDUAL_COLLECTED,
+    });
+
+    // The match on page two is followed and adopted; nothing is created.
+    expect(result).toEqual({ contactId: pageTwoContactId });
+    expect(listContacts).toHaveBeenCalledTimes(2);
+    expect(listContacts).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({ q: COUNTERPARTY_ID, pageNumber: 1 })
+    );
+    expect(createContact).not.toHaveBeenCalled();
+    expect(mockAccounts.completeCustomerLink).toHaveBeenCalledWith(
+      expect.objectContaining({ providerCustomerReference: pageTwoContactId })
+    );
+  });
+
   it("refuses to adopt when the contact search matches more than one contact", async () => {
     const duplicateIds = ["contact_dup_1", "contact_dup_2"];
     mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
-    listContacts.mockResolvedValue(
-      duplicateIds.map((id) => bvnkContact({ id, description: COUNTERPARTY_ID }))
-    );
+    listContacts.mockResolvedValue({
+      content: duplicateIds.map((id) => bvnkContact({ id, description: COUNTERPARTY_ID })),
+      pageable: { pageNumber: 0, pageSize: 50 },
+      hasNext: false,
+    });
 
     let caught: unknown;
     try {
@@ -450,7 +496,11 @@ describe("advanceBvnkContact", () => {
 
   it("creates the contact when the contact search finds no match", async () => {
     mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
-    listContacts.mockResolvedValue([]);
+    listContacts.mockResolvedValue({
+      content: [],
+      pageable: { pageNumber: 0, pageSize: 50 },
+      hasNext: false,
+    });
     createContact.mockResolvedValue(bvnkContact({ id: CONTACT_ID }));
     mockAccounts.completeCustomerLink.mockResolvedValue({
       ...pendingCustomerLinkRow(),
@@ -476,7 +526,11 @@ describe("advanceBvnkContact", () => {
     const winnerContactId = "contact_race_winner";
     const orphanContactId = "contact_race_orphan";
     mockAccounts.getPendingCustomerLink.mockResolvedValue(pendingCustomerLinkRow());
-    listContacts.mockResolvedValue([]);
+    listContacts.mockResolvedValue({
+      content: [],
+      pageable: { pageNumber: 0, pageSize: 50 },
+      hasNext: false,
+    });
     createContact
       .mockResolvedValueOnce(bvnkContact({ id: winnerContactId }))
       .mockResolvedValueOnce(bvnkContact({ id: orphanContactId }));
