@@ -121,12 +121,12 @@ export interface CounterpartyProviderAccount {
 }
 
 /** SDP-owned lifecycle of a BVNK customer link before BVNK's own customer status exists. */
-export const BVNK_CUSTOMER_LINK_STAGE_STATUSES = ["PENDING_AGREEMENT", "PENDING_DETAILS"] as const;
+export const BVNK_CUSTOMER_LINK_STAGE_STATUSES = ["PENDING_AGREEMENT", "AGREEMENT_SIGNED"] as const;
 export type BvnkCustomerLinkStageStatus = (typeof BVNK_CUSTOMER_LINK_STAGE_STATUSES)[number];
 /** Named access to the BVNK customer-link stage statuses for the read model that derives them. */
 export const BVNK_CUSTOMER_LINK_STAGE = {
   pendingAgreement: "PENDING_AGREEMENT",
-  pendingDetails: "PENDING_DETAILS",
+  agreementSigned: "AGREEMENT_SIGNED",
 } as const satisfies Record<string, BvnkCustomerLinkStageStatus>;
 
 export interface CounterpartyProviderCustomerLinkAgreement {

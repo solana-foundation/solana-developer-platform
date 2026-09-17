@@ -7,7 +7,6 @@ import {
   bvnkSessionAgreementSchema,
   bvnkVerificationStatusSchema,
 } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { HERCLE_VERIFICATION_STATUSES } from "@sdp/payments/ramps/providers/hercle/provider-data";
 import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
@@ -72,6 +71,7 @@ export const bvnkCustomerProviderAccountMetadataSchema = z.object({
     .object({
       reference: z.string().min(1),
       signedAt: z.string().datetime().optional(),
+      consentSubmittedAt: z.string().datetime().optional(),
       agreements: z.array(bvnkSessionAgreementSchema.omit({ status: true })),
     })
     .optional(),
@@ -79,17 +79,6 @@ export const bvnkCustomerProviderAccountMetadataSchema = z.object({
 export type BvnkCustomerProviderAccountMetadata = z.infer<
   typeof bvnkCustomerProviderAccountMetadataSchema
 >;
-
-/**
- * Hercle `customer_link` metadata. The reference is the counterparty id the sub-account was
- * registered under; the verification lifecycle is normalised at write time. The hosted verification
- * link is minted per read and never stored, and nothing about the business itself lands here.
- */
-export const hercleCustomerLinkMetadataSchema = z.object({
-  externalReference: z.string().min(1),
-  verificationStatus: z.enum(HERCLE_VERIFICATION_STATUSES).optional(),
-});
-export type HercleCustomerLinkMetadata = z.infer<typeof hercleCustomerLinkMetadataSchema>;
 
 export interface UpsertCounterpartyProviderAccountInput {
   organizationId: string;
@@ -182,6 +171,20 @@ export interface SetCustomerLinkSessionInput extends GetCounterpartyProviderAcco
   id: string;
   /** The minted agreement session, CAS-written only while the row carries none yet. */
   session: NonNullable<BvnkCustomerProviderAccountMetadata["session"]>;
+}
+
+export interface FindCustomerLinkBySessionReferenceInput {
+  provider: RampProviderId;
+  sessionReference: string;
+}
+
+export type BvnkSessionTimestampField = "signedAt" | "consentSubmittedAt";
+
+export interface MarkCustomerLinkSessionTimestampInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  sessionReference: string;
+  field: BvnkSessionTimestampField;
+  timestamp: string;
 }
 
 export interface InsertPendingExternalAccountInput extends ListActiveExternalAccountsInput {
@@ -319,6 +322,30 @@ export interface CounterpartyProviderAccountsRepository {
    */
   setCustomerLinkSession(
     input: SetCustomerLinkSessionInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Finds an active customer link by its BVNK agreement-session reference.
+   * This is system-scoped because webhook payloads carry no tenant identity.
+   *
+   * @param input - Provider and stored agreement-session reference.
+   * @returns The matching customer-link row, or null when no active row owns the session.
+   */
+  findCustomerLinkBySessionReference(
+    input: FindCustomerLinkBySessionReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * CAS-marks an agreement-session timestamp field on an active customer link.
+   * The write lands only while the session still lacks that field, so a
+   * replayed signature or consent event loses the CAS instead of overwriting
+   * the earlier record.
+   *
+   * @param input - Tenant scope, row id, provider, session reference, the timestamp field to record, and its value.
+   * @returns The updated row, or null when the field was already set or the row is outside the scope.
+   */
+  markCustomerLinkSessionTimestamp(
+    input: MarkCustomerLinkSessionTimestampInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

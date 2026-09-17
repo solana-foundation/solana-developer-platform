@@ -140,22 +140,12 @@ const requirementDateFieldSchema = z.object({
   before: z.string().optional(),
 });
 
-const requirementConsentFieldSchema = z.object({
-  kind: z.literal("consent"),
-  key: z.string(),
-  label: z.string(),
-  required: z.boolean(),
-  documentUrl: z.url(),
-  documentLabel: z.string().optional(),
-});
-
 const requirementFieldSchema = z.discriminatedUnion("kind", [
   requirementTextFieldSchema,
   requirementSelectFieldSchema,
   requirementCountryFieldSchema,
   requirementCurrencyFieldSchema,
   requirementDateFieldSchema,
-  requirementConsentFieldSchema,
   z.object({
     kind: z.literal("address"),
     key: z.string(),
@@ -307,6 +297,11 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       ...requirementBase,
       provider: z.enum(["bvnk", "mural"]),
       status: z.enum(["customer_verifying", "customer_verification_failed"]),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("bvnk"),
+      status: z.literal("counterparty_agreement_signing"),
     }),
     z.object({
       ...requirementBase,
@@ -556,7 +551,7 @@ const customerLinkBaseDocFields = {
   status: counterpartyAccountStatusSchema,
   providerStatus: withOpenApi(z.string().nullable(), {
     description:
-      "Provider-side customer status when known; for BVNK links before the customer exists, one of PENDING_AGREEMENT / PENDING_DETAILS.",
+      "Provider-side customer status when known; for BVNK links before the customer exists, one of PENDING_AGREEMENT / AGREEMENT_SIGNED.",
     example: "ACTIVE",
   }),
   createdAt: withOpenApi(isoDateTimeSchema, {

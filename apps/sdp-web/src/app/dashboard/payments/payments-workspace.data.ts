@@ -779,20 +779,13 @@ export async function fetchCounterpartyAccounts(
   return body.data?.accounts ?? [];
 }
 
-export type SandboxTransferSimulationInput =
+type SandboxTransferSimulationInput =
   | {
       provider: "lightspark";
       payload: {
         quoteId: string;
         currencyCode?: "USD" | "USDC";
         currencyAmount?: number;
-      };
-    }
-  | {
-      provider: "hercle";
-      payload: {
-        orderId: string;
-        status?: "awaiting_payment" | "settling" | "settled" | "failed" | "expired";
       };
     }
   | {

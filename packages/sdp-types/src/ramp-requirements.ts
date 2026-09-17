@@ -60,19 +60,6 @@ export type RequirementField =
       required: boolean;
       /** Nested parts collected under dotted keys, e.g. `customer.address.line1`. */
       fields: RequirementField[];
-    }
-  | {
-      /**
-       * An affirmative acceptance of a provider document (terms of service, privacy policy), collected as
-       * the literal `"true"`. The label is the sentence up to the document's name and `documentLabel`
-       * completes it as a link to `documentUrl`, so the person reads what they accept where they accept it.
-       */
-      kind: "consent";
-      key: string;
-      label: string;
-      required: boolean;
-      documentUrl: string;
-      documentLabel?: string;
     };
 
 export type RequirementFieldKind = RequirementField["kind"];
@@ -192,6 +179,7 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
       verificationUrl: string;
     }
   | { provider: "bvnk"; status: "customer_verifying" }
+  | { provider: "bvnk"; status: "counterparty_agreement_signing" }
   | { provider: "bvnk"; status: "customer_verification_failed" }
   | { provider: "bvnk"; status: "customer_funding_account_provisioning" }
   | { provider: "bvnk"; status: "customer_funding_account_provisioning_failed" }
@@ -201,10 +189,52 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "mural"; status: "customer_verifying" }
   | { provider: "mural"; status: "customer_verification_failed" }
   | { provider: "mural"; status: "funding_account_provisioning" }
-  | { provider: "hercle"; status: "customer_verification_required"; verificationUrl: string }
-  | { provider: "hercle"; status: "customer_verifying" }
-  | { provider: "hercle"; status: "customer_verification_failed" }
 );
+
+export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES = [
+  "terms_of_service_required",
+  "customer_verification_required",
+  "customer_verifying",
+  "counterparty_agreement_signing",
+  "customer_funding_account_provisioning",
+  "funding_account_provisioning",
+] as const satisfies readonly CounterpartyRequirements["status"][];
+
+export type CounterpartyRequirementsPollStatus =
+  (typeof COUNTERPARTY_REQUIREMENTS_POLL_STATUSES)[number];
+
+/**
+ * Whether a requirements status should continue polling its provider lifecycle.
+ *
+ * @param status - Requirements lifecycle status to classify.
+ * @returns True when the requirements request should poll for a provider transition.
+ */
+export function isCounterpartyRequirementsPollStatus(
+  status: CounterpartyRequirements["status"]
+): status is CounterpartyRequirementsPollStatus {
+  return COUNTERPARTY_REQUIREMENTS_POLL_STATUSES.some((candidate) => candidate === status);
+}
+
+export const RAMP_ONBOARDING_PENDING_STATUSES = [
+  "customer_verifying",
+  "counterparty_agreement_signing",
+  "customer_funding_account_provisioning",
+  "funding_account_provisioning",
+] as const satisfies readonly CounterpartyRequirements["status"][];
+
+export type RampOnboardingPendingStatus = (typeof RAMP_ONBOARDING_PENDING_STATUSES)[number];
+
+/**
+ * Whether a requirements status blocks ramp progression while a provider transition completes.
+ *
+ * @param status - Requirements lifecycle status to classify.
+ * @returns True when the provider transition is still pending.
+ */
+export function isRampOnboardingPendingStatus(
+  status: CounterpartyRequirements["status"]
+): status is RampOnboardingPendingStatus {
+  return RAMP_ONBOARDING_PENDING_STATUSES.some((candidate) => candidate === status);
+}
 
 /** Collect stages whose answer carries a `fields` array for the client to render. */
 export const COLLECT_FIELDS_STATUSES = [

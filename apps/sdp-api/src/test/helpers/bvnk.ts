@@ -196,9 +196,35 @@ export function bvnkPlatformCustomerUpdateEvent(
   return {
     event: "bvnk:platform:customer:update",
     data: {
-      reference: "cp_123e4567e89b12d3a456426614174000",
+      reference: "123e4567-e89b-12d3-a456-426614174000",
       ...overrides,
     },
+  };
+}
+
+type BvnkAgreementSessionStatusChangeEvent = Extract<
+  BvnkWebhookInput,
+  { event: "bvnk:platform:customer:agreement-session-status-change" }
+>;
+
+/**
+ * Builds the observed BVNK agreement-session status-change webhook payload.
+ *
+ * @param overrides - Event fields to replace for a test case.
+ * @returns A fully shaped agreement-session status-change event.
+ */
+export function bvnkAgreementSessionStatusChangeEvent(
+  overrides?: Partial<BvnkAgreementSessionStatusChangeEvent>
+): BvnkAgreementSessionStatusChangeEvent {
+  return {
+    event: "bvnk:platform:customer:agreement-session-status-change",
+    eventId: "01a0ab3a-a9cf-7b71-ab7c-f7903f653099",
+    timestamp: new Date().toISOString(),
+    data: {
+      status: "SIGNED",
+      reference: "95d360c0-65dd-4598-acc0-89cab6b249da",
+    },
+    ...overrides,
   };
 }
 

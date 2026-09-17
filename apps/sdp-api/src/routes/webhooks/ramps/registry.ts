@@ -2,7 +2,6 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import { badRequest } from "@/lib/errors";
 import { BvnkWebhookProcessor } from "./bvnk";
 import { CoinbaseWebhookProcessor } from "./coinbase";
-import { HercleWebhookProcessor } from "./hercle";
 import { LightsparkWebhookProcessor } from "./lightspark";
 import { MoonpayWebhookProcessor } from "./moonpay";
 import { MuralWebhookProcessor } from "./mural";
@@ -16,7 +15,6 @@ export const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   coinbase: new CoinbaseWebhookProcessor(),
   mural: new MuralWebhookProcessor(),
   stripe: new StripeWebhookProcessor(),
-  hercle: new HercleWebhookProcessor(),
 } as const satisfies Record<
   Exclude<RampProviderId, "moneygram">,
   WebhookProcessor<unknown, unknown>

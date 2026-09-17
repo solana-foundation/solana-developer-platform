@@ -187,7 +187,6 @@ function mapCustomerLink(
     case "coinbase":
     case "mural":
     case "stripe":
-    case "hercle":
       return {
         provider: row.provider,
         id: row.id,
@@ -207,7 +206,7 @@ function mapCustomerLink(
  * Maps a BVNK customer-link row to its public shape. Before the v1 customer
  * exists, the reference column carries SDP's outbound externalReference alias,
  * so the stage comes from the stored agreement session (PENDING_AGREEMENT until
- * consent, PENDING_DETAILS once signed) and the reference stays null until the
+ * consent, AGREEMENT_SIGNED once signed) and the reference stays null until the
  * v1 create replaces the alias. A claimed row whose session is not yet minted
  * (crash or concurrent window) reads as PENDING_AGREEMENT with no agreements.
  * The residence country and session are kept on the row through the create,
@@ -257,12 +256,14 @@ function mapBvnkCustomerLink(
  * @param metadata - Parsed BVNK customer-link metadata.
  * @returns The BVNK customer status or the pre-customer stage label.
  */
-function bvnkCustomerLinkProviderStatus(metadata: BvnkCustomerProviderAccountMetadata): string {
+export function bvnkCustomerLinkProviderStatus(
+  metadata: BvnkCustomerProviderAccountMetadata
+): string {
   if (metadata.status !== undefined) {
     return metadata.status;
   }
   if (metadata.session === undefined || metadata.session.signedAt === undefined) {
     return BVNK_CUSTOMER_LINK_STAGE.pendingAgreement;
   }
-  return BVNK_CUSTOMER_LINK_STAGE.pendingDetails;
+  return BVNK_CUSTOMER_LINK_STAGE.agreementSigned;
 }

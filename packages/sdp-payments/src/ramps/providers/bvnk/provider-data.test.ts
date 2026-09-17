@@ -46,10 +46,10 @@ describe("bvnkUnverifiedOnboardingStatus", () => {
 });
 
 describe("buildBvnkCustomerExternalReference", () => {
-  it("builds a compact cp_ externalReference from an SDP counterparty id", () => {
+  it("drops the cpty_ prefix to fit BVNK's 36-character externalReference", () => {
     assert.equal(
       buildBvnkCustomerExternalReference("cpty_123e4567-e89b-12d3-a456-426614174000"),
-      "cp_123e4567e89b12d3a456426614174000"
+      "123e4567-e89b-12d3-a456-426614174000"
     );
   });
 

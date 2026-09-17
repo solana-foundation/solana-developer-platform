@@ -29,7 +29,6 @@ export const RAMP_PROVIDER_LOGOS = {
   coinbase: "/provider-logos/coinbase-cdp.png",
   mural: "/provider-logos/muralpay.svg",
   stripe: "/provider-logos/stripe.svg",
-  hercle: "/provider-logos/hercle.png",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS = {
@@ -40,8 +39,6 @@ export const RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS = {
   coinbase: false,
   mural: false,
   stripe: false,
-  // The payout account is the business's own, registered once at onboarding — nothing to pick from.
-  hercle: false,
 } as const satisfies Record<RampProviderId, boolean>;
 
 export const RAMP_PROVIDER_WEBSITES = {
@@ -52,7 +49,6 @@ export const RAMP_PROVIDER_WEBSITES = {
   coinbase: "https://www.coinbase.com/developer-platform",
   mural: "https://www.muralpay.com",
   stripe: "https://stripe.com",
-  hercle: "https://www.hercle.financial",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
@@ -63,7 +59,6 @@ export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "coinbase", title: "Coinbase" },
   { id: "mural", title: "Mural Pay" },
   { id: "stripe", title: "Stripe" },
-  { id: "hercle", title: "Hercle" },
 ];
 
 /**
