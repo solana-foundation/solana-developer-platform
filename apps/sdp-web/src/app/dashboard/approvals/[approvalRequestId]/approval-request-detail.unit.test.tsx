@@ -194,6 +194,28 @@ describe("ApprovalRequestDetail", () => {
     expect(screen.queryByText(REVIEW_DESCRIPTION)).toBeNull();
   });
 
+  // sdp-web ships on merge, sdp-api on release: an API without the viewer
+  // fields must leave the page as it was, not hide every decision.
+  it("offers every decision when the API does not report the viewer yet", () => {
+    const { viewerIsRequester: _requester, viewerCanDecide: _canDecide, ...olderApi } =
+      pendingRequest;
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          // SAFETY: models a response from an API release that predates the viewer fields.
+          initialRequest={olderApi as WalletApprovalRequestSummary}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+      </I18nProvider>
+    );
+
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  });
+
   it("asks only a viewer who can decide to review before deciding", () => {
     const { rerender } = render(
       <I18nProvider locale="en" messages={getMessages("en")}>

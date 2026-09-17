@@ -252,6 +252,22 @@ export function ApprovalRequestDetail({
   );
 }
 
+/**
+ * The viewer's standing on a request, as the API reports it.
+ *
+ * sdp-web reaches production on every merge while sdp-api waits for the
+ * release, so the dashboard can read an API that predates these fields. When
+ * they are absent the page offers what it did before, every decision to a role
+ * that may decide, and the API's own check still refuses anyone else.
+ */
+function viewerStanding(request: {
+  viewerIsRequester?: boolean;
+  viewerCanDecide?: boolean;
+}): { isRequester: boolean; canDecide: boolean } {
+  const isRequester = request.viewerIsRequester === true;
+  return { isRequester, canDecide: request.viewerCanDecide ?? !isRequester };
+}
+
 function ApprovalRequestHeader({
   request,
   canDecide,
@@ -267,9 +283,9 @@ function ApprovalRequestHeader({
   const isPending = request.status === "pending";
   // The API reports who may decide, with the same check it enforces, so only
   // decisions it will accept are offered. The requester can still withdraw.
-  const canApproveOrReject = isPending && canDecide && request.viewerCanDecide;
-  const canCancel =
-    isPending && canDecide && (request.viewerIsRequester || request.viewerCanDecide);
+  const viewer = viewerStanding(request);
+  const canApproveOrReject = isPending && canDecide && viewer.canDecide;
+  const canCancel = isPending && canDecide && (viewer.isRequester || viewer.canDecide);
 
   return (
     <header className="flex flex-wrap items-start justify-between gap-5 border-b border-border-default pb-6">
@@ -330,7 +346,7 @@ function ApprovalRequestHeader({
 /** Why a pending request offers the viewer no decision. */
 function pendingNoticeKey(request: WalletApprovalRequestSummary, canDecide: boolean) {
   if (!canDecide) return "DashboardApprovals.viewOnly";
-  if (request.viewerIsRequester) return "DashboardApprovals.requesterCannotDecide";
+  if (viewerStanding(request).isRequester) return "DashboardApprovals.requesterCannotDecide";
   return request.approvalGroupId
     ? "DashboardApprovals.approvalGroupOnly"
     : "DashboardApprovals.adminOnly";
@@ -351,7 +367,7 @@ function ApprovalRequestNotice({
 }) {
   const t = useTranslations();
   if (request.status === "pending") {
-    if (canDecide && request.viewerCanDecide) return null;
+    if (canDecide && viewerStanding(request).canDecide) return null;
     return (
       <p className="border-b border-border-default bg-fill-subtle px-3 py-2 text-sm text-secondary">
         {t(pendingNoticeKey(request, canDecide))}

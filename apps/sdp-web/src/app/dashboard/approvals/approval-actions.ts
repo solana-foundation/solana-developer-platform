@@ -65,8 +65,9 @@ const approvalRequestEnvelopeSchema = z.object({
     approvalRequest: z.looseObject({
       id: z.string().min(1),
       status: z.enum(APPROVAL_REQUEST_STATUS),
-      viewerIsRequester: z.boolean(),
-      viewerCanDecide: z.boolean(),
+      // Optional: sdp-web can deploy ahead of the API release that adds them.
+      viewerIsRequester: z.boolean().optional(),
+      viewerCanDecide: z.boolean().optional(),
       operation: z.looseObject({
         status: z.enum(WALLET_OPERATION_STATUS),
         executionCompletedAt: z.string().nullable(),
