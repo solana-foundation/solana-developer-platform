@@ -1,19 +1,16 @@
+import { type BvnkFiatCurrency, isBvnkFiatCurrency } from "./currencies";
 import type { BvnkRuleEntity, BvnkRuleEntityAddress } from "./provider-data";
 import type { BvnkContactV3, BvnkContactV3Address } from "./schemas";
 
-/** Fiat currencies BVNK off-ramp settles into the settlement wallet. Withdraw-to-bank is deferred, so this gates the direction only. */
-const BVNK_OFFRAMP_CURRENCIES = ["USD", "EUR"] as const;
-
-type BvnkOfframpCurrency = (typeof BVNK_OFFRAMP_CURRENCIES)[number];
-
 /**
- * Whether BVNK off-ramp settles in the given fiat currency.
+ * Whether BVNK off-ramp settles in the given fiat currency; the only fiats
+ * BVNK serves are the sandbox fiat set shared with the on-ramp.
  *
  * @param value - Fiat currency code, for example `USD`.
  * @returns True when the currency is an off-ramp settlement currency.
  */
-export function isBvnkOfframpCurrency(value: string): value is BvnkOfframpCurrency {
-  return BVNK_OFFRAMP_CURRENCIES.some((currency) => currency === value);
+export function isBvnkOfframpCurrency(value: string): value is BvnkFiatCurrency {
+  return isBvnkFiatCurrency(value);
 }
 
 /**

@@ -718,7 +718,7 @@ export async function advanceCounterpartyRequirements(
           input.projectId,
           input.fiatCurrency
         );
-        if (!isBvnkWalletActive(wallet.provider_status ?? undefined)) {
+        if (!isBvnkWalletActive(wallet.provider_status)) {
           return { provider: "bvnk", direction: input.direction, status: "provisioning" };
         }
         return readyCounterparty("bvnk", input.direction);
@@ -1218,7 +1218,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           "BVNK settlement wallet has no wallet id bound to its provider-account row."
         );
       }
-      if (!isBvnkWalletActive(settlementWallet.provider_status ?? undefined)) {
+      if (!isBvnkWalletActive(settlementWallet.provider_status)) {
         throw counterpartyNotProvisioned("bvnk", "offramp");
       }
       const apiKey = c.get("apiKey");
@@ -1292,15 +1292,6 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           });
         }
         throw error;
-      }
-      const { currency, network } = normalizeBvnkCurrencyAndNetwork(
-        getCryptoRailAssetLabel(input.assetRail)
-      );
-      if (quote.provider === "bvnk" && quote.deliveryMode === "manual_instructions") {
-        const depositInstruction = quote.paymentInstructions.find(isCryptoDepositInstruction);
-        if (depositInstruction !== undefined) {
-          depositInstruction.instructionsNotes = `Send ${currency} on ${network} to the deposit address. BVNK converts it to ${fiatCurrency} and credits ${counterparty.display_name}'s ${fiatCurrency} balance.`;
-        }
       }
       break;
     }

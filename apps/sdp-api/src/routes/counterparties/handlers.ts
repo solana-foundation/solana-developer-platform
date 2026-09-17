@@ -1,8 +1,6 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { isBvnkFiatCurrency } from "@sdp/payments/ramps/providers/bvnk/currencies";
-import {
-  isBvnkWalletActive,
-} from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { isBvnkWalletActive } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import {
@@ -437,6 +435,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
   return success(c, requirements);
 };
 
+/** Submits collected requirement fields; BVNK requirements are evaluated entirely by the advance handler. */
 export const submitCounterpartyRequirements = async (
   c: ValidatedBodyContext<typeof submitCounterpartyRequirementsSchema>
 ) => {

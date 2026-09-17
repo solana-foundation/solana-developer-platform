@@ -3,8 +3,7 @@ import { describe, it } from "node:test";
 import type { Counterparty } from "@sdp/types";
 import { SdpPaymentsError } from "../../../errors";
 import { countryField, parseCollectedFields } from "../../requirements";
-import type { ValidateCounterpartyOptions } from "../../types";
-import { bvnkOfframpFields, isBvnkOfframpCurrency, validateBvnkCounterparty } from "./counterparty";
+import { isBvnkOfframpCurrency } from "./counterparty";
 
 function counterparty(): Counterparty {
   return {

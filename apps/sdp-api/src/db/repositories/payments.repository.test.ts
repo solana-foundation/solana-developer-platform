@@ -1063,3 +1063,110 @@ describe("PaymentsRepository.getInFlightBvnkOnrampTransferByFundingWallet (postg
     ).toBeNull();
   });
 });
+
+describe("PaymentsRepository.bindBvnkOfframpCredit (postgres)", () => {
+  let repo: PaymentsRepository;
+
+  beforeAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  afterAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  beforeEach(async () => {
+    const db = getDb(env);
+    await db.prepare("DELETE FROM payment_transfers").run();
+    await db.prepare("DELETE FROM custody_wallets").run();
+    await db.prepare("DELETE FROM custody_configs").run();
+    await db.prepare("DELETE FROM projects").run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+      )
+      .bind(TEST_USER.id, TEST_USER.email)
+      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
+    await seedExactWallet();
+    repo = createPostgresPaymentsRepository(db);
+  });
+
+  async function seedBvnkOfframpTransfer(input: {
+    id: string;
+    status: string;
+    fiatAmount: string | null;
+    providerData: Record<string, unknown>;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
+          (id, organization_id, project_id, wallet_id, counterparty_id, source_address,
+           destination_address, token, amount, memo, type, direction, status, provider,
+           delivery_mode, fiat_currency, fiat_amount, provider_data, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'offramp', 'outbound', ?, 'bvnk',
+                 'manual_instructions', 'USD', ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        input.id,
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        TEST_WALLET_ID,
+        "cpty_bvnk_offramp_credit",
+        "src",
+        "dest",
+        "USDC",
+        "10.00",
+        input.status,
+        input.fiatAmount,
+        JSON.stringify(input.providerData),
+        now,
+        now
+      )
+      .run();
+  }
+
+  it("records the credited fiat amount once in provider_data, keeping the quoted fiat_amount", async () => {
+    await seedBvnkOfframpTransfer({
+      id: "xfr_offramp_credit",
+      status: "awaiting_payment",
+      fiatAmount: "1000.00",
+      providerData: { bvnk: { settlementWalletAccountId: "cpa_settlement_credit" } },
+    });
+    const credit = {
+      transferId: "xfr_offramp_credit",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      creditedFiatAmount: "950.00",
+      updatedAt: new Date().toISOString(),
+    };
+
+    const bound = await repo.bindBvnkOfframpCredit(credit);
+
+    expect(bound?.status).toBe("completed");
+    const row = await getDb(env)
+      .prepare("SELECT fiat_amount, provider_data FROM payment_transfers WHERE id = ?")
+      .bind("xfr_offramp_credit")
+      .first<{
+        fiat_amount: string | null;
+        provider_data: { bvnk?: { creditedFiatAmount?: string } };
+      }>();
+    expect(row?.fiat_amount).toBe("1000.00");
+    expect(row?.provider_data.bvnk?.creditedFiatAmount).toBe("950.00");
+
+    const redelivered = await repo.bindBvnkOfframpCredit(credit);
+    expect(redelivered).toBeNull();
+  });
+});

@@ -313,11 +313,15 @@ function FundingWalletRow({
           <dt className="text-tertiary">
             {t("DashboardPayments.counterparty.providerAccountBank")}
           </dt>
-          <dd className="text-primary">{instrument.bankDetails?.name ?? "—"}</dd>
-          <dt className="text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountRouting")}
-          </dt>
-          <dd className="text-primary">{instrument.bankDetails?.bic ?? "—"}</dd>
+          <dd className="text-primary">{instrument.bankDetails.name}</dd>
+          {instrument.bankDetails.bic === undefined ? null : (
+            <>
+              <dt className="text-tertiary">
+                {t("DashboardPayments.counterparty.providerAccountRouting")}
+              </dt>
+              <dd className="text-primary">{instrument.bankDetails.bic}</dd>
+            </>
+          )}
         </dl>
       ) : null}
     </div>
@@ -329,13 +333,17 @@ function FundingWalletRow({
  * expandable virtual account details when live payment instruments exist.
  * Unlike the funding row there is no active-rule line and no action.
  */
-function SettlementWalletRow({ account }: { account: CounterpartyProviderAccount }) {
+function SettlementWalletRow({
+  account,
+}: {
+  account: Extract<CounterpartyProviderAccount, { kind: "virtual_settlement_wallet" }>;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
   const live = account.live;
   const title = `${t("DashboardPayments.counterparty.providerAccountSettlement")} · ${
-    account.fiatCurrency ?? ""
+    account.fiatCurrency
   }`;
   if (live === undefined) {
     return (
@@ -392,11 +400,15 @@ function SettlementWalletRow({ account }: { account: CounterpartyProviderAccount
           <dt className="text-tertiary">
             {t("DashboardPayments.counterparty.providerAccountBank")}
           </dt>
-          <dd className="text-primary">{instrument.bankDetails?.name ?? "—"}</dd>
-          <dt className="text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountRouting")}
-          </dt>
-          <dd className="text-primary">{instrument.bankDetails?.bic ?? "—"}</dd>
+          <dd className="text-primary">{instrument.bankDetails.name}</dd>
+          {instrument.bankDetails.bic === undefined ? null : (
+            <>
+              <dt className="text-tertiary">
+                {t("DashboardPayments.counterparty.providerAccountRouting")}
+              </dt>
+              <dd className="text-primary">{instrument.bankDetails.bic}</dd>
+            </>
+          )}
         </dl>
       ) : null}
     </div>

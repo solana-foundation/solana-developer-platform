@@ -841,7 +841,6 @@ export function createPostgresPaymentsRepository(
           `WITH pt AS (
            UPDATE payment_transfers
            SET status = 'completed',
-               fiat_amount = ?,
                provider_data = provider_data || jsonb_build_object(
                  'bvnk', COALESCE(provider_data->'bvnk', '{}'::jsonb) || ?::jsonb
                ),
@@ -858,7 +857,6 @@ export function createPostgresPaymentsRepository(
            SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(
-          input.creditedFiatAmount,
           JSON.stringify({ creditedFiatAmount: input.creditedFiatAmount }),
           input.updatedAt,
           input.transferId,

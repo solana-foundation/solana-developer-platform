@@ -1219,29 +1219,27 @@ export const bvnkPaymentInstrumentSchema = z.object({
   accountHolderName: z.string(),
   accountNumber: z.string(),
   remittanceInformationPrefix: z.string().optional(),
-  bankDetails: z
-    .object({
-      name: z.string(),
-      bic: z.string(),
-      address: z
-        .object({
-          addressLine1: z.string().optional(),
-          addressLine2: z.string().optional(),
-          city: z.string().optional(),
-          country: z.string().optional(),
-          stateCode: z.string().optional(),
-          postCode: z.string().optional(),
-          fullAddress: z.string().optional(),
-        })
-        .optional(),
-      nid: z
-        .object({
-          value: z.string(),
-          type: z.enum(["ROUTING_NUMBER", "SORT_CODE", "OTHER"]),
-        })
-        .optional(),
-    })
-    .optional(),
+  bankDetails: z.object({
+    name: z.string(),
+    bic: z.string().optional(),
+    address: z
+      .object({
+        addressLine1: z.string().optional(),
+        addressLine2: z.string().optional(),
+        city: z.string().optional(),
+        country: z.string().optional(),
+        stateCode: z.string().optional(),
+        postCode: z.string().optional(),
+        fullAddress: z.string().optional(),
+      })
+      .optional(),
+    nid: z
+      .object({
+        value: z.string(),
+        type: z.enum(["ROUTING_NUMBER", "SORT_CODE", "OTHER"]),
+      })
+      .optional(),
+  }),
 });
 export type BvnkPaymentInstrument = z.infer<typeof bvnkPaymentInstrumentSchema>;
 

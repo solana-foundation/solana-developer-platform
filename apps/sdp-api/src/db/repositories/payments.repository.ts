@@ -364,8 +364,9 @@ export interface PaymentsRepository {
    * the transfer must still be `awaiting_payment` or `settling`, and the
    * fiat credit must not already be recorded (`creditedFiatAmount` key
    * untouched), so a redelivered or racing confirmation can never
-   * double-credit or regress a completed row. The fiat amount column mirrors
-   * the credited amount for the off-ramp read models.
+   * double-credit or regress a completed row. The credited amount lives only
+   * in `provider_data.bvnk.creditedFiatAmount`; the `fiat_amount` column
+   * keeps the quoted amount.
    *
    * @param input - Tenant scope, transfer id, credited amount, and timestamp.
    * @returns The completed transfer, or null when the CAS missed.
