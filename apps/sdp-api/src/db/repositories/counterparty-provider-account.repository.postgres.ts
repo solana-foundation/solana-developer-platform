@@ -359,7 +359,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND counterparty_id = ?
              AND provider = ?
              AND kind = 'customer_link'
-             AND NOT (metadata ? 'session')
+             AND NOT jsonb_exists(metadata, 'session')
            RETURNING *`
         )
         .bind(
