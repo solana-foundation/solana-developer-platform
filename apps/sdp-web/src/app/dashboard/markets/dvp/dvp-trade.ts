@@ -15,7 +15,7 @@ import {
 } from "@sdp/types";
 import { z } from "zod";
 
-export { DVP_TRADE_SIDES, type DvpSettlementAvailability, type DvpTradeSide, type DvpTradeStatus };
+export type { DvpSettlementAvailability, DvpTradeStatus };
 
 /**
  * The caller's standing on a trade, derived per caller by the API.
@@ -42,6 +42,18 @@ export const dvpActionWalletSchema = z.object({
 });
 
 export type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
+
+/**
+ * A DvP endpoint's refusal envelope. Only the message — and, when the refusal
+ * is a structured one, its reason code — is ever read by the dashboard;
+ * everything else the API attached is stripped.
+ */
+export const dvpErrorEnvelopeSchema = z.object({
+  error: z.object({
+    message: z.string(),
+    details: z.object({ reason: z.string() }).partial().optional(),
+  }),
+});
 
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
@@ -169,7 +181,12 @@ const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
   "expired",
 ]);
 
-function isDvpTradeOpen(trade: DvpTrade): boolean {
+/**
+ * Whether a trade can still move: the statuses a settle or cancel is reachable
+ * from, and the ones a leg's funding or reclaim actions answer to. The detail
+ * page's per-leg gates read this rather than re-spelling the set.
+ */
+export function isDvpTradeOpen(trade: { status: DvpTradeStatus }): boolean {
   return OPEN.has(trade.status);
 }
 

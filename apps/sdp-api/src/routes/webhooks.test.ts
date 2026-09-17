@@ -1163,6 +1163,21 @@ describe("BVNK ramp webhook", () => {
     expect(entry?.ruleId).toBe("rule_webhook_verified_1");
     expect(entry?.provisioningError).toBeUndefined();
 
+    // Webhook-driven provisioning creates provider-side payout objects with no
+    // request actor; the system audit entries are what attribution rests on.
+    const auditActions = await getDb(env)
+      .prepare(
+        `SELECT metadata::jsonb ->> 'action' AS action FROM audit_logs
+         WHERE resource_type = 'counterparty' AND resource_id = ?
+           AND metadata::jsonb ->> 'provider' = 'bvnk'
+         ORDER BY created_at ASC`
+      )
+      .bind(COUNTERPARTY_ID)
+      .all<{ action: string }>();
+    expect(auditActions.results.map((row) => row.action)).toEqual(
+      expect.arrayContaining(["bvnk_onramp_wallet_created", "bvnk_onramp_payment_rule_created"])
+    );
+
     getProfile.mockRestore();
     createWallet.mockRestore();
     createRule.mockRestore();

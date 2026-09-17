@@ -70,7 +70,7 @@ function policy(
   };
 }
 
-function harness() {
+function harness(scope: SponsorshipScope = SCOPE) {
   const repository = {
     resolvePolicies: vi
       .fn()
@@ -111,7 +111,7 @@ function harness() {
     signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
   };
-  const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, SCOPE, provider, {
+  const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, provider, {
     repository,
     budgetRedis,
     getNetworkFee: vi.fn().mockResolvedValue(5_000n),
@@ -142,6 +142,23 @@ describe("BudgetedFeePayment", () => {
     const created = repository.createReservation.mock.invocationCallOrder[0];
     const reserved = budgetRedis.reserve.mock.invocationCallOrder[0];
     expect(created).toBeLessThan(reserved);
+  });
+
+  it("charges the scope's cluster network, not the process default", async () => {
+    // A mainnet Earn movement on a devnet-default process must reserve against
+    // the mainnet policies and record a mainnet reservation, or the devnet
+    // budget silently pays for mainnet and the mainnet breaker never sees it.
+    const { feePayment, repository } = harness({ ...SCOPE, cluster: "mainnet-beta" });
+    repository.resolvePolicies.mockResolvedValue([
+      { ...policy("global"), network: "mainnet" },
+      { ...policy("organization"), network: "mainnet" },
+      { ...policy("project"), network: "mainnet" },
+    ]);
+
+    await expect(feePayment.signAndSend(buildTransaction())).resolves.toBe("signature_1");
+
+    expect(repository.resolvePolicies.mock.calls[0]?.[0]).toMatchObject({ network: "mainnet" });
+    expect(repository.createReservation.mock.calls[0]?.[0]).toMatchObject({ network: "mainnet" });
   });
 
   it("excludes the current reservation from the reconstruction snapshot", async () => {

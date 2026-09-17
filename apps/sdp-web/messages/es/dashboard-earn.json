@@ -566,7 +566,13 @@
       "statusFundedTooEarly": "Fondeado",
       "toastReclaimed": "Tu depósito va de regreso.",
       "txFundingSent": "Enviado desde tu Wallet",
-      "viewTransaction": "Ver transacción"
+      "viewTransaction": "Ver transacción",
+      "legRefusedTradeClosing": "Esta operación se está liquidando o cancelando, por lo que no se envió nada.",
+      "closeRefusedFailedOnChain": "La red rechazó la solicitud, así que no se movió nada. Actualiza la operación para ver en qué estado quedó.",
+      "closeRefusedInProgress": "Esta operación ya se está liquidando o cancelando. Vuelve a revisar en un momento.",
+      "closeRefusedLegMoving": "Un tramo todavía se está fondeando o recuperando. Inténtalo de nuevo cuando termine.",
+      "toastCancelSent": "Cancelación enviada. La operación se actualizará cuando se confirme.",
+      "toastSettleSent": "Liquidación enviada. La operación se actualizará cuando se confirme."
     }
   },
   "DashboardEarn": {

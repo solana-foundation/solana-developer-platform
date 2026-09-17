@@ -25,7 +25,12 @@ import {
   type TransactionError,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
-import { getSolanaConfig, resolveSolanaRpcProviderUrls } from "./config";
+import {
+  explicitClusterRpcUrl,
+  getSolanaConfig,
+  resolveDefaultCluster,
+  resolveSolanaRpcProviderUrls,
+} from "./config";
 import { solanaRpcError } from "./errors";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
@@ -229,6 +234,28 @@ export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
   const transports = urls.map((url) => withRequestTimeout(buildTransport(url), timeoutMs));
   return createSolanaRpcFromTransport(
     createFailoverTransport(transports, { stickyKey: urls.join("|") })
+  );
+}
+
+/**
+ * An RPC client for `cluster` on a process that may serve both clusters. An
+ * explicit `SOLANA_<CLUSTER>_RPC_URL` wins for any cluster, the default
+ * cluster included, so a pinned private endpoint is used for every read of
+ * that cluster (Earn execution and sponsorship reconciliation must observe the
+ * same chain). Without one, the process default cluster keeps the full
+ * failover client `createRpc` builds, and the other cluster throws, so a
+ * caller never silently reads or prices against the wrong chain.
+ */
+export function createClusterRpc(
+  env: RpcEnv,
+  cluster: "devnet" | "mainnet-beta",
+  options?: Omit<RpcClientOptions, "rpcUrl">
+): SolanaRpc {
+  const rpcUrl = explicitClusterRpcUrl(env, cluster);
+  if (rpcUrl) return createRpc(env, { ...options, rpcUrl });
+  if (cluster === resolveDefaultCluster(env)) return createRpc(env, options);
+  throw new Error(
+    `No RPC endpoint is configured for ${cluster}: set SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL`
   );
 }
 

@@ -35,6 +35,21 @@ export const RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT = "sdp_api_ramp_webhook_event_ex
 export const RAMP_WEBHOOK_EVENT_DISCARDED_EVENT = "sdp_api_ramp_webhook_event_discarded";
 
 /**
+ * The identity a parked row is stamped with; a later deploy changes it.
+ * Deliberately the image build SHA, NOT K_REVISION and not API_VERSION: the
+ * api service parks rows (background apply) and the worker re-arms them, and
+ * Cloud Run gives every service its own revision name, while API_VERSION is
+ * static configuration that deploys do not bump. Both services deploy from
+ * the same image, so its build SHA is shared by the two sides and moves
+ * exactly when a deploy ships. A runtime without one (local, compose) uses a
+ * fixed placeholder: no deploys happen there, so nothing re-arms.
+ */
+function currentAppRevision(env: Env): string {
+  const sha = env.SDP_BUILD_SHA?.trim();
+  return sha ? sha : "local";
+}
+
+/**
  * Applies one persisted event and discharges its row. On failure the row
  * keeps its payload and error for the next replay pass, or parks as `failed`
  * once attempts are exhausted — the alertable state, because it means a
@@ -50,12 +65,15 @@ export async function applyStoredRampWebhookEvent(
   const events = createPostgresRampWebhookEventsRepository(getDb(env));
   if (!isWebhookRampProvider(row.provider)) {
     // Unreachable while inserts come from the registry; a row from a retired
-    // provider parks immediately rather than burning replay attempts.
+    // provider parks immediately rather than burning replay attempts. NOT
+    // terminal: a later release can restore the processor, and the deploy
+    // re-arm should hand the row to it.
     await events.recordFailure({
       id: row.id,
       error: `no webhook processor for provider ${row.provider}`,
       attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      appRevision: currentAppRevision(env),
     });
     return false;
   }
@@ -87,6 +105,8 @@ export async function applyStoredRampWebhookEvent(
       error: message,
       attempts: spentAttempts,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      appRevision: currentAppRevision(env),
+      terminal,
     });
     if (spentAttempts >= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS) {
       logEvent("error", {
@@ -111,12 +131,30 @@ export async function applyStoredRampWebhookEvent(
 export async function replayRampWebhookEvents(env: Env): Promise<number> {
   const events = createPostgresRampWebhookEventsRepository(getDb(env));
   const cutoff = new Date(Date.now() - RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS).toISOString();
+  const appRevision = currentAppRevision(env);
+
+  // A deploy may carry the fix a parked row was waiting for: rows parked by a
+  // different revision go back to pending with fresh attempts, so the happy
+  // path after an incident is "ship the fix" with no manual re-arm. Rows the
+  // CURRENT revision parked stay parked — same code, same payload, same
+  // outcome.
+  for (const row of await events.rearmParkedByOtherRevisions(appRevision)) {
+    logEvent("info", {
+      event: "sdp_api_ramp_webhook_event_rearmed",
+      flow: "ramp-settlement",
+      webhook_event_id: row.id,
+      provider: row.provider,
+      environment: row.environment,
+      app_revision: appRevision,
+    });
+  }
 
   // A crash after the final claim leaves a pending row every claim excludes:
   // park it as failed and page, instead of stranding it silently.
   for (const row of await events.parkExhausted({
     updatedBefore: cutoff,
     maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+    appRevision,
   })) {
     logEvent("error", {
       event: RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT,

@@ -238,7 +238,11 @@
       "error": "Impossible de charger l'activité.",
       "recentTitle": "Activité récente",
       "viewAll": "Tout afficher",
-      "actorSystem": "Système"
+      "actorSystem": "Système",
+      "createToken": "Créer un Token",
+      "createAssetProfile": "Créer un profil d'actif",
+      "approveRecipient": "Approuver le bénéficiaire",
+      "removeRecipient": "Supprimer le bénéficiaire"
     },
     "permissions": {
       "managedBadge": "Géré par SDP",
@@ -572,7 +576,8 @@
       "pauseImpactWarning": "Cela affecte chaque détenteur : ils ne pourront plus envoyer ce Token ni effectuer de paiements avec. La création de nouveaux Tokens sera également bloquée une fois la pause confirmée.",
       "unpauseImpactWarning": "Une fois confirmé, cela lève la pause sur l'ensemble du Token. Les détenteurs éligibles peuvent à nouveau envoyer ce Token et effectuer des paiements, et les Wallets autorisés peuvent créer de nouveaux Tokens. Assurez-vous que le motif de la pause a été résolu.",
       "requiredSignerAmbiguous": "Plusieurs Wallets contrôlés correspondent au Signer requis. Résolvez le conflit de Wallet avant de réessayer.",
-      "signingUnavailable": "La signature est désactivée pour ce Wallet."
+      "signingUnavailable": "La signature est désactivée pour ce Wallet.",
+      "supplyLocked": "Supply verrouillée"
     },
     "forms": {
       "saveMetadata": "Enregistrer les métadonnées",

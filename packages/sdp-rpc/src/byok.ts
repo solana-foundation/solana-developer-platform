@@ -9,6 +9,7 @@ import {
   withOptionalApiKeyTemplate,
 } from "./config";
 import { SdpRpcError } from "./errors";
+import { maskCredentialShapes } from "./relay";
 
 /**
  * A tenant supplies the same pair the operator supplies today: an endpoint and
@@ -265,17 +266,7 @@ export function maskTenantEndpoint(endpoint: string, apiKey: string): string {
     }
   }
 
-  try {
-    const parsed = new URL(masked);
-    for (const name of parsed.searchParams.keys()) {
-      if (name.toLowerCase().includes("key") || name.toLowerCase().includes("token")) {
-        parsed.searchParams.set(name, "***");
-      }
-    }
-    return parsed.toString();
-  } catch {
-    return masked;
-  }
+  return maskCredentialShapes(masked);
 }
 
 /**

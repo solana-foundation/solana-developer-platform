@@ -89,6 +89,11 @@
       "import": "./src/ramps/providers/bvnk/counterparty.ts",
       "default": "./src/ramps/providers/bvnk/counterparty.ts"
     },
+    "./ramps/providers/bvnk/currencies": {
+      "types": "./src/ramps/providers/bvnk/currencies.ts",
+      "import": "./src/ramps/providers/bvnk/currencies.ts",
+      "default": "./src/ramps/providers/bvnk/currencies.ts"
+    },
     "./ramps/providers/bvnk/provider-data": {
       "types": "./src/ramps/providers/bvnk/provider-data.ts",
       "import": "./src/ramps/providers/bvnk/provider-data.ts",

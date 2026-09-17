@@ -1,6 +1,7 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
+import { dvpErrorEnvelopeSchema } from "../dvp-trade";
 
 /**
  * What the create form needs to offer real choices instead of blank fields.
@@ -199,8 +200,8 @@ export async function fetchDvpCreateContext(
         tokens: [],
         counterpartyAccounts: [],
         error:
-          z.object({ error: z.object({ message: z.string() }) }).safeParse(walletsBody).data?.error
-            .message ?? `Wallet list failed (${walletsResponse.status}).`,
+          dvpErrorEnvelopeSchema.safeParse(walletsBody).data?.error.message ??
+          `Wallet list failed (${walletsResponse.status}).`,
       };
     }
 

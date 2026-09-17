@@ -61,12 +61,3 @@ export function recallVaultWithdrawalFloor(fingerprint: string): string | null |
 export function forgetVaultWithdrawalFloor(fingerprint: string): void {
   vaultWithdrawalFloorMemo.forget(fingerprint);
 }
-
-/**
- * Test-only: clear this flow's memo tier so specs are order-independent.
- *
- * @internal
- */
-export function resetVaultWithdrawalTrackingStateForTests(): void {
-  vaultWithdrawalFloorMemo.resetForTests();
-}

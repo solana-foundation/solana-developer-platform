@@ -17,7 +17,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals } from "./earn-decimal";
+import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd } from "./earn-format";
 import { earnMintAsset, shortenMarketAddress, TransactionLink } from "./earn-market-presentation";
@@ -522,9 +522,7 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
           action={
             <EarnAmountMaxButton
               disabled={
-                submitting ||
-                availableAmount === undefined ||
-                compareUnsignedDecimals(availableAmount, "0") !== 1
+                submitting || availableAmount === undefined || !isPositiveDecimal(availableAmount)
               }
               label={t("DashboardEarn.vaultWithdraw.max")}
               onClick={onMax}
