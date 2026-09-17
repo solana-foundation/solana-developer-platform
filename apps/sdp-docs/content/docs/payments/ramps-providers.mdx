@@ -3,7 +3,7 @@ title: Ramp providers
 description: MoonPay, Lightspark, BVNK, MoneyGram, Coinbase, Mural, Stripe, and Hercle — capability matrix, configuration, and per-provider notes.
 ---
 
-SDP currently integrates seven ramp providers. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/quote` and `POST /v1/payments/ramps/offramp/quote` selects between them.
+SDP currently integrates eight ramp providers. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/quote` and `POST /v1/payments/ramps/offramp/quote` selects between them.
 
 ## Sandbox vs production selection
 
@@ -137,7 +137,7 @@ Requirements flow: the first POST collects the company registration number, the 
 
 ## Provider gating
 
-Even when all seven providers' env vars are populated, an org can be restricted to a subset. This is [**Provider Availability**](/docs/reference/provider-onboarding): a provider must be configured for the deployment and either generally available or manually activated for the organization. SDP checks this on every ramp call — if the org lacks availability for the requested provider, the call returns an error. To activate or change provider availability for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
+Even when all eight providers' env vars are populated, an org can be restricted to a subset. This is [**Provider Availability**](/docs/reference/provider-onboarding): a provider must be configured for the deployment and either generally available or manually activated for the organization. SDP checks this on every ramp call — if the org lacks availability for the requested provider, the call returns an error. To activate or change provider availability for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
 
 ## Choosing a provider
 
