@@ -1,5 +1,5 @@
 import type { Country, CountryCode } from "./countries";
-import type { BvnkProviderAccountLiveState } from "./payments";
+import type { BvnkProviderAccountLiveState, BvnkSettlementWalletLiveState } from "./payments";
 import type { RampProviderId } from "./provider-access";
 
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
@@ -118,9 +118,12 @@ interface CounterpartyProviderAccountBase {
   /**
    * Just-in-time provider state for the row, fetched from BVNK at request
    * time and never persisted or cached across requests. Present only for
-   * corridors BVNK serves live.
+   * corridors BVNK serves live. `BvnkProviderAccountLiveState` (with an
+   * active payment rule) maps to `virtual_funding_wallet` rows;
+   * `BvnkSettlementWalletLiveState` (no rule) maps to
+   * `virtual_settlement_wallet` rows.
    */
-  live?: BvnkProviderAccountLiveState;
+  live?: BvnkProviderAccountLiveState | BvnkSettlementWalletLiveState;
 }
 
 /**
@@ -147,7 +150,7 @@ export type CounterpartyProviderAccount =
       paymentRail: string | null;
     })
   | (CounterpartyProviderAccountBase & {
-      kind: "merchant_wallet";
+      kind: "virtual_settlement_wallet";
       fiatCurrency: string;
       destinationCountry: CountryCode | null;
       paymentRail: string | null;
@@ -163,7 +166,7 @@ export type CounterpartyProviderAccountKind =
   | "customer_link"
   | "payout_account"
   | "virtual_funding_wallet"
-  | "merchant_wallet";
+  | "virtual_settlement_wallet";
 
 export interface ListCounterpartyProviderAccountsResponse {
   accounts: CounterpartyProviderAccount[];

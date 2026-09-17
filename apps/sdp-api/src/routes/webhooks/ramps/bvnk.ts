@@ -2,21 +2,16 @@ import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   isBvnkWalletActive,
   readBvnkOfframpReference,
-  withBvnkOfframpWalletStatus,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { bvnkOnrampTransferProviderDataSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import { NON_TERMINAL_RAMP_TRANSFER_STATUSES, type SdpEnvironment } from "@sdp/types";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import type { SdpEnvironment } from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { buildInClause } from "@/db/postgres-utils";
-import {
-  createSystemCounterpartiesRepository,
-  createSystemPaymentsRepository,
-} from "@/db/repositories";
-import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
+import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import { createSystemPaymentsRepository } from "@/db/repositories";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { resolveBvnkOnrampRule } from "@/routes/payments/handlers/ramps/bvnk";
@@ -189,31 +184,35 @@ async function handleBvnkFundingWalletWebhook(
   }
 }
 
-async function handleBvnkOfframpWalletWebhook(
+/**
+ * Flips a virtual settlement wallet row active with the wallet-status
+ * webhook's provider status; stores nothing else.
+ *
+ * @param env - Process environment used for database access.
+ * @param wallet - The settlement wallet provider-account row.
+ * @param status - The provider status reported by the webhook.
+ * @returns Resolves once the row is updated.
+ */
+async function handleBvnkSettlementWalletWebhook(
   env: Env,
   wallet: CounterpartyProviderAccountRow,
   status: string
 ): Promise<void> {
-  if (wallet.fiat_currency === null) {
-    throw new TerminalRampWebhookError(
-      `BVNK webhook merchant wallet ${wallet.id} has no fiat currency`
-    );
-  }
-  const repo = createSystemCounterpartiesRepository(env);
-  const counterparty = await repo.findActiveCounterpartyById(wallet.counterparty_id);
-  if (!counterparty) {
-    throw new TerminalRampWebhookError(
-      `BVNK webhook counterparty ${wallet.counterparty_id} was not found or is not active`
-    );
-  }
-  // TODO(PRO-1824): Move BVNK merchant-wallet state to counterparty_provider_accounts.
-  await repo.mutateProviderData({
-    counterpartyId: counterparty.id,
-    organizationId: counterparty.organization_id,
-    projectId: counterparty.project_id,
-    mutate: (providerData) =>
-      withBvnkOfframpWalletStatus(providerData, wallet.fiat_currency as RampFiatCurrency, status),
+  const updated = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(env)
+  ).updateVirtualSettlementWalletStatus({
+    organizationId: wallet.organization_id,
+    projectId: wallet.project_id,
+    counterpartyId: wallet.counterparty_id,
+    provider: "bvnk",
+    id: wallet.id,
+    providerStatus: status,
   });
+  if (updated === null) {
+    throw new TerminalRampWebhookError(
+      `BVNK webhook settlement wallet ${wallet.id} was not found in its tenant scope`
+    );
+  }
 }
 
 async function applyBvnkWalletEvent(
@@ -227,8 +226,10 @@ async function applyBvnkWalletEvent(
         await handleBvnkFundingWalletWebhook(env, wallet, data.status);
       }
       return;
-    case "merchant_wallet":
-      await handleBvnkOfframpWalletWebhook(env, wallet, data.status);
+    case "virtual_settlement_wallet":
+      if (isBvnkWalletActive(data.status)) {
+        await handleBvnkSettlementWalletWebhook(env, wallet, data.status);
+      }
       return;
     default:
       getLogger().info(
@@ -238,42 +239,33 @@ async function applyBvnkWalletEvent(
 }
 
 /**
- * Applies an off-ramp channel settlement transition with its terminal amount.
+ * Applies the confirmed off-ramp channel transition in one compare-and-swap:
+ * CAS's the transfer from `awaiting_payment` or `settling` to `completed` and
+ * records the credited fiat amount once (a JSONB guard refuses to overwrite an
+ * earlier credit). A redelivered or racing confirmation is a no-op.
  *
  * @param env - Process environment used for database access.
- * @param transferId - SDP off-ramp transfer identifier.
- * @param status - Settlement status to apply.
- * @param walletAmount - Confirmed wallet amount, when BVNK has supplied one.
+ * @param transfer - The resolved BVNK off-ramp transfer.
+ * @param walletAmount - Confirmed fiat amount BVNK credited to the wallet.
  * @returns Resolves once the guarded transfer update completes.
  */
 async function settleBvnkOfframpChannel(
   env: Env,
-  transferId: string,
-  status: "settling" | "completed",
-  walletAmount: string | null
+  transfer: PaymentTransferRow,
+  walletAmount: string
 ): Promise<void> {
-  const placeholders = buildInClause(NON_TERMINAL_RAMP_TRANSFER_STATUSES.length);
-  const updatedAt = new Date().toISOString();
-  await getDb(env)
-    .prepare(
-      `UPDATE payment_transfers
-       SET status = ?,
-           fiat_amount = CASE WHEN ?::boolean THEN ? ELSE fiat_amount END,
-           updated_at = ?
-       WHERE id = ?
-         AND provider = 'bvnk'
-         AND type = 'offramp'
-         AND status IN (${placeholders})`
-    )
-    .bind(
-      status,
-      walletAmount !== null,
-      walletAmount,
-      updatedAt,
-      transferId,
-      ...NON_TERMINAL_RAMP_TRANSFER_STATUSES
-    )
-    .run();
+  const updated = await createSystemPaymentsRepository(env).bindBvnkOfframpCredit({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    creditedFiatAmount: walletAmount,
+    updatedAt: new Date().toISOString(),
+  });
+  if (updated === null) {
+    getLogger().info(
+      `[bvnk webhook] channel confirmation for transfer ${transfer.id} lost the completion claim or was already credited`
+    );
+  }
 }
 
 function bvnkChannelTransferId(
@@ -302,7 +294,27 @@ async function handleBvnkPaymentChannelTransactionDetected(
   if (transferId === undefined) {
     return;
   }
-  await settleBvnkOfframpChannel(env, transferId, "settling", null);
+  const payments = createSystemPaymentsRepository(env);
+  const transfer = await payments.getBvnkOfframpTransferById({ transferId });
+  if (transfer === null) {
+    getLogger().info(
+      `[bvnk webhook] channel ${event.data.channelId} references unknown off-ramp transfer ${transferId}`
+    );
+    return;
+  }
+  const settled = await payments.updateTransferStatusGuarded({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    fromStatuses: ["awaiting_payment"],
+    toStatus: "settling",
+    updatedAt: new Date().toISOString(),
+  });
+  if (settled === null) {
+    getLogger().warn(
+      `[bvnk webhook] channel ${event.data.channelId} lost the settling claim for transfer ${transferId}`
+    );
+  }
 }
 
 async function handleBvnkPaymentChannelTransactionConfirmed(
@@ -313,7 +325,15 @@ async function handleBvnkPaymentChannelTransactionConfirmed(
   if (transferId === undefined) {
     return;
   }
-  await settleBvnkOfframpChannel(env, transferId, "completed", event.data.walletAmount);
+  const payments = createSystemPaymentsRepository(env);
+  const transfer = await payments.getBvnkOfframpTransferById({ transferId });
+  if (transfer === null) {
+    getLogger().info(
+      `[bvnk webhook] channel ${event.data.channelId} references unknown off-ramp transfer ${transferId}`
+    );
+    return;
+  }
+  await settleBvnkOfframpChannel(env, transfer, event.data.walletAmount);
 }
 
 export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParsedWebhook> {

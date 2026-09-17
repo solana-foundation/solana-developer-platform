@@ -177,11 +177,12 @@ interface ProviderAccountGroup {
   customerLink: Extract<CounterpartyProviderAccount, { kind: "customer_link" }> | undefined;
   payoutAccounts: Extract<CounterpartyProviderAccount, { kind: "payout_account" }>[];
   fundingWallets: Extract<CounterpartyProviderAccount, { kind: "virtual_funding_wallet" }>[];
+  settlementWallets: Extract<CounterpartyProviderAccount, { kind: "virtual_settlement_wallet" }>[];
 }
 
 /**
  * Groups provider-account rows by provider, separating the customer-link
- * identity row from the payout rows.
+ * identity row from the payout, funding-wallet, and settlement-wallet rows.
  *
  * @param accounts - Flat provider-account rows from the API.
  * @returns One group per provider in first-seen order.
@@ -196,6 +197,7 @@ function groupProviderAccounts(accounts: CounterpartyProviderAccount[]): Provide
         customerLink: undefined,
         payoutAccounts: [],
         fundingWallets: [],
+        settlementWallets: [],
       };
       groups.set(account.provider, group);
     }
@@ -207,6 +209,9 @@ function groupProviderAccounts(accounts: CounterpartyProviderAccount[]): Provide
     }
     if (account.kind === "virtual_funding_wallet") {
       group.fundingWallets.push(account);
+    }
+    if (account.kind === "virtual_settlement_wallet") {
+      group.settlementWallets.push(account);
     }
   }
   return [...groups.values()];
@@ -259,6 +264,7 @@ function FundingWalletRow({
     );
   }
   const instrument = live.paymentInstruments[0];
+  const activeRule = live.state === "ok" && "activeRule" in live ? live.activeRule : undefined;
   return (
     <div className="border-t border-border-default px-4 py-2.5 text-sm">
       {instrument === undefined ? (
@@ -283,11 +289,11 @@ function FundingWalletRow({
           </span>
         </button>
       )}
-      {live.activeRule !== undefined && live.activeRule !== null ? (
+      {activeRule !== undefined && activeRule !== null ? (
         <p className="mt-1 pl-6 text-xs text-tertiary">
           {t("DashboardPayments.counterparty.providerAccountRuleActive")} →{" "}
-          {shortenAddress(live.activeRule.destinationAddress)} · {live.activeRule.cryptoCurrency}
-          {live.activeRule.transferId === null ? null : ` · ${live.activeRule.transferId}`}
+          {shortenAddress(activeRule.destinationAddress)} · {activeRule.cryptoCurrency}
+          {activeRule.transferId === null ? null : ` · ${activeRule.transferId}`}
         </p>
       ) : (
         <p className="mt-1 pl-6 text-xs text-tertiary">
@@ -318,14 +324,93 @@ function FundingWalletRow({
   );
 }
 
+/**
+ * Renders a BVNK settlement-wallet row: "Settlement · fiat · balance" with
+ * expandable virtual account details when live payment instruments exist.
+ * Unlike the funding row there is no active-rule line and no action.
+ */
+function SettlementWalletRow({ account }: { account: CounterpartyProviderAccount }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const [open, setOpen] = useState(false);
+  const live = account.live;
+  const title = `${t("DashboardPayments.counterparty.providerAccountSettlement")} · ${
+    account.fiatCurrency ?? ""
+  }`;
+  if (live === undefined) {
+    return (
+      <div className="flex items-center border-t border-border-default px-4 py-2.5 text-sm">
+        <span className="truncate text-sm text-primary">{title}</span>
+      </div>
+    );
+  }
+  if (live.state === "unavailable") {
+    return (
+      <div className="border-t border-border-default px-4 py-2.5 text-sm">
+        <span className="truncate text-sm text-primary">{title}</span>
+        <p className="mt-1 text-xs text-tertiary">
+          {live.code}: {live.message}
+        </p>
+      </div>
+    );
+  }
+  const instrument = live.paymentInstruments[0];
+  return (
+    <div className="border-t border-border-default px-4 py-2.5 text-sm">
+      {instrument === undefined ? (
+        <span className="truncate text-sm text-primary">
+          {title} · {formatCurrencyAmount(live.balance.amount, locale)}
+        </span>
+      ) : (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <ChevronDownIcon
+            className={cn(
+              "size-4 shrink-0 text-secondary transition-transform",
+              !open && "-rotate-90"
+            )}
+          />
+          <span className="truncate text-sm text-primary">
+            {title} · {formatCurrencyAmount(live.balance.amount, locale)}
+          </span>
+        </button>
+      )}
+      {open && instrument !== undefined ? (
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 pl-6 text-xs">
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountAccountHolder")}
+          </dt>
+          <dd className="text-primary">{instrument.accountHolderName}</dd>
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountNumber")}
+          </dt>
+          <dd className="text-primary">{instrument.accountNumber}</dd>
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountBank")}
+          </dt>
+          <dd className="text-primary">{instrument.bankDetails?.name ?? "—"}</dd>
+          <dt className="text-tertiary">
+            {t("DashboardPayments.counterparty.providerAccountRouting")}
+          </dt>
+          <dd className="text-primary">{instrument.bankDetails?.bic ?? "—"}</dd>
+        </dl>
+      ) : null}
+    </div>
+  );
+}
+
 function ProviderAccountCard({ group }: { group: ProviderAccountGroup }) {
   const t = useTranslations();
   const [open, setOpen] = useState(true);
-  const { provider, customerLink, payoutAccounts } = group;
-  const fundingWallets = group.fundingWallets;
+  const { provider, customerLink, payoutAccounts, fundingWallets, settlementWallets } = group;
   const expandable =
     payoutAccounts.length > 0 ||
     fundingWallets.length > 0 ||
+    settlementWallets.length > 0 ||
     RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
   const headers = [
     t("DashboardPayments.counterparty.providerAccountCorridor"),
@@ -380,6 +465,9 @@ function ProviderAccountCard({ group }: { group: ProviderAccountGroup }) {
       {customerLink !== undefined ? <CustomerLinkRow /> : null}
       {fundingWallets.map((wallet) => (
         <FundingWalletRow key={wallet.id} account={wallet} />
+      ))}
+      {settlementWallets.map((wallet) => (
+        <SettlementWalletRow key={wallet.id} account={wallet} />
       ))}
       {expandable && open ? (
         payoutAccounts.length === 0 ? (

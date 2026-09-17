@@ -5,6 +5,7 @@ import type {
   CompleteCustomerLinkInput,
   CompleteExternalAccountInput,
   CompleteVirtualFundingWalletReferenceInput,
+  CompleteVirtualSettlementWalletReferenceInput,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
   GetAccountByKindAndCurrencyInput,
@@ -12,8 +13,10 @@ import type {
   GetExternalAccountByIdInput,
   GetProviderAccountByExternalReferenceInput,
   GetVirtualFundingWalletInput,
+  GetVirtualSettlementWalletInput,
   InsertPendingExternalAccountInput,
   InsertPendingVirtualFundingWalletInput,
+  InsertPendingVirtualSettlementWalletInput,
   InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
@@ -21,11 +24,13 @@ import type {
   PatchAccountMetadataInput,
   UpdateExternalAccountStatusInput,
   UpdateVirtualFundingWalletStatusInput,
+  UpdateVirtualSettlementWalletStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
   bvnkCustomerLinkMetadataSchema,
   bvnkFundingWalletMetadataSchema,
+  bvnkSettlementWalletMetadataSchema,
   counterpartyProviderAccountRowSchema,
   generateCounterpartyProviderAccountId,
   pendingCustomerLinkRowSchema,
@@ -46,6 +51,9 @@ function assertProviderAccountMetadata(
 ): void {
   if (kind === "virtual_funding_wallet" && provider === "bvnk") {
     bvnkFundingWalletMetadataSchema.parse(metadata);
+  }
+  if (kind === "virtual_settlement_wallet" && provider === "bvnk") {
+    bvnkSettlementWalletMetadataSchema.parse(metadata);
   }
   if (kind === "customer_link" && provider === "bvnk") {
     bvnkCustomerLinkMetadataSchema.parse(metadata);
@@ -182,6 +190,31 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return row === null ? null : parseProviderAccountRow(row);
     },
 
+    async getVirtualSettlementWallet(input: GetVirtualSettlementWalletInput) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'virtual_settlement_wallet'
+             AND fiat_currency = ?
+           ORDER BY (status = 'archived') ASC, created_at ASC
+           LIMIT 1`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.fiatCurrency
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
     async getProviderAccountByExternalReference(input: GetProviderAccountByExternalReferenceInput) {
       const row = await db
         .prepare(
@@ -251,6 +284,63 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return row === null ? null : parseProviderAccountRow(row);
     },
 
+    async insertPendingVirtualSettlementWallet(input: InsertPendingVirtualSettlementWalletInput) {
+      const row = await db
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+             id, organization_id, project_id, counterparty_id, provider,
+             provider_customer_reference, kind, fiat_currency, status
+           ) VALUES (?, ?, ?, ?, ?, NULL, 'virtual_settlement_wallet', ?, 'active')
+           RETURNING *`
+        )
+        .bind(
+          generateCounterpartyProviderAccountId(),
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.fiatCurrency
+        )
+        .first<Record<string, unknown>>();
+
+      if (row === null) {
+        throw internalError("Virtual settlement-wallet claim escaped its tenant scope.");
+      }
+      return parseProviderAccountRow(row);
+    },
+
+    async completeVirtualSettlementWalletReference(
+      input: CompleteVirtualSettlementWalletReferenceInput
+    ) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET external_account_reference = ?,
+               provider_status = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'virtual_settlement_wallet'
+             AND external_account_reference IS NULL
+           RETURNING *`
+        )
+        .bind(
+          input.externalAccountReference,
+          input.providerStatus,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
     async updateVirtualFundingWalletStatus(input: UpdateVirtualFundingWalletStatusInput) {
       const row = await db
         .prepare(
@@ -264,6 +354,34 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND counterparty_id = ?
              AND provider = ?
              AND kind = 'virtual_funding_wallet'
+           RETURNING *`
+        )
+        .bind(
+          input.providerStatus,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async updateVirtualSettlementWalletStatus(input: UpdateVirtualSettlementWalletStatusInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET status = 'active',
+               provider_status = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'virtual_settlement_wallet'
            RETURNING *`
         )
         .bind(
@@ -513,7 +631,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         "organization_id = ?",
         "project_id = ?",
         "counterparty_id = ?",
-        "kind IN ('payout_account', 'virtual_funding_wallet', 'customer_link')",
+        "kind IN ('payout_account', 'virtual_funding_wallet', 'virtual_settlement_wallet', 'customer_link')",
         "status IN ('active', 'archived')",
       ];
       const bindings: string[] = [input.organizationId, input.projectId, input.counterpartyId];

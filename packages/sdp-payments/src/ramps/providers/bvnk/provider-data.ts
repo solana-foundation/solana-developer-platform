@@ -1,9 +1,7 @@
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
-import type { CounterpartyRow } from "../../../counterparty";
 import { badRequest, internalError } from "../../../errors";
 import { hashString } from "../../../hash";
-import { readRecord } from "../../../json";
 
 export interface BvnkRuleEntityAddress {
   addressLine1: string;
@@ -164,19 +162,6 @@ export function isBvnkWalletActive(status: string | null): boolean {
   return status !== null && BVNK_WALLET_ACTIVE_STATUSES.has(status.toUpperCase());
 }
 
-export function readBvnkData(
-  providerData: CounterpartyRow["provider_data"]
-): Record<string, unknown> {
-  const bvnk = providerData.bvnk;
-  return bvnk && typeof bvnk === "object" ? (bvnk as Record<string, unknown>) : {};
-}
-
-/** Merchant-owned BVNK off-ramp wallet, one per fiat currency. */
-export interface BvnkOfframpWallet {
-  id: string;
-  status: string;
-}
-
 /**
  * Builds the display-only BVNK wallet name for the merchant-owned off-ramp
  * wallet, one per (counterparty, fiat). Webhook-to-row mapping keys on the
@@ -209,99 +194,4 @@ export function buildBvnkOnrampWalletName(
   fiatCurrency: RampFiatCurrency
 ): string {
   return `sdp:onramp:${counterpartyId}:${fiatCurrency}`;
-}
-
-export function readBvnkOfframpWallets(
-  providerData: CounterpartyRow["provider_data"]
-): Record<string, BvnkOfframpWallet> {
-  const offramp = readRecord(readBvnkData(providerData).offramp)?.wallets;
-  return offramp && typeof offramp === "object"
-    ? (offramp as Record<string, BvnkOfframpWallet>)
-    : {};
-}
-
-export function withBvnkOfframpWalletStatus(
-  providerData: CounterpartyRow["provider_data"],
-  fiatCurrency: RampFiatCurrency,
-  status: string
-): CounterpartyRow["provider_data"] {
-  const bvnk = readBvnkData(providerData);
-  const offramp =
-    bvnk.offramp && typeof bvnk.offramp === "object"
-      ? (bvnk.offramp as Record<string, unknown>)
-      : {};
-  const wallets = readBvnkOfframpWallets(providerData);
-  return {
-    ...providerData,
-    bvnk: {
-      ...bvnk,
-      offramp: {
-        ...offramp,
-        wallets: {
-          ...wallets,
-          [fiatCurrency]: { ...wallets[fiatCurrency], status },
-        },
-      },
-    },
-  };
-}
-
-export function readBvnkOfframpWallet(
-  providerData: CounterpartyRow["provider_data"],
-  fiatCurrency: string
-): BvnkOfframpWallet | undefined {
-  return readBvnkOfframpWallets(providerData)[fiatCurrency];
-}
-
-/** A registered off-ramp payout beneficiary. PII-light: raw account details are not stored. */
-export interface BvnkOfframpBeneficiary {
-  /** `${fiatCurrency}:${hash(collectedData)}` — content-addressed so distinct bank details never collide. */
-  key: string;
-  fiatCurrency: string;
-  accountType: string;
-  createdAt: string;
-}
-
-export function readBvnkOfframpBeneficiaries(
-  providerData: CounterpartyRow["provider_data"]
-): Record<string, unknown> {
-  const beneficiaries = readRecord(readBvnkData(providerData).offramp)?.beneficiaries;
-  return beneficiaries && typeof beneficiaries === "object"
-    ? (beneficiaries as Record<string, unknown>)
-    : {};
-}
-
-function parseBvnkOfframpBeneficiary(key: string, value: unknown): BvnkOfframpBeneficiary {
-  const { fiatCurrency, accountType, createdAt } = value as {
-    fiatCurrency?: unknown;
-    accountType?: unknown;
-    createdAt?: unknown;
-  };
-  if (
-    typeof fiatCurrency !== "string" ||
-    typeof accountType !== "string" ||
-    typeof createdAt !== "string"
-  ) {
-    throw internalError(`Malformed BVNK off-ramp beneficiary "${key}" in provider_data`);
-  }
-  return { key, fiatCurrency, accountType, createdAt };
-}
-
-export function readBvnkOfframpBeneficiaryByKey(
-  providerData: CounterpartyRow["provider_data"],
-  key: string
-): BvnkOfframpBeneficiary | null {
-  const value = readBvnkOfframpBeneficiaries(providerData)[key];
-  return value === undefined ? null : parseBvnkOfframpBeneficiary(key, value);
-}
-
-export function latestBvnkOfframpBeneficiary(
-  providerData: CounterpartyRow["provider_data"],
-  fiatCurrency: string
-): BvnkOfframpBeneficiary | null {
-  const entries = Object.entries(readBvnkOfframpBeneficiaries(providerData))
-    .filter(([key]) => key.startsWith(`${fiatCurrency}:`))
-    .map(([key, value]) => parseBvnkOfframpBeneficiary(key, value))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return entries[0] ?? null;
 }

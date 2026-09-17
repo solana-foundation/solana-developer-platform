@@ -1,107 +1,19 @@
-import type { Counterparty } from "@sdp/types";
-import type { CounterpartyRequirements, RequirementField } from "@sdp/types/ramp-requirements";
-import { badRequest, unsupportedCounterparty } from "../../../errors";
-import { readyCounterparty, textField } from "../../requirements";
-import type { ValidateCounterpartyOptions } from "../../types";
-import {
-  type BvnkRuleEntity,
-  type BvnkRuleEntityAddress,
-  isBvnkWalletActive,
-  latestBvnkOfframpBeneficiary,
-  readBvnkOfframpWallet,
-} from "./provider-data";
+import type { BvnkRuleEntity, BvnkRuleEntityAddress } from "./provider-data";
 import type { BvnkContactV3, BvnkContactV3Address } from "./schemas";
 
-interface BvnkOfframpSpec {
-  accountType: string;
-  fields: readonly RequirementField[];
-}
+/** Fiat currencies BVNK off-ramp settles into the settlement wallet. Withdraw-to-bank is deferred, so this gates the direction only. */
+const BVNK_OFFRAMP_CURRENCIES = ["USD", "EUR"] as const;
 
-/** Verified BVNK payout corridors: each fiat maps to its bank-detail field set. */
-const BVNK_OFFRAMP_SPECS = {
-  USD: {
-    accountType: "ACH",
-    fields: [
-      textField({
-        key: "accountNumber",
-        label: "Account number",
-        required: true,
-        pattern: "^[0-9]{4,17}$",
-      }),
-      textField({
-        key: "routingNumber",
-        label: "Routing number",
-        required: true,
-        pattern: "^[0-9]{9}$",
-        placeholder: "021000021",
-      }),
-    ],
-  },
-  EUR: {
-    accountType: "SEPA_CT",
-    fields: [
-      textField({
-        key: "iban",
-        label: "IBAN",
-        required: true,
-        pattern: "^[A-Z]{2}[0-9A-Z]{13,32}$",
-        placeholder: "DE89370400440532013000",
-      }),
-    ],
-  },
-} as const satisfies Record<string, BvnkOfframpSpec>;
+type BvnkOfframpCurrency = (typeof BVNK_OFFRAMP_CURRENCIES)[number];
 
-type BvnkOfframpCurrency = keyof typeof BVNK_OFFRAMP_SPECS;
-
+/**
+ * Whether BVNK off-ramp settles in the given fiat currency.
+ *
+ * @param value - Fiat currency code, for example `USD`.
+ * @returns True when the currency is an off-ramp settlement currency.
+ */
 export function isBvnkOfframpCurrency(value: string): value is BvnkOfframpCurrency {
-  return Object.hasOwn(BVNK_OFFRAMP_SPECS, value);
-}
-
-export function bvnkOfframpAccountType(fiatCurrency: BvnkOfframpCurrency): string {
-  return BVNK_OFFRAMP_SPECS[fiatCurrency].accountType;
-}
-
-export function bvnkOfframpFields(fiatCurrency: BvnkOfframpCurrency): RequirementField[] {
-  return [...BVNK_OFFRAMP_SPECS[fiatCurrency].fields];
-}
-
-export function validateBvnkCounterparty(
-  _counterparty: Counterparty,
-  options: ValidateCounterpartyOptions
-): CounterpartyRequirements {
-  const { direction, providerData, fiatCurrency } = options;
-
-  if (options.direction === "offramp") {
-    if (!fiatCurrency) {
-      throw badRequest("fiatCurrency is required for BVNK off-ramp requirements.");
-    }
-    if (!isBvnkOfframpCurrency(fiatCurrency)) {
-      return unsupportedCounterparty(
-        "bvnk",
-        direction,
-        `BVNK off-ramp does not support payouts in ${fiatCurrency}.`
-      );
-    }
-    if (!latestBvnkOfframpBeneficiary(providerData, fiatCurrency)) {
-      return {
-        provider: "bvnk",
-        direction,
-        status: "collect",
-        fields: bvnkOfframpFields(fiatCurrency),
-      };
-    }
-    const wallet = readBvnkOfframpWallet(providerData, fiatCurrency);
-    if (!wallet || !isBvnkWalletActive(wallet.status)) {
-      return {
-        provider: "bvnk",
-        direction,
-        status: "provisioning",
-      };
-    }
-    return readyCounterparty("bvnk", direction);
-  }
-
-  return readyCounterparty("bvnk", direction);
+  return BVNK_OFFRAMP_CURRENCIES.some((currency) => currency === value);
 }
 
 /**

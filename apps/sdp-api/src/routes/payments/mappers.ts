@@ -61,6 +61,13 @@ export function mapTransferRow(row: TransferRow) {
   const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;
   const cryptoDeposit = row.provider_data.cryptoDeposit as RampCryptoDeposit | null | undefined;
   const moneygram = mapMoneygramTransferDetails(row);
+  const bvnk = row.provider_data.bvnk as Record<string, unknown> | undefined;
+  const creditedFiatAmount =
+    row.type === "offramp" &&
+    bvnk !== undefined &&
+    typeof bvnk.creditedFiatAmount === "string"
+      ? bvnk.creditedFiatAmount
+      : undefined;
   return {
     ...base,
     provider: row.provider,
@@ -68,6 +75,7 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.delivery_mode ? { deliveryMode: row.delivery_mode } : {}),
     ...(row.fiat_currency ? { fiatCurrency: row.fiat_currency } : {}),
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
+    ...(creditedFiatAmount ? { creditedFiatAmount } : {}),
     ...(settlement ? { settlement } : {}),
     ...(cryptoDeposit ? { cryptoDeposit } : {}),
     ...(moneygram ? { moneygram } : {}),

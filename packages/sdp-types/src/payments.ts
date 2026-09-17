@@ -440,6 +440,8 @@ export interface PaymentTransferSummary {
   deliveryMode?: PaymentRampQuoteDeliveryMode;
   fiatCurrency?: string;
   fiatAmount?: string;
+  /** Fiat the BVNK virtual settlement wallet was credited, once confirmed. */
+  creditedFiatAmount?: string;
   settlement?: RampTransferSettlement;
   cryptoDeposit?: RampCryptoDeposit;
   moneygram?: MoneygramTransferDetails;
@@ -1278,6 +1280,30 @@ export const bvnkProviderAccountLiveStateSchema = z.discriminatedUnion("state", 
   }),
 ]);
 export type BvnkProviderAccountLiveState = z.infer<typeof bvnkProviderAccountLiveStateSchema>;
+
+/**
+ * Live provider-side state for a BVNK virtual settlement wallet row, fetched
+ * JIT per request and never persisted: the wallet's balance and payment
+ * instruments with no rule (settlement wallets carry no payment rule), or an
+ * unavailable marker when the provider read fails.
+ */
+export const bvnkSettlementWalletLiveStateSchema = z.discriminatedUnion("state", [
+  z.object({
+    state: z.literal("ok"),
+    balance: z.object({
+      /** Available balance as a decimal string. */
+      amount: z.string(),
+      currency: z.string(),
+    }),
+    paymentInstruments: bvnkPaymentInstrumentSchema.array(),
+  }),
+  z.object({
+    state: z.literal("unavailable"),
+    code: z.string(),
+    message: z.string(),
+  }),
+]);
+export type BvnkSettlementWalletLiveState = z.infer<typeof bvnkSettlementWalletLiveStateSchema>;
 
 export const MURAL_SANDBOX_PAYIN_CURRENCIES = ["USD", "MXN", "BRL", "ARS"] as const;
 export type MuralSandboxPayinCurrency = (typeof MURAL_SANDBOX_PAYIN_CURRENCIES)[number];

@@ -7,7 +7,7 @@ import type {
   RampProvider,
   RampRuntimeContext,
 } from "@sdp/payments/ramps/types";
-import type { BvnkProviderAccountLiveState } from "@sdp/types";
+import type { BvnkProviderAccountLiveState, BvnkSettlementWalletLiveState } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
@@ -177,7 +177,7 @@ export async function enrichBvnkVirtualFundingWalletLive(
   payments: PaymentsRepository,
   rows: readonly CounterpartyProviderAccountRow[]
 ): Promise<Map<string, BvnkProviderAccountLiveState>> {
-  const eligible = rows.filter(isBvnkLiveEligibleRow);
+  const eligible = rows.filter((row) => isBvnkLiveEligibleRow(row, "virtual_funding_wallet"));
   const settled = await Promise.all(
     eligible.map(async (row): Promise<[string, BvnkProviderAccountLiveState]> => {
       return [row.id, await fetchBvnkWalletLive(runtime, payments, row)];
@@ -187,20 +187,135 @@ export async function enrichBvnkVirtualFundingWalletLive(
 }
 
 /**
- * Restricts live enrichment to BVNK virtual funding wallets whose fiat is in
- * the sandbox fiat set and whose external wallet reference is provisioned.
+ * Enriches every BVNK virtual settlement wallet row with request-time live
+ * data: the ledger wallet balance and its payment instruments. Settlement
+ * wallets carry no payment rule, so no rule list is fetched. Fetched per row
+ * in parallel and never persisted or cached across requests. A BVNK failure
+ * on one row surfaces as the unavailable live variant for that row only; the
+ * remaining rows are unaffected.
+ *
+ * @param runtime - Provider runtime context (env and environment mode).
+ * @param rows - Parent-scoped provider-account rows.
+ * @returns Live data keyed by SDP row id, covering only BVNK virtual
+ * settlement wallets in a sandbox fiat currency with a provisioned wallet
+ * reference.
+ */
+export async function enrichBvnkVirtualSettlementWalletLive(
+  runtime: RampRuntimeContext,
+  rows: readonly CounterpartyProviderAccountRow[]
+): Promise<Map<string, BvnkSettlementWalletLiveState>> {
+  const eligible = rows.filter((row) => isBvnkLiveEligibleRow(row, "virtual_settlement_wallet"));
+  const settled = await Promise.all(
+    eligible.map(async (row): Promise<[string, BvnkSettlementWalletLiveState]> => {
+      return [row.id, await fetchBvnkSettlementWalletLive(runtime, row)];
+    })
+  );
+  return new Map(settled);
+}
+
+/** Virtual wallet kinds that carry request-time BVNK live data in list responses. */
+type BvnkLiveWalletKind = "virtual_funding_wallet" | "virtual_settlement_wallet";
+
+/**
+ * Restricts live enrichment to BVNK virtual wallets of the given kind whose
+ * fiat is in the sandbox fiat set and whose external wallet reference is
+ * provisioned.
  *
  * @param row - Provider-account row to test for live enrichment eligibility.
+ * @param kind - The virtual wallet kind to enrich.
  * @returns Whether the row carries a `live` field in the response.
  */
-function isBvnkLiveEligibleRow(row: CounterpartyProviderAccountRow): boolean {
+function isBvnkLiveEligibleRow(
+  row: CounterpartyProviderAccountRow,
+  kind: BvnkLiveWalletKind
+): boolean {
   return (
     row.provider === "bvnk" &&
-    row.kind === "virtual_funding_wallet" &&
+    row.kind === kind &&
     row.fiat_currency !== null &&
     isBvnkFiatCurrency(row.fiat_currency) &&
     row.external_account_reference !== null
   );
+}
+
+/**
+ * Builds the shared unavailable live variant for a failed BVNK read.
+ *
+ * @param error - The provider read error.
+ * @returns The unavailable live variant.
+ */
+function bvnkLiveUnavailable(
+  error: unknown
+): Extract<BvnkProviderAccountLiveState, { state: "unavailable" }> {
+  return {
+    state: "unavailable",
+    code: error instanceof SdpPaymentsError ? error.code : "PROVIDER_UNAVAILABLE",
+    message: error instanceof Error ? error.message : "BVNK wallet live data is unavailable.",
+  };
+}
+
+/**
+ * Fetches and maps one settlement wallet's live state from the ledger wallet
+ * alone; settlement wallets carry no payment rule, so no rule lookup runs.
+ * Any provider read failure, including a malformed wallet or one without a
+ * balance, resolves to the unavailable variant instead of throwing out of the
+ * caller's loop.
+ *
+ * @param runtime - Provider runtime context.
+ * @param row - The settlement-wallet row to enrich.
+ * @returns The live ok or unavailable variant for the row.
+ */
+async function fetchBvnkSettlementWalletLive(
+  runtime: RampRuntimeContext,
+  row: CounterpartyProviderAccountRow
+): Promise<BvnkSettlementWalletLiveState> {
+  try {
+    const walletId = row.external_account_reference;
+    if (walletId === null) {
+      throw providerUnavailable("BVNK settlement wallet has no external wallet reference.");
+    }
+    const wallet = await RAMP_PROVIDER_CLIENTS.bvnk.getLedgerWalletV2(runtime, { walletId });
+    return mapBvnkSettlementWalletLiveOk(wallet);
+  } catch (error) {
+    logBvnkWalletLiveFailure(row, error);
+    return bvnkLiveUnavailable(error);
+  }
+}
+
+/**
+ * Maps a fetched ledger wallet into the settlement ok live variant. A wallet
+ * without a balance is treated as a provider failure.
+ *
+ * @param wallet - The BVNK ledger wallet.
+ * @returns The ok live variant for the row.
+ */
+function mapBvnkSettlementWalletLiveOk(wallet: BvnkLedgerWalletV2): BvnkSettlementWalletLiveState {
+  const okLive: Extract<BvnkSettlementWalletLiveState, { state: "ok" }> = {
+    state: "ok",
+    ...mapBvnkWalletBalanceAndInstruments(wallet),
+  };
+  return okLive;
+}
+
+/**
+ * Maps the ledger wallet balance and payment instruments shared by both live
+ * ok variants; the client boundary already converted the balance to a decimal
+ * string.
+ *
+ * @param wallet - The BVNK ledger wallet.
+ * @returns The balance and payment instruments in the public shapes.
+ */
+function mapBvnkWalletBalanceAndInstruments(wallet: BvnkLedgerWalletV2): {
+  balance: { amount: string; currency: string };
+  paymentInstruments: LivePaymentInstrument[];
+} {
+  return {
+    balance: {
+      amount: wallet.balance.amount,
+      currency: wallet.balance.currency,
+    },
+    paymentInstruments: wallet.paymentInstruments.map(mapBvnkPaymentInstrument),
+  };
 }
 
 /**
@@ -233,11 +348,7 @@ async function fetchBvnkWalletLive(
     return await mapBvnkWalletLiveOk(wallet, rules, payments, row);
   } catch (error) {
     logBvnkWalletLiveFailure(row, error);
-    return {
-      state: "unavailable",
-      code: error instanceof SdpPaymentsError ? error.code : "PROVIDER_UNAVAILABLE",
-      message: error instanceof Error ? error.message : "BVNK wallet live data is unavailable.",
-    };
+    return bvnkLiveUnavailable(error);
   }
 }
 
@@ -259,11 +370,7 @@ async function mapBvnkWalletLiveOk(
 ): Promise<BvnkProviderAccountLiveState> {
   const okLive: Extract<BvnkProviderAccountLiveState, { state: "ok" }> = {
     state: "ok",
-    balance: {
-      amount: wallet.balance.amount,
-      currency: wallet.balance.currency,
-    },
-    paymentInstruments: wallet.paymentInstruments.map(mapBvnkPaymentInstrument),
+    ...mapBvnkWalletBalanceAndInstruments(wallet),
   };
   const found = rules.find((rule) => rule.status === "ACTIVE");
   const activeRule = found === undefined ? null : found;
@@ -332,7 +439,7 @@ function mapBvnkPaymentInstrument(
  * Records one row's live enrichment failure so the unavailable arm is
  * observable in telemetry, not just in the response.
  *
- * @param row - The funding-wallet row that failed.
+ * @param row - The wallet row that failed.
  * @param error - The provider read error.
  */
 function logBvnkWalletLiveFailure(row: CounterpartyProviderAccountRow, error: unknown): void {

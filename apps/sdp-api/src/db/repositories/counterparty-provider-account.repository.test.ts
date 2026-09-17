@@ -190,13 +190,13 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       externalAccountReference: "wallet_resource_1",
       metadata: {},
     });
-    const merchantWallet = await repository.insertProviderResourceAccount({
+    const settlementWallet = await repository.insertProviderResourceAccount({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "bvnk",
       providerCustomerReference: "bvnk_customer_resource",
-      kind: "merchant_wallet",
+      kind: "virtual_settlement_wallet",
       fiatCurrency: "USD",
       externalAccountReference: "wallet_resource_2",
       metadata: {},
@@ -208,10 +208,10 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
         counterpartyId: counterparty.id,
         provider: "bvnk",
-        kind: "merchant_wallet",
+        kind: "virtual_settlement_wallet",
         fiatCurrency: "USD",
       })
-    ).toMatchObject({ id: merchantWallet.id, kind: "merchant_wallet" });
+    ).toMatchObject({ id: settlementWallet.id, kind: "virtual_settlement_wallet" });
     expect(
       await repository.getAccountByKindAndCurrency({
         organizationId: TEST_ORG.id,
@@ -265,6 +265,39 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         fiatCurrency: "USD",
       })
     ).toMatchObject({ id: fundingWallet.id, metadata: {} });
+    expect(
+      await repository.getVirtualSettlementWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: "USD",
+      })
+    ).toMatchObject({ id: settlementWallet.id, kind: "virtual_settlement_wallet", metadata: {} });
+
+    // The virtual settlement wallet's metadata is a strict empty object too:
+    // any key is rejected by its row-kind schema, offramp state lives on the
+    // transfer.
+    await expect(
+      repository.patchAccountMetadata({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        id: settlementWallet.id,
+        set: { walletLabel: "settlement" },
+        unset: [],
+      })
+    ).rejects.toThrow();
+    expect(
+      await repository.getVirtualSettlementWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: "USD",
+      })
+    ).toMatchObject({ id: settlementWallet.id, metadata: {} });
   });
 
   it("returns the virtual funding wallet for a corridor at any status", async () => {
@@ -317,6 +350,115 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     ).toBeNull();
   });
 
+  it("returns the virtual settlement wallet for a corridor at any status", async () => {
+    const counterparty = await seedCounterparty("cpacc_settlement_corridor");
+    const wallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_settlement",
+      kind: "virtual_settlement_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "wallet_settlement_corridor_1",
+      metadata: {},
+    });
+    expect(
+      await repository.getVirtualSettlementWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: "USD",
+      })
+    ).toMatchObject({ id: wallet.id });
+
+    // The corridor read carries no status filter: an archived wallet is still
+    // the corridor's row and stays resolvable.
+    await getDb(env)
+      .prepare("UPDATE counterparty_provider_accounts SET status = 'archived' WHERE id = ?")
+      .bind(wallet.id)
+      .run();
+    expect(
+      await repository.getVirtualSettlementWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: "USD",
+      })
+    ).toMatchObject({ id: wallet.id, status: "archived" });
+
+    expect(
+      await repository.getVirtualSettlementWallet({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        fiatCurrency: "GBP",
+      })
+    ).toBeNull();
+  });
+
+  it("runs the virtual settlement wallet claim, reference, and status lifecycle", async () => {
+    const counterparty = await seedCounterparty("cpacc_settlement_lifecycle");
+    const claimed = await repository.insertPendingVirtualSettlementWallet({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      fiatCurrency: "USD",
+    });
+    expect(claimed).toMatchObject({
+      kind: "virtual_settlement_wallet",
+      fiat_currency: "USD",
+      external_account_reference: null,
+      status: "active",
+    });
+
+    const completed = await repository.completeVirtualSettlementWalletReference({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: claimed.id,
+      externalAccountReference: "wallet_settlement_lifecycle_1",
+      providerStatus: "PENDING",
+    });
+    expect(completed).toMatchObject({
+      id: claimed.id,
+      external_account_reference: "wallet_settlement_lifecycle_1",
+      provider_status: "PENDING",
+    });
+
+    const active = await repository.updateVirtualSettlementWalletStatus({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: claimed.id,
+      providerStatus: "ACTIVE",
+    });
+    expect(active).toMatchObject({
+      id: claimed.id,
+      status: "active",
+      provider_status: "ACTIVE",
+    });
+
+    // The reference bind is a CAS: a second bind on the same row misses.
+    expect(
+      await repository.completeVirtualSettlementWalletReference({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        id: claimed.id,
+        externalAccountReference: "wallet_settlement_lifecycle_2",
+        providerStatus: "ACTIVE",
+      })
+    ).toBeNull();
+  });
+
   it("resolves provider accounts of any kind by external account reference", async () => {
     const counterparty = await seedCounterparty("cpacc_external_reference");
     const customer = await repository.upsertProviderAccount({
@@ -339,7 +481,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       externalAccountReference: "a:25031472839104:funding:1",
       metadata: {},
     });
-    const merchantWallet = await repository.insertProviderResourceAccount({
+    const settlementWallet = await repository.insertProviderResourceAccount({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
@@ -347,9 +489,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       providerCustomerReference: providerCustomerReferenceSchema.parse(
         customer.provider_customer_reference
       ),
-      kind: "merchant_wallet",
+      kind: "virtual_settlement_wallet",
       fiatCurrency: "USD",
-      externalAccountReference: "a:25031472839104:merchant:1",
+      externalAccountReference: "a:25031472839104:settlement:1",
       metadata: {},
     });
     const payout = await repository.insertPendingExternalAccount({
@@ -383,9 +525,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     expect(
       await repository.getProviderAccountByExternalReference({
         provider: "bvnk",
-        externalAccountReference: "a:25031472839104:merchant:1",
+        externalAccountReference: "a:25031472839104:settlement:1",
       })
-    ).toMatchObject({ id: merchantWallet.id, kind: "merchant_wallet" });
+    ).toMatchObject({ id: settlementWallet.id, kind: "virtual_settlement_wallet" });
     expect(
       await repository.getProviderAccountByExternalReference({
         provider: "bvnk",
@@ -395,14 +537,14 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
 
     await getDb(env)
       .prepare("UPDATE counterparty_provider_accounts SET status = 'archived' WHERE id = ?")
-      .bind(merchantWallet.id)
+      .bind(settlementWallet.id)
       .run();
     expect(
       await repository.getProviderAccountByExternalReference({
         provider: "bvnk",
-        externalAccountReference: "a:25031472839104:merchant:1",
+        externalAccountReference: "a:25031472839104:settlement:1",
       })
-    ).toMatchObject({ id: merchantWallet.id, status: "archived" });
+    ).toMatchObject({ id: settlementWallet.id, status: "archived" });
 
     expect(
       await repository.getProviderAccountByExternalReference({
@@ -658,6 +800,17 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       externalAccountReference: "wallet_list_1",
       metadata: {},
     });
+    const settlementWallet = await repository.insertProviderResourceAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: "bvnk_customer_list",
+      kind: "virtual_settlement_wallet",
+      fiatCurrency: "USD",
+      externalAccountReference: "wallet_list_settlement",
+      metadata: {},
+    });
     const gbp = await repository.insertPendingExternalAccount({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
@@ -688,6 +841,10 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       expect.objectContaining({ id: customer.id, kind: "customer_link" }),
       usd,
       expect.objectContaining({ id: wallet.id, kind: "virtual_funding_wallet" }),
+      expect.objectContaining({
+        id: settlementWallet.id,
+        kind: "virtual_settlement_wallet",
+      }),
       expect.objectContaining({ id: gbp.id, status: "archived" }),
     ]);
     expect(

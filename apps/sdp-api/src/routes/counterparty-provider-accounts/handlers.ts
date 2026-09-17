@@ -1,6 +1,7 @@
 import type { RampExternalAccountDetails } from "@sdp/payments/ramps/types";
 import type {
   BvnkProviderAccountLiveState,
+  BvnkSettlementWalletLiveState,
   CounterpartyProviderAccount,
   CounterpartyProviderCustomerLink,
   ListCounterpartyProviderAccountsResponse,
@@ -14,6 +15,7 @@ import { success } from "@/lib/response";
 import { getPaymentsRepository, rampRuntime } from "@/routes/payments/context";
 import {
   enrichBvnkVirtualFundingWalletLive,
+  enrichBvnkVirtualSettlementWalletLive,
   enrichCounterpartyProviderAccounts,
 } from "@/services/payments/provider-account-enrichment";
 import type { AppContext } from "../counterparties/context";
@@ -63,11 +65,12 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     runtime,
     rows.filter((row) => row.kind === "payout_account")
   );
-  const liveByRowId = await enrichBvnkVirtualFundingWalletLive(
+  const fundingLiveByRowId = await enrichBvnkVirtualFundingWalletLive(
     runtime,
     getPaymentsRepository(c),
     rows
   );
+  const settlementLiveByRowId = await enrichBvnkVirtualSettlementWalletLive(runtime, rows);
 
   const rowsByProvider = new Map<
     CounterpartyProviderAccountRow["provider"],
@@ -87,11 +90,20 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     const customerLink = providerRows.find((row) => row.kind === "customer_link");
     const payoutRows = providerRows.filter((row) => row.kind === "payout_account");
     const fundingRows = providerRows.filter((row) => row.kind === "virtual_funding_wallet");
-    if (payoutRows.length === 0 && fundingRows.length === 0 && customerLink !== undefined) {
+    const settlementRows = providerRows.filter((row) => row.kind === "virtual_settlement_wallet");
+    if (
+      payoutRows.length === 0 &&
+      fundingRows.length === 0 &&
+      settlementRows.length === 0 &&
+      customerLink !== undefined
+    ) {
       accounts.push(mapCustomerLinkAccount(customerLink));
     }
     for (const row of fundingRows) {
-      accounts.push(mapVirtualFundingWalletAccount(row, liveByRowId, customerLink));
+      accounts.push(mapVirtualFundingWalletAccount(row, fundingLiveByRowId, customerLink));
+    }
+    for (const row of settlementRows) {
+      accounts.push(mapVirtualSettlementWalletAccount(row, settlementLiveByRowId, customerLink));
     }
     for (const row of payoutRows) {
       accounts.push(mapProviderAccount(row, enriched, customerLink));
@@ -199,6 +211,48 @@ function mapVirtualFundingWalletAccount(
   const fiatCurrency = row.fiat_currency;
   if (row.kind !== "virtual_funding_wallet" || fiatCurrency === null) {
     throw internalError("Virtual funding-wallet row is missing its fiat currency.");
+  }
+  const result: CounterpartyProviderAccount = {
+    id: row.id,
+    provider: row.provider,
+    kind: row.kind,
+    fiatCurrency,
+    destinationCountry: row.destination_country,
+    paymentRail: row.payment_rail,
+    status: row.status,
+    providerStatus: row.provider_status,
+    createdAt: row.created_at,
+  };
+  const rowLive = live.get(row.id);
+  if (rowLive !== undefined) {
+    result.live = rowLive;
+  }
+  if (customerLink !== undefined) {
+    result.customerLink = mapCustomerLink(customerLink);
+  }
+  return result;
+}
+
+/**
+ * Maps a virtual settlement wallet row into the public provider-account
+ * shape, attaching the request-time live state (balance, payment instruments)
+ * when the row was enriched. Settlement wallets carry no payment rule, so the
+ * live object has no activeRule; they carry no corridor data either, so null
+ * currency and country are valid here.
+ *
+ * @param row - Parent-scoped virtual settlement wallet row.
+ * @param live - Just-in-time live state indexed by row id.
+ * @param customerLink - The provider's customer-link row for the counterparty, when one exists.
+ * @returns Public provider-account response row.
+ */
+function mapVirtualSettlementWalletAccount(
+  row: CounterpartyProviderAccountRow,
+  live: ReadonlyMap<string, BvnkSettlementWalletLiveState>,
+  customerLink: CounterpartyProviderAccountRow | undefined
+): CounterpartyProviderAccount {
+  const fiatCurrency = row.fiat_currency;
+  if (row.kind !== "virtual_settlement_wallet" || fiatCurrency === null) {
+    throw internalError("Virtual settlement-wallet row is missing its fiat currency.");
   }
   const result: CounterpartyProviderAccount = {
     id: row.id,

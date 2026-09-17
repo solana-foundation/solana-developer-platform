@@ -26,7 +26,12 @@ export const counterpartyProviderAccountRowSchema = z.object({
   counterparty_id: z.string(),
   provider: z.enum(RAMP_PROVIDERS),
   provider_customer_reference: z.string().nullable(),
-  kind: z.enum(["customer_link", "payout_account", "virtual_funding_wallet", "merchant_wallet"]),
+  kind: z.enum([
+    "customer_link",
+    "payout_account",
+    "virtual_funding_wallet",
+    "virtual_settlement_wallet",
+  ]),
   external_account_reference: z.string().nullable(),
   fiat_currency: z.string().nullable(),
   destination_country: z.enum(COUNTRY_CODES).nullable(),
@@ -42,6 +47,9 @@ export type CounterpartyProviderAccountKind = CounterpartyProviderAccountRow["ki
 
 export const bvnkFundingWalletMetadataSchema = z.strictObject({});
 export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadataSchema>;
+
+export const bvnkSettlementWalletMetadataSchema = z.strictObject({});
+export type BvnkSettlementWalletMetadata = z.infer<typeof bvnkSettlementWalletMetadataSchema>;
 
 export const bvnkCustomerLinkMetadataSchema = z.strictObject({});
 export type BvnkCustomerLinkMetadata = z.infer<typeof bvnkCustomerLinkMetadataSchema>;
@@ -89,12 +97,21 @@ export interface GetVirtualFundingWalletInput extends GetCounterpartyProviderAcc
   fiatCurrency: string;
 }
 
+export interface GetVirtualSettlementWalletInput extends GetCounterpartyProviderAccountInput {
+  fiatCurrency: string;
+}
+
 export interface GetProviderAccountByExternalReferenceInput {
   provider: RampProviderId;
   externalAccountReference: string;
 }
 
 export interface InsertPendingVirtualFundingWalletInput
+  extends GetCounterpartyProviderAccountInput {
+  fiatCurrency: string;
+}
+
+export interface InsertPendingVirtualSettlementWalletInput
   extends GetCounterpartyProviderAccountInput {
   fiatCurrency: string;
 }
@@ -106,7 +123,20 @@ export interface CompleteVirtualFundingWalletReferenceInput
   providerStatus: string;
 }
 
+export interface CompleteVirtualSettlementWalletReferenceInput
+  extends GetCounterpartyProviderAccountInput {
+  id: string;
+  externalAccountReference: string;
+  providerStatus: string;
+}
+
 export interface UpdateVirtualFundingWalletStatusInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  providerStatus: string;
+}
+
+export interface UpdateVirtualSettlementWalletStatusInput
+  extends GetCounterpartyProviderAccountInput {
   id: string;
   providerStatus: string;
 }
@@ -143,7 +173,7 @@ export type InsertProviderResourceAccountInput = InsertProviderResourceAccountBa
         paymentRail?: string;
       }
     | {
-        kind: "virtual_funding_wallet" | "merchant_wallet";
+        kind: "virtual_funding_wallet" | "virtual_settlement_wallet";
         destinationCountry?: never;
         paymentRail?: never;
       }
@@ -229,6 +259,16 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
+   * Reads the virtual settlement wallet for one (counterparty, fiat) corridor.
+   *
+   * @param input - Tenant scope, counterparty, provider, and fiat currency.
+   * @returns The corridor's virtual settlement wallet row at any status, or null when none exists.
+   */
+  getVirtualSettlementWallet(
+    input: GetVirtualSettlementWalletInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
    * Reads a provider-account row of any kind by its provider-side external
    * account reference (the BVNK wallet id). System-scoped because webhook
    * payloads carry no tenant identity; the row supplies the tenant scope.
@@ -263,6 +303,29 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
+   * Inserts the unbound virtual settlement wallet row for a corridor before
+   * the BVNK wallet create; the unique active-corridor index makes the first
+   * provisioner win.
+   *
+   * @param input - Tenant scope, counterparty, provider, and fiat currency.
+   * @returns The inserted row with a null external account reference.
+   */
+  insertPendingVirtualSettlementWallet(
+    input: InsertPendingVirtualSettlementWalletInput
+  ): Promise<CounterpartyProviderAccountRow>;
+
+  /**
+   * Binds the created BVNK wallet id onto the unbound virtual settlement
+   * wallet row.
+   *
+   * @param input - Tenant scope plus the row id, BVNK wallet id, and provider status.
+   * @returns The bound row, or null when the reservation was lost underneath the assignment.
+   */
+  completeVirtualSettlementWalletReference(
+    input: CompleteVirtualSettlementWalletReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
    * Flips a virtual funding wallet row active with the wallet-status webhook's
    * provider status; stores nothing else.
    *
@@ -271,6 +334,17 @@ export interface CounterpartyProviderAccountsRepository {
    */
   updateVirtualFundingWalletStatus(
     input: UpdateVirtualFundingWalletStatusInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Flips a virtual settlement wallet row active with the wallet-status
+   * webhook's provider status; stores nothing else.
+   *
+   * @param input - Tenant scope plus the row id and provider status.
+   * @returns The updated row, or null when the row is gone or out of scope.
+   */
+  updateVirtualSettlementWalletStatus(
+    input: UpdateVirtualSettlementWalletStatusInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
@@ -362,7 +436,7 @@ export interface CounterpartyProviderAccountsRepository {
   listExternalAccounts(input: ListExternalAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
 
   /**
-   * Lists all payout-account, virtual funding wallet, and customer-link rows
+   * Lists all payout-account, virtual wallet, and customer-link rows
    * for one counterparty. Corridor filters apply to corridor rows only;
    * customer links carry no corridor and are always included for the
    * matching providers.

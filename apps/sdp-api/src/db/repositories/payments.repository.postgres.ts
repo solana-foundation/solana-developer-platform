@@ -820,6 +820,56 @@ export function createPostgresPaymentsRepository(
       return row ? mapTransferRow(row) : null;
     },
 
+    async getBvnkOfframpTransferById({ transferId }) {
+      const row = await db
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
+           WHERE pt.id = ?
+             AND pt.provider = 'bvnk'
+             AND pt.type = 'offramp'`
+        )
+        .bind(transferId)
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async bindBvnkOfframpCredit(input) {
+      const row = await db
+        .prepare(
+          `WITH pt AS (
+           UPDATE payment_transfers
+           SET status = 'completed',
+               fiat_amount = ?,
+               provider_data = provider_data || jsonb_build_object(
+                 'bvnk', COALESCE(provider_data->'bvnk', '{}'::jsonb) || ?::jsonb
+               ),
+               updated_at = ?
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+             AND provider = 'bvnk'
+             AND type = 'offramp'
+             AND status IN ('awaiting_payment', 'settling')
+             AND provider_data->'bvnk'->>'creditedFiatAmount' IS NULL
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
+        )
+        .bind(
+          input.creditedFiatAmount,
+          JSON.stringify({ creditedFiatAmount: input.creditedFiatAmount }),
+          input.updatedAt,
+          input.transferId,
+          input.organizationId,
+          input.projectId
+        )
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
     async setProviderReferenceIfEmpty(input) {
       const clauses = ["id = ?", "provider = ?"];
       const values: unknown[] = [input.transferId, input.provider];

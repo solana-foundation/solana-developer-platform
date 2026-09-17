@@ -349,6 +349,35 @@ export interface PaymentsRepository {
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
   /**
+   * Reads one BVNK off-ramp transfer by id without a tenant scope, for
+   * webhook channel payloads that carry only the transfer id encoded in the
+   * channel reference (`sdp_offramp_<transferId>`). System-only.
+   *
+   * @param params - The transfer id decoded from the channel reference.
+   * @returns The matching BVNK off-ramp transfer, or null when none exists.
+   */
+  getBvnkOfframpTransferById(params: {
+    transferId: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
+   * Completes a BVNK off-ramp channel confirmation in one compare-and-swap:
+   * the transfer must still be `awaiting_payment` or `settling`, and the
+   * fiat credit must not already be recorded (`creditedFiatAmount` key
+   * untouched), so a redelivered or racing confirmation can never
+   * double-credit or regress a completed row. The fiat amount column mirrors
+   * the credited amount for the off-ramp read models.
+   *
+   * @param input - Tenant scope, transfer id, credited amount, and timestamp.
+   * @returns The completed transfer, or null when the CAS missed.
+   */
+  bindBvnkOfframpCredit(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    creditedFiatAmount: string;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
    * Atomically binds a provider-owned reference to a provider transfer selected
    * by SDP's internal correlation ID. Replays with the same reference succeed;
    * a different occupied reference is never overwritten.

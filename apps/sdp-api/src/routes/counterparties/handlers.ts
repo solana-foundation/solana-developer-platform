@@ -2,7 +2,6 @@ import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { isBvnkFiatCurrency } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import {
   isBvnkWalletActive,
-  readBvnkOfframpWallet,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
@@ -275,8 +274,20 @@ async function readBvnkRequirements(
     return bvnkCollectRequirements(query.direction, counterparty.entity_type);
   }
   if (query.direction === "offramp") {
-    const wallet = readBvnkOfframpWallet(counterparty.provider_data, query.fiatCurrency);
-    if (wallet !== undefined && isBvnkWalletActive(wallet.status)) {
+    const wallet = await createPostgresCounterpartyProviderAccountsRepository(
+      getDb(c.env)
+    ).getVirtualSettlementWallet({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      fiatCurrency: query.fiatCurrency,
+    });
+    if (
+      wallet !== null &&
+      wallet.external_account_reference !== null &&
+      isBvnkWalletActive(wallet.provider_status)
+    ) {
       return readyCounterparty("bvnk", query.direction);
     }
     return { provider: "bvnk", direction: query.direction, status: "provisioning" };
@@ -472,52 +483,55 @@ export const submitCounterpartyRequirements = async (
     counterpartyId: counterparty.id,
     provider: input.provider,
   });
-  const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
-    mapToCounterparty(counterparty),
-    {
-      direction: input.direction,
-      providerData: counterparty.provider_data,
-      ...("assetRail" in input ? { cryptoToken: getCryptoRailAssetLabel(input.assetRail) } : {}),
-      ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
-      ...(input.provider === "lightspark" && input.direction === "offramp"
-        ? { cryptoRail: input.assetRail }
-        : {}),
-      ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
-      ...(providerAccount === null || providerAccount.provider_customer_reference === null
-        ? {}
-        : { providerCustomerReference: providerAccount.provider_customer_reference }),
-      ...("collectedData" in input ? { collectedData: input.collectedData } : {}),
-    }
-  );
+  if (input.provider !== "bvnk") {
+    const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
+      mapToCounterparty(counterparty),
+      {
+        direction: input.direction,
+        providerData: counterparty.provider_data,
+        ...("assetRail" in input ? { cryptoToken: getCryptoRailAssetLabel(input.assetRail) } : {}),
+        ...("fiatCurrency" in input ? { fiatCurrency: input.fiatCurrency } : {}),
+        ...(input.provider === "lightspark" && input.direction === "offramp"
+          ? { cryptoRail: input.assetRail }
+          : {}),
+        ...(destinationWalletAddress ? { destinationWalletAddress } : {}),
+        ...(providerAccount === null || providerAccount.provider_customer_reference === null
+          ? {}
+          : { providerCustomerReference: providerAccount.provider_customer_reference }),
+        ...("collectedData" in input ? { collectedData: input.collectedData } : {}),
+      }
+    );
 
-  if (requirements.status === "unsupported") {
-    return success(c, requirements);
-  }
-
-  if (requirements.status === "collect_account") {
-    if (
-      await lightsparkPayoutSubmissionNeedsRequirements(
-        c,
-        input,
-        counterparty,
-        auth.organizationId,
-        projectId
-      )
-    ) {
+    if (requirements.status === "unsupported") {
       return success(c, requirements);
     }
-  }
 
-  if (isCollectFieldsRequirements(requirements)) {
-    const collectedData = "collectedData" in input ? input.collectedData : undefined;
-    const missing = requirements.fields
-      .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
-      .filter(
-        (field) =>
-          field.required && (collectedData === undefined || collectedData[field.key] === undefined)
-      );
-    if (missing.length > 0) {
-      return success(c, { ...requirements, fields: missing });
+    if (requirements.status === "collect_account") {
+      if (
+        await lightsparkPayoutSubmissionNeedsRequirements(
+          c,
+          input,
+          counterparty,
+          auth.organizationId,
+          projectId
+        )
+      ) {
+        return success(c, requirements);
+      }
+    }
+
+    if (isCollectFieldsRequirements(requirements)) {
+      const collectedData = "collectedData" in input ? input.collectedData : undefined;
+      const missing = requirements.fields
+        .flatMap((field) => (field.kind === "address" ? field.fields : [field]))
+        .filter(
+          (field) =>
+            field.required &&
+            (collectedData === undefined || collectedData[field.key] === undefined)
+        );
+      if (missing.length > 0) {
+        return success(c, { ...requirements, fields: missing });
+      }
     }
   }
 

@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { SdpPaymentsError } from "../../../errors";
 import { buildBvnkThirdPartyRuleEntity } from "./counterparty";
 import {
+  buildBvnkOfframpReference,
   buildBvnkOfframpWalletName,
   buildBvnkOnrampWalletName,
   buildBvnkWalletIdempotencyKey,
+  readBvnkOfframpReference,
 } from "./provider-data";
 import type { BvnkContactV3 } from "./schemas";
 
@@ -144,6 +147,26 @@ describe("BVNK wallet names", () => {
   it("builds the display-only off-ramp wallet name from the counterparty id and fiat currency", () => {
     assert.equal(buildBvnkOfframpWalletName("cpty_123", "USD"), "sdp:offramp:cpty_123:USD");
     assert.equal(buildBvnkOfframpWalletName("cpty_456", "EUR"), "sdp:offramp:cpty_456:EUR");
+  });
+});
+
+describe("BVNK off-ramp channel reference round-trip", () => {
+  const TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174000";
+
+  it("builds sdp_offramp_<transfer_id> and parses it back", () => {
+    const reference = buildBvnkOfframpReference(TRANSFER_ID);
+
+    assert.equal(reference, `sdp_offramp_${TRANSFER_ID}`);
+    assert.equal(readBvnkOfframpReference(reference), TRANSFER_ID);
+  });
+
+  it("rejects a blank transfer id when building", () => {
+    assert.throws(() => buildBvnkOfframpReference("   "), SdpPaymentsError);
+  });
+
+  it("returns undefined for references SDP did not create", () => {
+    assert.equal(readBvnkOfframpReference("bvnk_channel_reference"), undefined);
+    assert.equal(readBvnkOfframpReference("sdp_offramp_not-a-transfer-id"), undefined);
   });
 });
 

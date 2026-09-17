@@ -36,7 +36,6 @@ import type {
   RampRuntimeContext,
   ValidateCounterpartyOptions,
 } from "../../types";
-import { validateBvnkCounterparty } from "./counterparty";
 import { discoverBvnkCurrencyAndRails } from "./currencies";
 import { bvnkRequestFailure, parseBvnkResponse } from "./errors";
 import {
@@ -220,10 +219,12 @@ export class BvnkRampClient implements RampProvider {
   }
 
   validateCounterparty(
-    counterparty: Counterparty,
-    options: ValidateCounterpartyOptions
+    _counterparty: Counterparty,
+    _options: ValidateCounterpartyOptions
   ): CounterpartyRequirements {
-    return validateBvnkCounterparty(counterparty, options);
+    throw internalError(
+      "BVNK counterparty requirements are evaluated by the API handler: contact collect, settlement-wallet provisioning, ready."
+    );
   }
 
   async discoverCurrencyAndRails(
@@ -647,7 +648,7 @@ export class BvnkRampClient implements RampProvider {
           destinationAddress,
           network,
           reference,
-          instructionsNotes: `Send ${currency} on ${network} to the deposit address. BVNK converts it to ${parsed.data.fiatCurrency} and pays out to the registered bank account.`,
+          instructionsNotes: `Send ${currency} on ${network} to the deposit address. BVNK converts it to ${parsed.data.fiatCurrency} and credits the counterparty's ${parsed.data.fiatCurrency} balance.`,
         },
       ],
     };

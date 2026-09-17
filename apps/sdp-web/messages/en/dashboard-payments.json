@@ -583,7 +583,8 @@
       "providerAccountRuleActive": "Rule active",
       "providerAccountNoActiveRule": "No active rule",
       "providerAccountAccountHolder": "Account holder",
-      "providerAccountRouting": "Routing"
+      "providerAccountRouting": "Routing",
+      "providerAccountSettlement": "Settlement"
     },
     "playground": {
       "moonPay": "MoonPay",

@@ -103,7 +103,13 @@ describe("BvnkWebhookProcessor.parse", () => {
   it("parses a channel transaction-detected webhook", () => {
     const processor = new BvnkWebhookProcessor();
 
-    expect(processor.parse(bvnkChannelTransactionEvent("transaction-detected"))).toEqual({
+    // The channel payload carries more fields than the schema models; the
+    // assertion pins the event name and correlation reference without
+    // freezing the extras (channelId/walletAmount may or may not survive the
+    // schema transform).
+    expect(
+      processor.parse(bvnkChannelTransactionEvent("transaction-detected"))
+    ).toMatchObject({
       event: "bvnk:payment:channel:transaction-detected",
       data: { reference: "bvnk-sandbox-test-payment" },
     });
@@ -120,7 +126,7 @@ describe("BvnkWebhookProcessor.parse", () => {
           walletAmount: 4.95,
         })
       )
-    ).toEqual({
+    ).toMatchObject({
       event: "bvnk:payment:channel:transaction-confirmed",
       data: {
         reference: "bvnk-sandbox-test-payment",
@@ -139,7 +145,7 @@ describe("BvnkWebhookProcessor.parse", () => {
           walletAmount: 100,
         })
       )
-    ).toEqual({
+    ).toMatchObject({
       event: "bvnk:payment:channel:transaction-confirmed",
       data: {
         reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",

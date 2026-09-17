@@ -594,26 +594,43 @@ const bvnkVirtualFundingWalletActiveRuleSchema = withOpenApi(
   { description: "The ACTIVE payment rule on a BVNK virtual funding wallet, when one exists." }
 );
 
-const bvnkProviderAccountLiveSchema = withOpenApi(
+const bvnkLiveBalanceSchema = withOpenApi(
+  z.object({
+    amount: withOpenApi(z.string(), {
+      description: "Available balance as a decimal string.",
+      example: "1000.50",
+    }),
+    currency: withOpenApi(z.string(), {
+      description: "Balance currency.",
+      example: "USD",
+    }),
+  }),
+  { description: "Just-in-time wallet balance." }
+);
+
+const bvnkLiveUnavailableStateSchema = z.object({
+  state: withOpenApi(z.literal("unavailable"), {
+    description: "Live provider state could not be fetched.",
+    example: "unavailable",
+  }),
+  code: withOpenApi(z.string(), {
+    description: "Provider error code.",
+    example: "bvnk_unavailable",
+  }),
+  message: withOpenApi(z.string(), {
+    description: "Human-readable error message.",
+    example: "BVNK is currently unavailable.",
+  }),
+});
+
+const bvnkVirtualFundingWalletLiveStateSchema = withOpenApi(
   z.discriminatedUnion("state", [
     z.object({
       state: withOpenApi(z.literal("ok"), {
         description: "Live provider state was fetched successfully.",
         example: "ok",
       }),
-      balance: withOpenApi(
-        z.object({
-          amount: withOpenApi(z.string(), {
-            description: "Available balance as a decimal string.",
-            example: "1000.50",
-          }),
-          currency: withOpenApi(z.string(), {
-            description: "Balance currency.",
-            example: "USD",
-          }),
-        }),
-        { description: "Just-in-time wallet balance." }
-      ),
+      balance: bvnkLiveBalanceSchema,
       paymentInstruments: withOpenApi(z.array(bvnkVirtualFundingWalletPaymentInstrumentSchema), {
         description: "Payment instruments on the wallet's virtual bank account.",
       }),
@@ -621,24 +638,31 @@ const bvnkProviderAccountLiveSchema = withOpenApi(
         description: "The wallet's active payment rule, when one exists.",
       }),
     }),
-    z.object({
-      state: withOpenApi(z.literal("unavailable"), {
-        description: "Live provider state could not be fetched.",
-        example: "unavailable",
-      }),
-      code: withOpenApi(z.string(), {
-        description: "Provider error code.",
-        example: "bvnk_unavailable",
-      }),
-      message: withOpenApi(z.string(), {
-        description: "Human-readable error message.",
-        example: "BVNK is currently unavailable.",
-      }),
-    }),
+    bvnkLiveUnavailableStateSchema,
   ]),
   {
     description:
       "Live BVNK virtual funding wallet state, fetched just-in-time at request time and never persisted across requests.",
+  }
+);
+
+const bvnkSettlementWalletLiveStateSchema = withOpenApi(
+  z.discriminatedUnion("state", [
+    z.object({
+      state: withOpenApi(z.literal("ok"), {
+        description: "Live provider state was fetched successfully.",
+        example: "ok",
+      }),
+      balance: bvnkLiveBalanceSchema,
+      paymentInstruments: withOpenApi(z.array(bvnkVirtualFundingWalletPaymentInstrumentSchema), {
+        description: "Payment instruments on the wallet's virtual bank account.",
+      }),
+    }),
+    bvnkLiveUnavailableStateSchema,
+  ]),
+  {
+    description:
+      "Live BVNK virtual settlement wallet state, fetched just-in-time at request time and never persisted across requests. Settlement wallets hold off-ramp proceeds as a fiat balance credit; there is no payment rule.",
   }
 );
 
@@ -653,7 +677,12 @@ export const counterpartyProviderAccountSchema = withOpenApi(
       example: "lightspark",
     }),
     kind: withOpenApi(
-      z.enum(["customer_link", "payout_account", "virtual_funding_wallet", "merchant_wallet"]),
+      z.enum([
+        "customer_link",
+        "payout_account",
+        "virtual_funding_wallet",
+        "virtual_settlement_wallet",
+      ]),
       {
         description: "Provider-account resource kind.",
         example: "payout_account",
@@ -713,10 +742,15 @@ export const counterpartyProviderAccountSchema = withOpenApi(
           "The counterparty's provider customer link, present once the provider onboarding has started.",
       }
     ),
-    live: withOpenApi(bvnkProviderAccountLiveSchema.optional(), {
-      description:
-        "Just-in-time live state for BVNK virtual funding wallet rows (USD/EUR corridors only): balance, payment instruments, and the active payment rule, fetched per request and never persisted across requests. Omitted on other account kinds.",
-    }),
+    live: withOpenApi(
+      z
+        .union([bvnkVirtualFundingWalletLiveStateSchema, bvnkSettlementWalletLiveStateSchema])
+        .optional(),
+      {
+        description:
+          "Just-in-time live state for BVNK virtual funding wallet and virtual settlement wallet rows (USD/EUR corridors only), fetched per request and never persisted across requests. Virtual funding wallets report balance, payment instruments, and the active payment rule; virtual settlement wallets report balance and payment instruments, with no payment rule. Omitted on other account kinds.",
+      }
+    ),
   }),
   { description: "Counterparty provider-account row with optional provider details." }
 );

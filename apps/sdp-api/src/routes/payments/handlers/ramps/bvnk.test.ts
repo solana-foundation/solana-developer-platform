@@ -1,11 +1,20 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import { buildBvnkOnrampRuleReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  buildBvnkOfframpWalletName,
+  buildBvnkOnrampRuleReference,
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { RequirementField } from "@sdp/types/ramp-requirements";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { env as testEnv } from "@/test/helpers/env";
 import type { AppContext } from "../../context";
-import { advanceBvnkContact, bvnkContactFields, bvnkOnrampQuote } from "./bvnk";
+import { rampRuntime } from "../../context";
+import {
+  advanceBvnkContact,
+  bvnkContactFields,
+  bvnkOnrampQuote,
+  ensureBvnkSettlementWallet,
+} from "./bvnk";
 
 const mockTransaction = vi.hoisted(() => ({}));
 
@@ -15,6 +24,9 @@ const mockAccounts = vi.hoisted(() => ({
   completeCustomerLink: vi.fn(),
   getProviderAccount: vi.fn(),
   getVirtualFundingWallet: vi.fn(),
+  getVirtualSettlementWallet: vi.fn(),
+  insertPendingVirtualSettlementWallet: vi.fn(),
+  completeVirtualSettlementWalletReference: vi.fn(),
 }));
 
 const mockPayments = vi.hoisted(() => ({
@@ -51,9 +63,16 @@ const COUNTERPARTY_ID = "cpty_123e4567-e89b-12d3-a456-426614174000";
 const PROJECT_ID = "prj_test";
 const CONTACT_ID = "contact_created_1";
 
+/** The ramp runtime context the settlement-wallet handler is invoked with. */
+const RAMP_CTX = rampRuntime(fakeContext());
+
 /** The virtual funding wallet CPA row id; the transfer's lock key. */
 const FUNDING_ACCOUNT_ID = "counterparty_provider_account_funding_usd";
 const WALLET_ID = "a:1:wallet:1";
+/** The virtual settlement wallet CPA row id claimed at off-ramp quote time. */
+const SETTLEMENT_ACCOUNT_ID = "counterparty_provider_account_settlement_usd";
+/** The BVNK ledger wallet id bound to the settlement wallet row. */
+const OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
 const TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174000";
 const DESTINATION_WALLET_ADDRESS = "J4t4M6zJH3M6ewN9pmRUpMt2EMWXXCFPYvnrD9ck9EEi";
 
@@ -141,6 +160,29 @@ function fundingWalletRow(overrides?: Record<string, unknown>): Record<string, u
     provider_customer_reference: "",
     kind: "virtual_funding_wallet",
     external_account_reference: WALLET_ID,
+    fiat_currency: "USD",
+    destination_country: null,
+    payment_rail: null,
+    provider_status: "ACTIVE",
+    status: "active",
+    metadata: {},
+    created_at: "2026-06-28T00:00:00.000Z",
+    updated_at: "2026-06-28T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** The per-(counterparty, fiat) virtual settlement wallet row, keyed by wallet id. */
+function settlementWalletRow(overrides?: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: SETTLEMENT_ACCOUNT_ID,
+    organization_id: "org_test",
+    project_id: PROJECT_ID,
+    counterparty_id: COUNTERPARTY_ID,
+    provider: "bvnk",
+    provider_customer_reference: "",
+    kind: "virtual_settlement_wallet",
+    external_account_reference: OFFRAMP_WALLET_ID,
     fiat_currency: "USD",
     destination_country: null,
     payment_rail: null,
@@ -626,6 +668,172 @@ describe("advanceBvnkContact US state rule", () => {
         }),
       })
     );
+  });
+});
+
+describe("ensureBvnkSettlementWallet", () => {
+  let listLedgerWalletProfilesV2: ReturnType<typeof vi.spyOn>;
+  let createLedgerWalletV2: ReturnType<typeof vi.spyOn>;
+
+  /** A BVNK v2 ledger wallet owned by the settlement corridor's merchant profile. */
+  function offrampLedgerWallet(status = "ACTIVE"): Record<string, unknown> {
+    return {
+      id: OFFRAMP_WALLET_ID,
+      name: `sdp:offramp:${COUNTERPARTY_ID}:USD`,
+      status,
+      paymentInstruments: [],
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listLedgerWalletProfilesV2 = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listLedgerWalletProfilesV2");
+    createLedgerWalletV2 = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createLedgerWalletV2");
+    listLedgerWalletProfilesV2.mockResolvedValue({
+      content: [{ id: "profile_settlement_usd", currencies: ["USD"] }],
+    } as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("claims a pending settlement-wallet row, creates the BVNK wallet, and CASes the reference", async () => {
+    mockAccounts.getVirtualSettlementWallet.mockResolvedValue(null);
+    mockAccounts.insertPendingVirtualSettlementWallet.mockResolvedValue(
+      settlementWalletRow({ external_account_reference: null, provider_status: null, status: "pending" })
+    );
+    createLedgerWalletV2.mockResolvedValue(offrampLedgerWallet("PENDING"));
+    mockAccounts.completeVirtualSettlementWalletReference.mockResolvedValue(
+      settlementWalletRow({ provider_status: "PENDING", status: "pending" })
+    );
+
+    const result = await ensureBvnkSettlementWallet(
+      fakeContext(),
+      RAMP_CTX,
+      counterpartyRow(),
+      PROJECT_ID,
+      "USD"
+    );
+
+    expect(result).toMatchObject({
+      id: SETTLEMENT_ACCOUNT_ID,
+      external_account_reference: OFFRAMP_WALLET_ID,
+    });
+    // The row is claimed before any BVNK call, so a crash after the wallet
+    // create leaves a recoverable pending row tied to the same corridor.
+    expect(
+      mockAccounts.insertPendingVirtualSettlementWallet.mock.invocationCallOrder[0]
+    ).toBeLessThan(createLedgerWalletV2.mock.invocationCallOrder[0]);
+    expect(mockAccounts.insertPendingVirtualSettlementWallet).toHaveBeenCalledWith({
+      organizationId: "org_test",
+      projectId: PROJECT_ID,
+      counterpartyId: COUNTERPARTY_ID,
+      provider: "bvnk",
+      fiatCurrency: "USD",
+    });
+    expect(listLedgerWalletProfilesV2).toHaveBeenCalledWith(expect.anything(), {
+      currency: "USD",
+    });
+    // The BVNK wallet is created under the counterparty's display name and an
+    // idempotency key derived from the claimed row id, so a retry reuses it.
+    expect(createLedgerWalletV2).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        currency: "USD",
+        name: buildBvnkOfframpWalletName(COUNTERPARTY_ID, "USD"),
+        profileId: "profile_settlement_usd",
+        idempotencyKey: expect.any(String),
+      })
+    );
+    expect(mockAccounts.completeVirtualSettlementWalletReference).toHaveBeenCalledWith({
+      organizationId: "org_test",
+      projectId: PROJECT_ID,
+      counterpartyId: COUNTERPARTY_ID,
+      provider: "bvnk",
+      id: SETTLEMENT_ACCOUNT_ID,
+      externalAccountReference: OFFRAMP_WALLET_ID,
+      providerStatus: "PENDING",
+    });
+  });
+
+  it("completes an unbound settlement-wallet row left by a crash without inserting a second", async () => {
+    mockAccounts.getVirtualSettlementWallet.mockResolvedValue(
+      settlementWalletRow({ external_account_reference: null, provider_status: null, status: "pending" })
+    );
+    createLedgerWalletV2.mockResolvedValue(offrampLedgerWallet("PENDING"));
+    mockAccounts.completeVirtualSettlementWalletReference.mockResolvedValue(
+      settlementWalletRow({ provider_status: "PENDING", status: "pending" })
+    );
+
+    const result = await ensureBvnkSettlementWallet(
+      fakeContext(),
+      RAMP_CTX,
+      counterpartyRow(),
+      PROJECT_ID,
+      "USD"
+    );
+
+    // Crash recovery: the existing row is adopted, never duplicated.
+    expect(result).toMatchObject({ id: SETTLEMENT_ACCOUNT_ID });
+    expect(mockAccounts.insertPendingVirtualSettlementWallet).not.toHaveBeenCalled();
+    expect(createLedgerWalletV2).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        currency: "USD",
+        name: buildBvnkOfframpWalletName(COUNTERPARTY_ID, "USD"),
+      })
+    );
+    expect(mockAccounts.completeVirtualSettlementWalletReference).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: SETTLEMENT_ACCOUNT_ID,
+        externalAccountReference: OFFRAMP_WALLET_ID,
+      })
+    );
+  });
+
+  it("returns the bound settlement-wallet row without any provider call", async () => {
+    mockAccounts.getVirtualSettlementWallet.mockResolvedValue(settlementWalletRow());
+
+    const result = await ensureBvnkSettlementWallet(
+      fakeContext(),
+      RAMP_CTX,
+      counterpartyRow(),
+      PROJECT_ID,
+      "USD"
+    );
+
+    expect(result).toMatchObject({
+      id: SETTLEMENT_ACCOUNT_ID,
+      external_account_reference: OFFRAMP_WALLET_ID,
+      status: "active",
+    });
+    expect(listLedgerWalletProfilesV2).not.toHaveBeenCalled();
+    expect(createLedgerWalletV2).not.toHaveBeenCalled();
+    expect(mockAccounts.insertPendingVirtualSettlementWallet).not.toHaveBeenCalled();
+    expect(mockAccounts.completeVirtualSettlementWalletReference).not.toHaveBeenCalled();
+  });
+
+  it("adopts the winning row after a unique-violation race on the settlement-wallet claim", async () => {
+    mockAccounts.getVirtualSettlementWallet
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(settlementWalletRow());
+    mockAccounts.insertPendingVirtualSettlementWallet.mockRejectedValue(
+      uniqueViolationError()
+    );
+
+    const result = await ensureBvnkSettlementWallet(
+      fakeContext(),
+      RAMP_CTX,
+      counterpartyRow(),
+      PROJECT_ID,
+      "USD"
+    );
+
+    // The losing insert re-reads the corridor and adopts the winner's bound row.
+    expect(result).toMatchObject({ id: SETTLEMENT_ACCOUNT_ID });
+    expect(createLedgerWalletV2).not.toHaveBeenCalled();
+    expect(mockAccounts.completeVirtualSettlementWalletReference).not.toHaveBeenCalled();
   });
 });
 

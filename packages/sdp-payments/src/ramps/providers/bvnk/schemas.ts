@@ -33,6 +33,22 @@ export const bvnkOnrampTransferProviderDataSchema = z.object({
 });
 export type BvnkOnrampTransferProviderData = z.infer<typeof bvnkOnrampTransferProviderDataSchema>;
 
+/**
+ * BVNK off-ramp transfer provider_data. `settlementWalletAccountId` is the
+ * counterparty_provider_accounts row id claimed at quote time (the BVNK wallet
+ * id lives on that row's `external_account_reference`); the channel uuid is
+ * stored on the transfer's `provider_reference` column, never here.
+ */
+export const bvnkOfframpTransferProviderDataSchema = z.object({
+  bvnk: z.object({
+    settlementWalletAccountId: z.string().min(1),
+    creditedFiatAmount: z.string().min(1).optional(),
+  }),
+});
+export type BvnkOfframpTransferProviderData = z.infer<
+  typeof bvnkOfframpTransferProviderDataSchema
+>;
+
 export const bvnkErrorEnvelopeSchema = z.object({
   code: z.string().optional(),
   message: z.string().optional(),

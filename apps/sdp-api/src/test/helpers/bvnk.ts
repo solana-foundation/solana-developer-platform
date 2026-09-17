@@ -10,8 +10,6 @@ export const TEST_BVNK_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
 
 export const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
 
-export const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
-
 export interface BvnkSandboxEnvValues {
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
@@ -136,11 +134,11 @@ export function bvnkCryptoStatusChangeEvent(overrides?: Partial<BvnkCryptoStatus
 
 /**
  * BVNK channel transaction payloads carry far more fields than the webhook
- * schema models (it reads only `reference`/`walletAmount`), so this shape
- * stays local to the fixture module.
+ * schema models (it reads only `channelId`/`reference`/`walletAmount`), so
+ * this shape stays local to the fixture module.
  */
 interface BvnkChannelTransactionData {
-  reference: string;
+  reference?: string;
   channelId: string;
   status: string;
   merchantDisplayName?: string;
@@ -183,6 +181,7 @@ export function bvnkChannelTransactionEvent(
       reference: "bvnk-sandbox-test-payment",
       channelId: "channel_1",
       status: kind === "transaction-detected" ? "DETECTED" : "completed",
+      ...(kind === "transaction-confirmed" ? { walletAmount: 100 } : {}),
       ...dataOverrides,
     },
   };
@@ -201,24 +200,26 @@ export function bvnkTransferProviderData(
 }
 
 /**
- * The BVNK off-ramp marker stored under
- * `counterparties.provider_data.bvnk.offramp`; no zod schema models
- * provider_data in the API, so the shape stays local.
+ * The BVNK off-ramp transfer marker stored under
+ * `payment_transfers.provider_data.bvnk`; the settlement wallet row id is
+ * claimed with the transfer, and the credited fiat amount lands once the
+ * channel confirmation is applied.
  */
-export interface BvnkOfframpProviderData {
-  wallets: Record<string, { id: string; status: string }>;
-  beneficiaries?: Record<
-    string,
-    { key: string; fiatCurrency: string; accountType: string; createdAt: string }
-  >;
+export interface BvnkOfframpTransferProviderData {
+  bvnk: {
+    settlementWalletAccountId: string;
+    creditedFiatAmount?: string;
+  };
 }
 
-export function bvnkOnrampProviderDataSeed(input: { offramp?: BvnkOfframpProviderData }): {
-  bvnk: { offramp?: BvnkOfframpProviderData };
-} {
+export function bvnkOfframpTransferProviderData(
+  settlementWalletAccountId: string,
+  overrides?: Partial<BvnkOfframpTransferProviderData["bvnk"]>
+): BvnkOfframpTransferProviderData {
   return {
     bvnk: {
-      ...(input.offramp === undefined ? {} : { offramp: input.offramp }),
+      settlementWalletAccountId,
+      ...overrides,
     },
   };
 }

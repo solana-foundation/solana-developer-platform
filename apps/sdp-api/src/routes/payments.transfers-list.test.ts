@@ -54,14 +54,17 @@ describe("Payments routes — list transfers", () => {
     direction?: "inbound" | "outbound";
     provider?: "moonpay" | "lightspark" | "bvnk" | "moneygram" | "coinbase" | "mural" | "stripe";
     providerReference?: string | null;
+    fiatCurrency?: string | null;
+    fiatAmount?: string | null;
+    providerData?: Record<string, unknown>;
     createdAt?: string;
   }): Promise<void> {
     const now = params.createdAt ?? new Date().toISOString();
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers
-           (id, organization_id, project_id, custody_wallet_id, wallet_id, counterparty_id, source_address, destination_address, token, amount, memo, type, direction, status, provider, provider_reference, signature, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, custody_wallet_id, wallet_id, counterparty_id, source_address, destination_address, token, amount, memo, type, direction, status, provider, provider_reference, fiat_currency, fiat_amount, provider_data, signature, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)`
       )
       .bind(
         params.id,
@@ -80,6 +83,9 @@ describe("Payments routes — list transfers", () => {
         params.status,
         params.provider ?? null,
         params.providerReference ?? null,
+        params.fiatCurrency ?? null,
+        params.fiatAmount ?? null,
+        JSON.stringify(params.providerData ?? {}),
         params.signature ?? null,
         now,
         now
@@ -1427,6 +1433,49 @@ describe("Payments routes — list transfers", () => {
         env
       );
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("BVNK off-ramp transfer read model", () => {
+    it("shows the credited fiat amount once a BVNK off-ramp transfer is completed", async () => {
+      // The off-ramp sale settled into the counterparty's virtual settlement
+      // wallet: the credited amount lives in provider_data.bvnk.creditedFiatAmount
+      // (written by the confirmed channel webhook), never in fiat_amount.
+      await seedTransfer({
+        id: "xfr_offramp_credited",
+        status: "completed",
+        type: "offramp",
+        direction: "outbound",
+        provider: "bvnk",
+        token: "USDC",
+        amount: "5",
+        fiatCurrency: "USD",
+        fiatAmount: null,
+        providerData: {
+          bvnk: {
+            settlementWalletAccountId: "cpa_settlement_read",
+            creditedFiatAmount: "4.95",
+          },
+        },
+      });
+
+      const res = await app.request(
+        "/v1/payments/transfers",
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<Record<string, unknown>>;
+      };
+      const row = body.data.find((item) => item.id === "xfr_offramp_credited");
+      expect(row).toBeDefined();
+      expect(row).toMatchObject({
+        provider: "bvnk",
+        fiatCurrency: "USD",
+        creditedFiatAmount: "4.95",
+      });
     });
   });
 });

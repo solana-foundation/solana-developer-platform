@@ -4067,9 +4067,9 @@ Lightspark quotes always return `deliveryMode: "manual_instructions"` — the re
 
 BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
 
-BVNK is a travel-rule / compliance-sharing provider and requires party details such as name and address. The requirements step therefore collects the counterparty's identity once — first name and last name for individuals, legal name for companies — and creates a BVNK contact for it. There is no BVNK customer, KYC, or agreement flow: wallets are merchant-owned, and payment rules and channels declare the counterparty as a `THIRD_PARTY` entity, referencing the contact via `complianceDetails.contactId`.
+BVNK is a travel-rule / compliance-sharing provider and requires party details. The requirements step collects the counterparty's identity once — first and last name for individuals, legal name for companies — and creates a BVNK contact, with no BVNK customer, KYC, or agreement flow.
 
-BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
+BVNK quotes always return `deliveryMode: "manual_instructions"`. On-ramps fund a BVNK virtual funding wallet via a per-transfer payment rule declaring the counterparty a `THIRD_PARTY` entity. Off-ramps sell the crypto into the counterparty's BVNK settlement balance: deposit crypto, and fiat is credited to that balance. Bank withdrawal is not available yet.
 
 ## MoneyGram
 

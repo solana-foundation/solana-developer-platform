@@ -1,4 +1,3 @@
-import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   buildBvnkThirdPartyRuleEntity,
@@ -17,12 +16,6 @@ import {
   buildBvnkOnrampWalletName,
   buildBvnkWalletIdempotencyKey,
   isBvnkWalletActive,
-  latestBvnkOfframpBeneficiary,
-  readBvnkData,
-  readBvnkOfframpBeneficiaries,
-  readBvnkOfframpBeneficiaryByKey,
-  readBvnkOfframpWallet,
-  readBvnkOfframpWallets,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type {
   BvnkLedgerWalletProfilesV2,
@@ -66,7 +59,6 @@ import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repos
 import type {
   PaymentsRepository,
   PaymentTransferRow,
-  PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
 import {
   AppError,
@@ -76,87 +68,9 @@ import {
   internalError,
   providerUnavailable,
 } from "@/lib/errors";
-import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
-import { type AuditIntent, AuditService } from "@/services/audit.service";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
-
-/** Creates the pending off-ramp transfer row that anchors a BVNK channel quote. */
-export async function createPendingBvnkOfframpTransfer(
-  c: AppContext,
-  input: {
-    transferId: string;
-    organizationId: string;
-    projectId: string;
-    counterpartyId: string;
-    custodyWalletId: string;
-    walletId: string;
-    walletAddress: string;
-    assetRail: CryptoRailId;
-    cryptoAmount: string;
-    fiatCurrency: RampFiatCurrency;
-    rampsMemo: Record<string, string> | undefined;
-  }
-): Promise<PaymentTransferRow> {
-  const apiKey = c.get("apiKey");
-  const created = await getPaymentsRepository(c).createTransfer({
-    id: input.transferId,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    custodyWalletId: input.custodyWalletId,
-    walletId: input.walletId,
-    counterpartyId: input.counterpartyId,
-    sourceAddress: input.walletAddress,
-    destinationAddress: null,
-    token: rampTransferTokenMint(input.assetRail, c.env),
-    amount: input.cryptoAmount,
-    memo: null,
-    type: "offramp",
-    direction: "outbound",
-    status: "pending",
-    provider: "bvnk",
-    providerReference: null,
-    deliveryMode: null,
-    fiatCurrency: input.fiatCurrency,
-    fiatAmount: null,
-    rampsMemo: input.rampsMemo,
-    providerData: {},
-    serializedTx: null,
-    signature: null,
-    slot: null,
-    initiatedByKeyId: apiKey ? apiKey.id : null,
-  });
-  if (!created) {
-    throw internalError("Failed to create ramp transfer record");
-  }
-  return created;
-}
-
-/** Stamps the pending BVNK off-ramp transfer with the quote's reference, delivery mode, and status. */
-export async function completePendingBvnkOfframpTransfer(
-  c: AppContext,
-  input: {
-    organizationId: string;
-    projectId: string;
-    transferId: string;
-    quote: PaymentRampQuote;
-    status: PaymentTransferStatus;
-  }
-): Promise<void> {
-  const updated = await getPaymentsRepository(c).updateTransfer({
-    transferId: input.transferId,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    status: input.status,
-    providerReference: input.quote.id,
-    deliveryMode: input.quote.deliveryMode,
-    updatedAt: new Date().toISOString(),
-  });
-  if (!updated) {
-    throw internalError("Failed to complete BVNK off-ramp transfer record");
-  }
-}
 
 type BvnkOnrampQuote = PaymentRampQuote & {
   provider: "bvnk";
@@ -209,16 +123,119 @@ function bvnkWalletBankAccount(
   };
 }
 
+/** Scope and reference operations a virtual wallet kind's provisioning needs. */
+interface BvnkWalletProvisioning {
+  get(scope: BvnkWalletScope): Promise<CounterpartyProviderAccountRow | null>;
+  insertPending(scope: BvnkWalletScope): Promise<CounterpartyProviderAccountRow>;
+  completeReference(input: {
+    organizationId: string;
+    projectId: string;
+    counterpartyId: string;
+    provider: "bvnk";
+    id: string;
+    externalAccountReference: string;
+    providerStatus: string;
+  }): Promise<CounterpartyProviderAccountRow | null>;
+}
+
+type BvnkWalletScope = {
+  organizationId: string;
+  projectId: string;
+  counterpartyId: string;
+  provider: "bvnk";
+  fiatCurrency: RampFiatCurrency;
+};
+
 /**
- * Ensures the counterparty's virtual funding wallet row exists for one fiat
- * currency and is bound to a BVNK ledger wallet. The unbound row
- * (external_account_reference NULL) is claimed in its own committed
- * transaction BEFORE the BVNK create, so a crash between create and bind
- * never rolls the claim back; a retry then reuses the same row, whose id
+ * Ensures a virtual wallet row of one kind exists for a fiat currency and is
+ * bound to a BVNK ledger wallet, shared by the funding and settlement kinds.
+ * The unbound row (external_account_reference NULL) is claimed in its own
+ * committed transaction BEFORE the BVNK create, so a crash between create and
+ * bind never rolls the claim back; a retry reuses the same row, whose id
  * seeds the idempotency key and makes BVNK return the same wallet instead of
  * minting an orphan. The bind is a compare-and-swap matching only while the
  * row carries no reference, so a concurrent provisioner's bind wins exactly
  * once and the loser adopts the winner's wallet (same idempotency key).
+ *
+ * @param c - Request context used for database access.
+ * @param ctx - Ramp runtime context used for provider access.
+ * @param counterparty - Counterparty owning the wallet.
+ * @param projectId - Project that owns the counterparty.
+ * @param fiatCurrency - Fiat currency the wallet accepts.
+ * @param buildName - Wallet-name builder for the requested kind.
+ * @param provisioning - Kind-specific row operations.
+ * @returns The bound virtual wallet row.
+ */
+async function ensureBvnkWalletProvisioned(
+  c: AppContext,
+  ctx: RampRuntimeContext,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  fiatCurrency: RampFiatCurrency,
+  buildName: (counterpartyId: string, fiatCurrency: RampFiatCurrency) => string,
+  provisioning: BvnkWalletProvisioning
+): Promise<CounterpartyProviderAccountRow> {
+  const scope = {
+    organizationId: counterparty.organization_id,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: "bvnk" as const,
+  };
+  const client = RAMP_PROVIDER_CLIENTS.bvnk;
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  const existing = await provisioning.get({ ...scope, fiatCurrency });
+  if (existing !== null && existing.external_account_reference !== null) {
+    return existing;
+  }
+  let claim = existing;
+  if (claim === null) {
+    claim = await getDb(c.env).transaction(async (transaction) => {
+      const txAccounts = createPostgresCounterpartyProviderAccountsRepository(
+        asTransactionalClient(transaction)
+      );
+      try {
+        return await provisioning.insertPending({ ...scope, fiatCurrency });
+      } catch (error) {
+        if (!isPostgresUniqueViolation(error)) {
+          throw error;
+        }
+        const raced = await provisioning.get({ ...scope, fiatCurrency });
+        if (raced !== null) {
+          return raced;
+        }
+        throw internalError("BVNK wallet claim raced into a vanished reservation.");
+      }
+    });
+  }
+  const walletProfile = selectBvnkWalletProfile(
+    await client.listLedgerWalletProfilesV2(ctx, { currency: fiatCurrency }),
+    fiatCurrency
+  );
+  const wallet = await client.createLedgerWalletV2(ctx, {
+    currency: fiatCurrency,
+    name: buildName(counterparty.id, fiatCurrency),
+    profileId: walletProfile.id,
+    idempotencyKey: await buildBvnkWalletIdempotencyKey(claim.id),
+  });
+  const completed = await provisioning.completeReference({
+    ...scope,
+    id: claim.id,
+    externalAccountReference: wallet.id,
+    providerStatus: wallet.status,
+  });
+  if (completed !== null) {
+    return completed;
+  }
+  const bound = await provisioning.get({ ...scope, fiatCurrency });
+  if (bound !== null && bound.external_account_reference !== null) {
+    return bound;
+  }
+  throw internalError("BVNK wallet reservation was lost underneath the wallet assignment.");
+}
+
+/**
+ * Ensures the counterparty's virtual funding wallet row exists for one fiat
+ * currency and is bound to a BVNK ledger wallet.
  *
  * @param c - Request context used for database access.
  * @param ctx - Ramp runtime context used for provider access.
@@ -234,62 +251,56 @@ export async function ensureBvnkVirtualFundingWallet(
   projectId: string,
   fiatCurrency: RampFiatCurrency
 ): Promise<CounterpartyProviderAccountRow> {
-  const scope = {
-    organizationId: counterparty.organization_id,
-    projectId,
-    counterpartyId: counterparty.id,
-    provider: "bvnk" as const,
-  };
-  const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const existing = await accounts.getVirtualFundingWallet({ ...scope, fiatCurrency });
-  if (existing !== null && existing.external_account_reference !== null) {
-    return existing;
-  }
-  let claim = existing;
-  if (claim === null) {
-    claim = await getDb(c.env).transaction(async (transaction) => {
-      const txAccounts = createPostgresCounterpartyProviderAccountsRepository(
-        asTransactionalClient(transaction)
-      );
-      try {
-        return await txAccounts.insertPendingVirtualFundingWallet({ ...scope, fiatCurrency });
-      } catch (error) {
-        if (!isPostgresUniqueViolation(error)) {
-          throw error;
-        }
-        const raced = await txAccounts.getVirtualFundingWallet({ ...scope, fiatCurrency });
-        if (raced !== null) {
-          return raced;
-        }
-        throw internalError("BVNK funding-wallet claim raced into a vanished reservation.");
-      }
-    });
-  }
-  const walletProfile = selectBvnkWalletProfile(
-    await client.listLedgerWalletProfilesV2(ctx, { currency: fiatCurrency }),
-    fiatCurrency
+  return ensureBvnkWalletProvisioned(
+    c,
+    ctx,
+    counterparty,
+    projectId,
+    fiatCurrency,
+    buildBvnkOnrampWalletName,
+    {
+      get: (scope) => accounts.getVirtualFundingWallet(scope),
+      insertPending: (scope) => accounts.insertPendingVirtualFundingWallet(scope),
+      completeReference: (input) => accounts.completeVirtualFundingWalletReference(input),
+    }
   );
-  const wallet = await client.createLedgerWalletV2(ctx, {
-    currency: fiatCurrency,
-    name: buildBvnkOnrampWalletName(counterparty.id, fiatCurrency),
-    profileId: walletProfile.id,
-    idempotencyKey: await buildBvnkWalletIdempotencyKey(claim.id),
-  });
-  const completed = await accounts.completeVirtualFundingWalletReference({
-    ...scope,
-    id: claim.id,
-    externalAccountReference: wallet.id,
-    providerStatus: wallet.status,
-  });
-  if (completed !== null) {
-    return completed;
-  }
-  const bound = await accounts.getVirtualFundingWallet({ ...scope, fiatCurrency });
-  if (bound !== null && bound.external_account_reference !== null) {
-    return bound;
-  }
-  throw internalError("BVNK funding-wallet reservation was lost underneath the wallet assignment.");
+}
+
+/**
+ * Ensures the counterparty's virtual settlement wallet row exists for one
+ * fiat currency and is bound to a BVNK ledger wallet. The row becomes active
+ * through the wallet-status webhook; callers check `isBvnkWalletActive` on
+ * the provider status.
+ *
+ * @param c - Request context used for database access.
+ * @param ctx - Ramp runtime context used for provider access.
+ * @param counterparty - Counterparty owning the wallet.
+ * @param projectId - Project that owns the counterparty.
+ * @param fiatCurrency - Fiat currency the wallet accepts.
+ * @returns The bound virtual settlement wallet row.
+ */
+export async function ensureBvnkSettlementWallet(
+  c: AppContext,
+  ctx: RampRuntimeContext,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  fiatCurrency: RampFiatCurrency
+): Promise<CounterpartyProviderAccountRow> {
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  return ensureBvnkWalletProvisioned(
+    c,
+    ctx,
+    counterparty,
+    projectId,
+    fiatCurrency,
+    buildBvnkOfframpWalletName,
+    {
+      get: (scope) => accounts.getVirtualSettlementWallet(scope),
+      insertPending: (scope) => accounts.insertPendingVirtualSettlementWallet(scope),
+      completeReference: (input) => accounts.completeVirtualSettlementWalletReference(input),
+    }
+  );
 }
 
 /** Identity and delivery inputs needed to create a transfer's BVNK on-ramp rule. */
@@ -312,6 +323,7 @@ export type BvnkOnrampRuleTransfer = Pick<
   "id" | "organization_id" | "project_id" | "provider_data"
 >;
 
+/**
 /**
  * Resolves the transfer's payment rule: a bound rule is returned as stored;
  * an unbound one is reconciled against the wallet's rules — exactly one
@@ -446,216 +458,6 @@ async function createBvnkOnrampRule(
     throw internalError("BVNK on-ramp rule reservation was lost underneath the rule assignment.");
   }
   return { ruleId: created.id, ruleStatus: created.status };
-}
-
-/** Persists a merchant-owned off-ramp wallet to provider_data.bvnk.offramp.wallets. */
-async function persistBvnkOfframpWallet(
-  c: AppContext,
-  counterparty: CounterpartyRow,
-  projectId: string,
-  fiatCurrency: string,
-  wallet: BvnkLedgerWalletV2
-): Promise<void> {
-  const repo = getCounterpartiesRepository(c);
-  // TODO(PRO-1824): Move BVNK merchant-wallet state to counterparty_provider_accounts.
-  await repo.mutateProviderData({
-    counterpartyId: counterparty.id,
-    organizationId: counterparty.organization_id,
-    projectId,
-    mutate(providerData) {
-      const bvnk = readBvnkData(providerData);
-      const offramp =
-        bvnk.offramp && typeof bvnk.offramp === "object"
-          ? (bvnk.offramp as Record<string, unknown>)
-          : {};
-      const wallets = readBvnkOfframpWallets(providerData);
-      return {
-        ...providerData,
-        bvnk: {
-          ...bvnk,
-          offramp: {
-            ...offramp,
-            wallets: { ...wallets, [fiatCurrency]: { id: wallet.id, status: wallet.status } },
-          },
-        },
-      };
-    },
-  });
-}
-
-/**
- * Provisions (or reuses) a merchant-owned BVNK fiat wallet for an off-ramp,
- * keyed per fiat currency in provider_data.bvnk.offramp.wallets. No
- * customer/KYC: the wallet is owned by the merchant. A freshly-created wallet
- * is not immediately ACTIVE; when a stored wallet is still inactive its
- * status is refreshed from BVNK so the requirements flow can keep returning
- * `provisioning` until BVNK activates it.
- *
- * @param c - Request context used for provider and repository access.
- * @param ctx - Ramp runtime context used for provider access.
- * @param counterparty - Counterparty owning the wallet.
- * @param projectId - Project that owns the counterparty.
- * @param fiatCurrency - Fiat currency the wallet accepts.
- * @returns The provisioned off-ramp wallet marker.
- */
-export async function ensureBvnkOfframpWallet(
-  c: AppContext,
-  ctx: RampRuntimeContext,
-  counterparty: CounterpartyRow,
-  projectId: string,
-  fiatCurrency: RampFiatCurrency
-): Promise<BvnkOfframpWallet> {
-  const client = RAMP_PROVIDER_CLIENTS.bvnk;
-  const existing = readBvnkOfframpWallet(counterparty.provider_data, fiatCurrency);
-  if (existing?.id) {
-    if (isBvnkWalletActive(existing.status)) {
-      return existing;
-    }
-    const refreshed = await client.getLedgerWalletV2(ctx, { walletId: existing.id });
-    if (refreshed.status !== existing.status) {
-      await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, refreshed);
-    }
-    return { id: refreshed.id, status: refreshed.status };
-  }
-  const walletProfile = selectBvnkWalletProfile(
-    await client.listLedgerWalletProfilesV2(ctx, { currency: fiatCurrency }),
-    fiatCurrency
-  );
-  const walletName = buildBvnkOfframpWalletName(counterparty.id, fiatCurrency);
-  const audit = requestProvisioningAudit(c, counterparty);
-  const intent = await audit.begin({
-    action: "bvnk_offramp_wallet_created",
-    metadata: { walletName, fiatCurrency },
-  });
-  try {
-    const wallet = await client.createLedgerWalletV2(ctx, {
-      name: walletName,
-      currency: fiatCurrency,
-      profileId: walletProfile.id,
-      idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
-    });
-    await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, wallet);
-    await audit.complete(intent, { walletId: wallet.id });
-    return { id: wallet.id, status: wallet.status };
-  } catch (error) {
-    await audit.fail(intent, error);
-    throw error;
-  }
-}
-
-/** Persists an off-ramp payout beneficiary marker to provider_data.bvnk.offramp.beneficiaries. */
-async function persistBvnkOfframpBeneficiary(
-  c: AppContext,
-  counterparty: CounterpartyRow,
-  projectId: string,
-  beneficiary: BvnkOfframpBeneficiary
-): Promise<void> {
-  const repo = getCounterpartiesRepository(c);
-  // TODO(PRO-1824): Move BVNK beneficiary state to counterparty_provider_accounts.
-  await repo.mutateProviderData({
-    counterpartyId: counterparty.id,
-    organizationId: counterparty.organization_id,
-    projectId,
-    mutate(providerData) {
-      const bvnk = readBvnkData(providerData);
-      const offramp =
-        bvnk.offramp && typeof bvnk.offramp === "object"
-          ? (bvnk.offramp as Record<string, unknown>)
-          : {};
-      const beneficiaries = readBvnkOfframpBeneficiaries(providerData);
-      return {
-        ...providerData,
-        bvnk: {
-          ...bvnk,
-          offramp: {
-            ...offramp,
-            beneficiaries: { ...beneficiaries, [beneficiary.key]: beneficiary },
-          },
-        },
-      };
-    },
-  });
-}
-
-async function bvnkOfframpBeneficiaryKey(
-  fiatCurrency: string,
-  collectedData: CollectedFieldData
-): Promise<string> {
-  const fields = Object.entries(collectedData)
-    .map(([key, value]) => `${key}=${value.trim()}`)
-    .sort()
-    .join("&");
-  return `${fiatCurrency}:${(await hashString(fields)).slice(0, 16)}`;
-}
-
-/**
- * Registers (or reuses) an off-ramp payout beneficiary from collected bank details,
- * keyed by `${fiat}:${hash(collected)}` so re-submitting the same details reuses the
- * record. PII-light: only a marker is persisted — the deferred payout (BVNK Step C)
- * forwards the raw bank details, which are validated here but not stored.
- *
- * @param c - Request context used for persistence and audit.
- * @param input - Counterparty, project, fiat currency, and the collected bank details.
- * @returns The registered beneficiary marker.
- */
-export async function ensureBvnkOfframpBeneficiary(
-  c: AppContext,
-  input: {
-    counterparty: CounterpartyRow;
-    projectId: string;
-    fiatCurrency: string;
-    collectedData?: CollectedFieldData;
-  }
-): Promise<BvnkOfframpBeneficiary> {
-  if (!isBvnkOfframpCurrency(input.fiatCurrency)) {
-    throw badRequest(`BVNK off-ramp does not support payouts in ${input.fiatCurrency}.`);
-  }
-  const fiatCurrency = input.fiatCurrency;
-  const collected =
-    input.collectedData !== undefined && Object.keys(input.collectedData).length > 0
-      ? input.collectedData
-      : undefined;
-
-  if (!collected) {
-    const existing = latestBvnkOfframpBeneficiary(input.counterparty.provider_data, fiatCurrency);
-    if (!existing) {
-      throw badRequest("collectedData with payout bank details is required for BVNK off-ramp.");
-    }
-    return existing;
-  }
-
-  const parsed = buildRequirementSchema(bvnkOfframpFields(fiatCurrency)).safeParse(collected);
-  if (!parsed.success) {
-    throw new AppError("BAD_REQUEST", "Missing or invalid bank details for BVNK off-ramp.", {
-      errors: z.treeifyError(parsed.error),
-    });
-  }
-
-  const key = await bvnkOfframpBeneficiaryKey(fiatCurrency, collected);
-  const existing = readBvnkOfframpBeneficiaryByKey(input.counterparty.provider_data, key);
-  if (existing) {
-    return existing;
-  }
-
-  const beneficiary: BvnkOfframpBeneficiary = {
-    key,
-    fiatCurrency,
-    accountType: bvnkOfframpAccountType(fiatCurrency),
-    createdAt: new Date().toISOString(),
-  };
-  const audit = requestProvisioningAudit(c, input.counterparty);
-  const intent = await audit.begin({
-    action: "bvnk_offramp_beneficiary_registered",
-    metadata: { key, fiatCurrency, accountType: beneficiary.accountType },
-  });
-  try {
-    await persistBvnkOfframpBeneficiary(c, input.counterparty, input.projectId, beneficiary);
-    await audit.complete(intent);
-  } catch (error) {
-    await audit.fail(intent, error);
-    throw error;
-  }
-  return beneficiary;
 }
 
 /**
@@ -858,60 +660,19 @@ export async function advanceBvnkContact(
   return { contactId };
 }
 
-export interface BvnkProvisioningAudit {
-  begin(event: { action: string; metadata: Record<string, unknown> }): Promise<AuditIntent>;
-  complete(intent: AuditIntent, metadata?: Record<string, unknown>): Promise<void>;
-  /** Resolves the intent with a failure outcome, so a routine provider error
-   * does not strand an unresolved intent that pollutes ledger verification.
-   * The outcome records that the ATTEMPT failed, never that the provider-side
-   * object does not exist: an ambiguous error (a timeout after the provider
-   * accepted the call) may have created it, so the entry carries
-   * providerOutcome: "unverified" instead of asserting a definite state. */
-  fail(intent: AuditIntent, error: unknown): Promise<void>;
-}
-
 /**
- * Admitted intent/outcome audit bound to a counterparty: `begin` writes a
- * durable intent BEFORE the effect, and `complete`/`fail` resolve it with the
- * provider-assigned ids or an unverified outcome after the local state is
- * persisted. Provider-side objects created here (wallets, payout
- * beneficiaries, payment rules) decide where future settlements land, so their
- * creation must be attributable; the route path binds the request actor, the
- * webhook path a system actor.
+ * Creates a BVNK on-ramp quote under the rule-as-lock model: the transfer row
+ * is the lock, one payment rule per transfer, one in-flight on-ramp transfer
+ * per virtual funding wallet. The fiat gate and the counterparty contact are
+ * enforced before any BVNK call; the funding wallet is provisioned on demand;
+ * the transfer row is claimed `awaiting_payment` (a unique-violation race
+ * becomes a conflict naming the blocking transfer); the per-transfer rule is
+ * recovered, swept, and created before being CAS'd onto the transfer.
  *
- * @param c - Request context used for the audit service.
- * @param counterparty - Counterparty the provisioning step belongs to.
- * @returns The bound audit handle.
+ * @param c - Request context used for provider and repository access.
+ * @param input - Counterparty, destination wallet, and funding specification.
+ * @returns The manual-instructions quote and the claimed transfer id.
  */
-export function requestProvisioningAudit(
-  c: AppContext,
-  counterparty: CounterpartyRow
-): BvnkProvisioningAudit {
-  const service = new AuditService(getDb(c.env));
-  return {
-    async begin({ action, metadata }) {
-      return service.beginCritical(c, {
-        action: "update",
-        resourceType: "counterparty",
-        resourceId: counterparty.id,
-        metadata: { action, provider: "bvnk", ...metadata },
-      });
-    },
-    async complete(intent, metadata = {}) {
-      await service.completeCritical(c, intent, { metadata });
-    },
-    async fail(intent, error) {
-      await service.completeCritical(c, intent, {
-        status: "failure",
-        metadata: {
-          error: error instanceof Error ? error.message : String(error),
-          providerOutcome: "unverified",
-        },
-      });
-    },
-  };
-}
-
 export interface BvnkOnrampQuoteInput {
   counterparty: CounterpartyRow;
   organizationId: string;
@@ -933,7 +694,7 @@ export interface BvnkOnrampQuoteInput {
  * is the lock, one payment rule per transfer, one in-flight on-ramp transfer
  * per virtual funding wallet. The fiat gate and the counterparty contact are
  * enforced before any BVNK call; the funding wallet is provisioned on demand;
- * the transfer row is claimed `awaiting_payment` (a unique-violation race
+ * the transfer row is claimed awaiting_payment (a unique-violation race
  * becomes a conflict naming the blocking transfer); the per-transfer rule is
  * recovered, swept, and created before being CAS'd onto the transfer.
  *

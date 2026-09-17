@@ -27,7 +27,9 @@ beforeEach(async () => {
   await client.query("DROP INDEX counterparty_provider_accounts_customer_unique");
   await client.query("DROP INDEX counterparty_provider_accounts_active_corridor_idx");
   await client.query("DROP INDEX counterparty_provider_accounts_pending_reservation_unique");
-  await client.query("DROP INDEX counterparty_provider_accounts_active_merchant_wallet_unique");
+  await client.query(
+    "DROP INDEX IF EXISTS counterparty_provider_accounts_active_merchant_wallet_unique"
+  );
   await client.query(
     "DROP INDEX IF EXISTS counterparty_provider_accounts_active_funding_wallet_unique"
   );
