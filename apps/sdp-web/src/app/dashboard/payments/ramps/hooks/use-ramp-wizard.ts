@@ -539,6 +539,8 @@ export function useRampWizard<TId extends string>(
     isAdvancing: requirements.isAdvancing,
     retryOnboarding: requirements.retryOnboarding,
     pendingAgreements: requirements.pendingAgreements,
+    acceptedAgreements: requirements.acceptedAgreements,
+    toggleAgreement: requirements.toggleAgreement,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

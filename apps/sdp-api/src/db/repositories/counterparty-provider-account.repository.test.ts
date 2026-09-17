@@ -315,6 +315,144 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     ).toMatchObject({ id: counterparty.id });
   });
 
+  it("assigns the v1 customer reference and metadata via the CAS alias", async () => {
+    const counterparty = await seedCounterparty("cpacc_assign_hit");
+    const alias = "cp_cpacc_assign_hit";
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: alias,
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_hit",
+          agreements: [],
+        },
+      },
+    });
+
+    const assigned = await repository.assignCustomerLinkReference({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: seeded.id,
+      fromProviderCustomerReference: alias,
+      providerCustomerReference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      metadata: { status: "PENDING" },
+    });
+
+    expect(assigned).toMatchObject({
+      id: seeded.id,
+      provider_customer_reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      metadata: { status: "PENDING" },
+    });
+  });
+
+  it("returns null on a CAS miss and leaves the row untouched", async () => {
+    const counterparty = await seedCounterparty("cpacc_assign_miss");
+    const alias = "cp_cpacc_assign_miss";
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: alias,
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_miss",
+          agreements: [],
+        },
+      },
+    });
+
+    const assigned = await repository.assignCustomerLinkReference({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      id: seeded.id,
+      fromProviderCustomerReference: "cp_someone_else",
+      providerCustomerReference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      metadata: { status: "PENDING" },
+    });
+
+    expect(assigned).toBeNull();
+    expect(
+      await repository.getProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      })
+    ).toMatchObject({
+      id: seeded.id,
+      provider_customer_reference: alias,
+      status: "active",
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_miss",
+          agreements: [],
+        },
+      },
+    });
+  });
+
+  it("scopes customer-link reference assignment to the parent tenant", async () => {
+    const counterparty = await seedCounterparty("cpacc_assign_scope");
+    const alias = "cp_cpacc_assign_scope";
+    const seeded = await repository.upsertProviderAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "bvnk",
+      providerCustomerReference: alias,
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_scope",
+          agreements: [],
+        },
+      },
+    });
+
+    expect(
+      await repository.assignCustomerLinkReference({
+        organizationId: TEST_ORG.id,
+        projectId: `${TEST_PROJECT_ID}_production`,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        id: seeded.id,
+        fromProviderCustomerReference: alias,
+        providerCustomerReference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+        metadata: { status: "PENDING" },
+      })
+    ).toBeNull();
+    expect(
+      await repository.getProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      })
+    ).toMatchObject({
+      id: seeded.id,
+      provider_customer_reference: alias,
+      status: "active",
+      metadata: {
+        residenceCountryCode: "US",
+        session: {
+          reference: "bvnk_session_assign_scope",
+          agreements: [],
+        },
+      },
+    });
+  });
+
   it("scopes external account lookup to the parent counterparty", async () => {
     const counterparty = await seedCounterparty("cpacc_lookup_owner");
     const otherCounterparty = await seedCounterparty("cpacc_lookup_other");

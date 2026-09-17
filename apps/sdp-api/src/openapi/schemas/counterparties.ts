@@ -268,16 +268,21 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     z.object({
       ...requirementBase,
       provider: z.literal("bvnk"),
-      status: z.literal("customer_agreement_required"),
+      status: z.literal("counterparty_collect_agreement"),
       agreements: z.array(
         z.object({
-          id: withOpenApi(z.string(), { description: "BVNK agreement id." }),
-          name: withOpenApi(z.string(), { description: "Agreement display name." }),
+          name: withOpenApi(z.string(), {
+            description: "BVNK agreement identifier (v1 agreements have no id).",
+          }),
+          displayName: withOpenApi(z.string(), { description: "Agreement display name." }),
           description: withOpenApi(z.string(), {
             description: "Agreement summary text.",
           }),
-          downloadUrl: withOpenApi(z.url(), {
-            description: "Agreement text URL, minted JIT per response and never persisted.",
+          url: withOpenApi(z.url(), {
+            description: "Agreement text URL, stored statically on the customer link.",
+          }),
+          privacyPolicyUrl: withOpenApi(z.url(), {
+            description: "Privacy policy URL, stored statically on the customer link.",
           }),
         })
       ),

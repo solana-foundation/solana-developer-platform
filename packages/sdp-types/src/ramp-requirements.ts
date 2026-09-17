@@ -157,13 +157,19 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
     }
   | {
       provider: "bvnk";
-      status: "customer_agreement_required";
-      /** Agreement text is an external link; `downloadUrl` is minted JIT per response and never persisted. */
+      status: "counterparty_collect_agreement";
+      /**
+       * Agreements of the minted v1 session. The document links are the
+       * session's static help-centre URLs stored on the customer link; nothing
+       * is minted per response. `name` is the v1 agreement identifier (v1 has
+       * no id).
+       */
       agreements: {
-        id: string;
         name: string;
+        displayName: string;
         description: string;
-        downloadUrl: string;
+        url: string;
+        privacyPolicyUrl: string;
       }[];
     }
   | {
@@ -201,7 +207,7 @@ export type CollectFieldsStatus = (typeof COLLECT_FIELDS_STATUSES)[number];
 export const COLLECT_STAGE_STATUSES = [
   ...COLLECT_FIELDS_STATUSES,
   "collect_account",
-  "customer_agreement_required",
+  "counterparty_collect_agreement",
 ] as const;
 
 export type CollectStageStatus = (typeof COLLECT_STAGE_STATUSES)[number];

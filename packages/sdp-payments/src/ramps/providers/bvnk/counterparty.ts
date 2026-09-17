@@ -18,7 +18,7 @@ import {
   bvnkOnrampFields,
   isBvnkOfframpCurrency,
 } from "./requirements";
-import { type BvnkCustomerV2Individual, bvnkV2CddSchema } from "./schemas";
+import { type BvnkCustomerIndividual, bvnkV2CddSchema } from "./schemas";
 
 function collectedString(data: Record<string, unknown>, key: string): string {
   const value = data[key];
@@ -46,7 +46,7 @@ export function parseBvnkResidenceCountry(collectedData: CollectedFieldData): Co
 }
 
 /**
- * Builds the BVNK v2 individual request from transient collected fields.
+ * Builds the BVNK individual request from transient collected fields.
  *
  * @param collectedData - Flattened PII fields supplied for this request.
  * @param residenceCountry - The counterparty's residence country, collected in
@@ -56,7 +56,7 @@ export function parseBvnkResidenceCountry(collectedData: CollectedFieldData): Co
 export function buildBvnkCustomerRequest(
   collectedData: CollectedFieldData,
   residenceCountry: CountryCode
-): BvnkCustomerV2Individual {
+): BvnkCustomerIndividual {
   const data = parseCollectedFields(
     bvnkOnrampFields(residenceCountry),
     collectedData,

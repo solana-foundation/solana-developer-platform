@@ -133,6 +133,28 @@ const READY_US_ADVANCE: CounterpartyRequirements = {
   providerAccountId: "cpa_us_primary",
 };
 
+const COLLECT_AGREEMENTS: CounterpartyRequirements = {
+  provider: "bvnk",
+  direction: "onramp",
+  status: "counterparty_collect_agreement",
+  agreements: [
+    {
+      name: "bvnk_platform_agreement",
+      displayName: "BVNK Platform Agreement",
+      description: "BVNK Platform Agreement",
+      url: "https://help.bvnk.com/en/articles/platform-agreement",
+      privacyPolicyUrl: "https://www.bvnk.com/privacy-policy",
+    },
+    {
+      name: "bvnk_privacy_policy",
+      displayName: "BVNK Privacy Policy",
+      description: "BVNK Privacy Policy",
+      url: "https://www.bvnk.com/privacy-policy",
+      privacyPolicyUrl: "https://www.bvnk.com/privacy-policy",
+    },
+  ],
+};
+
 const OFFRAMP_PARAMS: CounterpartyRequirementsParams = {
   counterpartyId: "cpty_behavior",
   provider: "lightspark",
@@ -508,6 +530,35 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     await secondSubmit;
 
     expect(rendered.result.current.onboarding).toEqual(provisioning);
+  });
+
+  it("gates completion on every pending agreement being accepted", async () => {
+    const onrampParams: CounterpartyRequirementsParams = {
+      counterpartyId: "cpty_behavior",
+      provider: "bvnk",
+      direction: "onramp",
+      assetRail: "usdc.solana",
+      destinationCustodyWalletId: "wlt_behavior",
+      fiatCurrency: "USD",
+    };
+    const rendered = renderHook(
+      (props: CounterpartyRequirementsParams) => useCounterpartyRequirements(props),
+      { wrapper, initialProps: onrampParams }
+    );
+    await release("GET", COLLECT_AGREEMENTS);
+    await waitFor(() => expect(rendered.result.current.isResolved).toBe(true));
+
+    expect(rendered.result.current.pendingAgreements).toHaveLength(2);
+    expect(rendered.result.current.isComplete).toBe(false);
+
+    act(() => rendered.result.current.toggleAgreement("bvnk_platform_agreement", true));
+    expect(rendered.result.current.isComplete).toBe(false);
+
+    act(() => rendered.result.current.toggleAgreement("bvnk_privacy_policy", true));
+    expect(rendered.result.current.isComplete).toBe(true);
+
+    act(() => rendered.result.current.toggleAgreement("bvnk_platform_agreement", false));
+    expect(rendered.result.current.isComplete).toBe(false);
   });
 
   /**

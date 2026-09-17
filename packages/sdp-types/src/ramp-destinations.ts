@@ -26,6 +26,13 @@ export const MOONPAY_HOSTED_APPROVED_HOSTS = [
 /** Coinbase headless-onramp payment-link host (sandbox uses the same host). */
 export const COINBASE_HOSTED_APPROVED_HOSTS = ["pay.coinbase.com"] as const;
 
+/**
+ * BVNK customer-link hosts: the agreement and privacy-policy pages. The Sumsub
+ * verification link is opened via `openExternalRampUrl` instead and its host is
+ * not pinned by design.
+ */
+export const BVNK_CUSTOMER_LINK_APPROVED_HOSTS = ["help.bvnk.com"] as const;
+
 export type RampDestinationRejection =
   | "not_a_url"
   | "protocol_relative"

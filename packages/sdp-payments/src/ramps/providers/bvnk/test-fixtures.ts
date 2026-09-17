@@ -1,17 +1,15 @@
 import type {
-  BvnkAgreementActionResultsV2,
-  BvnkAgreementContentV2,
-  BvnkAgreementsV2,
-  BvnkCustomerV2,
-  BvnkCustomerV2Detail,
-  BvnkCustomerV2Individual,
+  BvnkAgreementSession,
+  BvnkCustomer,
+  BvnkCustomerCreated,
+  BvnkCustomerIndividual,
   BvnkLedgerWalletProfilesV2,
   BvnkLedgerWalletV2,
 } from "./schemas";
 
 export function bvnkIndividualCustomer(
-  overrides?: Partial<BvnkCustomerV2Individual>
-): BvnkCustomerV2Individual {
+  overrides?: Partial<BvnkCustomerIndividual>
+): BvnkCustomerIndividual {
   return {
     address: {
       addressLine1: "1 Main Street",
@@ -36,74 +34,48 @@ export function bvnkIndividualCustomer(
       employmentIndustrySector: "INVESTMENT",
     },
     ...overrides,
-  } satisfies BvnkCustomerV2Individual;
+  } satisfies BvnkCustomerIndividual;
 }
 
-export function bvnkCustomerSummary(overrides?: Partial<BvnkCustomerV2>): BvnkCustomerV2 {
+export function bvnkAgreementSession(
+  overrides?: Partial<BvnkAgreementSession>
+): BvnkAgreementSession {
   return {
-    id: "customer-id",
-    reference: "customer-reference",
+    reference: "c1d91c8b-f4a6-469e-953d-7344fdb6858c",
     status: "PENDING",
-    type: "INDIVIDUAL",
-    model: "EMBEDDED",
-    useCase: "STABLECOIN_PAYOUTS",
-    ...overrides,
-  } satisfies BvnkCustomerV2;
-}
-
-export function bvnkCustomerDetailV2(
-  overrides?: Partial<BvnkCustomerV2Detail>
-): BvnkCustomerV2Detail {
-  return {
-    ...bvnkCustomerSummary(),
-    status: "ACTIONS_REQUIRED",
-    authenticatedLink: {
-      link: "https://onboarding.example/customer",
-      expiresAt: "2030-01-01T00:00:00Z",
-    },
-    requiredActions: [{ type: "DATA", code: "TAX_ID", status: "REQUIRED" }],
-    ...overrides,
-  } satisfies BvnkCustomerV2Detail;
-}
-
-export function bvnkAgreementWorkingSet(overrides?: Partial<BvnkAgreementsV2>): BvnkAgreementsV2 {
-  return {
-    id: "working-set-id",
-    reference: "customer-reference",
     agreements: [
       {
-        id: "agreement-id",
         status: "PENDING",
-        declinable: false,
-        name: "Terms",
-        description: "Platform terms and conditions",
+        name: "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
+        displayName: "Embedded US Partner Platform Customers Agreement",
+        description: "Embedded US Partner Platform Customers Agreement",
+        url: "https://help.bvnk.com/hc/en-us/sections/27816998470930-BVNK-US-Partner-Platform-Customers",
+        privacyPolicyUrl: "https://help.bvnk.com/hc/en-us/articles/7662076884882-Privacy-Policy",
       },
     ],
-    signingUrl: "https://onboarding.example/sign",
     ...overrides,
-  } satisfies BvnkAgreementsV2;
+  } satisfies BvnkAgreementSession;
 }
 
-export function bvnkAgreementContent(
-  overrides?: Partial<BvnkAgreementContentV2>
-): BvnkAgreementContentV2 {
+export function bvnkCustomerCreated(overrides?: Partial<BvnkCustomerCreated>): BvnkCustomerCreated {
   return {
-    downloadUrl: "https://files.example/agreement.pdf",
-    expiresAt: null,
+    reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+    status: "PENDING",
     ...overrides,
-  } satisfies BvnkAgreementContentV2;
+  } satisfies BvnkCustomerCreated;
 }
 
-export function bvnkAgreementActionsResponse(
-  overrides?: Partial<BvnkAgreementActionResultsV2>
-): BvnkAgreementActionResultsV2 {
+export function bvnkCustomer(overrides?: Partial<BvnkCustomer>): BvnkCustomer {
   return {
-    content: [{ agreementId: "agreement-id", status: "ACCEPTED" }],
-    totalElements: 1,
-    totalPages: 1,
-    hasNext: false,
+    reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+    status: "INFO_REQUIRED",
+    verification: {
+      status: "init",
+      // biome-ignore lint/security/noSecrets: synthetic sandbox Sumsub link, not a credential
+      url: "https://in.sumsub.com/websdk/p/sbx_EDHeJPPmWnBSU2Es",
+    },
     ...overrides,
-  } satisfies BvnkAgreementActionResultsV2;
+  } satisfies BvnkCustomer;
 }
 
 export function bvnkLedgerWallet(overrides?: Partial<BvnkLedgerWalletV2>): BvnkLedgerWalletV2 {
