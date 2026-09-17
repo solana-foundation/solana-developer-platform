@@ -95,7 +95,7 @@ export function PlaygroundApiKeySelector() {
         size="xl"
         iconLeft={<KeyRound className="h-4 w-4 text-tertiary" />}
         value={selectedPlaygroundApiKeyId ?? playgroundApiKeys[0].id}
-        onValueChange={(value) => setSelectedPlaygroundApiKeyId(value ?? "")}
+        onValueChange={setSelectedPlaygroundApiKeyId}
       >
         {playgroundApiKeys.map((apiKey) => (
           <SelectItem key={apiKey.id} value={apiKey.id}>
