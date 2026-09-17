@@ -67,6 +67,7 @@ import {
   parseSlippageToleranceBps,
   quoteForKey,
   useDebouncedVaultQuote,
+  type VaultFloorReplay,
   type VaultQuoteState,
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
@@ -1395,10 +1396,10 @@ export function EarnVaultDepositModal({
   async function floorSafeToSubmit(
     controller: AbortController,
     amount: string,
-    replayedFloor: string | null | undefined,
+    replay: VaultFloorReplay,
     floor: string | null
   ): Promise<boolean> {
-    if (replayedFloor !== undefined || floor === null || !isExpiredQuote(quote)) return true;
+    if (replay.kind !== "fresh" || floor === null || !isExpiredQuote(quote)) return true;
     const verdict = await revalidateExpiredFloor(strategy.id, amount, floor, controller.signal);
     if (verdict === "still_satisfiable") return true;
     if (verdict === "aborted") return false;
@@ -1451,12 +1452,22 @@ export function EarnVaultDepositModal({
     // which retires the key and lets the next submit mint a fresh one while
     // the first attempt may already have executed. The floor memo answers for
     // both; a fresh key takes the freshly derived floor, and records it for
-    // exactly that future replay.
-    const replayFloor = floorToReplay(resolvedKey, recallVaultDepositFloor, fingerprint);
-    const floorForRequest = replayFloor !== undefined ? replayFloor : (minSharesOut ?? null);
+    // exactly that future replay. A reuse whose memo LOST the floor cannot
+    // re-floor safely at all — it stops here, submitting nothing, rather than
+    // pair the live key with a changed request.
+    const replay = floorToReplay(
+      resolvedKey,
+      recallVaultDepositFloor,
+      fingerprint,
+      minSharesOut ?? null
+    );
+    if (replay.kind === "unavailable") {
+      setSubmitError(t("DashboardEarn.deposit.vaultFloorUnavailable"));
+      return;
+    }
 
-    if (!(await floorSafeToSubmit(controller, amount, replayFloor, floorForRequest))) return;
-    rememberVaultDepositFloor(fingerprint, floorForRequest);
+    if (!(await floorSafeToSubmit(controller, amount, replay, replay.floor))) return;
+    rememberVaultDepositFloor(fingerprint, replay.floor);
 
     // The value-moving POST deliberately takes NO abort signal. The server
     // processes the request whether or not this component survives it, so
@@ -1471,7 +1482,7 @@ export function EarnVaultDepositModal({
         strategyId: strategy.id,
         custodyWalletId: wallet.id,
         amount,
-        ...(floorForRequest === null ? {} : { minSharesOut: floorForRequest }),
+        ...(replay.floor === null ? {} : { minSharesOut: replay.floor }),
         ...(swapActive
           ? {
               sourceTokenMint: fundingToken.mint,

@@ -264,13 +264,16 @@ export interface IdempotencyKeyStore {
    */
   claim(fingerprint: string): string;
   /**
-   * Whether this fingerprint already has a live key — held or not. The
-   * retry-detection half of `claim`: a caller that mints request-scoped state
-   * alongside the key (the vault flows' quote-derived floor) must replay that
-   * state when the key is reused, and `claim` alone cannot say which mint was
-   * a reuse.
+   * `claim` paired with the answer to "did this call hand back a live key or
+   * mint a fresh one?" — answered from the SAME read that produced the key. A
+   * caller that mints request-scoped state alongside the key (the vault flows'
+   * quote-derived floor) must replay that state when the key is reused, and
+   * the flag has to describe the key it is attached to: answering it from a
+   * separate, TTL-sensitive read can disagree with `claim` — an entry expiring
+   * between the two reads would report a reuse while `claim` minted fresh, and
+   * the previous key's remembered state would ride a brand-new key.
    */
-  hasLive(fingerprint: string): boolean;
+  claimReportingReuse(fingerprint: string): { key: string; wasReused: boolean };
   /**
    * Pin a key for as long as an approval hold on it is live: an approval
    * answers to a human and can take hours, far past the default TTL, and a
@@ -321,20 +324,28 @@ export async function resolveHeldIdempotencyKey(
   signal: AbortSignal,
   fetchRecorded: (key: string) => Promise<HeldIdempotencyKeyLookup>
 ): Promise<HeldIdempotencyKeyResolution> {
-  const wasReused = store.hasLive(fingerprint);
-  const key = store.claim(fingerprint);
-  if (!store.isHeld(fingerprint)) return { kind: "key", key, wasHeld: false, wasReused };
+  const claimed = store.claimReportingReuse(fingerprint);
+  const key = claimed.key;
+  if (!store.isHeld(fingerprint)) {
+    return { kind: "key", key, wasHeld: false, wasReused: claimed.wasReused };
+  }
 
   const recorded = await fetchRecorded(key);
   if (signal.aborted) return { kind: "aborted" };
   if (recorded.kind === "unavailable") return { kind: "unavailable" };
-  if (recorded.kind === "absent") return { kind: "key", key, wasHeld: true, wasReused };
+  if (recorded.kind === "absent") {
+    return { kind: "key", key, wasHeld: true, wasReused: claimed.wasReused };
+  }
 
   // The hold is over and a movement was recorded under the key: this
   // submission is a NEW intent, so it goes out under a fresh key with fresh
-  // request-scoped state — never a replay of the executed movement's.
+  // request-scoped state — never a replay of the executed movement's. The
+  // reuse flag still rides the claim that produced the key: if the release
+  // above failed to land, the claim hands back the same key and the flag says
+  // so honestly.
   store.release(fingerprint);
-  return { kind: "key", key: store.claim(fingerprint), wasHeld: false, wasReused: false };
+  const fresh = store.claimReportingReuse(fingerprint);
+  return { kind: "key", key: fresh.key, wasHeld: false, wasReused: fresh.wasReused };
 }
 
 type IdempotencyKeyOutcome =
@@ -483,22 +494,27 @@ export function createFloorMemo(storageKey: string): FloorMemo {
 
 /** One per money flow, each under its own versioned `sessionStorage` key. */
 export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore {
+  /** One read decides reuse and produces the key, so the two can never disagree. */
+  function claimReporting(fingerprint: string): { key: string; wasReused: boolean } {
+    const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
+    const existing = entries.find((entry) => entry.id === fingerprint);
+    if (existing) return { key: existing.value, wasReused: true };
+
+    const key = crypto.randomUUID();
+    writeEntries(storeKey, [
+      ...entries.filter((entry) => entry.id !== fingerprint),
+      { id: fingerprint, value: key, createdAt: Date.now() },
+    ]);
+    return { key, wasReused: false };
+  }
+
   return {
     claim(fingerprint) {
-      const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
-      const existing = entries.find((entry) => entry.id === fingerprint);
-      if (existing) return existing.value;
-
-      const key = crypto.randomUUID();
-      writeEntries(storeKey, [
-        ...entries.filter((entry) => entry.id !== fingerprint),
-        { id: fingerprint, value: key, createdAt: Date.now() },
-      ]);
-      return key;
+      return claimReporting(fingerprint).key;
     },
 
-    hasLive(fingerprint) {
-      return readEntries(storeKey, IDEMPOTENCY_TTL_MS).some((entry) => entry.id === fingerprint);
+    claimReportingReuse(fingerprint) {
+      return claimReporting(fingerprint);
     },
 
     hold(fingerprint) {

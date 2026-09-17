@@ -70,6 +70,29 @@ describe("resolveHeldIdempotencyKey reuse reporting", () => {
     expect(resolution.wasReused).toBe(true);
   });
 
+  it("answers a fresh key — not a reused one — once a prior attempt's key has lapsed", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = await resolveHeldIdempotencyKey(store, fingerprint, liveSignal, async () => ({
+        kind: "absent",
+      }));
+      // Past the TTL the prior key is dead. The reuse answer comes from the
+      // SAME read that produced the key, so a lapsed entry can never stick a
+      // reuse flag on a brand-new mint — which would send the previous
+      // request's remembered state (the vault flows' floor) under it.
+      vi.setSystemTime(Date.now() + 15 * 60_000 + 1_000);
+      const retry = await resolveHeldIdempotencyKey(store, fingerprint, liveSignal, async () => ({
+        kind: "absent",
+      }));
+
+      if (first.kind !== "key" || retry.kind !== "key") throw new Error("expected key resolutions");
+      expect(retry.wasReused).toBe(false);
+      expect(retry.key).not.toBe(first.key);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("hands back a fresh key — not a reused one — when the held movement already executed", async () => {
     const spent = store.claim(fingerprint);
     store.hold(fingerprint);

@@ -358,6 +358,59 @@ describe("exit slippage floors (quote-derived)", () => {
     );
   });
 
+  it("stops a reused key whose exit floor memo was lost: error copy, no POST", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "4.997",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      })
+      .mockResolvedValue({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "2.5",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      });
+    mocks.createEarnVaultWithdrawal.mockResolvedValueOnce({
+      ok: false,
+      error: "Bad gateway",
+      status: 503,
+      body: null,
+    });
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    // The floor memo is bounded and stored separately from the key store, so
+    // a busy session can evict a live key's floor while the key lives on.
+    // Simulate that eviction at the storage tier.
+    sessionStorage.removeItem("sdp:earn:vault-withdrawal:floor:v1");
+
+    // enterVedaShares hands back real timers before its confirm click; the
+    // second arm needs the fake clock again for the debounced quote.
+    vi.useFakeTimers();
+    renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+
+    // The retry must NOT go out under a freshly derived floor: that pairs the
+    // live key with a changed request, and the API's 409 retires the key while
+    // the ambiguous first attempt may already have executed. The submission
+    // stops with its own words instead, key untouched.
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/could not confirm the exact terms/);
+    });
+  });
+
   it("sends no floor and never quotes for a provider with no declared policy", async () => {
     mocks.createEarnVaultWithdrawal.mockResolvedValue({
       ok: true,

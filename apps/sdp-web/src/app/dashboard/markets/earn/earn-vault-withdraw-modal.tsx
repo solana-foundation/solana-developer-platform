@@ -835,16 +835,27 @@ export function EarnVaultWithdrawModal({
     // and lets the next submit mint a fresh one while the first attempt may
     // already have exited. The floor memo answers for both. A fresh key takes
     // the freshly derived floor, and records it for exactly that future replay.
-    const replayFloor = floorToReplay(resolvedKey, recallVaultWithdrawalFloor, fingerprint);
-    const floorForRequest = replayFloor !== undefined ? replayFloor : (minAmountOut ?? null);
-    rememberVaultWithdrawalFloor(fingerprint, floorForRequest);
+    // A reuse whose memo LOST the floor cannot re-floor safely at all — it
+    // stops here, submitting nothing, rather than pair the live key with a
+    // changed request.
+    const replay = floorToReplay(
+      resolvedKey,
+      recallVaultWithdrawalFloor,
+      fingerprint,
+      minAmountOut ?? null
+    );
+    if (replay.kind === "unavailable") {
+      setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
+      return;
+    }
+    rememberVaultWithdrawalFloor(fingerprint, replay.floor);
 
     // No abort signal on the value-moving POST — see the deposit modal.
     const result = await createEarnVaultWithdrawal(
       {
         positionId: position.id,
         shares,
-        ...(floorForRequest === null ? {} : { minAmountOut: floorForRequest }),
+        ...(replay.floor === null ? {} : { minAmountOut: replay.floor }),
       },
       resolvedKey.key
     );
