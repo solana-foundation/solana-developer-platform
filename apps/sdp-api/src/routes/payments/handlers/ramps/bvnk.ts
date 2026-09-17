@@ -492,6 +492,10 @@ export type BvnkStoredStage =
       agreements: BvnkStoredSessionAgreements;
     }
   | {
+      kind: "agreements_submitted";
+      sessionReference: string;
+    }
+  | {
       kind: "collect_counterparty";
       sessionReference: string;
       residenceCountryCode: CountryCode;
@@ -523,17 +527,23 @@ export function bvnkStoredStage(
       residenceCountryCode: requireBvnkResidenceCountry(metadata),
     };
   }
-  if (session.signedAt === undefined) {
+  if (session.signedAt !== undefined) {
     return {
-      kind: "agreements_pending",
+      kind: "collect_counterparty",
       sessionReference: session.reference,
-      agreements: session.agreements,
+      residenceCountryCode: requireBvnkResidenceCountry(metadata),
+    };
+  }
+  if (session.consentSubmittedAt !== undefined) {
+    return {
+      kind: "agreements_submitted",
+      sessionReference: session.reference,
     };
   }
   return {
-    kind: "collect_counterparty",
+    kind: "agreements_pending",
     sessionReference: session.reference,
-    residenceCountryCode: requireBvnkResidenceCountry(metadata),
+    agreements: session.agreements,
   };
 }
 
@@ -557,6 +567,12 @@ export function presentBvnkStoredStage(
         direction,
         status: "counterparty_collect_agreement",
         agreements: stage.agreements,
+      };
+    case "agreements_submitted":
+      return {
+        provider: "bvnk",
+        direction,
+        status: "counterparty_agreement_signing",
       };
     case "collect_counterparty":
       return bvnkCollectCounterparty(direction, stage.residenceCountryCode);
@@ -934,7 +950,7 @@ export async function ensureBvnkCustomer(
           reference: stage.sessionReference,
           ipAddress: ipAddress === null ? BVNK_UNRESOLVED_CONSENT_IP : ipAddress,
         });
-        const now = new Date().toISOString();
+        const consentSubmittedAt = new Date().toISOString();
         const updated = await accounts.patchAccountMetadata({
           organizationId: counterparty.organization_id,
           projectId,
@@ -943,8 +959,9 @@ export async function ensureBvnkCustomer(
           id: existing.id,
           set: {
             session: {
-              ...metadata.session,
-              signedAt: now,
+              reference: stage.sessionReference,
+              agreements: stage.agreements,
+              consentSubmittedAt,
             },
           },
           unset: [],
@@ -956,12 +973,15 @@ export async function ensureBvnkCustomer(
           {
             counterparty_id: counterparty.id,
             session_reference: stage.sessionReference,
-            signed_at: now,
+            consent_submitted_at: consentSubmittedAt,
           },
-          "[bvnk consent] agreement session signed"
+          "[bvnk consent] agreement session consent submitted"
         );
         return {
-          requirements: bvnkCollectCounterparty(direction, requireBvnkResidenceCountry(metadata)),
+          requirements: presentBvnkStoredStage(direction, {
+            kind: "agreements_submitted",
+            sessionReference: stage.sessionReference,
+          }),
         };
       }
       if (stage.kind === "session_pending" && collectedData !== undefined) {

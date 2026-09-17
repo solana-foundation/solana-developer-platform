@@ -6,6 +6,7 @@ import type {
   CompleteExternalAccountInput,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
+  FindCustomerLinkBySessionReferenceInput,
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
@@ -15,6 +16,7 @@ import type {
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
+  MarkCustomerLinkSessionSignedInput,
   PatchAccountMetadataInput,
   SetCustomerLinkSessionInput,
   UpdateExternalAccountStatusInput,
@@ -373,6 +375,65 @@ export function createPostgresCounterpartyProviderAccountsRepository(
           input.projectId,
           input.counterpartyId,
           input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    /**
+     * Finds a webhook-targeted customer link without tenant scope.
+     *
+     * @param input - Provider and stored agreement-session reference.
+     * @returns The matching active customer-link row, or null when it is absent.
+     */
+    async findCustomerLinkBySessionReference(input: FindCustomerLinkBySessionReferenceInput) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE provider = ?
+             AND kind = 'customer_link'
+             AND status = 'active'
+             AND metadata->'session'->>'reference' = ?
+           LIMIT 1`
+        )
+        .bind(input.provider, input.sessionReference)
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    /**
+     * CAS-records the provider-confirmed agreement signature for one customer link.
+     *
+     * @param input - Tenant scope, customer-link id, session reference, and signed timestamp.
+     * @returns The signed row, or null when the expected unsigned row no longer exists.
+     */
+    async markCustomerLinkSessionSigned(input: MarkCustomerLinkSessionSignedInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET metadata = jsonb_set(metadata, '{session,signedAt}', to_jsonb(?::text)),
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'customer_link'
+             AND status = 'active'
+             AND metadata->'session'->>'reference' = ?
+             AND NOT jsonb_exists(metadata->'session', 'signedAt')
+           RETURNING *`
+        )
+        .bind(
+          input.signedAt,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.sessionReference
         )
         .first<Record<string, unknown>>();
 

@@ -52,6 +52,12 @@ export const bvnkWebhookSchema = z.discriminatedUnion("event", [
     data: z.object({ reference: z.string().min(1) }),
   }),
   z.object({
+    event: z.literal("bvnk:platform:customer:agreement-session-status-change"),
+    eventId: z.string().min(1),
+    timestamp: z.string().datetime(),
+    data: z.object({ status: z.string().min(1), reference: z.string().min(1) }),
+  }),
+  z.object({
     event: z.literal("ledger:v2:wallet:status-change"),
     data: z
       .object({

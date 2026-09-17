@@ -72,6 +72,7 @@ export const bvnkCustomerProviderAccountMetadataSchema = z.object({
     .object({
       reference: z.string().min(1),
       signedAt: z.string().datetime().optional(),
+      consentSubmittedAt: z.string().datetime().optional(),
       agreements: z.array(bvnkSessionAgreementSchema.omit({ status: true })),
     })
     .optional(),
@@ -182,6 +183,17 @@ export interface SetCustomerLinkSessionInput extends GetCounterpartyProviderAcco
   id: string;
   /** The minted agreement session, CAS-written only while the row carries none yet. */
   session: NonNullable<BvnkCustomerProviderAccountMetadata["session"]>;
+}
+
+export interface FindCustomerLinkBySessionReferenceInput {
+  provider: RampProviderId;
+  sessionReference: string;
+}
+
+export interface MarkCustomerLinkSessionSignedInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  sessionReference: string;
+  signedAt: string;
 }
 
 export interface InsertPendingExternalAccountInput extends ListActiveExternalAccountsInput {
@@ -319,6 +331,27 @@ export interface CounterpartyProviderAccountsRepository {
    */
   setCustomerLinkSession(
     input: SetCustomerLinkSessionInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Finds an active customer link by its BVNK agreement-session reference.
+   * This is system-scoped because webhook payloads carry no tenant identity.
+   *
+   * @param input - Provider and stored agreement-session reference.
+   * @returns The matching customer-link row, or null when no active row owns the session.
+   */
+  findCustomerLinkBySessionReference(
+    input: FindCustomerLinkBySessionReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * CAS-marks an active customer-link agreement session as signed.
+   *
+   * @param input - Tenant scope, row id, provider, session reference, and provider event timestamp.
+   * @returns The signed row, or null when the session was already signed or is outside the scope.
+   */
+  markCustomerLinkSessionSigned(
+    input: MarkCustomerLinkSessionSignedInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

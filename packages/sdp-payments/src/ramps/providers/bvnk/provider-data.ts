@@ -193,8 +193,8 @@ export function readBvnkOfframpReference(reference: string): string | undefined 
 export interface BvnkCustomerResolution {
   /**
    * BVNK customer `externalReference` value. For SDP-created customers this is
-   * a reversible `cp_<uuid_without_hyphens>` alias for the SDP counterparty id,
-   * sized to fit BVNK's 36-character limit.
+   * the counterparty uuid without the `cpty_` prefix, which is exactly BVNK's
+   * 36-character limit.
    */
   externalReference?: string;
   customerReference?: string;
@@ -206,15 +206,15 @@ export interface BvnkCustomerResolution {
  * Builds the value stored in BVNK's customer `externalReference` field.
  *
  * BVNK limits `externalReference` to 36 characters, while SDP counterparty ids
- * are `cpty_<uuid>` and therefore too long. This function creates a
- * reversible BVNK-facing id in `cp_<uuid_without_hyphens>` format. BVNK returns
+ * are `cpty_<uuid>` and therefore too long. The bare hyphenated uuid is exactly
+ * 36 characters, so the prefix is dropped and nothing else changes. BVNK returns
  * this caller-provided value in customer/payment webhooks, letting handlers
  * reconstruct the SDP counterparty id and load by primary key.
  *
  * @param counterpartyId SDP counterparty primary key in `cpty_<uuid>` format.
- * @returns BVNK customer `externalReference` in `cp_<32_hex_uuid>` format.
+ * @returns BVNK customer `externalReference`: the counterparty uuid without its prefix.
  * @throws SdpPaymentsError with `INTERNAL_ERROR` when the counterparty id cannot be
- * represented in BVNK's compact externalReference format.
+ * represented as a BVNK externalReference.
  */
 export function buildBvnkCustomerExternalReference(counterpartyId: string): string {
   const match = SDP_COUNTERPARTY_ID_PATTERN.exec(counterpartyId);
@@ -223,24 +223,23 @@ export function buildBvnkCustomerExternalReference(counterpartyId: string): stri
       `Malformed SDP counterparty id for BVNK externalReference: ${counterpartyId}`
     );
   }
-  return `cp_${match.slice(1).join("").toLowerCase()}`;
+  return match.slice(1).join("-").toLowerCase();
 }
 
 const BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN =
-  /^cp_([0-9a-f]{8})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})$/;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * Recovers the SDP counterparty id from a BVNK customer `externalReference`.
  *
- * @param reference - Candidate `cp_<32_hex_uuid>` external reference.
+ * @param reference - Candidate external reference (a bare counterparty uuid).
  * @returns The `cpty_<uuid>` counterparty id, or null when the value is not an SDP external reference.
  */
 export function parseBvnkCustomerExternalReference(reference: string): string | null {
-  const match = BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN.exec(reference);
-  if (!match) {
+  if (!BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN.test(reference)) {
     return null;
   }
-  return `cpty_${match.slice(1).join("-")}`;
+  return `cpty_${reference}`;
 }
 
 /** Per funding-spec (fiat+token+destination) virtual wallet + rule. */

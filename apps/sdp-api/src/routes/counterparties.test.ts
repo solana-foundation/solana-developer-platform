@@ -1426,7 +1426,7 @@ describe("Counterparties Routes", () => {
       }
     });
 
-    it("signs the stored agreement session on consent and forwards the consenting user's IP", async () => {
+    it("submits the stored agreement consent and forwards the consenting user's IP", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_consent" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
@@ -1487,8 +1487,7 @@ describe("Counterparties Routes", () => {
         expect((await response.json()).data).toEqual({
           provider: "bvnk",
           direction: "onramp",
-          status: "collect_counterparty",
-          fields: bvnkOnrampFields("US"),
+          status: "counterparty_agreement_signing",
         });
         expect(requests).toEqual([
           `/platform/v1/customers/agreement/sessions/${BVNK_SESSION_REFERENCE}`,
@@ -1506,7 +1505,7 @@ describe("Counterparties Routes", () => {
           session: {
             reference: BVNK_SESSION_REFERENCE,
             agreements: [BVNK_STORED_AGREEMENT],
-            signedAt: expect.any(String),
+            consentSubmittedAt: expect.any(String),
           },
         });
         const linked = await repository.getProviderAccount({
@@ -1541,7 +1540,7 @@ describe("Counterparties Routes", () => {
                 id: linked.id,
                 providerCustomerReference: null,
                 status: "active",
-                providerStatus: "PENDING_DETAILS",
+                providerStatus: "PENDING_AGREEMENT",
                 createdAt: linked.created_at,
                 residenceCountryCode: "US",
                 agreements: [
@@ -1550,7 +1549,7 @@ describe("Counterparties Routes", () => {
                     displayName: BVNK_STORED_AGREEMENT.displayName,
                     url: BVNK_STORED_AGREEMENT.url,
                     privacyPolicyUrl: BVNK_STORED_AGREEMENT.privacyPolicyUrl,
-                    signedAt: expect.any(String),
+                    signedAt: null,
                   },
                 ],
               },
@@ -1566,7 +1565,75 @@ describe("Counterparties Routes", () => {
       }
     });
 
-    it("signs the stored agreement from the TCP peer when proxy headers are untrusted", async () => {
+    it("does not resubmit agreement consent after it has already been submitted", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_consent_repeat" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+      await repository.upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+        providerCustomerReference: buildBvnkCustomerExternalReference(counterparty.id),
+        metadata: {
+          residenceCountryCode: "US",
+          session: {
+            reference: BVNK_SESSION_REFERENCE,
+            agreements: [BVNK_STORED_AGREEMENT],
+          },
+        },
+      });
+      let signRequestCount = 0;
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === `/platform/v1/customers/agreement/sessions/${BVNK_SESSION_REFERENCE}`) {
+          signRequestCount += 1;
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`unexpected fetch: ${path}`);
+      });
+      env.BVNK_SANDBOX_WALLET_ID = "wallet";
+      env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
+      try {
+        const request = {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "bvnk",
+            direction: "onramp",
+            assetRail: "usdc.solana",
+            destinationCustodyWalletId: "cwlt_counterparties_test",
+            fiatCurrency: "USD",
+            agreementConsent: true,
+          }),
+        };
+        const first = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          request,
+          env
+        );
+        expect(first.status).toBe(200);
+        expect((await first.json()).data.status).toBe("counterparty_agreement_signing");
+
+        const repeat = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          request,
+          env
+        );
+        expect(repeat.status).toBe(200);
+        expect((await repeat.json()).data.status).toBe("counterparty_agreement_signing");
+        expect(signRequestCount).toBe(1);
+      } finally {
+        fetchSpy.mockRestore();
+        env.BVNK_SANDBOX_WALLET_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_AUTH_ID = undefined;
+        env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
+      }
+    });
+
+    it("submits the stored agreement consent from the TCP peer when proxy headers are untrusted", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_consent_peer_ip" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
@@ -1625,8 +1692,7 @@ describe("Counterparties Routes", () => {
         expect((await response.json()).data).toEqual({
           provider: "bvnk",
           direction: "onramp",
-          status: "collect_counterparty",
-          fields: bvnkOnrampFields("US"),
+          status: "counterparty_agreement_signing",
         });
         expect(signBodies[0]).toEqual({ status: "SIGNED", ipAddress: "0.0.0.0" });
         const row = await getDb(env)
@@ -1641,7 +1707,7 @@ describe("Counterparties Routes", () => {
           session: {
             reference: BVNK_SESSION_REFERENCE,
             agreements: [BVNK_STORED_AGREEMENT],
-            signedAt: expect.any(String),
+            consentSubmittedAt: expect.any(String),
           },
         });
       } finally {

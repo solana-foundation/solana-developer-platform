@@ -15,9 +15,13 @@ import {
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import type { BvnkCustomerProviderAccountMetadata } from "@/db/repositories/counterparty-provider-account.repository";
 import app from "@/index";
+import { bvnkCustomerLinkProviderStatus } from "@/routes/counterparty-provider-accounts/handlers";
+import { bvnkCustomerRequirementsFromMetadata } from "@/routes/payments/handlers/ramps/bvnk";
 import { SessionService } from "@/services/session.service";
 import {
+  bvnkAgreementSessionStatusChangeEvent,
   bvnkCachedCustomerSeed,
   bvnkChannelTransactionEvent,
   bvnkCustomerStatusChangeEvent,
@@ -952,6 +956,7 @@ describe("BVNK ramp webhook", () => {
   const PROJECT_ID = "prj_bvnk_webhook";
   const COUNTERPARTY_ID = "cpty_123e4567-e89b-12d3-a456-426614174000";
   const CUSTOMER_REFERENCE = "965a5ef5-77f3-482e-917f-194c30143810";
+  const AGREEMENT_SESSION_REFERENCE = "95d360c0-65dd-4598-acc0-89cab6b249da";
   const USER_ID = "usr_bvnk_webhook";
   const WALLET_ID = "a:1:wallet:1";
   const CUSTOMER_EXTERNAL_REFERENCE = buildBvnkCustomerExternalReference(COUNTERPARTY_ID);
@@ -1004,10 +1009,10 @@ describe("BVNK ramp webhook", () => {
       .run();
   }
 
-  async function sendBvnkWebhook(payload: unknown, signature?: string) {
+  async function sendBvnkWebhook(payload: Record<string, unknown>, signature?: string) {
     const body = JSON.stringify({
-      ...(payload as Record<string, unknown>),
       timestamp: new Date().toISOString(),
+      ...payload,
     });
     const sig =
       signature ?? createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64");
@@ -1031,6 +1036,27 @@ describe("BVNK ramp webhook", () => {
     );
     await Promise.allSettled(background);
     return res;
+  }
+
+  async function seedAgreementSession(): Promise<void> {
+    await getDb(env)
+      .prepare(
+        `UPDATE counterparty_provider_accounts
+         SET metadata = ?
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(
+        {
+          residenceCountryCode: "US",
+          session: {
+            reference: AGREEMENT_SESSION_REFERENCE,
+            agreements: [],
+            consentSubmittedAt: "2026-09-16T17:18:00.000Z",
+          },
+        },
+        COUNTERPARTY_ID
+      )
+      .run();
   }
 
   beforeEach(async () => {
@@ -1729,6 +1755,89 @@ describe("BVNK ramp webhook", () => {
       "not-a-valid-signature"
     );
     expect(res.status).toBe(401);
+  });
+
+  it("records a SIGNED agreement session and advances its stored requirements", async () => {
+    await seedAgreementSession();
+
+    const res = await sendBvnkWebhook(bvnkAgreementSessionStatusChangeEvent());
+
+    expect(res.status).toBe(200);
+    const row = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{ metadata: BvnkCustomerProviderAccountMetadata }>();
+    if (row === null) {
+      throw new Error("Expected BVNK agreement-session customer link");
+    }
+    if (row.metadata.session === undefined) {
+      throw new Error("Expected BVNK agreement-session metadata");
+    }
+    expect(row.metadata.session.signedAt).toBe("2026-09-16T17:19:03.631Z");
+    expect(bvnkCustomerLinkProviderStatus(row.metadata)).toBe("AGREEMENT_SIGNED");
+    expect(bvnkCustomerRequirementsFromMetadata("onramp", row.metadata)).toMatchObject({
+      status: "collect_counterparty",
+    });
+  });
+
+  it("acknowledges a replayed agreement-session signature without changing the row", async () => {
+    await seedAgreementSession();
+    await sendBvnkWebhook(bvnkAgreementSessionStatusChangeEvent());
+    const before = await getDb(env)
+      .prepare(
+        `SELECT metadata, updated_at FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<Record<string, unknown>>();
+
+    const res = await sendBvnkWebhook(bvnkAgreementSessionStatusChangeEvent());
+
+    expect(res.status).toBe(200);
+    const after = await getDb(env)
+      .prepare(
+        `SELECT metadata, updated_at FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<Record<string, unknown>>();
+    expect(after).toEqual(before);
+  });
+
+  it("fails a SIGNED agreement session webhook with an unknown reference", async () => {
+    const res = await sendBvnkWebhook(
+      bvnkAgreementSessionStatusChangeEvent({
+        data: { status: "SIGNED", reference: "unknown-agreement-session" },
+      })
+    );
+
+    expect(res.status).toBe(500);
+  });
+
+  it("acknowledges a non-SIGNED agreement session without changing the row", async () => {
+    await seedAgreementSession();
+
+    const res = await sendBvnkWebhook(
+      bvnkAgreementSessionStatusChangeEvent({
+        data: { status: "PENDING", reference: AGREEMENT_SESSION_REFERENCE },
+      })
+    );
+
+    expect(res.status).toBe(200);
+    const row = await getDb(env)
+      .prepare(
+        `SELECT metadata FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
+      )
+      .bind(COUNTERPARTY_ID)
+      .first<{ metadata: BvnkCustomerProviderAccountMetadata }>();
+    if (row === null || row.metadata.session === undefined) {
+      throw new Error("Expected BVNK agreement-session metadata");
+    }
+    expect(row.metadata.session.signedAt).toBeUndefined();
   });
 
   it("rejects a bvnk webhook that omits the envelope timestamp", async () => {

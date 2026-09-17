@@ -11,7 +11,11 @@ import type {
   RequirementField,
   RequirementOption,
 } from "@sdp/types/ramp-requirements";
-import { isCollectFieldsRequirements, isCollectStageStatus } from "@sdp/types/ramp-requirements";
+import {
+  isCollectFieldsRequirements,
+  isCollectStageStatus,
+  isCounterpartyRequirementsPollStatus,
+} from "@sdp/types/ramp-requirements";
 import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
 import {
@@ -313,16 +317,6 @@ function payoutTreeOf(answer: CounterpartyRequirements | undefined): PayoutRequi
   return answer !== undefined && answer.status === "collect_account" ? answer.payout : null;
 }
 
-function isOnboardingPending(status: CounterpartyRequirements["status"]): boolean {
-  return (
-    status === "terms_of_service_required" ||
-    status === "customer_verification_required" ||
-    status === "customer_verifying" ||
-    status === "customer_funding_account_provisioning" ||
-    status === "funding_account_provisioning"
-  );
-}
-
 export interface CounterpartyRequirementsState {
   /** Fields the client must collect; empty unless the provider returned `collect`. */
   fields: RequirementField[];
@@ -548,7 +542,9 @@ export function useCounterpartyRequirements(
   // stop an in-flight tick from repopulating a shared key, so no two advances
   // ever share a key.
   const pollKey =
-    advance !== null && params?.provider && isOnboardingPending(advance.result.status)
+    advance !== null &&
+    params?.provider &&
+    isCounterpartyRequirementsPollStatus(advance.result.status)
       ? paymentsQueryKeys.requirementsStatusPoll({
           subjectKey: `${corridorIdentity}#${advance.advanceId}`,
         })
@@ -569,9 +565,14 @@ export function useCounterpartyRequirements(
     },
     {
       refreshInterval: (latest) =>
-        latest !== undefined && !isOnboardingPending(latest.status) ? 0 : 4000,
+        latest !== undefined && !isCounterpartyRequirementsPollStatus(latest.status) ? 0 : 4000,
       revalidateOnFocus: false,
       dedupingInterval: 0,
+      onSuccess: (latest) => {
+        if (isCollectStageStatus(latest.status)) {
+          setCollectRecord({ subject: subjectKey, result: latest });
+        }
+      },
     }
   );
 

@@ -1,6 +1,7 @@
 import { buildBvnkOnrampWalletName } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { describe, expect, it } from "vitest";
 import {
+  bvnkAgreementSessionStatusChangeEvent,
   bvnkChannelTransactionEvent,
   bvnkCustomerStatusChangeEvent,
   bvnkPayinStatusChangeEvent,
@@ -51,8 +52,16 @@ describe("BvnkWebhookProcessor.parse", () => {
 
     expect(processor.parse(bvnkPlatformCustomerUpdateEvent())).toEqual({
       event: "bvnk:platform:customer:update",
-      data: { reference: "cp_123e4567e89b12d3a456426614174000" },
+      data: { reference: "123e4567-e89b-12d3-a456-426614174000" },
     });
+  });
+
+  it("parses an agreement-session status-change webhook", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(processor.parse(bvnkAgreementSessionStatusChangeEvent())).toEqual(
+      bvnkAgreementSessionStatusChangeEvent()
+    );
   });
 
   it("parses a ledger wallet status-change webhook", () => {

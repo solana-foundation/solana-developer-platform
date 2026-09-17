@@ -77,6 +77,7 @@ type PanelOnboardingRequirements =
 const BVNK_ONBOARDING_PANEL_STATUSES = new Set<BvnkOnboardingPanelStatus>([
   "customer_verification_required",
   "customer_verifying",
+  "counterparty_agreement_signing",
   "customer_verification_failed",
   "customer_funding_account_provisioning",
   "customer_funding_account_provisioning_failed",
@@ -101,6 +102,48 @@ const HERCLE_ONBOARDING_PANEL_STATUSES = new Set<HercleOnboardingPanelStatus>([
   "ready",
 ]);
 
+function isBvnkPanelOnboardingRequirements(
+  requirements: CounterpartyRequirements
+): requirements is BvnkPanelOnboardingRequirements {
+  if (requirements.provider !== "bvnk") {
+    return false;
+  }
+  for (const status of BVNK_ONBOARDING_PANEL_STATUSES) {
+    if (status === requirements.status) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isLightsparkPanelOnboardingRequirements(
+  requirements: CounterpartyRequirements
+): requirements is LightsparkPanelOnboardingRequirements {
+  if (requirements.provider !== "lightspark") {
+    return false;
+  }
+  for (const status of LIGHTSPARK_ONBOARDING_PANEL_STATUSES) {
+    if (status === requirements.status) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isMuralPanelOnboardingRequirements(
+  requirements: CounterpartyRequirements
+): requirements is MuralPanelOnboardingRequirements {
+  if (requirements.provider !== "mural") {
+    return false;
+  }
+  for (const status of MURAL_ONBOARDING_PANEL_STATUSES) {
+    if (status === requirements.status) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Whether a requirements status is an onboarding-lifecycle state the panel can
  * render, as opposed to a form-collection or terminal-block state.
@@ -113,13 +156,11 @@ export function isOnboardingPanelStatus(
 ): requirements is PanelOnboardingRequirements {
   switch (requirements.provider) {
     case "bvnk":
-      return BVNK_ONBOARDING_PANEL_STATUSES.has(requirements.status as BvnkOnboardingPanelStatus);
+      return isBvnkPanelOnboardingRequirements(requirements);
     case "lightspark":
-      return LIGHTSPARK_ONBOARDING_PANEL_STATUSES.has(
-        requirements.status as LightsparkOnboardingPanelStatus
-      );
+      return isLightsparkPanelOnboardingRequirements(requirements);
     case "mural":
-      return MURAL_ONBOARDING_PANEL_STATUSES.has(requirements.status as MuralOnboardingPanelStatus);
+      return isMuralPanelOnboardingRequirements(requirements);
     case "hercle":
       return HERCLE_ONBOARDING_PANEL_STATUSES.has(
         requirements.status as HercleOnboardingPanelStatus

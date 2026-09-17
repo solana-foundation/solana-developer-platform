@@ -1,5 +1,6 @@
 "use client";
 
+import { isRampOnboardingPendingStatus } from "@sdp/types/ramp-requirements";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
@@ -83,9 +84,9 @@ export function OnrampRail({
 
   const verificationPending =
     onOnboardingStep &&
-    (wizard.onboarding?.status === "customer_verifying" ||
-      wizard.onboarding?.status === "customer_funding_account_provisioning" ||
-      wizard.onboarding?.status === "funding_account_provisioning");
+    wizard.onboarding !== null &&
+    wizard.onboarding !== undefined &&
+    isRampOnboardingPendingStatus(wizard.onboarding.status);
 
   const summaryDetails = [
     ...preStepSummaryDetails(t, counterpartyName, methodLabel),

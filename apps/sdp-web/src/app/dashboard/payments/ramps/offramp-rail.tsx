@@ -1,6 +1,7 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types";
+import { isRampOnboardingPendingStatus } from "@sdp/types/ramp-requirements";
 import { SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -91,9 +92,9 @@ export function OfframpRail({
       : undefined;
   const verificationPending =
     onOnboardingStep &&
-    (wizard.onboarding?.status === "customer_verifying" ||
-      wizard.onboarding?.status === "customer_funding_account_provisioning" ||
-      wizard.onboarding?.status === "funding_account_provisioning");
+    wizard.onboarding !== null &&
+    wizard.onboarding !== undefined &&
+    isRampOnboardingPendingStatus(wizard.onboarding.status);
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
