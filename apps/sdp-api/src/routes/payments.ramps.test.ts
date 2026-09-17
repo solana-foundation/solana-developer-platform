@@ -1,7 +1,9 @@
 import { createHmac } from "node:crypto";
+import { RAMP_PROVIDERS } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { createOnrampQuoteSchema } from "@/routes/payments/schemas";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -1888,5 +1890,51 @@ describe("Payments routes — ramps", () => {
       expect(gridBody.destination.accountId).toBe("ExternalAccount:single");
       fetchSpy.mockRestore();
     });
+  });
+});
+
+describe("createOnrampQuoteSchema", () => {
+  // The body is discriminated by provider so an arm can carry what only that
+  // provider needs. The arms are identical today, so these pin that the split
+  // changed nothing: the same bodies are accepted and rejected as before.
+  const validBody = (provider: string) => ({
+    provider,
+    counterpartyId: "cpty_x",
+    destinationCustodyWalletId: "cwlt_x",
+    assetRail: "usdc.solana",
+    fiatCurrency: "USD",
+    fiatAmount: "100.00",
+  });
+
+  it("accepts a valid body for every ramp provider", () => {
+    for (const provider of RAMP_PROVIDERS) {
+      expect(createOnrampQuoteSchema.safeParse(validBody(provider)).success, provider).toBe(true);
+    }
+  });
+
+  it("rejects an unknown provider", () => {
+    expect(createOnrampQuoteSchema.safeParse(validBody("not-a-provider")).success).toBe(false);
+  });
+
+  it("rejects an unknown key on every arm", () => {
+    // The single object this replaced was a strictObject. An arm that is not
+    // strict would loosen the endpoint silently, which is the one way this
+    // refactor could change behaviour.
+    for (const provider of RAMP_PROVIDERS) {
+      const body = { ...validBody(provider), unexpected: "value" };
+      expect(createOnrampQuoteSchema.safeParse(body).success, provider).toBe(false);
+    }
+  });
+
+  it("still accepts the optional fields on every arm", () => {
+    for (const provider of RAMP_PROVIDERS) {
+      const body = { ...validBody(provider), rampsMemo: { invoice: "INV-1" }, domain: "x.example" };
+      expect(createOnrampQuoteSchema.safeParse(body).success, provider).toBe(true);
+    }
+  });
+
+  it("still rejects a body missing a required field", () => {
+    const { fiatAmount: _omitted, ...withoutAmount } = validBody("coinbase");
+    expect(createOnrampQuoteSchema.safeParse(withoutAmount).success).toBe(false);
   });
 });
