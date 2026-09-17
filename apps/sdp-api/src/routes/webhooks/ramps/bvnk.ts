@@ -8,9 +8,9 @@ import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/paym
 import type { SdpEnvironment } from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
-import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories";
+import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";

@@ -701,7 +701,11 @@ describe("ensureBvnkSettlementWallet", () => {
   it("claims a pending settlement-wallet row, creates the BVNK wallet, and CASes the reference", async () => {
     mockAccounts.getVirtualSettlementWallet.mockResolvedValue(null);
     mockAccounts.insertPendingVirtualSettlementWallet.mockResolvedValue(
-      settlementWalletRow({ external_account_reference: null, provider_status: null, status: "pending" })
+      settlementWalletRow({
+        external_account_reference: null,
+        provider_status: null,
+        status: "pending",
+      })
     );
     createLedgerWalletV2.mockResolvedValue(offrampLedgerWallet("PENDING"));
     mockAccounts.completeVirtualSettlementWalletReference.mockResolvedValue(
@@ -759,7 +763,11 @@ describe("ensureBvnkSettlementWallet", () => {
 
   it("completes an unbound settlement-wallet row left by a crash without inserting a second", async () => {
     mockAccounts.getVirtualSettlementWallet.mockResolvedValue(
-      settlementWalletRow({ external_account_reference: null, provider_status: null, status: "pending" })
+      settlementWalletRow({
+        external_account_reference: null,
+        provider_status: null,
+        status: "pending",
+      })
     );
     createLedgerWalletV2.mockResolvedValue(offrampLedgerWallet("PENDING"));
     mockAccounts.completeVirtualSettlementWalletReference.mockResolvedValue(
@@ -818,9 +826,7 @@ describe("ensureBvnkSettlementWallet", () => {
     mockAccounts.getVirtualSettlementWallet
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(settlementWalletRow());
-    mockAccounts.insertPendingVirtualSettlementWallet.mockRejectedValue(
-      uniqueViolationError()
-    );
+    mockAccounts.insertPendingVirtualSettlementWallet.mockRejectedValue(uniqueViolationError());
 
     const result = await ensureBvnkSettlementWallet(
       fakeContext(),

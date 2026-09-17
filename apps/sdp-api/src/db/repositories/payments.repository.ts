@@ -356,9 +356,7 @@ export interface PaymentsRepository {
    * @param params - The transfer id decoded from the channel reference.
    * @returns The matching BVNK off-ramp transfer, or null when none exists.
    */
-  getBvnkOfframpTransferById(params: {
-    transferId: string;
-  }): Promise<PaymentTransferRow | null>;
+  getBvnkOfframpTransferById(params: { transferId: string }): Promise<PaymentTransferRow | null>;
   /**
    * Completes a BVNK off-ramp channel confirmation in one compare-and-swap:
    * the transfer must still be `awaiting_payment` or `settling`, and the

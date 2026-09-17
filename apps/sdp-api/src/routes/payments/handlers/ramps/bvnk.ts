@@ -1,16 +1,9 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import {
-  buildBvnkThirdPartyRuleEntity,
-  bvnkOfframpAccountType,
-  bvnkOfframpFields,
-  isBvnkOfframpCurrency,
-} from "@sdp/payments/ramps/providers/bvnk/counterparty";
+import { buildBvnkThirdPartyRuleEntity } from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import { isBvnkFiatCurrency } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import {
   type BvnkCryptoCurrency,
   type BvnkNetwork,
-  type BvnkOfframpBeneficiary,
-  type BvnkOfframpWallet,
   buildBvnkOfframpWalletName,
   buildBvnkOnrampRuleReference,
   buildBvnkOnrampWalletName,
@@ -28,7 +21,6 @@ import {
   createBvnkContactV3InputSchema,
 } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import {
-  buildRequirementSchema,
   countryField,
   dateField,
   parseCollectedFields,
@@ -49,19 +41,14 @@ import type {
   RampDirection,
   RequirementField,
 } from "@sdp/types/ramp-requirements";
-import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createSystemTransactionalPaymentsRepository } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
-import type {
-  PaymentsRepository,
-  PaymentTransferRow,
-} from "@/db/repositories/payments.repository";
+import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import {
-  AppError,
   badRequest,
   conflict,
   counterpartyNotProvisioned,
@@ -182,17 +169,13 @@ async function ensureBvnkWalletProvisioned(
     provider: "bvnk" as const,
   };
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
-  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
   const existing = await provisioning.get({ ...scope, fiatCurrency });
   if (existing !== null && existing.external_account_reference !== null) {
     return existing;
   }
   let claim = existing;
   if (claim === null) {
-    claim = await getDb(c.env).transaction(async (transaction) => {
-      const txAccounts = createPostgresCounterpartyProviderAccountsRepository(
-        asTransactionalClient(transaction)
-      );
+    claim = await getDb(c.env).transaction(async () => {
       try {
         return await provisioning.insertPending({ ...scope, fiatCurrency });
       } catch (error) {
