@@ -43,8 +43,7 @@ export function DeactivateCredentialsDialog({
 
   const handleConfirm = async () => {
     const result = await run(
-      () =>
-        deactivateCredentialAction(lifecycle.providerCredential.id, provider, connectionId),
+      () => deactivateCredentialAction(lifecycle.providerCredential.id, provider, connectionId),
       {
         successTitle: t("DashboardCustody.deactivateCredentialsSuccessTitle"),
         successDescription: t("DashboardCustody.deactivateCredentialsSuccessDescription"),
@@ -79,9 +78,7 @@ export function DeactivateCredentialsDialog({
             {t("DashboardCustody.credentialsStillInUseBody", {
               count: references.length,
               projects: [
-                ...new Set(
-                  references.map((r) => projectNames.get(r.projectId) ?? r.projectId)
-                ),
+                ...new Set(references.map((r) => projectNames.get(r.projectId) ?? r.projectId)),
               ].join(", "),
             })}
           </Callout>

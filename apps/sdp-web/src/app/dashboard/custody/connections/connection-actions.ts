@@ -41,7 +41,11 @@ function revalidateCustody(provider: string, connectionId?: string) {
 function classifyThrown(error: unknown, fallback: string): CustodyActionResult {
   const { status, message } = extractSdpApiError(error);
   if (status !== null && status < 500 && status !== 408 && status !== 429) {
-    return { status: "failed", kind: resolveHttpOutcome(status).kind, message: message || fallback };
+    return {
+      status: "failed",
+      kind: resolveHttpOutcome(status).kind,
+      message: message || fallback,
+    };
   }
   return { status: "unknown", message: message || fallback };
 }

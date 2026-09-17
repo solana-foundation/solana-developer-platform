@@ -3,12 +3,11 @@
 import { RefreshCwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { toast } from "sonner";
 import { recheckPrivyCredentialAction } from "@/app/dashboard/custody/byok-actions";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { docsHref } from "@/components/dashboard-nav";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { docsHref } from "@/components/dashboard-nav";
 import { useTranslations } from "@/i18n/provider";
 import type { CustodyOutcome, CustodyOutcomeKind } from "./verification-outcome";
 

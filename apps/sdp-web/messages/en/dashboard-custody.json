@@ -878,7 +878,6 @@
     "deactivateConnectionSectionTitle": "Deactivate connection",
     "deactivateConnectionSectionBody": "Permanently stops this connection. History is kept.",
     "deactivateConnectionConfirm": "Deactivate connection",
-    "deactivateConnectionHolding": "Hold to deactivate…",
     "deactivateConnectionTitle": "Deactivate “{label}”?",
     "deactivateBlockedTitle": "Not possible right now.",
     "deactivateConnectionBlockedBody": "{count} wallets are still active on this connection. Privy wallets can't be deactivated from SDP yet, so this connection stays active.",
@@ -950,6 +949,12 @@
     "outcomeWalletConflictBody": "Replacing the credentials will not fix it; contact support to resolve the connection.",
     "outcomeReload": "Reload",
     "outcomeCheckCurrentState": "Check current state",
-    "outcomeContactSupport": "Contact support"
+    "outcomeContactSupport": "Contact support",
+    "connection": "Connection",
+    "walletSetupConnection": "Connection",
+    "walletSetupConnectionHint": "The wallet is created in this connection and signs with its credentials.",
+    "walletSetupConnectionDefault": "Project default",
+    "walletSetupConnectionUnavailablePending": "Setup unfinished",
+    "walletSetupConnectionUnavailableFailed": "Needs attention"
   }
 }

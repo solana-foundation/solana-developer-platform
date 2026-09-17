@@ -66,18 +66,15 @@ export function RotateCredentialsModal({
     formData.set("appId", appId);
     formData.set("appSecret", appSecret);
 
-    const result = await run(
-      () => rotateCredentialsAction(formData),
-      {
-        successTitle: t("DashboardCustody.rotateSuccessTitle"),
-        successDescription: t("DashboardCustody.rotateSuccessDescription", {
-          connections: connectionCount,
-          projects: lifecycle.impact.projects.length,
-        }),
-        failedTitle: t("DashboardCustody.rotateFailedTitle"),
-        unknownTitle: t("DashboardCustody.rotateUnknownTitle"),
-      }
-    );
+    const result = await run(() => rotateCredentialsAction(formData), {
+      successTitle: t("DashboardCustody.rotateSuccessTitle"),
+      successDescription: t("DashboardCustody.rotateSuccessDescription", {
+        connections: connectionCount,
+        projects: lifecycle.impact.projects.length,
+      }),
+      failedTitle: t("DashboardCustody.rotateFailedTitle"),
+      unknownTitle: t("DashboardCustody.rotateUnknownTitle"),
+    });
 
     // Clear the secret before anything else on every settled outcome: a
     // re-render must not leave it in a mounted input, and a rejected secret is
@@ -102,9 +99,7 @@ export function RotateCredentialsModal({
         <CredentialImpactList impact={lifecycle.impact} provider={provider} />
 
         <div className="space-y-2">
-          <Label htmlFor="custody-rotate-app-id">
-            {t("DashboardCustody.providerPrivyAppId")}
-          </Label>
+          <Label htmlFor="custody-rotate-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
           <Input
             id="custody-rotate-app-id"
             name="appId"

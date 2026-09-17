@@ -3,6 +3,7 @@ import {
   CUSTODY_CONNECTION_FAILURE_CODES,
   CUSTODY_CONNECTION_LIFECYCLES,
   CUSTODY_PROVIDERS,
+  type CustodyProvider,
   type CustodyWalletSummary,
 } from "@sdp/types";
 import { z } from "zod";
@@ -138,6 +139,40 @@ export async function resolveConnectionsPage(
     return { result, filters };
   }
   return { result: await fetchConnectionsPage(request, firstPage), filters: firstPage };
+}
+
+/** One page is plenty for a picker; a project with more needs a search, not a longer list. */
+const CONNECTION_PICKER_LIMIT = 50;
+
+/**
+ * The connections a wallet can be created in, for the setup wizard's picker.
+ *
+ * Deactivated connections are dropped — they can never accept a wallet — while
+ * pending and failed ones are kept so the picker can show them disabled with a
+ * reason, rather than leave the user wondering where their connection went.
+ *
+ * Returns `[]` instead of throwing on any failure: the endpoint requires
+ * `custody:admin`, and someone allowed to create a wallet without it must still
+ * reach the wizard's provider form.
+ */
+export async function fetchConnectionPickerOptions(
+  request: SdpApiClient["request"],
+  provider: CustodyProvider
+): Promise<CustodyConnectionListItem[]> {
+  try {
+    const res = await request(
+      `/internal/dashboard/custody/connections?limit=${CONNECTION_PICKER_LIMIT}&offset=0`
+    );
+    if (!res.ok) {
+      return [];
+    }
+    const parsed = connectionsPageEnvelopeSchema.parse(await res.json()).data;
+    return parsed.connections.filter(
+      (connection) => connection.provider === provider && connection.status !== "deactivated"
+    );
+  } catch {
+    return [];
+  }
 }
 
 /**

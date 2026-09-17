@@ -69,7 +69,10 @@ describe("PrivyCredentialForm", () => {
   });
 
   it("submits with an idempotency key and routes to wallets on success", async () => {
-    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({ status: "success", connectionId: "cconn_test" });
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
+      status: "success",
+      connectionId: "cconn_test",
+    });
     const user = userEvent.setup();
     renderForm();
 
@@ -80,7 +83,10 @@ describe("PrivyCredentialForm", () => {
   });
 
   it("refreshes wallet inventories in the current project after install without replaying commands", async () => {
-    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({ status: "success" });
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
+      status: "success",
+      connectionId: "conn_test",
+    });
     const walletRead = vi.fn(async () => "New Connection wallet");
     const otherProjectRead = vi.fn(async () => "Other project changed");
     const command = vi.fn(async () => "Replayed command");
@@ -260,7 +266,10 @@ describe("PrivyCredentialForm", () => {
       message: "Install checks are not enabled for this organization",
       connectionId: "conn_1",
     });
-    vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({ status: "success", connectionId: "cconn_test" });
+    vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({
+      status: "success",
+      connectionId: "cconn_test",
+    });
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -385,7 +394,10 @@ describe("PrivyCredentialForm", () => {
       status: "retry_unknown",
       connectionId: "conn_1",
     });
-    vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({ status: "success", connectionId: "cconn_test" });
+    vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({
+      status: "success",
+      connectionId: "cconn_test",
+    });
     const user = userEvent.setup();
     renderForm();
 

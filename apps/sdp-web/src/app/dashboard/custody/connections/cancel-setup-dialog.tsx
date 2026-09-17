@@ -34,15 +34,12 @@ export function CancelSetupDialog({
   const { pending, run } = useCustodyAction();
 
   const handleConfirm = async () => {
-    const result = await run(
-      () => cancelSetupAction(connectionId, provider),
-      {
-        successTitle: t("DashboardCustody.cancelSetupSuccessTitle"),
-        successDescription: t("DashboardCustody.cancelSetupSuccessDescription"),
-        failedTitle: t("DashboardCustody.cancelSetupFailedTitle"),
-        unknownTitle: t("DashboardCustody.cancelSetupUnknownTitle"),
-      }
-    );
+    const result = await run(() => cancelSetupAction(connectionId, provider), {
+      successTitle: t("DashboardCustody.cancelSetupSuccessTitle"),
+      successDescription: t("DashboardCustody.cancelSetupSuccessDescription"),
+      failedTitle: t("DashboardCustody.cancelSetupFailedTitle"),
+      unknownTitle: t("DashboardCustody.cancelSetupUnknownTitle"),
+    });
     if (result.status === "success") {
       onClose();
       // The connection this page is about no longer exists, so staying here
@@ -70,12 +67,7 @@ export function CancelSetupDialog({
           <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
             {t("DashboardCustody.cancelSetupKeep")}
           </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={handleConfirm}
-            disabled={pending}
-          >
+          <Button type="button" variant="destructive" onClick={handleConfirm} disabled={pending}>
             {t("DashboardCustody.cancelSetupConfirm")}
           </Button>
         </div>

@@ -57,8 +57,7 @@ export function RollbackDialog({
 
   const handleConfirm = async () => {
     const result = await run(
-      () =>
-        rollbackCredentialAction(lifecycle.providerCredential.id, provider, connectionId),
+      () => rollbackCredentialAction(lifecycle.providerCredential.id, provider, connectionId),
       {
         successTitle: t("DashboardCustody.rollbackSuccessTitle"),
         successDescription: t("DashboardCustody.rollbackSuccessDescription", {

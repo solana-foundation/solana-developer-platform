@@ -1,8 +1,4 @@
-import type {
-  CustodyWalletSummary,
-  OrganizationRpcProvider,
-  SafeRpcConnection,
-} from "@sdp/types";
+import type { CustodyWalletSummary, OrganizationRpcProvider, SafeRpcConnection } from "@sdp/types";
 import { VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -18,10 +14,7 @@ import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
-import {
-  CustodyConnectionCount,
-  CustodyConnectionsSection,
-} from "../custody-connections-section";
+import { CustodyConnectionCount, CustodyConnectionsSection } from "../custody-connections-section";
 import type { IntegrationDetail } from "../integration-detail";
 import { RpcByokSection } from "../rpc-byok-section";
 import { RpcConnectionPanel } from "../rpc-connection-panel";

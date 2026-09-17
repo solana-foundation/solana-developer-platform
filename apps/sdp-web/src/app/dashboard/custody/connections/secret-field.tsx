@@ -64,9 +64,7 @@ export function SecretField({
           disabled={disabled}
           aria-pressed={shown}
           // The icon carries no text, so the control needs its own name.
-          aria-label={
-            shown ? t("DashboardCustody.hideSecret") : t("DashboardCustody.showSecret")
-          }
+          aria-label={shown ? t("DashboardCustody.hideSecret") : t("DashboardCustody.showSecret")}
           onClick={() => setShown((current) => !current)}
         >
           {shown ? (

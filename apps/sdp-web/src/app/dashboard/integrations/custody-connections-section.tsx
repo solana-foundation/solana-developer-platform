@@ -4,11 +4,11 @@ import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { AddConnectionModal } from "@/app/dashboard/custody/connections/add-connection-modal";
-import { ConnectionsList } from "@/app/dashboard/custody/connections/connections-list";
 import type {
   ConnectionsFilters,
   ConnectionsPageResult,
 } from "@/app/dashboard/custody/connections/connections.data";
+import { ConnectionsList } from "@/app/dashboard/custody/connections/connections-list";
 import { useSelectedProjectName } from "@/app/dashboard/custody/connections/use-selected-project-name";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
@@ -120,11 +120,7 @@ export function CustodyConnectionsSection({
         </div>
       </div>
 
-      <AddConnectionModal
-        isOpen={addOpen}
-        onClose={() => setAddOpen(false)}
-        provider={provider}
-      />
+      <AddConnectionModal isOpen={addOpen} onClose={() => setAddOpen(false)} provider={provider} />
     </section>
   );
 }

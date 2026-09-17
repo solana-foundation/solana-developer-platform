@@ -75,9 +75,7 @@ export function AddWalletDialog({
       ariaLabel={t("DashboardCustody.addWalletTitle")}
     >
       <form onSubmit={handleSubmit} className="space-y-5 p-6" data-custody-add-wallet-form>
-        <h2 className="text-lg font-medium text-primary">
-          {t("DashboardCustody.addWalletTitle")}
-        </h2>
+        <h2 className="text-lg font-medium text-primary">{t("DashboardCustody.addWalletTitle")}</h2>
 
         <div className="space-y-2">
           <p className="text-sm font-medium text-primary">
@@ -104,9 +102,7 @@ export function AddWalletDialog({
             value={label}
             onChange={(event) => setLabel(event.target.value)}
           />
-          <p className="text-sm leading-5 text-tertiary">
-            {t("DashboardCustody.addWalletHint")}
-          </p>
+          <p className="text-sm leading-5 text-tertiary">{t("DashboardCustody.addWalletHint")}</p>
         </div>
 
         <div className="flex items-center justify-end gap-2">

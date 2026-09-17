@@ -37,15 +37,12 @@ export function MakeDefaultDialog({
   const { pending, run } = useCustodyAction();
 
   const handleConfirm = async () => {
-    const result = await run(
-      () => makeDefaultConnectionAction(connectionId, provider),
-      {
-        successTitle: t("DashboardCustody.makeDefaultSuccessTitle", { label }),
-        successDescription: t("DashboardCustody.makeDefaultSuccessDescription"),
-        failedTitle: t("DashboardCustody.makeDefaultFailedTitle"),
-        unknownTitle: t("DashboardCustody.makeDefaultUnknownTitle"),
-      }
-    );
+    const result = await run(() => makeDefaultConnectionAction(connectionId, provider), {
+      successTitle: t("DashboardCustody.makeDefaultSuccessTitle", { label }),
+      successDescription: t("DashboardCustody.makeDefaultSuccessDescription"),
+      failedTitle: t("DashboardCustody.makeDefaultFailedTitle"),
+      unknownTitle: t("DashboardCustody.makeDefaultUnknownTitle"),
+    });
     if (result.status === "success") {
       onClose();
     }

@@ -9,6 +9,7 @@ import { ListChecks, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
+import { fetchConnectionListItem } from "@/app/dashboard/custody/connections/connection-detail.data";
 import {
   formatCustodyProviderName,
   getCustodyProviderCategory,
@@ -249,6 +250,13 @@ export default async function WalletDetailPage({
     ? formatCustodyProviderName(provider)
     : t("DashboardCustody.unknown");
   const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
+  // Wallets created before Connections — and every legacy Config-backed one —
+  // carry no connection, so the row is absent rather than empty. The lookup
+  // needs `custody:admin` and returns null without it, which degrades to the
+  // connection id: still the answer to "which connection", just unnamed.
+  const connection = wallet.custodyConnectionId
+    ? await fetchConnectionListItem(apiClient.request, wallet.custodyConnectionId)
+    : null;
 
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
@@ -330,6 +338,17 @@ export default async function WalletDetailPage({
                 <WalletInfoRow
                   label={t("DashboardCustody.provider")}
                   value={formatCustodyProviderName(provider)}
+                />
+              ) : null}
+              {wallet.custodyConnectionId ? (
+                <WalletInfoRow
+                  label={t("DashboardCustody.connection")}
+                  value={connection?.label ?? truncateMiddle(wallet.custodyConnectionId)}
+                  href={
+                    canManageCustody
+                      ? `/dashboard/integrations/${connection?.provider ?? provider ?? "privy"}/connections/${wallet.custodyConnectionId}`
+                      : undefined
+                  }
                 />
               ) : null}
               {purposeLabel ? (
@@ -686,25 +705,33 @@ function WalletInfoRow({
   value,
   monospace = false,
   trailing,
+  href,
 }: {
   label: string;
   value: string;
   monospace?: boolean;
   trailing?: ReactNode;
+  /** Renders the value as a link to the record it names. */
+  href?: string;
 }) {
+  const valueClassName = [
+    "truncate text-right text-[15px] text-primary",
+    monospace ? "font-mono text-xs" : "",
+  ].join(" ");
+
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0">
       <p className="text-[15px] text-secondary">{label}</p>
       <div className="flex min-w-0 items-center gap-2">
-        <p
-          className={[
-            "truncate text-right text-[15px] text-primary",
-            monospace ? "font-mono text-xs" : "",
-          ].join(" ")}
-          title={value}
-        >
-          {value}
-        </p>
+        {href ? (
+          <Link className={`${valueClassName} hover:underline`} href={href} title={value}>
+            {value}
+          </Link>
+        ) : (
+          <p className={valueClassName} title={value}>
+            {value}
+          </p>
+        )}
         {trailing}
       </div>
     </div>

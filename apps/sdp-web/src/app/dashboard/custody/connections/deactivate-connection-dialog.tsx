@@ -3,7 +3,7 @@
 import type { CustodyProvider } from "@sdp/types";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
+import { HoldButton } from "@/components/ui/hold-button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { deactivateConnectionAction } from "./connection-actions";
@@ -43,15 +43,12 @@ export function DeactivateConnectionDialog({
   const blocked = activeWalletCount > 0;
 
   const handleConfirm = async () => {
-    const result = await run(
-      () => deactivateConnectionAction(connectionId, provider),
-      {
-        successTitle: t("DashboardCustody.deactivateConnectionSuccessTitle"),
-        successDescription: t("DashboardCustody.deactivateConnectionSuccessDescription"),
-        failedTitle: t("DashboardCustody.deactivateConnectionFailedTitle"),
-        unknownTitle: t("DashboardCustody.deactivateConnectionUnknownTitle"),
-      }
-    );
+    const result = await run(() => deactivateConnectionAction(connectionId, provider), {
+      successTitle: t("DashboardCustody.deactivateConnectionSuccessTitle"),
+      successDescription: t("DashboardCustody.deactivateConnectionSuccessDescription"),
+      failedTitle: t("DashboardCustody.deactivateConnectionFailedTitle"),
+      unknownTitle: t("DashboardCustody.deactivateConnectionUnknownTitle"),
+    });
     if (result.status === "success") {
       onClose();
     }
@@ -86,9 +83,7 @@ export function DeactivateConnectionDialog({
           <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-secondary">
             <li>{t("DashboardCustody.deactivateConnectionPointIrreversible")}</li>
             <li>{t("DashboardCustody.deactivateConnectionPointProviderKey")}</li>
-            {isDefault ? (
-              <li>{t("DashboardCustody.deactivateConnectionPointDefault")}</li>
-            ) : null}
+            {isDefault ? <li>{t("DashboardCustody.deactivateConnectionPointDefault")}</li> : null}
           </ul>
         )}
 
@@ -101,12 +96,12 @@ export function DeactivateConnectionDialog({
               {t("DashboardCustody.deactivateConnectionConfirm")}
             </Button>
           ) : (
-            <HoldToConfirmButton
-              onConfirm={handleConfirm}
-              disabled={pending}
-              label={t("DashboardCustody.deactivateConnectionConfirm")}
-              holdingLabel={t("DashboardCustody.deactivateConnectionHolding")}
-            />
+            // Hold rather than click: deactivation cannot be undone, and the
+            // fill that runs while holding is the pause a destructive,
+            // irreversible step deserves.
+            <HoldButton onHoldComplete={handleConfirm} disabled={pending}>
+              {t("DashboardCustody.deactivateConnectionConfirm")}
+            </HoldButton>
           )}
         </div>
       </div>

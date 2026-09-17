@@ -2,8 +2,8 @@
 
 import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types";
 import { PlusIcon, RefreshCwIcon } from "lucide-react";
-import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 import { recheckPrivyCredentialAction } from "@/app/dashboard/custody/byok-actions";
 import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
@@ -15,12 +15,12 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { AddWalletDialog } from "./add-wallet-dialog";
 import { CancelSetupDialog } from "./cancel-setup-dialog";
 import { ConnectionCredentialsSection } from "./connection-credentials-section";
-import { ConnectionWalletsCard } from "./connection-wallets-card";
 import type {
   CustodyCredentialLifecycle,
   CustodyInstallationConnection,
 } from "./connection-detail.data";
-import { SigningLine, statusLabel, STATUS_BADGE_VARIANTS } from "./connection-status";
+import { SigningLine, STATUS_BADGE_VARIANTS, statusLabel } from "./connection-status";
+import { ConnectionWalletsCard } from "./connection-wallets-card";
 import type { CustodyConnectionListItem } from "./connections.data";
 import { DeactivateConnectionDialog } from "./deactivate-connection-dialog";
 import { MakeDefaultDialog } from "./make-default-dialog";
@@ -34,6 +34,100 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
       <dt className="w-32 shrink-0 text-tertiary">{label}</dt>
       <dd className="min-w-0 text-primary">{children}</dd>
     </div>
+  );
+}
+
+/**
+ * Identity of the connection, plus the two actions that apply to it as a whole.
+ *
+ * Signing availability sits on its own line under the badges rather than
+ * becoming a third one: connection health and whether it may sign right now are
+ * different facts, and collapsing them into one row would hide that.
+ */
+function ConnectionHeaderCard({
+  canManageCustody,
+  connection,
+  formattedCreated,
+  listItem,
+  onAddWallet,
+  onMakeDefault,
+  projectName,
+  provider,
+  t,
+}: {
+  canManageCustody: boolean;
+  connection: CustodyInstallationConnection;
+  formattedCreated: string | null;
+  listItem: CustodyConnectionListItem | null;
+  onAddWallet: () => void;
+  onMakeDefault: () => void;
+  projectName: string | null;
+  provider: CustodyProvider;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <header className="rounded-2xl border border-border-default bg-surface-raised p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-4">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-fill-strong">
+            <WalletProviderMark provider={provider} size="sm" />
+          </span>
+          <div className="min-w-0 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="truncate text-xl font-medium tracking-tight text-primary">
+                {connection.label}
+              </h1>
+              <Badge variant={STATUS_BADGE_VARIANTS[connection.status]}>
+                {statusLabel(connection.status, t)}
+              </Badge>
+              {connection.isDefault ? (
+                <Badge variant="outline">{t("DashboardCustody.projectDefaultBadge")}</Badge>
+              ) : null}
+            </div>
+            {listItem ? (
+              <SigningLine
+                status={connection.status}
+                isRuntimeExecutionAllowed={listItem.isRuntimeExecutionAllowed}
+              />
+            ) : null}
+            <dl className="space-y-1 pt-1">
+              <DetailRow label={t("DashboardCustody.provider")}>
+                {formatCustodyProviderName(provider)}
+              </DetailRow>
+              {projectName ? (
+                <DetailRow label={t("DashboardCustody.project")}>{projectName}</DetailRow>
+              ) : null}
+              <DetailRow label={t("DashboardCustody.connectionIdLabel")}>
+                <span className="flex min-w-0 items-center gap-1">
+                  <span className="truncate font-mono text-xs">{connection.id}</span>
+                  <WalletMetadataCopyButton
+                    value={connection.id}
+                    label={t("DashboardCustody.connectionIdLabel")}
+                    tooltip={connection.id}
+                  />
+                </span>
+              </DetailRow>
+              {formattedCreated ? (
+                <DetailRow label={t("DashboardCustody.created")}>{formattedCreated}</DetailRow>
+              ) : null}
+            </dl>
+          </div>
+        </div>
+
+        {/* Nothing is actionable on a connection that has been ended, and a
+            half-finished one has exactly one next step, offered below. */}
+        {canManageCustody && connection.status === "active" ? (
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button variant="secondary" disabled={connection.isDefault} onClick={onMakeDefault}>
+              {t("DashboardCustody.makeDefaultAction")}
+            </Button>
+            <Button onClick={onAddWallet} iconLeft={<PlusIcon className="size-4" />}>
+              {t("DashboardCustody.addWalletAction")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </header>
   );
 }
 
@@ -105,72 +199,17 @@ export function ConnectionDetailView({
 
   return (
     <div className="w-full space-y-6 px-4 py-6 md:px-6" data-custody-connection={connection.id}>
-      <header className="rounded-2xl border border-border-default bg-surface-raised p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex min-w-0 items-start gap-4">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-fill-strong">
-              <WalletProviderMark provider={provider} size="sm" />
-            </span>
-            <div className="min-w-0 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-xl font-medium tracking-tight text-primary">
-                  {connection.label}
-                </h1>
-                <Badge variant={STATUS_BADGE_VARIANTS[connection.status]}>
-                  {statusLabel(connection.status, t)}
-                </Badge>
-                {connection.isDefault ? (
-                  <Badge variant="outline">{t("DashboardCustody.projectDefaultBadge")}</Badge>
-                ) : null}
-              </div>
-              {listItem ? (
-                <SigningLine
-                  status={connection.status}
-                  isRuntimeExecutionAllowed={listItem.isRuntimeExecutionAllowed}
-                />
-              ) : null}
-              <dl className="space-y-1 pt-1">
-                <DetailRow label={t("DashboardCustody.provider")}>
-                  {formatCustodyProviderName(provider)}
-                </DetailRow>
-                {projectName ? (
-                  <DetailRow label={t("DashboardCustody.project")}>{projectName}</DetailRow>
-                ) : null}
-                <DetailRow label={t("DashboardCustody.connectionIdLabel")}>
-                  <span className="flex min-w-0 items-center gap-1">
-                    <span className="truncate font-mono text-xs">{connection.id}</span>
-                    <WalletMetadataCopyButton
-                      value={connection.id}
-                      label={t("DashboardCustody.connectionIdLabel")}
-                      tooltip={connection.id}
-                    />
-                  </span>
-                </DetailRow>
-                {formattedCreated ? (
-                  <DetailRow label={t("DashboardCustody.created")}>{formattedCreated}</DetailRow>
-                ) : null}
-              </dl>
-            </div>
-          </div>
-
-          {/* Nothing is actionable on a connection that has been ended, and a
-              half-finished one has exactly one next step, offered below. */}
-          {canManageCustody && connection.status === "active" ? (
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button
-                variant="secondary"
-                disabled={connection.isDefault}
-                onClick={() => setMakeDefaultOpen(true)}
-              >
-                {t("DashboardCustody.makeDefaultAction")}
-              </Button>
-              <Button onClick={() => setAddWalletOpen(true)} iconLeft={<PlusIcon className="size-4" />}>
-                {t("DashboardCustody.addWalletAction")}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      </header>
+      <ConnectionHeaderCard
+        canManageCustody={canManageCustody}
+        connection={connection}
+        formattedCreated={formattedCreated}
+        listItem={listItem}
+        onAddWallet={() => setAddWalletOpen(true)}
+        onMakeDefault={() => setMakeDefaultOpen(true)}
+        projectName={projectName}
+        provider={provider}
+        t={t}
+      />
 
       {isDeactivated ? (
         <Callout variant="neutral">{t("DashboardCustody.connectionDeactivatedExplainer")}</Callout>

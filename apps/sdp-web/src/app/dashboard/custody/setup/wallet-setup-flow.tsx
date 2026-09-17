@@ -7,6 +7,7 @@ import {
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
 } from "@/app/dashboard/custody/actions";
+import type { CustodyConnectionListItem } from "@/app/dashboard/custody/connections/connections.data";
 import type { KnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import {
   type CustodyProviderAvailability,
@@ -18,6 +19,7 @@ import { WalletProviderChoices } from "@/app/dashboard/custody/wallet-provider-c
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectItem } from "@/components/ui/select";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -69,6 +71,159 @@ interface WalletSetupFlowProps {
   initialProvider?: KnownCustodyProvider | null;
   /** Stored-credential install for Privy; ships dark until the flag is on. */
   privyByokEnabled?: boolean;
+  /**
+   * Connections the wallet can be created in. Empty whenever the project has
+   * none, the provider predates Connections, or the reader lacks
+   * `custody:admin` — in every one of those the wizard keeps its old shape.
+   */
+  connections?: CustodyConnectionListItem[];
+}
+
+/** Only an active connection holds verified credentials, so only it can take a wallet. */
+function isSelectableConnection(connection: CustodyConnectionListItem): boolean {
+  return connection.status === "active";
+}
+
+/**
+ * The connection a wallet lands in unless the user says otherwise: the project
+ * default when it is usable, else the first active one. Picking nothing when a
+ * usable connection exists would make the wizard fail on submit for no reason.
+ */
+function defaultConnectionId(connections: CustodyConnectionListItem[]): string {
+  const selectable = connections.filter(isSelectableConnection);
+  return selectable.find((connection) => connection.isDefault)?.id ?? selectable[0]?.id ?? "";
+}
+
+/**
+ * Picks the connection a new wallet is created in.
+ *
+ * Unusable connections stay on the list, disabled and annotated, rather than
+ * being filtered out: a user who came here to add a wallet to the connection
+ * they just set up needs to see that it is there but not ready yet, not to
+ * find it missing.
+ */
+function WalletConnectionField({
+  connections,
+  t,
+}: {
+  connections: CustodyConnectionListItem[];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const annotate = (connection: CustodyConnectionListItem): string | null => {
+    if (isSelectableConnection(connection)) {
+      return connection.isDefault ? t("DashboardCustody.walletSetupConnectionDefault") : null;
+    }
+    return connection.status === "failed"
+      ? t("DashboardCustody.walletSetupConnectionUnavailableFailed")
+      : t("DashboardCustody.walletSetupConnectionUnavailablePending");
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="wallet-connection">{t("DashboardCustody.walletSetupConnection")}</Label>
+      <Select
+        name="connectionId"
+        ariaLabel={t("DashboardCustody.walletSetupConnection")}
+        defaultValue={defaultConnectionId(connections)}
+        size="xl"
+      >
+        {connections.map((connection) => {
+          const annotation = annotate(connection);
+          return (
+            <SelectItem
+              key={connection.id}
+              value={connection.id}
+              disabled={!isSelectableConnection(connection)}
+            >
+              {annotation ? `${connection.label} · ${annotation}` : connection.label}
+            </SelectItem>
+          );
+        })}
+      </Select>
+      <p className="text-sm leading-6 text-tertiary">
+        {t("DashboardCustody.walletSetupConnectionHint")}
+      </p>
+    </div>
+  );
+}
+
+/** Read-only row for context the wizard states but does not let the user change. */
+function WalletFixedField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <div className="flex h-12 items-center rounded-2xl border border-border-default bg-fill-subtle px-4 text-sm font-medium text-primary">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+/** Step 2 of the wizard for a provider that is already installed. */
+function WalletDetailsFields({
+  canProvisionWallet,
+  connectionOptions,
+  errorMessage,
+  isConnected,
+  onWalletLabelChange,
+  providerEntry,
+  showConnectionPicker,
+  t,
+  walletLabel,
+}: {
+  canProvisionWallet: boolean;
+  connectionOptions: CustodyConnectionListItem[];
+  errorMessage: string | null;
+  isConnected: boolean;
+  onWalletLabelChange: (value: string) => void;
+  providerEntry: { id: KnownCustodyProvider; label: string } | null;
+  showConnectionPicker: boolean;
+  t: ReturnType<typeof useTranslations>;
+  walletLabel: string;
+}) {
+  return (
+    <>
+      <input type="hidden" name="provider" value={providerEntry?.id ?? ""} />
+      <div className="space-y-2">
+        <Label htmlFor="wallet-label">{t("DashboardCustody.walletLabel")}</Label>
+        <Input
+          id="wallet-label"
+          name={isConnected ? "label" : "walletLabel"}
+          value={walletLabel}
+          onChange={(event) => onWalletLabelChange(event.currentTarget.value)}
+          placeholder={t("DashboardCustody.walletLabelPlaceholder")}
+          className="h-12 rounded-2xl border-border-default bg-surface-raised px-4 shadow-none"
+          required
+        />
+      </div>
+      {showConnectionPicker ? (
+        <WalletConnectionField connections={connectionOptions} t={t} />
+      ) : null}
+      <WalletFixedField
+        label={t("DashboardCustody.project")}
+        value={t("DashboardCustody.projectValue")}
+      />
+      <WalletFixedField
+        label={t("DashboardCustody.environment")}
+        value={t("DashboardCustody.sandbox")}
+      />
+      {canProvisionWallet ? null : (
+        <div className="rounded-2xl border border-border-default bg-fill-subtle px-4 py-3 text-sm leading-6 text-tertiary">
+          {providerEntry
+            ? t("DashboardCustody.connectedProviderDescription", { provider: providerEntry.label })
+            : t("DashboardCustody.chooseEnabledProvider")}
+        </div>
+      )}
+      {errorMessage ? (
+        <div
+          role="alert"
+          className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error"
+        >
+          {errorMessage}
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function getInitialSelection(input: {
@@ -101,6 +256,7 @@ export function WalletSetupFlow({
   enabledProviders,
   initialProvider = null,
   privyByokEnabled = false,
+  connections = [],
 }: WalletSetupFlowProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -143,6 +299,16 @@ export function WalletSetupFlow({
     ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
     : false;
   const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
+  // Switching provider on step 1 must not carry the previous provider's
+  // connections into step 2, so the list is narrowed here rather than trusted
+  // as delivered. The picker earns its place only when the provider is already
+  // installed and something is actually selectable: a legacy Config-backed
+  // provider has no connections and keeps the original two-field form.
+  const connectionOptions = useMemo(
+    () => connections.filter((connection) => connection.provider === selectedProvider),
+    [connections, selectedProvider]
+  );
+  const showConnectionPicker = isConnected && connectionOptions.some(isSelectableConnection);
   // An uninstalled Privy under BYOK goes through provider details (credential
   // submission + connection check) instead of the legacy initialize path,
   // which the API refuses once stored-credential setup is enforced.
@@ -261,50 +427,17 @@ export function WalletSetupFlow({
   const stepIndex = SETUP_STEPS.indexOf(currentStep);
 
   const formContent = (
-    <>
-      <input type="hidden" name="provider" value={selectedProviderEntry?.id ?? ""} />
-      <div className="space-y-2">
-        <Label htmlFor="wallet-label">{t("DashboardCustody.walletLabel")}</Label>
-        <Input
-          id="wallet-label"
-          name={isConnected ? "label" : "walletLabel"}
-          value={walletLabel}
-          onChange={(event) => setWalletLabel(event.currentTarget.value)}
-          placeholder={t("DashboardCustody.walletLabelPlaceholder")}
-          className="h-12 rounded-2xl border-border-default bg-surface-raised px-4 shadow-none"
-          required
-        />
-      </div>
-      <div className="space-y-2">
-        <Label>{t("DashboardCustody.project")}</Label>
-        <div className="flex h-12 items-center rounded-2xl border border-border-default bg-fill-subtle px-4 text-sm font-medium text-primary">
-          {t("DashboardCustody.projectValue")}
-        </div>
-      </div>
-      <div className="space-y-2">
-        <Label>{t("DashboardCustody.environment")}</Label>
-        <div className="flex h-12 items-center rounded-2xl border border-border-default bg-fill-subtle px-4 text-sm font-medium text-primary">
-          {t("DashboardCustody.sandbox")}
-        </div>
-      </div>
-      {!canProvisionWallet ? (
-        <div className="rounded-2xl border border-border-default bg-fill-subtle px-4 py-3 text-sm leading-6 text-tertiary">
-          {selectedProviderEntry
-            ? t("DashboardCustody.connectedProviderDescription", {
-                provider: selectedProviderEntry.label,
-              })
-            : t("DashboardCustody.chooseEnabledProvider")}
-        </div>
-      ) : null}
-      {errorMessage ? (
-        <div
-          role="alert"
-          className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error"
-        >
-          {errorMessage}
-        </div>
-      ) : null}
-    </>
+    <WalletDetailsFields
+      canProvisionWallet={canProvisionWallet}
+      connectionOptions={connectionOptions}
+      errorMessage={errorMessage}
+      isConnected={isConnected}
+      onWalletLabelChange={setWalletLabel}
+      providerEntry={selectedProviderEntry}
+      showConnectionPicker={showConnectionPicker}
+      t={t}
+      walletLabel={walletLabel}
+    />
   );
 
   return (

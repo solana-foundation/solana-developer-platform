@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  canRollBack,
   type CustodyCredentialLifecycle,
-  type LifecycleCredential,
+  canRollBack,
   isCredentialManagedHere,
-  resolveRetiredAt,
+  type LifecycleCredential,
   ROLLBACK_WINDOW_MS,
+  resolveRetiredAt,
   rollbackHoursRemaining,
 } from "./connection-detail.data";
 

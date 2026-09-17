@@ -250,9 +250,7 @@ export function ConnectionsList({
                     </DropdownMenuItem>
                     {/* Only an active connection can take signing, and making
                         the current default the default again is a no-op. */}
-                    {canManageCustody &&
-                    connection.status === "active" &&
-                    !connection.isDefault ? (
+                    {canManageCustody && connection.status === "active" && !connection.isDefault ? (
                       <DropdownMenuItem onSelect={() => setDefaultTarget(connection)}>
                         {t("DashboardCustody.makeDefaultAction")}
                       </DropdownMenuItem>

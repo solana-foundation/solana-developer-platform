@@ -39,6 +39,69 @@ function maskedAppId(credential: LifecycleCredential): string {
   return suffix ? `····${suffix}` : "—";
 }
 
+/**
+ * The credential the previous rotation retired, and the window in which it can
+ * still be restored. Rendered only while that window is open: once the API
+ * stops returning `rollback`, the secret is gone and there is nothing to show.
+ */
+function PreviousCredentialCard({
+  canRollBackNow,
+  expiresAt,
+  onRollBack,
+  retiredAt,
+  rotationBlocks,
+  t,
+}: {
+  canRollBackNow: boolean;
+  expiresAt: string;
+  onRollBack: () => void;
+  retiredAt: Date | null;
+  rotationBlocks: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const formatDate = useDateFormatter();
+
+  return (
+    <div className="rounded-xl border border-border-default p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium text-primary">
+          {t("DashboardCustody.credentialPreviousVersion")}
+        </p>
+        <Badge variant="outline">{t("DashboardCustody.credentialRetired")}</Badge>
+      </div>
+      <dl className="mt-3 space-y-1">
+        <CredentialRow label={t("DashboardCustody.credentialRetired")}>
+          {formatDate(retiredAt) ?? "—"}
+        </CredentialRow>
+        <CredentialRow label={t("DashboardCustody.rollbackUntil")}>
+          {formatDate(expiresAt) ?? "—"}{" "}
+          <span className="text-tertiary">
+            {t("DashboardCustody.rollbackHoursLeft", {
+              hours: rollbackHoursRemaining(expiresAt),
+            })}
+          </span>
+        </CredentialRow>
+      </dl>
+      <div className="mt-4">
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!canRollBackNow}
+          onClick={onRollBack}
+          iconLeft={<Undo2Icon className="size-4" />}
+        >
+          {t("DashboardCustody.rollbackAction")}
+        </Button>
+        {rotationBlocks ? (
+          <p className="mt-2 text-sm text-warning">
+            {t("DashboardCustody.rollbackBlockedByRotation")}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function useDateFormatter() {
   const locale = useLocale();
   return (value: string | Date | null) => {
@@ -137,26 +200,22 @@ export function ConnectionCredentialsSection({
 
   const retiredAt = lifecycle.rollback ? resolveRetiredAt(lifecycle.rollback.expiresAt) : null;
 
-  const handleSettleCandidate = async () => {
-    await run(
-      () => completeRotationAction(candidate!.id, provider, connection.id),
-      {
-        successTitle: t("DashboardCustody.rotateSuccessTitle"),
-        failedTitle: t("DashboardCustody.rotateFailedTitle"),
-        unknownTitle: t("DashboardCustody.rotateUnknownTitle"),
-      }
-    );
+  // Both take the id rather than closing over `candidate`, because only the
+  // branch that renders these buttons knows a candidate exists.
+  const handleSettleCandidate = async (candidateId: string) => {
+    await run(() => completeRotationAction(candidateId, provider, connection.id), {
+      successTitle: t("DashboardCustody.rotateSuccessTitle"),
+      failedTitle: t("DashboardCustody.rotateFailedTitle"),
+      unknownTitle: t("DashboardCustody.rotateUnknownTitle"),
+    });
   };
 
-  const handleCancelCandidate = async () => {
-    await run(
-      () => cancelRotationAction(candidate!.id, provider, connection.id),
-      {
-        successTitle: t("DashboardCustody.rotationCancelledTitle"),
-        failedTitle: t("DashboardCustody.rotationCancelFailedTitle"),
-        unknownTitle: t("DashboardCustody.rotationCancelUnknownTitle"),
-      }
-    );
+  const handleCancelCandidate = async (candidateId: string) => {
+    await run(() => cancelRotationAction(candidateId, provider, connection.id), {
+      successTitle: t("DashboardCustody.rotationCancelledTitle"),
+      failedTitle: t("DashboardCustody.rotationCancelFailedTitle"),
+      unknownTitle: t("DashboardCustody.rotationCancelUnknownTitle"),
+    });
   };
 
   return (
@@ -180,13 +239,17 @@ export function ConnectionCredentialsSection({
             <p>{t("DashboardCustody.rotationPendingBody")}</p>
             {canManageCustody ? (
               <span className="flex shrink-0 items-center gap-2">
-                <Button size="sm" onClick={handleSettleCandidate} disabled={pending}>
+                <Button
+                  size="sm"
+                  onClick={() => handleSettleCandidate(candidate.id)}
+                  disabled={pending}
+                >
                   {t("DashboardCustody.rotationPendingRetry")}
                 </Button>
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={handleCancelCandidate}
+                  onClick={() => handleCancelCandidate(candidate.id)}
                   disabled={pending}
                 >
                   {t("DashboardCustody.rotationPendingCancel")}
@@ -274,45 +337,16 @@ export function ConnectionCredentialsSection({
         </div>
 
         {lifecycle.rollback ? (
-          <div className="rounded-xl border border-border-default p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium text-primary">
-                {t("DashboardCustody.credentialPreviousVersion")}
-              </p>
-              <Badge variant="outline">{t("DashboardCustody.credentialRetired")}</Badge>
-            </div>
-            <dl className="mt-3 space-y-1">
-              <CredentialRow label={t("DashboardCustody.credentialRetired")}>
-                {formatDate(retiredAt) ?? "—"}
-              </CredentialRow>
-              <CredentialRow label={t("DashboardCustody.rollbackUntil")}>
-                {formatDate(lifecycle.rollback.expiresAt) ?? "—"}
-                {" "}
-                <span className="text-tertiary">
-                  {t("DashboardCustody.rollbackHoursLeft", {
-                    hours: rollbackHoursRemaining(lifecycle.rollback.expiresAt),
-                  })}
-                </span>
-              </CredentialRow>
-            </dl>
-            <div className="mt-4">
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={!canAct || !rollbackState.available || pending}
-                onClick={() => setRollbackOpen(true)}
-                iconLeft={<Undo2Icon className="size-4" />}
-              >
-                {t("DashboardCustody.rollbackAction")}
-              </Button>
-              {rollbackState.available === false &&
-              rollbackState.reason === "rotation_pending" ? (
-                <p className="mt-2 text-sm text-warning">
-                  {t("DashboardCustody.rollbackBlockedByRotation")}
-                </p>
-              ) : null}
-            </div>
-          </div>
+          <PreviousCredentialCard
+            canRollBackNow={canAct && rollbackState.available && !pending}
+            expiresAt={lifecycle.rollback.expiresAt}
+            onRollBack={() => setRollbackOpen(true)}
+            retiredAt={retiredAt}
+            rotationBlocks={
+              rollbackState.available === false && rollbackState.reason === "rotation_pending"
+            }
+            t={t}
+          />
         ) : null}
       </div>
 

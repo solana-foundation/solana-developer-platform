@@ -3,6 +3,7 @@ import {
   buildConnectionsSearchParams,
   ConnectionsRequestError,
   type CustodyConnectionListItem,
+  fetchConnectionPickerOptions,
   fetchConnectionsPage,
   fetchWalletsByConnection,
   parseConnectionsFilters,
@@ -224,5 +225,55 @@ describe("fetchWalletsByConnection", () => {
     expect(request).toHaveBeenCalledWith("/v1/wallets?includeAllProviders=true");
     expect([...byConnection.keys()].sort()).toEqual(["conn-1", "conn-2"]);
     expect(byConnection.get("conn-1")?.map((wallet) => wallet.walletId)).toEqual(["w-1", "w-2"]);
+  });
+});
+
+describe("fetchConnectionPickerOptions", () => {
+  function page(connections: CustodyConnectionListItem[]): Response {
+    return jsonResponse({
+      data: {
+        connections,
+        pagination: { limit: 50, offset: 0, total: connections.length },
+      },
+    });
+  }
+
+  it("keeps unusable connections so the picker can explain them", async () => {
+    const pending = { ...connection("conn-pending"), status: "pending" as const };
+    const failed = { ...connection("conn-failed"), status: "failed" as const };
+    const request = vi.fn(async () => page([connection("conn-active"), pending, failed]));
+
+    const options = await fetchConnectionPickerOptions(request, "privy");
+
+    expect(options.map((option) => option.id)).toEqual([
+      "conn-active",
+      "conn-pending",
+      "conn-failed",
+    ]);
+  });
+
+  it("drops deactivated connections and other providers", async () => {
+    const deactivated = { ...connection("conn-dead"), status: "deactivated" as const };
+    const otherProvider = { ...connection("conn-turnkey"), provider: "turnkey" as const };
+    const request = vi.fn(async () =>
+      page([connection("conn-active"), deactivated, otherProvider])
+    );
+
+    const options = await fetchConnectionPickerOptions(request, "privy");
+
+    expect(options.map((option) => option.id)).toEqual(["conn-active"]);
+  });
+
+  // The endpoint needs custody:admin, which creating a wallet does not.
+  it("returns nothing rather than throwing when the read is refused", async () => {
+    const request = vi.fn(async () => new Response("forbidden", { status: 403 }));
+
+    await expect(fetchConnectionPickerOptions(request, "privy")).resolves.toEqual([]);
+  });
+
+  it("returns nothing when the payload does not match the schema", async () => {
+    const request = vi.fn(async () => jsonResponse({ data: { connections: "nope" } }));
+
+    await expect(fetchConnectionPickerOptions(request, "privy")).resolves.toEqual([]);
   });
 });

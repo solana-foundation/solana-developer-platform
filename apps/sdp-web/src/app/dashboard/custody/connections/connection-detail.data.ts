@@ -1,12 +1,12 @@
 import {
   CUSTODY_CONNECTION_LIFECYCLES,
   CUSTODY_PROVIDERS,
-  PROVIDER_CREDENTIAL_STATUSES,
   type CustodyWalletSummary,
+  PROVIDER_CREDENTIAL_STATUSES,
 } from "@sdp/types";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { connectionsPageEnvelopeSchema, type CustodyConnectionListItem } from "./connections.data";
+import { type CustodyConnectionListItem, connectionsPageEnvelopeSchema } from "./connections.data";
 
 /**
  * The API grants exactly 24 hours of secret retention at cut-over
@@ -60,9 +60,7 @@ const lifecycleSchema = z.object({
   rotationCandidate: safeCredentialSchema.nullable(),
   impact: z.object({
     projects: z.array(z.object({ id: z.string(), name: z.string() })),
-    connections: z.array(
-      z.object({ id: z.string(), projectId: z.string(), status: z.string() })
-    ),
+    connections: z.array(z.object({ id: z.string(), projectId: z.string(), status: z.string() })),
   }),
   rollback: z
     .object({ providerCredential: safeCredentialSchema, expiresAt: z.string() })

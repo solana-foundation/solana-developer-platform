@@ -57,9 +57,7 @@ export function AddConnectionModal({
           <h2 className="text-lg font-medium text-primary">
             {t("DashboardCustody.addConnection")}
           </h2>
-          <p className="text-sm text-tertiary">
-            {t("DashboardCustody.addConnectionDescription")}
-          </p>
+          <p className="text-sm text-tertiary">{t("DashboardCustody.addConnectionDescription")}</p>
         </div>
 
         <PrivyCredentialForm
@@ -78,14 +76,10 @@ export function AddConnectionModal({
             form={formId}
             disabled={submitting}
             iconLeft={
-              submitting ? (
-                <Loader2Icon aria-hidden className="size-4 animate-spin" />
-              ) : undefined
+              submitting ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
             }
           >
-            {submitting
-              ? t("DashboardCustody.byokChecking")
-              : t("DashboardCustody.byokConnect")}
+            {submitting ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
           </Button>
         </div>
       </div>
