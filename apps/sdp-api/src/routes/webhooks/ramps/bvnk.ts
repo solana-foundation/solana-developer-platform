@@ -249,7 +249,7 @@ async function handleBvnkCustomerRequirementWebhook(
     }
   }
   if (!counterparty) {
-    throw new TerminalRampWebhookError(
+    throw internalError(
       `BVNK webhook customer ${customerReference} was not found or is not active`
     );
   }
