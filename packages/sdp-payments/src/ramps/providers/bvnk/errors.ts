@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   badRequest,
+  conflict,
   internalError,
   providerNotConfigured,
   providerUnavailable,
@@ -44,6 +45,9 @@ function mapBvnkErrorStatus(
     return providerNotConfigured(
       "BVNK request was forbidden (status 403). Check the BVNK Hawk auth/account permissions and that the API egress IP is allowlisted on the merchant account."
     );
+  }
+  if (status === 409) {
+    return conflict(message);
   }
   if (status === 429) {
     return rateLimited(message);

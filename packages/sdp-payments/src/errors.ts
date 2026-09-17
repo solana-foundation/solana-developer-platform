@@ -60,6 +60,10 @@ export function rateLimited(message?: string): SdpPaymentsError {
   return new SdpPaymentsError("RATE_LIMITED", message);
 }
 
+export function conflict(message?: string): SdpPaymentsError {
+  return new SdpPaymentsError("CONFLICT", message);
+}
+
 export function providerNotConfigured(message?: string): SdpPaymentsError {
   return new SdpPaymentsError("PROVIDER_NOT_CONFIGURED", message);
 }
