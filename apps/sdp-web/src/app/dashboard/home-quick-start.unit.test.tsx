@@ -26,8 +26,11 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => workspace,
   useOptionalDashboardWorkspace: () => workspace,
 }));
+const activity = vi.hoisted(() => ({
+  data: { activityRows: [], todaysVolume: 0 } as Record<string, unknown>,
+}));
 vi.mock("@/lib/dashboard-swr", () => ({
-  usePersistedDashboardSWR: () => ({ data: { activityRows: [], todaysVolume: 0 } }),
+  usePersistedDashboardSWR: () => ({ data: activity.data }),
 }));
 vi.mock("./wallets/section-entry", () => ({
   SectionEntry: ({ children }: { children: ReactNode }) => children,
@@ -57,6 +60,7 @@ function ui(totalBalanceError: string | null = null) {
 afterEach(() => {
   cleanup();
   workspace.sdpEnvironment = "sandbox";
+  activity.data = { activityRows: [], todaysVolume: 0 };
 });
 
 describe("home after quick start", () => {
@@ -130,5 +134,18 @@ describe("home after quick start", () => {
     expect(view.getByText("Unavailable")).toBeTruthy();
     expect(view.getByText("Balance data is unavailable right now.")).toBeTruthy();
     expect(view.queryByRole("heading", { name: "Tutorials" })).toBeNull();
+  });
+
+  it("says why today's volume is missing on the page, not only on hover", () => {
+    setQuickStart(progressKey, "done");
+    activity.data = {
+      activityRows: [],
+      todaysVolume: null,
+      todaysVolumeError: "Payments activity is unavailable right now.",
+    };
+    const view = render(ui());
+    const reason = view.getByText("Payments activity is unavailable right now.");
+    expect(reason.tagName).toBe("DD");
+    expect(view.container.querySelector("dd[title]")).toBeNull();
   });
 });
