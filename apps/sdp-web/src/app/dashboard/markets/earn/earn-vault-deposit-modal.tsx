@@ -61,6 +61,7 @@ import {
 import {
   atomsToDecimalString,
   derivedMinOut,
+  floorToReplay,
   isExpiredQuote,
   isSlippageExceededRefusal,
   parseSlippageToleranceBps,
@@ -1384,19 +1385,20 @@ export function EarnVaultDepositModal({
   /**
    * EXPIRY BACKSTOP (PRO-1691), the state half. The quote hook re-quotes on
    * its own, but timers throttle in background tabs, so the floor on screen
-   * can be older than the TTL at submit. A fresh floor, or a HELD floor (a
-   * replay must carry it verbatim), passes straight through. An expired one is
-   * revalidated first; a rate that moved beyond it stops the submission on
-   * THIS side of the API, through the same copy and control as a blown floor,
-   * and either way the displayed quote re-syncs. Returns whether to proceed.
+   * can be older than the TTL at submit. A replayed floor — a held or kept
+   * key's minted floor, which must go out verbatim — or a fresh one passes
+   * straight through. An expired one is revalidated first; a rate that moved
+   * beyond it stops the submission on THIS side of the API, through the same
+   * copy and control as a blown floor, and either way the displayed quote
+   * re-syncs. Returns whether to proceed.
    */
   async function floorSafeToSubmit(
     controller: AbortController,
     amount: string,
-    heldFloor: string | null | undefined,
+    replayedFloor: string | null | undefined,
     floor: string | null
   ): Promise<boolean> {
-    if (heldFloor !== undefined || floor === null || !isExpiredQuote(quote)) return true;
+    if (replayedFloor !== undefined || floor === null || !isExpiredQuote(quote)) return true;
     const verdict = await revalidateExpiredFloor(strategy.id, amount, floor, controller.signal);
     if (verdict === "still_satisfiable") return true;
     if (verdict === "aborted") return false;
@@ -1443,12 +1445,17 @@ export function EarnVaultDepositModal({
     // A HELD key must replay the floor it was MINTED with, verbatim: the API's
     // idempotency fingerprint includes `minSharesOut`, so pairing the held key
     // with a freshly quoted floor would be refused as a changed request —
-    // stranding the approval the hold exists to wait on. A fresh key takes the
-    // freshly derived floor, and records it for exactly that future replay.
-    const heldFloor = resolvedKey.wasHeld ? recallVaultDepositFloor(fingerprint) : undefined;
-    const floorForRequest = heldFloor !== undefined ? heldFloor : (minSharesOut ?? null);
+    // stranding the approval the hold exists to wait on. A KEPT key — one a
+    // prior ambiguous attempt (a 5xx, a lost answer) left live — must replay
+    // its minted floor too, and worse: the changed-request refusal is a 409,
+    // which retires the key and lets the next submit mint a fresh one while
+    // the first attempt may already have executed. The floor memo answers for
+    // both; a fresh key takes the freshly derived floor, and records it for
+    // exactly that future replay.
+    const replayFloor = floorToReplay(resolvedKey, recallVaultDepositFloor, fingerprint);
+    const floorForRequest = replayFloor !== undefined ? replayFloor : (minSharesOut ?? null);
 
-    if (!(await floorSafeToSubmit(controller, amount, heldFloor, floorForRequest))) return;
+    if (!(await floorSafeToSubmit(controller, amount, replayFloor, floorForRequest))) return;
     rememberVaultDepositFloor(fingerprint, floorForRequest);
 
     // The value-moving POST deliberately takes NO abort signal. The server

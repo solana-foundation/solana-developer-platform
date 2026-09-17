@@ -100,6 +100,23 @@ export function derivedMinOut<Preview extends { blockingIssues: readonly unknown
 }
 
 /**
+ * The floor a REUSED idempotency key must go out with: the one it was MINTED
+ * with, from the flow's floor memo — verbatim, whether the reuse is a held
+ * approval's replay or a kept key's retry after an ambiguous failure. A
+ * freshly derived floor would pair the reused key with a changed request,
+ * which the API refuses (its idempotency fingerprint includes the floor) and
+ * the refusal retires the key. A fresh key has no remembered floor, so this
+ * answers `undefined` and the caller derives one.
+ */
+export function floorToReplay(
+  resolution: { wasHeld: boolean; wasReused: boolean },
+  recallFloor: (fingerprint: string) => string | null | undefined,
+  fingerprint: string
+): string | null | undefined {
+  return resolution.wasHeld || resolution.wasReused ? recallFloor(fingerprint) : undefined;
+}
+
+/**
  * True when the quote expects ZERO atoms out — nothing any floor could protect.
  * An over-scale (malformed) quote is not PROVABLY zero, so it answers `false`;
  * the floor it derives is `null` and blocks the submission instead.

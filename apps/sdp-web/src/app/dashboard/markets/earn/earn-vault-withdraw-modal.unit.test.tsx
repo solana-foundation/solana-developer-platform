@@ -298,6 +298,66 @@ describe("exit slippage floors (quote-derived)", () => {
     });
   });
 
+  it("replays a kept key's exit floor verbatim after an ambiguous failure", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "4.997",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      })
+      .mockResolvedValue({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "2.5",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      });
+    // A 5xx is the ambiguous case: the API may have recorded and broadcast the
+    // exit, and the key stays live in the store either way.
+    mocks.createEarnVaultWithdrawal
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "Bad gateway",
+        status: 503,
+        body: null,
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    // enterVedaShares hands back real timers before its confirm click; the
+    // second arm needs the fake clock again for the debounced quote.
+    vi.useFakeTimers();
+    renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+
+    // The retry is the SAME request under the SAME key, so it must carry the
+    // floor that key was MINTED with — not a fresh floor off the moved rate.
+    // A re-derived floor would conflict with the API's recorded fingerprint
+    // (a 409), retire the key, and let the next submit exit a second time
+    // while the first attempt may already have executed.
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0]).toMatchObject({
+      minAmountOut: "4.992003",
+    });
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+    );
+  });
+
   it("sends no floor and never quotes for a provider with no declared policy", async () => {
     mocks.createEarnVaultWithdrawal.mockResolvedValue({
       ok: true,

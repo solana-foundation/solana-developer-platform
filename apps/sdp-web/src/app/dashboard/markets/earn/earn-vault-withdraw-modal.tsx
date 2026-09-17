@@ -31,6 +31,7 @@ import {
 } from "./earn-program-data";
 import {
   derivedMinOut,
+  floorToReplay,
   isSlippageExceededRefusal,
   parseSlippageToleranceBps,
   quoteForKey,
@@ -828,10 +829,14 @@ export function EarnVaultWithdrawModal({
     }
 
     // A HELD key must replay the floor it was MINTED with, verbatim — the
-    // deposit modal documents why. A fresh key takes the freshly derived
-    // floor, and records it for exactly that future replay.
-    const heldFloor = resolvedKey.wasHeld ? recallVaultWithdrawalFloor(fingerprint) : undefined;
-    const floorForRequest = heldFloor !== undefined ? heldFloor : (minAmountOut ?? null);
+    // deposit modal documents why. A KEPT key — one a prior ambiguous attempt
+    // (a 5xx, a lost answer) left live — must replay its minted floor too,
+    // and worse: the changed-request refusal is a 409, which retires the key
+    // and lets the next submit mint a fresh one while the first attempt may
+    // already have exited. The floor memo answers for both. A fresh key takes
+    // the freshly derived floor, and records it for exactly that future replay.
+    const replayFloor = floorToReplay(resolvedKey, recallVaultWithdrawalFloor, fingerprint);
+    const floorForRequest = replayFloor !== undefined ? replayFloor : (minAmountOut ?? null);
     rememberVaultWithdrawalFloor(fingerprint, floorForRequest);
 
     // No abort signal on the value-moving POST — see the deposit modal.

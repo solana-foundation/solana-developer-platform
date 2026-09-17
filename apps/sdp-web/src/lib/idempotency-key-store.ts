@@ -264,6 +264,14 @@ export interface IdempotencyKeyStore {
    */
   claim(fingerprint: string): string;
   /**
+   * Whether this fingerprint already has a live key — held or not. The
+   * retry-detection half of `claim`: a caller that mints request-scoped state
+   * alongside the key (the vault flows' quote-derived floor) must replay that
+   * state when the key is reused, and `claim` alone cannot say which mint was
+   * a reuse.
+   */
+  hasLive(fingerprint: string): boolean;
+  /**
    * Pin a key for as long as an approval hold on it is live: an approval
    * answers to a human and can take hours, far past the default TTL, and a
    * lapsed key there resubmits into a SECOND approval request for one intent.
@@ -284,7 +292,7 @@ export interface IdempotencyKeyStore {
 }
 
 type HeldIdempotencyKeyResolution =
-  | { kind: "key"; key: string; wasHeld: boolean }
+  | { kind: "key"; key: string; wasHeld: boolean; wasReused: boolean }
   | { kind: "aborted" }
   | { kind: "unavailable" };
 
@@ -295,7 +303,17 @@ type HeldIdempotencyKeyLookup = { kind: "found" } | { kind: "absent" } | { kind:
  *
  * `wasHeld` is load-bearing: an approval can execute between the preflight and
  * POST, so the response must distinguish that absorbed race from a fresh
- * submission. Both vault money flows use this exact lifecycle.
+ * submission.
+ *
+ * `wasReused` is load-bearing for a KEPT-key retry — a key a prior ambiguous
+ * attempt (a 5xx, a lost answer, an unreadable 2xx) left live in the store. The
+ * caller must resubmit the request-scoped state that key was MINTED with (the
+ * vault flows' quote-derived floor), because the API's own idempotency
+ * fingerprint includes that state: pairing the reused key with a freshly
+ * derived value is refused with a 409, which the caller then reads as "nothing
+ * was written" and retires — letting the next submit mint a fresh key while
+ * the first attempt may already have executed. Both vault money flows use this
+ * exact lifecycle.
  */
 export async function resolveHeldIdempotencyKey(
   store: IdempotencyKeyStore,
@@ -303,16 +321,20 @@ export async function resolveHeldIdempotencyKey(
   signal: AbortSignal,
   fetchRecorded: (key: string) => Promise<HeldIdempotencyKeyLookup>
 ): Promise<HeldIdempotencyKeyResolution> {
+  const wasReused = store.hasLive(fingerprint);
   const key = store.claim(fingerprint);
-  if (!store.isHeld(fingerprint)) return { kind: "key", key, wasHeld: false };
+  if (!store.isHeld(fingerprint)) return { kind: "key", key, wasHeld: false, wasReused };
 
   const recorded = await fetchRecorded(key);
   if (signal.aborted) return { kind: "aborted" };
   if (recorded.kind === "unavailable") return { kind: "unavailable" };
-  if (recorded.kind === "absent") return { kind: "key", key, wasHeld: true };
+  if (recorded.kind === "absent") return { kind: "key", key, wasHeld: true, wasReused };
 
+  // The hold is over and a movement was recorded under the key: this
+  // submission is a NEW intent, so it goes out under a fresh key with fresh
+  // request-scoped state — never a replay of the executed movement's.
   store.release(fingerprint);
-  return { kind: "key", key: store.claim(fingerprint), wasHeld: false };
+  return { kind: "key", key: store.claim(fingerprint), wasHeld: false, wasReused: false };
 }
 
 type IdempotencyKeyOutcome =
@@ -473,6 +495,10 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
         { id: fingerprint, value: key, createdAt: Date.now() },
       ]);
       return key;
+    },
+
+    hasLive(fingerprint) {
+      return readEntries(storeKey, IDEMPOTENCY_TTL_MS).some((entry) => entry.id === fingerprint);
     },
 
     hold(fingerprint) {
