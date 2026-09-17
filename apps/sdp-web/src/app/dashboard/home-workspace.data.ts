@@ -1,5 +1,6 @@
 "use client";
 
+import { z } from "zod";
 import type { HomeActivityRow } from "./home-page.data";
 
 interface HomeActivityResponseEnvelope {
@@ -19,10 +20,7 @@ export interface HomeActivitySnapshot {
   activityNotice: string | null;
 }
 
-function getApiError(
-  body: HomeActivityResponseEnvelope | HomeVolumeResponseEnvelope,
-  fallback: string
-): string {
+function getApiError(body: HomeActivityResponseEnvelope, fallback: string): string {
   if (typeof body.error?.message === "string" && body.error.message) {
     return body.error.message;
   }
@@ -51,21 +49,17 @@ export async function fetchHomeActivity(
   };
 }
 
-interface HomeVolumeResponseEnvelope {
-  data?: {
-    todaysVolume?: number | null;
-    todaysVolumeError?: string | null;
-  };
-  error?: {
-    message?: string;
-  };
-}
+/** The volume route's answer. Parsed, not cast: a malformed body is an error, never "no volume". */
+const homeVolumeResponseSchema = z.object({
+  data: z.object({
+    todaysVolume: z.number().nullable(),
+    todaysVolumeError: z.string().nullable(),
+  }),
+});
 
-export interface HomeVolumeSnapshot {
-  todaysVolume: number | null;
-  /** Set when not every wallet's transfers loaded, so the volume would be understated. */
-  todaysVolumeError: string | null;
-}
+const homeVolumeErrorSchema = z.object({ error: z.string().min(1) });
+
+export type HomeVolumeSnapshot = z.infer<typeof homeVolumeResponseSchema>["data"];
 
 /** Today's volume, read apart from the activity list because it waits on every wallet. */
 export async function fetchHomeVolume(
@@ -76,14 +70,14 @@ export async function fetchHomeVolume(
     cache: "no-store",
     signal: options.signal,
   });
-  const body = (await response.json().catch(() => ({}))) as HomeVolumeResponseEnvelope;
+  const body: unknown = await response.json();
 
   if (!response.ok) {
-    throw new Error(getApiError(body, ""));
+    const failure = homeVolumeErrorSchema.safeParse(body);
+    throw new Error(
+      failure.success ? failure.data.error : `Volume request failed (${response.status})`
+    );
   }
 
-  return {
-    todaysVolume: body.data?.todaysVolume ?? null,
-    todaysVolumeError: body.data?.todaysVolumeError ?? null,
-  };
+  return homeVolumeResponseSchema.parse(body).data;
 }
