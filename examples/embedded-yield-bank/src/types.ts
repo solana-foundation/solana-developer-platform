@@ -47,6 +47,7 @@ export interface YieldMovement {
   movementId: string;
   positionId: string;
   provider: string;
+  providerReference: string;
   direction: "deposit" | "withdrawal";
   status: MovementStatus;
   signature: string;
@@ -66,16 +67,6 @@ export interface TokenBalance {
   symbol: string;
   amount: string;
   decimals: number;
-}
-
-export interface TokenEarnings {
-  tokenMint: string;
-  positionCount: number;
-  unavailablePositionCount: number;
-  currentValue?: string;
-  totalDeposited: string;
-  earned?: string;
-  earnedUnavailableReason?: string;
 }
 
 export type FeePayer = "customer" | "northstar";

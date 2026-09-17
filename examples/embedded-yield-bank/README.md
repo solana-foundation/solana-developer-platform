@@ -24,11 +24,11 @@ affordances for the example.
 | Northstar | SDP |
 | --- | --- |
 | Checking balance | The demo wallet's balance of the strategy's deposit token, read over RPC |
-| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first instant-liquidity devnet USDC strategy |
-| Savings balance and earnings | The wallet's external-wallet position and earnings for that strategy |
+| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first devnet strategy that is both instant-liquidity and USDC (anything else is a startup error) |
+| Savings balance and earnings | The wallet's open position in that strategy; earnings use SDP's formula (value + finalized payouts - finalized deposits) over that strategy's movements only |
 | Move to savings | Deposit preview when the strategy requires a floor, then build, server-side sign, submit |
 | Move to checking | Token amount converted to shares at the live share price, then withdrawal preview, build, sign, submit |
-| Recent activity | External-wallet movements for that position, shown in the deposit token |
+| Recent activity | External-wallet movements whose provider and vault match the strategy, shown in the deposit token, kept after the position closes |
 
 The customer never sees shares, providers, or slippage. Northstar demonstrates
 the authenticated tier because it submits signed transactions to SDP and reads
@@ -63,8 +63,8 @@ handlers in [`src/app/api`](src/app/api).
   8 seconds while a transfer is settling (30 seconds otherwise), gives up after
   two minutes, and backs off for exactly the `Retry-After` SDP sends on a 429.
   This avoids holding a serverless function open while Solana settles.
-- Each refresh costs three SDP calls and one RPC read: the strategy catalogue
-  is cached server-side for five minutes.
+- Each refresh costs two SDP calls (positions, movements) and one RPC read:
+  the strategy catalogue is cached server-side for five minutes.
 - While a transfer this browser submitted is pending, the page shows the
   balances it will produce and keeps the total fixed, then hands back to live
   data once SDP records settlement. SDP reconciles pending movements once a
@@ -175,7 +175,7 @@ that Vercel exposes as `VERCEL_PROJECT_PRODUCTION_URL`.
 | `DEMO_ACCESS_PASSWORD` | Yes | HTTP Basic password protecting the page and all API routes. |
 | `DEMO_WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array Solana keypair used only by the server. Its token balance is checking. |
 | `DEMO_FEE_PAYER_PRIVATE_KEY` | No | Different funded devnet keypair that co-signs and pays network fees and account rent. |
-| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Defaults to an instant-liquidity devnet USDC strategy. |
+| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Otherwise the first devnet strategy that is both instant-liquidity and USDC; none qualifying is a startup error. |
 | `SOLANA_RPC_URL` | No | Devnet RPC used for direct wallet balance reads. |
 
 ## Local end-to-end notes

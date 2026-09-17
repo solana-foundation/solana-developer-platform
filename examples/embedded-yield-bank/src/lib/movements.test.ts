@@ -139,6 +139,7 @@ function createMovement(status: YieldMovement["status"]): YieldMovement {
     movementId: "movement-1",
     positionId: "position-1",
     provider: "kamino",
+    providerReference: "vault",
     direction: "deposit",
     status,
     signature: "signature",

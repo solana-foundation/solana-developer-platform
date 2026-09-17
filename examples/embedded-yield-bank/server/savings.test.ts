@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { TokenEarnings, YieldPosition, YieldStrategy } from "../src/types";
+import type { YieldMovement, YieldPosition, YieldStrategy } from "../src/types";
 import {
+  earnedFromLedger,
   pickSavingsStrategy,
   sharesForAmount,
   summarizeSavings,
@@ -9,16 +10,28 @@ import {
 import { DEVNET_USDC_MINT } from "./solana";
 
 describe("savings strategy", () => {
-  it("prefers an instant-liquidity USDC strategy on devnet", () => {
+  it("picks the first instant-liquidity USDC strategy on devnet, in catalogue order", () => {
     const strategies = [
       strategy({ id: "veda-delayed", liquidityTerm: "delayed" }),
       strategy({ id: "eurc-instant", depositMints: ["eurc"] }),
-      strategy({ id: "kamino-usdc" }),
       strategy({ id: "mainnet", hostCluster: "mainnet-beta" }),
       strategy({ id: "paused", status: "paused" }),
+      strategy({ id: "kamino-usdc" }),
+      strategy({ id: "steakhouse-usdc" }),
     ];
 
     expect(pickSavingsStrategy(strategies).id).toBe("kamino-usdc");
+  });
+
+  it("refuses to fall back to a delayed or non-USDC strategy", () => {
+    const strategies = [
+      strategy({ id: "veda-delayed", liquidityTerm: "delayed" }),
+      strategy({ id: "eurc-instant", depositMints: ["eurc"] }),
+    ];
+
+    expect(() => pickSavingsStrategy(strategies)).toThrow(
+      "instant liquidity and a USDC deposit mint"
+    );
   });
 
   it("honours DEMO_STRATEGY_ID even when it is paused for deposits", () => {
@@ -34,15 +47,13 @@ describe("savings strategy", () => {
   });
 
   it("explains an empty catalogue", () => {
-    expect(() => pickSavingsStrategy([])).toThrow(
-      "no fundable devnet strategy"
-    );
+    expect(() => pickSavingsStrategy([])).toThrow("Set DEMO_STRATEGY_ID");
   });
 });
 
 describe("savings summary", () => {
   it("reports an empty savings account against checking", () => {
-    expect(summarizeSavings({ amount: "20" }, null, undefined)).toEqual({
+    expect(summarizeSavings({ amount: "20" }, null, [])).toEqual({
       balance: "0",
       withdrawable: "0",
       earned: "0",
@@ -50,7 +61,7 @@ describe("savings summary", () => {
     });
   });
 
-  it("adds the live position value to checking", () => {
+  it("adds the live position value to checking and earns from the ledger", () => {
     expect(
       summarizeSavings(
         { amount: "19.35" },
@@ -59,7 +70,7 @@ describe("savings summary", () => {
           withdrawableShares: "0.65",
           tokenValue: "0.66",
         }),
-        earnings("0.01")
+        [movement("deposit", "finalized", "0.65")]
       )
     ).toEqual({
       balance: "0.66",
@@ -70,14 +81,43 @@ describe("savings summary", () => {
   });
 
   it("leaves totals undefined while the valuation is unavailable", () => {
-    expect(
-      summarizeSavings({ amount: "19.35" }, position({}), undefined)
-    ).toEqual({
+    expect(summarizeSavings({ amount: "19.35" }, position({}), [])).toEqual({
       balance: undefined,
       withdrawable: undefined,
       earned: undefined,
       total: undefined,
     });
+  });
+});
+
+describe("earnings from the strategy ledger", () => {
+  it("counts payouts of finalized withdrawals and ignores failures", () => {
+    expect(
+      earnedFromLedger("1.5", [
+        movement("withdrawal", "finalized", "1.5"),
+        movement("deposit", "finalized", "2"),
+        movement("deposit", "finalized", "1"),
+        movement("deposit", "failed", "5"),
+      ])
+    ).toBe("0");
+  });
+
+  it("states realized earnings for a closed position", () => {
+    expect(
+      earnedFromLedger("0", [
+        movement("withdrawal", "finalized", "10.4"),
+        movement("deposit", "finalized", "10"),
+      ])
+    ).toBe("0.4");
+  });
+
+  it("is unstatable while a movement is pending or a payout is unvalued", () => {
+    expect(
+      earnedFromLedger("1", [movement("deposit", "submitted", "1")])
+    ).toBeUndefined();
+    expect(
+      earnedFromLedger("1", [movement("withdrawal", "finalized", null)])
+    ).toBeUndefined();
   });
 });
 
@@ -147,13 +187,25 @@ function position(
   };
 }
 
-function earnings(earned: string): TokenEarnings {
+function movement(
+  direction: YieldMovement["direction"],
+  status: YieldMovement["status"],
+  tokenAmount: string | null
+): YieldMovement {
   return {
+    movementId: `movement-${direction}-${status}-${tokenAmount}`,
+    positionId: "position",
+    provider: "provider",
+    providerReference: "vault",
+    direction,
+    status,
+    signature: "signature",
+    amount: tokenAmount ?? "1",
+    denomination: "mint",
     tokenMint: DEVNET_USDC_MINT,
-    positionCount: 1,
-    unavailablePositionCount: 0,
-    currentValue: "0.66",
-    totalDeposited: "0.65",
-    earned,
+    tokenAmount,
+    failureReason: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    settledAt: status === "finalized" ? "2026-01-01T00:00:01.000Z" : null,
   };
 }

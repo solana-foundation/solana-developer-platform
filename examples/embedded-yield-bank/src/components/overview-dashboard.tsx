@@ -162,7 +162,7 @@ export function OverviewDashboard({
               ? "—"
               : formatAmount(savings.balance, token.symbol)
           }
-          {...savingsDetail(savings, token.symbol)}
+          {...savingsDetail(savings, token.symbol, settling.length > 0)}
           footer={`${strategy.name} · ${
             strategy.liquidityTerm === "instant"
               ? "Withdraw anytime"
@@ -223,12 +223,16 @@ function Dot() {
 
 function savingsDetail(
   savings: DashboardData["savings"],
-  symbol: string
+  symbol: string,
+  settling: boolean
 ): { detail: string; positive?: boolean } {
-  if (savings.position === null)
+  if (savings.position === null && savings.earned === "0")
     return { detail: "Start earning with your first transfer" };
-  if (savings.earned === undefined)
-    return { detail: "Earnings update shortly" };
+  if (savings.earned === undefined) {
+    return {
+      detail: settling ? "Earnings update shortly" : "Earnings unavailable",
+    };
+  }
   if (savings.earned === "0") return { detail: "Nothing earned yet" };
   return {
     detail: `${formatAmount(savings.earned, symbol, { signed: true })} earned`,

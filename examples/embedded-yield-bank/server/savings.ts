@@ -9,7 +9,7 @@ import {
 } from "../src/lib/decimal";
 import type {
   TokenBalance,
-  TokenEarnings,
+  YieldMovement,
   YieldPosition,
   YieldStrategy,
 } from "../src/types";
@@ -21,8 +21,10 @@ const MAX_SHARE_DECIMALS = 9;
 
 /**
  * Northstar offers one savings product, backed by one Embedded Yield strategy.
- * `DEMO_STRATEGY_ID` pins it; otherwise prefer an instant-liquidity USDC
- * strategy so "move to checking" settles right away.
+ * `DEMO_STRATEGY_ID` pins it; otherwise the first active, fundable devnet
+ * strategy that is BOTH instant-liquidity and USDC, in catalogue order. Nothing
+ * else qualifies: a delayed exit or another token would silently change the
+ * checking-and-savings model, so that is a configuration error instead.
  */
 export function pickSavingsStrategy(
   strategies: readonly YieldStrategy[],
@@ -43,32 +45,20 @@ export function pickSavingsStrategy(
     return strategy;
   }
 
-  const [strategy] = strategies
-    .filter(
-      (item) =>
-        item.fundable &&
-        item.status === "active" &&
-        item.hostCluster === "devnet" &&
-        item.depositMints.length > 0
-    )
-    // Stable sort: ties keep the catalogue's own order.
-    .sort(
-      (left, right) =>
-        rank(right, "instant") - rank(left, "instant") ||
-        rank(right, DEVNET_USDC_MINT) - rank(left, DEVNET_USDC_MINT)
-    );
+  const strategy = strategies.find(
+    (item) =>
+      item.fundable &&
+      item.status === "active" &&
+      item.hostCluster === "devnet" &&
+      item.liquidityTerm === "instant" &&
+      item.depositMints[0] === DEVNET_USDC_MINT
+  );
   if (!strategy) {
     throw new Error(
-      "The SDP catalogue has no fundable devnet strategy. Sync the catalogue or set DEMO_STRATEGY_ID."
+      "The SDP catalogue has no fundable devnet strategy with instant liquidity and a USDC deposit mint. Set DEMO_STRATEGY_ID to choose one explicitly."
     );
   }
   return strategy;
-}
-
-function rank(strategy: YieldStrategy, feature: string): number {
-  return Number(
-    strategy.liquidityTerm === feature || strategy.depositMints[0] === feature
-  );
 }
 
 export function canDeposit(strategy: YieldStrategy): boolean {
@@ -104,29 +94,55 @@ export interface SavingsSummary {
   total?: string;
 }
 
+/**
+ * `movements` must already be scoped to the savings strategy. Earnings follow
+ * SDP's own rule for a wallet, applied to this one strategy: live value plus
+ * finalized withdrawal payouts minus finalized deposits, stated only when it
+ * is exact (no pending movement, no unvalued payout, no missing valuation).
+ * SDP's earnings endpoint groups by token across every strategy the wallet
+ * touches, which is the wrong scope for a single savings account.
+ */
 export function summarizeSavings(
   checking: Pick<TokenBalance, "amount">,
   position: YieldPosition | null,
-  earnings: TokenEarnings | undefined
+  movements: readonly YieldMovement[]
 ): SavingsSummary {
-  if (!position) {
-    return {
-      balance: "0",
-      withdrawable: "0",
-      earned: earnings?.earned ?? "0",
-      total: checking.amount,
-    };
-  }
-  const balance = position.tokenValue;
+  const balance = position ? position.tokenValue : "0";
   return {
     balance,
-    withdrawable: withdrawableAmount(position),
-    earned: earnings?.earned,
+    withdrawable: position ? withdrawableAmount(position) : "0",
+    earned: earnedFromLedger(balance, movements),
     total:
       balance === undefined
         ? undefined
         : addDecimals([checking.amount, balance]),
   };
+}
+
+export function earnedFromLedger(
+  currentValue: string | undefined,
+  movements: readonly YieldMovement[]
+): string | undefined {
+  if (currentValue === undefined) return undefined;
+  if (movements.some((movement) => isPendingMovement(movement)))
+    return undefined;
+  const finalized = movements.filter(
+    (movement) => movement.status === "finalized"
+  );
+  if (finalized.some((movement) => movement.tokenAmount === null))
+    return undefined;
+  return addDecimals([
+    currentValue,
+    ...finalized.map((movement) =>
+      movement.direction === "withdrawal"
+        ? (movement.tokenAmount as string)
+        : `-${movement.tokenAmount as string}`
+    ),
+  ]);
+}
+
+function isPendingMovement(movement: YieldMovement): boolean {
+  return movement.status !== "finalized" && movement.status !== "failed";
 }
 
 /** Current token value that can be redeemed immediately, rounded down. */

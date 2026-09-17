@@ -48,23 +48,22 @@ export async function loadDashboard(): Promise<DashboardData> {
   );
   const tokenMint = requireDepositMint(strategy);
 
-  const [positions, movements, earnings, checking] = await Promise.all([
+  const [positions, allMovements, checking] = await Promise.all([
     client.listPositions(owner.address),
-    client.listActivity(owner.address),
-    client.getEarnings(owner.address),
+    client.listMovements(owner.address),
     readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
   ]);
 
-  const strategyPositions = positions.filter((position) =>
-    belongsToStrategy(position, strategy)
+  // Scope by strategy, never by open-position ids: SDP drops a position from
+  // the list once it closes, but its movements (and their payouts) remain.
+  const position =
+    positions
+      .filter((candidate) => belongsToStrategy(candidate, strategy))
+      .find(isOpenPosition) ?? null;
+  const movements = allMovements.filter((movement) =>
+    belongsToStrategy(movement, strategy)
   );
-  const position = strategyPositions.find(isOpenPosition) ?? null;
-  const positionIds = new Set(strategyPositions.map((item) => item.id));
-  const { total, ...savings } = summarizeSavings(
-    checking,
-    position,
-    earnings.find((item) => item.tokenMint === tokenMint)
-  );
+  const { total, ...savings } = summarizeSavings(checking, position, movements);
 
   return {
     wallet: {
@@ -76,9 +75,7 @@ export async function loadDashboard(): Promise<DashboardData> {
     checking: { balance: checking.amount },
     savings: { strategy, position, ...savings },
     total,
-    movements: movements.filter((movement) =>
-      positionIds.has(movement.positionId)
-    ),
+    movements,
     connection: {
       apiLabel: localApiLabel(config.SDP_API_BASE_URL),
       checkedAt: new Date().toISOString(),
