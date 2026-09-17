@@ -30,23 +30,6 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
 }
 
 /**
- * Minimum time between on-chain reference checks for the same payment
- * request on one API instance. Read paths that reconcile many rows at once
- * (the payment requests list) pass this so a page view does not fire one
- * billed RPC round trip per awaiting request; payer-facing flows omit it so
- * payment status stays immediate.
- */
-export const PAYMENT_REQUEST_CHAIN_CHECK_MIN_INTERVAL_MS = 30_000;
-
-/**
- * Last chain-check time per request id, stamped just before the RPC round
- * trip so concurrent reads within the interval share one check. Entries are
- * dropped once a reconcile observes a terminal state or an invariant
- * violation, so the map only holds ids of awaiting requests recently seen.
- */
-const chainCheckedAtByRequestId = new Map<string, number>();
-
-/**
  * Checks the chain for a transaction referencing this payment request and,
  * when a valid payment is found, records the inbound transfer and marks the
  * request paid.
@@ -61,26 +44,18 @@ const chainCheckedAtByRequestId = new Map<string, number>();
  *   Other invariant violations (AppError) always rethrow — they do
  *   not self-heal and must not hide behind a stale row. When false, every
  *   failure rethrows, for paths that must not act on stale state.
- * @param options.minChainCheckIntervalMs - When set, skips the chain check
- *   when the request was already checked within this interval on this API
- *   instance and returns the stored row. Bounds the billed RPC cost of
- *   fan-out reads that reconcile every row of a page, at the cost of
- *   detecting a landed payment up to one interval later on those reads.
- *   Leave unset where status must reflect the chain on every read.
  * @returns The settled row when a valid payment was found, otherwise the
  *   stored row.
  */
 export async function reconcilePaymentRequest(
   env: Env,
   row: PaymentRequestRow,
-  options: { bestEffort: boolean; minChainCheckIntervalMs?: number }
+  options: { bestEffort: boolean }
 ): Promise<PaymentRequestRow> {
   if (row.status !== "awaiting_payment") {
-    chainCheckedAtByRequestId.delete(row.id);
     return row;
   }
   if (isPaymentRequestExpired(row.expires_at)) {
-    chainCheckedAtByRequestId.delete(row.id);
     return row;
   }
   if (row.custody_wallet_id === null) {
@@ -90,23 +65,10 @@ export async function reconcilePaymentRequest(
     throw new AppError("CONFLICT", "Payment request wallet identity is unresolved");
   }
 
-  const lastChainCheckedAt = chainCheckedAtByRequestId.get(row.id);
-  if (
-    options.minChainCheckIntervalMs !== undefined &&
-    lastChainCheckedAt !== undefined &&
-    Date.now() - lastChainCheckedAt < options.minChainCheckIntervalMs
-  ) {
-    return row;
-  }
-  chainCheckedAtByRequestId.set(row.id, Date.now());
-
   try {
     return await settlePaymentRequestIfPaid(env, row, row.custody_wallet_id);
   } catch (err) {
     if (!options.bestEffort || err instanceof AppError) {
-      // Never memoize a failed invariant check: the next read must surface
-      // it again instead of serving the stale row.
-      chainCheckedAtByRequestId.delete(row.id);
       throw err;
     }
     getLogger().error(

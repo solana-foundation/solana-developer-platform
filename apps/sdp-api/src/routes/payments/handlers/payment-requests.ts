@@ -12,7 +12,6 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   isPaymentRequestExpired,
-  PAYMENT_REQUEST_CHAIN_CHECK_MIN_INTERVAL_MS,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
@@ -67,17 +66,8 @@ export async function listPaymentRequests(c: AppContext) {
     offset: (page - 1) * pageSize,
   });
 
-  // A list read reconciles every awaiting row; without the interval each
-  // page view pays one billed chain round trip per open request. The gate
-  // coalesces repeated and concurrent reads onto one check per row, and the
-  // public pay page keeps reconciling on every read.
   const reconciledRows = await Promise.all(
-    rows.map((row) =>
-      reconcilePaymentRequest(c.env, row, {
-        bestEffort: true,
-        minChainCheckIntervalMs: PAYMENT_REQUEST_CHAIN_CHECK_MIN_INTERVAL_MS,
-      })
-    )
+    rows.map((row) => reconcilePaymentRequest(c.env, row, { bestEffort: true }))
   );
 
   const response: ListPaymentRequestsResponse = {
