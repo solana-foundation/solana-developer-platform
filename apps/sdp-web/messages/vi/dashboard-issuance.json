@@ -360,7 +360,14 @@
         "seize": "Thu hồi",
         "force_burn": "Force burn",
         "burn": "Burn",
-        "mint": "Mint"
+        "mint": "Mint",
+        "confidential_configure": "Cấu hình tài khoản bảo mật",
+        "confidential_approve": "Phê duyệt tài khoản bảo mật",
+        "confidential_deposit": "Nạp vào số dư bảo mật",
+        "confidential_apply_pending": "Áp dụng số dư bảo mật đang chờ",
+        "confidential_transfer": "Chuyển khoản bảo mật",
+        "confidential_withdraw": "Rút từ số dư bảo mật",
+        "confidential_empty_account": "Làm trống tài khoản bảo mật"
       },
       "actionDescriptions": {
         "allowlist_add": "Thêm Wallet vào Allowlist của Asset này để có thể nắm giữ và chuyển.",
@@ -375,7 +382,14 @@
         "seize": "Buộc chuyển số dư của người nắm giữ sang Wallet khác. Không thể hoàn tác.",
         "force_burn": "Hủy Token từ Wallet của người nắm giữ. Không thể hoàn tác.",
         "burn": "Hủy Token từ số dư treasury của bạn. Không thể hoàn tác.",
-        "mint": "Phát hành Token mới tới một Wallet. Không thể hoàn tác."
+        "mint": "Phát hành Token mới tới một Wallet. Không thể hoàn tác.",
+        "confidential_configure": "Thiết lập tài khoản Token cho chuyển khoản bảo mật (số dư được mã hóa).",
+        "confidential_approve": "Phê duyệt tài khoản đã cấu hình để có thể giao dịch bảo mật (chính sách danh sách trắng).",
+        "confidential_deposit": "Chuyển Token từ số dư công khai sang số dư bảo mật đang chờ.",
+        "confidential_apply_pending": "Áp dụng số dư bảo mật đang chờ vào số dư khả dụng.",
+        "confidential_transfer": "Chuyển một khoản đã mã hóa tới số dư bảo mật của Wallet khác. Số tiền không hiển thị sau đó.",
+        "confidential_withdraw": "Chuyển Token từ số dư bảo mật khả dụng trở lại số dư công khai.",
+        "confidential_empty_account": "Đóng số dư của tài khoản bảo mật sau khi đã rút về không."
       },
       "statusLabels": {
         "awaiting_review": "Chờ xem xét",
@@ -1202,6 +1216,14 @@
       "transferHook": "Quy tắc chuyển tùy chỉnh",
       "transferHookDescription": "Đưa chuyển qua chương trình quy tắc bạn cung cấp để kiểm tra thêm.",
       "transferHookProgramId": "Program ID",
+      "confidentialTransfers": "Số dư bảo mật",
+      "confidentialTransfersDescription": "Mã hóa số dư của người nắm giữ và số tiền chuyển khoản trên chuỗi; chỉ người nắm giữ (và người kiểm toán tùy chọn) mới có thể giải mã. Chỉ dùng trên devnet.",
+      "confidentialTransfersPolicy": "Phê duyệt tài khoản",
+      "confidentialTransfersPolicyHint": "Với danh sách trắng, cơ quan bảo mật phải phê duyệt từng tài khoản trước khi giao dịch. Với opt-in, tài khoản được tự động phê duyệt.",
+      "confidentialTransfersPolicyOptIn": "Opt-in (tự động phê duyệt)",
+      "confidentialTransfersPolicyWhitelist": "Danh sách trắng (phê duyệt thủ công)",
+      "confidentialTransfersAuditorElgamalPubkey": "Khóa công khai của người kiểm toán",
+      "confidentialTransfersAuditorElgamalPubkeyHint": "Khóa công khai ElGamal tùy chọn có thể giải mã mọi số tiền chuyển khoản bảo mật để phục vụ rà soát tuân thủ.",
       "advancedSettingsTitle": "Cài đặt nâng cao",
       "showTechnicalDetail": "Xem",
       "deployPreview": "Xem trước Deploy",

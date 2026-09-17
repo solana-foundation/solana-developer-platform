@@ -962,6 +962,14 @@
       "transferHook": "Règles de transfert personnalisées",
       "transferHookDescription": "Achemine les transferts via un programme de règles que vous fournissez pour des vérifications supplémentaires.",
       "transferHookProgramId": "ID du programme",
+      "confidentialTransfers": "Soldes confidentiels",
+      "confidentialTransfersDescription": "Chiffre les soldes des détenteurs et les montants transférés sur la chaîne ; seul le détenteur (et un auditeur optionnel) peut les déchiffrer. Devnet uniquement.",
+      "confidentialTransfersPolicy": "Approbation de compte",
+      "confidentialTransfersPolicyHint": "Avec liste blanche, l'autorité confidentielle doit approuver chaque compte avant qu'il puisse transiger. Avec adhésion volontaire, l'approbation est automatique.",
+      "confidentialTransfersPolicyOptIn": "Adhésion volontaire (approbation automatique)",
+      "confidentialTransfersPolicyWhitelist": "Liste blanche (approbation manuelle)",
+      "confidentialTransfersAuditorElgamalPubkey": "Clé publique de l'auditeur",
+      "confidentialTransfersAuditorElgamalPubkeyHint": "Clé publique ElGamal optionnelle pouvant déchiffrer chaque montant de transfert confidentiel à des fins de conformité.",
       "advancedSettingsTitle": "Paramètres avancés",
       "showTechnicalDetail": "Vue",
       "deployPreview": "Aperçu du déploiement",
@@ -1448,7 +1456,14 @@
         "seize": "Saisir",
         "force_burn": "Burn forcé",
         "burn": "Burn",
-        "mint": "Mint"
+        "mint": "Mint",
+        "confidential_configure": "Configurer un compte confidentiel",
+        "confidential_approve": "Approuver un compte confidentiel",
+        "confidential_deposit": "Déposer sur le solde confidentiel",
+        "confidential_apply_pending": "Appliquer le solde confidentiel en attente",
+        "confidential_transfer": "Transfert confidentiel",
+        "confidential_withdraw": "Retirer du solde confidentiel",
+        "confidential_empty_account": "Vider le compte confidentiel"
       },
       "actionDescriptions": {
         "allowlist_add": "Ajoutez le Wallet à l'allowlist de cet actif afin qu'il puisse détenir et transférer.",
@@ -1463,7 +1478,14 @@
         "seize": "Transférez de force le solde d'un détenteur vers un autre Wallet. Irréversible.",
         "force_burn": "Détruisez des Tokens du Wallet d'un détenteur. Irréversible.",
         "burn": "Détruisez des Tokens de votre propre solde de trésorerie. Irréversible.",
-        "mint": "Émettez de nouveaux Tokens vers un Wallet. Irréversible."
+        "mint": "Émettez de nouveaux Tokens vers un Wallet. Irréversible.",
+        "confidential_configure": "Configurez un compte Token pour les transferts confidentiels (solde chiffré).",
+        "confidential_approve": "Approuvez un compte configuré afin qu'il puisse transiger confidentiellement (politique de liste blanche).",
+        "confidential_deposit": "Déplacez des Tokens du solde public vers le solde confidentiel en attente.",
+        "confidential_apply_pending": "Appliquez le solde confidentiel en attente au solde disponible.",
+        "confidential_transfer": "Transférez un montant chiffré vers le solde confidentiel d'un autre Wallet. Le montant n'est pas visible ensuite.",
+        "confidential_withdraw": "Déplacez des Tokens du solde confidentiel disponible vers le solde public.",
+        "confidential_empty_account": "Clôturez les soldes d'un compte confidentiel une fois retirés à zéro."
       },
       "statusLabels": {
         "awaiting_review": "En attente de revue",

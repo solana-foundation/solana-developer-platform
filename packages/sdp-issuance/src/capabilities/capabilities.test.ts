@@ -331,6 +331,38 @@ describe("advanced settings capability registry", () => {
     assert.equal(pauseOnly.isFreezable, false);
   });
 
+  it("resolves confidentialTransfers into a deployable extension config", () => {
+    // Without this mapping the setting is accepted by the UI and then silently
+    // dropped on the way to the mint — and the extension cannot be added later.
+    const withAuditor = resolveSettingsToExtensions("generic", "generic", {
+      confidentialTransfers: {
+        params: {
+          policy: "opt-in",
+          auditorElgamalPubkey: "So11111111111111111111111111111111111111112",
+        },
+      },
+    });
+    assert.deepEqual(withAuditor.errors, []);
+    assert.deepEqual(withAuditor.extensions?.confidentialTransfers, {
+      policy: "opt-in",
+      auditorElgamalPubkey: "So11111111111111111111111111111111111111112",
+    });
+
+    // No auditor selected: the key must be omitted, not emitted empty — an empty
+    // string would be deserialized as an address by the mosaic builder.
+    const withoutAuditor = resolveSettingsToExtensions("generic", "generic", {
+      confidentialTransfers: { params: { policy: "whitelist" } },
+    });
+    assert.deepEqual(withoutAuditor.extensions?.confidentialTransfers, { policy: "whitelist" });
+
+    // Whitelist is the on-chain default, so an unset policy must land there
+    // rather than silently auto-approving every holder account.
+    const noPolicy = resolveSettingsToExtensions("generic", "generic", {
+      confidentialTransfers: {},
+    });
+    assert.equal(noPolicy.extensions?.confidentialTransfers?.policy, "whitelist");
+  });
+
   it("resolves freezeAccounts to isFreezable rather than an extension", () => {
     // The base mint's freeze authority is not a Token-2022 extension, so this
     // setting must surface as a token column (like requiresAllowlist) and add
@@ -446,8 +478,22 @@ describe("advanced settings capability registry", () => {
 
   it("rejects two extensions that cannot coexist on one mint", () => {
     // Both define raw→UI amount conversion; conflict despite being individually valid.
-    assert.deepEqual(getConflictingSettingKeys("interestBearing"), ["scaledUiAmount"]);
-    assert.deepEqual(getConflictingSettingKeys("scaledUiAmount"), ["interestBearing"]);
+    // Both also conflict with confidentialTransfers — the visible amount they depend
+    // on doesn't exist for confidential balances.
+    assert.deepEqual(getConflictingSettingKeys("interestBearing"), [
+      "scaledUiAmount",
+      "confidentialTransfers",
+    ]);
+    assert.deepEqual(getConflictingSettingKeys("scaledUiAmount"), [
+      "interestBearing",
+      "confidentialTransfers",
+    ]);
+    // confidentialTransfers conflicts with every visible-amount-dependent setting.
+    assert.deepEqual(getConflictingSettingKeys("confidentialTransfers").sort(), [
+      "interestBearing",
+      "scaledUiAmount",
+      "transferFee",
+    ]);
     // nonTransferable can't pair with a fee or a hook (no transfers to act on).
     assert.deepEqual(getConflictingSettingKeys("nonTransferable").sort(), [
       "transferFee",

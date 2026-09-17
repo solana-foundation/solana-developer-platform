@@ -126,6 +126,51 @@ export const ADVANCED_SETTINGS = {
       },
     ],
   },
+  // Devnet-only for now (see the runtime `SOLANA_NETWORK !== "devnet"` guard in the
+  // confidential route handlers) — not expressed here since gating is per-network,
+  // not per-capability. Visible amount doesn't exist for confidential balances, so
+  // it conflicts with the amount-scaling extensions below (see
+  // INCOMPATIBLE_EXTENSION_PAIRS).
+  confidentialTransfers: {
+    group: "controls",
+    labelKey: config("confidentialTransfers"),
+    descriptionKey: desc("confidentialTransfers"),
+    extensions: ["confidentialTransfers"],
+    actions: [
+      "confidential_configure",
+      "confidential_approve",
+      "confidential_deposit",
+      "confidential_apply_pending",
+      "confidential_transfer",
+      "confidential_withdraw",
+      "confidential_empty_account",
+    ],
+    params: [
+      {
+        key: "policy",
+        kind: "select",
+        labelKey: config("confidentialTransfersPolicy"),
+        hintKey: config("confidentialTransfersPolicyHint"),
+        defaultValue: "whitelist",
+        options: [
+          // biome-ignore lint/security/noSecrets: i18n message key, not a secret.
+          { value: "opt-in", labelKey: config("confidentialTransfersPolicyOptIn") },
+          { value: "whitelist", labelKey: config("confidentialTransfersPolicyWhitelist") },
+        ],
+        required: true,
+      },
+      {
+        // biome-ignore lint/security/noSecrets: param key, not a secret.
+        key: "auditorElgamalPubkey",
+        kind: "string",
+        format: "base58-pubkey",
+        // biome-ignore lint/security/noSecrets: i18n message key, not a secret.
+        labelKey: config("confidentialTransfersAuditorElgamalPubkey"),
+        // biome-ignore lint/security/noSecrets: i18n message key, not a secret.
+        hintKey: config("confidentialTransfersAuditorElgamalPubkeyHint"),
+      },
+    ],
+  },
   // nonTransferable is a terminal "opt out of transfers" choice — kept last so the
   // list ends on it (it conflicts with the transfer-related settings above).
   nonTransferable: {
@@ -182,7 +227,10 @@ export function expandLegacySettingKeys<T>(
 }
 
 // Extension pairs that can't coexist: interestBearing+scaledUiAmount (on-chain),
-// or nonTransferable+{transferFee,transferHook} (logical conflicts).
+// nonTransferable+{transferFee,transferHook} (logical conflicts), or
+// confidentialTransfers+{transferFee,interestBearing,scaledUiAmount} — those three
+// depend on a visible token amount to compute fees/interest/scaling, which doesn't
+// exist for confidential balances (only the holder can decrypt them).
 export const INCOMPATIBLE_EXTENSION_PAIRS: readonly (readonly [
   TokenExtensionName,
   TokenExtensionName,
@@ -190,6 +238,9 @@ export const INCOMPATIBLE_EXTENSION_PAIRS: readonly (readonly [
   ["interestBearing", "scaledUiAmount"],
   ["nonTransferable", "transferFee"],
   ["nonTransferable", "transferHook"],
+  ["confidentialTransfers", "transferFee"],
+  ["confidentialTransfers", "interestBearing"],
+  ["confidentialTransfers", "scaledUiAmount"],
 ];
 
 export function findIncompatibleExtensionPair(

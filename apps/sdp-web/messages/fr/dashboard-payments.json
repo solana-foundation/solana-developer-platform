@@ -1188,7 +1188,14 @@
           "update_authority": "Mise à jour de l'autorité",
           "pause": "Mettre en pause",
           "unpause": "Reprendre",
-          "deploy": "Déployer"
+          "deploy": "Déployer",
+          "confidential_configure": "Configure confidential account",
+          "confidential_approve": "Approve confidential account",
+          "confidential_deposit": "Confidential deposit",
+          "confidential_apply_pending": "Apply pending balance",
+          "confidential_transfer": "Confidential transfer",
+          "confidential_withdraw": "Confidential withdrawal",
+          "confidential_empty_account": "Empty confidential account"
         },
         "rings": {
           "shield": "Shield",

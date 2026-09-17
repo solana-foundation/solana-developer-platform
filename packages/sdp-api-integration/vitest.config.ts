@@ -42,6 +42,15 @@ process.env.CUSTODY_ENCRYPTION_KEY ??= Buffer.alloc(32).toString("base64");
 export default defineConfig({
   resolve: {
     alias: {
+      // `@solana-program/token-2022`'s confidential-transfer helpers import
+      // `@solana/zk-sdk/bundler`, while `@solana/mosaic-sdk/_zk` resolves to
+      // `@solana/zk-sdk/node` under the `node` condition. Each entry point
+      // instantiates its own copy of the wasm module, so an ElGamal keypair
+      // built through one is rejected by the other with "expected instance of
+      // ElGamalKeypair". `apps/sdp-api/scripts/build-node.mjs` already collapses
+      // the two for the Docker bundle; tests need the same redirect or every
+      // confidential-transfer operation fails at runtime.
+      "@solana/zk-sdk/bundler": "@solana/zk-sdk/node",
       "@": path.resolve(__dirname, "../../apps/sdp-api/src"),
       "@sdp/api/test-support": path.resolve(
         __dirname,
@@ -61,7 +70,10 @@ export default defineConfig({
     isolate: false,
     server: {
       deps: {
-        inline: [/@solana\/mosaic-sdk/],
+        // token-2022 and zk-sdk are inlined so the `@solana/zk-sdk/bundler`
+        // alias above actually reaches them: an externalized dependency is
+        // loaded by Node's own ESM resolver, which ignores vite aliases.
+        inline: [/@solana\/mosaic-sdk/, /@solana-program\/token-2022/, /@solana\/zk-sdk/],
       },
     },
   },

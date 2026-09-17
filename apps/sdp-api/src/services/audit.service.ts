@@ -37,6 +37,14 @@ export const AUDIT_ACTIONS = [
   "update_authority",
   "pause",
   "unpause",
+  // Confidential transfers (Token-2022 encrypted balances)
+  "confidential_configure",
+  "confidential_approve",
+  "confidential_deposit",
+  "confidential_apply_pending",
+  "confidential_transfer",
+  "confidential_withdraw",
+  "confidential_empty_account",
   // Money movement actions
   "transfer",
   // Transaction actions

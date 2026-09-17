@@ -1138,7 +1138,14 @@
           "update_authority": "Update authority",
           "pause": "Pausar",
           "unpause": "Despausar",
-          "deploy": "Deploy"
+          "deploy": "Deploy",
+          "confidential_configure": "Configure confidential account",
+          "confidential_approve": "Approve confidential account",
+          "confidential_deposit": "Confidential deposit",
+          "confidential_apply_pending": "Apply pending balance",
+          "confidential_transfer": "Confidential transfer",
+          "confidential_withdraw": "Confidential withdrawal",
+          "confidential_empty_account": "Empty confidential account"
         },
         "rings": {
           "shield": "Proteger",

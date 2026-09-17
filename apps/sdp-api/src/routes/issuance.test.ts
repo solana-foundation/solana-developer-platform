@@ -11261,4 +11261,100 @@ describe("Issuance Routes", () => {
       });
     });
   });
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Confidential Transfers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("Confidential Transfers", () => {
+    const CONFIDENTIAL_PATHS = [
+      "configure",
+      "approve",
+      "deposit",
+      "apply-pending",
+      "transfer",
+      "withdraw",
+      "empty",
+    ];
+
+    const confidentialRequest = (
+      tokenId: string,
+      path: string,
+      body: Record<string, unknown>,
+      overrideEnv: typeof env = env
+    ) =>
+      app.request(
+        `/v1/issuance/tokens/${tokenId}/confidential/${path}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        },
+        overrideEnv
+      );
+
+    // Confidential balances are still being validated on devnet; a mainnet
+    // deployment must not be able to reach the chain through any of these.
+    it.each(CONFIDENTIAL_PATHS)("refuses %s on mainnet", async (path) => {
+      const token = await seedIssuedToken({ id: `tok_conf_mainnet_${path}` });
+      const res = await confidentialRequest(
+        token.id,
+        path,
+        {
+          walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          accountAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          amount: "1",
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+        },
+        { ...env, SOLANA_NETWORK: "mainnet-beta" }
+      );
+
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("SERVICE_UNAVAILABLE");
+    });
+
+    it("refuses the balance read on mainnet", async () => {
+      const token = await seedIssuedToken({ id: "tok_conf_mainnet_balance" });
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}/confidential/balance?walletAddress=${TEST_SOLANA_ADDRESSES.wallet2}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        { ...env, SOLANA_NETWORK: "mainnet-beta" }
+      );
+
+      expect(res.status).toBe(503);
+    });
+
+    // The extension can only be added when the mint is created, so a custom
+    // token that did not enable it is a permanent no — not a retryable error.
+    it("refuses a custom token that was not created with confidential balances", async () => {
+      const token = await seedIssuedToken({ id: "tok_conf_disabled", template: "custom" });
+      const res = await confidentialRequest(token.id, "configure", {
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("CONFIDENTIAL_NOT_ENABLED");
+    });
+
+    it("rejects a request with no wallet address", async () => {
+      const token = await seedIssuedToken({ id: "tok_conf_novalidate" });
+      const res = await confidentialRequest(token.id, "configure", {});
+
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects an amount that is not a decimal string", async () => {
+      const token = await seedIssuedToken({ id: "tok_conf_badamount" });
+      const res = await confidentialRequest(token.id, "deposit", {
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        amount: "not-a-number",
+      });
+
+      expect(res.status).toBe(400);
+    });
+  });
 });

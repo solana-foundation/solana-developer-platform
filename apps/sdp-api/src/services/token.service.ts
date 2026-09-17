@@ -409,6 +409,38 @@ const WALLET_TRANSACTION_MATCH_CONFIG = {
     publicKeyFields: [],
     tokenAccountFields: [],
   },
+  // Single-account confidential ops persist the acted-on token account under
+  // `accountAddress`, matching freeze/unfreeze's convention — Phase 3 route
+  // handlers must persist `TokenTransaction.params` accordingly.
+  confidential_configure: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
+  confidential_approve: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
+  confidential_deposit: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
+  confidential_apply_pending: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
+  // Mirrors seize's source/destination convention.
+  confidential_transfer: {
+    publicKeyFields: ["source", "destination"],
+    tokenAccountFields: ["source", "destination"],
+  },
+  confidential_withdraw: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
+  confidential_empty_account: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
 } satisfies Record<TokenTransactionType, WalletTransactionMatchConfig>;
 
 interface TokenAccountMatch {

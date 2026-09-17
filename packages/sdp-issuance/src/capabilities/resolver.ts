@@ -100,6 +100,16 @@ function toOverride(
       const programId = toStringValue(params.programId, "");
       return programId ? { transferHook: { programId } } : {};
     }
+    case "confidentialTransfers": {
+      // The authority is not injected here: every mosaic template defaults the
+      // confidential-balances authority to the mint authority, which is the
+      // wallet SDP already controls. Policy falls back to the on-chain default.
+      const policy = params.policy === "opt-in" ? "opt-in" : "whitelist";
+      const auditorElgamalPubkey = toStringValue(params.auditorElgamalPubkey, "");
+      return {
+        confidentialTransfers: auditorElgamalPubkey ? { policy, auditorElgamalPubkey } : { policy },
+      };
+    }
     default:
       return {};
   }

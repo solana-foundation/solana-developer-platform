@@ -7,6 +7,7 @@
 
 import type { TokenExtensionsConfig, TokenTemplate } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
+import type { ConfidentialKeys } from "@solana/mosaic-sdk/confidential";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Template Mapping
@@ -75,6 +76,42 @@ export interface MosaicTransactionResult {
   mint?: Address;
   tokenAccount?: Address;
   listAddress?: Address;
+}
+
+/**
+ * Prepare-mode result for an operation that may span multiple transactions
+ * (confidential-transfer configure/withdraw/transfer: proof context-state setup
+ * → the operation itself → context-state cleanup). Ordered — the client must
+ * sign and submit each transaction in sequence, since later ones reference
+ * on-chain state the earlier ones create.
+ */
+export interface MosaicTransactionPlan {
+  transactions: MosaicTransaction[];
+}
+
+/**
+ * Execute-mode result for a {@link MosaicTransactionPlan} — one result per
+ * transaction actually submitted, in the same order.
+ */
+export interface MosaicTransactionPlanResult {
+  transactions: MosaicTransactionResult[];
+}
+
+/**
+ * Thrown when a multi-transaction plan fails partway. The transactions listed in
+ * `submitted` already landed on-chain and cannot be rolled back — callers must
+ * journal them so the proof context-state accounts they created can be
+ * reconciled instead of silently leaking rent.
+ */
+export class MosaicTransactionPlanError extends Error {
+  readonly submitted: MosaicTransactionResult[];
+
+  constructor(cause: unknown, submitted: MosaicTransactionResult[]) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "MosaicTransactionPlanError";
+    this.cause = cause;
+    this.submitted = submitted;
+  }
 }
 
 /**
@@ -222,6 +259,129 @@ export interface UpdateMetadataOptions {
   imageUrl?: string | null;
   updateAuthority: TransactionSigner;
   feePayer: TransactionSigner;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Confidential Transfer Types
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Field shapes here are the SDP-facing contract (Address-only where the SDK
+// derives extra state itself, decimal string where mosaic converts using mint
+// decimals) — mirrors FreezeThawOptions/TransferOptions. Mapping onto
+// @solana/mosaic-sdk's `createConfidential*InstructionPlan` builder signatures
+// happens in the service layer (Phase 2).
+//
+// Key management gap (flag, don't solve — see the plan's Phase 2 note): ops that
+// need the account owner's ElGamal/AES keys take a `keys: ConfidentialKeys` field
+// directly rather than deriving it internally. MosaicService's `this.signer` is
+// the custody/operating authority, not necessarily `owner`, and HOO-1507 hasn't
+// settled the derivation scheme yet — so key derivation is entirely the caller's
+// responsibility (route handler / Phase 3) until that resolves.
+
+/**
+ * Options for configuring a token account for confidential transfers.
+ * Must run before deposit/apply/withdraw/transfer can touch the account.
+ */
+export interface ConfigureConfidentialAccountOptions {
+  mint: Address;
+  /** The token account owner. */
+  owner: Address;
+  /** Explicit token account; defaults to the owner's ATA. */
+  tokenAccount?: Address;
+  /** ElGamal keypair + AES key the balances will be encrypted under. */
+  keys: ConfidentialKeys;
+  /** Max pending credits before ApplyPendingBalance must be run. */
+  maximumPendingBalanceCreditCounter?: number;
+  feePayer: Address;
+}
+
+/**
+ * Options for approving a configured confidential account. Only needed when
+ * the mint uses the manual-approve (whitelist) policy.
+ */
+export interface ApproveConfidentialAccountOptions {
+  tokenAccount: Address;
+  mint: Address;
+  /** The mint's confidential-transfer authority. */
+  authority: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for depositing from a token account's public balance into its
+ * confidential pending balance.
+ */
+export interface DepositConfidentialOptions {
+  tokenAccount: Address;
+  mint: Address;
+  /** Decimal amount (e.g. "100" for 100 tokens); resolved against mint decimals. */
+  amount: string;
+  owner: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for rolling a confidential account's pending balance into its
+ * available balance.
+ */
+export interface ApplyPendingConfidentialBalanceOptions {
+  tokenAccount: Address;
+  owner: Address;
+  keys: ConfidentialKeys;
+  feePayer: Address;
+}
+
+/**
+ * Options for a confidential (encrypted-amount) transfer between two
+ * confidential token accounts.
+ */
+export interface ConfidentialTransferOptions {
+  mint: Address;
+  from: Address;
+  to: Address;
+  amount: string;
+  owner: Address;
+  /** ElGamal keypair + AES key for the source (`from`) account. */
+  keys: ConfidentialKeys;
+  /** Override the auditor pubkey; defaults to the mint's configured auditor. */
+  auditorElgamalPubkey?: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for withdrawing from a confidential account's available balance
+ * back to the token account's public balance.
+ */
+export interface WithdrawConfidentialOptions {
+  tokenAccount: Address;
+  mint: Address;
+  amount: string;
+  owner: Address;
+  keys: ConfidentialKeys;
+  feePayer: Address;
+}
+
+/**
+ * Options for emptying (closing out) a confidential account's encrypted
+ * balances once they've been withdrawn to zero.
+ */
+export interface EmptyConfidentialAccountOptions {
+  tokenAccount: Address;
+  owner: Address;
+  keys: ConfidentialKeys;
+  feePayer: Address;
+}
+
+/**
+ * Options for reading and decrypting a confidential account's balances.
+ * Read-only — no TransactionSigner, no on-chain transaction.
+ */
+export interface GetConfidentialBalanceOptions {
+  tokenAccount: Address;
+  /** ElGamal keypair + AES key for this account; balances are returned encrypted-only when omitted. */
+  keys?: ConfidentialKeys;
+  /** Also decrypt the pending balance (ElGamal discrete log — can be slow). */
+  decryptPendingBalance?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

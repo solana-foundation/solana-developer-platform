@@ -15,25 +15,26 @@ Manager-facing advanced settings, the SDP actions and Token-2022 extensions each
 | interestBearing | economics | interestBearing | update_authority |
 | scaledUiAmount | economics | scaledUiAmount | update_authority |
 | transferHook | controls | transferHook | update_authority |
+| confidentialTransfers | controls | confidentialTransfers | confidential_configure, confidential_approve, confidential_deposit, confidential_apply_pending, confidential_transfer, confidential_withdraw, confidential_empty_account |
 | nonTransferable | controls | nonTransferable | — |
 
 ## Availability by asset type
 
 Legend: `req` = locked (forced on) · `rec` = recommended (default on) · `opt` = available (opt-in) · `—` = unsupported.
 
-| Asset type | Template | pauseTransfers | freezeAccounts | permanentDelegate | transferFee | interestBearing | scaledUiAmount | transferHook | nonTransferable |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| generic/generic | custom | opt | opt | opt | opt | opt | opt | opt | opt |
-| generic/commodity | custom | opt | opt | opt | opt | opt | opt | opt | opt |
-| generic/real_estate | custom | opt | opt | opt | opt | opt | opt | opt | opt |
-| generic/collectible | custom | opt | opt | opt | opt | opt | opt | opt | opt |
-| stablecoin/fiat_backed | stablecoin | req | req | req | — | — | — | — | — |
-| stablecoin/crypto_backed | stablecoin | req | req | req | — | — | — | — | — |
-| stablecoin/generic | stablecoin | req | req | req | — | — | — | — | — |
-| tokenized_security/generic | tokenized-security | req | req | req | — | — | opt | — | — |
-| tokenized_security/equity | tokenized-security | req | req | req | — | — | opt | — | — |
-| tokenized_security/debt | tokenized-security | req | req | req | — | — | opt | — | — |
-| tokenized_security/fund | tokenized-security | req | req | req | — | — | opt | — | — |
+| Asset type | Template | pauseTransfers | freezeAccounts | permanentDelegate | transferFee | interestBearing | scaledUiAmount | transferHook | confidentialTransfers | nonTransferable |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| generic/generic | custom | opt | opt | opt | opt | opt | opt | opt | opt | opt |
+| generic/commodity | custom | opt | opt | opt | opt | opt | opt | opt | opt | opt |
+| generic/real_estate | custom | opt | opt | opt | opt | opt | opt | opt | opt | opt |
+| generic/collectible | custom | opt | opt | opt | opt | opt | opt | opt | opt | opt |
+| stablecoin/fiat_backed | stablecoin | req | req | req | — | — | — | — | opt | — |
+| stablecoin/crypto_backed | stablecoin | req | req | req | — | — | — | — | opt | — |
+| stablecoin/generic | stablecoin | req | req | req | — | — | — | — | opt | — |
+| tokenized_security/generic | tokenized-security | req | req | req | — | — | opt | — | opt | — |
+| tokenized_security/equity | tokenized-security | req | req | req | — | — | opt | — | opt | — |
+| tokenized_security/debt | tokenized-security | req | req | req | — | — | opt | — | opt | — |
+| tokenized_security/fund | tokenized-security | req | req | req | — | — | opt | — | opt | — |
 
 ## Unsupported gaps
 

@@ -41,6 +41,7 @@ export type ErrorCode =
   | "INSUFFICIENT_TOKEN_BALANCE"
   | "ACCOUNT_FROZEN"
   | "ACCOUNT_NOT_FROZEN"
+  | "CONFIDENTIAL_NOT_ENABLED"
   | "MAX_SUPPLY_EXCEEDED"
   | "SOLANA_RPC_ERROR"
   | "SOLANA_RPC_TIMEOUT"
@@ -103,6 +104,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   INSUFFICIENT_TOKEN_BALANCE: 400,
   ACCOUNT_FROZEN: 400,
   ACCOUNT_NOT_FROZEN: 400,
+  CONFIDENTIAL_NOT_ENABLED: 400,
   MAX_SUPPLY_EXCEEDED: 400,
   SOLANA_RPC_ERROR: 502,
   SOLANA_RPC_TIMEOUT: 504,
@@ -161,6 +163,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   INSUFFICIENT_TOKEN_BALANCE: "Token account does not hold enough balance",
   ACCOUNT_FROZEN: "Account is frozen",
   ACCOUNT_NOT_FROZEN: "Account is not frozen",
+  CONFIDENTIAL_NOT_ENABLED: "Token does not have confidential balances enabled",
   MAX_SUPPLY_EXCEEDED: "Operation would exceed maximum supply",
   SOLANA_RPC_ERROR: "Error communicating with Solana RPC",
   SOLANA_RPC_TIMEOUT: "The RPC upstream did not answer in time; the request's outcome is unknown",

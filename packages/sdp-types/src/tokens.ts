@@ -30,6 +30,13 @@ export const TOKEN_TRANSACTION_TYPES = [
   "pause",
   "unpause",
   "deploy",
+  "confidential_configure",
+  "confidential_approve",
+  "confidential_deposit",
+  "confidential_apply_pending",
+  "confidential_transfer",
+  "confidential_withdraw",
+  "confidential_empty_account",
 ] as const;
 export type TokenTransactionType = (typeof TOKEN_TRANSACTION_TYPES)[number];
 
@@ -69,7 +76,8 @@ export type TokenExtensionName =
   | "nonTransferable"
   | "defaultAccountState"
   | "scaledUiAmount"
-  | "transferHook";
+  | "transferHook"
+  | "confidentialTransfers";
 
 /**
  * Extension info for template definitions
@@ -192,6 +200,15 @@ export interface TokenExtensionsConfig {
     programId: string;
     /** Authority that can update the hook program */
     authority?: string;
+  };
+  /** Confidential transfers (Token-2022 ElGamal/AES-encrypted balances) configuration */
+  confidentialTransfers?: {
+    /** Whether new accounts must be manually approved before they can transact */
+    policy: "opt-in" | "whitelist";
+    /** Authority that can update the config and approve accounts (manual-approve policy) */
+    authority?: string;
+    /** Auditor ElGamal public key allowed to decode every confidential transfer amount */
+    auditorElgamalPubkey?: string;
   };
 }
 
@@ -385,6 +402,14 @@ export interface ExtensionOverrides {
     | {
         programId: string;
         authority?: string;
+      };
+  /** Enable/configure confidential transfers, or false to disable */
+  confidentialTransfers?:
+    | false
+    | {
+        policy: "opt-in" | "whitelist";
+        authority?: string;
+        auditorElgamalPubkey?: string;
       };
 }
 

@@ -21,6 +21,12 @@ import {
 } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
+  flattenTransactionPlan,
+  singleTransactionPlan,
+  type TransactionPlan,
+  transformTransactionPlan,
+} from "@solana/instruction-plans";
+import {
   type Address,
   appendTransactionMessageInstructions,
   type Commitment,
@@ -68,6 +74,18 @@ import {
   resolveTokenAccount,
   TOKEN_ACL_PROGRAM_ID,
 } from "@solana/mosaic-sdk";
+import {
+  createApplyConfidentialPendingBalanceInstructionPlan,
+  createApproveConfidentialAccountInstructionPlan,
+  createConfidentialDepositInstructionPlan,
+  createConfidentialTransactionPlanner,
+  createConfidentialTransferInstructionPlan,
+  createConfidentialWithdrawInstructionPlan,
+  createConfigureConfidentialAccountInstructionPlan,
+  createEmptyConfidentialAccountInstructionPlan,
+  decryptConfidentialBalances,
+  fetchConfidentialAccountState,
+} from "@solana/mosaic-sdk/confidential";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { findWalletEntryPda } from "@solana/token-acl-gate-sdk";
 import { findMintConfigPda, getSetAuthorityInstruction } from "@solana/token-acl-sdk";
@@ -81,17 +99,28 @@ import {
 import { buildAuthorityTransaction } from "./authority";
 import {
   type AblWalletOptions,
+  type ApplyPendingConfidentialBalanceOptions,
+  type ApproveConfidentialAccountOptions,
+  type ConfidentialTransferOptions,
+  type ConfigureConfidentialAccountOptions,
   type CreateTokenOptions,
   DEFAULT_ACL_MODE,
+  type DepositConfidentialOptions,
+  type EmptyConfidentialAccountOptions,
   type ExecuteTransferOptions,
   type FreezeThawOptions,
+  type GetConfidentialBalanceOptions,
   MintMetadataUpdateError,
   type MintToOptions,
   type MosaicTransaction,
+  type MosaicTransactionPlan,
+  MosaicTransactionPlanError,
+  type MosaicTransactionPlanResult,
   type MosaicTransactionResult,
   TEMPLATE_MAP,
   type TransferOptions,
   type UpdateMetadataOptions,
+  type WithdrawConfidentialOptions,
 } from "./types";
 import { safeStringify } from "./utils";
 
@@ -349,14 +378,17 @@ export class MosaicService {
     return this.toMosaicTransaction(fullTx, mint);
   }
 
-  private async buildCreateTokenTransaction(
-    template: string,
+  /**
+   * Fee payer, authorities and extension config for a create-token build.
+   *
+   * Extracted from buildCreateTokenTransaction so the template switch there
+   * stays within the cognitive-complexity budget: every template needs the same
+   * resolution, and none of it depends on which template was chosen.
+   */
+  private async resolveCreateTokenBuildInputs(
     options: CreateTokenOptions,
-    mintKeypair: TransactionSigner,
-    aclMode: "allowlist" | "blocklist",
-    enableSrfc37: boolean,
-    forClientSigning = false
-  ): Promise<FullTransaction> {
+    forClientSigning: boolean
+  ) {
     // Resolve fee payer - use Kora if available, otherwise from options. This
     // applies to sRFC-37 deploys too: the patched mosaic-sdk templates fund the
     // on-chain ABL/TACL setup from the fee payer (Kora) while keeping the mint
@@ -372,16 +404,57 @@ export class MosaicService {
         ? this.signer
         : options.mintAuthority;
     const mintAuthorityAddress = resolveMintAuthorityAddress(options);
-    const metadataAuthority = options.metadataAuthority?.address ?? mintAuthorityAddress;
+    const confidentialTransfers = options.extensions?.confidentialTransfers;
 
-    const freezeAuthority = options.freezeAuthority ?? undefined;
-    const permanentDelegateAuthority =
-      typeof options.extensions?.permanentDelegate === "string"
-        ? (options.extensions.permanentDelegate as Address)
-        : undefined;
-    const pausableAuthority = options.extensions?.pausable?.authority as Address | undefined;
-    const scaledUiAmount = options.extensions?.scaledUiAmount;
-    const transferHook = options.extensions?.transferHook;
+    return {
+      feePayer,
+      mintAuthority,
+      mintAuthorityAddress,
+      confidentialTransfers,
+      metadataAuthority: options.metadataAuthority?.address ?? mintAuthorityAddress,
+      freezeAuthority: options.freezeAuthority ?? undefined,
+      permanentDelegateAuthority:
+        typeof options.extensions?.permanentDelegate === "string"
+          ? (options.extensions.permanentDelegate as Address)
+          : undefined,
+      pausableAuthority: options.extensions?.pausable?.authority as Address | undefined,
+      scaledUiAmount: options.extensions?.scaledUiAmount,
+      transferHook: options.extensions?.transferHook,
+      // `ConfidentialBalancesConfig` carries only policy + auditor; the authority
+      // travels separately through each template's confidentialBalancesAuthority.
+      confidentialBalances: confidentialTransfers
+        ? {
+            policy: confidentialTransfers.policy,
+            auditorElgamalPubkey: confidentialTransfers.auditorElgamalPubkey as Address | undefined,
+          }
+        : undefined,
+      confidentialBalancesAuthority:
+        (confidentialTransfers?.authority as Address | undefined) ?? mintAuthorityAddress,
+    };
+  }
+
+  private async buildCreateTokenTransaction(
+    template: string,
+    options: CreateTokenOptions,
+    mintKeypair: TransactionSigner,
+    aclMode: "allowlist" | "blocklist",
+    enableSrfc37: boolean,
+    forClientSigning = false
+  ): Promise<FullTransaction> {
+    const {
+      feePayer,
+      mintAuthority,
+      mintAuthorityAddress,
+      metadataAuthority,
+      freezeAuthority,
+      permanentDelegateAuthority,
+      pausableAuthority,
+      scaledUiAmount,
+      transferHook,
+      confidentialTransfers,
+      confidentialBalances,
+      confidentialBalancesAuthority,
+    } = await this.resolveCreateTokenBuildInputs(options, forClientSigning);
 
     let transaction: FullTransaction;
     switch (template) {
@@ -402,10 +475,11 @@ export class MosaicService {
           aclMode,
           metadataAuthority,
           pausableAuthority ?? mintAuthorityAddress, // pausableAuthority
-          mintAuthorityAddress, // confidentialBalancesAuthority
+          confidentialBalancesAuthority,
           permanentDelegateAuthority ?? mintAuthorityAddress, // permanentDelegateAuthority
           enableSrfc37,
-          freezeAuthority
+          freezeAuthority,
+          confidentialBalances
         );
         break;
 
@@ -448,7 +522,8 @@ export class MosaicService {
             aclMode,
             metadataAuthority,
             pausableAuthority: pausableAuthority ?? mintAuthorityAddress,
-            confidentialBalancesAuthority: mintAuthorityAddress,
+            confidentialBalancesAuthority,
+            confidentialBalances,
             permanentDelegateAuthority: permanentDelegateAuthority ?? mintAuthorityAddress,
             enableSrfc37,
             scaledUiAmount: scaledUiAmount
@@ -513,6 +588,13 @@ export class MosaicService {
             enableTransferHook: !!transferHook,
             transferHookAuthority: transferHook?.authority as Address | undefined,
             transferHookProgramId: transferHook?.programId as Address | undefined,
+            // Unlike the stablecoin/tokenized-security templates, custom does not
+            // add the extension unless asked — and it cannot be added after mint.
+            enableConfidentialBalances: !!confidentialTransfers,
+            confidentialBalancesAuthority: confidentialTransfers
+              ? confidentialBalancesAuthority
+              : undefined,
+            confidentialBalances,
             freezeAuthority,
           }
         );
@@ -797,6 +879,365 @@ export class MosaicService {
     });
 
     return this.signAndSubmit(fullTx);
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // Confidential Transfer Operations
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Every `createConfidential*InstructionPlan` builder returns an `InstructionPlan`
+  // rather than a `FullTransaction` — some ops (configure, withdraw, transfer) span
+  // multiple transactions (proof context-state setup → the op → cleanup). The three
+  // private helpers below turn that into the same prepare/execute shapes as every
+  // other op in this service, just plural: `MosaicTransactionPlan` (ordered unsigned
+  // transactions for prepare mode) / `MosaicTransactionPlanResult` (ordered results
+  // for execute mode) instead of a single `MosaicTransaction`/`MosaicTransactionResult`.
+  //
+  // Builder return types come from mosaic-sdk's own nested `@solana/kit` install
+  // (structurally close to, but a different package instance than, this repo's
+  // directly-installed `@solana/kit`/`@solana/instruction-plans`) — the `as unknown
+  // as TransactionPlan` casts below cross that version boundary the same way
+  // `this.rpc`'s constructor already does earlier in this file.
+
+  /**
+   * Plans a confidential `InstructionPlan` into a fee-payer-bound, blockhash-stamped
+   * `TransactionPlan` — one or more ready-to-sign transaction messages, in order.
+   */
+  private async planConfidentialTransactions(
+    instructionPlan: Awaited<ReturnType<typeof createConfidentialDepositInstructionPlan>>,
+    feePayer: TransactionSigner
+  ): Promise<TransactionPlan> {
+    const planner = createConfidentialTransactionPlanner(feePayer);
+    const plan = (await planner(instructionPlan)) as unknown as TransactionPlan;
+    const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send();
+
+    return transformTransactionPlan(plan, (node) =>
+      node.kind === "single"
+        ? singleTransactionPlan(
+            setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, node.message)
+          )
+        : node
+    );
+  }
+
+  /** Prepare mode: compile each transaction in the plan for client signing, in order. */
+  private toMosaicTransactionPlan(plan: TransactionPlan): MosaicTransactionPlan {
+    return {
+      transactions: flattenTransactionPlan(plan).map((single) =>
+        this.toMosaicTransaction(single.message as unknown as FullTransaction)
+      ),
+    };
+  }
+
+  /**
+   * Execute mode: sign and submit each transaction in the plan sequentially,
+   * confirming each before the next — later transactions in a multi-tx plan
+   * reference on-chain state (context-state accounts) the earlier ones create.
+   */
+  private async signAndSubmitPlan(
+    plan: TransactionPlan,
+    selfPaid = false
+  ): Promise<MosaicTransactionPlanResult> {
+    const transactions: MosaicTransactionResult[] = [];
+    for (const single of flattenTransactionPlan(plan)) {
+      try {
+        transactions.push(
+          await this.signAndSubmit(
+            single.message as unknown as FullTransaction,
+            undefined,
+            selfPaid
+          )
+        );
+      } catch (error) {
+        // Earlier transactions in the plan already landed. Surface them so the
+        // caller can journal the orphaned context-state accounts rather than
+        // losing the evidence with the stack trace.
+        throw new MosaicTransactionPlanError(error, transactions);
+      }
+    }
+    return { transactions };
+  }
+
+  /**
+   * Configure a token account for confidential transfers. Must run before
+   * deposit/apply/withdraw/transfer can touch the account.
+   */
+  async prepareConfigureConfidentialAccount(
+    options: ConfigureConfidentialAccountOptions
+  ): Promise<MosaicTransactionPlan> {
+    const feePayer = createNoopSigner(options.feePayer);
+    const instructionPlan = await createConfigureConfidentialAccountInstructionPlan({
+      rpc: this.rpc,
+      payer: feePayer,
+      owner: options.owner,
+      mint: options.mint,
+      keys: options.keys,
+      token: options.tokenAccount,
+      maximumPendingBalanceCreditCounter: options.maximumPendingBalanceCreditCounter,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.toMosaicTransactionPlan(plan);
+  }
+
+  async configureConfidentialAccount(
+    options: ConfigureConfidentialAccountOptions
+  ): Promise<MosaicTransactionPlanResult> {
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
+    const instructionPlan = await createConfigureConfidentialAccountInstructionPlan({
+      rpc: this.rpc,
+      payer: feePayer,
+      owner: this.signer,
+      mint: options.mint,
+      keys: options.keys,
+      token: options.tokenAccount,
+      maximumPendingBalanceCreditCounter: options.maximumPendingBalanceCreditCounter,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.signAndSubmitPlan(plan, feePayer === this.signer);
+  }
+
+  /**
+   * Approve a configured confidential account — only needed when the mint uses
+   * the manual-approve (whitelist) policy. Signed by the mint's confidential
+   * authority, not the account owner.
+   */
+  async prepareApproveConfidentialAccount(
+    options: ApproveConfidentialAccountOptions
+  ): Promise<MosaicTransaction> {
+    const feePayer = createNoopSigner(options.feePayer);
+    const instructionPlan = await createApproveConfidentialAccountInstructionPlan({
+      tokenAccount: options.tokenAccount,
+      mint: options.mint,
+      authority: createNoopSigner(options.authority),
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.toMosaicTransactionPlan(plan).transactions[0];
+  }
+
+  async approveConfidentialAccount(
+    options: ApproveConfidentialAccountOptions
+  ): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
+    const instructionPlan = await createApproveConfidentialAccountInstructionPlan({
+      tokenAccount: options.tokenAccount,
+      mint: options.mint,
+      authority: this.signer,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    const result = await this.signAndSubmitPlan(plan, feePayer === this.signer);
+    return result.transactions[0];
+  }
+
+  /**
+   * Deposit from a token account's public balance into its confidential pending
+   * balance. No proof required. Run apply-pending-balance afterwards to move the
+   * credited amount into the available confidential balance.
+   */
+  async prepareDepositConfidential(
+    options: DepositConfidentialOptions
+  ): Promise<MosaicTransaction> {
+    const feePayer = createNoopSigner(options.feePayer);
+    const instructionPlan = await createConfidentialDepositInstructionPlan({
+      rpc: this.rpc,
+      mint: options.mint,
+      tokenAccount: options.tokenAccount,
+      authority: options.owner,
+      amount: options.amount,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.toMosaicTransactionPlan(plan).transactions[0];
+  }
+
+  async depositConfidential(options: DepositConfidentialOptions): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
+    const instructionPlan = await createConfidentialDepositInstructionPlan({
+      rpc: this.rpc,
+      mint: options.mint,
+      tokenAccount: options.tokenAccount,
+      authority: this.signer,
+      amount: options.amount,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    const result = await this.signAndSubmitPlan(plan, feePayer === this.signer);
+    return result.transactions[0];
+  }
+
+  /** Roll a confidential account's pending balance into its available balance. */
+  async prepareApplyPendingConfidentialBalance(
+    options: ApplyPendingConfidentialBalanceOptions
+  ): Promise<MosaicTransaction> {
+    const feePayer = createNoopSigner(options.feePayer);
+    const instructionPlan = await createApplyConfidentialPendingBalanceInstructionPlan({
+      rpc: this.rpc,
+      tokenAccount: options.tokenAccount,
+      authority: options.owner,
+      keys: options.keys,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.toMosaicTransactionPlan(plan).transactions[0];
+  }
+
+  async applyPendingConfidentialBalance(
+    options: ApplyPendingConfidentialBalanceOptions
+  ): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
+    const instructionPlan = await createApplyConfidentialPendingBalanceInstructionPlan({
+      rpc: this.rpc,
+      tokenAccount: options.tokenAccount,
+      authority: this.signer,
+      keys: options.keys,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    const result = await this.signAndSubmitPlan(plan, feePayer === this.signer);
+    return result.transactions[0];
+  }
+
+  /**
+   * Confidentially transfer an encrypted amount to another account's confidential
+   * balance. May span multiple transactions (proof setup → transfer → cleanup).
+   */
+  async prepareConfidentialTransfer(
+    options: ConfidentialTransferOptions
+  ): Promise<MosaicTransactionPlan> {
+    const feePayer = createNoopSigner(options.feePayer);
+    const instructionPlan = await createConfidentialTransferInstructionPlan({
+      rpc: this.rpc,
+      payer: feePayer,
+      mint: options.mint,
+      sourceToken: options.from,
+      destinationToken: options.to,
+      authority: options.owner,
+      amount: options.amount,
+      keys: options.keys,
+      auditorElgamalPubkey: options.auditorElgamalPubkey,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.toMosaicTransactionPlan(plan);
+  }
+
+  async confidentialTransfer(
+    options: ConfidentialTransferOptions
+  ): Promise<MosaicTransactionPlanResult> {
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
+    const instructionPlan = await createConfidentialTransferInstructionPlan({
+      rpc: this.rpc,
+      payer: feePayer,
+      mint: options.mint,
+      sourceToken: options.from,
+      destinationToken: options.to,
+      authority: this.signer,
+      amount: options.amount,
+      keys: options.keys,
+      auditorElgamalPubkey: options.auditorElgamalPubkey,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.signAndSubmitPlan(plan, feePayer === this.signer);
+  }
+
+  /**
+   * Withdraw from a confidential account's available balance back to its public
+   * balance. May span multiple transactions (proof setup → withdraw → cleanup).
+   */
+  async prepareWithdrawConfidential(
+    options: WithdrawConfidentialOptions
+  ): Promise<MosaicTransactionPlan> {
+    const feePayer = createNoopSigner(options.feePayer);
+    const instructionPlan = await createConfidentialWithdrawInstructionPlan({
+      rpc: this.rpc,
+      payer: feePayer,
+      mint: options.mint,
+      tokenAccount: options.tokenAccount,
+      authority: options.owner,
+      amount: options.amount,
+      keys: options.keys,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.toMosaicTransactionPlan(plan);
+  }
+
+  async withdrawConfidential(
+    options: WithdrawConfidentialOptions
+  ): Promise<MosaicTransactionPlanResult> {
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
+    const instructionPlan = await createConfidentialWithdrawInstructionPlan({
+      rpc: this.rpc,
+      payer: feePayer,
+      mint: options.mint,
+      tokenAccount: options.tokenAccount,
+      authority: this.signer,
+      amount: options.amount,
+      keys: options.keys,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.signAndSubmitPlan(plan, feePayer === this.signer);
+  }
+
+  /**
+   * Empty (close out) a confidential account's balances once withdrawn to zero.
+   * The available balance must already be zero (run withdraw first).
+   */
+  async prepareEmptyConfidentialAccount(
+    options: EmptyConfidentialAccountOptions
+  ): Promise<MosaicTransaction> {
+    const feePayer = createNoopSigner(options.feePayer);
+    const instructionPlan = await createEmptyConfidentialAccountInstructionPlan({
+      rpc: this.rpc,
+      payer: feePayer,
+      tokenAccount: options.tokenAccount,
+      authority: options.owner,
+      keys: options.keys,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    return this.toMosaicTransactionPlan(plan).transactions[0];
+  }
+
+  async emptyConfidentialAccount(
+    options: EmptyConfidentialAccountOptions
+  ): Promise<MosaicTransactionResult> {
+    const feePayer = await this.resolveConfidentialFeePayerSigner(options.feePayer);
+    const instructionPlan = await createEmptyConfidentialAccountInstructionPlan({
+      rpc: this.rpc,
+      payer: feePayer,
+      tokenAccount: options.tokenAccount,
+      authority: this.signer,
+      keys: options.keys,
+    });
+    const plan = await this.planConfidentialTransactions(instructionPlan, feePayer);
+    const result = await this.signAndSubmitPlan(plan, feePayer === this.signer);
+    return result.transactions[0];
+  }
+
+  /**
+   * Read a confidential account's approval status and (when `keys` are supplied)
+   * decrypted balances. Read-only — no transaction.
+   */
+  async getConfidentialBalance(options: GetConfidentialBalanceOptions): Promise<{
+    tokenAccount: Address;
+    approved: boolean;
+    availableBalance?: bigint;
+    pendingBalance?: bigint;
+  } | null> {
+    const state = await fetchConfidentialAccountState(this.rpc, options.tokenAccount, {
+      keys: options.keys,
+      decryptPendingBalance: options.decryptPendingBalance,
+    });
+    if (!state) {
+      return null;
+    }
+
+    const decrypted = options.keys
+      ? (state.decrypted ??
+        decryptConfidentialBalances(state, options.keys, {
+          decryptPendingBalance: options.decryptPendingBalance,
+        }))
+      : undefined;
+
+    return {
+      tokenAccount: state.tokenAccount,
+      approved: state.approved,
+      availableBalance: decrypted?.availableBalance,
+      pendingBalance: decrypted?.pendingBalance,
+    };
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -1206,10 +1647,19 @@ export class MosaicService {
    */
   private async signAndSubmit(
     fullTx: FullTransaction,
-    onBeforeSubmit?: () => Promise<void>
+    onBeforeSubmit?: () => Promise<void>,
+    /**
+     * The transaction already carries its own fee payer and full signature set,
+     * so it must bypass Kora. Kora signs *as* the fee payer and rejects anything
+     * whose fee payer is not its own address ("Signer ... not found in
+     * transaction signer keys"). Only the confidential operations set this — see
+     * `resolveConfidentialFeePayerSigner` — and every other caller keeps the
+     * sponsored path unconditionally.
+     */
+    selfPaid = false
   ): Promise<MosaicTransactionResult> {
     const feePayment = this.feePayment;
-    if (feePayment) {
+    if (feePayment && !selfPaid) {
       // Two-signer flow: custody signs locally, Kora adds fee payer + submits
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
@@ -1275,6 +1725,30 @@ export class MosaicService {
 
     const feePayer = await this.feePayment.getFeePayer();
     return createNoopSigner(feePayer);
+  }
+
+  /**
+   * Fee payer for a confidential operation.
+   *
+   * The confidential routes name the operation's own signer as fee payer — the
+   * holder, or the mint's confidential authority for `approve`. That is not
+   * decoration: Kora refuses to sponsor the Token-2022 `Reallocate` that
+   * `configure` needs ("Token2022 Reallocate is not allowed when involving fee
+   * payer"), and the pinned `e9bc391` has no `allow_reallocate` in
+   * `fee_payer_policy.token_2022` to relax it. Until that lands upstream, these
+   * operations are holder-paid rather than sponsored.
+   *
+   * Honour the request only when it names the signer this service already
+   * holds; any other address has no signer here, so it keeps the sponsored path.
+   */
+  private async resolveConfidentialFeePayerSigner(
+    requested: Address | undefined
+  ): Promise<TransactionSigner> {
+    if (requested && requested === this.signer.address) {
+      return this.signer;
+    }
+
+    return this.resolveFeePayerSigner();
   }
 
   private async resolveFeePayerSigner(
