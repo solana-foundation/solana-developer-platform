@@ -175,7 +175,10 @@ export async function tryApprovedOperationReplayAuth(
 
   const capability = capabilities.get(token);
   capabilities.delete(token);
-  if (!capability || capability.path !== c.req.path) {
+  // The stored path carries the query string (a DELETE route's parameters
+  // live there), so the comparison must too — c.req.path is pathname only.
+  const requestUrl = new URL(c.req.url);
+  if (!capability || capability.path !== `${requestUrl.pathname}${requestUrl.search}`) {
     throw new AppError("UNAUTHORIZED", "Invalid approved-operation replay capability");
   }
 
