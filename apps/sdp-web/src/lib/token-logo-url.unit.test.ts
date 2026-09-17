@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRenderableLogoUrl } from "./token-mark";
+import { isRenderableLogoUrl } from "./token-logo-url";
 
 describe("isRenderableLogoUrl", () => {
   it.each([

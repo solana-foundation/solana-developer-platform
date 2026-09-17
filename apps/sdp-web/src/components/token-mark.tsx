@@ -3,6 +3,7 @@
 import { WELL_KNOWN_TOKEN_BY_MINT, type WellKnownTokenSymbol } from "@sdp/types";
 import Image from "next/image";
 import { useState } from "react";
+import { isRenderableLogoUrl } from "@/lib/token-logo-url";
 import { cn } from "@/lib/utils";
 
 /**
@@ -55,23 +56,6 @@ interface TokenMarkProps {
   logoUrl?: string | null;
   size?: TokenMarkSize;
   className?: string;
-}
-
-/**
- * Issuer-supplied logo URLs render as a raw `<img src>`, so the string alone
- * picks the one network request this component may issue. Upstream issuance
- * validates the scheme at write time, but this is the render boundary every
- * surface shares: anything that is not a credential-free https URL falls back
- * to the monogram rather than letting token metadata point the dashboard's
- * network at an arbitrary origin.
- */
-export function isRenderableLogoUrl(candidate: string): boolean {
-  try {
-    const parsed = new URL(candidate);
-    return parsed.protocol === "https:" && parsed.username === "" && parsed.password === "";
-  } catch {
-    return false;
-  }
 }
 
 /** Two or three characters read better than a truncated long symbol. */
