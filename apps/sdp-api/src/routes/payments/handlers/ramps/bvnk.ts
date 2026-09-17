@@ -737,12 +737,16 @@ async function mintBvnkAgreementSession(
     action: "bvnk_agreement_session_created",
     metadata: { countryCode: residenceCountry },
   });
+  // The catch covers only the effect and its durable write: everything after
+  // `complete` runs outside it, so one intent can never collect a success
+  // outcome and then a contradicting failure outcome from the read-back path.
+  let assigned: Awaited<ReturnType<typeof accounts.setCustomerLinkSession>>;
   try {
     const session = await input.client.createAgreementSession(input.ctx, {
       countryCode: residenceCountry,
       idempotencyKey: counterpartyProviderAccountUuid(row.id),
     });
-    const assigned = await accounts.setCustomerLinkSession({
+    assigned = await accounts.setCustomerLinkSession({
       ...scope,
       id: row.id,
       session: {
@@ -751,21 +755,18 @@ async function mintBvnkAgreementSession(
       },
     });
     await audit.complete(intent, { sessionReference: session.reference });
-    if (assigned !== null) {
-      return present(
-        bvnkCustomerProviderAccountMetadataSchema.parse(assigned.metadata),
-        "assigned"
-      );
-    }
-    const current = await accounts.getProviderAccount(scope);
-    if (current === null) {
-      throw internalError("BVNK customer-link row vanished underneath the session write.");
-    }
-    return present(bvnkCustomerProviderAccountMetadataSchema.parse(current.metadata), "converged");
   } catch (error) {
     await audit.fail(intent, error);
     throw error;
   }
+  if (assigned !== null) {
+    return present(bvnkCustomerProviderAccountMetadataSchema.parse(assigned.metadata), "assigned");
+  }
+  const current = await accounts.getProviderAccount(scope);
+  if (current === null) {
+    throw internalError("BVNK customer-link row vanished underneath the session write.");
+  }
+  return present(bvnkCustomerProviderAccountMetadataSchema.parse(current.metadata), "converged");
 }
 
 /**
