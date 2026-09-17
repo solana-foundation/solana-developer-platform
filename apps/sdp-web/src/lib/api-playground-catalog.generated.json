@@ -5466,6 +5466,7 @@
           {
             "key": "search",
             "label": "search",
+            "description": "Prefix match against transaction id, module id, or signature — not a substring search.",
             "required": false
           },
           {
