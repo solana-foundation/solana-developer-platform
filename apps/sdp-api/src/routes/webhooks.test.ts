@@ -1221,9 +1221,11 @@ describe("BVNK ramp webhook", () => {
         name: ONRAMP_WALLET_NAME,
         status: "ACTIVE",
       });
-    const createRule = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule")
-      .mockResolvedValue({ id: "rule_webhook_verified_1", status: "ACTIVE" });
+    const createRule = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule").mockResolvedValue({
+      id: "rule_webhook_verified_1",
+      reference: "rule_webhook_verified_1",
+      status: "ACTIVE",
+    });
 
     const res = await sendBvnkWebhook({
       event: "bvnk:customers:status-change",
@@ -1387,9 +1389,11 @@ describe("BVNK ramp webhook", () => {
       )
       .run();
 
-    const createRule = vi
-      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule")
-      .mockResolvedValue({ id: "rule_webhook_1", status: "ACTIVE" });
+    const createRule = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampRule").mockResolvedValue({
+      id: "rule_webhook_1",
+      reference: "rule_webhook_1",
+      status: "ACTIVE",
+    });
 
     const res = await sendBvnkWebhook({
       event: "ledger:v2:wallet:status-change",
@@ -1613,6 +1617,7 @@ describe("BVNK ramp webhook", () => {
       data: {
         customerReference: CUSTOMER_REFERENCE,
         beneficiary: { walletId: WALLET_ID },
+        uuid: "payin_1",
         status: "COMPLETED",
         amount: { value: 100, currencyCode: "USD" },
       },
@@ -1678,6 +1683,7 @@ describe("BVNK ramp webhook", () => {
       data: {
         customerReference: CUSTOMER_REFERENCE,
         beneficiary: { walletId: WALLET_ID },
+        uuid: "payin_2",
         status: "COMPLETED",
         amount: { value: 100, currencyCode: "USD" },
       },
@@ -1751,6 +1757,7 @@ describe("BVNK ramp webhook", () => {
       data: {
         customerReference: CUSTOMER_REFERENCE,
         beneficiary: { walletId: WALLET_ID },
+        uuid: "payin_3",
         status: "COMPLETED",
         amount: { value: 100, currencyCode: "USD" },
       },
