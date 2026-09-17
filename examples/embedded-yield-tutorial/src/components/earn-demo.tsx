@@ -14,7 +14,7 @@ function easeInOutCubic(progress: number): number {
 }
 
 /**
- * Step 3 centerpiece: when the phone scrolls into view the "Earn 7.8%" button
+ * Step 3 centerpiece: when the phone scrolls into view the "Earn 8.43%" button
  * presses itself, a confirmation appears, and then 30 days of yield fast-
  * forward with a rising balance chart. Replayable on demand.
  */

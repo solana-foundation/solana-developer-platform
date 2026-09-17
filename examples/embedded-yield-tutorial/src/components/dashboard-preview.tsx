@@ -9,19 +9,19 @@ import { CheckIcon } from "lucide-react";
  */
 const MAINNET_STRATEGIES = [
   {
-    name: "Steakhouse High Yield USDG",
-    provider: "kamino",
-    asset: "USDG",
-    tvl: "$43.3M",
-    apy: "4.34%",
-    surfaced: true,
-  },
-  {
     name: "Kamino Institutional Commodity Yield",
     provider: "kamino",
     asset: "USDC",
     tvl: "$32.0M",
     apy: "8.43%",
+    surfaced: true,
+  },
+  {
+    name: "Steakhouse High Yield USDG",
+    provider: "kamino",
+    asset: "USDG",
+    tvl: "$43.3M",
+    apy: "4.34%",
     surfaced: true,
   },
   {

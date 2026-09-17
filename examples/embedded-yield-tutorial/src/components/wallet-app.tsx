@@ -187,7 +187,7 @@ export function EarnScreen({
           {earning ? (
             <p className="flex items-center gap-1.5 rounded-full bg-success/20 px-2 py-0.5 text-[10px] font-semibold text-[#7ee2b8]">
               <span className="animate-pulse-dot size-1.5 rounded-full bg-[#7ee2b8]" />
-              Earning 7.8% APY
+              Earning 8.43% APY
             </p>
           ) : null}
         </div>
@@ -219,7 +219,7 @@ export function EarnScreen({
             ) : (
               <>
                 <TrendingUpIcon className="size-4" />
-                Earn 7.8%
+                Earn 8.43%
               </>
             )}
           </button>
