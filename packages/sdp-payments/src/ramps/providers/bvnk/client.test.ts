@@ -277,7 +277,7 @@ describe("BvnkRampClient pay family", () => {
     networkFeeCurrency: { currency: "USD", amount: 0, actual: 0 },
     exchangeRate: { base: "USD", counter: "USDC", rate: 0.998 },
     transactions: [],
-    address: { address: payoutInput.payOutDetails.address },
+    address: { address: payoutInput.payOutDetails.address, network: "SOLANA" },
   };
 
   it("dry_run_schema_accepts_probe_nulls and posts the dry-run path with the SOL network", async () => {
