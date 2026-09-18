@@ -129,8 +129,11 @@ function registerEarnStrategyPaths(
       "Returns the strategy catalogue visible to the caller, ranked by deposit size (TVL " +
       "descending). By default the list answers the environment's own cluster, the shelf the " +
       "caller can act on; pass `?cluster=` to browse the other cluster's mirrored shelf " +
-      "(those rows stay `fundable: false`). Catalogued is not the same as fundable: branch on " +
-      "`fundable` and `status` rather than assuming a listed strategy takes deposits.",
+      "(those rows stay `fundable: false`). Without an API key you pick the shelf with " +
+      "`?environment=`: production (mainnet) unless you ask for sandbox (devnet); a key's shelf " +
+      "is its project's, and naming another answers 400. Catalogued is not the same as " +
+      "fundable: branch on `fundable` and `status` rather than assuming a listed strategy takes " +
+      "deposits.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -184,7 +187,7 @@ function registerEarnDepositPreviewPath(
       "accounting. Use it when the strategy's `depositSlippage.quoteRequired` is true, then " +
       "derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no " +
       "idempotency key, and 501 when the provider cannot quote deposits. An anonymous request " +
-      "uses the deployment environment and no tenant state. An authenticated request retains " +
+      "acts in the named strategy's environment and touches no tenant state. An authenticated request retains " +
       "its project environment, `earn:read` scope, and provider entitlement.",
     security,
     request: {

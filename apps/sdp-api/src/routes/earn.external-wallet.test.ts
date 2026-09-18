@@ -415,6 +415,26 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(input).not.toHaveProperty("feePayer");
   });
 
+  it("builds anonymously against the shelf the strategy names, not the deployment", async () => {
+    // A keyless caller has no project, so the row it named decides: a
+    // production strategy builds on mainnet from any deployment (PRO-1998).
+    const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ environment: "production", provider: "kamino" })
+    );
+    const input = buildExternalWalletDepositTransaction.mock.calls[0]?.[1];
+    expect(input).not.toHaveProperty("organizationId");
+  });
+
   it("builds against a resolved, admitted strategy", async () => {
     await seedAuth();
     const strategy = await seedStrategy();

@@ -15,7 +15,8 @@ integrator's SDP API key.
 - Strategy catalogue reads, deposit and withdrawal previews, and unsigned
   external-wallet transaction builds accept either a valid SDP credential or
   no credential. The anonymous form has no organization or project context,
-  maps the deployment's validated `ENVIRONMENT`, and persists nothing.
+  picks its own shelf (`?environment=` on the list, the named strategy's
+  environment on quotes and builds), and persists nothing.
 - Submits, programs, custody vault operations, movements, positions, earnings,
   and aggregate reads require an authenticated tenant and their existing Earn
   permissions.
@@ -193,7 +194,7 @@ ADR 0002's 2026-08-14 addendum.
 | A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b) |
 | No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below |
 | The Ondo pass fails with `Ondo assets API listed no usdy entry` or `Ondo USDY apy is not a non-negative number` | `ondo.finance/api/v1/assets` changed shape (the `usdy` entry or its numeric `apy` percent). Check the live body; the row keeps its last figures until fixed |
-| No Ondo row in the sandbox MIRROR either, on a devnet deployment | the production pass needs a mainnet RPC: `resolveCatalogueRpcUrl` reads `SOLANA_MAINNET_RPC_URL` and falls back to `SOLANA_RPC_URL`, which a devnet deployment fails the genesis proof on (steady-state skip, mirror converges to empty). Set the override; smoky needs it in sdp-infra dev `app_secret_keys` + Doppler |
+| No Ondo row in the sandbox MIRROR either, on a deployment with no mainnet RPC | the production pass needs a mainnet RPC: `resolveCatalogueRpcUrl` reads `SOLANA_MAINNET_RPC_URL` and falls back to `SOLANA_RPC_URL`, which fails the genesis proof when it serves devnet (steady-state skip, mirror converges to empty). Set the override; smoky needs it in sdp-infra dev `app_secret_keys` + Doppler |
 
 ## Ondo — a TOKEN-HOLDING strategy, no vault program at all
 

@@ -1826,6 +1826,28 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     });
   });
 
+  it("quotes anonymously on the shelf the strategy names, not the deployment's", async () => {
+    // The row decides (PRO-1998): a production Kamino strategy quotes on
+    // mainnet for a caller with no project, from any deployment.
+    const strategy = await seedStrategy({
+      provider: "kamino",
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
+    vaultDirectClientOverride.current = quoteCapableClient({
+      sharesOut: "9.99999",
+      shareDecimals: 6,
+      blockingIssues: [],
+    });
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: { strategyId: strategy.id, sharesOut: "9.99999" },
+    });
+  });
+
   it("answers the provider's own quote for a surfaced, quotable strategy", async () => {
     await seedAuth();
     const strategy = await seedStrategy({ provider: "veda" });
