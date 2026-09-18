@@ -30,7 +30,10 @@ import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import type { DvpCallerWallet } from "@/services/dvp/inbound";
 import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
-import { runDvpLegActionOnce } from "@/services/dvp/leg-action-idempotency";
+import {
+  type DvpLegActionResult,
+  runDvpLegActionOnce,
+} from "@/services/dvp/leg-action-idempotency";
 import { deriveDvpLegOutcome, observedAfterClose } from "@/services/dvp/leg-outcome";
 import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import {
@@ -50,6 +53,13 @@ import {
   type fundDvpTradeSchema,
   listDvpTradesQuerySchema,
 } from "./schemas";
+import {
+  beginDvpFundAudit,
+  completeDvpFundAudit,
+  concludeDvpFundAuditOnError,
+  dvpTradeAuditActor,
+  recordDvpExitAudit,
+} from "./trade-audit";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -514,6 +524,16 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
 
   const result = await closeDvpTrade(c, trade, action, settlement);
 
+  // An exit, so the record is written after the effect and cannot refuse it.
+  // `confirmed: false` is a broadcast whose outcome the request could not read,
+  // which is what the reconciler resolves; the signature is what ties the
+  // ledger entry to whatever landed. PRO-1992.
+  await recordDvpExitAudit(c, dvpTradeAuditActor(auth), action, trade.id, {
+    settlementCustodyWalletId: settlement.custodyWalletId,
+    signature: result.signature,
+    confirmed: result.landed,
+  });
+
   // Recorded only once the close is confirmed: a second close can be accepted by
   // the RPC and still be the one that fails. An unconfirmed close is left to the
   // observation below and the reconciler, which decode what actually landed.
@@ -596,6 +616,7 @@ async function resolveLegAction(c: ValidatedBodyContext<typeof fundDvpTradeSchem
 
   return {
     trade,
+    actor: dvpTradeAuditActor(auth),
     params: { side, custodyWalletId, organizationId: auth.organizationId, projectId },
   };
 }
@@ -607,13 +628,38 @@ async function resolveLegAction(c: ValidatedBodyContext<typeof fundDvpTradeSchem
  * @returns The funded-leg response envelope.
  */
 export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
-  const { trade, params } = await resolveLegAction(c);
-  const { result, replayed } = await runDvpLegActionOnce(
-    c.env,
-    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
-    { action: "fund", tradeId: trade.id, ...params },
-    (recordAttempt) => fundDvpTradeLeg(c, trade, { ...params, recordAttempt })
-  );
+  const { trade, actor, params } = await resolveLegAction(c);
+
+  // Money IN to the escrow, so the intent is fail-closed and admitted after
+  // the refusals resolveLegAction makes (which move nothing and are not worth
+  // an event) and before anything is signed. PRO-1992.
+  const intent = await beginDvpFundAudit(c, actor, trade.id, {
+    side: params.side,
+    custodyWalletId: params.custodyWalletId,
+    mint: params.side === "a" ? trade.mintA : trade.mintB,
+    targetAmount: params.side === "a" ? trade.amountA : trade.amountB,
+  });
+
+  let result: DvpLegActionResult;
+  let replayed: boolean;
+  try {
+    ({ result, replayed } = await runDvpLegActionOnce(
+      c.env,
+      c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+      { action: "fund", tradeId: trade.id, ...params },
+      (recordAttempt) => fundDvpTradeLeg(c, trade, { ...params, recordAttempt })
+    ));
+  } catch (error) {
+    await concludeDvpFundAuditOnError(c, intent, error);
+    throw error;
+  }
+
+  await completeDvpFundAudit(c, intent, {
+    leg: result.leg,
+    amount: result.amount,
+    signature: result.signature,
+    replayed,
+  });
 
   // A replay moved nothing now, so there is no new effect to wait for.
   if (!replayed) {
@@ -636,13 +682,24 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
  * @returns The reclaimed-leg response envelope.
  */
 export const reclaimTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
-  const { trade, params } = await resolveLegAction(c);
+  const { trade, actor, params } = await resolveLegAction(c);
   const { result, replayed } = await runDvpLegActionOnce(
     c.env,
     c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
     { action: "reclaim", tradeId: trade.id, ...params },
     (recordAttempt) => reclaimDvpTradeLeg(c, trade, { ...params, recordAttempt })
   );
+
+  // An exit, so the record is written after the effect and cannot refuse it.
+  // PRO-1992.
+  await recordDvpExitAudit(c, actor, "reclaim", trade.id, {
+    side: params.side,
+    custodyWalletId: params.custodyWalletId,
+    mint: params.side === "a" ? trade.mintA : trade.mintB,
+    amount: result.amount,
+    signature: result.signature,
+    replayed,
+  });
 
   if (!replayed) {
     await observeDvpTradeNow(c.env, trade, result.signature);

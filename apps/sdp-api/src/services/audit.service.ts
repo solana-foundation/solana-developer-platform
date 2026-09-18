@@ -56,6 +56,14 @@ export const AUDIT_ACTIONS = [
   // the ledger movement id, actor matching the row's createdBy/initiatedByKeyId.
   "deposit",
   "withdraw",
+  // DvP money movements (PRO-1992): resourceType "dvp_trade", resourceId the
+  // trade id, the leg's side in the metadata because a leg has no id of its
+  // own. Bare verbs like the issuance actions above; the resource type is what
+  // distinguishes a DvP settle from anything else that could be said to settle.
+  "fund",
+  "reclaim",
+  "settle",
+  "cancel",
   // Privileged audit-ledger operations (verification checkpoints, restore evidence).
   "maintenance",
 ] as const;
@@ -91,6 +99,7 @@ export type ResourceType =
   | "provider_credential"
   | "custody_connection"
   | "earn_movement"
+  | "dvp_trade"
   | "payment_request"
   | "payment_transfer"
   | "audit_ledger";
