@@ -43,7 +43,6 @@ interface WalletsOverviewProps {
   connectedProviders: KnownCustodyProvider[];
   enabledProviders: KnownCustodyProvider[];
   configsError: string | null;
-  showConnectionsLink: boolean;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
   onCreateWallet: OpenCreateWallet;
@@ -225,7 +224,6 @@ export function WalletsOverview({
   connectedProviders,
   enabledProviders,
   configsError,
-  showConnectionsLink,
   wallets,
   walletsError,
   onCreateWallet,
@@ -350,14 +348,6 @@ export function WalletsOverview({
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          {showConnectionsLink ? (
-            <Button asChild variant="secondary" className="w-full sm:w-auto">
-              {/* The provider page owns the connections list now. */}
-              <Link href="/dashboard/integrations/privy">
-                {t("Shared.dashboardShell.connections")}
-              </Link>
-            </Button>
-          ) : null}
           {canManageCustody && hasAvailableProvider ? (
             <Button
               type="button"

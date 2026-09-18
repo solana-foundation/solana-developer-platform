@@ -812,7 +812,7 @@
     "connectionsEmptyInProject": "No connections in {project} yet",
     "addConnectionDescription": "Connect a Privy app to this project.",
     "connectionSigningAllowed": "Signing allowed",
-    "connectionSigningPaused": "Signing paused for this organization",
+    "connectionSigningPaused": "Signing is disabled",
     "signingPausedTitle": "Signing through your own credentials is currently not allowed for this organization.",
     "signingPausedBody": "Connections, wallets and history stay visible. You can still rotate, roll back and deactivate. New signing requests through these connections fail until it is allowed again. Nothing has been deleted.",
     "readOnlyViewer": "You can view connections in this project. Adding, rotating or deactivating needs the custody admin role. Ask an organization admin in Settings › Members.",

@@ -38,7 +38,7 @@ describe("connection status cell", () => {
     expect(html).toContain("Active");
     expect(html).not.toContain("Deactivated");
     expect(html).toContain('data-signing-state="paused"');
-    expect(html).toContain("Signing paused for this organization");
+    expect(html).toContain("Signing is disabled");
   });
 
   it("makes no claim about signing on a connection that is not active yet", () => {
