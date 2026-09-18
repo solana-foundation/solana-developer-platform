@@ -620,7 +620,7 @@ async function handleBvnkFundingWalletStatusChange(
     return;
   }
   if (data.customer === undefined) {
-    throw internalError("BVNK funding wallet event carries no customer");
+    throw badRequest("BVNK funding wallet event carries no customer");
   }
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
   const row = await accounts.findActiveFundingWalletByCustomerLinkId({
