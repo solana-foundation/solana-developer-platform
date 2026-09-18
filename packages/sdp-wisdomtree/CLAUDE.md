@@ -61,7 +61,9 @@ layers in SDP, none redundant:
    literal-seeded compliance-config PDA, two literal accounts, and two
    account-data-seeded PDAs on an external program keyed by the source/dest
    owners — the per-wallet compliance state. Resolution failures surface as
-   `HOOK_UNRESOLVED`.
+   `WITHDRAW_REFUSED` (the API's caller-fixable 400): SDP only ever builds
+   fund-token transfers for redemptions, and resolution failing IS the KYC
+   gate answering no.
 3. **The hook itself**, on-chain, at execution — the backstop nothing in SDP
    can bypass. The surfpool smoke test demonstrates it rejecting an unverified
    wallet's redemption.
@@ -100,6 +102,17 @@ constant or reader in `@sdp/earn/providers/wisdomtree/connect.ts`:
 - Wallet `status` vocabulary (only `"approved"` passes; fail-closed).
 - The on-receipt order lifecycle/correlation fields needed to reconcile a
   Solana transfer with the later provider settlement.
+- **The OAuth grant itself**: Connect documents only the Resource Owner
+  Password Credentials grant (`grant_type=password`, `POST /o/token/`) — the
+  plaintext-username/password flow ROPC deprecations target. Whether
+  WisdomTree has shipped a replacement (client-credentials or an
+  authorization flow) is UNMEASURED without a tenant; re-check their docs
+  when credentials arrive. Until then SDP accepts ROPC deliberately: the
+  credential tuple never leaves SDP's secret storage except to TLS-protected
+  `POST /o/token/` calls (HTTPS production/sandbox hosts, pinned in
+  `connect.ts`), no password is persisted anywhere else, and the bearer cache
+  keys tokens by a SHA-256 digest so plaintext credentials cannot leak
+  through the in-memory map.
 
 ## Smoke test — the mainnet-fork proof
 

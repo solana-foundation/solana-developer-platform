@@ -102,10 +102,10 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
     "Your live vault position will refresh automatically.",
   "DashboardEarn.deposit.providerOrderConfirmedTitle": "Subscription sent",
   "DashboardEarn.deposit.providerOrderConfirmedBody":
-    "Solana confirmation has been observed for the USDC transfer. WisdomTree still needs to strike NAV and deliver the fund shares; this is not a completed position yet.",
-  "DashboardEarn.deposit.providerOrderConfirmedStatus": "Processing at WisdomTree",
+    "Solana confirmation has been observed for the USDC transfer. The provider still needs to strike NAV and deliver the fund shares; this is not a completed position yet.",
+  "DashboardEarn.deposit.providerOrderConfirmedStatus": "Processing at the provider",
   "DashboardEarn.deposit.providerOrderConfirmedNote":
-    "The position appears after WisdomTree delivers shares to this wallet.",
+    "The position appears after the provider delivers shares to this wallet.",
   "DashboardEarn.deposit.vaultFailedTitle": "Deposit failed",
   "DashboardEarn.deposit.vaultFailedBody":
     "The deposit transaction failed on Solana. No position balance was credited from this movement.",
@@ -884,7 +884,7 @@ describe("EarnVaultDepositModal", () => {
     await enterDepositAmount();
 
     expect(await screen.findByText("Subscription sent")).toBeTruthy();
-    expect(screen.getByText("Processing at WisdomTree")).toBeTruthy();
+    expect(screen.getByText("Processing at the provider")).toBeTruthy();
     expect(screen.getByText(/this is not a completed position yet/)).toBeTruthy();
     expect(screen.queryByText("Active")).toBeNull();
     expect(screen.getByText("Provider settlement").getAttribute("aria-current")).toBe("step");
@@ -918,7 +918,7 @@ describe("EarnVaultDepositModal", () => {
     expect(await screen.findByText("Deposit failed")).toBeTruthy();
     expect(screen.getByText("Failed")).toBeTruthy();
     expect(screen.getByText(/No position balance was credited/)).toBeTruthy();
-    expect(screen.queryByText("Processing at WisdomTree")).toBeNull();
+    expect(screen.queryByText("Processing at the provider")).toBeNull();
   });
 
   it("keeps a failed deposit on the form and reports the provider reason", async () => {

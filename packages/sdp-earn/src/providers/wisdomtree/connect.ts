@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { providerNotConfigured, providerUnavailable, SdpEarnError } from "../../errors";
 import { providerFetchJson } from "../../fetch";
@@ -115,10 +116,12 @@ interface CachedToken {
 }
 
 /**
- * Bearer-token cache, keyed by the complete credential tuple so two
- * environments — or any rotated credential field — can never share a token. Expiry
- * keeps a safety margin; WisdomTree's `expires_in` is treated as advisory and
- * an expired-token 401 surfaces as a normal provider error on the next call.
+ * Bearer-token cache, keyed by a SHA-256 digest of the complete credential
+ * tuple so two environments — or any rotated credential field — can never
+ * share a token, while plaintext secrets stay out of any future dump or log
+ * of the map. Expiry keeps a safety margin; WisdomTree's `expires_in` is
+ * treated as advisory and an expired-token 401 surfaces as a normal provider
+ * error on the next call.
  */
 const tokenCache = new Map<string, CachedToken>();
 
@@ -141,13 +144,19 @@ async function getWisdomTreeAccessToken(
   ctx: EarnRuntimeContext
 ): Promise<{ token: string; baseUrl: string; cacheKey: string }> {
   const config = readWisdomTreeConfig(ctx);
-  const cacheKey = JSON.stringify([
-    config.baseUrl,
-    config.credentials.clientId,
-    config.credentials.clientSecret,
-    config.credentials.username,
-    config.credentials.password,
-  ]);
+  // A digest, not the raw tuple: the map outlives any single call, and a dump
+  // or log of it must never carry the plaintext credentials.
+  const cacheKey = createHash("sha256")
+    .update(
+      JSON.stringify([
+        config.baseUrl,
+        config.credentials.clientId,
+        config.credentials.clientSecret,
+        config.credentials.username,
+        config.credentials.password,
+      ])
+    )
+    .digest("hex");
 
   const cached = tokenCache.get(cacheKey);
   if (cached && cached.expiresAtMs > Date.now()) {
@@ -246,7 +255,10 @@ function readWisdomTreeProduct(value: unknown): WisdomTreeProduct {
     ["can_trade", "boolean"],
   ] as const;
   for (const [field, expectedType] of fields) {
-    if (record[field] !== undefined && typeof record[field] !== expectedType) {
+    // Absent means absent — and DRF-style serializers routinely spell that
+    // with null. Fail closed on a WRONG type, never on absence.
+    const value = record[field];
+    if (value !== undefined && value !== null && typeof value !== expectedType) {
       throw providerUnavailable(`WisdomTree returned a product with an invalid ${field}`);
     }
   }
@@ -338,7 +350,9 @@ function readWisdomTreeWalletRecord(value: unknown): WisdomTreeWalletRecord {
   }
   const record = value as Record<string, unknown>;
   for (const field of ["wallet_guid", "public_key", "status"] as const) {
-    if (record[field] !== undefined && typeof record[field] !== "string") {
+    // Same rule as the product reader: null is absence, not a wrong type.
+    const fieldValue = record[field];
+    if (fieldValue !== undefined && fieldValue !== null && typeof fieldValue !== "string") {
       throw providerUnavailable(`WisdomTree returned a wallet with an invalid ${field}`);
     }
   }
@@ -425,9 +439,13 @@ export async function checkWisdomTreeDepositEligibility(
   // Resolve `/me` exactly once, then perform both admission reads using the
   // same runtime context and cached bearer token. The products endpoint is
   // scoped by that token; the wallets endpoint is scoped by the resolved GUID.
+  // The reads are independent of each other, so they are issued in parallel:
+  // one fewer provider round-trip on the money-in hot path.
   const guid = await getWisdomTreeOrganizationGuid(ctx);
-  const wallets = await listWisdomTreeSolanaWalletsForOrganization(ctx, guid);
-  const products = await listWisdomTreeProducts(ctx);
+  const [wallets, products] = await Promise.all([
+    listWisdomTreeSolanaWalletsForOrganization(ctx, guid),
+    listWisdomTreeProducts(ctx),
+  ]);
 
   const address = input.address.trim();
   const match = wallets.find((wallet) => wallet.public_key?.trim() === address);

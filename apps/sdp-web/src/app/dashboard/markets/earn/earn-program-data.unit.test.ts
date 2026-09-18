@@ -104,17 +104,21 @@ describe("provider-order settlement watches", () => {
     settledAt: TIMESTAMP,
   } satisfies EarnVaultWithdrawal;
 
-  it("keeps confirmed provider-order deposits in flight after reload", () => {
-    expect(isEarnVaultDepositInFlight(deposit)).toBe(true);
-    expect(isEarnVaultDepositInFlight({ ...deposit, provider: "retired_provider" })).toBe(true);
+  it("watches a confirmed provider-order deposit like any other wire-terminal row", () => {
+    expect(isEarnVaultDepositInFlight(deposit)).toBe(false);
+    expect(isEarnVaultDepositInFlight({ ...deposit, provider: "retired_provider" })).toBe(false);
     expect(isEarnVaultDepositInFlight({ ...deposit, provider: "kamino" })).toBe(false);
     expect(isEarnVaultDepositInFlight({ ...deposit, status: "failed" })).toBe(false);
   });
 
-  it("does not trust a provider-order finalized row without provider completion", () => {
-    expect(isEarnVaultWithdrawalInFlight(withdrawal)).toBe(true);
+  it("releases a provider-order withdrawal from the watch at the chain leg", () => {
+    expect(isEarnVaultWithdrawalInFlight(withdrawal)).toBe(false);
+    // The reconciler parks provider-order rows at `confirmed`; that is the
+    // strongest wire fact, so the watch stops there instead of polling forever.
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, status: "confirmed" })).toBe(false);
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, status: "submitted" })).toBe(true);
     expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, provider: "retired_provider" })).toBe(
-      true
+      false
     );
     expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, provider: "kamino" })).toBe(false);
     expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, status: "failed" })).toBe(false);

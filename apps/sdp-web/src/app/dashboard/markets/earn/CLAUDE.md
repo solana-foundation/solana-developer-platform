@@ -421,10 +421,14 @@ nothing else; the program create still sends the body `requestId` form.
   polling contract is intentionally stricter than atomic-route presentation:
   an atomic withdrawal may treat `confirmed` as complete and project its
   resulting balance while polling continues to protocol finality. A
-  provider-order withdrawal does neither: `confirmed` covers only the share
-  leg, remains visibly pending provider settlement, and projects no cash or
-  balance change. This is the OPPOSITE of the deposit poll's rule (legacy DTO,
-  legacy terminal set); the two sets sit side by side in
+  provider-order withdrawal does neither in PRESENTATION: `confirmed` covers
+  only the share leg, stays visibly pending provider settlement, and projects
+  no cash or balance change. Its WATCH, however, is terminal at `confirmed`
+  (`PROVIDER_ORDER_WATCH_TERMINAL_STATUSES`): the reconciler caps a
+  provider-order row there, the NAV strike after it has no wire state to
+  observe, and watching past the strongest wire fact would poll forever with
+  `onSettled` never firing. This is the OPPOSITE of the deposit poll's rule
+  (legacy DTO, legacy terminal set); the sets sit side by side in
   `earn-program-data.ts` with the reasoning attached to each.
 
 ## Where these seams are consumed — do not delete them as dead code
@@ -474,10 +478,13 @@ money is genuinely in the air. **Keep using
 `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`** (PRO-1705): that one is the
 unified ledger's vocabulary, where the background watcher continues past
 `confirmed` because `finalized` exists after it. This legacy poll still stops
-at `confirmed` because no later wire state exists: atomic presentation may call
-that Done, while provider-order presentation must remain pending provider
-settlement and project no balance. Switching to the unified set would make the
-poll wait for a `finalized` nothing writes yet and never stop. An unreadable
+at `confirmed` because no later wire state exists — for either settlement
+kind: a provider-order deposit parks at `confirmed` the same way, so the
+"provider settlement" step is presentation-only, never a watch state. Atomic
+presentation may call `confirmed` Done, while provider-order presentation
+stays pending provider settlement and projects no balance. Switching to the
+unified set would make the poll wait for a `finalized` nothing writes yet and
+never stop. An unreadable
 poll returns `undefined` and keeps polling; a read that failed says nothing
 about whether the deposit landed.
 

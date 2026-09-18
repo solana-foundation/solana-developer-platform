@@ -536,6 +536,25 @@ describe("provider-order settlement boundary", () => {
     expect(claimable.map((movement) => movement.id)).toContain(seeded.movement.id);
     expect(getTransaction).not.toHaveBeenCalled();
     expect(readVaultPositions).not.toHaveBeenCalled();
+
+    // Every sweep re-reads the same finalized chain status, and every row
+    // WisdomTree ever wrote sits parked here until a Connect reconciler
+    // exists. The parked row must therefore be IDEMPOTENT under re-sweeps:
+    // no refused confirmed -> confirmed write, stable confirmed_at, still no
+    // settled_at, and still unsettled work.
+    const parked = await ledgerRow(seeded.movement.id);
+    await reconcileEarnVaultMovements(env);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "confirmed",
+      confirmed_at: parked?.confirmed_at,
+      settled_at: null,
+      token_amount_settled: null,
+    });
+    const stillClaimable = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).claimUnsettledVaultMovements(256);
+    expect(stillClaimable.map((movement) => movement.id)).toContain(seeded.movement.id);
   });
 
   it("does not value or close a provider-order redemption when only its share leg finalized", async () => {

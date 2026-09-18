@@ -878,6 +878,7 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
     requestId: string;
     projectId?: string;
     positionId?: string;
+    provider?: string;
   }) {
     const positionId = params.positionId ?? (await seedPosition());
     return {
@@ -888,7 +889,7 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
         organizationId: TEST_ORG.id,
         projectId: params.projectId ?? TEST_PROJECT.id,
         environment: "sandbox",
-        provider: "kamino",
+        provider: params.provider ?? "kamino",
         positionId,
         vaultAddress: VAULT,
         custodyWalletId: CUSTODY_WALLET_ID,
@@ -1001,6 +1002,45 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
       confirmed.recorded.movement.id,
       pending.recorded.movement.id,
     ]);
+  });
+
+  it("keeps a finalized provider-order withdrawal out of the settled set", async () => {
+    await seedAuth();
+    // The reconciler caps a provider-order row at confirmed and never stamps
+    // settled_at, so even a legacy FINALIZED wisdomtree withdrawal must stay
+    // discoverable under settled=false and absent under settled=true until a
+    // provider reconciler introduces its own durable completion fact.
+    const positionId = await seedPosition({ provider: "wisdomtree" });
+    const { recorded } = await recordWithdrawal({
+      requestId: "vw-wt-finalized",
+      positionId,
+      provider: "wisdomtree",
+    });
+    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+      movementId: recorded.movement.id,
+      organizationId: TEST_ORG.id,
+      toStatus: "finalized",
+      confirmedAt: new Date().toISOString(),
+      settledAt: new Date().toISOString(),
+    });
+
+    const unsettled = (await (await getWithdrawal("?settled=false")).json()) as {
+      data: { withdrawals: Array<{ movementId: string }> };
+    };
+    expect(
+      unsettled.data.withdrawals.some(
+        (withdrawal) => withdrawal.movementId === recorded.movement.id
+      )
+    ).toBe(true);
+
+    const settledOnly = (await (await getWithdrawal("?settled=true")).json()) as {
+      data: { withdrawals: Array<{ movementId: string }> };
+    };
+    expect(
+      settledOnly.data.withdrawals.some(
+        (withdrawal) => withdrawal.movementId === recorded.movement.id
+      )
+    ).toBe(false);
   });
 });
 

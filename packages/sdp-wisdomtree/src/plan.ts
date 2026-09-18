@@ -35,17 +35,27 @@ export interface WisdomTreeDepositPlanInput {
   rentPayer?: TransactionSigner;
 }
 
+/** The two money directions a WisdomTree plan can be built for. */
+export type WisdomTreeBuildDirection = "deposit" | "redemption";
+
 /**
  * Verify the live fund mint against the measured registry before any plan is
  * built against it: owner program, initialization, decimals, transfer-hook,
  * and live pause state must be safe, or the build refuses. A paused fund is
  * especially dangerous for subscriptions: the USDC leg itself is an ordinary
  * transfer and could land even though WisdomTree cannot deliver shares.
+ *
+ * Registry DRIFT (missing mint, wrong program, wrong decimals, wrong hook) is
+ * `MINT_MISMATCH` — SDP's problem, a 500. A live PAUSE is not drift: the
+ * instrument is exactly as registered, it just refuses to move money right
+ * now, so it surfaces as the caller-fixable `DEPOSIT_REFUSED` /
+ * `WITHDRAW_REFUSED` for the direction being built.
  */
 export async function verifyFundMint(
   reader: WisdomTreeChainReader,
   runtime: WisdomTreeRuntime,
-  fund: WisdomTreeFund
+  fund: WisdomTreeFund,
+  direction: WisdomTreeBuildDirection
 ): Promise<void> {
   const account = await reader.getAccount(address(fund.mint));
   if (account === null) {
@@ -66,7 +76,7 @@ export async function verifyFundMint(
   }
   if (parsed.paused === true) {
     throw new SdpWisdomTreeError(
-      "MINT_MISMATCH",
+      direction === "deposit" ? "DEPOSIT_REFUSED" : "WITHDRAW_REFUSED",
       `Fund mint ${fund.mint} is paused; refusing to move money while settlement is disabled.`
     );
   }
@@ -107,7 +117,7 @@ export async function buildWisdomTreeDepositPlan(
   runtime: WisdomTreeRuntime,
   input: WisdomTreeDepositPlanInput
 ): Promise<WisdomTreeInstructionPlan> {
-  await verifyFundMint(reader, runtime, input.fund);
+  await verifyFundMint(reader, runtime, input.fund, "deposit");
 
   const accepted = acceptAtMintScale(input.amount, input.depositDecimals, "Deposit amount");
   const rentPayer = input.rentPayer ?? input.owner;
@@ -207,7 +217,7 @@ export interface WisdomTreeRedemptionPlanInput {
  * strike, outside this transaction.
  *
  * The hook resolution is where an unverified wallet fails: a missing
- * compliance account surfaces as HOOK_UNRESOLVED at build, and anything the
+ * compliance account surfaces as WITHDRAW_REFUSED at build, and anything the
  * resolver cannot see fails at simulation when the hook's execute refuses.
  * Both refusals happen BEFORE money moves, which is the point.
  *
@@ -220,7 +230,7 @@ export async function buildWisdomTreeRedemptionPlan(
   runtime: WisdomTreeRuntime,
   input: WisdomTreeRedemptionPlanInput
 ): Promise<WisdomTreeInstructionPlan> {
-  await verifyFundMint(reader, runtime, input.fund);
+  await verifyFundMint(reader, runtime, input.fund, "redemption");
   const hookProgram = WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS[runtime.cluster];
   if (hookProgram === undefined) {
     throw new SdpWisdomTreeError(
@@ -322,7 +332,7 @@ export async function buildWisdomTreeRedemptionPlan(
 function hookAccountRole(account: ResolvedHookAccount): AccountRole {
   if (account.isSigner) {
     throw new SdpWisdomTreeError(
-      "HOOK_UNRESOLVED",
+      "WITHDRAW_REFUSED",
       `The transfer hook demands a signature from ${account.address}, which SDP cannot provide.`
     );
   }
