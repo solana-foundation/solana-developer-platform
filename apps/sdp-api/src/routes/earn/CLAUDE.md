@@ -1294,18 +1294,26 @@ The Earn reads that fan out to a PAID upstream carry `meteredQuota`: the
 provider's API on a program read (`GET /programs` is 2N round trips per page
 against the shared provider account), Solana RPC on a live-hydrated one. Two
 counters, `earn-provider-read` (programs list/detail/deposits, the deposit
-quote) and `earn-chain-read` (vault positions, share reconciliation, the
-per-owner external-wallet reads).
+quote, the keyed external-wallet deposit build) and `earn-chain-read` (vault
+positions, share reconciliation, the per-owner external-wallet reads).
 
 **No money-OUT route and no EXIT quote carries one, and that is load-bearing.**
 `meteredQuota` fails closed — a counter-store outage answers 503 — and a 5xx on
 a customer's way out of a position is exactly the failure ADR 0002 exit safety
 rules out. A refused read costs a caller a retry; a refused exit traps funds.
-So withdrawals, vault withdrawals, the external-wallet submits and builds, and
-every preview an exit derives its floor from stay unmetered. Money-IN carries
-no such rule, which is why the deposit quote is metered and the exit quote is
-not. Pinned by the "metered quotas" describe in `../earn-program.test.ts`,
-whose second test exhausts both counters and asserts the payout still lands.
+So withdrawals, vault withdrawals, the external-wallet submits, the
+external-wallet exit build, and every preview an exit derives its floor from
+stay unmetered. A fail-OPEN meter on the two external-wallet exit routes was
+weighed and dropped (PRO-1994): a 429 is still a refusal on the way out, so
+keyed exit traffic is bounded by the general per-key tier alone, recorded as
+accepted risk. Money-IN carries no such rule, which is why the deposit quote
+and the keyed external-wallet deposit build are metered
+(`authenticatedMeteredQuota`, so an anonymous build keeps its per-IP `earn-rpc`
+counter) and the exit quote is not. Pinned by the "metered quotas" describe in
+`../earn-program.test.ts`,
+whose second test exhausts both counters and asserts the payout still lands,
+and by the one in `../earn.external-wallet.test.ts`, which also breaks the
+counter store and asserts the deposit build 503s while the exit still builds.
 Anonymous paid-upstream counters use a verified Cloud Run client address. A
 self-hosted deployment ignores forwarded addresses by default and shares the
 fail-closed unidentified bucket; `TRUST_PROXY_HEADERS=true` is safe only when

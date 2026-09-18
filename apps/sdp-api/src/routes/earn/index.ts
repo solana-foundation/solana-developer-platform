@@ -232,10 +232,14 @@ optionalAuthEarn.post(
   validateBody(earnVaultDepositPreviewSchema),
   createEarnVaultDepositPreview
 );
+// The deposit BUILD is money-IN, so it takes the same keyed meter as the
+// deposit quote above (PRO-1994). Its exit siblings below carry none: see the
+// keyed-router comment on why every exit route stays unmetered.
 optionalAuthEarn.post(
   "/external-wallet/deposit-transactions",
   ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:write"),
+  authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletDepositTransactionSchema),
   createEarnExternalWalletDepositTransaction
@@ -281,13 +285,17 @@ earn.use("*", projectContextMiddleware());
 // an unmetered caller spends the platform's money at whatever rate it likes.
 //
 // What is deliberately NOT metered is every money-OUT route and every EXIT
-// quote: withdrawals, vault withdrawals, the external-wallet submits, and the
-// previews an exit derives its floor from. `meteredQuota` FAILS CLOSED — a
-// counter-store outage answers 503 — and a 5xx on a customer's way out of a
-// position is precisely the failure ADR 0002 exit safety rules out. A refused
-// read costs a caller a retry; a refused exit traps funds.
+// quote: withdrawals, vault withdrawals, the external-wallet submits, the
+// external-wallet exit build, and the previews an exit derives its floor from.
+// `meteredQuota` FAILS CLOSED — a counter-store outage answers 503 — and a 5xx
+// on a customer's way out of a position is precisely the failure ADR 0002 exit
+// safety rules out. A refused read costs a caller a retry; a refused exit traps
+// funds. A fail-OPEN meter on the exit routes was weighed and dropped
+// (PRO-1994): a 429 is still a refusal on the way out, so keyed exit traffic
+// is bounded by the general per-key tier alone, as accepted risk.
 //
-// Money-IN reads carry no such rule, so the deposit quote is metered.
+// Money-IN carries no such rule, so the deposit quote and the external-wallet
+// deposit build are metered.
 // B2B2C live holdings (PRO-1724). The owner is a REQUIRED query filter on
 // every per-owner read of this surface (positions, movements, earnings) — one
 // addressing style for one concept, and no literal segment (`summary`) can
