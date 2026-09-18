@@ -73,6 +73,29 @@ function confirmationDescription(
   return `${state} on ${network}`;
 }
 
+function showSettledTransferToasts(
+  settled: readonly InFlightTransfer[],
+  completedMovementIds: Set<string>,
+  movementToastIds: Map<string, ReturnType<typeof toast.loading>>,
+  cluster: DashboardData["wallet"]["cluster"] | undefined
+) {
+  for (const transfer of settled) {
+    if (completedMovementIds.has(transfer.movementId)) continue;
+    completedMovementIds.add(transfer.movementId);
+    const toastId = movementToastIds.get(transfer.movementId);
+    toast.success(
+      TRANSFER_COPY[
+        transfer.direction === "deposit" ? "to-savings" : "to-checking"
+      ].done,
+      {
+        id: toastId,
+        description: confirmationDescription(cluster, "Confirmed"),
+      }
+    );
+    movementToastIds.delete(transfer.movementId);
+  }
+}
+
 export function App() {
   const [data, setData] = useState<DashboardData>();
   const [error, setError] = useState<string>();
@@ -174,24 +197,12 @@ export function App() {
             reflectedOrExpired
           );
         }
-        for (const transfer of settled) {
-          if (completedMovementIds.current.has(transfer.movementId)) continue;
-          completedMovementIds.current.add(transfer.movementId);
-          const toastId = movementToastIds.current.get(transfer.movementId);
-          toast.success(
-            TRANSFER_COPY[
-              transfer.direction === "deposit" ? "to-savings" : "to-checking"
-            ].done,
-            {
-              id: toastId,
-              description: confirmationDescription(
-                latestData.current?.wallet.cluster,
-                "Confirmed"
-              ),
-            }
-          );
-          movementToastIds.current.delete(transfer.movementId);
-        }
+        showSettledTransferToasts(
+          settled,
+          completedMovementIds.current,
+          movementToastIds.current,
+          latestData.current?.wallet.cluster
+        );
         if (expired.length) {
           toast.warning("Balances are taking longer to update", {
             id: "balance-sync-timeout",
@@ -364,30 +375,64 @@ export function App() {
 
   return (
     <>
-      <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
-        <BankSidebar />
-        <div className="min-w-0 flex-1 lg:p-1">
-          <MobileHeader />
-          <main className="min-h-[calc(100svh-57px)] bg-background lg:h-full lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-foreground/5">
-            {!data && !error ? <DashboardSkeleton /> : null}
-            {error && !data ? (
-              <SetupError message={error} onRetry={() => void refresh()} />
-            ) : null}
-            {view ? (
-              <OverviewDashboard
-                data={view}
-                refreshing={refreshing}
-                busy={busy}
-                onRefresh={() => void refreshWithProgress()}
-                onDeposit={(amount) => transfer("to-savings", amount)}
-                onWithdraw={(amount) => transfer("to-checking", amount)}
-              />
-            ) : null}
-          </main>
-        </div>
-      </div>
+      <BankShell
+        loading={!data && !error}
+        error={!data ? error : undefined}
+        view={view}
+        refreshing={refreshing}
+        busy={busy}
+        onRetry={() => void refresh()}
+        onRefresh={() => void refreshWithProgress()}
+        onDeposit={(amount) => transfer("to-savings", amount)}
+        onWithdraw={(amount) => transfer("to-checking", amount)}
+      />
       <Toaster richColors position="bottom-right" />
     </>
+  );
+}
+
+function BankShell({
+  loading,
+  error,
+  view,
+  refreshing,
+  busy,
+  onRetry,
+  onRefresh,
+  onDeposit,
+  onWithdraw,
+}: {
+  loading: boolean;
+  error?: string;
+  view?: DashboardData;
+  refreshing: boolean;
+  busy: boolean;
+  onRetry: () => void;
+  onRefresh: () => void;
+  onDeposit: (amount: string) => Promise<void>;
+  onWithdraw: (amount: string) => Promise<void>;
+}) {
+  return (
+    <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
+      <BankSidebar />
+      <div className="min-w-0 flex-1 lg:p-1">
+        <MobileHeader />
+        <main className="min-h-[calc(100svh-57px)] bg-background lg:h-full lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-foreground/5">
+          {loading ? <DashboardSkeleton /> : null}
+          {error ? <SetupError message={error} onRetry={onRetry} /> : null}
+          {view ? (
+            <OverviewDashboard
+              data={view}
+              refreshing={refreshing}
+              busy={busy}
+              onRefresh={onRefresh}
+              onDeposit={onDeposit}
+              onWithdraw={onWithdraw}
+            />
+          ) : null}
+        </main>
+      </div>
+    </div>
   );
 }
 
