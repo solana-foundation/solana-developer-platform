@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { BvnkCompletedPayoutObservation, BvnkFailedPayoutObservation } from "./settlement";
-import { bvnkTerminalObservationsEqual } from "./settlement";
+import { bvnkPayoutObservationMismatches, bvnkTerminalObservationsEqual } from "./settlement";
 
 /** One canonical completed observation; every field is caller-written. */
 function completedObservation(
@@ -127,5 +127,34 @@ describe("bvnkTerminalObservationsEqual", () => {
       ),
       false
     );
+  });
+});
+
+describe("bvnkPayoutObservationMismatches", () => {
+  const payin = {
+    id: "payin_1",
+    receivedAmount: "100",
+    receivedCurrency: "USD",
+    walletId: "a:1:wallet:1",
+    customerId: "cust_1",
+  };
+  const intent = {
+    amount: "99.8",
+    currency: "USD",
+    cryptoCurrency: "USDC",
+    network: "SOLANA",
+    address: "AddrSame",
+  };
+
+  it("failed_payout_without_a_destination_matches_its_intent", () => {
+    const observation = failedObservation({ destination: null, network: null });
+    assert.deepEqual(bvnkPayoutObservationMismatches(observation, "xfr_1", payin, intent), []);
+  });
+
+  it("completed_payout_to_another_destination_mismatches", () => {
+    const observation = completedObservation({ destination: "AddrOther" });
+    assert.deepEqual(bvnkPayoutObservationMismatches(observation, "xfr_1", payin, intent), [
+      "destination",
+    ]);
   });
 });

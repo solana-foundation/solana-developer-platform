@@ -527,6 +527,7 @@ describe("BvnkRampClient ledger wallet list", () => {
             name: "sdp:onramp:row-b",
             customer: { id: "c1" },
             status: "INACTIVE",
+            balance: { amount: 0, currency: "USD" },
           },
         ],
         pageable: { pageNumber: 0, pageSize: 100 },
@@ -539,6 +540,7 @@ describe("BvnkRampClient ledger wallet list", () => {
             name: "sdp:onramp:row-c",
             customer: { id: "c1" },
             status: "ACTIVE",
+            balance: { amount: 0, currency: "USD" },
           },
         ],
         pageable: { pageNumber: 1, pageSize: 100 },
@@ -594,6 +596,31 @@ describe("BvnkRampClient ledger wallet list", () => {
     assert.equal(q, "customerId:c1 AND currency:USD");
     assert.equal(q.includes("sdp:onramp:cpa_x"), false);
     assert.equal(q.includes("name:"), false);
+  });
+
+  it("rejects a wallet list row without a balance as a malformed response", async () => {
+    queueFetch(
+      respond({
+        content: [
+          {
+            id: "a:26091832510099:3uD7Mrf:1",
+            name: "sdp:onramp:cpa_x",
+            customer: { id: "c1" },
+            status: "ACTIVE",
+          },
+        ],
+        pageable: { pageNumber: 0, pageSize: 100 },
+        hasNext: false,
+      })
+    );
+
+    await assert.rejects(
+      new BvnkRampClient().listLedgerWalletsV2(runtimeContext, {
+        customerId: "c1",
+        currency: "USD",
+      }),
+      (error: unknown) => error instanceof Error && error.message === "BVNK response is malformed."
+    );
   });
 });
 

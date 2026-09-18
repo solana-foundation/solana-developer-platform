@@ -222,8 +222,9 @@ async function reconcileUnclaimedPayout(
     );
     return true;
   } catch (error) {
+    let touched = false;
     try {
-      return await translateUnclaimedFailure(repo, candidate, claimLanded, claimedAt, error);
+      touched = await translateUnclaimedFailure(repo, candidate, claimLanded, claimedAt, error);
     } catch (failureWriteError) {
       logger.error(
         {
@@ -232,8 +233,9 @@ async function reconcileUnclaimedPayout(
         },
         "[bvnk onramp] unclaimed payout failure persistence failed"
       );
-      return false;
     }
+    await repo.touchPayoutCandidate({ transferId: candidate.id });
+    return touched;
   }
 }
 

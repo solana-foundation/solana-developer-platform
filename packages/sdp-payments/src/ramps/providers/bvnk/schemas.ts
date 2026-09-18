@@ -429,8 +429,7 @@ export const bvnkV2WalletListRowSchema = z.object({
   name: z.string().min(1),
   status: bvnkV2WalletStatusSchema,
   customer: z.object({ id: z.string().min(1), name: z.string().optional() }),
-  currency: z.string().min(1).optional(),
-  balance: z.object({ amount: z.number().finite(), currency: z.string().min(1) }).optional(),
+  balance: z.object({ amount: z.number().finite(), currency: z.string().min(1) }),
 });
 export type BvnkV2WalletListRow = z.infer<typeof bvnkV2WalletListRowSchema>;
 

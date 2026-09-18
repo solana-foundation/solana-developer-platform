@@ -99,18 +99,6 @@ describe("0113 BVNK on-ramp pay-in id pivot", () => {
       providerStatus: "funding_wallet_locked",
       metadata: { transferId: "xfr_legacy_0113" },
     });
-    // The second active BVNK wallet is a DIFFERENT fiat (USD/EUR), so the
-    // pre-migration state stays legal under the 0112 active-funding-wallet
-    // unique index while still exercising the legacy archive UPDATE.
-    await insertFundingRow({
-      id: "cpa_legacy_0113",
-      projectId: "prj_0113",
-      counterpartyId: "cpty_0113",
-      provider: "bvnk",
-      providerStatus: null,
-      fiatCurrency: "EUR",
-      metadata: { onrampKey: "USD:USDC_SOLANA:dest-a" },
-    });
     await insertFundingRow({
       id: "cpa_other_provider_0113",
       projectId: "prj_0113",
@@ -137,12 +125,10 @@ describe("0113 BVNK on-ramp pay-in id pivot", () => {
     }>(
       `SELECT id, provider_status, status, metadata
        FROM counterparty_provider_accounts
-       WHERE id IN ('cpa_locked_0113', 'cpa_legacy_0113', 'cpa_other_provider_0113')
+       WHERE id IN ('cpa_locked_0113', 'cpa_other_provider_0113')
        ORDER BY id`
     );
-    // The query orders by id, so the lexicographically-first legacy row leads.
     expect(fundingRows.rows).toEqual([
-      { id: "cpa_legacy_0113", provider_status: null, status: "archived", metadata: {} },
       {
         id: "cpa_locked_0113",
         provider_status: "provisioned_funding_wallet",

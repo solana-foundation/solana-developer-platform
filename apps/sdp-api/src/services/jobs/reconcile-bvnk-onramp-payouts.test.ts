@@ -417,6 +417,28 @@ describe("reconcileBvnkOnrampPayouts", () => {
       }
     });
 
+    it("a_throwing_dry_run_rotates_the_candidate_to_the_back_of_the_queue", async () => {
+      await seedUnclaimedCandidate({ id: "xfr_dry_run_throws" });
+      const before = await getDb(env)
+        .prepare("SELECT updated_at FROM payment_transfers WHERE id = ?")
+        .bind("xfr_dry_run_throws")
+        .first<{ updated_at: string }>();
+      assert(before);
+      dryRunSpy.mockRejectedValueOnce(new Error("BVNK dry-run unavailable"));
+
+      await reconcileBvnkOnrampPayouts(env);
+
+      const after = await getDb(env)
+        .prepare("SELECT updated_at, status, provider_data FROM payment_transfers WHERE id = ?")
+        .bind("xfr_dry_run_throws")
+        .first<{ updated_at: string; status: string; provider_data: Record<string, unknown> }>();
+      assert(after);
+      expect(after.status).toBe("settling");
+      expect(after.updated_at > before.updated_at).toBe(true);
+      expect(bvnkData(after).payout).toBeUndefined();
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
     it("claim_lost sends no provider create", async () => {
       await seedUnclaimedCandidate({ id: "xfr_claim_lost" });
       bvnkRepoHarness.claimPayout.mockImplementationOnce(async () => null);

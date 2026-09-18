@@ -212,14 +212,31 @@ function selectBvnkWalletProfile(
 }
 
 /**
- * Maps the first BVNK fiat payment instrument into the persisted bank-account shape.
+ * Maps the BVNK FIAT payment instrument into the persisted bank-account shape.
  *
  * @param wallet - BVNK v2 ledger wallet.
  * @returns Persistable bank details, or undefined when no instrument is present.
  */
+/**
+ * Reads the wallet's fiat payment instrument; the wire schema admits FIAT
+ * instruments only, and a fresh wallet has none until BVNK provisions it.
+ *
+ * @param wallet - BVNK v2 ledger wallet.
+ * @returns The fiat instrument, or null when the wallet has none yet.
+ */
+function bvnkFiatInstrument(
+  wallet: BvnkLedgerWalletV2
+): NonNullable<BvnkLedgerWalletV2["paymentInstruments"]>[number] | null {
+  if (wallet.paymentInstruments === undefined) {
+    return null;
+  }
+  const [first] = wallet.paymentInstruments;
+  return first === undefined ? null : first;
+}
+
 function bvnkWalletBankAccount(wallet: BvnkLedgerWalletV2): BvnkBankFundingDetails | undefined {
-  const instrument = wallet.paymentInstruments?.[0];
-  if (instrument === undefined) {
+  const instrument = bvnkFiatInstrument(wallet);
+  if (instrument === null) {
     return undefined;
   }
   const nid = instrument.bankDetails.nid;
@@ -1182,10 +1199,9 @@ async function adoptBvnkFundingWalletByName(
 ): Promise<CounterpartyProviderAccountRow | null> {
   const namedMatches = wallets.filter((wallet) => wallet.name === walletName);
   for (const wallet of namedMatches) {
-    const walletCurrency = wallet.balance === undefined ? null : wallet.balance.currency;
     if (
       wallet.customer.id !== customerLink.provider_customer_reference ||
-      walletCurrency !== fiatCurrency
+      wallet.balance.currency !== fiatCurrency
     ) {
       throw internalError(
         `BVNK funding wallet ${wallet.id} is not the ${fiatCurrency} funding wallet of the customer link`
@@ -1380,7 +1396,7 @@ export async function bvnkOnrampQuote(
       throw internalError("BVNK funding wallet has no fiat payment instrument yet.");
     }
     const paymentReference = bvnkOnrampRemittance(input.transferId);
-    const instrument = wallet.paymentInstruments?.[0];
+    const instrument = bvnkFiatInstrument(wallet);
     const instruction: BvnkFiatFundingInstruction = {
       provider: "bvnk",
       kind: "fiat_funding",
@@ -1391,7 +1407,7 @@ export async function bvnkOnrampQuote(
       network: input.network,
       bankAccount: { ...bankAccount, paymentReference },
       paymentReference,
-      ...(instrument?.remittanceInformationPrefix === undefined
+      ...(instrument === null || instrument.remittanceInformationPrefix === undefined
         ? {}
         : { remittanceInformationPrefix: instrument.remittanceInformationPrefix }),
       instructionsNotes: `Include ${paymentReference} in the bank transfer reference to receive crypto on ${input.network}.`,
@@ -1505,12 +1521,8 @@ export async function recoverProvisioningBvnkFundingWallet(
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
   const scope = bvnkAccountScope(input.counterparty, input.projectId);
   const wallet = await RAMP_PROVIDER_CLIENTS.bvnk.getLedgerWalletV2(ctx, { walletId });
-  const hasFiatInstrument =
-    wallet.paymentInstruments === undefined
-      ? false
-      : wallet.paymentInstruments.some(
-          (instrument) => instrument.type === "FIAT" && instrument.accountNumber.length > 0
-        );
+  const fiatInstrument = bvnkFiatInstrument(wallet);
+  const hasFiatInstrument = fiatInstrument !== null && fiatInstrument.accountNumber.length > 0;
   if (wallet.status !== "ACTIVE" || !hasFiatInstrument) {
     return;
   }

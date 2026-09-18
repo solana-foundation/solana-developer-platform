@@ -271,10 +271,10 @@ export function bvnkPayoutObservationMismatches(
   ) {
     mismatches.push("amount");
   }
-  if (observation.destination !== intent.address) {
+  if (observation.destination !== null && observation.destination !== intent.address) {
     mismatches.push("destination");
   }
-  if (observation.network !== intent.network) {
+  if (observation.network !== null && observation.network !== intent.network) {
     mismatches.push("network");
   }
   return mismatches;

@@ -222,6 +222,33 @@ describe("BvnkOnrampTransfersRepository (postgres)", () => {
     }
   });
 
+  it("touchPayoutCandidate_rotates_only_unclaimed_settling_rows", async () => {
+    const db = getDb(env);
+    await seedBvnkOnrampPayinApplied(db, {
+      ...seedScope("touch_unclaimed", "a:wallet:touch:1"),
+      transferId: "xfr_touch_unclaimed",
+      destinationAddress: "AddrTouch",
+      payin: makePayin("payin_touch_unclaimed", "a:wallet:touch:1"),
+    });
+    await seedBvnkOnrampPayoutClaimed(db, {
+      ...seedScope("touch_claimed", "a:wallet:touch:2"),
+      transferId: "xfr_touch_claimed",
+      destinationAddress: "AddrTouch",
+      payin: makePayin("payin_touch_claimed", "a:wallet:touch:2"),
+      claimedAt: "2026-09-18T00:00:00.000Z",
+      intent: makeIntent("AddrTouch"),
+    });
+    await setUpdatedAt("xfr_touch_unclaimed", "2026-09-18T00:00:00.000Z");
+
+    const touched = await repo.touchPayoutCandidate({ transferId: "xfr_touch_unclaimed" });
+    const untouched = await repo.touchPayoutCandidate({ transferId: "xfr_touch_claimed" });
+
+    assert(touched);
+    expect(touched.updated_at > "2026-09-18T00:00:00.000Z").toBe(true);
+    expect(touched.status).toBe("settling");
+    expect(untouched).toBeNull();
+  });
+
   it("claimPayout_and_leasePayoutRecovery_are_guarded", async () => {
     await seedBvnkOnrampPayinApplied(getDb(env), {
       ...seedScope("lease_recovery", "a:wallet:lease_recovery:1"),

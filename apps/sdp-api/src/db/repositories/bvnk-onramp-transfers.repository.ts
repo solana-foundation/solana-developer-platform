@@ -87,6 +87,10 @@ export interface FailBvnkOnrampPayoutUnclaimedInput {
   claimedAt: string;
 }
 
+export interface TouchBvnkOnrampPayoutCandidateInput {
+  transferId: string;
+}
+
 export interface MarkBvnkOnrampPayoutPolledInput {
   transferId: string;
   polledAt: string;
@@ -162,6 +166,16 @@ export interface BvnkOnrampTransfersRepository {
 
   /** Stamps `payout.lastPolledAt` after a poll so the row rotates; fenced on the payoutId existing and the row settling. */
   markPayoutPolled(input: MarkBvnkOnrampPayoutPolledInput): Promise<PaymentTransferRow | null>;
+  /**
+   * Rotates an unclaimed settling candidate to the back of the queue after a
+   * failed attempt by bumping `updated_at`; a claimed row is left untouched.
+   *
+   * @param input.transferId - The candidate transfer id.
+   * @returns The touched row, or null when the row is no longer an unclaimed settling candidate.
+   */
+  touchPayoutCandidate(
+    input: TouchBvnkOnrampPayoutCandidateInput
+  ): Promise<PaymentTransferRow | null>;
 
   /** Claims the sandbox simulation slot first-write-wins while the transfer is still awaiting payment (R15). */
   claimPayinSimulation(

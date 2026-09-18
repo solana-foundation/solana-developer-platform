@@ -17,6 +17,7 @@ import type {
   MarkBvnkOnrampPayoutPolledInput,
   RecordBvnkOnrampPayoutIdInput,
   SettleBvnkOnrampPayoutInput,
+  TouchBvnkOnrampPayoutCandidateInput,
 } from "./bvnk-onramp-transfers.repository";
 import { mapTransferRow } from "./payments.repository.postgres";
 
@@ -201,6 +202,15 @@ SET status = 'failed',
     error = ?,
     provider_data = jsonb_set(provider_data, '{bvnk,payout}', ?::jsonb),
     updated_at = sdp_iso_now()
+WHERE id = ?
+  AND provider = 'bvnk'
+  AND type = 'onramp'
+  AND status = 'settling'
+  AND NOT jsonb_exists(provider_data->'bvnk','payout')
+RETURNING *, ${ONRAMP_KIND}`;
+
+const TOUCH_PAYOUT_CANDIDATE_SQL = `UPDATE payment_transfers
+SET updated_at = sdp_iso_now()
 WHERE id = ?
   AND provider = 'bvnk'
   AND type = 'onramp'
@@ -407,6 +417,15 @@ export function createPostgresBvnkOnrampTransfersRepository(
       const row = await db
         .prepare(MARK_PAYOUT_POLLED_SQL)
         .bind(input.polledAt, input.transferId)
+        .first<OnrampTransferProjectionRow>();
+
+      return row === null ? null : mapTransferRow(row);
+    },
+
+    async touchPayoutCandidate(input: TouchBvnkOnrampPayoutCandidateInput) {
+      const row = await db
+        .prepare(TOUCH_PAYOUT_CANDIDATE_SQL)
+        .bind(input.transferId)
         .first<OnrampTransferProjectionRow>();
 
       return row === null ? null : mapTransferRow(row);

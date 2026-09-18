@@ -23,15 +23,3 @@ WHERE prj.id=pt.project_id
   AND pt.provider='bvnk'
   AND pt.type='onramp'
   AND pt.status IN ('pending','awaiting_payment','settling');
-
-UPDATE counterparty_provider_accounts cpa
-SET status='archived',
-    metadata='{}'::jsonb,
-    updated_at=sdp_iso_now()
-FROM projects prj
-WHERE prj.id=cpa.project_id
-  AND prj.environment='sandbox'
-  AND cpa.kind='funding_wallet'
-  AND cpa.status='active'
-  AND cpa.provider='bvnk'
-  AND cpa.provider_status IS NULL;
