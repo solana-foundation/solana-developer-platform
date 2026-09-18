@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -897,6 +898,23 @@ describe("Earn queued withdrawal repository", () => {
       destination_address: EXTERNAL_OWNER,
       signature: "queued-fulfilled-external-signature",
       status: "finalized",
+    });
+
+    // The fulfilled request now exists BOTH as a persisted movement and as a
+    // queue row; the owner's earned totals must count the payout once.
+    const totals = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).aggregateExternalWalletMovements({
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      ownerAddress: EXTERNAL_OWNER,
+    });
+    expect(totals.get(EXTERNAL_POSITION)).toMatchObject({
+      finalizedDeposits: "0",
+      finalizedWithdrawals: "9.8",
+      finalizedWithdrawalCount: 1,
+      unvaluedWithdrawalCount: 0,
     });
   });
 

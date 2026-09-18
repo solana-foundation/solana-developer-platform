@@ -1675,25 +1675,36 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 AND project_id = ?
                 AND environment = ?
                 AND owner_address = ?
-             UNION ALL
-             SELECT position_id,
-                    0::numeric,
-                    CASE WHEN status = 'fulfilled'
-                         THEN COALESCE(assets_paid, '0')::numeric
-                         ELSE 0::numeric END,
-                    CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END,
-                    CASE WHEN status = 'fulfilled' AND assets_paid IS NULL THEN 1 ELSE 0 END,
-                    CASE WHEN status IN (
-                           'creating', 'pending', 'fulfillable',
-                           'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                         ) THEN 1 ELSE 0 END
-               FROM earn_vault_withdrawal_requests
-              WHERE organization_id = ?
-                AND project_id = ?
-                AND environment = ?
-                AND owner_address = ?
-                AND custody_wallet_id IS NULL
-           )
+              UNION ALL
+              SELECT request.position_id,
+                     0::numeric,
+                     CASE WHEN request.status = 'fulfilled'
+                          THEN COALESCE(request.assets_paid, '0')::numeric
+                          ELSE 0::numeric END,
+                     CASE WHEN request.status = 'fulfilled' THEN 1 ELSE 0 END,
+                     CASE WHEN request.status = 'fulfilled' AND request.assets_paid IS NULL
+                          THEN 1 ELSE 0 END,
+                     CASE WHEN request.status IN (
+                            'creating', 'pending', 'fulfillable',
+                            'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                          ) THEN 1 ELSE 0 END
+                FROM earn_vault_withdrawal_requests request
+               WHERE request.organization_id = ?
+                 AND request.project_id = ?
+                 AND request.environment = ?
+                 AND request.owner_address = ?
+                 AND request.custody_wallet_id IS NULL
+                 -- A fulfilled request whose payout was persisted into
+                 -- earn_movements is already counted by the ledger half of this
+                 -- union; counting the queue projection too would double the
+                 -- withdrawal and its payout. The prefix is the one the writer
+                 -- (advanceRequest) keys the movement on.
+                 AND NOT EXISTS (
+                   SELECT 1 FROM earn_movements persisted
+                    WHERE persisted.id =
+                      '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}' || request.id
+                 )
+            )
            SELECT position_id,
                   COALESCE(SUM(finalized_deposits), 0)::text AS finalized_deposits,
                   COALESCE(SUM(finalized_withdrawals), 0)::text AS finalized_withdrawals,
