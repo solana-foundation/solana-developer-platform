@@ -227,11 +227,14 @@ describe("WalletSetupFlow connection picker", () => {
     };
   }
 
-  function renderInstalledPrivy(connections: FlowProps["connections"]): string {
+  function renderInstalledPrivy(
+    connections: FlowProps["connections"],
+    connectedProviders: FlowProps["connectedProviders"] = ["privy"]
+  ): string {
     return renderToStaticMarkup(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <WalletSetupFlow
-          connectedProviders={["privy"]}
+          connectedProviders={connectedProviders}
           enabledProviders={["privy"]}
           initialProvider="privy"
           privyByokEnabled
@@ -272,6 +275,26 @@ describe("WalletSetupFlow connection picker", () => {
     const markup = renderInstalledPrivy([]);
 
     expect(markup).not.toContain("The wallet is created in this connection");
+  });
+
+  // A BYOK-only project has no legacy config, so `/v1/wallets/configs` reports
+  // nothing connected; the active connection alone must mark privy installed.
+  it("offers an active connection when there is no legacy config and no default", () => {
+    const markup = renderInstalledPrivy([connection({ isDefault: false })], []);
+
+    expect(markup).toContain("Wallet details");
+    expect(markup).toContain('name="connectionId"');
+    expect(markup).toContain("conn-active");
+    expect(markup).toContain('name="label"');
+    expect(markup).not.toContain("data-privy-byok-form");
+    expect(markup).not.toMatch(/type="password"/);
+  });
+
+  it("keeps the credential form while the only connection is not active yet", () => {
+    const markup = renderInstalledPrivy([connection({ status: "pending" })], []);
+
+    expect(markup).toContain("data-privy-byok-form");
+    expect(markup).not.toContain('name="connectionId"');
   });
 
   // Connections belong to one provider; switching on step 1 must not carry them over.

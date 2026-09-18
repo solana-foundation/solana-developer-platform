@@ -304,11 +304,6 @@ export function WalletSetupFlow({
     [availability, selectedProvider]
   );
   const selectedProviderEntry = selectedAvailability?.entry ?? null;
-  const isConnected = selectedAvailability?.status === "active";
-  const canProvisionWallet = selectedProviderEntry
-    ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
-    : false;
-  const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
   // Switching provider on step 1 must not carry the previous provider's
   // connections into step 2, so the list is narrowed here rather than trusted
   // as delivered. The picker earns its place only when the provider is already
@@ -318,6 +313,16 @@ export function WalletSetupFlow({
     () => connections.filter((connection) => connection.provider === selectedProvider),
     [connections, selectedProvider]
   );
+  // The availability status comes from legacy Configs. A BYOK-only project has
+  // no legacy Config, so an active connection also shows that the provider is
+  // installed. Without it, the wizard asks for the credentials again.
+  const isConnected =
+    selectedAvailability !== null &&
+    (selectedAvailability.status === "active" || connectionOptions.some(isSelectableConnection));
+  const canProvisionWallet = selectedProviderEntry
+    ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
+    : false;
+  const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
   const showConnectionPicker = isConnected && connectionOptions.some(isSelectableConnection);
   // An uninstalled Privy under BYOK goes through provider details (credential
   // submission + connection check) instead of the legacy initialize path,
