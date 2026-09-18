@@ -65,7 +65,11 @@ describe("0112 BVNK funding wallet per fiat", () => {
        ) VALUES
          ('cpa_funding_0112_a', 'org_0112', 'prj_0112', 'cpty_0112', 'bvnk', 'bvnk_0112_a', 'funding_wallet', 'USD', '{"onrampKey":"USD:USDC_SOLANA:dest-a"}'),
          ('cpa_funding_0112_b', 'org_0112', 'prj_0112', 'cpty_0112', 'bvnk', 'bvnk_0112_b', 'funding_wallet', 'USD', '{"onrampKey":"USD:USDC_SOLANA:dest-b"}'),
-         ('cpa_funding_0112_production', 'org_0112', 'prj_0112_production', 'cpty_0112_production', 'bvnk', 'bvnk_0112_production', 'funding_wallet', 'USD', '{"onrampKey":"USD:USDC_SOLANA:dest-prod"}')`
+         ('cpa_funding_0112_production', 'org_0112', 'prj_0112_production', 'cpty_0112_production', 'bvnk', 'bvnk_0112_production', 'funding_wallet', 'USD', '{"onrampKey":"USD:USDC_SOLANA:dest-prod"}'),
+         ('cpa_funding_0112_production_older', 'org_0112', 'prj_0112_production', 'cpty_0112_production', 'bvnk', 'bvnk_0112_production_older', 'funding_wallet', 'USD', '{"onrampKey":"USD:USDC_SOLANA:dest-prod-older"}')`
+    );
+    await client.query(
+      `UPDATE counterparty_provider_accounts SET updated_at = '2026-01-01T00:00:00.000Z' WHERE id = 'cpa_funding_0112_production_older'`
     );
 
     await client.query(migrationSql);
@@ -84,6 +88,11 @@ describe("0112 BVNK funding wallet per fiat", () => {
         id: "cpa_funding_0112_production",
         status: "active",
         metadata: { onrampKey: "USD:USDC_SOLANA:dest-prod" },
+      },
+      {
+        id: "cpa_funding_0112_production_older",
+        status: "archived",
+        metadata: { onrampKey: "USD:USDC_SOLANA:dest-prod-older" },
       },
     ]);
 
