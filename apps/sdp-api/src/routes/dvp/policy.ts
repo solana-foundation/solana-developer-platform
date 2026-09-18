@@ -30,6 +30,7 @@
  * (PRO-1597), where the authoring UI can be updated with it.
  */
 
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { PolicyCandidate, WalletOperationType } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -99,9 +100,35 @@ async function providerWalletIdFor(
   return wallet.walletId;
 }
 
+/**
+ * The leg's target as a decimal amount, or null when its decimals are unknown.
+ *
+ * `dvp_trades.decimals_a` is nullable for rows written before migration 0081,
+ * and a target of "1000" means nothing without the scale. Null says so: an
+ * amount rule then does not apply, rather than comparing raw base units against
+ * a bound that means whole tokens. Every rule that does not read the amount
+ * still governs, and the base units travel in the candidate's context so an
+ * approver sees the real number.
+ *
+ * @param baseUnits - The leg's stored target.
+ * @param decimals - The mint's decimals, or null on a legacy row.
+ * @returns The decimal amount, or null when it cannot be stated.
+ */
+function decimalTargetAmount(baseUnits: string, decimals: number | null): string | null {
+  return decimals === null ? null : formatDecimalAmount(baseUnits, decimals);
+}
+
 function buildDvpPolicyCandidate(input: {
   auth: ApiKeyContext;
   trade: DvpTradeRow;
+  /**
+   * The CALLER's project, never the trade's. An inbound trade belongs to the
+   * counterparty's project, and the wallet being judged, the policy that
+   * governs it and the request scope enforcement runs under are all the
+   * caller's, so taking the trade's project aborts an inbound funding before it
+   * is ever evaluated.
+   */
+  projectId: string;
   custodyWalletId: string;
   walletId: string;
   operationType: DvpPolicyOperationType;
@@ -112,7 +139,7 @@ function buildDvpPolicyCandidate(input: {
 }): PolicyCandidate {
   return {
     organizationId: input.auth.organizationId,
-    projectId: input.trade.projectId,
+    projectId: input.projectId,
     custodyWalletId: input.custodyWalletId,
     walletId: input.walletId,
     apiKeyId: input.auth.apiKeyId,
@@ -158,15 +185,24 @@ export async function extractDvpFundPolicyCandidate(
     candidate: buildDvpPolicyCandidate({
       auth,
       trade,
+      projectId: params.projectId,
       custodyWalletId: params.custodyWalletId,
       walletId,
       operationType: "dvp_fund",
-      asset: isA ? trade.symbolA : trade.symbolB,
-      amount: isA ? trade.amountA : trade.amountB,
+      // Mint and decimal amount, the form payments and earn use: asset rules
+      // match a mint exactly, and amount bounds are decimal, so a symbol would
+      // match no rule and raw base units would compare against a limit that
+      // means whole tokens.
+      asset: isA ? trade.mintA : trade.mintB,
+      amount: decimalTargetAmount(
+        isA ? trade.amountA : trade.amountB,
+        isA ? trade.decimalsA : trade.decimalsB
+      ),
       destination: isA ? trade.escrowA : trade.escrowB,
       context: {
         side: params.side,
-        mint: isA ? trade.mintA : trade.mintB,
+        symbol: isA ? trade.symbolA : trade.symbolB,
+        baseUnits: isA ? trade.amountA : trade.amountB,
         counterparty: isA ? trade.userB : trade.userA,
       },
     }),
@@ -211,6 +247,7 @@ export async function extractDvpSettlePolicyCandidate(
     candidate: buildDvpPolicyCandidate({
       auth,
       trade,
+      projectId,
       custodyWalletId: settlement.custodyWalletId,
       walletId,
       operationType: "dvp_settle",

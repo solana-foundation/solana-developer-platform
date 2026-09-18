@@ -391,6 +391,37 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
       expect(fundDvpTradeLeg).toHaveBeenCalledTimes(1);
     });
 
+    // Settlement replays with no body of its own, through the close idempotency
+    // and its own effect fence, so funding's approval test does not cover it.
+    it("executes the settlement once an approver allows it", async () => {
+      await seedTrade("dvp_policy_settle_approved");
+      await seedWalletPolicy(SETTLEMENT_WALLET.id, [
+        { id: "approve-settle", kind: "approval", operationTypes: ["dvp_settle"] },
+      ]);
+
+      const held = await post("dvp_policy_settle_approved", "settle");
+      expect(held.status).toBe(202);
+      const { error } = (await held.json()) as {
+        error: { details: { approvalRequestId: string } };
+      };
+
+      const decided = await app.request(
+        `/v1/wallets/approval-requests/${error.details.approvalRequestId}/approve`,
+        {
+          method: "POST",
+          headers: { ...approverHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+        env
+      );
+      expect(decided.status).toBe(200);
+
+      if (closeDvpTrade.mock.calls.length === 0) {
+        await recoverApprovedWalletOperations(env);
+      }
+      expect(closeDvpTrade).toHaveBeenCalledTimes(1);
+    });
+
     // The judged amount is the leg's target, and the transfer only ever sends
     // the outstanding part of it, so what moves is always inside what was
     // approved. Recording the live shortfall instead would let a reclaim
@@ -405,16 +436,20 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
 
       const row = await getDb(env)
         .prepare(
-          `SELECT amount, asset, destination, operation_type, operation_family, custody_wallet_id
+          `SELECT amount, asset, destination, operation_type, operation_family,
+                  custody_wallet_id, project_id
              FROM wallet_operations WHERE operation_type = 'dvp_fund'`
         )
         .first<Record<string, unknown>>();
+      // The mint and a decimal amount, the form asset and amount rules match on.
+      // 1000 base units at 6 decimals is 0.001, not 1000.
       expect(row).toMatchObject({
-        amount: LEG_A_TARGET,
-        asset: "ATD",
+        amount: "0.001",
+        asset: MINT_A,
         destination: ESCROW_A,
         operation_family: "program",
         custody_wallet_id: PARTY_A_WALLET.id,
+        project_id: TEST_PROJECT.id,
       });
     });
   });
@@ -472,6 +507,27 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
       .prepare("SELECT id FROM wallet_operations")
       .all<{ id: string }>();
     expect(operations.results ?? []).toHaveLength(0);
+  });
+
+  // An inbound trade belongs to the counterparty's project. The candidate must
+  // carry the CALLER's project, or the funding aborts before it is judged.
+  it("judges an inbound trade against the caller's own project", async () => {
+    await seedTrade("dvp_policy_inbound");
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET project_id = ?, organization_id = ? WHERE id = ?")
+      .bind(`${TEST_PROJECT.id}_production`, TEST_ORG.id, "dvp_policy_inbound")
+      .run();
+    await seedWalletPolicy(PARTY_A_WALLET.id, [
+      { id: "approve-fund", kind: "approval", operationTypes: ["dvp_fund"] },
+    ]);
+
+    const res = await post("dvp_policy_inbound", "fund", { side: "a" });
+
+    expect(res.status).toBe(202);
+    const row = await getDb(env)
+      .prepare("SELECT project_id FROM wallet_operations WHERE operation_type = 'dvp_fund'")
+      .first<{ project_id: string }>();
+    expect(row?.project_id).toBe(TEST_PROJECT.id);
   });
 
   it("funds normally when no policy governs the wallet", async () => {

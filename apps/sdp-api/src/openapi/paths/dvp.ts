@@ -114,6 +114,11 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     },
     responses: {
       200: { description: "Leg funded", content: jsonContent(dvpLegActionResponse) },
+      202: {
+        description:
+          "Held for approval by the wallet's policy. The transfer runs when an approver allows it; error.details.approvalRequestId identifies the request.",
+        content: jsonContent(errorResponseSchema),
+      },
       ...errorResponses(dvpLegRefusalErrorResponseSchema, [400, 409]),
       ...errorResponses(errorResponseSchema, [401, 403, 404, 422, 500]),
     },
@@ -177,6 +182,15 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
       },
       responses: {
         200: { description: "Close sent", content: jsonContent(dvpCloseResponse) },
+        ...(action === "settle"
+          ? {
+              202: {
+                description:
+                  "Held for approval by the settlement wallet's policy. The settlement runs when an approver allows it; error.details.approvalRequestId identifies the request.",
+                content: jsonContent(errorResponseSchema),
+              },
+            }
+          : {}),
         ...errorResponses(dvpCloseRefusalErrorResponseSchema, [400, 409]),
         ...errorResponses(errorResponseSchema, [401, 403, 404, 422, 500]),
       },

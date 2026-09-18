@@ -514,12 +514,14 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     },
     (recordAttempt) =>
       closeDvpTrade(c, trade, action, settlement, async (attempt) => {
-        // Fences an approved replay immediately before the external
-        // submission, and is a no-op on an ordinary request.
+        // Record first, fence second. Both happen before the submission, and
+        // in this order a failed record aborts while the approval's lease is
+        // still unspent, so the operation can be executed again. Fencing first
+        // would strand an approved settle that never reached the network.
+        await recordAttempt(attempt);
         if (action === "settle") {
           await beginApprovedWalletOperationEffect(c);
         }
-        await recordAttempt(attempt);
       })
   );
 
@@ -597,10 +599,11 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
         fundDvpTradeLeg(c, trade, {
           ...params,
           recordAttempt: async (attempt) => {
-            // Fences an approved replay immediately before the transfer; a
-            // no-op on an ordinary request.
-            await beginApprovedWalletOperationEffect(c);
+            // Record first, fence second: see the close above. The fence is a
+            // no-op on an ordinary request and is the last thing before the
+            // transfer goes out.
             await recordAttempt(attempt);
+            await beginApprovedWalletOperationEffect(c);
           },
         })
     ));
