@@ -13,7 +13,12 @@ import { badRequest, transactionExpired } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
+import {
+  clearKVStores,
+  readRateLimitCount,
+  seedCachedApiKey,
+  seedRateLimit,
+} from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 const buildExternalWalletDepositTransaction = vi.hoisted(() => vi.fn());
@@ -1317,6 +1322,18 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
     // Refused before the RPC probe was paid for, which is the whole point.
     expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+  });
+
+  it("charges nothing for a keyed request the body validator refuses", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+
+    const res = await post("deposit-transactions", { strategyId: strategy.id, amount: "25" });
+
+    expect(res.status).toBe(400);
+    // The org pool is shared: malformed requests must not be able to drain it.
+    expect(await readRateLimitCount(env, ACTOR_SCOPE)).toBe(0);
+    expect(await readRateLimitCount(env, `metered:earn-provider-read:org:${TEST_ORG.id}`)).toBe(0);
   });
 
   it("meters the anonymous build by client address, not by the org's exhausted pool", async () => {

@@ -223,13 +223,18 @@ optionalAuthEarn.get(
 // the optional-auth router: authenticated callers retain tenant entitlement
 // and durable build behavior inside the shared handlers, while anonymous
 // callers never acquire a tenant identity or write a row.
+//
+// On the two money-IN routes the body is validated BEFORE either meter runs:
+// the keyed counter is shared by the whole organization, so a malformed
+// request must not be able to spend the pool that later valid builds and
+// provider reads draw from. Same order as the RPC relay's quota.
 optionalAuthEarn.post(
   "/vault-deposit-previews",
   ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:read"),
+  validateBody(earnVaultDepositPreviewSchema),
   authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
   anonymousEarnRpcQuota,
-  validateBody(earnVaultDepositPreviewSchema),
   createEarnVaultDepositPreview
 );
 // The deposit BUILD is money-IN, so it takes the same keyed meter as the
@@ -239,9 +244,9 @@ optionalAuthEarn.post(
   "/external-wallet/deposit-transactions",
   ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:write"),
+  validateBody(earnExternalWalletDepositTransactionSchema),
   authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
   anonymousEarnRpcQuota,
-  validateBody(earnExternalWalletDepositTransactionSchema),
   createEarnExternalWalletDepositTransaction
 );
 optionalAuthEarn.post(

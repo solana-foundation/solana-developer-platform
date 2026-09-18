@@ -1309,7 +1309,9 @@ keyed exit traffic is bounded by the general per-key tier alone, recorded as
 accepted risk. Money-IN carries no such rule, which is why the deposit quote
 and the keyed external-wallet deposit build are metered
 (`authenticatedMeteredQuota`, so an anonymous build keeps its per-IP `earn-rpc`
-counter) and the exit quote is not. Pinned by the "metered quotas" describe in
+counter) and the exit quote is not. On both money-in routes the body is
+validated before either meter runs, so a malformed request charges nothing
+against the organization's shared pool. Pinned by the "metered quotas" describe in
 `../earn-program.test.ts`,
 whose second test exhausts both counters and asserts the payout still lands,
 and by the one in `../earn.external-wallet.test.ts`, which also breaks the
