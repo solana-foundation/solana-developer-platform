@@ -13,7 +13,13 @@ import { badRequest, transactionExpired } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import {
+  clearKVStores,
+  readRateLimitCount,
+  seedCachedApiKey,
+  seedRateLimit,
+} from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 const buildExternalWalletDepositTransaction = vi.hoisted(() => vi.fn());
 const buildExternalWalletWithdrawalTransaction = vi.hoisted(() => vi.fn());
@@ -30,6 +36,9 @@ const resolveVaultWithdrawClient = vi.hoisted(() =>
   }))
 );
 const surfacingEnabled = vi.hoisted(() => ({ value: true }));
+// Flip to simulate a rate-limit counter-store outage for the requests that
+// follow. Only the rateLimits store breaks: auth still reads its key cache.
+const rateLimitStoreDown = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/services/earn/vault-external-wallet.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/vault-external-wallet.service")>()),
@@ -48,6 +57,31 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/types/provider-access")>()),
   isEarnProviderSurfaced: () => surfacingEnabled.value,
 }));
+
+vi.mock("@/runtime/kv-redis", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/runtime/kv-redis")>();
+  return {
+    ...original,
+    createKVStoreSet: (env: Env) => {
+      const stores = original.createKVStoreSet(env);
+      if (!rateLimitStoreDown.value) {
+        return stores;
+      }
+      return {
+        ...stores,
+        rateLimits: new Proxy(stores.rateLimits, {
+          get(target, property) {
+            if (property === "admitSlidingWindow") {
+              return () => Promise.reject(new Error("counter store down"));
+            }
+            const value = Reflect.get(target, property);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }),
+      };
+    },
+  };
+});
 
 /**
  * The external-wallet (caller-signed) routes — the gates, and the ADR 0002
@@ -331,6 +365,7 @@ beforeEach(async () => {
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   surfacingEnabled.value = true;
+  rateLimitStoreDown.value = false;
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
@@ -1258,6 +1293,106 @@ describe("exit safety (ADR 0002): the exit outlives every money-in gate", () => 
     const body = (await res.json()) as { data: { withdrawal: Record<string, unknown> } };
     expect(body.data.withdrawal.status).toBe("submitted");
     expect(body.data.withdrawal.denomination).toBe(SHARE_MINT);
+  });
+});
+
+/**
+ * The keyed deposit BUILD is money-in against paid RPC (a simulation probe per
+ * build, Jupiter on a swap-funded one), so it carries the same keyed meter as
+ * the deposit quote (PRO-1994). The exit build and preview carry NONE, and that
+ * is load-bearing: `meteredQuota` fails closed, and a 5xx on the way out of a
+ * position is what ADR 0002 exit safety rules out. See routes/earn/CLAUDE.md,
+ * "Metered quotas".
+ */
+describe("metered quotas (PRO-1994): the deposit build is metered, the exit never is", () => {
+  const ACTOR_SCOPE = `metered:earn-provider-read:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`;
+
+  it("429s a keyed deposit build once the actor's quota is exhausted", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedRateLimit(env, ACTOR_SCOPE, 60);
+
+    const res = await post("deposit-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      amount: "25",
+    });
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+    // Refused before the RPC probe was paid for, which is the whole point.
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+  });
+
+  it("charges nothing for a keyed request the body validator refuses", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+
+    const res = await post("deposit-transactions", { strategyId: strategy.id, amount: "25" });
+
+    expect(res.status).toBe(400);
+    // The org pool is shared: malformed requests must not be able to drain it.
+    expect(await readRateLimitCount(env, ACTOR_SCOPE)).toBe(0);
+    expect(await readRateLimitCount(env, `metered:earn-provider-read:org:${TEST_ORG.id}`)).toBe(0);
+  });
+
+  it("meters the anonymous build by client address, not by the org's exhausted pool", async () => {
+    const strategy = await seedStrategy();
+    await seedRateLimit(env, `metered:earn-provider-read:org:${TEST_ORG.id}`, 1000);
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("never lets an exhausted quota stand between the owner and its exit", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    const positionId = await seedExternalWalletPosition();
+    // Both Earn quotas exhausted for this actor AND the whole organization.
+    for (const quota of ["earn-provider-read", "earn-chain-read"]) {
+      await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`, 1000);
+      await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}`, 1000);
+    }
+
+    const preview = await post("withdrawal-previews", { positionId, shares: "10" });
+    expect(preview.status).toBe(200);
+    const exit = await post("withdrawal-transactions", { positionId, shares: "10" });
+    expect(exit.status).toBe(200);
+    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
+
+    // The CONTRAST under identical conditions: the deposit build is refused.
+    const deposit = await post("deposit-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      amount: "25",
+    });
+    expect(deposit.status).toBe(429);
+  });
+
+  it("a counter-store outage refuses the deposit build and never the exit", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    const positionId = await seedExternalWalletPosition();
+    rateLimitStoreDown.value = true;
+
+    const preview = await post("withdrawal-previews", { positionId, shares: "10" });
+    expect(preview.status).toBe(200);
+    const exit = await post("withdrawal-transactions", { positionId, shares: "10" });
+    expect(exit.status).toBe(200);
+
+    const deposit = await post("deposit-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      amount: "25",
+    });
+    expect(deposit.status).toBe(503);
+    expect(await deposit.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
   });
 });
 
