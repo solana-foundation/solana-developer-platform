@@ -292,7 +292,68 @@ export async function resolveWalletTokenAccountAddresses(
   }
 }
 
-async function fetchParsedTransaction(
+type ParsedTransaction = NonNullable<ParsedTransactionResponse["result"]>;
+
+/**
+ * Cap on cached parsed transactions. A confirmed transaction's parsed body is
+ * immutable, so entries never need revalidation; the bound exists only to keep
+ * memory flat as signatures rotate through the FIFO.
+ */
+export const PARSED_TRANSACTION_CACHE_MAX_ENTRIES = 1_000;
+
+const PARSED_TRANSACTION_CACHE_TTL_MS = 60 * 60 * 1000;
+
+interface ParsedTransactionCacheEntry {
+  expiresAt: number;
+  value: ParsedTransaction;
+}
+
+const parsedTransactionCache = new Map<string, ParsedTransactionCacheEntry>();
+const inFlightParsedTransactions = new Map<string, Promise<ParsedTransactionResponse["result"]>>();
+
+/**
+ * Drops every cached parsed transaction and in-flight lookup. Cache entries
+ * are keyed by signature alone and shared across tenants (a parsed body is
+ * tenant-independent), so callers that stub the RPC must clear the cache to
+ * stay isolated.
+ */
+export function clearObservedTransferCaches() {
+  parsedTransactionCache.clear();
+  inFlightParsedTransactions.clear();
+}
+
+function readCachedParsedTransaction(signature: string): ParsedTransaction | null {
+  const entry = parsedTransactionCache.get(signature);
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.expiresAt <= Date.now()) {
+    parsedTransactionCache.delete(signature);
+    return null;
+  }
+
+  return entry.value;
+}
+
+function writeParsedTransactionCache(signature: string, parsed: ParsedTransaction): void {
+  if (!parsedTransactionCache.has(signature)) {
+    while (parsedTransactionCache.size >= PARSED_TRANSACTION_CACHE_MAX_ENTRIES) {
+      const oldest = parsedTransactionCache.keys().next();
+      if (oldest.done) {
+        break;
+      }
+      parsedTransactionCache.delete(oldest.value);
+    }
+  }
+
+  parsedTransactionCache.set(signature, {
+    value: parsed,
+    expiresAt: Date.now() + PARSED_TRANSACTION_CACHE_TTL_MS,
+  });
+}
+
+async function fetchParsedTransactionFromRpc(
   env: Env,
   signature: string
 ): Promise<ParsedTransactionResponse["result"]> {
@@ -322,6 +383,39 @@ async function fetchParsedTransaction(
   }
 
   return payload.result ?? null;
+}
+
+async function fetchParsedTransaction(
+  env: Env,
+  signature: string
+): Promise<ParsedTransactionResponse["result"]> {
+  const cached = readCachedParsedTransaction(signature);
+  if (cached) {
+    return cached;
+  }
+
+  const inFlight = inFlightParsedTransactions.get(signature);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const pending = fetchParsedTransactionFromRpc(env, signature)
+    .then((parsedTransaction) => {
+      // Only cache confirmed bodies. A null means the transaction is not yet
+      // indexed at the confirmed commitment; caching it would hide a
+      // just-submitted transfer until the TTL lapsed, delaying on-chain
+      // status. Failures stay uncached too, so the next read retries.
+      if (parsedTransaction) {
+        writeParsedTransactionCache(signature, parsedTransaction);
+      }
+      return parsedTransaction;
+    })
+    .finally(() => {
+      inFlightParsedTransactions.delete(signature);
+    });
+  inFlightParsedTransactions.set(signature, pending);
+
+  return pending;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
