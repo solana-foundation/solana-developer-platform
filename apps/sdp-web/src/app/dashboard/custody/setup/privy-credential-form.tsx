@@ -302,8 +302,11 @@ function usePrivyCredentialSubmission({
     if (isPending) {
       return;
     }
+    onPendingChange?.(true);
     startTransition(async () => {
-      applyResult(await submitSafely(payload));
+      const result = await submitSafely(payload);
+      onPendingChange?.(false);
+      applyResult(result);
     });
   };
 
@@ -311,6 +314,7 @@ function usePrivyCredentialSubmission({
     if (isPending) {
       return;
     }
+    onPendingChange?.(true);
     startTransition(async () => {
       try {
         applyResult(await recheckPrivyCredentialAction(connectionId));
@@ -318,6 +322,8 @@ function usePrivyCredentialSubmission({
         // The completion is replay-safe and the connection survives
         // server-side, so a lost action response leaves the current recovery
         // state valid; stay on it with the same re-check still offered.
+      } finally {
+        onPendingChange?.(false);
       }
     });
   };

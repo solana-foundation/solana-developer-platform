@@ -4,6 +4,7 @@ import type { CustodyProvider } from "@sdp/types";
 import { Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Callout } from "@/components/ui/callout";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
@@ -28,32 +29,35 @@ export function RotateCredentialsModal({
   lifecycle,
   provider,
   connectionId,
+  canRotate,
 }: {
   isOpen: boolean;
   onClose: () => void;
   lifecycle: CustodyCredentialLifecycle;
   provider: CustodyProvider;
   connectionId: string;
+  canRotate: boolean;
 }) {
   const t = useTranslations();
   const { pending, run } = useCustodyAction();
+  const [recoveryLocked, setRecoveryLocked] = useState(false);
+  const closeDisabled = pending || recoveryLocked;
 
-  // The form mounts only while the dialog is open, which is what re-mints the
-  // idempotency key and drops the typed secret: both are per-attempt values,
-  // and unmounting is the one reset that cannot leave a secret behind in a
-  // mounted input for a frame.
+  // Closing unmounts the form, so an unresolved attempt must settle first.
   return (
     <Modal
       isOpen={isOpen}
-      onClose={pending ? undefined : onClose}
-      closeDisabled={pending}
+      onClose={closeDisabled ? undefined : onClose}
+      closeDisabled={closeDisabled}
       size="lg"
       ariaLabel={t("DashboardCustody.rotateTitle")}
     >
       <RotateCredentialsForm
+        canRotate={canRotate}
         connectionId={connectionId}
         lifecycle={lifecycle}
         onClose={onClose}
+        onRecoveryLockChange={setRecoveryLocked}
         pending={pending}
         provider={provider}
         run={run}
@@ -64,17 +68,21 @@ export function RotateCredentialsModal({
 }
 
 function RotateCredentialsForm({
+  canRotate,
   connectionId,
   lifecycle,
   onClose,
+  onRecoveryLockChange,
   pending,
   provider,
   run,
   t,
 }: {
+  canRotate: boolean;
   connectionId: string;
   lifecycle: CustodyCredentialLifecycle;
   onClose: () => void;
+  onRecoveryLockChange: (locked: boolean) => void;
   pending: boolean;
   provider: CustodyProvider;
   run: ReturnType<typeof useCustodyAction>["run"];
@@ -82,30 +90,30 @@ function RotateCredentialsForm({
 }) {
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
-  // One key per user intent, reused verbatim if the same rotation is retried:
-  // the server replays the original result for a repeated key instead of
-  // opening a second rotation.
-  //
-  // State, not a ref: re-minting is a settled decision the submit handler makes
-  // from the result, and a ref would have to be written during render to be
-  // initialised lazily — which React is free to replay or discard. The extra
-  // render costs nothing, since it batches with the secret being cleared beside
-  // it. This mirrors the same key's handling in `privy-credential-form.tsx`.
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [attempt, setAttempt] = useState<FormData | null>(null);
 
   const connectionCount = lifecycle.impact.connections.length;
+  const fieldsDisabled = pending || attempt !== null || !canRotate;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const formData = new FormData();
-    formData.set("credentialId", lifecycle.providerCredential.id);
-    formData.set("provider", provider);
-    formData.set("connectionId", connectionId);
-    formData.set("idempotencyKey", idempotencyKey);
-    formData.set("appId", appId);
-    formData.set("appSecret", appSecret);
+    if (pending || (!attempt && !canRotate)) return;
+    // Keep fields, key and target together: a refresh may replace the current
+    // credential while the original request's response is still unknown.
+    const formData = attempt ?? new FormData();
+    if (!attempt) {
+      formData.set("credentialId", lifecycle.providerCredential.id);
+      formData.set("provider", provider);
+      formData.set("connectionId", connectionId);
+      formData.set("idempotencyKey", idempotencyKey);
+      formData.set("appId", appId);
+      formData.set("appSecret", appSecret);
+      setAttempt(formData);
+    }
+    onRecoveryLockChange(true);
 
-    const result = await run(() => rotateCredentialsAction(formData), {
+    const result = await run(() => rotateCredentialsAction(formData, attempt !== null), {
       successTitle: t("DashboardCustody.rotateSuccessTitle"),
       successDescription: t("DashboardCustody.rotateSuccessDescription", {
         connections: connectionCount,
@@ -115,18 +123,13 @@ function RotateCredentialsForm({
       unknownTitle: t("DashboardCustody.rotateUnknownTitle"),
     });
 
-    // Clear the secret before anything else on every settled outcome: a
-    // re-render must not leave it in a mounted input, and a rejected secret is
-    // never the one to retry with.
-    setAppSecret("");
+    if (result.status === "unknown") return;
 
-    // A conclusive refusal ends this intent along with the secret that carried
-    // it. The dialog stays open for a corrected secret, and that is a *new*
-    // rotation — submitted under the old key the server would answer the
-    // changed payload with an idempotency conflict instead of rotating. An
-    // unknown outcome is the opposite case: the first request may have
-    // committed, so its key is kept and a retry replays it rather than opening
-    // a second rotation.
+    setAttempt(null);
+    setAppSecret("");
+    onRecoveryLockChange(false);
+
+    // Only a conclusive refusal permits a corrected intent under a fresh key.
     if (result.status === "failed") {
       setIdempotencyKey(crypto.randomUUID());
     }
@@ -142,13 +145,17 @@ function RotateCredentialsForm({
 
       <CredentialImpactList impact={lifecycle.impact} provider={provider} />
 
+      {attempt && !pending ? (
+        <Callout variant="warning">{t("DashboardCustody.rotateRetryHint")}</Callout>
+      ) : null}
+
       <div className="space-y-2">
         <Label htmlFor="custody-rotate-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
         <Input
           id="custody-rotate-app-id"
           name="appId"
           required
-          disabled={pending}
+          disabled={fieldsDisabled}
           value={appId}
           onChange={(event) => setAppId(event.target.value)}
         />
@@ -160,16 +167,21 @@ function RotateCredentialsForm({
         hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
         value={appSecret}
         onChange={setAppSecret}
-        disabled={pending}
+        disabled={fieldsDisabled}
       />
 
       <div className="flex items-center justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={onClose}
+          disabled={pending || attempt !== null}
+        >
           {t("DashboardCustody.cancel")}
         </Button>
         <Button
           type="submit"
-          disabled={pending}
+          disabled={pending || (!attempt && !canRotate)}
           iconLeft={
             pending ? (
               <Loader2Icon aria-hidden className="size-4 animate-spin" />
@@ -178,7 +190,9 @@ function RotateCredentialsForm({
             )
           }
         >
-          {t("DashboardCustody.rotateConfirm", { count: connectionCount })}
+          {attempt
+            ? t("Shared.SharedComponents.retry")
+            : t("DashboardCustody.rotateConfirm", { count: connectionCount })}
         </Button>
       </div>
     </form>

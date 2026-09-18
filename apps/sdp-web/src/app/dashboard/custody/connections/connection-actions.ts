@@ -38,7 +38,10 @@ function revalidateCustody(provider: string, connectionId?: string) {
  * under 500 and not 408/429, the server answered and nothing committed;
  * anything else — including no response at all — leaves the outcome open.
  */
-function classifyThrown(error: unknown, fallback: string): CustodyActionResult {
+function classifyThrown(
+  error: unknown,
+  fallback: string
+): Exclude<CustodyActionResult, { status: "success" }> {
   const { status, message } = extractSdpApiError(error);
   if (status !== null && status < 500 && status !== 408 && status !== 429) {
     return {
@@ -60,7 +63,10 @@ function classifyThrown(error: unknown, fallback: string): CustodyActionResult {
  * on an HTTP **200** with `rotation.status === "failed"`, so the result body is
  * what settles this, not the status code.
  */
-export async function rotateCredentialsAction(formData: FormData): Promise<CustodyActionResult> {
+export async function rotateCredentialsAction(
+  formData: FormData,
+  isRecoveryAttempt = false
+): Promise<CustodyActionResult> {
   const t = await getTranslations();
   const fallback = t("DashboardCustody.rotateFailed");
 
@@ -91,7 +97,10 @@ export async function rotateCredentialsAction(formData: FormData): Promise<Custo
       }
     );
   } catch (error) {
-    return classifyThrown(error, fallback);
+    const result = classifyThrown(error, fallback);
+    // A replay can be refused before the server reads the original outcome.
+    // Only a rotation result can settle an earlier unknown submission.
+    return isRecoveryAttempt ? { status: "unknown", message: result.message } : result;
   }
 
   const outcome = resolveRotationOutcome(result.rotation);
@@ -207,9 +216,8 @@ export async function deactivateConnectionAction(
 }
 
 /**
- * Abandons an unfinished setup. Deliberately distinct from deactivation: the
- * unverified secret is deleted and the connection leaves the list, because
- * nothing was ever created at the provider.
+ * Cancels unfinished setup and starts stored-secret cleanup.
+ * The deactivated connection remains in the list for history.
  */
 export async function cancelSetupAction(
   connectionId: string,

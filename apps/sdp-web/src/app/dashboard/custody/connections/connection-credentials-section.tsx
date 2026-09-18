@@ -407,17 +407,41 @@ export function ConnectionCredentialsSection({
 }) {
   const t = useTranslations();
   const { pending, run } = useCustodyAction();
-  const [rotateOpen, setRotateOpen] = useState(false);
+  const [rotationLifecycle, setRotationLifecycle] = useState<CustodyCredentialLifecycle | null>(
+    null
+  );
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
+  const availableLifecycle = typeof lifecycle === "object" ? lifecycle : null;
+  const managedHere =
+    availableLifecycle !== null && isCredentialManagedHere(availableLifecycle.providerCredential);
+  const currentInUse =
+    availableLifecycle?.providerCredential.status === "active" &&
+    availableLifecycle.impact.connections.length > 0;
+  const canAct = canManageCustody && managedHere && currentInUse;
+  // A refresh can fail or change the active credential. Keep the open dialog
+  // mounted so it can settle its original attempt, without enabling a new one.
+  const rotationModal = rotationLifecycle ? (
+    <RotateCredentialsModal
+      isOpen
+      onClose={() => setRotationLifecycle(null)}
+      lifecycle={availableLifecycle ?? rotationLifecycle}
+      provider={provider}
+      connectionId={connection.id}
+      canRotate={canAct}
+    />
+  ) : null;
 
   if (lifecycle === "restricted") {
     return (
-      <CredentialsNotice
-        title={t("DashboardCustody.credentialsTitle")}
-        variant="neutral"
-        message={t("DashboardCustody.credentialsRestricted")}
-      />
+      <>
+        {rotationModal}
+        <CredentialsNotice
+          title={t("DashboardCustody.credentialsTitle")}
+          variant="neutral"
+          message={t("DashboardCustody.credentialsRestricted")}
+        />
+      </>
     );
   }
 
@@ -425,19 +449,19 @@ export function ConnectionCredentialsSection({
   // is still true, so this says so and invites a retry.
   if (!lifecycle) {
     return (
-      <CredentialsNotice
-        title={t("DashboardCustody.credentialsTitle")}
-        variant="warning"
-        message={t("DashboardCustody.credentialsUnavailable")}
-      />
+      <>
+        {rotationModal}
+        <CredentialsNotice
+          title={t("DashboardCustody.credentialsTitle")}
+          variant="warning"
+          message={t("DashboardCustody.credentialsUnavailable")}
+        />
+      </>
     );
   }
 
   const credential = lifecycle.providerCredential;
   const candidate = lifecycle.rotationCandidate;
-  const managedHere = isCredentialManagedHere(credential);
-  const currentInUse = credential.status === "active" && lifecycle.impact.connections.length > 0;
-  const canAct = canManageCustody && managedHere && currentInUse;
   const canDeactivate =
     canManageCustody &&
     managedHere &&
@@ -462,66 +486,59 @@ export function ConnectionCredentialsSection({
   };
 
   return (
-    // The named container the two-up credential grid below measures. Undeclared,
-    // its `@3xl` query never matched and the cards stayed stacked at every width.
-    <section className="@container/connection-credentials rounded-2xl border border-border-default bg-surface-raised p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-medium text-primary">
-          {t("DashboardCustody.credentialsTitle")}
-        </h2>
-        {managedHere ? null : (
-          <Badge variant="outline">{t("DashboardCustody.credentialDeploymentBadge")}</Badge>
-        )}
-      </div>
+    <>
+      {rotationModal}
+      {/* The named container the two-up credential grid below measures. */}
+      <section className="@container/connection-credentials rounded-2xl border border-border-default bg-surface-raised p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-medium text-primary">
+            {t("DashboardCustody.credentialsTitle")}
+          </h2>
+          {managedHere ? null : (
+            <Badge variant="outline">{t("DashboardCustody.credentialDeploymentBadge")}</Badge>
+          )}
+        </div>
 
-      {candidate ? (
-        <PendingRotationCallout
-          canCancel={
-            candidate.status === "pending" || (candidate.status === "creating" && currentInUse)
-          }
-          canManageCustody={canManageCustody}
-          currentInUse={currentInUse}
-          onCancel={() => handleCancelCandidate(candidate.id)}
-          onSettle={() => handleSettleCandidate(candidate.id)}
-          pending={pending}
-          t={t}
-        />
-      ) : null}
-
-      <div className="mt-3 grid gap-4 @3xl/connection-credentials:grid-cols-2">
-        <CurrentCredentialCard
-          badge={resolveCredentialBadge(credential, t)}
-          canAct={canAct}
-          canDeactivate={canDeactivate}
-          connectionId={connection.id}
-          credential={credential}
-          hasPendingRotation={Boolean(candidate)}
-          impact={lifecycle.impact}
-          managedHere={managedHere}
-          onDeactivate={() => setDeactivateOpen(true)}
-          onRotate={() => setRotateOpen(true)}
-          pending={pending}
-          t={t}
-        />
-
-        <PreviousCredentialCard
-          canAct={canAct}
-          lifecycle={lifecycle}
-          onRollBack={() => setRollbackOpen(true)}
-          pending={pending}
-          t={t}
-        />
-      </div>
-
-      {canAct ? (
-        <>
-          <RotateCredentialsModal
-            isOpen={rotateOpen}
-            onClose={() => setRotateOpen(false)}
-            lifecycle={lifecycle}
-            provider={provider}
-            connectionId={connection.id}
+        {candidate ? (
+          <PendingRotationCallout
+            canCancel={
+              candidate.status === "pending" || (candidate.status === "creating" && currentInUse)
+            }
+            canManageCustody={canManageCustody}
+            currentInUse={currentInUse}
+            onCancel={() => handleCancelCandidate(candidate.id)}
+            onSettle={() => handleSettleCandidate(candidate.id)}
+            pending={pending}
+            t={t}
           />
+        ) : null}
+
+        <div className="mt-3 grid gap-4 @3xl/connection-credentials:grid-cols-2">
+          <CurrentCredentialCard
+            badge={resolveCredentialBadge(credential, t)}
+            canAct={canAct}
+            canDeactivate={canDeactivate}
+            connectionId={connection.id}
+            credential={credential}
+            hasPendingRotation={Boolean(candidate)}
+            impact={lifecycle.impact}
+            managedHere={managedHere}
+            onDeactivate={() => setDeactivateOpen(true)}
+            onRotate={() => setRotationLifecycle(lifecycle)}
+            pending={pending}
+            t={t}
+          />
+
+          <PreviousCredentialCard
+            canAct={canAct}
+            lifecycle={lifecycle}
+            onRollBack={() => setRollbackOpen(true)}
+            pending={pending}
+            t={t}
+          />
+        </div>
+
+        {canAct ? (
           <RollbackDialog
             isOpen={rollbackOpen}
             onClose={() => setRollbackOpen(false)}
@@ -529,17 +546,17 @@ export function ConnectionCredentialsSection({
             provider={provider}
             connectionId={connection.id}
           />
-        </>
-      ) : null}
-      {canDeactivate ? (
-        <DeactivateCredentialsDialog
-          isOpen={deactivateOpen}
-          onClose={() => setDeactivateOpen(false)}
-          lifecycle={lifecycle}
-          provider={provider}
-          connectionId={connection.id}
-        />
-      ) : null}
-    </section>
+        ) : null}
+        {canDeactivate ? (
+          <DeactivateCredentialsDialog
+            isOpen={deactivateOpen}
+            onClose={() => setDeactivateOpen(false)}
+            lifecycle={lifecycle}
+            provider={provider}
+            connectionId={connection.id}
+          />
+        ) : null}
+      </section>
+    </>
   );
 }

@@ -9,12 +9,8 @@ import { cancelSetupAction } from "./connection-actions";
 import { useCustodyAction } from "./use-custody-action";
 
 /**
- * Abandons a setup that never finished.
- *
- * Kept visibly separate from deactivation, which is the permanent end of a
- * connection that did work. Nothing was created at the provider by an
- * unverified attempt, so there is no residue to reason about: the stored secret
- * is deleted, the row leaves the list, and the user can start again whenever.
+ * Cancels unfinished setup, retaining the deactivated connection for history.
+ * Stored-secret cleanup may finish after the cancellation succeeds.
  */
 export function CancelSetupDialog({
   isOpen,
@@ -42,8 +38,7 @@ export function CancelSetupDialog({
     });
     if (result.status === "success") {
       onClose();
-      // The connection this page is about no longer exists, so staying here
-      // would render a 404 on the next read.
+      // Return to the list, where the connection remains as Deactivated.
       router.push(`/dashboard/integrations/${provider}`);
     }
   };

@@ -9,7 +9,7 @@ import { ListChecks, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
-import { fetchConnectionListItem } from "@/app/dashboard/custody/connections/connection-detail.data";
+import { fetchConnectionInstallation } from "@/app/dashboard/custody/connections/connection-detail.data";
 import {
   formatCustodyProviderName,
   getCustodyProviderCategory,
@@ -33,7 +33,7 @@ import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { issuance, policies } from "@/flags";
+import { issuance, policies, privyByok } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -212,8 +212,14 @@ export default async function WalletDetailPage({
 }: {
   params: Promise<{ walletId: string }>;
 }) {
-  const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled, policiesEnabled] =
-    await Promise.all([getTranslations(), auth(), params, issuance(), policies()]);
+  const [
+    t,
+    { userId, orgId, orgRole },
+    { walletId },
+    issuanceEnabled,
+    policiesEnabled,
+    byokEnabled,
+  ] = await Promise.all([getTranslations(), auth(), params, issuance(), policies(), privyByok()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -250,17 +256,13 @@ export default async function WalletDetailPage({
     ? formatCustodyProviderName(provider)
     : t("DashboardCustody.unknown");
   const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
-  // Wallets created before Connections — and every legacy Config-backed one —
-  // carry no connection, so the row is absent rather than empty. The lookup
-  // needs `custody:admin` and returns null without it, which degrades to the
-  // connection id: still the answer to "which connection", just unnamed.
-  const connection = wallet.custodyConnectionId
-    ? await fetchConnectionListItem(
-        apiClient.request,
-        wallet.custodyConnectionId,
-        provider ?? undefined
-      )
-    : null;
+  // The connection label is optional; retain the wallet and its connection id if lookup fails.
+  const connection =
+    byokEnabled && canManageCustody && wallet.custodyConnectionId
+      ? await fetchConnectionInstallation(apiClient.request, wallet.custodyConnectionId).catch(
+          () => null
+        )
+      : null;
 
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
@@ -349,7 +351,7 @@ export default async function WalletDetailPage({
                   label={t("DashboardCustody.connection")}
                   value={connection?.label ?? truncateMiddle(wallet.custodyConnectionId)}
                   href={
-                    canManageCustody
+                    byokEnabled && canManageCustody
                       ? `/dashboard/integrations/${connection?.provider ?? provider ?? "privy"}/connections/${wallet.custodyConnectionId}`
                       : undefined
                   }

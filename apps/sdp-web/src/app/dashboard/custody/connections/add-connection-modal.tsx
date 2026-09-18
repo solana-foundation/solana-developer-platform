@@ -17,10 +17,8 @@ import { useTranslations } from "@/i18n/provider";
  * mean two versions of the one piece of logic that must never duplicate a
  * credential, so the modal only supplies the frame and where to go afterwards.
  *
- * Closing is refused while a submission is in flight. That request may commit
- * server-side after the response is lost, and the recovery state offering the
- * verbatim replay lives in the form — unmounting it would strand a credential
- * nobody can see.
+ * Closing is refused while a request is in flight or recovery is locked: the
+ * exact payload needed to replay an unknown submission lives in the form.
  */
 export function AddConnectionModal({
   isOpen,
@@ -41,10 +39,19 @@ export function AddConnectionModal({
   // the user a live-looking button that did nothing when Privy stopped
   // answering — exactly when they most needed the one that works.
   const [inRecovery, setInRecovery] = useState(false);
+  const [recoveryLocked, setRecoveryLocked] = useState(false);
+  const closeDisabled = submitting || recoveryLocked;
+
+  const handleClose = () => {
+    if (closeDisabled) return;
+    setInRecovery(false);
+    onClose();
+  };
 
   const handleSuccess = (connectionId: string) => {
     setSubmitting(false);
     setInRecovery(false);
+    setRecoveryLocked(false);
     onClose();
     router.push(
       `/dashboard/integrations/${provider}/connections/${encodeURIComponent(connectionId)}`
@@ -54,8 +61,8 @@ export function AddConnectionModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={submitting ? undefined : onClose}
-      closeDisabled={submitting}
+      onClose={handleClose}
+      closeDisabled={closeDisabled}
       size="lg"
       ariaLabel={t("DashboardCustody.addConnection")}
     >
@@ -72,11 +79,12 @@ export function AddConnectionModal({
           onSuccess={handleSuccess}
           onPendingChange={setSubmitting}
           onRecoveryChange={setInRecovery}
+          onRecoveryLockChange={setRecoveryLocked}
           showSubmitButton={false}
         />
 
         <div className="flex items-center justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
+          <Button type="button" variant="secondary" onClick={handleClose} disabled={closeDisabled}>
             {inRecovery ? t("DashboardCustody.close") : t("DashboardCustody.cancel")}
           </Button>
           {inRecovery ? null : (
