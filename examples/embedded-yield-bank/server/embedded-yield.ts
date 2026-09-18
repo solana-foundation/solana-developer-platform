@@ -14,7 +14,7 @@ import {
   summarizeSavings,
 } from "./savings";
 import { EmbeddedYieldClient, SdpApiError } from "./sdp-client";
-import { readTokenBalance, signTransaction } from "./solana";
+import { assertRpcCluster, readTokenBalance, signTransaction } from "./solana";
 
 const DEFAULT_WITHDRAWAL_TOLERANCE_BPS = 10;
 const STRATEGY_CACHE_MS = 5 * 60_000;
@@ -47,8 +47,10 @@ export async function loadDashboard(
   const config = getConfig();
   const { owner, feePayer } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
+  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
   const strategy = pickSavingsStrategy(
     await listStrategies(client),
+    config.SOLANA_CLUSTER,
     config.DEMO_STRATEGY_ID
   );
   const tokenMint = requireDepositMint(strategy);
@@ -87,7 +89,7 @@ export async function loadDashboard(
   return {
     wallet: {
       address: owner.address,
-      cluster: "devnet",
+      cluster: config.SOLANA_CLUSTER,
       feesPaidBy: feePayer ? "northstar" : "customer",
     },
     token: { mint: tokenMint, symbol: checking.symbol },
@@ -152,8 +154,10 @@ export async function deposit(amount: string): Promise<YieldMovement> {
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
+  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
   const strategy = pickSavingsStrategy(
     await listStrategies(client),
+    config.SOLANA_CLUSTER,
     config.DEMO_STRATEGY_ID
   );
   if (!canDeposit(strategy)) {
@@ -203,11 +207,16 @@ export async function withdraw(amount: string): Promise<YieldMovement> {
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
+  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
   const [strategies, positions] = await Promise.all([
     listStrategies(client),
     client.listPositions(owner.address),
   ]);
-  const strategy = pickSavingsStrategy(strategies, config.DEMO_STRATEGY_ID);
+  const strategy = pickSavingsStrategy(
+    strategies,
+    config.SOLANA_CLUSTER,
+    config.DEMO_STRATEGY_ID
+  );
   const position = positions
     .filter((candidate) => belongsToStrategy(candidate, strategy))
     .find(isOpenPosition);

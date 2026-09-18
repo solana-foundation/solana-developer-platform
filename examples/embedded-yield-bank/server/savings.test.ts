@@ -8,11 +8,12 @@ import {
   summarizeSavings,
   withdrawableAmount,
 } from "./savings";
-import { DEVNET_USDC_MINT } from "./solana";
+import { USDC_MINTS } from "./solana";
 
 describe("savings strategy", () => {
-  it("picks the first instant-liquidity USDC strategy on devnet, in catalogue order", () => {
+  it("picks the first DeFi, instant-liquidity USDC strategy on devnet, in catalogue order", () => {
     const strategies = [
+      strategy({ id: "rwa-usdc", sourceKind: "rwa" }),
       strategy({ id: "veda-delayed", liquidityTerm: "delayed" }),
       strategy({ id: "eurc-instant", depositMints: ["eurc"] }),
       strategy({ id: "mainnet", hostCluster: "mainnet-beta" }),
@@ -21,7 +22,26 @@ describe("savings strategy", () => {
       strategy({ id: "steakhouse-usdc" }),
     ];
 
-    expect(pickSavingsStrategy(strategies).id).toBe("kamino-usdc");
+    expect(pickSavingsStrategy(strategies, "devnet").id).toBe("kamino-usdc");
+  });
+
+  it("picks a mainnet USDC strategy when mainnet is configured", () => {
+    const strategies = [
+      strategy({ id: "devnet", hostCluster: "devnet" }),
+      strategy({
+        id: "mainnet-rwa",
+        sourceKind: "rwa",
+        hostCluster: "mainnet-beta",
+        depositMints: [USDC_MINTS["mainnet-beta"]],
+      }),
+      strategy({
+        id: "mainnet",
+        hostCluster: "mainnet-beta",
+        depositMints: [USDC_MINTS["mainnet-beta"]],
+      }),
+    ];
+
+    expect(pickSavingsStrategy(strategies, "mainnet-beta").id).toBe("mainnet");
   });
 
   it("refuses to fall back to a delayed or non-USDC strategy", () => {
@@ -30,7 +50,7 @@ describe("savings strategy", () => {
       strategy({ id: "eurc-instant", depositMints: ["eurc"] }),
     ];
 
-    expect(() => pickSavingsStrategy(strategies)).toThrow(
+    expect(() => pickSavingsStrategy(strategies, "devnet")).toThrow(
       "instant liquidity and a USDC deposit mint"
     );
   });
@@ -41,14 +61,28 @@ describe("savings strategy", () => {
       strategy({ id: "veda-usdc", status: "paused" }),
     ];
 
-    expect(pickSavingsStrategy(strategies, "veda-usdc").id).toBe("veda-usdc");
-    expect(() => pickSavingsStrategy(strategies, "missing")).toThrow(
+    expect(pickSavingsStrategy(strategies, "devnet", "veda-usdc").id).toBe(
+      "veda-usdc"
+    );
+    expect(() => pickSavingsStrategy(strategies, "devnet", "missing")).toThrow(
       "not in the SDP strategy catalogue"
     );
   });
 
+  it("rejects an explicitly pinned strategy from another cluster", () => {
+    expect(() =>
+      pickSavingsStrategy(
+        [strategy({ id: "mainnet", hostCluster: "mainnet-beta" })],
+        "devnet",
+        "mainnet"
+      )
+    ).toThrow("is not a devnet strategy");
+  });
+
   it("explains an empty catalogue", () => {
-    expect(() => pickSavingsStrategy([])).toThrow("Set DEMO_STRATEGY_ID");
+    expect(() => pickSavingsStrategy([], "devnet")).toThrow(
+      "Set DEMO_STRATEGY_ID"
+    );
   });
 });
 
@@ -182,7 +216,7 @@ function strategy(overrides: Partial<YieldStrategy>): YieldStrategy {
     providerReference: "vault",
     name: "Strategy",
     sourceKind: "defi",
-    depositMints: [DEVNET_USDC_MINT],
+    depositMints: [USDC_MINTS.devnet],
     liquidityTerm: "instant",
     status: "active",
     hostCluster: "devnet",
@@ -202,7 +236,7 @@ function position(
     provider: "provider",
     providerReference: "vault",
     label: "Savings",
-    tokenMint: DEVNET_USDC_MINT,
+    tokenMint: USDC_MINTS.devnet,
     shareMint: "shares",
     createdAt: "2026-01-01T00:00:00.000Z",
     closedAt: null,
@@ -225,7 +259,7 @@ function movement(
     signature: "signature",
     amount: tokenAmount ?? "1",
     denomination: "mint",
-    tokenMint: DEVNET_USDC_MINT,
+    tokenMint: USDC_MINTS.devnet,
     tokenAmount,
     failureReason: null,
     createdAt: "2026-01-01T00:00:00.000Z",

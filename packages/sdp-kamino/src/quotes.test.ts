@@ -15,6 +15,9 @@ function estimate(overrides: Partial<KaminoDepositEstimate> = {}): KaminoDeposit
     sharesOutBaseUnits: 800_000n,
     shareDecimals: 6,
     tokensForSharesBaseUnits: 800_000n,
+    tokenDecimals: 6,
+    crankFundsBaseUnits: 10_000n,
+    minimumDepositBaseUnits: 0n,
     depositCapBaseUnits: 1_500_000n,
     netAumBaseUnits: 1_000_000n,
     sharesIssuedBaseUnits: 1_000_000n,
@@ -111,6 +114,22 @@ describe("deriveKaminoDepositQuote", () => {
       estimate({ tokensForSharesBaseUnits: -5n, sharesOutBaseUnits: 0n })
     );
     expect(quote.issues.map((issue) => issue.code)).toEqual(["ZERO_SHARES_OUT"]);
+  });
+
+  it("reports a deposit below the vault minimum after crank funding", () => {
+    const quote = deriveKaminoDepositQuote(
+      estimate({
+        tokensForSharesBaseUnits: 99_999n,
+        crankFundsBaseUnits: 5_000n,
+        minimumDepositBaseUnits: 100_000n,
+      })
+    );
+    expect(quote.issues).toContainEqual({
+      code: "DEPOSIT_BELOW_MINIMUM",
+      message:
+        "Kamino requires at least 0.1 vault tokens after its crank-fund charge. " +
+        "Increase the requested deposit to at least 0.105.",
+    });
   });
 });
 

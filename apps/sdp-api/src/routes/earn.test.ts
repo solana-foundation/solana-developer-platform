@@ -964,6 +964,31 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     }
   });
 
+  it("publishes the Kamino deposit floor required by production builds", async () => {
+    curation.bypassCuratedVaults = true;
+    await seedAuth();
+    const kamino = await seedStrategy({ hostCluster: "mainnet-beta" });
+
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      data: {
+        strategies: Array<{
+          id: string;
+          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+        }>;
+      };
+    };
+    expect(body.data.strategies).toEqual([
+      expect.objectContaining({
+        id: kamino.id,
+        depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+        withdrawalSlippage: null,
+      }),
+    ]);
+  });
+
   it("shows the supported Jupiter Lend provider independently of Kamino's allowlist", async () => {
     curation.bypassCuratedVaults = false;
     await seedAuth();

@@ -26,6 +26,7 @@ import {
   compileUnsignedVaultTransaction,
   signVaultPlan,
   simulateVaultPlan,
+  VaultTransactionTooLargeError,
 } from "./vault-execution.service";
 
 const env = {} as Env;
@@ -222,6 +223,32 @@ describe("vault execution validation", () => {
     });
     const decoded = getTransactionDecoder().decode(unsigned.bytes);
     expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
+  });
+
+  it("classifies an oversized simulation locally before calling RPC", async () => {
+    const oversizedPlan: EarnVaultTransactionPlan = {
+      ...planForOwner(ownerAddress),
+      instructions: [
+        {
+          programAddress: "11111111111111111111111111111111",
+          accounts: [{ address: ownerAddress, role: AccountRole.READONLY_SIGNER }],
+          data: Buffer.alloc(1_300).toString("base64"),
+        },
+      ],
+    };
+
+    await expect(
+      simulateVaultPlan(env, {
+        cluster: "devnet",
+        deadline: createVaultDeadline(),
+        expectedAssetIdentity: oversizedPlan.assetIdentity,
+        plan: oversizedPlan,
+        owner: ownerAddress,
+        rpcUrl,
+        fee: { kind: "caller-provided", feePayer: feePayerAddress },
+      })
+    ).rejects.toBeInstanceOf(VaultTransactionTooLargeError);
+    expect(simulateSend).not.toHaveBeenCalled();
   });
 
   it("refuses to sign a caller-provided fee mode", async () => {

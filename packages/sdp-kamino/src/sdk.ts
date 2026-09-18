@@ -909,6 +909,8 @@ function observeDepositPricing(
 
   return {
     tokensForSharesBaseUnits: amountBaseUnits - crankFunds,
+    tokenDecimals,
+    crankFundsBaseUnits: crankFunds,
     depositCapBaseUnits: bigintField("deposit cap", state.depositCap),
     netAumBaseUnits: netAum,
     sharesIssuedBaseUnits: sharesIssued,
@@ -974,7 +976,12 @@ export async function quoteKaminoDeposit(
     throw vaultUnreadable(input.vault, runtime.cluster, cause);
   }
 
-  return deriveKaminoDepositQuote({ sharesOutBaseUnits, shareDecimals, ...pricing });
+  return deriveKaminoDepositQuote({
+    sharesOutBaseUnits,
+    shareDecimals,
+    minimumDepositBaseUnits: bigintField("minimum deposit", state.minDepositAmount),
+    ...pricing,
+  });
 }
 
 /**

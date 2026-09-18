@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import * as rpcCore from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -70,12 +71,28 @@ function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][
 export function appendVaultRequestMemo(
   plan: EarnVaultTransactionPlan,
   kind: "vault-deposit" | "vault-withdrawal" | "external-deposit" | "external-withdrawal",
-  requestId: string
+  requestId: string,
+  options: { compact?: boolean } = {}
 ): EarnVaultTransactionPlan {
+  // A second, caller-provided fee-payer signer costs 96 packet bytes. Some
+  // provider plans fit with the owner paying but cross Solana's 1232-byte
+  // limit with that extra signer. Preserve the idempotency binding in a short
+  // cryptographic form when a caller explicitly asks for the compact retry:
+  // 128 bits remains far beyond the collision budget for transaction intents.
+  const payload = options.compact
+    ? `sdp:e:${
+        {
+          "vault-deposit": "vd",
+          "vault-withdrawal": "vw",
+          "external-deposit": "ed",
+          "external-withdrawal": "ew",
+        }[kind]
+      }:${createHash("sha256").update(requestId).digest("base64url").slice(0, 22)}`
+    : `sdp:earn:${kind}:${requestId}`;
   const memo = {
     programAddress: MEMO_PROGRAM_ADDRESS,
     accounts: [],
-    data: Buffer.from(`sdp:earn:${kind}:${requestId}`, "utf8").toString("base64"),
+    data: Buffer.from(payload, "utf8").toString("base64"),
   };
   return {
     ...plan,
@@ -543,6 +560,20 @@ export async function simulateVaultPlan(
   // simulated: we want the PROGRAM's verdict, not a signature check.
   const compiled = await input.deadline.run("Compiling the vault simulation", () =>
     partiallySignTransactionMessageWithSigners(message)
+  );
+  // Solana's RPC rejects an oversized base64 transaction before it can
+  // simulate anything. Classify that locally with the same typed verdict the
+  // signing/unsigned-compile paths use, so swap-funded callers can retry a
+  // compact route or return their documented split-swap fallback instead of
+  // leaking the RPC's -32602 as an internal error.
+  const compiledBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
+  assertVaultTransactionFits(
+    compiledBytes,
+    input.fee.kind === "sponsored"
+      ? "sponsored"
+      : input.fee.kind === "caller-provided"
+        ? "caller-provided"
+        : false
   );
   const wire = getBase64EncodedWireTransaction(compiled);
   const result = await input.deadline.run("Simulating the vault transaction", () =>

@@ -12,6 +12,7 @@ const configSchema = z.object({
     .min(1, "DEMO_WALLET_PRIVATE_KEY is required"),
   DEMO_FEE_PAYER_PRIVATE_KEY: z.string().min(1).optional(),
   DEMO_STRATEGY_ID: z.string().min(1).optional(),
+  SOLANA_CLUSTER: z.enum(["devnet", "mainnet-beta"]).default("devnet"),
   SOLANA_RPC_URL: z.url().default("https://api.devnet.solana.com"),
 });
 
