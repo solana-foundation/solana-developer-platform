@@ -34,6 +34,8 @@ export type {
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
   ArchiveExternalAccountInput,
+  AssignFundingWalletReferenceInput,
+  ClaimFundingWalletInput,
   CompleteExternalAccountInput,
   CounterpartyProviderAccountKind,
   CounterpartyProviderAccountRow,
@@ -41,7 +43,6 @@ export type {
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
-  GetFundingWalletByOnrampKeyInput,
   InsertPendingExternalAccountInput,
   InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,

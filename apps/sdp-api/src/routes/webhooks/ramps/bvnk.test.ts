@@ -1,50 +1,47 @@
-import { buildBvnkOnrampWalletName } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { buildBvnkFundingWalletName } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { describe, expect, it } from "vitest";
 import {
+  BVNK_WEBHOOK_TIMESTAMP,
   bvnkAgreementSessionStatusChangeEvent,
   bvnkChannelTransactionEvent,
-  bvnkCustomerStatusChangeEvent,
+  bvnkCryptoPayoutStatusChangeEvent,
   bvnkPayinStatusChangeEvent,
+  bvnkPlatformCustomerStatusChangeEvent,
   bvnkPlatformCustomerUpdateEvent,
   bvnkWalletStatusChangeEvent,
 } from "@/test/helpers/bvnk";
 import { BvnkWebhookProcessor } from "./bvnk";
 
-const ONRAMP_KEY = "USD:USDC_SOLANA:dest";
-
 describe("BvnkWebhookProcessor.parse", () => {
-  it("parses a customer status-change webhook", () => {
+  it("parses a platform customer status-change webhook", () => {
     const processor = new BvnkWebhookProcessor();
+    const event = bvnkPlatformCustomerStatusChangeEvent();
 
-    expect(processor.parse(bvnkCustomerStatusChangeEvent())).toEqual({
-      event: "bvnk:customers:status-change",
-      data: {
-        customerId: "customer_1",
-        status: "VERIFIED",
-      },
-    });
+    expect(processor.parse(event)).toEqual(event);
   });
 
-  it("accepts the terminal-success statuses customer webhooks report", () => {
-    const processor = new BvnkWebhookProcessor();
-
-    for (const status of ["COMPLETED", "APPROVED"] as const) {
-      expect(processor.parse(bvnkCustomerStatusChangeEvent({ status }))).toEqual({
-        event: "bvnk:customers:status-change",
-        data: { customerId: "customer_1", status },
-      });
-    }
-  });
-
-  it("rejects a customer status-change whose status is not the uppercase enum", () => {
+  it("rejects a platform customer status-change whose status is not the uppercase enum", () => {
     const processor = new BvnkWebhookProcessor();
 
     expect(() =>
       processor.parse({
-        event: "bvnk:customers:status-change",
-        data: { customerId: "customer_1", status: "verified" },
+        event: "bvnk:platform:customer:status-change",
+        eventId: "01a0b1ec-bc16-76e8-a168-d44c4d7d25ad",
+        timestamp: BVNK_WEBHOOK_TIMESTAMP,
+        data: { status: "verified", reference: "customer_1" },
       })
     ).toThrow(/failed validation/);
+  });
+
+  it("no longer recognises the v1 customers:status-change event name", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(
+      processor.parse({
+        event: "bvnk:customers:status-change",
+        data: { customerId: "customer_1", status: "VERIFIED" },
+      })
+    ).toEqual({ event: "ignore", reason: "unsupported_event:bvnk:customers:status-change" });
   });
 
   it("parses a platform customer update webhook", () => {
@@ -69,14 +66,75 @@ describe("BvnkWebhookProcessor.parse", () => {
     expect(
       processor.parse(
         bvnkWalletStatusChangeEvent({
-          name: buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY),
+          name: "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest",
         })
       )
     ).toEqual({
       event: "ledger:v2:wallet:status-change",
       data: {
+        id: "a:synthetic:wallet:1",
         name: "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest",
         status: "ACTIVE",
+        customer: { id: "customer_1" },
+        bankAccount: { accountNumber: "900473221558", code: "LEADUS49XXX", bankName: "LEAD BANK" },
+      },
+    });
+  });
+
+  it("parses a funding wallet status-change webhook", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(
+      processor.parse(
+        bvnkWalletStatusChangeEvent({
+          name: buildBvnkFundingWalletName("cpa_123"),
+        })
+      )
+    ).toEqual({
+      event: "ledger:v2:wallet:status-change",
+      data: {
+        id: "a:synthetic:wallet:1",
+        name: "sdp:onramp:cpa_123",
+        status: "ACTIVE",
+        customer: { id: "customer_1" },
+        bankAccount: { accountNumber: "900473221558", code: "LEADUS49XXX", bankName: "LEAD BANK" },
+      },
+    });
+  });
+
+  it("parses the observed wallet status-change shape and strips customer PII", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(
+      processor.parse({
+        event: "ledger:v2:wallet:status-change",
+        eventId: "evt_synthetic_1",
+        timestamp: "2026-09-18T01:08:21.014395318Z",
+        data: {
+          id: "a:synthetic:wallet:1",
+          name: "sdp:onramp:counterparty_provider_account_402478d1-2f23-4559-b3e1-58a0f693de9b",
+          status: "ACTIVE",
+          balance: { amount: 0, currency: "USD" },
+          customer: { id: "2acdd3e5-7166-4b04-8115-6ad3ccd66477", name: "Synthetic Customer" },
+          createdAt: "2026-09-18T00:00:00.000Z",
+          updatedAt: "2026-09-18T01:00:00.000Z",
+          paymentInstruments: [
+            {
+              type: "FIAT",
+              bankDetails: { bic: "LEADUS49XXX", name: "LEAD BANK" },
+              accountNumber: "900473221558",
+              accountHolderName: "Synthetic Holder",
+            },
+          ],
+        },
+      })
+    ).toEqual({
+      event: "ledger:v2:wallet:status-change",
+      data: {
+        id: "a:synthetic:wallet:1",
+        name: "sdp:onramp:counterparty_provider_account_402478d1-2f23-4559-b3e1-58a0f693de9b",
+        status: "ACTIVE",
+        customer: { id: "2acdd3e5-7166-4b04-8115-6ad3ccd66477" },
         bankAccount: { accountNumber: "900473221558", code: "LEADUS49XXX", bankName: "LEAD BANK" },
       },
     });
@@ -89,7 +147,7 @@ describe("BvnkWebhookProcessor.parse", () => {
       processor.parse({
         event: "bvnk:ledger:wallet:create",
         data: {
-          walletName: buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY),
+          walletName: "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest",
           status: "COMPLETED",
           ledgers: [{ accountNumber: "900368997705", code: "101019644" }],
         },
@@ -104,17 +162,121 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
 
-  it("parses a BVNK fiat pay-in status-change webhook, stringifying the amount", () => {
+  it("parses a BVNK fiat pay-in status-change webhook under the v2 event name", () => {
     const processor = new BvnkWebhookProcessor();
 
     expect(processor.parse(bvnkPayinStatusChangeEvent())).toEqual({
-      event: "bvnk:payment:payin:status-change",
+      event: "payment:v2:payin:status-change",
       data: {
+        id: "payin_1",
         status: "COMPLETED",
-        customerReference: "customer_1",
-        beneficiary: { walletId: "a:1:wallet:1" },
-        amount: { value: "100" },
-        uuid: "payin_1",
+        beneficiary: {
+          amount: "100",
+          currency: "USD",
+          walletId: "a:1:wallet:1",
+          customerId: "customer_1",
+        },
+      },
+    });
+  });
+
+  it("acknowledges the legacy bvnk:payment:payin:status-change name as unsupported", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(
+      processor.parse({
+        event: "bvnk:payment:payin:status-change",
+        data: { status: "COMPLETED", customerReference: "customer_1" },
+      })
+    ).toEqual({
+      event: "ignore",
+      reason: "unsupported_event:bvnk:payment:payin:status-change",
+    });
+  });
+
+  it("parses a pay-in whose status is not in the acted-on vocabulary as a plain string", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    const parsed = processor.parse(
+      bvnkPayinStatusChangeEvent({ id: "payin_unknown_status", status: "REFUNDED" })
+    );
+
+    expect(parsed).toEqual({
+      event: "payment:v2:payin:status-change",
+      data: {
+        id: "payin_unknown_status",
+        status: "REFUNDED",
+        beneficiary: {
+          amount: "100",
+          currency: "USD",
+          walletId: "a:1:wallet:1",
+          customerId: "customer_1",
+        },
+      },
+    });
+  });
+
+  it("parses the observed crypto payout shape and strips PII and extra keys", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(
+      processor.parse({
+        event: "bvnk:payment:crypto:status-change",
+        eventId: "evt_crypto_payout",
+        timestamp: "2026-09-18T01:08:21.014395318Z",
+        data: {
+          type: "OUT",
+          uuid: "payout_1",
+          status: "COMPLETE",
+          walletId: "a:1:wallet:1",
+          reference: "ON_RAMP_payin_1",
+          address: { address: "dest", network: "SOLANA", protocol: "SOL" },
+          paidCurrency: { actual: 9.8802, amount: 9.8802, currency: "USDC" },
+          walletCurrency: { actual: 9.9, amount: 9.9, currency: "USD" },
+          feeCurrency: { actual: 0.1, amount: 0.1, currency: "USD" },
+          exchangeRate: { base: "USD", rate: 0.998, counter: "USDC" },
+          transactions: [{ hash: "tx_synthetic_1", amount: 9.8802, fee: 0 }],
+          redirectUrl: "https://pay.sandbox.bvnk.com/payout/payout_1",
+          originator: { name: "Synthetic Buyer", accountNumber: "900473221558" },
+        },
+      })
+    ).toEqual({
+      event: "bvnk:payment:crypto:status-change",
+      data: {
+        type: "OUT",
+        uuid: "payout_1",
+        status: "COMPLETE",
+        walletId: "a:1:wallet:1",
+        reference: "ON_RAMP_payin_1",
+        address: { address: "dest", network: "SOLANA" },
+        paidCurrency: { actual: "9.8802", amount: "9.8802", currency: "USDC" },
+        walletCurrency: { actual: "9.9", amount: "9.9", currency: "USD" },
+        feeCurrency: { actual: "0.1", amount: "0.1", currency: "USD" },
+        exchangeRate: { base: "USD", rate: 0.998, counter: "USDC" },
+        transactions: [{ hash: "tx_synthetic_1" }],
+      },
+    });
+  });
+
+  it("parses a crypto payout whose status is not in the acted-on vocabulary as a plain string", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    const parsed = processor.parse(bvnkCryptoPayoutStatusChangeEvent({ status: "CANCELLED" }));
+
+    expect(parsed).toEqual({
+      event: "bvnk:payment:crypto:status-change",
+      data: {
+        type: "OUT",
+        uuid: "payout_1",
+        status: "CANCELLED",
+        walletId: "a:1:wallet:1",
+        reference: "ON_RAMP_payin_1",
+        address: { address: "dest", network: "SOLANA" },
+        paidCurrency: { actual: "0", amount: "9.8802", currency: "USDC" },
+        walletCurrency: { actual: "0", amount: "9.9", currency: "USD" },
+        feeCurrency: { actual: "0", amount: "0.1", currency: "USD" },
+        exchangeRate: { base: "USD", rate: 0.998, counter: "USDC" },
+        transactions: [],
       },
     });
   });
@@ -190,8 +352,8 @@ describe("BvnkWebhookProcessor.parse", () => {
   it("rejects a handled BVNK event missing its data object with a 400", () => {
     const processor = new BvnkWebhookProcessor();
 
-    expect(() => processor.parse({ event: "bvnk:customers:status-change" })).toThrowError(
-      'BVNK webhook "bvnk:customers:status-change" is missing a data object'
+    expect(() => processor.parse({ event: "bvnk:platform:customer:status-change" })).toThrowError(
+      'BVNK webhook "bvnk:platform:customer:status-change" is missing a data object'
     );
   });
 });

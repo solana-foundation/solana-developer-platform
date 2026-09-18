@@ -1,14 +1,9 @@
 import {
-  BVNK_CRYPTO_CURRENCIES,
-  BVNK_NETWORKS,
-  type BvnkOnrampRequestSpec,
-} from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import {
   bvnkSessionAgreementSchema,
   bvnkVerificationStatusSchema,
 } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
+import { type BvnkFundingWalletStatus, COUNTRY_CODES, type CountryCode } from "@sdp/types";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { internalError } from "@/lib/errors";
@@ -47,21 +42,14 @@ export const counterpartyProviderAccountRowSchema = z.object({
 export type CounterpartyProviderAccountRow = z.infer<typeof counterpartyProviderAccountRowSchema>;
 export type CounterpartyProviderAccountKind = CounterpartyProviderAccountRow["kind"];
 
-const bvnkOnrampRequestSpecSchema = z.object({
-  currency: z.enum(BVNK_CRYPTO_CURRENCIES),
-  network: z.enum(BVNK_NETWORKS),
-  destinationWalletAddress: z.string(),
-  fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
-}) satisfies z.ZodType<BvnkOnrampRequestSpec>;
+export const bvnkFundingWalletMetadataSchema = z.object({}).strict();
 
-export const bvnkFundingWalletMetadataSchema = z.object({
-  onrampKey: z.string(),
-  ruleId: z.string().optional(),
-  ruleStatus: z.string().optional(),
-  walletName: z.string().optional(),
-  request: bvnkOnrampRequestSpecSchema.optional(),
-});
-export type BvnkFundingWalletMetadata = z.infer<typeof bvnkFundingWalletMetadataSchema>;
+export const bvnkFundingWalletLockSchema = z
+  .object({
+    transferId: z.string().min(1),
+    payinId: z.string().min(1).optional(),
+  })
+  .strict();
 
 export const bvnkCustomerProviderAccountMetadataSchema = z.object({
   status: z.string().optional(),
@@ -119,8 +107,50 @@ export interface GetAccountByKindAndCurrencyInput extends GetCounterpartyProvide
   fiatCurrency: string;
 }
 
-export interface GetFundingWalletByOnrampKeyInput extends GetCounterpartyProviderAccountInput {
-  onrampKey: string;
+export interface ClaimFundingWalletInput extends GetCounterpartyProviderAccountInput {
+  providerCustomerReference: string;
+  fiatCurrency: RampFiatCurrency;
+  providerStatus: BvnkFundingWalletStatus;
+}
+
+export interface AssignFundingWalletReferenceInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  externalAccountReference: string;
+}
+
+export interface FindActiveFundingWalletByCustomerLinkIdInput {
+  provider: RampProviderId;
+  customerLinkId: string;
+  fiatCurrency: RampFiatCurrency;
+}
+
+export interface FindActiveFundingWalletByReferenceInput {
+  provider: RampProviderId;
+  externalAccountReference: string;
+}
+
+export interface RecordFundingWalletPayinInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  /** The transfer id the lock must still be held for. */
+  transferId: string;
+  /** The provider pay-in id to record on the lock. */
+  payinId: string;
+}
+
+export interface UpdateFundingWalletStatusInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  fromStatus: BvnkFundingWalletStatus;
+  toStatus: BvnkFundingWalletStatus;
+}
+
+export interface LockFundingWalletInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  transferId: string;
+}
+
+export interface ReleaseFundingWalletInput extends GetCounterpartyProviderAccountInput {
+  id: string;
+  transferId: string;
 }
 
 interface InsertProviderResourceAccountBase extends GetCounterpartyProviderAccountInput {
@@ -139,7 +169,7 @@ export type InsertProviderResourceAccountInput = InsertProviderResourceAccountBa
         paymentRail?: string;
       }
     | {
-        kind: "funding_wallet" | "merchant_wallet";
+        kind: "merchant_wallet";
         destinationCountry?: never;
         paymentRail?: never;
       }
@@ -245,13 +275,103 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Reads an active BVNK funding wallet by its on-ramp key.
+   * Claims the per-fiat BVNK customer funding wallet row. The INSERT decides
+   * the race against the partial unique index before any provider call:
+   * `INSERT … ON CONFLICT (counterparty_id, provider, fiat_currency) WHERE
+   * status = 'active' AND kind = 'funding_wallet' DO NOTHING RETURNING *`,
+   * with kind `funding_wallet`, `external_account_reference` NULL, and
+   * metadata `{}`.
    *
-   * @param input - Tenant scope, counterparty, provider, and on-ramp key.
-   * @returns The active funding-wallet row, or null when none exists.
+   * @param input - Tenant scope, the customer link's provider customer reference, the fiat currency, and the claimed provider status.
+   * @returns The new row, or null when an active funding wallet for that fiat already exists (caller reads it with getAccountByKindAndCurrency).
    */
-  getFundingWalletByOnrampKey(
-    input: GetFundingWalletByOnrampKeyInput
+  claimFundingWallet(
+    input: ClaimFundingWalletInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Stores the provider wallet reference on a claimed funding-wallet row via
+   * a compare-and-swap: `UPDATE … WHERE id AND org AND project AND
+   * counterparty AND provider AND kind='funding_wallet' AND status='active'
+   * AND external_account_reference IS NULL RETURNING *`. A concurrent claim
+   * that already assigned a reference loses the CAS instead of being
+   * overwritten.
+   *
+   * @param input - Tenant scope, row id, and the created BVNK wallet reference.
+   * @returns The updated row, or null when it is out of scope or already assigned.
+   */
+  assignFundingWalletReference(
+    input: AssignFundingWalletReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Finds the active funding-wallet row for a customer-link row, keyed by a
+   * self-join on the shared tenant, counterparty, and provider scope. This
+   * is system-scoped because webhook payloads carry no tenant identity.
+   *
+   * @param input - Ramp provider, the customer-link row id, and the funding fiat currency.
+   * @returns The active funding-wallet row, or null when the link or the funding row is missing.
+   */
+  findActiveFundingWalletByCustomerLinkId(
+    input: FindActiveFundingWalletByCustomerLinkIdInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Finds the active funding-wallet row by its provider wallet reference. This
+   * is system-scoped because webhook payloads carry no tenant identity.
+   *
+   * @param input - Ramp provider and the provider wallet reference.
+   * @returns The active funding-wallet row, or null when none carries the reference.
+   */
+  findActiveFundingWalletByReference(
+    input: FindActiveFundingWalletByReferenceInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Records the provider pay-in id on a locked funding-wallet row via a
+   * compare-and-swap: the metadata merge lands only while the row is still
+   * locked by the same transfer and carries no pay-in id yet. A replay or a
+   * lock that moved returns null and writes nothing.
+   *
+   * @param input - Tenant scope, row id, the holding transfer id, and the pay-in id.
+   * @returns The updated row, or null when the CAS lost (replay or lock moved).
+   */
+  recordFundingWalletPayin(
+    input: RecordFundingWalletPayinInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Advances a funding-wallet row's provider status via a compare-and-swap
+   * against the status the transition was computed from.
+   *
+   * @param input - Tenant scope, row id, and the from/to funding wallet statuses.
+   * @returns The updated row, or null when the row is out of scope or no longer in `fromStatus`.
+   */
+  updateFundingWalletStatus(
+    input: UpdateFundingWalletStatusInput
+  ): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Reserves a provisioned funding-wallet row for one on-ramp transfer via a
+   * compare-and-swap against `provisioned_funding_wallet`, stamping the lock
+   * metadata with the holding transfer id. The transfer id is the guard and
+   * the webhook-to-transfer pointer, never a lookup key.
+   *
+   * @param input - Tenant scope, row id, and the transfer id the lock is held for.
+   * @returns The locked row, or null when it is out of scope or not provisioned.
+   */
+  lockFundingWallet(input: LockFundingWalletInput): Promise<CounterpartyProviderAccountRow | null>;
+
+  /**
+   * Returns a locked funding-wallet row to `provisioned_funding_wallet` via a
+   * compare-and-swap on both the locked status and the holding transfer id, so
+   * only the transfer that holds the lock can free it.
+   *
+   * @param input - Tenant scope, row id, and the transfer id the lock must still be held for.
+   * @returns The released row, or null when the lock is not held by that transfer.
+   */
+  releaseFundingWallet(
+    input: ReleaseFundingWalletInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

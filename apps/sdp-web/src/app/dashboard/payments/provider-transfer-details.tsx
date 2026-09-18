@@ -1,9 +1,12 @@
-import type {
-  CoinbaseRampSettlement,
-  LightsparkRampSettlement,
-  MoonpayRampSettlement,
-  PaymentTransferSummary,
-  SolanaCluster,
+import {
+  type BvnkRampSettlement,
+  type CoinbaseRampSettlement,
+  type LightsparkRampSettlement,
+  type MoonpayRampSettlement,
+  type PaymentTransferSummary,
+  SDP_ENVIRONMENT_BY_CLUSTER,
+  type SdpEnvironment,
+  type SolanaCluster,
 } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -56,6 +59,19 @@ export interface ProviderTransferDetailRow {
 
 function moonpayTrackerUrl(transactionId: string): string {
   return `https://buy.moonpay.com/v2/transaction-tracker?transactionId=${encodeURIComponent(transactionId)}`;
+}
+
+/**
+ * The BVNK-hosted payout receipt for one payout, derived per environment and
+ * never stored.
+ *
+ * @param payoutId - The BVNK payout id (the crypto payout webhook's `uuid`).
+ * @param environment - Sandbox or production ramp environment.
+ * @returns The hosted receipt URL.
+ */
+export function bvnkPayoutReceiptUrl(payoutId: string, environment: SdpEnvironment): string {
+  const host = environment === "sandbox" ? "pay.sandbox.bvnk.com" : "pay.bvnk.com";
+  return `https://${host}/payout/${encodeURIComponent(payoutId)}`;
 }
 
 const MOONPAY_FIELDS: readonly TransferDetailFieldSpec<MoonpayRampSettlement>[] = [
@@ -119,6 +135,33 @@ const COINBASE_FIELDS: readonly TransferDetailFieldSpec<CoinbaseRampSettlement>[
         settlement.exchangeRate,
         settlement.paymentCurrency
       )}`,
+  },
+];
+
+const BVNK_FIELDS: readonly TransferDetailFieldSpec<BvnkRampSettlement>[] = [
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.providerFee",
+    text: (settlement) => formatDisplayAmount(settlement.feeAmount, settlement.feeCurrency),
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.exchangeRate",
+    text: (settlement) =>
+      `1 ${settlement.fiatCurrency} = ${formatDisplayAmount(
+        String(settlement.exchangeRate),
+        settlement.cryptoCurrency
+      )}`,
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.delivered",
+    text: (settlement) => formatDisplayAmount(settlement.cryptoAmount, settlement.cryptoCurrency),
+  },
+  {
+    kind: "explorerTx",
+    labelKey: "DashboardPayments.transferDetails.solanaSignature",
+    signature: (settlement) => settlement.txHash,
   },
 ];
 
@@ -248,6 +291,26 @@ function lightsparkBuilder(
     : [];
 }
 
+function bvnkBuilder(
+  transfer: PaymentTransferSummary,
+  context: TransferDetailFieldContext,
+  t: Translate
+): ProviderTransferDetailRow[] {
+  const settlement = transfer.settlement;
+  if (settlement === undefined || settlement.provider !== "bvnk") {
+    return [];
+  }
+  const receipt: ProviderTransferDetailRow[] = [
+    {
+      key: "DashboardPayments.transferDetails.receipt",
+      label: t("DashboardPayments.transferDetails.receipt"),
+      value: t("DashboardPayments.transferDetails.viewReceipt"),
+      href: bvnkPayoutReceiptUrl(settlement.payoutId, SDP_ENVIRONMENT_BY_CLUSTER[context.cluster]),
+    },
+  ];
+  return [...receipt, ...rowsFromSpecs(BVNK_FIELDS, settlement, context, t)];
+}
+
 /**
  * Detail rows each provider contributes to the transfer modal, keyed by
  * provider and ramp direction. Providers absent here (or directions a
@@ -259,6 +322,7 @@ const PROVIDER_TRANSFER_DETAIL_FIELDS: Partial<
   moonpay: { onramp: moonpayBuilder, offramp: moonpayBuilder },
   coinbase: { onramp: coinbaseBuilder },
   lightspark: { onramp: lightsparkBuilder, offramp: lightsparkBuilder },
+  bvnk: { onramp: bvnkBuilder },
 };
 
 /**

@@ -1,29 +1,38 @@
+import { BVNK_FUNDING_WALLET_STATUS } from "@sdp/types";
 import type { AppDb } from "@/db";
 import { internalError } from "@/lib/errors";
 import type {
   ArchiveExternalAccountInput,
   AssignCustomerLinkReferenceInput,
+  AssignFundingWalletReferenceInput,
+  ClaimFundingWalletInput,
   CompleteExternalAccountInput,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
+  FindActiveFundingWalletByCustomerLinkIdInput,
+  FindActiveFundingWalletByReferenceInput,
   FindCustomerLinkBySessionReferenceInput,
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
-  GetFundingWalletByOnrampKeyInput,
   InsertPendingExternalAccountInput,
   InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
+  LockFundingWalletInput,
   MarkCustomerLinkSessionTimestampInput,
   PatchAccountMetadataInput,
+  RecordFundingWalletPayinInput,
+  ReleaseFundingWalletInput,
   SetCustomerLinkSessionInput,
   UpdateExternalAccountStatusInput,
+  UpdateFundingWalletStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
   type BvnkSessionTimestampField,
+  bvnkFundingWalletLockSchema,
   bvnkFundingWalletMetadataSchema,
   counterpartyProviderAccountRowSchema,
   generateCounterpartyProviderAccountId,
@@ -31,25 +40,37 @@ import {
 
 /**
  * Validates a provider-account metadata blob against the schema its row
- * kind requires.
+ * kind requires. A locked BVNK funding row must carry the lock metadata; every
+ * other BVNK funding row must carry none.
  *
  * @param kind - The row's kind discriminator.
  * @param provider - The row's ramp provider.
+ * @param providerStatus - The row's current provider status.
  * @param metadata - The metadata blob to validate.
  */
 function assertProviderAccountMetadata(
   kind: CounterpartyProviderAccountRow["kind"],
   provider: CounterpartyProviderAccountRow["provider"],
+  providerStatus: string | null,
   metadata: Record<string, unknown>
 ): void {
   if (kind === "funding_wallet" && provider === "bvnk") {
+    if (providerStatus === BVNK_FUNDING_WALLET_STATUS.locked) {
+      bvnkFundingWalletLockSchema.parse(metadata);
+      return;
+    }
     bvnkFundingWalletMetadataSchema.parse(metadata);
   }
 }
 
 function parseProviderAccountRow(row: Record<string, unknown>): CounterpartyProviderAccountRow {
   const parsed = counterpartyProviderAccountRowSchema.parse(row);
-  assertProviderAccountMetadata(parsed.kind, parsed.provider, parsed.metadata);
+  assertProviderAccountMetadata(
+    parsed.kind,
+    parsed.provider,
+    parsed.provider_status,
+    parsed.metadata
+  );
   return parsed;
 }
 
@@ -189,24 +210,225 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return row === null ? null : parseProviderAccountRow(row);
     },
 
-    async getFundingWalletByOnrampKey(input: GetFundingWalletByOnrampKeyInput) {
+    async claimFundingWallet(input: ClaimFundingWalletInput) {
       const row = await db
         .prepare(
-          `SELECT * FROM counterparty_provider_accounts
-           WHERE organization_id = ?
-             AND project_id = ?
-             AND counterparty_id = ?
-             AND provider = ?
-             AND kind = 'funding_wallet'
-             AND metadata->>'onrampKey' = ?
-             AND status = 'active'`
+          `INSERT INTO counterparty_provider_accounts (
+             id, organization_id, project_id, counterparty_id, provider,
+             provider_customer_reference, kind, fiat_currency, provider_status, metadata
+           ) VALUES (?, ?, ?, ?, ?, ?, 'funding_wallet', ?, ?, '{}'::jsonb)
+           ON CONFLICT (counterparty_id, provider, fiat_currency)
+             WHERE status = 'active' AND kind = 'funding_wallet'
+           DO NOTHING
+           RETURNING *`
         )
         .bind(
+          generateCounterpartyProviderAccountId(),
           input.organizationId,
           input.projectId,
           input.counterpartyId,
           input.provider,
-          input.onrampKey
+          input.providerCustomerReference,
+          input.fiatCurrency,
+          input.providerStatus
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async assignFundingWalletReference(input: AssignFundingWalletReferenceInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET external_account_reference = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'funding_wallet'
+             AND status = 'active'
+             AND external_account_reference IS NULL
+           RETURNING *`
+        )
+        .bind(
+          input.externalAccountReference,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async findActiveFundingWalletByCustomerLinkId(
+      input: FindActiveFundingWalletByCustomerLinkIdInput
+    ) {
+      const row = await db
+        .prepare(
+          `SELECT f.*
+           FROM counterparty_provider_accounts f
+           JOIN counterparty_provider_accounts l
+             ON l.organization_id = f.organization_id
+            AND l.project_id = f.project_id
+            AND l.counterparty_id = f.counterparty_id
+            AND l.provider = f.provider
+           WHERE l.id = ?
+             AND l.kind = 'customer_link'
+             AND l.status = 'active'
+             AND f.kind = 'funding_wallet'
+             AND f.fiat_currency = ?
+             AND f.status = 'active'
+             AND f.provider = ?`
+        )
+        .bind(input.customerLinkId, input.fiatCurrency, input.provider)
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async findActiveFundingWalletByReference(input: FindActiveFundingWalletByReferenceInput) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE provider = ?
+             AND kind = 'funding_wallet'
+             AND status = 'active'
+             AND external_account_reference = ?`
+        )
+        .bind(input.provider, input.externalAccountReference)
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async recordFundingWalletPayin(input: RecordFundingWalletPayinInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET metadata = metadata || jsonb_build_object('payinId', ?::text),
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'funding_wallet'
+             AND status = 'active'
+             AND provider_status = ?
+             AND metadata->>'transferId' = ?
+             AND NOT jsonb_exists(metadata, 'payinId')
+           RETURNING *`
+        )
+        .bind(
+          input.payinId,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          BVNK_FUNDING_WALLET_STATUS.locked,
+          input.transferId
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async updateFundingWalletStatus(input: UpdateFundingWalletStatusInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET provider_status = ?,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'funding_wallet'
+             AND status = 'active'
+             AND provider_status = ?
+           RETURNING *`
+        )
+        .bind(
+          input.toStatus,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          input.fromStatus
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async lockFundingWallet(input: LockFundingWalletInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET provider_status = ?,
+               metadata = jsonb_build_object('transferId', ?::text),
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'funding_wallet'
+             AND status = 'active'
+             AND provider_status = ?
+           RETURNING *`
+        )
+        .bind(
+          BVNK_FUNDING_WALLET_STATUS.locked,
+          input.transferId,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          BVNK_FUNDING_WALLET_STATUS.provisioned
+        )
+        .first<Record<string, unknown>>();
+
+      return row === null ? null : parseProviderAccountRow(row);
+    },
+
+    async releaseFundingWallet(input: ReleaseFundingWalletInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET provider_status = ?,
+               metadata = '{}'::jsonb,
+               updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'funding_wallet'
+             AND status = 'active'
+             AND provider_status = ?
+             AND metadata->>'transferId' = ?
+           RETURNING *`
+        )
+        .bind(
+          BVNK_FUNDING_WALLET_STATUS.provisioned,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider,
+          BVNK_FUNDING_WALLET_STATUS.locked,
+          input.transferId
         )
         .first<Record<string, unknown>>();
 
@@ -214,10 +436,12 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     },
 
     async insertProviderResourceAccount(input: InsertProviderResourceAccountInput) {
-      // The onramp-key unique index and lookup are expression-based; a row
-      // missing metadata.onrampKey would commit but be unreachable and
-      // un-deduplicated, so the shape is enforced before the write.
-      assertProviderAccountMetadata(input.kind, input.provider, input.metadata);
+      assertProviderAccountMetadata(
+        input.kind,
+        input.provider,
+        input.providerStatus === undefined ? null : input.providerStatus,
+        input.metadata
+      );
       const row = await db
         .prepare(
           `INSERT INTO counterparty_provider_accounts (
@@ -251,13 +475,10 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     },
 
     async patchAccountMetadata(input: PatchAccountMetadataInput) {
-      // Patch semantics (top-level shallow merge + explicit key deletion)
-      // keep callers from clobbering sibling keys such as a funding
-      // wallet's onrampKey. The row is locked for the read-merge-write and
-      // the merged blob is validated against the row kind's schema BEFORE
-      // the UPDATE — an invalid blob would otherwise persist while
-      // escaping the expression-based unique index and the onramp-key
-      // lookup.
+      // Patch semantics (top-level shallow merge + explicit key deletion) keep
+      // callers from clobbering sibling keys. The row is locked for the
+      // read-merge-write and the merged blob is validated against the row
+      // kind's schema BEFORE the UPDATE — an invalid blob can never persist.
       return db.transaction(async (tx) => {
         const current = await tx
           .prepare(
@@ -290,7 +511,12 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         for (const key of input.unset) {
           delete metadata[key];
         }
-        assertProviderAccountMetadata(currentRow.kind, currentRow.provider, metadata);
+        assertProviderAccountMetadata(
+          currentRow.kind,
+          currentRow.provider,
+          currentRow.provider_status,
+          metadata
+        );
 
         const row = await tx
           .prepare(

@@ -52,6 +52,7 @@ import {
   type BvnkCustomerCreated,
   type BvnkLedgerWalletProfilesV2,
   type BvnkLedgerWalletV2,
+  type BvnkRule,
   type BvnkRuleResponse,
   type BvnkSandboxPayinCurrency,
   bvnkAgreementSessionSchema,
@@ -62,6 +63,7 @@ import {
   bvnkPayoutEstimateResponseSchema,
   bvnkQuoteEstimateResponseSchema,
   bvnkRuleResponseSchema,
+  bvnkRuleSchema,
   bvnkSandboxPayinCurrencySchema,
   bvnkV2LedgerWalletSchema,
   bvnkV2WalletProfilesSchema,
@@ -99,9 +101,11 @@ interface BvnkSandboxBankAccount {
 const SANDBOX_ORIGINATOR_BANK_ACCOUNTS = {
   // biome-ignore lint/security/noSecrets: synthetic sandbox account, not a credential
   USD: { accountNumber: "000123456789", accountNumberFormat: "ABA", bankCode: "021000021" },
-  // biome-ignore lint/security/noSecrets: synthetic sandbox account, not a credential
-  EUR: { accountNumber: "GB29NWBK60161331926819", accountNumberFormat: "IBAN" },
 } as const satisfies Record<BvnkSandboxPayinCurrency, BvnkSandboxBankAccount>;
+
+const SANDBOX_PAYIN_METHODS = {
+  USD: "ACH",
+} as const satisfies Record<BvnkSandboxPayinCurrency, string>;
 
 interface BvnkConfig {
   auth: { authId: string; secretKey: string };
@@ -212,7 +216,7 @@ export class BvnkRampClient implements RampProvider {
     }
 
     if (parsed === undefined) {
-      if (response.status === 204) {
+      if (response.status === 204 || raw.trim() === "") {
         return undefined;
       }
       throw providerUnavailable("BVNK returned an unparseable response", {
@@ -420,6 +424,47 @@ export class BvnkRampClient implements RampProvider {
     return parseBvnkResponse(bvnkRuleResponseSchema, response);
   }
 
+  /**
+   * Lists the payment rules registered on a wallet, including deactivated
+   * ones. The list response is the source of truth for which rules exist:
+   * SDP stores no rule id.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - The wallet whose rules are listed.
+   * @returns Every rule on the wallet with its current status.
+   */
+  async listOnrampRules(
+    { env, mode }: RampRuntimeContext,
+    input: { walletId: string }
+  ): Promise<BvnkRule[]> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(
+      config,
+      `/payment/v1/rules?walletId=${encodeURIComponent(input.walletId)}`,
+      { method: "GET" }
+    );
+    return parseBvnkResponse(z.array(bvnkRuleSchema), response);
+  }
+
+  /**
+   * Deactivates a payment rule so no further pay-in can match it. BVNK
+   * answers 204; deactivating an already-INACTIVE rule is a provider error.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - The rule id to deactivate.
+   * @returns Nothing once BVNK acknowledges the deactivation.
+   */
+  async deactivateOnrampRule(
+    { env, mode }: RampRuntimeContext,
+    input: { ruleId: string }
+  ): Promise<void> {
+    const config = readBvnkConfig(env, mode);
+    await this.request(config, `/payment/v1/rules/${encodeURIComponent(input.ruleId)}/actions`, {
+      method: "POST",
+      body: { type: "DEACTIVATE" },
+    });
+  }
+
   async simulatePayin(
     { env, mode }: RampRuntimeContext,
     input: {
@@ -433,7 +478,7 @@ export class BvnkRampClient implements RampProvider {
   ): Promise<unknown> {
     const currency = bvnkSandboxPayinCurrencySchema.safeParse(input.currency);
     if (!currency.success) {
-      throw badRequest("BVNK sandbox pay-in simulation supports USD and EUR only.");
+      throw badRequest("BVNK sandbox pay-in simulation supports USD only.");
     }
     const config = readBvnkConfig(env, mode);
     return this.request(config, "/payment/v2/payins/simulation", {
@@ -443,6 +488,7 @@ export class BvnkRampClient implements RampProvider {
         walletId: input.walletId,
         amount: input.amount,
         currency: currency.data,
+        method: SANDBOX_PAYIN_METHODS[currency.data],
         remittanceInformation: input.remittanceInformation,
         originator: {
           name: input.originatorName,

@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { buildBvnkCustomerRequest } from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import { buildBvnkCustomerExternalReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
@@ -10,6 +11,7 @@ import {
   bvnkAgreementSession,
   bvnkCustomer,
 } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
+import { BVNK_FUNDING_WALLET_STATUS } from "@sdp/types";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -29,7 +31,13 @@ import {
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
-import { restoreBvnkSandboxEnv, stubBvnkSandboxEnv } from "@/test/helpers/bvnk";
+import {
+  restoreBvnkSandboxEnv,
+  seedBvnkFundingWallet,
+  seedBvnkOnrampTransfer,
+  stubBvnkSandboxEnv,
+  TEST_BVNK_WALLET_ID,
+} from "@/test/helpers/bvnk";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -1239,6 +1247,293 @@ describe("Counterparties Routes", () => {
           },
         },
       ]);
+    });
+
+    async function seedVerifiedBvnkCustomerLink(counterpartyId: string): Promise<void> {
+      await createPostgresCounterpartyProviderAccountsRepository(getDb(env)).upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId,
+        provider: "bvnk",
+        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+        metadata: { status: "VERIFIED" },
+      });
+    }
+
+    function mockVerifiedBvnkCustomer() {
+      const spy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer")
+        .mockResolvedValue(
+          bvnkCustomer({ reference: BVNK_CUSTOMER_REFERENCE, status: "VERIFIED" })
+        );
+      return spy;
+    }
+
+    function bvnkOnrampRequirementsRequest(counterpartyId: string) {
+      return app.request(
+        `/v1/counterparties/${counterpartyId}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`,
+        { headers: { "Content-Type": "application/json", Authorization: authHeader } },
+        env
+      );
+    }
+
+    function seedFundingWallet(
+      counterpartyId: string,
+      input: {
+        providerStatus:
+          | "provisioning_funding_wallet"
+          | "provisioned_funding_wallet"
+          | "funding_wallet_locked";
+        metadata: Record<string, unknown>;
+      }
+    ) {
+      return seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId,
+        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+        walletId: TEST_BVNK_WALLET_ID,
+        providerStatus: input.providerStatus,
+        metadata: input.metadata,
+      });
+    }
+
+    it("gates the verified BVNK on-ramp on customer_funding_account_provisioning before the funding row exists", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_funding_missing" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "customer_funding_account_provisioning",
+      });
+
+      getCustomerSpy.mockRestore();
+    });
+
+    it("keeps reporting customer_funding_account_provisioning while the funding wallet provisions", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_funding_provisioning",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedFundingWallet(counterparty.id, {
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
+        metadata: {},
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "customer_funding_account_provisioning",
+      });
+
+      getCustomerSpy.mockRestore();
+    });
+
+    it("answers ready once the BVNK funding wallet is provisioned", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_funding_ready" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedFundingWallet(counterparty.id, {
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "ready",
+      });
+
+      getCustomerSpy.mockRestore();
+    });
+
+    it("reports funding_wallet_reserved with the holding transfer while a quote awaits payment", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_funding_reserved",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedBvnkOnrampTransfer(getDb(env), {
+        id: "xfr_req_reserved",
+        status: "awaiting_payment",
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        fiatAmount: "42.00",
+        destinationAddress: TEST_CP_WALLET_PUBLIC_KEY,
+      });
+      await seedFundingWallet(counterparty.id, {
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.locked,
+        metadata: { transferId: "xfr_req_reserved" },
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "funding_wallet_reserved",
+        transfer: {
+          id: "xfr_req_reserved",
+          fiatAmount: "42.00",
+          createdAt: expect.any(String),
+        },
+      });
+
+      getCustomerSpy.mockRestore();
+    });
+
+    it("reports funding_wallet_settling while the pay-in is settling", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_funding_settling",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedBvnkOnrampTransfer(getDb(env), {
+        id: "xfr_req_settling",
+        status: "settling",
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        fiatAmount: "88.00",
+        destinationAddress: TEST_CP_WALLET_PUBLIC_KEY,
+      });
+      await seedFundingWallet(counterparty.id, {
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.locked,
+        metadata: { transferId: "xfr_req_settling" },
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "funding_wallet_settling",
+        transfer: {
+          id: "xfr_req_settling",
+          fiatAmount: "88.00",
+          createdAt: expect.any(String),
+        },
+      });
+
+      getCustomerSpy.mockRestore();
+    });
+
+    it("releases a lock held by a completed transfer and answers ready", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_funding_stale" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedBvnkOnrampTransfer(getDb(env), {
+        id: "xfr_req_completed",
+        status: "completed",
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        fiatAmount: "33.00",
+        destinationAddress: TEST_CP_WALLET_PUBLIC_KEY,
+      });
+      await seedFundingWallet(counterparty.id, {
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.locked,
+        metadata: { transferId: "xfr_req_completed" },
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+      const listRulesSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listOnrampRules")
+        .mockResolvedValue([
+          { id: "rule_req_stale", reference: "xfr_req_completed", status: "ACTIVE" },
+        ]);
+      const deactivateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "deactivateOnrampRule")
+        .mockResolvedValue(undefined);
+
+      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "ready",
+      });
+      expect(deactivateSpy).toHaveBeenCalledTimes(1);
+      expect(deactivateSpy).toHaveBeenCalledWith(expect.anything(), {
+        ruleId: "rule_req_stale",
+      });
+      const funding = await getDb(env)
+        .prepare(
+          "SELECT provider_status, metadata FROM counterparty_provider_accounts WHERE counterparty_id = ? AND kind = 'funding_wallet'"
+        )
+        .bind(counterparty.id)
+        .first<{ provider_status: string; metadata: Record<string, unknown> }>();
+      expect(funding).toEqual({
+        provider_status: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+
+      getCustomerSpy.mockRestore();
+      listRulesSpy.mockRestore();
+      deactivateSpy.mockRestore();
+    });
+
+    it("advances a verified BVNK on-ramp submit to ready once the funding wallet is provisioned", async () => {
+      const created = await createCounterparty({ externalId: "requirements_bvnk_submit_ready" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedFundingWallet(counterparty.id, {
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "bvnk",
+            direction: "onramp",
+            assetRail: "usdc.solana",
+            destinationCustodyWalletId: TEST_CP_CUSTODY_WALLET_ID,
+            fiatCurrency: "USD",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "ready",
+      });
+
+      getCustomerSpy.mockRestore();
     });
 
     it("mints the session from a claimed row whose crash left it unminted", async () => {

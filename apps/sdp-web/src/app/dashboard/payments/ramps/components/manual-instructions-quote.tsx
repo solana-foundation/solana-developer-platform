@@ -383,7 +383,6 @@ function BvnkInstruction({
 
   const isReady = instruction.onboardingStatus === "ready";
   const needsVerification = instruction.onboardingStatus === "verification_required";
-  const isProvisioning = instruction.onboardingStatus === "provisioning";
   const bank = instruction.bankAccount;
   const verificationUrl = instruction.verificationUrl;
 
@@ -439,18 +438,14 @@ function BvnkInstruction({
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-primary">
-              {isProvisioning
-                ? t("DashboardPayments.manualInstructions.provisioningAccount")
-                : t("DashboardPayments.manualInstructions.verificationInReview")}
+              {t("DashboardPayments.manualInstructions.verificationInReview")}
             </p>
             <p className="mt-1 text-sm leading-relaxed text-tertiary">
               {instruction.instructionsNotes}
             </p>
             <p className="mt-3 flex items-center gap-2 text-xs font-medium text-secondary">
               <Loader2 className="size-3.5 animate-spin" />
-              {isProvisioning
-                ? t("DashboardPayments.manualInstructions.provisioningFundingAccount")
-                : t("DashboardPayments.manualInstructions.checkingVerificationStatus")}
+              {t("DashboardPayments.manualInstructions.checkingVerificationStatus")}
             </p>
           </div>
         </div>
@@ -550,7 +545,7 @@ export function ManualInstructionsQuote({
         key={
           instruction.kind === "crypto_deposit"
             ? instruction.destinationAddress
-            : (instruction.ruleId ?? instruction.beneficiaryAddress)
+            : instruction.beneficiaryAddress
         }
         instruction={instruction}
         action={action}

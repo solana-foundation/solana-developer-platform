@@ -26,7 +26,8 @@ export const bvnkComplianceDetailsSchema = z.object({
 });
 export type BvnkComplianceInput = z.infer<typeof bvnkComplianceDetailsSchema>;
 
-export const bvnkSandboxPayinCurrencySchema = z.enum(["USD", "EUR"]);
+/** Sandbox pay-in simulation is USD only: ACH is the one method the sandbox accepts on a customer funding wallet (probe Sep 16 2026). */
+export const bvnkSandboxPayinCurrencySchema = z.enum(["USD"]);
 export type BvnkSandboxPayinCurrency = z.infer<typeof bvnkSandboxPayinCurrencySchema>;
 
 export const bvnkOfframpQuoteInputSchema = z.object({
@@ -37,14 +38,17 @@ export const bvnkOfframpQuoteInputSchema = z.object({
   bvnkCompliance: bvnkComplianceDetailsSchema,
 });
 
-export const bvnkOnrampTransferProviderDataSchema = z.object({
-  bvnk: z.object({
-    ruleId: z.string().min(1),
-    ruleStatus: z.string().min(1).optional(),
-    fundingWalletId: z.string().min(1),
-  }),
-});
-export type BvnkOnrampTransferProviderData = z.infer<typeof bvnkOnrampTransferProviderDataSchema>;
+export const BVNK_RULE_STATUSES = ["ACTIVE", "INACTIVE"] as const;
+export type BvnkRuleStatus = (typeof BVNK_RULE_STATUSES)[number];
+export const bvnkRuleStatusSchema = z.enum(BVNK_RULE_STATUSES);
+
+/**
+ * @param status - A BVNK payment-rule status.
+ * @returns True when the rule is still live and can match a pay-in.
+ */
+export function isBvnkRuleActive(status: BvnkRuleStatus): boolean {
+  return status === bvnkRuleStatusSchema.enum.ACTIVE;
+}
 
 export const bvnkErrorEnvelopeSchema = z.object({
   code: z.string().optional(),
@@ -117,12 +121,6 @@ export const bvnkCustomerStatusSchema = z.enum([
   "VERIFIED",
   "REJECTED",
   "TERMINATED",
-]);
-/** Customer webhooks also report terminal success as COMPLETED or APPROVED, which the v2 customer API never returns. */
-export const bvnkCustomerWebhookStatusSchema = z.enum([
-  ...bvnkCustomerStatusSchema.options,
-  "COMPLETED",
-  "APPROVED",
 ]);
 
 const bvnkV2AddressSchema = z.object({
@@ -225,6 +223,12 @@ export type BvnkCustomerCreated = z.infer<typeof bvnkCustomerCreatedSchema>;
  */
 export const bvnkVerificationStatusSchema = z.string().min(1);
 
+/**
+ * The v1 customer GET also drives quote-time rule entities, so its person
+ * block carries the address keys BVNK's rule validation re-reads. The
+ * `individual` field stays optional at the top level: BVNK may omit the block
+ * while KYC is in flight, and the rule entity builder fails loudly then.
+ */
 export const bvnkCustomerSchema = z.object({
   reference: z.string().min(1),
   status: bvnkCustomerStatusSchema,
@@ -234,8 +238,22 @@ export const bvnkCustomerSchema = z.object({
       url: bvnkHttpsUrlSchema.optional(),
     })
     .optional(),
+  individual: z
+    .object({
+      person: z.object({
+        firstName: z.string().min(1),
+        lastName: z.string().min(1),
+        dateOfBirth: z.string().min(1),
+        address: bvnkV2AddressSchema.extend({
+          postalCode: z.string().optional(),
+          countryCode: z.string().length(2),
+        }),
+      }),
+    })
+    .optional(),
 });
 export type BvnkCustomer = z.infer<typeof bvnkCustomerSchema>;
+export type BvnkCustomerStatus = z.infer<typeof bvnkCustomerStatusSchema>;
 
 export interface CreateBvnkCustomerInput {
   idempotencyKey: string;
@@ -302,9 +320,11 @@ export const bvnkV2LedgerWalletSchema = z.object({
 });
 export type BvnkLedgerWalletV2 = z.infer<typeof bvnkV2LedgerWalletSchema>;
 
-export const bvnkRuleResponseSchema = z.object({
+export const bvnkRuleSchema = z.object({
   id: z.string().min(1),
   reference: z.string().min(1),
-  status: z.string().min(1),
+  status: bvnkRuleStatusSchema,
 });
-export type BvnkRuleResponse = z.infer<typeof bvnkRuleResponseSchema>;
+export type BvnkRule = z.infer<typeof bvnkRuleSchema>;
+export const bvnkRuleResponseSchema = bvnkRuleSchema;
+export type BvnkRuleResponse = BvnkRule;

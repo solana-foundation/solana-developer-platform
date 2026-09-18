@@ -2,46 +2,163 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildBvnkCustomerExternalReference,
+  buildBvnkFundingWalletName,
   buildBvnkOfframpWalletName,
-  buildBvnkOnrampPaymentRuleKey,
-  buildBvnkOnrampWalletName,
   buildBvnkWalletIdempotencyKey,
-  bvnkUnverifiedOnboardingStatus,
+  bvnkCustomerStatusRequirements,
+  bvnkRuleEntityFromCustomer,
+  parseBvnkFundingWalletName,
   parseBvnkOfframpWalletName,
-  parseBvnkOnrampPaymentRuleKey,
-  parseBvnkOnrampWalletName,
+  parseBvnkWalletName,
 } from "./provider-data";
+import { bvnkCustomer } from "./test-fixtures";
 
-const ONRAMP_KEY = "USD:USDC_SOLANA:dest";
-
-describe("bvnkUnverifiedOnboardingStatus", () => {
-  it("maps PENDING (submitted, in review) to verifying", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("PENDING"), "verifying");
+describe("bvnkCustomerStatusRequirements", () => {
+  it("answers ready for VERIFIED", () => {
+    assert.deepEqual(bvnkCustomerStatusRequirements("VERIFIED", "onramp"), {
+      provider: "bvnk",
+      direction: "onramp",
+      status: "ready",
+    });
   });
 
-  it("maps INFO_REQUIRED / ACTIONS_REQUIRED to verification_required", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("INFO_REQUIRED"), "verification_required");
-    assert.equal(bvnkUnverifiedOnboardingStatus("ACTIONS_REQUIRED"), "verification_required");
+  it("answers customer_verifying for PENDING", () => {
+    assert.deepEqual(bvnkCustomerStatusRequirements("PENDING", "offramp"), {
+      provider: "bvnk",
+      direction: "offramp",
+      status: "customer_verifying",
+    });
   });
 
-  it("maps the terminal REJECTED status to verification_failed", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("REJECTED"), "verification_failed");
+  it("answers customer_verification_required with the JIT URL for INFO_REQUIRED", () => {
+    assert.deepEqual(
+      bvnkCustomerStatusRequirements("INFO_REQUIRED", "onramp", "https://in.sumsub.com/websdk/p/t"),
+      {
+        provider: "bvnk",
+        direction: "onramp",
+        status: "customer_verification_required",
+        verificationUrl: "https://in.sumsub.com/websdk/p/t",
+      }
+    );
   });
 
-  it("maps the terminal TERMINATED status to verification_failed", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("TERMINATED"), "verification_failed");
+  it("answers customer_verification_required with the JIT URL for ACTIONS_REQUIRED", () => {
+    assert.deepEqual(
+      bvnkCustomerStatusRequirements(
+        "ACTIONS_REQUIRED",
+        "onramp",
+        "https://in.sumsub.com/websdk/p/t"
+      ),
+      {
+        provider: "bvnk",
+        direction: "onramp",
+        status: "customer_verification_required",
+        verificationUrl: "https://in.sumsub.com/websdk/p/t",
+      }
+    );
   });
 
-  it("is case-insensitive", () => {
-    assert.equal(bvnkUnverifiedOnboardingStatus("pending"), "verifying");
+  it("throws when a verification-required status has no JIT URL", () => {
+    assert.throws(() => bvnkCustomerStatusRequirements("INFO_REQUIRED", "onramp"), {
+      message: /verification_required.*without a JIT verification URL/,
+    });
   });
 
-  it("throws on an unmapped status", () => {
-    assert.throws(() => bvnkUnverifiedOnboardingStatus("WAT"));
+  it("answers customer_verification_failed for REJECTED", () => {
+    assert.deepEqual(bvnkCustomerStatusRequirements("REJECTED", "onramp"), {
+      provider: "bvnk",
+      direction: "onramp",
+      status: "customer_verification_failed",
+    });
   });
 
-  it("throws on a missing status", () => {
-    assert.throws(() => bvnkUnverifiedOnboardingStatus(undefined));
+  it("answers customer_verification_failed for TERMINATED", () => {
+    assert.deepEqual(bvnkCustomerStatusRequirements("TERMINATED", "onramp"), {
+      provider: "bvnk",
+      direction: "onramp",
+      status: "customer_verification_failed",
+    });
+  });
+});
+
+describe("bvnkRuleEntityFromCustomer", () => {
+  const person = {
+    firstName: "Jane",
+    lastName: "Doe",
+    dateOfBirth: "1984-06-30",
+    address: {
+      addressLine1: "1 Main Street",
+      addressLine2: "Apt 4",
+      city: "Austin",
+      postalCode: "78701",
+      stateCode: "TX",
+      countryCode: "US",
+    },
+  };
+
+  it("maps the person block onto BVNK's rule-entity address keys", () => {
+    const customer = bvnkCustomer({
+      reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      status: "VERIFIED",
+      individual: { person },
+    });
+
+    assert.deepEqual(bvnkRuleEntityFromCustomer(customer), {
+      type: "INDIVIDUAL",
+      relationshipType: "SELF_OWNED",
+      customerIdentifier: customer.reference,
+      firstName: "Jane",
+      lastName: "Doe",
+      dateOfBirth: "1984-06-30",
+      address: {
+        addressLine1: "1 Main Street",
+        addressLine2: "Apt 4",
+        city: "Austin",
+        region: "TX",
+        postCode: "78701",
+        country: "US",
+      },
+    });
+  });
+
+  it("omits optional address keys the person block does not carry", () => {
+    const customer = bvnkCustomer({
+      reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      status: "VERIFIED",
+      individual: {
+        person: {
+          firstName: "Jane",
+          lastName: "Doe",
+          dateOfBirth: "1984-06-30",
+          address: {
+            addressLine1: "1 Main Street",
+            city: "Austin",
+            countryCode: "US",
+          },
+        },
+      },
+    });
+
+    const entity = bvnkRuleEntityFromCustomer(customer);
+    if (entity.type !== "INDIVIDUAL") {
+      throw new Error(`expected an individual entity, got ${entity.type}`);
+    }
+    assert.deepEqual(entity.address, {
+      addressLine1: "1 Main Street",
+      city: "Austin",
+      country: "US",
+    });
+  });
+
+  it("throws naming the customer when no individual details are present", () => {
+    const customer = bvnkCustomer({
+      reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+      status: "VERIFIED",
+    });
+
+    assert.throws(() => bvnkRuleEntityFromCustomer(customer), {
+      message: /BVNK customer 2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3 has no individual details/,
+    });
   });
 });
 
@@ -71,7 +188,7 @@ describe("parseBvnkOfframpWalletName", () => {
   it("round-trips an SDP off-ramp wallet name", () => {
     assert.deepEqual(parseBvnkOfframpWalletName(buildBvnkOfframpWalletName("USD", "cpty_123")), {
       namespace: "sdp",
-      direction: "offramp",
+      kind: "merchant_offramp",
       fiatCurrency: "USD",
       counterpartyId: "cpty_123",
     });
@@ -79,6 +196,9 @@ describe("parseBvnkOfframpWalletName", () => {
 
   it("rejects malformed wallet names", () => {
     assert.throws(() => parseBvnkOfframpWalletName("sdp:onramp:USD:cpty_123"), {
+      message: /Malformed BVNK off-ramp wallet name/,
+    });
+    assert.throws(() => parseBvnkOfframpWalletName("sdp:sideways:USD:cpty_123"), {
       message: /Malformed BVNK off-ramp wallet name/,
     });
     assert.throws(() => parseBvnkOfframpWalletName("sdp:offramp:NOTFIAT:cpty_123"), {
@@ -90,29 +210,66 @@ describe("parseBvnkOfframpWalletName", () => {
   });
 });
 
-describe("parseBvnkOnrampWalletName", () => {
-  it("round-trips an SDP on-ramp wallet name", () => {
-    const walletName = buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY);
-
-    assert.equal(walletName, "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest");
-    assert.deepEqual(parseBvnkOnrampWalletName(walletName), {
+describe("parseBvnkFundingWalletName", () => {
+  it("parses a customer funding wallet name into its provider-account id", () => {
+    assert.equal(buildBvnkFundingWalletName("cpa_123"), "sdp:onramp:cpa_123");
+    assert.deepEqual(parseBvnkFundingWalletName("sdp:onramp:cpa_123"), {
       namespace: "sdp",
-      direction: "onramp",
-      counterpartyId: "cpty_123",
-      onrampKey: ONRAMP_KEY,
+      kind: "funding_wallet",
+      providerAccountId: "cpa_123",
+    });
+    assert.deepEqual(parseBvnkWalletName("sdp:onramp:cpa_123"), {
+      namespace: "sdp",
+      kind: "funding_wallet",
+      providerAccountId: "cpa_123",
     });
   });
 
-  it("rejects wallet names with malformed payment rule keys", () => {
-    assert.throws(() => parseBvnkOnrampWalletName("sdp:onramp:cpty_123:USD:USDC_NOPE:dest"), {
-      message: /Malformed BVNK on-ramp wallet name/,
+  it("rejects wallet names that are not the 3-part funding shape", () => {
+    assert.throws(() => parseBvnkFundingWalletName("sdp:onramp:cpa_123:extra"), {
+      message: /Malformed BVNK funding wallet name/,
+    });
+  });
+
+  it("rejects wallet names with the wrong direction segment", () => {
+    assert.throws(() => parseBvnkFundingWalletName("sdp:sideways:cpa_123"), {
+      message: /Malformed BVNK funding wallet name/,
+    });
+  });
+});
+
+describe("parseBvnkWalletName", () => {
+  it("round-trips the merchant off-ramp wallet name", () => {
+    assert.deepEqual(parseBvnkWalletName(buildBvnkOfframpWalletName("USD", "cpty_123")), {
+      namespace: "sdp",
+      kind: "merchant_offramp",
+      fiatCurrency: "USD",
+      counterpartyId: "cpty_123",
+    });
+  });
+
+  it("reports the legacy 6-part on-ramp wallet name as unrecognised", () => {
+    assert.deepEqual(parseBvnkWalletName("sdp:onramp:cpty_123:USD:USDC_SOLANA:dest"), {
+      kind: "unrecognised",
+      name: "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest",
+    });
+  });
+
+  it("reports other foreign wallet names as unrecognised", () => {
+    assert.deepEqual(parseBvnkWalletName("sdp:sideways:USD:cpty_123"), {
+      kind: "unrecognised",
+      name: "sdp:sideways:USD:cpty_123",
+    });
+    assert.deepEqual(parseBvnkWalletName("a:foreign:wallet:1"), {
+      kind: "unrecognised",
+      name: "a:foreign:wallet:1",
     });
   });
 });
 
 describe("buildBvnkWalletIdempotencyKey", () => {
   it("hashes the BVNK wallet name to a stable 36-character key", async () => {
-    const walletName = buildBvnkOnrampWalletName("cpty_123", ONRAMP_KEY);
+    const walletName = buildBvnkFundingWalletName("cpa_123");
 
     const key = await buildBvnkWalletIdempotencyKey(walletName);
 
@@ -120,37 +277,5 @@ describe("buildBvnkWalletIdempotencyKey", () => {
     assert.equal(key.length, 36);
     assert.equal(await buildBvnkWalletIdempotencyKey(walletName), key);
     assert.notEqual(await buildBvnkWalletIdempotencyKey(`${walletName}:changed`), key);
-  });
-});
-
-describe("BVNK on-ramp payment rule key", () => {
-  it("builds and parses the payment rule key", () => {
-    const key = buildBvnkOnrampPaymentRuleKey("USD", "USDC", "SOLANA", "dest");
-
-    assert.equal(key, ONRAMP_KEY);
-    assert.deepEqual(parseBvnkOnrampPaymentRuleKey(key), {
-      fiatCurrency: "USD",
-      cryptoCurrency: "USDC",
-      cryptoNetwork: "SOLANA",
-      destinationWalletAddress: "dest",
-    });
-  });
-
-  it("rejects non-Solana crypto networks", () => {
-    assert.throws(() => parseBvnkOnrampPaymentRuleKey("USD:BCH_BITCOIN_CASH:dest"), {
-      message: /Malformed BVNK on-ramp payment rule key/,
-    });
-  });
-
-  it("rejects malformed payment rule keys", () => {
-    assert.throws(() => parseBvnkOnrampPaymentRuleKey("USD:USDC_SOLANA"), {
-      message: /Malformed BVNK on-ramp payment rule key/,
-    });
-    assert.throws(() => parseBvnkOnrampPaymentRuleKey("USD:USDC_NOT_A_NETWORK:dest"), {
-      message: /Malformed BVNK on-ramp payment rule key/,
-    });
-    assert.throws(() => parseBvnkOnrampPaymentRuleKey("NOPE:USDC_SOLANA:dest"), {
-      message: /Malformed BVNK on-ramp payment rule key/,
-    });
   });
 });

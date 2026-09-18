@@ -365,15 +365,23 @@ describe("Ramp webhook event inbox", () => {
     expect(await readInboxRows()).toHaveLength(0);
   });
 
-  it("discards a sandbox BVNK settlement for an unknown customer through the real processor", async () => {
+  it("discharges a sandbox BVNK pay-in for an unknown wallet through the real processor", async () => {
     const events = createPostgresRampWebhookEventsRepository(getDb(env));
     const stored = await events.insertEvent({
       provider: "bvnk",
       environment: "sandbox",
-      payload: bvnkPayinStatusChangeEvent({ customerReference: "customer_unknown" }),
+      payload: bvnkPayinStatusChangeEvent({
+        id: "payin_unknown_wallet_1",
+        beneficiary: {
+          amount: 100,
+          currency: "USD",
+          walletId: "a:unknown:wallet:1",
+          customerId: "customer_unknown",
+        },
+      }),
     });
 
-    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(true);
 
     expect(await readInboxRows()).toHaveLength(0);
   });

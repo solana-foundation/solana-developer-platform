@@ -375,10 +375,34 @@ export interface CoinbaseRampSettlement {
   failureReason?: string;
 }
 
+/**
+ * BVNK on-ramp economics captured from the COMPLETE crypto payout webhook:
+ * the fiat conversion totals come from the event's money objects
+ * (`walletCurrency.actual`, `paidCurrency.actual`, `feeCurrency.actual`),
+ * the exchange rate from `exchangeRate.rate`, and the on-chain delivery from
+ * `transactions[0].hash`; the pay-in and payout ids are the event's `id` and
+ * `uuid`.
+ */
+export interface BvnkRampSettlement {
+  provider: "bvnk";
+  status: "COMPLETE";
+  payinId: string;
+  payoutId: string;
+  fiatCurrency: string;
+  fiatAmount: string;
+  cryptoCurrency: string;
+  cryptoAmount: string;
+  feeCurrency: string;
+  feeAmount: string;
+  exchangeRate: number;
+  txHash: string;
+}
+
 export type RampTransferSettlement =
   | MoonpayRampSettlement
   | LightsparkRampSettlement
-  | CoinbaseRampSettlement;
+  | CoinbaseRampSettlement
+  | BvnkRampSettlement;
 
 /** Where an off-ramp sale expects the crypto deposit, reported by the provider while awaiting payment. */
 export interface RampCryptoDeposit {
@@ -1164,7 +1188,6 @@ export type BvnkOnboardingStatus =
   | "verification_required"
   | "verifying"
   | "verification_failed"
-  | "provisioning"
   | "ready";
 
 export interface BvnkBankFundingDetails {
@@ -1181,8 +1204,6 @@ export interface BvnkFiatFundingInstruction {
   kind: "fiat_funding";
   onboardingStatus: BvnkOnboardingStatus;
   verificationUrl?: string;
-  ruleId?: string;
-  ruleStatus?: string;
   fundingWalletId?: string;
   fiatCurrency: string;
   beneficiaryAddress: string;

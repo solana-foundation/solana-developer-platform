@@ -127,6 +127,13 @@ export interface PayoutRequirementTree {
   accounts: PayoutRequirementAccount[];
 }
 
+/** The transfer currently holding a BVNK funding wallet lock, as surfaced by the requirements gate. */
+export interface BvnkReservedTransfer {
+  id: string;
+  fiatAmount: string | null;
+  createdAt: string;
+}
+
 // TODO: tag RequirementField with a `group` ("kyc" | "bank") so the FE can section collect forms; deferred — today each collect is a single group.
 export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: Exclude<RampProviderId, "lightspark">; status: "ready" }
@@ -182,6 +189,21 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "bvnk"; status: "counterparty_agreement_signing" }
   | { provider: "bvnk"; status: "customer_verification_failed" }
   | { provider: "bvnk"; status: "customer_funding_account_provisioning" }
+  | {
+      provider: "bvnk";
+      /**
+       * The funding wallet is held by an open quote the client may cancel.
+       * Cancelling the named transfer releases the wallet.
+       */
+      status: "funding_wallet_reserved";
+      transfer: BvnkReservedTransfer;
+    }
+  | {
+      provider: "bvnk";
+      /** A pay-in has been seen on the funding wallet; settlement is in flight. */
+      status: "funding_wallet_settling";
+      transfer: BvnkReservedTransfer;
+    }
   | { provider: "bvnk"; status: "customer_funding_account_provisioning_failed" }
   | { provider: "mural"; status: "onboarding_not_started" }
   | { provider: "mural"; status: "terms_of_service_required"; termsOfServiceUrl: string }
@@ -197,6 +219,8 @@ export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES = [
   "customer_verifying",
   "counterparty_agreement_signing",
   "customer_funding_account_provisioning",
+  "funding_wallet_reserved",
+  "funding_wallet_settling",
   "funding_account_provisioning",
 ] as const satisfies readonly CounterpartyRequirements["status"][];
 
@@ -219,6 +243,8 @@ export const RAMP_ONBOARDING_PENDING_STATUSES = [
   "customer_verifying",
   "counterparty_agreement_signing",
   "customer_funding_account_provisioning",
+  "funding_wallet_reserved",
+  "funding_wallet_settling",
   "funding_account_provisioning",
 ] as const satisfies readonly CounterpartyRequirements["status"][];
 

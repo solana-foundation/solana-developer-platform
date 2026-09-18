@@ -311,6 +311,7 @@
       "acceptAgreements": "I agree and continue",
       "agreementSigningTitle": "Confirming agreement",
       "agreementSigningDescription": "Waiting for the provider to confirm the signed agreement. This usually takes a few seconds.",
+      "cancelReservedTransfer": "Cancel and continue",
       "verificationRequiredTitle": "Verify your identity",
       "verificationRequiredDescription": "BVNK partners with Sumsub to confirm your identity before activating your funding account. Hit “Complete Verification” to get started — this page refreshes automatically once you're approved, and your instructions will appear right here.",
       "verificationInReviewTitle": "Verification in review",
@@ -321,6 +322,10 @@
       "fundingAccountProvisioningDescription": "Almost there — we're provisioning your virtual account now. Your instructions will appear here in a moment.",
       "provisioningFailedTitle": "We couldn't finish setting up your account",
       "provisioningFailedDescription": "Something went wrong provisioning your funding account. Please try again.",
+      "fundingWalletReservedTitle": "Funding account reserved",
+      "fundingWalletReservedDescription": "Your funding account is held by a quote you can cancel. It will be released for the next quote once the current one settles or is canceled.",
+      "fundingWalletSettlingTitle": "Pay-in settling",
+      "fundingWalletSettlingDescription": "Your deposit arrived and is being converted — the crypto lands shortly.",
       "readyTitle": "Preparing your instructions",
       "readyDescription": "Your funding account is ready — fetching your details now.",
       "onrampProvisioningDetail": "Provisioning a BVNK wallet and fiat→crypto payment rule for this quote.",
@@ -715,7 +720,8 @@
       "lastUpdated": "Last updated",
       "copy": "Copy {label}",
       "viewReceipt": "View receipt",
-      "receipt": "Receipt"
+      "receipt": "Receipt",
+      "delivered": "Delivered"
     },
     "requestFailed": "Request failed.",
     "submitting": "Submitting...",

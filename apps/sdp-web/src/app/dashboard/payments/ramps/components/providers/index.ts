@@ -67,6 +67,8 @@ const BVNK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["stat
   "customer_verification_failed",
   "customer_funding_account_provisioning",
   "customer_funding_account_provisioning_failed",
+  "funding_wallet_reserved",
+  "funding_wallet_settling",
   "ready",
 ]);
 

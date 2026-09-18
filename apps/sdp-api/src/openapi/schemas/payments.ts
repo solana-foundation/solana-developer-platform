@@ -1764,7 +1764,7 @@ const bvnkFiatFundingInstructionSchema = z.object({
     example: "fiat_funding",
   }),
   onboardingStatus: z
-    .enum(["verification_required", "verifying", "verification_failed", "provisioning", "ready"])
+    .enum(["verification_required", "verifying", "verification_failed", "ready"])
     .openapi({
       description: "Where the buyer is in BVNK onboarding; 'ready' means the funding rule is live.",
       example: "ready",
@@ -1772,8 +1772,6 @@ const bvnkFiatFundingInstructionSchema = z.object({
   verificationUrl: z.string().optional().openapi({
     description: "Identity-verification (KYC) URL the buyer must complete before funding.",
   }),
-  ruleId: z.string().optional().openapi({ description: "BVNK on-ramp payment rule id." }),
-  ruleStatus: z.string().optional().openapi({ description: "Current status of the payment rule." }),
   fundingWalletId: z.string().optional().openapi({
     description: "BVNK fiat wallet the buyer funds; BVNK auto-converts arriving fiat to crypto.",
   }),
