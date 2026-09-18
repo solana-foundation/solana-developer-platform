@@ -1,4 +1,6 @@
+import { RAMP_PROVIDERS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
+import { createOnrampQuoteRequestSchema } from "./schemas/payments";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
@@ -595,5 +597,17 @@ describe("OpenAPI spec", () => {
     expect(rpcProviders).toContain(
       '"example":["triton","helius","alchemy","quicknode","validationcloud","nodit","default"]'
     );
+  });
+});
+
+describe("on-ramp quote request documentation", () => {
+  // The documented union indexes the runtime arms, so a new provider arm can be
+  // added to the schema and silently missed here, leaving clients with
+  // incomplete request documentation. This fails when that happens.
+  it("documents an arm for every ramp provider", () => {
+    const documented = createOnrampQuoteRequestSchema.options.map(
+      (arm) => arm.shape.provider.value
+    );
+    expect([...documented].sort()).toEqual([...RAMP_PROVIDERS].sort());
   });
 });
