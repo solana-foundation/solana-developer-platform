@@ -623,8 +623,12 @@ export const rampsMemoSchema = z
     message: `rampsMemo must contain at most ${RAMPS_MEMO_LIMITS.maxEntries} key-value pairs`,
   });
 
-export const createOnrampQuoteSchema = z.strictObject({
-  provider: rampProviderSchema,
+/**
+ * Every arm of the on-ramp quote body carries these. Spread rather than extended
+ * so each arm stays a `strictObject`: a union whose arms are not strict would
+ * silently accept unknown keys the single object rejected.
+ */
+const onrampQuoteFields = {
   counterpartyId: z.string().min(1),
   destinationCustodyWalletId: z.string().min(1),
   assetRail: onrampCryptoRailSchema,
@@ -633,7 +637,23 @@ export const createOnrampQuoteSchema = z.strictObject({
   rampsMemo: rampsMemoSchema.optional(),
   // Embedding domain for Coinbase's Apple Pay payment link (browser origin host).
   domain: z.string().min(1).optional(),
-});
+} as const;
+
+/**
+ * Discriminated by provider so an arm can carry what only that provider needs.
+ * The arms are identical today and written out rather than generated, because
+ * the next change to this schema edits one provider rather than all seven, and
+ * a reviewer should be able to see which.
+ */
+export const createOnrampQuoteSchema = z.discriminatedUnion("provider", [
+  z.strictObject({ provider: z.literal("moonpay"), ...onrampQuoteFields }),
+  z.strictObject({ provider: z.literal("lightspark"), ...onrampQuoteFields }),
+  z.strictObject({ provider: z.literal("bvnk"), ...onrampQuoteFields }),
+  z.strictObject({ provider: z.literal("moneygram"), ...onrampQuoteFields }),
+  z.strictObject({ provider: z.literal("coinbase"), ...onrampQuoteFields }),
+  z.strictObject({ provider: z.literal("mural"), ...onrampQuoteFields }),
+  z.strictObject({ provider: z.literal("stripe"), ...onrampQuoteFields }),
+]);
 
 const collectedDataSchema = z.record(z.string(), z.string()).optional();
 

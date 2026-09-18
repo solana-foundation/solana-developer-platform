@@ -974,6 +974,9 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
   let quote: PaymentRampQuote;
   let precreatedTransferId: string | undefined;
   let transferProviderData: Record<string, unknown> | undefined;
+  // Captured before the switch: covering every arm narrows `input` to never in
+  // the default branch, so the discriminant is no longer readable there.
+  const requestedProvider = input.provider;
   switch (input.provider) {
     case "moonpay": {
       const apiKey = c.get("apiKey");
@@ -1126,10 +1129,14 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       break;
     }
     default: {
-      const exhaustive: never = input.provider;
+      // The quote body is a discriminated union, so a switch covering every arm
+      // narrows `input` itself to never. Assert on the whole value rather than
+      // its discriminant, and read the provider off the unnarrowed request so
+      // the message still names it.
+      input satisfies never;
       throw new AppError(
         "INTERNAL_ERROR",
-        `On-ramp quotes are not implemented for provider: ${String(exhaustive)}`
+        `On-ramp quotes are not implemented for provider: ${String(requestedProvider)}`
       );
     }
   }

@@ -1536,44 +1536,60 @@ export const paymentSubscriptionCollectionAttemptListResponseSchema = z
   })
   .openapi({ description: "Collection attempt list response payload." });
 
-export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
-  .extend({
-    provider: withOpenApi(createOnrampQuoteSchemaBase.shape.provider, {
+/**
+ * The runtime schema is discriminated by provider, so the documented schema is
+ * too: decorating one flat object would drift from what the API actually
+ * accepts the moment an arm gains a field. Every arm carries the same field
+ * documentation, which is what makes the generated `oneOf` readable.
+ */
+function documentOnrampQuoteArm<A extends (typeof createOnrampQuoteSchemaBase)["options"][number]>(
+  arm: A
+) {
+  return arm.extend({
+    provider: withOpenApi(arm.shape.provider, {
       description:
         "Ramp provider identifier. Hosted providers return a URL, manual providers return funding instructions, and Stripe returns a session widget secret.",
       example: "moonpay",
     }),
-    counterpartyId: withOpenApi(createOnrampQuoteSchemaBase.shape.counterpartyId, {
+    counterpartyId: withOpenApi(arm.shape.counterpartyId, {
       description:
         "SDP counterparty ID. Provider-native customer records may be resolved or created from this counterparty.",
       example: "cpty_example",
     }),
-    destinationCustodyWalletId: withOpenApi(
-      createOnrampQuoteSchemaBase.shape.destinationCustodyWalletId,
-      {
-        description:
-          "Custody wallet ID (the `id` returned by the wallets API) for purchased crypto.",
-        example: "cwlt_example",
-      }
-    ),
-    assetRail: withOpenApi(createOnrampQuoteSchemaBase.shape.assetRail, {
+    destinationCustodyWalletId: withOpenApi(arm.shape.destinationCustodyWalletId, {
+      description: "Custody wallet ID (the `id` returned by the wallets API) for purchased crypto.",
+      example: "cwlt_example",
+    }),
+    assetRail: withOpenApi(arm.shape.assetRail, {
       description: "Canonical SDP crypto asset rail.",
       example: "usdc.solana",
     }),
-    fiatCurrency: withOpenApi(createOnrampQuoteSchemaBase.shape.fiatCurrency, {
+    fiatCurrency: withOpenApi(arm.shape.fiatCurrency, {
       description: "Fiat currency for on-ramp.",
       example: "USD",
     }),
-    fiatAmount: withOpenApi(createOnrampQuoteSchemaBase.shape.fiatAmount, {
+    fiatAmount: withOpenApi(arm.shape.fiatAmount, {
       description: "Fiat amount to on-ramp.",
       example: "100.00",
     }),
-    rampsMemo: withOpenApi(createOnrampQuoteSchemaBase.shape.rampsMemo, {
+    rampsMemo: withOpenApi(arm.shape.rampsMemo, {
       description: "Optional key-value memo stored on the resulting transfer.",
       example: { invoice: "INV-123", po: "PO-9" },
     }),
-  })
-  .openapi({
+  });
+}
+
+export const createOnrampQuoteRequestSchema = withOpenApi(
+  z.discriminatedUnion("provider", [
+    documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[0]),
+    documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[1]),
+    documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[2]),
+    documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[3]),
+    documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[4]),
+    documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[5]),
+    documentOnrampQuoteArm(createOnrampQuoteSchemaBase.options[6]),
+  ]),
+  {
     description:
       "Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions, open a hosted provider flow, or mount a provider session widget.",
     example: {
@@ -1584,7 +1600,8 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       fiatCurrency: "USD",
       fiatAmount: "100.00",
     },
-  });
+  }
+);
 
 export const simulateSandboxTransferRequestSchema = withOpenApi(simulateSandboxTransferSchemaBase, {
   description:
