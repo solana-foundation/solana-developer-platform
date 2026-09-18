@@ -581,6 +581,14 @@ const walletApprovalRequestSchema = z
       })
       .nullable()
       .openapi({ description: "Latest policy evaluation linked to this approval request." }),
+    viewerIsRequester: z.boolean().openapi({
+      description:
+        "Whether the caller raised this request, directly or through an API key they created. Such a caller can cancel the request but cannot approve or reject it.",
+    }),
+    viewerCanDecide: z.boolean().openapi({
+      description:
+        "Whether the caller may approve or reject this request: not its requester, and an active approver in its approval group, or an organization admin when it has no group.",
+    }),
   })
   .openapi({ description: "Wallet approval request summary." });
 

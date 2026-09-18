@@ -116,6 +116,43 @@ describe("PolicyRepository (postgres)", () => {
     ).resolves.toBeNull();
   });
 
+  it("lists the approval groups a user approves in, in one scoped read", async () => {
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO approval_groups (id, organization_id, project_id, name, status, created_by)
+           VALUES (?, ?, ?, 'Approvers', 'active', ?)`
+        )
+        .bind("apg_policy_member", TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+      db
+        .prepare(
+          `INSERT INTO approval_groups (id, organization_id, project_id, name, status, created_by)
+           VALUES (?, ?, ?, 'Others', 'active', ?)`
+        )
+        .bind("apg_policy_not_member", TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+      db
+        .prepare(
+          `INSERT INTO approval_group_members (id, approval_group_id, user_id, role)
+           VALUES (?, ?, ?, 'approver')`
+        )
+        .bind("agm_policy_member", "apg_policy_member", TEST_USER.id),
+    ]);
+    const foreignOrganizationRepo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: "org_policy_foreign", projectId: TEST_PROJECT.id })
+    );
+    const groups = ["apg_policy_member", "apg_policy_not_member", "apg_policy_missing"];
+
+    await expect(repo.listApproverGroupIds(groups, TEST_USER.id)).resolves.toEqual(
+      new Set(["apg_policy_member"])
+    );
+    await expect(repo.listApproverGroupIds([], TEST_USER.id)).resolves.toEqual(new Set());
+    await expect(
+      foreignOrganizationRepo.listApproverGroupIds(groups, TEST_USER.id)
+    ).resolves.toEqual(new Set());
+  });
+
   it("resolves implicit default allow when no customer-authored profiles exist", async () => {
     const service = policyStores(repo);
 

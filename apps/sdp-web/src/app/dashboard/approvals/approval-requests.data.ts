@@ -95,6 +95,46 @@ export function filterApprovalRequests(
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 }
 
+/**
+ * What running an approved request's operation did. Approving runs the
+ * operation inside the same API call, so an approved request is normally
+ * already `succeeded` or `failed`. `running` covers an attempt that has not
+ * finished, including an interrupted one the recovery job has yet to retry or
+ * fail. `not_run` is an approval whose operation was no longer pending
+ * approval when it was approved, so it was never claimed for execution.
+ */
+export type ApprovalExecutionState = "succeeded" | "failed" | "running" | "not_run";
+
+/** @returns The execution outcome for an approved request, or null for any other status. */
+export function approvalExecutionState(
+  request: WalletApprovalRequestSummary
+): ApprovalExecutionState | null {
+  if (request.status !== "approved") return null;
+  switch (request.operation.status) {
+    case "completed":
+      return "succeeded";
+    case "failed":
+      return "failed";
+    case "executing":
+      return "running";
+    case "created":
+    case "evaluated":
+    case "pending_approval":
+    case "canceled":
+      return "not_run";
+  }
+}
+
+/**
+ * The status a request's badge shows. An approval whose execution failed did
+ * not do what was approved, so it must not read as a green "Approved".
+ */
+export type ApprovalBadgeStatus = ApprovalRequestStatus | "execution_failed";
+
+export function approvalBadgeStatus(request: WalletApprovalRequestSummary): ApprovalBadgeStatus {
+  return approvalExecutionState(request) === "failed" ? "execution_failed" : request.status;
+}
+
 export function hasApprovalFilters(filters: ApprovalInboxFilters): boolean {
   return Object.values(filters).some(Boolean);
 }

@@ -44,7 +44,24 @@ const pendingRequest: WalletApprovalRequestSummary = {
     updatedAt: "2026-09-11T00:00:00.000Z",
   },
   policyEvaluation: null,
+  viewerIsRequester: false,
+  viewerCanDecide: true,
 };
+
+const REVIEW_DESCRIPTION =
+  "Confirm the policy context and operation details before making a decision.";
+
+function approvedRequest(
+  operation: Partial<WalletApprovalRequestSummary["operation"]>
+): WalletApprovalRequestSummary {
+  return {
+    ...pendingRequest,
+    status: "approved",
+    resolvedBy: "usr_approver",
+    resolvedAt: "2026-09-11T10:00:00.000Z",
+    operation: { ...pendingRequest.operation, ...operation },
+  };
+}
 
 afterEach(() => {
   act(() => toast.dismiss());
@@ -128,4 +145,277 @@ describe("ApprovalRequestDetail", () => {
       ]);
     }
   );
+
+  // The API refuses a decision from whoever raised the request, so offering
+  // Approve or Reject to them only offers a 403.
+  it("offers the requester Cancel only, and says someone else decides", () => {
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          initialRequest={{ ...pendingRequest, viewerIsRequester: true, viewerCanDecide: false }}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+      </I18nProvider>
+    );
+
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(
+      screen.getByText("You raised this request, so someone else has to decide it.")
+    ).toBeTruthy();
+    // The review prompt is for whoever can decide; the requester cannot.
+    expect(screen.queryByText(REVIEW_DESCRIPTION)).toBeNull();
+  });
+
+  // A member with wallet write who is not the request's approver would only
+  // get a 403 from Approve, Reject or Cancel, so none is offered.
+  it.each([
+    ["approval group", "grp_1", "Only approvers in this request's approval group can decide it."],
+    ["organization admin", null, "Only an organization admin can decide this request."],
+  ])("offers no action when only an %s can decide", (_label, approvalGroupId, notice) => {
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          initialRequest={{ ...pendingRequest, approvalGroupId, viewerCanDecide: false }}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+      </I18nProvider>
+    );
+
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.getByText(notice)).toBeTruthy();
+    expect(screen.queryByText(REVIEW_DESCRIPTION)).toBeNull();
+  });
+
+  // sdp-web ships on merge, sdp-api on release: an API without the viewer
+  // fields must leave the page as it was, not hide every decision.
+  it("offers every decision when the API does not report the viewer yet", () => {
+    const {
+      viewerIsRequester: _requester,
+      viewerCanDecide: _canDecide,
+      ...olderApi
+    } = pendingRequest;
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          // SAFETY: models a response from an API release that predates the viewer fields.
+          initialRequest={olderApi as WalletApprovalRequestSummary}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+      </I18nProvider>
+    );
+
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  });
+
+  it("asks only a viewer who can decide to review before deciding", () => {
+    const { rerender } = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          initialRequest={pendingRequest}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+      </I18nProvider>
+    );
+    expect(screen.getByText(REVIEW_DESCRIPTION)).toBeTruthy();
+
+    rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          key="view-only"
+          initialRequest={pendingRequest}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide={false}
+        />
+      </I18nProvider>
+    );
+    expect(screen.queryByText(REVIEW_DESCRIPTION)).toBeNull();
+    expect(
+      screen.getByText("You can review approval requests, but your role cannot decide them.")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+  });
+
+  describe("approved request execution", () => {
+    function renderApproved(operation: Partial<WalletApprovalRequestSummary["operation"]>) {
+      return render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApprovalRequestDetail
+            initialRequest={approvedRequest(operation)}
+            evaluation={null}
+            apiKeyNames={{}}
+            canDecide
+          />
+        </I18nProvider>
+      );
+    }
+
+    it("says the operation executed, and when", () => {
+      const { container } = renderApproved({
+        status: "completed",
+        executionCompletedAt: "2026-09-11T10:05:00.000Z",
+      });
+
+      expect(screen.getByText("Executed")).toBeTruthy();
+      expect(container.querySelector('time[datetime="2026-09-11T10:05:00.000Z"]')).toBeTruthy();
+      expect(screen.getAllByText("Approved").length).toBeGreaterThan(0);
+      expect(screen.queryByText("Execution failed")).toBeNull();
+      expect(screen.queryByText(REVIEW_DESCRIPTION)).toBeNull();
+    });
+
+    // A ramp quote that expires while the approval waits fails on replay; the
+    // approver has to see that, in the API's words.
+    it("marks a failed execution and shows the API's message", () => {
+      renderApproved({
+        status: "failed",
+        executionCompletedAt: "2026-09-11T10:05:00.000Z",
+        executionError: "Provider quote/session reference has expired; create a new quote.",
+      });
+
+      expect(screen.getByText("Execution failed")).toBeTruthy();
+      expect(
+        screen.getByText("Provider quote/session reference has expired; create a new quote.")
+      ).toBeTruthy();
+      expect(screen.queryByText("Executed")).toBeNull();
+    });
+
+    it("says so when a failed execution recorded no message", () => {
+      renderApproved({ status: "failed", executionCompletedAt: "2026-09-11T10:05:00.000Z" });
+
+      expect(screen.getByText("Execution failed")).toBeTruthy();
+      expect(screen.getByText("No error message was recorded")).toBeTruthy();
+    });
+
+    it("says execution has not finished while it is still running", () => {
+      renderApproved({
+        status: "executing",
+        executionStartedAt: "2026-09-11T10:00:00.000Z",
+      });
+
+      const notice = screen.getByText("Execution has not finished");
+      expect(notice.parentElement?.querySelector("time")).toBeNull();
+    });
+
+    it("says the operation did not run when it was never claimed", () => {
+      renderApproved({ status: "canceled" });
+
+      expect(screen.getByText("Not executed")).toBeTruthy();
+    });
+
+    it("shows no execution line for a request that was not approved", () => {
+      render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApprovalRequestDetail
+            initialRequest={{
+              ...pendingRequest,
+              status: "rejected",
+              operation: { ...pendingRequest.operation, status: "canceled" },
+            }}
+            evaluation={null}
+            apiKeyNames={{}}
+            canDecide
+          />
+        </I18nProvider>
+      );
+
+      expect(screen.queryByText("Not executed")).toBeNull();
+      expect(screen.queryByText(REVIEW_DESCRIPTION)).toBeNull();
+    });
+  });
+
+  it("does not announce a plain success when approving ran and failed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({
+          data: {
+            approvalRequest: approvedRequest({
+              status: "failed",
+              executionCompletedAt: "2026-09-11T10:05:00.000Z",
+              executionError: "Provider quote/session reference has expired; create a new quote.",
+            }),
+          },
+        })
+      )
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          initialRequest={pendingRequest}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+        <Toaster theme="light" />
+      </I18nProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "Approve request" }));
+
+    expect(await screen.findByText("Request approved, but execution failed")).toBeTruthy();
+    // The timeline still reads "Request approved"; only the toast must not.
+    expect(
+      [...document.querySelectorAll("[data-sonner-toast]")].map((toast) => toast.textContent)
+    ).toEqual(["Request approved, but execution failed"]);
+    expect(
+      screen.getByText("Provider quote/session reference has expired; create a new quote.")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+  });
+
+  // The API names the rule the caller did not meet; the role line was wrong
+  // for most of them.
+  it("shows the API's reason when a decision is forbidden", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json(
+          {
+            error: {
+              message: "Approval request must be decided by an active approval-group member",
+            },
+          },
+          { status: 403 }
+        )
+      )
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          initialRequest={pendingRequest}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+        <Toaster theme="light" />
+      </I18nProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "Approve request" }));
+
+    expect(
+      await screen.findByText("Approval request must be decided by an active approval-group member")
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("Your role does not have permission to decide approval requests.")
+    ).toBeNull();
+  });
 });

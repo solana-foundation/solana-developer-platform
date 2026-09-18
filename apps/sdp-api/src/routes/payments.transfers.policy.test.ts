@@ -9,7 +9,10 @@ import { createPostgresPaymentsRepository } from "@/db/repositories/payments.rep
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { walletApprovalRequestResponseSchema } from "@/openapi/schemas/custody";
+import {
+  walletApprovalRequestResponseSchema,
+  walletApprovalRequestsResponseSchema,
+} from "@/openapi/schemas/custody";
 import { walletPolicyResponseSchema } from "@/openapi/schemas/payments";
 import { SigningService } from "@/services/domain/signing.service";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
@@ -49,6 +52,7 @@ const TEST_ALIAS_AUTHORIZED_CUSTODY_WALLET_ID = "cwlt_payments_alias_authorized_
 const responseSchema = <T extends z.ZodType>(data: T) => z.object({ data });
 const walletPolicyHttpResponseSchema = responseSchema(walletPolicyResponseSchema);
 const walletApprovalHttpResponseSchema = responseSchema(walletApprovalRequestResponseSchema);
+const walletApprovalListHttpResponseSchema = responseSchema(walletApprovalRequestsResponseSchema);
 const dryRunResponseSchema = responseSchema(
   z.object({
     decision: z.string(),
@@ -1048,10 +1052,33 @@ describe("Payments routes — transfer policy", () => {
     const ownerSessionId = "ses_payment_request_owner";
     const approverSessionId = "ses_payment_approver";
     const approverUserId = "usr_payment_approver";
+    const outsiderSessionId = "ses_payment_outsider";
+    const outsiderUserId = "usr_payment_outsider";
     await getDb(env).batch([
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
         .bind(approverUserId, "payment-approver@example.com"),
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(outsiderUserId, "payment-outsider@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'member', 'active')`
+        )
+        .bind("om_payment_outsider", TEST_ORG.id, outsiderUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'developer')`
+        )
+        .bind("pm_payment_outsider", TEST_PROJECT.id, outsiderUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(outsiderSessionId, outsiderUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
       getDb(env)
         .prepare(
           `INSERT INTO organization_members (id, organization_id, user_id, role, status)
@@ -1137,6 +1164,53 @@ describe("Payments routes — transfer policy", () => {
       Cookie: `sdp_session=${approverSessionId}`,
       "x-project-id": TEST_PROJECT.id,
     };
+
+    // Reads report the same owner check the decision routes enforce, so the
+    // dashboard can hide a decision the API would refuse. The request came from
+    // an API key the owner created, so the owner's session is its requester.
+    const detailPath = `/v1/wallets/approval-requests/${pendingDetails.approvalRequestId}`;
+    const ownerRead = walletApprovalHttpResponseSchema.parse(
+      await (await app.request(detailPath, { headers: ownerSessionHeaders }, env)).json()
+    );
+    // The owner is also an approver in the group, but a requester never decides.
+    expect(ownerRead.data.approvalRequest).toMatchObject({
+      viewerIsRequester: true,
+      viewerCanDecide: false,
+    });
+    const approverRead = walletApprovalHttpResponseSchema.parse(
+      await (await app.request(detailPath, { headers: approverSessionHeaders }, env)).json()
+    );
+    expect(approverRead.data.approvalRequest).toMatchObject({
+      viewerIsRequester: false,
+      viewerCanDecide: true,
+    });
+    const outsiderSessionHeaders = {
+      "Content-Type": "application/json",
+      Cookie: `sdp_session=${outsiderSessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
+    const outsiderRead = await app.request(detailPath, { headers: outsiderSessionHeaders }, env);
+    expect(outsiderRead.status).toBe(200);
+    expect(
+      walletApprovalHttpResponseSchema.parse(await outsiderRead.json()).data.approvalRequest
+    ).toMatchObject({ viewerIsRequester: false, viewerCanDecide: false });
+    const outsiderDecision = await app.request(
+      approvalPath,
+      { method: "POST", headers: outsiderSessionHeaders },
+      env
+    );
+    expect(outsiderDecision.status).toBe(403);
+    expect(await outsiderDecision.json()).toMatchObject({
+      error: { message: "Approval request must be decided by an active approval-group member" },
+    });
+    const listed = walletApprovalListHttpResponseSchema.parse(
+      await (
+        await app.request("/v1/wallets/approval-requests", { headers: apiHeaders }, env)
+      ).json()
+    );
+    expect(
+      listed.data.approvalRequests.find((item) => item.id === pendingDetails.approvalRequestId)
+    ).toMatchObject({ viewerIsRequester: true, viewerCanDecide: false });
 
     const apiKeyDecision = await app.request(
       approvalPath,
