@@ -109,27 +109,57 @@ export function applySubmittedTransfers(
   );
   const optimisticOnly = submitted
     .filter((transfer) => !liveIds.has(transfer.movement.movementId))
-    .map(({ movement, requestedTokenAmount }) => ({
-      ...movement,
-      tokenAmount: movement.tokenAmount ?? requestedTokenAmount,
-    }))
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    .map(({ movement, requestedTokenAmount }) =>
+      withRequestedTokenAmount(movement, requestedTokenAmount)
+    );
+  const reconciledLive = live.movements.map((movement) =>
+    withRequestedTokenAmount(
+      movement,
+      submittedById.get(movement.movementId)?.requestedTokenAmount
+    )
+  );
 
   return {
     ...live,
-    movements: [
-      ...optimisticOnly,
-      ...live.movements.map((movement) => {
-        const submittedTransfer = submittedById.get(movement.movementId);
-        return movement.tokenAmount === null && submittedTransfer
-          ? {
-              ...movement,
-              tokenAmount: submittedTransfer.requestedTokenAmount,
-            }
-          : movement;
-      }),
-    ],
+    movements: [...optimisticOnly, ...reconciledLive].sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt)
+    ),
   };
+}
+
+/** Drop the local overlay once the live ledger has an authoritative outcome. */
+export function reconcileSubmittedTransfers(
+  submitted: SubmittedTransfer[],
+  live: readonly YieldMovement[]
+): SubmittedTransfer[] {
+  const reconciledIds = new Set(
+    live
+      .filter(
+        (movement) =>
+          movement.tokenAmount !== null || movement.status === "failed"
+      )
+      .map((movement) => movement.movementId)
+  );
+  const remaining = submitted.filter(
+    (transfer) =>
+      transfer.movement.status !== "failed" &&
+      !reconciledIds.has(transfer.movement.movementId)
+  );
+  return remaining.length === submitted.length ? submitted : remaining;
+}
+
+function withRequestedTokenAmount(
+  movement: YieldMovement,
+  requestedTokenAmount: string | undefined
+): YieldMovement {
+  if (
+    requestedTokenAmount === undefined ||
+    movement.tokenAmount !== null ||
+    movement.status === "failed"
+  ) {
+    return movement;
+  }
+  return { ...movement, tokenAmount: requestedTokenAmount };
 }
 
 /**

@@ -11,6 +11,7 @@ import {
   partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
+  reconcileSubmittedTransfers,
   SETTLEMENT_POLL_TIMEOUT_MS,
   startMovementPolling,
 } from "./movements";
@@ -350,6 +351,84 @@ describe("submitted transfer activity", () => {
 
     expect(view.movements).toHaveLength(1);
     expect(view.movements[0]?.tokenAmount).toBe("1.49");
+  });
+
+  it("sorts optimistic and live activity together by creation time", () => {
+    const olderSubmission = {
+      movement: {
+        ...withdrawal,
+        createdAt: "2026-09-17T00:00:00.000Z",
+      },
+      requestedTokenAmount: "1.5",
+    };
+    const newerLive = {
+      ...createMovement("confirmed"),
+      movementId: "movement-2",
+      createdAt: "2026-09-17T00:00:01.000Z",
+    };
+    const live = dashboard({
+      checking: "17",
+      savings: "3",
+      total: "20",
+      movements: [newerLive],
+    });
+
+    const view = applySubmittedTransfers(live, [olderSubmission]);
+
+    expect(view.movements.map((movement) => movement.movementId)).toEqual([
+      "movement-2",
+      "movement-1",
+    ]);
+  });
+
+  it("never presents a failed withdrawal as money moved", () => {
+    const failed = { ...withdrawal, status: "failed" as const };
+    const optimistic = applySubmittedTransfers(
+      dashboard({ checking: "17", savings: "3", total: "20" }),
+      [{ movement: failed, requestedTokenAmount: "1.5" }]
+    );
+    const live = applySubmittedTransfers(
+      dashboard({
+        checking: "17",
+        savings: "3",
+        total: "20",
+        movements: [failed],
+      }),
+      submitted
+    );
+
+    expect(optimistic.movements[0]?.tokenAmount).toBeNull();
+    expect(live.movements[0]?.tokenAmount).toBeNull();
+  });
+
+  it("prunes overlays after an exact amount or failure reaches the live ledger", () => {
+    const pending = { movement: withdrawal, requestedTokenAmount: "1.5" };
+    const exact = {
+      movement: { ...withdrawal, movementId: "exact" },
+      requestedTokenAmount: "2",
+    };
+    const failed = {
+      movement: { ...withdrawal, movementId: "failed" },
+      requestedTokenAmount: "3",
+    };
+    const localFailure = {
+      movement: {
+        ...withdrawal,
+        movementId: "local-failure",
+        status: "failed" as const,
+      },
+      requestedTokenAmount: "4",
+    };
+    const current = [pending, exact, failed, localFailure];
+    const live = [
+      { ...withdrawal, movementId: "exact", tokenAmount: "1.99" },
+      { ...withdrawal, movementId: "failed", status: "failed" as const },
+      { ...withdrawal, status: "confirmed" as const },
+    ];
+
+    const remaining = reconcileSubmittedTransfers(current, live);
+
+    expect(remaining).toEqual([pending]);
   });
 });
 

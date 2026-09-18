@@ -33,6 +33,7 @@ import {
   partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
+  reconcileSubmittedTransfers,
   SETTLEMENT_POLL_TIMEOUT_MS,
   type SubmittedTransfer,
   startMovementPolling,
@@ -144,6 +145,9 @@ export function App() {
       if (id !== requestId.current) return;
       latestData.current = next;
       setData(next);
+      setSubmittedTransfers((current) =>
+        reconcileSubmittedTransfers(current, next.movements)
+      );
       const reconciliation = reconcileMovementPolling(
         movementPollingRef.current,
         next.movements
@@ -305,15 +309,15 @@ export function App() {
       const { movement } = await (direction === "to-savings"
         ? createDeposit(amount)
         : createWithdrawal(amount));
+      if (movement.status === "failed") {
+        throw new Error(movement.failureReason ?? copy.failed);
+      }
       setSubmittedTransfers((current) => [
         { movement, requestedTokenAmount: amount },
         ...current.filter(
           (transfer) => transfer.movement.movementId !== movement.movementId
         ),
       ]);
-      if (movement.status === "failed") {
-        throw new Error(movement.failureReason ?? copy.failed);
-      }
       if (isPendingMovement(movement)) {
         const polling = startMovementPolling(
           movementPollingRef.current,
