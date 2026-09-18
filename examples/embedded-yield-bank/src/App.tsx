@@ -87,89 +87,93 @@ export function App() {
     setMovementPolling(next);
   }, []);
 
-  const refresh = useCallback(
-    async (showProgress = false) => {
-      // Solana/RPC reads can occasionally take longer than the one-second
-      // active cadence. Skip that tick instead of fanning out stale reads.
-      if (refreshInProgress.current) return;
-      refreshInProgress.current = true;
-      const id = ++requestId.current;
-      if (showProgress) setRefreshing(true);
-      try {
-        const next = await getDashboard();
-        if (id !== requestId.current) return;
-        latestData.current = next;
-        setData(next);
-        const reconciliation = reconcileMovementPolling(
-          movementPollingRef.current,
+  const refresh = useCallback(async () => {
+    // Solana/RPC reads can occasionally take longer than the one-second
+    // active cadence. Skip that tick instead of fanning out stale reads.
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
+    const id = ++requestId.current;
+    try {
+      const next = await getDashboard();
+      if (id !== requestId.current) return;
+      latestData.current = next;
+      setData(next);
+      const reconciliation = reconcileMovementPolling(
+        movementPollingRef.current,
+        next.movements
+      );
+      updateMovementPolling(reconciliation.polling);
+      const current = inFlightRef.current;
+      if (current.length) {
+        const { failed, remaining, settled } = reconcileInFlight(
+          current,
           next.movements
         );
-        updateMovementPolling(reconciliation.polling);
-        const current = inFlightRef.current;
-        if (current.length) {
-          const { failed, remaining, settled } = reconcileInFlight(
-            current,
-            next.movements
+        const keep = reconciliation.timedOut ? [] : remaining;
+        // Overlapping transfers: what just settled becomes part of the
+        // base so the ones still pending project from the balances it
+        // produced. A failed transfer moved nothing and is simply dropped.
+        if (settled.length && keep.length && inFlightBase.current) {
+          inFlightBase.current = foldSettledTransfers(
+            inFlightBase.current,
+            settled
           );
-          const keep = reconciliation.timedOut ? [] : remaining;
-          // Overlapping transfers: what just settled becomes part of the
-          // base so the ones still pending project from the balances it
-          // produced. A failed transfer moved nothing and is simply dropped.
-          if (settled.length && keep.length && inFlightBase.current) {
-            inFlightBase.current = foldSettledTransfers(
-              inFlightBase.current,
-              settled
-            );
-          }
-          for (const transfer of settled) {
-            const toastId = movementToastIds.current.get(transfer.movementId);
-            toast.success(
-              TRANSFER_COPY[
-                transfer.direction === "deposit" ? "to-savings" : "to-checking"
-              ].done,
-              { id: toastId }
-            );
-            movementToastIds.current.delete(transfer.movementId);
-          }
-          for (const transfer of failed) {
-            const copy =
-              TRANSFER_COPY[
-                transfer.direction === "deposit" ? "to-savings" : "to-checking"
-              ];
-            const toastId = movementToastIds.current.get(transfer.movementId);
-            toast.error(copy.failed, { id: toastId });
-            movementToastIds.current.delete(transfer.movementId);
-          }
-          updateInFlight(keep);
         }
-        if (reconciliation.timedOut) {
-          for (const toastId of movementToastIds.current.values()) {
-            toast.dismiss(toastId);
-          }
-          movementToastIds.current.clear();
-          toast.warning("Settlement is taking longer than expected", {
-            id: "settlement-timeout",
-            description: "Automatic refresh paused. Refresh to check again.",
-          });
+        for (const transfer of settled) {
+          const toastId = movementToastIds.current.get(transfer.movementId);
+          toast.success(
+            TRANSFER_COPY[
+              transfer.direction === "deposit" ? "to-savings" : "to-checking"
+            ].done,
+            { id: toastId }
+          );
+          movementToastIds.current.delete(transfer.movementId);
         }
-        setError(undefined);
-      } catch (caught) {
-        if (id !== requestId.current) return;
-        if (caught instanceof ApiError && caught.status === 429) {
-          pausedUntil.current =
-            Date.now() + (caught.retryAfterMs ?? RATE_LIMIT_PAUSE_MS);
-          if (latestData.current) return;
+        for (const transfer of failed) {
+          const copy =
+            TRANSFER_COPY[
+              transfer.direction === "deposit" ? "to-savings" : "to-checking"
+            ];
+          const toastId = movementToastIds.current.get(transfer.movementId);
+          toast.error(copy.failed, { id: toastId });
+          movementToastIds.current.delete(transfer.movementId);
         }
-        setError(
-          caught instanceof Error ? caught.message : "Unable to load the demo"
-        );
-      } finally {
-        refreshInProgress.current = false;
-        if (id === requestId.current && showProgress) setRefreshing(false);
+        updateInFlight(keep);
       }
-    },
-    [updateMovementPolling, updateInFlight]
-  );
+      if (reconciliation.timedOut) {
+        for (const toastId of movementToastIds.current.values()) {
+          toast.dismiss(toastId);
+        }
+        movementToastIds.current.clear();
+        toast.warning("Settlement is taking longer than expected", {
+          id: "settlement-timeout",
+          description: "Automatic refresh paused. Refresh to check again.",
+        });
+      }
+      setError(undefined);
+    } catch (caught) {
+      if (id !== requestId.current) return;
+      if (caught instanceof ApiError && caught.status === 429) {
+        pausedUntil.current =
+          Date.now() + (caught.retryAfterMs ?? RATE_LIMIT_PAUSE_MS);
+        if (latestData.current) return;
+      }
+      setError(
+        caught instanceof Error ? caught.message : "Unable to load the demo"
+      );
+    } finally {
+      refreshInProgress.current = false;
+    }
+  }, [updateMovementPolling, updateInFlight]);
+
+  const refreshWithProgress = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
 
   useEffect(() => {
     void refresh();
@@ -273,7 +277,7 @@ export function App() {
                 data={view}
                 refreshing={refreshing}
                 busy={busy}
-                onRefresh={() => void refresh(true)}
+                onRefresh={() => void refreshWithProgress()}
                 onDeposit={(amount) => transfer("to-savings", amount)}
                 onWithdraw={(amount) => transfer("to-checking", amount)}
               />
