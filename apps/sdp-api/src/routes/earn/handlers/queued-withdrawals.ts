@@ -52,7 +52,7 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import type { AppContext } from "../context";
-import { resolveKeylessEarnEnvironment, resolveSdpEnvironment } from "../context";
+import { resolveSdpEnvironment } from "../context";
 import {
   type earnExternalWalletQueuedWithdrawalPreviewSchema,
   type earnExternalWalletSubmitSchema,
@@ -639,9 +639,8 @@ export async function getEarnExternalWalletWithdrawalOptions(
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalOptionsSchema>
 ) {
   const body = c.req.valid("json");
-  const environment = resolveKeylessEarnEnvironment(c);
-  const target = await resolveExternalWalletExit(c, body, environment);
-  const options = await readOptions(c, environment, externalPosition(target));
+  const target = await resolveExternalWalletExit(c, body);
+  const options = await readOptions(c, target.environment, externalPosition(target));
   return success(c, {
     ...(target.positionId ? { positionId: target.positionId } : { strategyId: target.strategyId }),
     ...options,
@@ -652,9 +651,13 @@ export async function createEarnExternalWalletQueuedWithdrawalPreview(
   c: ValidatedBodyContext<typeof earnExternalWalletQueuedWithdrawalPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const environment = resolveKeylessEarnEnvironment(c);
-  const target = await resolveExternalWalletExit(c, body, environment);
-  const quote = await readPreview(c, environment, externalPosition(target), queuedTerms(body));
+  const target = await resolveExternalWalletExit(c, body);
+  const quote = await readPreview(
+    c,
+    target.environment,
+    externalPosition(target),
+    queuedTerms(body)
+  );
   return success(c, {
     ...(target.positionId ? { positionId: target.positionId } : { strategyId: target.strategyId }),
     ...quote,
@@ -665,10 +668,9 @@ export async function createEarnExternalWalletWithdrawalRequestTransaction(
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalRequestTransactionSchema>
 ) {
   const body: ExternalRequestBuildBody = c.req.valid("json");
-  const environment = resolveKeylessEarnEnvironment(c);
-  const target = await resolveExternalWalletExit(c, body, environment);
+  const target = await resolveExternalWalletExit(c, body);
   const built = await buildExternalQueuedWithdrawalRequest(c.env, {
-    actor: externalActor(c, environment),
+    actor: externalActor(c, target.environment),
     position: externalPosition(target),
     terms: queuedTerms(body),
     ...(body.feePayer ? { feePayer: body.feePayer } : {}),
@@ -687,9 +689,9 @@ export async function createEarnExternalWalletWithdrawalRequestCancelTransaction
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalRequestCancelTransactionSchema>
 ) {
   const body: ExternalCancelBuildBody = c.req.valid("json");
-  const environment = resolveKeylessEarnEnvironment(c);
   const auth = getOptionalAuth(c);
   if (auth) {
+    const environment = resolveSdpEnvironment(c);
     if (!("withdrawalRequestId" in body)) {
       throw badRequest("withdrawalRequestId is required for an authenticated cancellation build");
     }
@@ -704,11 +706,7 @@ export async function createEarnExternalWalletWithdrawalRequestCancelTransaction
     if (!request || request.custody_wallet_id !== null || request.project_id !== projectId) {
       throw notFound("Earn external-wallet withdrawal request");
     }
-    const target = await resolveExternalWalletExit(
-      c,
-      { positionId: request.position_id },
-      environment
-    );
+    const target = await resolveExternalWalletExit(c, { positionId: request.position_id });
     if (target.ownerAddress !== request.owner_address) {
       throw notFound("Earn external-wallet withdrawal request");
     }
@@ -727,9 +725,9 @@ export async function createEarnExternalWalletWithdrawalRequestCancelTransaction
   if (!("strategyId" in body)) {
     throw badRequest("strategyId, ownerAddress and requestAddress are required anonymously");
   }
-  const target = await resolveExternalWalletExit(c, body, environment);
+  const target = await resolveExternalWalletExit(c, body);
   const built = await buildExternalQueuedWithdrawalCancel(c.env, {
-    actor: { environment },
+    actor: { environment: target.environment },
     position: externalPosition(target),
     request: null,
     requestAddress: body.requestAddress,

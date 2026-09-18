@@ -7,8 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { formatEpochSeconds } from "./earn-format";
-import { earnMintAsset, shortenMarketAddress } from "./earn-market-presentation";
+import { formatEpochSeconds, shortenMarketAddress } from "./earn-format";
+import { earnMintAsset } from "./earn-market-presentation";
 import {
   cancelEarnVaultWithdrawalRequest,
   useEarnVaultWithdrawalRequests,

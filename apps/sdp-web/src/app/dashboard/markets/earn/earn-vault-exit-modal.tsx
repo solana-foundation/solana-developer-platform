@@ -6,7 +6,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { shortenMarketAddress } from "./earn-market-presentation";
+import { shortenMarketAddress } from "./earn-format";
 import { fetchEarnVaultWithdrawalOptions } from "./earn-program-data";
 import { EarnVaultAsyncWithdrawModal } from "./earn-vault-async-withdraw-modal";
 import {

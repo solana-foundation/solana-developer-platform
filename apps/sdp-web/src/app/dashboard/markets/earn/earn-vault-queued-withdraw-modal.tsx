@@ -21,8 +21,13 @@ import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { isPositiveDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
-import { formatEpochSeconds, formatTokenQuantity, formatUsd } from "./earn-format";
-import { earnMintAsset, shortenMarketAddress, TransactionLink } from "./earn-market-presentation";
+import {
+  formatEpochSeconds,
+  formatTokenQuantity,
+  formatUsd,
+  shortenMarketAddress,
+} from "./earn-format";
+import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
 import {
   cancelEarnVaultWithdrawalRequest,
   createEarnVaultWithdrawalRequest,
