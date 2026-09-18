@@ -32,6 +32,7 @@ import {
   partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
+  SETTLEMENT_POLL_TIMEOUT_MS,
   startMovementPolling,
 } from "@/lib/movements";
 import type { DashboardData } from "@/types";
@@ -127,12 +128,21 @@ export function App() {
         const waiting = balanceReconciliation.waiting.filter(
           (transfer) => now < transfer.expiresAt
         );
-        const keepIds = new Set(
-          [...remaining, ...waiting].map((transfer) => transfer.movementId)
+        const timedOutMovementIds = new Set(reconciliation.timedOutMovementIds);
+        const timedOut = remaining.filter((transfer) =>
+          timedOutMovementIds.has(transfer.movementId)
         );
-        const keep = reconciliation.timedOut
-          ? []
-          : current.filter((transfer) => keepIds.has(transfer.movementId));
+        const activeRemaining = remaining.filter(
+          (transfer) => !timedOutMovementIds.has(transfer.movementId)
+        );
+        const keepIds = new Set(
+          [...activeRemaining, ...waiting].map(
+            (transfer) => transfer.movementId
+          )
+        );
+        const keep = current.filter((transfer) =>
+          keepIds.has(transfer.movementId)
+        );
         // Overlapping transfers: what just settled becomes part of the
         // base so the ones still pending project from the balances it
         // produced. A failed transfer moved nothing and is simply dropped.
@@ -158,7 +168,7 @@ export function App() {
           );
           movementToastIds.current.delete(transfer.movementId);
         }
-        if (expired.length && !reconciliation.timedOut) {
+        if (expired.length) {
           toast.warning("Balances are taking longer to update", {
             id: "balance-sync-timeout",
             description:
@@ -174,16 +184,18 @@ export function App() {
           toast.error(copy.failed, { id: toastId });
           movementToastIds.current.delete(transfer.movementId);
         }
+        for (const transfer of timedOut) {
+          const toastId = movementToastIds.current.get(transfer.movementId);
+          if (toastId !== undefined) toast.dismiss(toastId);
+          movementToastIds.current.delete(transfer.movementId);
+        }
         updateInFlight(keep);
       }
-      if (reconciliation.timedOut) {
-        for (const toastId of movementToastIds.current.values()) {
-          toast.dismiss(toastId);
-        }
-        movementToastIds.current.clear();
+      if (reconciliation.timedOutMovementIds.length) {
         toast.warning("Settlement is taking longer than expected", {
           id: "settlement-timeout",
-          description: "Automatic refresh paused. Refresh to check again.",
+          description:
+            "Automatic refresh paused for timed-out transfers. Refresh to check again.",
         });
       }
       setError(undefined);
@@ -263,6 +275,9 @@ export function App() {
           movementPollingRef.current,
           movement.movementId
         );
+        const expiresAt =
+          polling.expiresAtByMovement[movement.movementId] ??
+          Date.now() + SETTLEMENT_POLL_TIMEOUT_MS;
         updateMovementPolling(polling);
         if (!inFlightRef.current.length) {
           inFlightBase.current = latestData.current;
@@ -273,7 +288,7 @@ export function App() {
             movementId: movement.movementId,
             direction: direction === "to-savings" ? "deposit" : "withdrawal",
             amount,
-            expiresAt: polling.expiresAt,
+            expiresAt,
           },
         ]);
         movementToastIds.current.set(movement.movementId, toastId);

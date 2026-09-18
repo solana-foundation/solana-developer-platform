@@ -7,7 +7,7 @@ export const SETTLEMENT_POLL_TIMEOUT_MS = 2 * 60_000;
 
 export interface MovementPolling {
   movementIds: string[];
-  expiresAt: number;
+  expiresAtByMovement: Record<string, number>;
 }
 
 /** Customer-visible completion: Solana confirmation is enough to show Done. */
@@ -32,7 +32,10 @@ export function startMovementPolling(
   if (polling?.movementIds.includes(movementId)) return polling;
   return {
     movementIds: [...(polling?.movementIds ?? []), movementId],
-    expiresAt: now + SETTLEMENT_POLL_TIMEOUT_MS,
+    expiresAtByMovement: {
+      ...(polling?.expiresAtByMovement ?? {}),
+      [movementId]: now + SETTLEMENT_POLL_TIMEOUT_MS,
+    },
   };
 }
 
@@ -40,24 +43,37 @@ export function reconcileMovementPolling(
   polling: MovementPolling | undefined,
   movements: YieldMovement[],
   now = Date.now()
-): { polling: MovementPolling | undefined; timedOut: boolean } {
+): {
+  polling: MovementPolling | undefined;
+  timedOutMovementIds: string[];
+} {
   const terminalIds = new Set(
     movements
       .filter((movement) => !isPendingMovement(movement))
       .map((movement) => movement.movementId)
   );
-  const next = polling?.movementIds.filter((id) => !terminalIds.has(id)) ?? [];
-
-  if (!next.length) return { polling: undefined, timedOut: false };
-  if (polling && now >= polling.expiresAt) {
-    return { polling: undefined, timedOut: true };
+  const next: string[] = [];
+  const timedOutMovementIds: string[] = [];
+  for (const movementId of polling?.movementIds ?? []) {
+    if (terminalIds.has(movementId)) continue;
+    const expiresAt = polling?.expiresAtByMovement[movementId] ?? now;
+    if (now >= expiresAt) timedOutMovementIds.push(movementId);
+    else next.push(movementId);
   }
+
   return {
-    polling: {
-      movementIds: next,
-      expiresAt: polling?.expiresAt ?? now + SETTLEMENT_POLL_TIMEOUT_MS,
-    },
-    timedOut: false,
+    polling: next.length
+      ? {
+          movementIds: next,
+          expiresAtByMovement: Object.fromEntries(
+            next.map((movementId) => [
+              movementId,
+              polling?.expiresAtByMovement[movementId] ?? now,
+            ])
+          ),
+        }
+      : undefined,
+    timedOutMovementIds,
   };
 }
 
@@ -201,15 +217,18 @@ function snapshotReflectsTransfer(
   if (baseSavings === undefined || liveSavings === undefined) return false;
 
   const projected = foldSettledTransfers(base, [transfer]);
+  const projectedSavings = projected.savings.balance;
+  if (projectedSavings === undefined) return false;
+
   if (transfer.direction === "deposit") {
     return (
       compareDecimals(live.checking.balance, projected.checking.balance) <= 0 &&
-      compareDecimals(liveSavings, baseSavings) > 0
+      compareDecimals(liveSavings, projectedSavings) >= 0
     );
   }
   return (
-    compareDecimals(live.checking.balance, base.checking.balance) > 0 &&
-    compareDecimals(liveSavings, baseSavings) < 0
+    compareDecimals(live.checking.balance, projected.checking.balance) >= 0 &&
+    compareDecimals(liveSavings, projectedSavings) <= 0
   );
 }
 

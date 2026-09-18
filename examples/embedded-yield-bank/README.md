@@ -75,9 +75,10 @@ handlers in [`src/app/api`](src/app/api).
 - While a transfer this browser submitted is pending, the page shows the
   balances it will produce and keeps the total fixed. At `confirmed`, the UI
   shows `Settled` and keeps that projection until both live account balances
-  reflect the transfer. This silent balance-sync polling is bounded by the same
-  two-minute window. SDP continues tracking protocol finalization in the
-  background without holding the customer in a loading state.
+  fully reflect the transfer. Each transfer has its own two-minute deadline, so
+  one slow movement cannot clear or pause a newer projection. SDP continues
+  tracking protocol finalization in the background without holding the customer
+  in a loading state.
 - API responses and outbound SDP reads use `no-store` caching.
 - Submit retries reuse one `Idempotency-Key`.
 - Quote-derived slippage floors and the amount-to-shares conversion use exact

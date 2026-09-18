@@ -28,7 +28,7 @@ describe("movement polling", () => {
     );
 
     expect(result.polling?.movementIds).toEqual(["movement-1"]);
-    expect(result.timedOut).toBe(false);
+    expect(result.timedOutMovementIds).toEqual([]);
   });
 
   it("stops polling and reports a movement after the settlement deadline", () => {
@@ -40,7 +40,7 @@ describe("movement polling", () => {
     );
 
     expect(result.polling).toBeUndefined();
-    expect(result.timedOut).toBe(true);
+    expect(result.timedOutMovementIds).toEqual(["movement-1"]);
   });
 
   it("does not start fast polling for historical pending movements", () => {
@@ -58,9 +58,18 @@ describe("movement polling", () => {
       SETTLEMENT_POLL_TIMEOUT_MS + 1
     );
 
-    expect(initial).toEqual({ polling: undefined, timedOut: false });
-    expect(afterTimeout).toEqual({ polling: undefined, timedOut: true });
-    expect(later).toEqual({ polling: undefined, timedOut: false });
+    expect(initial).toEqual({
+      polling: undefined,
+      timedOutMovementIds: [],
+    });
+    expect(afterTimeout).toEqual({
+      polling: undefined,
+      timedOutMovementIds: [pending.movementId],
+    });
+    expect(later).toEqual({
+      polling: undefined,
+      timedOutMovementIds: [],
+    });
   });
 
   it("stops customer-facing polling as soon as a movement is confirmed", () => {
@@ -69,7 +78,20 @@ describe("movement polling", () => {
     const result = reconcileMovementPolling(polling, [movement], 1);
 
     expect(result.polling).toBeUndefined();
-    expect(result.timedOut).toBe(false);
+    expect(result.timedOutMovementIds).toEqual([]);
+  });
+
+  it("times out each movement on its own deadline", () => {
+    const first = startMovementPolling(undefined, "old", 0);
+    const both = startMovementPolling(first, "new", 60_000);
+    const result = reconcileMovementPolling(
+      both,
+      [],
+      SETTLEMENT_POLL_TIMEOUT_MS
+    );
+
+    expect(result.polling?.movementIds).toEqual(["new"]);
+    expect(result.timedOutMovementIds).toEqual(["old"]);
   });
 });
 
@@ -233,6 +255,13 @@ describe("in-flight transfers", () => {
     expect(
       partitionSettledTransfersBySnapshot(
         base,
+        dashboard({ checking: "17", savings: "2", total: "19" }),
+        [transfer]
+      )
+    ).toEqual({ reflected: [], waiting: [transfer] });
+    expect(
+      partitionSettledTransfersBySnapshot(
+        base,
         dashboard({ checking: "17", savings: "3", total: "20" }),
         [transfer]
       )
@@ -248,6 +277,13 @@ describe("in-flight transfers", () => {
       expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
     };
 
+    expect(
+      partitionSettledTransfersBySnapshot(
+        base,
+        dashboard({ checking: "17.5", savings: "2.5", total: "20" }),
+        [transfer]
+      )
+    ).toEqual({ reflected: [], waiting: [transfer] });
     expect(
       partitionSettledTransfersBySnapshot(
         base,
