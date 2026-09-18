@@ -621,7 +621,7 @@ function toExternalWalletBuildContext(
   };
 }
 
-type ExternalWalletExitLocator =
+export type ExternalWalletExitLocator =
   | { positionId: string }
   | { strategyId: string; ownerAddress: string };
 
@@ -638,7 +638,7 @@ interface ResolvedExternalWalletExitBase {
   shareAtaRentFunder: string | null;
 }
 
-type ResolvedExternalWalletExit = ResolvedExternalWalletExitBase &
+export type ResolvedExternalWalletExit = ResolvedExternalWalletExitBase &
   ({ positionId: string; strategyId: null } | { positionId: null; strategyId: string });
 
 /**
@@ -648,7 +648,7 @@ type ResolvedExternalWalletExit = ResolvedExternalWalletExitBase &
  * catalogue sync retains that immutable identity as a deprecated tombstone, so
  * delisting closes deposits without closing exits.
  */
-async function resolveExternalWalletExit(
+export async function resolveExternalWalletExit(
   c: AppContext,
   locator: ExternalWalletExitLocator
 ): Promise<ResolvedExternalWalletExit> {
@@ -1208,6 +1208,7 @@ function toExternalWalletPositionWire(
     closedAt: holding.closedAt,
     shares: hydrated?.shares,
     withdrawableShares: hydrated?.withdrawableShares,
+    unlockTimestamp: hydrated?.unlockTimestamp,
     tokenValue: hydrated?.tokenValue,
   };
 }

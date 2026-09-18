@@ -11,6 +11,7 @@ const getBlockHeight = vi.hoisted(() => vi.fn());
 const getTransaction = vi.hoisted(() => vi.fn());
 const readVaultPositions = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
+const reconcileEarnVaultQueuedWithdrawals = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
@@ -26,6 +27,9 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   resolveVaultDirectClient: () => ({ readVaultPositions }),
 }));
 vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransaction }));
+vi.mock("@/services/earn/vault-queued-withdrawal-reconciliation.service", () => ({
+  reconcileEarnVaultQueuedWithdrawals,
+}));
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
   logEvent,
@@ -82,6 +86,7 @@ beforeEach(async () => {
   // transaction to read a payout from, no live snapshot to close a holding on.
   getTransaction.mockResolvedValue(null);
   readVaultPositions.mockResolvedValue([]);
+  reconcileEarnVaultQueuedWithdrawals.mockResolvedValue(undefined);
 });
 
 async function seedMovement(lastValidBlockHeight = "100") {
@@ -867,6 +872,25 @@ describe("reconcileEarnVaultMovements", () => {
       status: "finalized",
       failure_reason: null,
     });
+  });
+});
+
+describe("reconcileEarnVaultMovements: async-withdrawal sibling", () => {
+  it("runs the queued-withdrawal sweep independently and propagates its failure", async () => {
+    const queueFailure = new Error("queued withdrawal RPC unavailable");
+    reconcileEarnVaultQueuedWithdrawals.mockRejectedValueOnce(queueFailure);
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toBe(queueFailure);
+
+    expect(reconcileEarnVaultQueuedWithdrawals).toHaveBeenCalledOnce();
+    expect(reconcileEarnVaultQueuedWithdrawals).toHaveBeenCalledWith(env);
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_reconciliation_tick",
+        claimed: 0,
+      })
+    );
   });
 });
 

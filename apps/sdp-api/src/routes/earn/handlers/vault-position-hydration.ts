@@ -21,6 +21,8 @@ export interface HydratedVaultPositionValue {
   shares: string;
   withdrawableShares: string;
   tokenValue: string | undefined;
+  /** Provider-reported Unix epoch seconds; null means no active lock. */
+  unlockTimestamp?: string | null;
 }
 
 export interface VaultPositionHydrationOptions {
@@ -92,7 +94,9 @@ export async function hydrateVaultPositions(
               snapshot.cluster !== earnClusterFor(environment) ||
               !isBoundedSnapshotAmount(snapshot.shares) ||
               !isBoundedSnapshotAmount(snapshot.withdrawableShares) ||
-              (snapshot.tokenValue !== undefined && !isBoundedSnapshotAmount(snapshot.tokenValue))
+              (snapshot.tokenValue !== undefined &&
+                !isBoundedSnapshotAmount(snapshot.tokenValue)) ||
+              !isBoundedOptionalEpoch(snapshot.unlockTimestamp)
             ) {
               getLogger().warn(
                 {
@@ -121,6 +125,7 @@ export async function hydrateVaultPositions(
                 shares: snapshot.shares,
                 withdrawableShares: snapshot.withdrawableShares,
                 tokenValue: snapshot.tokenValue,
+                unlockTimestamp: snapshot.unlockTimestamp,
               });
             }
             if (!matched) {
@@ -177,6 +182,14 @@ function ownerTelemetryFields(
 
 function isBoundedSnapshotAmount(value: unknown): value is string {
   return typeof value === "string" && value.length <= 128 && isDecimalString(value);
+}
+
+function isBoundedOptionalEpoch(value: unknown): value is string | null | undefined {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== "string" || value.length > 20 || !/^\d+$/.test(value)) return false;
+  const seconds = Number(value);
+  if (!Number.isSafeInteger(seconds)) return false;
+  return Number.isFinite(new Date(seconds * 1_000).getTime());
 }
 
 /**

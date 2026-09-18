@@ -25,6 +25,24 @@ type GeneratedIntegration = {
     shares: string;
     feePayer?: string;
   }): Promise<Record<string, unknown>>;
+  getEarnWithdrawalOptions(positionId: string): Promise<Record<string, unknown>>;
+  previewEarnQueuedWithdrawal(input: {
+    positionId: string;
+    shares: string;
+    discountBps: number;
+    deadlineSeconds: number;
+  }): Promise<Record<string, unknown>>;
+  buildEarnQueuedWithdrawalRequest(input: {
+    positionId: string;
+    shares: string;
+    discountBps: number;
+    deadlineSeconds: number;
+    feePayer?: string;
+  }): Promise<Record<string, unknown>>;
+  buildEarnQueuedWithdrawalCancellation(input: {
+    withdrawalRequestId: string;
+    feePayer?: string;
+  }): Promise<Record<string, unknown>>;
   signEarnTransaction(
     built: Record<string, unknown>,
     customerSigner: (transaction: string) => Promise<string>,
@@ -220,5 +238,49 @@ describe("generated Embedded Yield integration", () => {
     await expect(generated.listEarnStrategies()).rejects.toThrow(
       "SDP 403 INSUFFICIENT_PERMISSIONS: earn:read is required"
     );
+  });
+
+  it("generates explicit queued request and post-deadline recovery calls", async () => {
+    process.env.SDP_API_KEY = "sk_test_example";
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        requests.push({ path, body });
+        return Response.json({ data: { transaction: { transactionId: "queue-build" } } });
+      })
+    );
+    const generated = await loadGeneratedIntegration(strategy);
+
+    await generated.buildEarnQueuedWithdrawalRequest({
+      positionId: "position",
+      shares: "2",
+      discountBps: 25,
+      deadlineSeconds: 600,
+      feePayer: "sponsor",
+    });
+    await generated.buildEarnQueuedWithdrawalCancellation({
+      withdrawalRequestId: "request_1",
+      feePayer: "sponsor",
+    });
+
+    expect(requests).toEqual([
+      {
+        path: "/v1/earn/external-wallet/withdrawal-request-transactions",
+        body: {
+          positionId: "position",
+          shares: "2",
+          discountBps: 25,
+          deadlineSeconds: 600,
+          feePayer: "sponsor",
+        },
+      },
+      {
+        path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+        body: { withdrawalRequestId: "request_1", feePayer: "sponsor" },
+      },
+    ]);
   });
 });

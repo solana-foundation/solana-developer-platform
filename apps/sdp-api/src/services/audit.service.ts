@@ -56,6 +56,10 @@ export const AUDIT_ACTIONS = [
   // the ledger movement id, actor matching the row's createdBy/initiatedByKeyId.
   "deposit",
   "withdraw",
+  // Asynchronous vault exits: the request escrows shares and cancellation
+  // restores them. Neither is the provider's eventual asset payout.
+  "withdraw_request",
+  "withdraw_cancel",
   // DvP money movements (PRO-1992): resourceType "dvp_trade", resourceId the
   // trade id, the leg's side in the metadata because a leg has no id of its
   // own. Bare verbs like the issuance actions above; the resource type is what
@@ -99,6 +103,7 @@ export type ResourceType =
   | "provider_credential"
   | "custody_connection"
   | "earn_movement"
+  | "earn_vault_withdrawal_request"
   | "dvp_trade"
   | "payment_request"
   | "payment_transfer"

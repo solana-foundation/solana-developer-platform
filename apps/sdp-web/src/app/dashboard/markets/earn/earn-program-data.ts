@@ -23,8 +23,13 @@ import {
   type EarnVaultDirectMovementStatus,
   type EarnVaultMovementStatus,
   type EarnVaultPosition,
+  type EarnVaultQueuedWithdrawalPreview,
+  type EarnVaultQueuedWithdrawalTermsRequest,
   type EarnVaultWithdrawal,
+  type EarnVaultWithdrawalOptions,
   type EarnVaultWithdrawalRequest,
+  type EarnVaultWithdrawalRequestRecord,
+  type EarnVaultWithdrawalRequestStatus,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
@@ -40,12 +45,16 @@ import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { earnQueryKeys } from "./earn-query-key";
+import { isEarnVaultQueuedWithdrawalTerminal } from "./earn-vault-queued-withdrawal-presentation";
 
 export type {
   EarnProgram,
   EarnVaultDeposit,
   EarnVaultDepositRecord,
+  EarnVaultQueuedWithdrawalPreview,
   EarnVaultWithdrawal,
+  EarnVaultWithdrawalOptions,
+  EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types";
 
 /**
@@ -1170,6 +1179,301 @@ export function useEarnVaultWithdrawalOutcome(
     onSettled,
     onUpdated,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Queued vault withdrawals — a provider obligation, not a movement. Landing
+// the request escrows shares; only a later solver fulfilment pays assets.
+// ---------------------------------------------------------------------------
+
+const queuedWithdrawalIssueSchema = z.object({ code: z.string(), message: z.string() });
+const queuedWithdrawalTermsSchema = z.object({
+  assetMint: z.string(),
+  allowWithdrawals: z.boolean(),
+  secondsToMaturity: z.number().int().nonnegative(),
+  minimumSecondsToDeadline: z.number().int().nonnegative(),
+  minimumDiscountBps: z.number().int().nonnegative(),
+  maximumDiscountBps: z.number().int().nonnegative(),
+  minimumShares: z.string(),
+  shareDecimals: z.number().int().min(0).max(38),
+});
+
+const earnVaultWithdrawalOptionsSchema: z.ZodType<EarnVaultWithdrawalOptions> = z.object({
+  positionId: z.string(),
+  instant: z.boolean(),
+  queued: z.boolean(),
+  withdrawAuthority: z.string().nullable(),
+  queueState: z.string().nullable(),
+  queueAsset: queuedWithdrawalTermsSchema.nullable(),
+});
+
+const earnVaultQueuedWithdrawalPreviewSchema: z.ZodType<EarnVaultQueuedWithdrawalPreview> =
+  z.object({
+    positionId: z.string(),
+    assetMint: z.string(),
+    shares: z.string(),
+    shareDecimals: z.number().int().min(0).max(38),
+    assets: z.string(),
+    assetDecimals: z.number().int().min(0).max(38),
+    discountBps: z.number().int().nonnegative(),
+    maturityTimestamp: z.string().regex(/^\d+$/),
+    deadlineTimestamp: z.string().regex(/^\d+$/),
+    blockingIssues: z.array(queuedWithdrawalIssueSchema),
+  });
+
+const EARN_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "pending",
+  "fulfillable",
+  "expiredCancelable",
+  "cancelling",
+  "fulfilled",
+  "cancelled",
+  "closedOrUnknown",
+  "failed",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalRequestRecord> =
+  z.object({
+    withdrawalRequestId: z.string(),
+    positionId: z.string(),
+    provider: z.string(),
+    providerReference: z.string(),
+    ownerAddress: z.string(),
+    requestAddress: z.string(),
+    status: z.enum(EARN_VAULT_WITHDRAWAL_REQUEST_STATUSES),
+    assetMint: z.string(),
+    shareMint: z.string(),
+    shares: z.string(),
+    quotedAssets: z.string(),
+    shareDecimals: z.number().int().min(0).max(38),
+    assetDecimals: z.number().int().min(0).max(38),
+    discountBps: z.number().int().nonnegative(),
+    nonce: z.string().regex(/^\d+$/).nullable(),
+    creationTimestamp: z.string().regex(/^\d+$/).nullable(),
+    maturityTimestamp: z.string().regex(/^\d+$/),
+    deadlineTimestamp: z.string().regex(/^\d+$/),
+    creationSignature: z.string().nullable(),
+    cancelSignature: z.string().nullable(),
+    closingSignature: z.string().nullable(),
+    assetsPaid: z.string().nullable(),
+    failureReason: z.string().nullable(),
+    fulfilledAt: z.string().nullable(),
+    cancelledAt: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    replayed: z.boolean().optional(),
+  });
+
+type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
+
+/** Read both routes independently. No client-side provider list chooses one. */
+export async function fetchEarnVaultWithdrawalOptions(
+  positionId: string,
+  signal?: AbortSignal
+): Promise<QueuedReadResult<EarnVaultWithdrawalOptions>> {
+  const result = await dashboardFetch<unknown>(
+    "/api/dashboard/markets/earn/vault-withdrawal-options",
+    { method: "POST", body: { positionId }, signal }
+  );
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = z.object({ data: earnVaultWithdrawalOptionsSchema }).safeParse(result.data);
+  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
+}
+
+export async function fetchEarnVaultQueuedWithdrawalPreview(
+  input: EarnVaultQueuedWithdrawalTermsRequest,
+  signal?: AbortSignal
+): Promise<QueuedReadResult<EarnVaultQueuedWithdrawalPreview>> {
+  const result = await dashboardFetch<unknown>(
+    "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
+    { method: "POST", body: input, signal }
+  );
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = z.object({ data: earnVaultQueuedWithdrawalPreviewSchema }).safeParse(result.data);
+  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
+}
+
+const queuedMutationEnvelopeSchema = z.object({
+  data: z.object({ withdrawalRequest: earnVaultWithdrawalRequestRecordSchema }),
+});
+
+const earnVaultQueuedWithdrawalOutcomeSchema = z.union([
+  queuedMutationEnvelopeSchema.transform(({ data }) => ({
+    kind: "submitted" as const,
+    withdrawalRequest: data.withdrawalRequest,
+  })),
+  signingPendingOutcomeSchema,
+]);
+
+export type EarnVaultQueuedWithdrawalOutcome = z.infer<
+  typeof earnVaultQueuedWithdrawalOutcomeSchema
+>;
+
+export async function createEarnVaultWithdrawalRequest(
+  input: EarnVaultQueuedWithdrawalTermsRequest,
+  idempotencyKey: string
+): Promise<DashboardFetchResult<EarnVaultQueuedWithdrawalOutcome>> {
+  const body: EarnVaultQueuedWithdrawalTermsRequest = {
+    positionId: input.positionId,
+    shares: input.shares,
+    discountBps: input.discountBps,
+    deadlineSeconds: input.deadlineSeconds,
+  };
+  const result = await dashboardFetch<unknown>(
+    "/api/dashboard/markets/earn/vault-withdrawal-requests",
+    {
+      method: "POST",
+      headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+      body,
+    }
+  );
+  if (!result.ok) return result;
+  const parsed = earnVaultQueuedWithdrawalOutcomeSchema.safeParse(result.data);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Invalid queued withdrawal response",
+      status: result.status,
+      body: result.data,
+    };
+  }
+  if (parsed.data.kind === "approval_pending" && result.status !== 202) {
+    return {
+      ok: false,
+      error: "Invalid queued withdrawal response",
+      status: result.status,
+      body: result.data,
+    };
+  }
+  return { ok: true, status: result.status, data: parsed.data };
+}
+
+export async function cancelEarnVaultWithdrawalRequest(
+  withdrawalRequestId: string,
+  idempotencyKey: string
+): Promise<DashboardFetchResult<EarnVaultWithdrawalRequestRecord>> {
+  const result = await dashboardFetch<unknown>(
+    `/api/dashboard/markets/earn/vault-withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}/cancel`,
+    {
+      method: "POST",
+      headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+      body: {},
+    }
+  );
+  if (!result.ok) return result;
+  const parsed = queuedMutationEnvelopeSchema.safeParse(result.data);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Invalid queued withdrawal cancellation response",
+      status: result.status,
+      body: result.data,
+    };
+  }
+  return { ok: true, status: result.status, data: parsed.data.data.withdrawalRequest };
+}
+
+export async function fetchEarnVaultWithdrawalRequest(
+  withdrawalRequestId: string
+): Promise<EarnVaultWithdrawalRequestRecord | undefined> {
+  const result = await dashboardFetch<unknown>(
+    `/api/dashboard/markets/earn/vault-withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}`
+  );
+  if (!result.ok) return undefined;
+  const parsed = queuedMutationEnvelopeSchema.safeParse(result.data);
+  return parsed.success ? parsed.data.data.withdrawalRequest : undefined;
+}
+
+const queuedRequestPageSchema = z.object({
+  data: z.object({
+    withdrawalRequests: z.array(earnVaultWithdrawalRequestRecordSchema),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable(),
+  }),
+});
+
+export async function fetchEarnVaultWithdrawalRequests(
+  options: { settled?: boolean } = {}
+): Promise<EarnVaultWithdrawalRequestRecord[]> {
+  const requests: EarnVaultWithdrawalRequestRecord[] = [];
+  const seen = new Set<string>();
+  let before: string | undefined;
+
+  for (let page = 0; page < EARN_PAGE_LIMIT; page += 1) {
+    const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
+    if (before) query.set("before", before);
+    if (options.settled !== undefined) query.set("settled", String(options.settled));
+    const result = await dashboardFetch<unknown>(
+      `/api/dashboard/markets/earn/vault-withdrawal-requests?${query}`
+    );
+    if (!result.ok) throw new Error(result.error);
+    const parsed = queuedRequestPageSchema.safeParse(result.data);
+    if (!parsed.success) throw new Error("Invalid queued withdrawal request page");
+    requests.push(...parsed.data.data.withdrawalRequests);
+    if (!parsed.data.data.hasMore) return requests;
+    const next = parsed.data.data.nextCursor;
+    if (!next || next === before || seen.has(next)) {
+      throw new Error("Queued withdrawal request pagination did not advance");
+    }
+    seen.add(next);
+    before = next;
+  }
+  throw new Error("Queued withdrawal request pagination exceeded its safety limit");
+}
+
+export function isEarnVaultWithdrawalRequestInFlight(
+  request: EarnVaultWithdrawalRequestRecord
+): boolean {
+  return !isEarnVaultQueuedWithdrawalTerminal(request.status);
+}
+
+export function useEarnVaultWithdrawalRequests() {
+  const { data, error, isLoading, mutate } = useSWR(
+    earnQueryKeys.vaultWithdrawalRequestsOpen(),
+    async () =>
+      (await fetchEarnVaultWithdrawalRequests({ settled: false })).filter(
+        isEarnVaultWithdrawalRequestInFlight
+      ),
+    { refreshInterval: LEDGER_REFRESH_MS }
+  );
+  return { withdrawalRequests: data, error, isLoading, refresh: () => void mutate() };
+}
+
+export function useEarnVaultWithdrawalRequestOutcome(
+  withdrawalRequestId: string | undefined,
+  onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void,
+  onUpdated?: (request: EarnVaultWithdrawalRequestRecord) => void
+): EarnVaultWithdrawalRequestRecord | undefined {
+  const onSettledEvent = useEffectEvent((request: EarnVaultWithdrawalRequestRecord) =>
+    onSettled?.(request)
+  );
+  const onUpdatedEvent = useEffectEvent((request: EarnVaultWithdrawalRequestRecord) =>
+    onUpdated?.(request)
+  );
+  const reportedSettledId = useRef<string | null>(null);
+  const { data } = useSWR(
+    withdrawalRequestId ? earnQueryKeys.vaultWithdrawalRequest({ withdrawalRequestId }) : null,
+    () => fetchEarnVaultWithdrawalRequest(withdrawalRequestId ?? ""),
+    {
+      refreshInterval: (latest) =>
+        latest && !isEarnVaultWithdrawalRequestInFlight(latest) ? 0 : 5_000,
+    }
+  );
+
+  useEffect(() => {
+    if (!data) return;
+    onUpdatedEvent(data);
+    if (
+      !isEarnVaultWithdrawalRequestInFlight(data) &&
+      reportedSettledId.current !== data.withdrawalRequestId
+    ) {
+      reportedSettledId.current = data.withdrawalRequestId;
+      onSettledEvent(data);
+    }
+  }, [data]);
+
+  return data;
 }
 
 export interface EarnWithdrawalPreviewInput {

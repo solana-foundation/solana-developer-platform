@@ -8,6 +8,9 @@ export const earnQueryKeys = {
   vaultWithdrawalsInFlight: () => "dashboard-earn-vault-withdrawals-in-flight",
   vaultWithdrawal: ({ movementId }: { movementId: string }) =>
     ["dashboard-earn-vault-withdrawal", movementId] as const,
+  vaultWithdrawalRequestsOpen: () => "dashboard-earn-vault-withdrawal-requests-open",
+  vaultWithdrawalRequest: ({ withdrawalRequestId }: { withdrawalRequestId: string }) =>
+    ["dashboard-earn-vault-withdrawal-request", withdrawalRequestId] as const,
   programWithdrawals: ({ programId }: { programId: string }) =>
     ["dashboard-earn-program-withdrawals", programId] as const,
   withdrawal: ({ programId, withdrawalRef }: { programId: string; withdrawalRef: string }) =>

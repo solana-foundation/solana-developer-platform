@@ -10,6 +10,14 @@ import {
   VEDA_BORING_VAULT_SIZE,
 } from "@sdp/earn/providers/veda/vault-state";
 import { describe, expect, it } from "vitest";
+import {
+  VEDA_REQUEST_WITHDRAW_DISCRIMINATOR,
+  VEDA_REQUEST_WITHDRAW_OWNER_ACCOUNT_INDEX,
+  VEDA_REQUEST_WITHDRAW_REQUEST_ACCOUNT_INDEX,
+  VEDA_SETUP_USER_WITHDRAW_STATE_DISCRIMINATOR,
+  VEDA_USER_WITHDRAW_STATE_ACCOUNT_SIZE,
+  VEDA_WITHDRAW_REQUEST_ACCOUNT_SIZE,
+} from "./queue-rent";
 
 /**
  * ════════════════════════════════════════════════════════════════════════════
@@ -49,6 +57,7 @@ interface IdlTypeDef {
 interface Idl {
   types: IdlTypeDef[];
   accounts: { name: string; discriminator: number[] }[];
+  instructions: { name: string; discriminator: number[]; accounts: { name: string }[] }[];
 }
 
 const PRIMITIVE_SIZES: Readonly<Record<string, number>> = {
@@ -73,6 +82,7 @@ function loadIdl(name: string): Idl {
 }
 
 const vaultIdl = loadIdl("boring_vault_svm");
+const queueIdl = loadIdl("boring_onchain_queue");
 const typesByName = new Map(vaultIdl.types.map((entry) => [entry.name, entry.type]));
 
 function sizeOf(type: IdlType): number {
@@ -241,5 +251,42 @@ describe("@sdp/earn's AssetData offsets match the IDL", () => {
   it("uses the IDL's own account discriminator", () => {
     const account = vaultIdl.accounts.find((entry) => entry.name === "AssetData");
     expect([...VEDA_ASSET_DATA_DISCRIMINATOR]).toEqual(account?.discriminator);
+  });
+});
+
+describe("queued-withdrawal plan inspection matches the queue IDL", () => {
+  const instruction = (name: string) => queueIdl.instructions.find((entry) => entry.name === name);
+  const fixedQueueAccountSize = (name: string): number => {
+    const definition = queueIdl.types.find((entry) => entry.name === name)?.type;
+    if (definition?.kind !== "struct") throw new Error(`${name} is not a queue struct`);
+    return (
+      8 +
+      definition.fields.reduce((total, field) => {
+        if (typeof field.type !== "string") throw new Error(`${name} has a non-primitive field`);
+        const size = PRIMITIVE_SIZES[field.type];
+        if (size === undefined) throw new Error(`${name} has unknown primitive ${field.type}`);
+        return total + size;
+      }, 0)
+    );
+  };
+
+  it("pins request identity extraction to the exact instruction ABI", () => {
+    const request = instruction("request_withdraw");
+    expect([...VEDA_REQUEST_WITHDRAW_DISCRIMINATOR]).toEqual(request?.discriminator);
+    expect(request?.accounts[VEDA_REQUEST_WITHDRAW_OWNER_ACCOUNT_INDEX]?.name).toBe("signer");
+    expect(request?.accounts[VEDA_REQUEST_WITHDRAW_REQUEST_ACCOUNT_INDEX]?.name).toBe(
+      "withdraw_request"
+    );
+  });
+
+  it("pins first-request detection to the exact setup discriminator", () => {
+    expect([...VEDA_SETUP_USER_WITHDRAW_STATE_DISCRIMINATOR]).toEqual(
+      instruction("setup_user_withdraw_state")?.discriminator
+    );
+  });
+
+  it("derives both owner-funded account sizes from the committed structs", () => {
+    expect(fixedQueueAccountSize("UserWithdrawState")).toBe(VEDA_USER_WITHDRAW_STATE_ACCOUNT_SIZE);
+    expect(fixedQueueAccountSize("WithdrawRequest")).toBe(VEDA_WITHDRAW_REQUEST_ACCOUNT_SIZE);
   });
 });

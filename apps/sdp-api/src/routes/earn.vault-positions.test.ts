@@ -404,6 +404,7 @@ describe("GET /v1/earn/vault-positions", () => {
     ["owner", { owner: PUBLIC_KEY_B }],
     ["amount", { shares: "NaN" }],
     ["withdrawable amount", { withdrawableShares: "NaN" }],
+    ["out-of-range unlock timestamp", { unlockTimestamp: "99999999999999999999" }],
   ] as const)("does not attach live balances under a mismatched %s", async (kind, override) => {
     const providerReference = `vault_${kind}_mismatch`;
     await createPosition({ providerReference });

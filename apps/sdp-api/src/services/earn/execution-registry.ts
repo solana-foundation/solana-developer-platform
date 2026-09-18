@@ -1,9 +1,14 @@
-import { supportsVaultDirect, supportsVaultWithdraw } from "@sdp/earn/capabilities";
+import {
+  supportsVaultDirect,
+  supportsVaultQueuedWithdraw,
+  supportsVaultWithdraw,
+} from "@sdp/earn/capabilities";
 import { providerNotConfigured } from "@sdp/earn/errors";
 import type {
   EarnRuntimeContext,
   EarnVaultDirectProvider,
   EarnVaultProvider,
+  EarnVaultQueuedWithdrawProvider,
   EarnVaultWithdrawProvider,
 } from "@sdp/earn/types";
 import {
@@ -228,4 +233,15 @@ export function resolveVaultWithdrawClient(
   const client = resolveEarnExecutionClient(env, provider, deadline);
   if (!client) return null;
   return supportsVaultWithdraw(client) ? client : null;
+}
+
+/** The executing client narrowed to the complete asynchronous queue lifecycle. */
+export function resolveVaultQueuedWithdrawClient(
+  env: Env,
+  provider: string,
+  deadline: VaultDeadline
+): EarnVaultQueuedWithdrawProvider | null {
+  const client = resolveEarnExecutionClient(env, provider, deadline);
+  if (!client) return null;
+  return supportsVaultQueuedWithdraw(client) ? client : null;
 }

@@ -71,6 +71,12 @@ const GUIDE_SECTIONS = [
     titleKey: "DashboardMarkets.earnProgram.guideWithdrawTitle",
     descriptionKey: "DashboardMarkets.earnProgram.guideWithdrawDescription",
   },
+  {
+    id: "asyncWithdraw",
+    navigationKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawNavigation",
+    titleKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawTitle",
+    descriptionKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawDescription",
+  },
 ] as const satisfies ReadonlyArray<{
   id: keyof EarnIntegrationSections;
   navigationKey: MessageKey;

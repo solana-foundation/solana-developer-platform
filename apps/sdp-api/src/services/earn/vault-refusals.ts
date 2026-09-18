@@ -1,4 +1,4 @@
-import { badRequest, providerUnavailable } from "@/lib/errors";
+import { badRequest, conflict, providerUnavailable } from "@/lib/errors";
 
 /**
  * Build failures whose reason belongs in front of the CALLER, not in a 500.
@@ -15,6 +15,8 @@ import { badRequest, providerUnavailable } from "@/lib/errors";
  * - `COMPLIANCE_APPROVAL_REQUIRED` — the vault gates the move on an approval
  *   from the provider's compliance service, which SDP does not implement. A
  *   definite, explainable refusal rather than an internal fault.
+ * - `INVALID_QUEUE_PARAMETERS` — caller-selected discount/deadline terms are
+ *   invalid for the queue contract.
  *
  * Matched on the shared `code` shape rather than provider classes, so a new
  * vault-direct provider inherits the mapping by using the same vocabulary.
@@ -30,6 +32,7 @@ const REFUSED_BUILD_CODES: ReadonlySet<string> = new Set([
   "DEPOSIT_REFUSED",
   "WITHDRAW_REFUSED",
   "COMPLIANCE_APPROVAL_REQUIRED",
+  "INVALID_QUEUE_PARAMETERS",
 ]);
 
 function providerError(error: unknown): { code: string; message: string } | null {
@@ -49,6 +52,12 @@ export function rethrowVaultProviderFailure(error: unknown): never {
   const failure = providerError(error);
   if (failure && REFUSED_BUILD_CODES.has(failure.code)) {
     throw badRequest(failure.message);
+  }
+  if (failure?.code === "WITHDRAWAL_REQUEST_NOT_FOUND") {
+    // The PDA was present when the caller selected it but may close before the
+    // cancellation build. Treat that race as stale state, not an API outage or
+    // an internal failure; the caller should refresh request history.
+    throw conflict(failure.message);
   }
   if (failure?.code === "VAULT_UNREADABLE") {
     throw providerUnavailable("Earn provider is temporarily unavailable. Try again.");

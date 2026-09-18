@@ -22,6 +22,11 @@ import type { Env } from "@/types/env";
 // referenced BY them, so CASCADE cannot reach them either.
 const POSTGRES_TEST_TABLES = [
   "ramp_webhook_events",
+  "earn_vault_withdrawal_request_pda_leases",
+  "earn_external_wallet_withdrawal_request_transactions",
+  "earn_vault_withdrawal_request_actions",
+  "earn_vault_withdrawal_request_reservations",
+  "earn_vault_withdrawal_requests",
   "earn_movements",
   "earn_positions",
   "sponsorship_budget_policy_revisions",

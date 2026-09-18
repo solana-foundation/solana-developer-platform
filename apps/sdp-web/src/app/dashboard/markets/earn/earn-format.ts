@@ -103,6 +103,22 @@ export function formatTokenQuantity(
   return formatProviderAmount(value, locale, symbol, 6);
 }
 
+/** Format Unix epoch seconds only when JavaScript can represent the resulting date. */
+export function formatEpochSeconds(
+  value: string | null | undefined,
+  locale: string
+): string | undefined {
+  if (value === undefined || value === null || !/^\d+$/.test(value)) return undefined;
+  const seconds = Number(value);
+  if (!Number.isSafeInteger(seconds)) return undefined;
+  const date = new Date(seconds * 1_000);
+  if (!Number.isFinite(date.getTime())) return undefined;
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
 /**
  * Compact human range from two ISO-8601 durations (providers report processing
  * estimates as e.g. "PT21M" / "P2D"). Unparseable inputs render verbatim so a

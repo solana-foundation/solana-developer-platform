@@ -89,15 +89,14 @@ import {
   EarnVaultDepositModal,
   EarnVaultDepositOutcomeTracker,
 } from "../earn/earn-vault-deposit-modal";
+import { EarnVaultExitModal } from "../earn/earn-vault-exit-modal";
 import {
   earnVaultDepositUiState,
   earnVaultPositionStatusDisplay,
   earnVaultWithdrawalUiState,
 } from "../earn/earn-vault-ui-state";
-import {
-  EarnVaultWithdrawalOutcomeTracker,
-  EarnVaultWithdrawModal,
-} from "../earn/earn-vault-withdraw-modal";
+import { EarnVaultWithdrawalOutcomeTracker } from "../earn/earn-vault-withdraw-modal";
+import { EarnVaultWithdrawalRequestsCard } from "../earn/earn-vault-withdrawal-requests-card";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import { useKaminoVaultAllocations } from "./kamino-allocations";
@@ -1823,6 +1822,8 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         withdrawals={vaultWithdrawals}
       />
 
+      <EarnVaultWithdrawalRequestsCard onChanged={onRefresh} />
+
       <TreasuryStrategiesCard
         devnetError={devnetCatalogueError}
         devnetLoading={devnetCatalogueLoading}
@@ -2211,6 +2212,13 @@ export function TreasurySolutionsWorkspace({
     walletsError,
     walletsLoading,
   });
+  const refreshTreasury = () => {
+    refreshWalletBalances();
+    refreshStrategies();
+    if (catalogueCluster !== undefined) refreshCatalogue();
+    refreshPositions();
+    refreshPrograms();
+  };
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -2226,13 +2234,7 @@ export function TreasurySolutionsWorkspace({
         mainnetCatalogueError={mainnetCatalogueError}
         mainnetCatalogueLoading={mainnetCatalogueLoading}
         onDeposit={setDepositStrategy}
-        onRefresh={() => {
-          refreshWalletBalances();
-          refreshStrategies();
-          if (catalogueCluster !== undefined) refreshCatalogue();
-          refreshPositions();
-          refreshPrograms();
-        }}
+        onRefresh={refreshTreasury}
         onWithdrawPosition={setWithdrawPosition}
         onWithdrawProgram={setWithdrawProgram}
         portfolioApy={portfolioApy}
@@ -2306,7 +2308,7 @@ export function TreasurySolutionsWorkspace({
       ) : null}
 
       {withdrawPosition ? (
-        <EarnVaultWithdrawModal
+        <EarnVaultExitModal
           environment={sdpEnvironment}
           onClose={() => setWithdrawPosition(null)}
           onWithdrawn={(withdrawal, intent) => {
@@ -2336,6 +2338,13 @@ export function TreasurySolutionsWorkspace({
             refreshWalletBalances();
           }}
           onMovementUpdated={updateVaultWithdrawalWatch}
+          onAsyncRequest={() => {
+            // An asynchronous request can move or escrow shares without paying
+            // assets yet. Refresh holdings without projecting an instant exit.
+            refreshPositions();
+            refreshWalletBalances();
+          }}
+          onAsyncRequestSettled={refreshTreasury}
           position={withdrawPosition}
           projectId={selectedProjectId}
         />

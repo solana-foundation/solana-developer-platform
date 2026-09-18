@@ -125,6 +125,10 @@ const mocks = vi.hoisted(() => ({
           positionId: string;
           status: string;
         }) => void;
+        onAsyncRequestSettled?: (event: {
+          kind: "queue";
+          request: { withdrawalRequestId: string };
+        }) => void;
         position: { label: string };
       }
     | undefined,
@@ -602,6 +606,40 @@ vi.mock("../earn/earn-vault-withdraw-modal", () => ({
     mocks.vaultWithdrawalTrackers[props.movementId] = props;
     return <output data-testid="vault-withdrawal-outcome-tracker">{props.movementId}</output>;
   },
+}));
+
+vi.mock("../earn/earn-vault-exit-modal", () => ({
+  EarnVaultExitModal: (props: {
+    onWithdrawn?: (
+      withdrawal: {
+        createdAt: string;
+        failureReason: string | null;
+        movementId: string;
+        positionId: string;
+        status: string;
+      },
+      intent?: { amount: string; projectBalance: boolean }
+    ) => void;
+    onMovementUpdated?: (withdrawal: {
+      createdAt: string;
+      failureReason: string | null;
+      movementId: string;
+      positionId: string;
+      status: string;
+    }) => void;
+    onAsyncRequestSettled?: (event: {
+      kind: "queue";
+      request: { withdrawalRequestId: string };
+    }) => void;
+    position: { label: string };
+  }) => {
+    mocks.vaultWithdrawalModal = props;
+    return <div role="dialog">Withdraw from {props.position.label}</div>;
+  },
+}));
+
+vi.mock("../earn/earn-vault-withdrawal-requests-card", () => ({
+  EarnVaultWithdrawalRequestsCard: () => null,
 }));
 
 vi.mock("../earn/earn-vault-deposit-modal", () => ({
@@ -1924,6 +1962,28 @@ describe("TreasurySolutionsWorkspace", () => {
 
     await user.click(within(vaultPositionRow).getByRole("button", { name: "Withdraw" }));
     expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Steakhouse USDC");
+  });
+
+  it("refreshes positions and custody balances after an asynchronous exit settles", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const vaultPositionRow = screen
+      .getAllByText("Steakhouse USDC")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!vaultPositionRow) throw new Error("Expected vault position row");
+    await user.click(within(vaultPositionRow).getByRole("button", { name: "Withdraw" }));
+
+    act(() => {
+      mocks.vaultWithdrawalModal?.onAsyncRequestSettled?.({
+        kind: "queue",
+        request: { withdrawalRequestId: "earn_vault_withdrawal_request_fulfilled" },
+      });
+    });
+
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the vault exit verb live in production, where deposits are closed", () => {

@@ -1159,7 +1159,7 @@ async function broadcastSubmitResult(
   return { ...result, movement };
 }
 
-interface VerifiedSignedExternalWalletTransaction {
+export interface VerifiedSignedExternalWalletTransaction {
   bytes: Uint8Array;
   signature: string;
   /** Canonical re-encoding of the verified bytes, for the ledger outbox. */
@@ -1181,8 +1181,11 @@ interface VerifiedSignedExternalWalletTransaction {
  * durable movement that parks reconcilable until its blockhash expires,
  * failing a customer minutes later for something knowable now.
  */
-async function verifySignedExternalWalletTransaction(
-  built: EarnExternalWalletTransactionRow,
+export async function verifySignedExternalWalletTransaction(
+  built: Pick<
+    EarnExternalWalletTransactionRow,
+    "id" | "owner_address" | "fee_payer" | "unsigned_transaction"
+  >,
   signedTransactionBase64: string
 ): Promise<VerifiedSignedExternalWalletTransaction> {
   let signedBytes: Uint8Array;

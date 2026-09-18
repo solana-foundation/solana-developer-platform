@@ -70,7 +70,15 @@ function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][
  */
 export function appendVaultRequestMemo(
   plan: EarnVaultTransactionPlan,
-  kind: "vault-deposit" | "vault-withdrawal" | "external-deposit" | "external-withdrawal",
+  kind:
+    | "vault-deposit"
+    | "vault-withdrawal"
+    | "vault-withdrawal-request"
+    | "vault-withdrawal-cancel"
+    | "external-deposit"
+    | "external-withdrawal"
+    | "external-withdrawal-request"
+    | "external-withdrawal-cancel",
   requestId: string,
   options: { compact?: boolean } = {}
 ): EarnVaultTransactionPlan {
@@ -84,8 +92,12 @@ export function appendVaultRequestMemo(
         {
           "vault-deposit": "vd",
           "vault-withdrawal": "vw",
+          "vault-withdrawal-request": "vr",
+          "vault-withdrawal-cancel": "vc",
           "external-deposit": "ed",
           "external-withdrawal": "ew",
+          "external-withdrawal-request": "er",
+          "external-withdrawal-cancel": "ec",
         }[kind]
       }:${createHash("sha256").update(requestId).digest("base64url").slice(0, 22)}`
     : `sdp:earn:${kind}:${requestId}`;

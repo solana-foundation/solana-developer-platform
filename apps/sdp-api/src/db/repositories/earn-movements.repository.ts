@@ -974,6 +974,102 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   };
 }
 
+const QUEUED_FULFILLMENT_MOVEMENT_PREFIX = "earn_queue_fulfillment_";
+
+function queuedFulfillmentMovementId(requestId: string): string {
+  return `${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}${requestId}`;
+}
+
+function queuedRequestIdFromMovementId(movementId: string): string | null {
+  return movementId.startsWith(QUEUED_FULFILLMENT_MOVEMENT_PREFIX)
+    ? movementId.slice(QUEUED_FULFILLMENT_MOVEMENT_PREFIX.length)
+    : null;
+}
+
+function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRow {
+  const requestId = String(row.id);
+  const settledAt = String(row.fulfilled_at ?? row.updated_at);
+  return {
+    id: queuedFulfillmentMovementId(requestId),
+    organization_id: String(row.organization_id),
+    project_id: row.project_id == null ? null : String(row.project_id),
+    environment: row.environment as SdpEnvironment,
+    provider: String(row.provider),
+    execution_model: "vault_direct",
+    direction: "withdrawal",
+    position_id: String(row.position_id),
+    status: "finalized",
+    failure_reason: null,
+    confirmed_at: settledAt,
+    settled_at: settledAt,
+    denomination: String(row.share_mint),
+    amount_requested: String(row.shares),
+    amount_settled: String(row.shares),
+    fee_amount: null,
+    token_amount_settled: row.assets_paid == null ? null : String(row.assets_paid),
+    min_shares_out: null,
+    shares_out: null,
+    payout_token: null,
+    custody_wallet_id: row.custody_wallet_id == null ? null : String(row.custody_wallet_id),
+    owner_address: String(row.owner_address),
+    vault_address: String(row.vault_address),
+    // Veda's solver is the asset source; the vault is only the instrument and
+    // request scope. Until the lifecycle event persists a solver address, SDP
+    // has not observed a truthful source address.
+    source_address: null,
+    destination_address: String(row.owner_address),
+    provider_reference: String(row.request_address),
+    signature: String(row.closing_signature),
+    signed_transaction: null,
+    last_valid_block_height: null,
+    request_id: String(row.client_request_id),
+    idempotency_fingerprint: String(row.idempotency_fingerprint),
+    provider_data: {
+      observation: "provider_solver_fulfillment",
+      withdrawalRequestId: requestId,
+      requestAddress: String(row.request_address),
+      nonce: row.nonce == null ? null : String(row.nonce),
+    },
+    created_by: row.created_by == null ? null : String(row.created_by),
+    initiated_by_key_id: row.initiated_by_key_id == null ? null : String(row.initiated_by_key_id),
+    created_at: settledAt,
+    updated_at: String(row.updated_at),
+    creates_share_account: false,
+    share_ata_rent_funder: null,
+    unknown_signature_observed_at: null,
+  };
+}
+
+function mergeMovementPage(
+  ledgerRows: readonly EarnMovementRow[],
+  queuedRows: readonly EarnMovementRow[],
+  limit: number
+): { rows: EarnMovementRow[]; hasMore: boolean } {
+  const combined = [...ledgerRows, ...queuedRows].sort((left, right) => {
+    if (left.created_at !== right.created_at)
+      return right.created_at.localeCompare(left.created_at);
+    return right.id.localeCompare(left.id);
+  });
+  return { rows: combined.slice(0, limit), hasMore: combined.length > limit };
+}
+
+async function getFulfilledQueueMovement(
+  db: DatabaseExecutor,
+  params: { organizationId: string; movementId: string }
+): Promise<EarnMovementRow | null> {
+  const requestId = queuedRequestIdFromMovementId(params.movementId);
+  if (!requestId) return null;
+  const row = await db
+    .prepare(
+      `SELECT * FROM earn_vault_withdrawal_requests
+        WHERE id = ? AND organization_id = ? AND status = 'fulfilled'
+          AND closing_signature IS NOT NULL`
+    )
+    .bind(requestId, params.organizationId)
+    .first<Record<string, unknown>>();
+  return row ? mapFulfilledQueueMovement(row) : null;
+}
+
 /**
  * What makes a custody vault claim VISIBLE to the org: the exact predicate
  * behind `GET /vault-positions` (activated, open or re-entered, live movement
@@ -1014,7 +1110,8 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .prepare(`SELECT * FROM earn_movements WHERE id = ? AND organization_id = ?`)
         .bind(params.movementId, params.organizationId)
         .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
+      if (row) return mapMovementRow(row);
+      return getFulfilledQueueMovement(db, params);
     },
 
     async findVaultMovementByRequestId(params) {
@@ -1104,8 +1201,41 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           params.limit + 1
         )
         .all<Record<string, unknown>>();
-      const rows = (result.results ?? []).map(mapMovementRow);
-      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+      const ledgerRows = (result.results ?? []).map(mapMovementRow);
+      if (params.direction !== "withdrawal" || params.settled === false) {
+        return {
+          rows: ledgerRows.slice(0, params.limit),
+          hasMore: ledgerRows.length > params.limit,
+        };
+      }
+      const queueBeforeClause = params.before
+        ? `AND (COALESCE(fulfilled_at, updated_at),
+                    '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}' || id) < (?, ?)`
+        : "";
+      const queue = await db
+        .prepare(
+          `SELECT * FROM earn_vault_withdrawal_requests
+            WHERE organization_id = ? AND environment = ? AND project_id = ?
+              AND custody_wallet_id = ANY (?::text[])
+              AND status = 'fulfilled' AND closing_signature IS NOT NULL
+              ${queueBeforeClause}
+            ORDER BY COALESCE(fulfilled_at, updated_at) DESC, id DESC
+            LIMIT ?`
+        )
+        .bind(
+          params.organizationId,
+          params.environment,
+          params.projectId,
+          params.custodyWalletIds,
+          ...(params.before ? [params.before.createdAt, params.before.id] : []),
+          params.limit + 1
+        )
+        .all<Record<string, unknown>>();
+      return mergeMovementPage(
+        ledgerRows,
+        (queue.results ?? []).map(mapFulfilledQueueMovement),
+        params.limit
+      );
     },
 
     async listCustodialMovements(params) {
@@ -1308,6 +1438,19 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                    WHERE unsettled.position_id = earn_positions.id
                      AND unsettled.status IN ('requested', 'submitted', 'confirmed')
                 )
+                -- A queued request escrows shares away from the wallet, so a
+                -- perfectly truthful live balance of zero does not mean the
+                -- holding is closed. Keep the claim visible until the queue
+                -- lifecycle reaches fulfilled/cancelled/failed; cancellation
+                -- can restore the wallet balance without creating a movement.
+                AND NOT EXISTS (
+                  SELECT 1 FROM earn_vault_withdrawal_requests queued
+                   WHERE queued.position_id = earn_positions.id
+                     AND queued.status IN (
+                       'creating', 'pending', 'fulfillable',
+                       'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                     )
+                )
               RETURNING id`
           )
           .bind(params.positionId, params.organizationId, params.observedUpdatedAt)
@@ -1424,8 +1567,44 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         )
         .bind(...bindings, params.limit + 1)
         .all<Record<string, unknown>>();
-      const rows = (result.results ?? []).map(mapMovementRow);
-      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+      const ledgerRows = (result.results ?? []).map(mapMovementRow);
+      if (
+        (params.direction !== undefined && params.direction !== "withdrawal") ||
+        (params.status !== undefined && params.status !== "finalized")
+      ) {
+        return {
+          rows: ledgerRows.slice(0, params.limit),
+          hasMore: ledgerRows.length > params.limit,
+        };
+      }
+      const queueBeforeClause = params.before
+        ? `AND (COALESCE(fulfilled_at, updated_at),
+                    '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}' || id) < (?, ?)`
+        : "";
+      const queue = await db
+        .prepare(
+          `SELECT * FROM earn_vault_withdrawal_requests
+            WHERE organization_id = ? AND project_id = ? AND environment = ?
+              AND owner_address = ? AND custody_wallet_id IS NULL
+              AND status = 'fulfilled' AND closing_signature IS NOT NULL
+              ${queueBeforeClause}
+            ORDER BY COALESCE(fulfilled_at, updated_at) DESC, id DESC
+            LIMIT ?`
+        )
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          params.ownerAddress,
+          ...(params.before ? [params.before.createdAt, params.before.id] : []),
+          params.limit + 1
+        )
+        .all<Record<string, unknown>>();
+      return mergeMovementPage(
+        ledgerRows,
+        (queue.results ?? []).map(mapFulfilledQueueMovement),
+        params.limit
+      );
     },
 
     async getExternalWalletMovement(params) {
@@ -1442,7 +1621,18 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         )
         .bind(params.movementId, params.organizationId, params.projectId, params.environment)
         .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
+      if (row) return mapMovementRow(row);
+      const projected = await getFulfilledQueueMovement(db, {
+        organizationId: params.organizationId,
+        movementId: params.movementId,
+      });
+      return projected &&
+        projected.project_id === params.projectId &&
+        projected.environment === params.environment &&
+        projected.owner_address !== null &&
+        projected.custody_wallet_id === null
+        ? projected
+        : null;
     },
 
     async aggregateExternalWalletMovements(params) {
@@ -1454,36 +1644,64 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // read can withhold earned instead of understating it.
       const result = await db
         .prepare(
-          `SELECT position_id,
-                  COALESCE(SUM(
+          `WITH facts AS (
+             SELECT position_id,
                     CASE WHEN direction = 'deposit' AND status = 'finalized'
                          THEN COALESCE(amount_settled, amount_requested)::numeric
-                         ELSE 0 END
-                  ), 0)::text AS finalized_deposits,
-                  COALESCE(SUM(
+                         ELSE 0::numeric END AS finalized_deposits,
                     CASE WHEN direction = 'withdrawal' AND status = 'finalized'
                          THEN COALESCE(token_amount_settled, '0')::numeric
-                         ELSE 0 END
-                  ), 0)::text AS finalized_withdrawals,
-                  COUNT(*) FILTER (
-                    WHERE direction = 'withdrawal' AND status = 'finalized'
-                  ) AS finalized_withdrawal_count,
-                  COUNT(*) FILTER (
-                    WHERE direction = 'withdrawal'
-                      AND status = 'finalized'
-                      AND token_amount_settled IS NULL
-                  ) AS unvalued_withdrawal_count,
-                  COUNT(*) FILTER (
-                    WHERE status IN ('requested', 'submitted', 'confirmed')
-                  ) AS unsettled_movement_count
-             FROM earn_movements
-            WHERE organization_id = ?
-              AND project_id = ?
-              AND environment = ?
-              AND owner_address = ?
+                         ELSE 0::numeric END AS finalized_withdrawals,
+                    CASE WHEN direction = 'withdrawal' AND status = 'finalized'
+                         THEN 1 ELSE 0 END AS finalized_withdrawal_count,
+                    CASE WHEN direction = 'withdrawal' AND status = 'finalized'
+                               AND token_amount_settled IS NULL
+                         THEN 1 ELSE 0 END AS unvalued_withdrawal_count,
+                    CASE WHEN status IN ('requested', 'submitted', 'confirmed')
+                         THEN 1 ELSE 0 END AS unsettled_movement_count
+               FROM earn_movements
+              WHERE organization_id = ?
+                AND project_id = ?
+                AND environment = ?
+                AND owner_address = ?
+             UNION ALL
+             SELECT position_id,
+                    0::numeric,
+                    CASE WHEN status = 'fulfilled'
+                         THEN COALESCE(assets_paid, '0')::numeric
+                         ELSE 0::numeric END,
+                    CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END,
+                    CASE WHEN status = 'fulfilled' AND assets_paid IS NULL THEN 1 ELSE 0 END,
+                    CASE WHEN status IN (
+                           'creating', 'pending', 'fulfillable',
+                           'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                         ) THEN 1 ELSE 0 END
+               FROM earn_vault_withdrawal_requests
+              WHERE organization_id = ?
+                AND project_id = ?
+                AND environment = ?
+                AND owner_address = ?
+                AND custody_wallet_id IS NULL
+           )
+           SELECT position_id,
+                  COALESCE(SUM(finalized_deposits), 0)::text AS finalized_deposits,
+                  COALESCE(SUM(finalized_withdrawals), 0)::text AS finalized_withdrawals,
+                  COALESCE(SUM(finalized_withdrawal_count), 0) AS finalized_withdrawal_count,
+                  COALESCE(SUM(unvalued_withdrawal_count), 0) AS unvalued_withdrawal_count,
+                  COALESCE(SUM(unsettled_movement_count), 0) AS unsettled_movement_count
+             FROM facts
             GROUP BY position_id`
         )
-        .bind(params.organizationId, params.projectId, params.environment, params.ownerAddress)
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          params.ownerAddress,
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          params.ownerAddress
+        )
         .all<{
           position_id: string;
           finalized_deposits: string;
@@ -1572,8 +1790,65 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         )
         .bind(...bindings, params.limit + 1)
         .all<Record<string, unknown>>();
-      const rows = (result.results ?? []).map(mapMovementRow);
-      return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
+      const ledgerRows = (result.results ?? []).map(mapMovementRow);
+      if (
+        params.custodyWalletIds.length === 0 ||
+        (params.direction !== undefined && params.direction !== "withdrawal") ||
+        (params.status !== undefined && params.status !== "finalized") ||
+        // The solver source is not persisted, so a source-address filter can
+        // never truthfully match a queued fulfillment projection.
+        params.sourceAddress !== undefined
+      ) {
+        return {
+          rows: ledgerRows.slice(0, params.limit),
+          hasMore: ledgerRows.length > params.limit,
+        };
+      }
+      const queueConditions = [
+        "organization_id = ?",
+        "environment = ?",
+        "project_id = ?",
+        "custody_wallet_id = ANY (?::text[])",
+        "status = 'fulfilled'",
+        "closing_signature IS NOT NULL",
+      ];
+      const queueBindings: unknown[] = [
+        params.organizationId,
+        params.environment,
+        params.projectId,
+        params.custodyWalletIds,
+      ];
+      for (const [column, value] of [
+        ["provider", params.provider],
+        ["position_id", params.positionId],
+        ["owner_address", params.destinationAddress],
+      ] as const) {
+        if (value !== undefined) {
+          queueConditions.push(`${column} = ?`);
+          queueBindings.push(value);
+        }
+      }
+      if (params.before) {
+        queueConditions.push(
+          `(COALESCE(fulfilled_at, updated_at),
+            '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}' || id) < (?, ?)`
+        );
+        queueBindings.push(params.before.createdAt, params.before.id);
+      }
+      const queue = await db
+        .prepare(
+          `SELECT * FROM earn_vault_withdrawal_requests
+            WHERE ${queueConditions.join(" AND ")}
+            ORDER BY COALESCE(fulfilled_at, updated_at) DESC, id DESC
+            LIMIT ?`
+        )
+        .bind(...queueBindings, params.limit + 1)
+        .all<Record<string, unknown>>();
+      return mergeMovementPage(
+        ledgerRows,
+        (queue.results ?? []).map(mapFulfilledQueueMovement),
+        params.limit
+      );
     },
 
     async claimUnsettledVaultMovements(limit) {

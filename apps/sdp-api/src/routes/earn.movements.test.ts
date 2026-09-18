@@ -48,6 +48,9 @@ interface MovementJson {
   status: string;
   denomination: string;
   amountRequested: string;
+  amountSettled?: string;
+  tokenAmount?: string;
+  tokenMint?: string;
   vaultAddress?: string;
   sourceAddress?: string;
   destinationAddress?: string;
@@ -187,13 +190,19 @@ async function seedScope(): Promise<void> {
 }
 
 async function seedVaultDeposit(
-  overrides: { projectId?: string; walletId?: string; vault?: string; amount?: string } = {}
+  overrides: {
+    projectId?: string;
+    walletId?: string;
+    vault?: string;
+    amount?: string;
+    provider?: string;
+  } = {}
 ) {
   return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: ORG,
     projectId: overrides.projectId ?? PROJECT_A,
     environment: "sandbox",
-    provider: "kamino",
+    provider: overrides.provider ?? "kamino",
     vaultAddress: overrides.vault ?? VAULT,
     custodyWalletId: overrides.walletId ?? WALLET_A,
     sourceAddress: PUBLIC_KEY_A,
@@ -208,6 +217,60 @@ async function seedVaultDeposit(
     idempotencyFingerprint: `fp_${crypto.randomUUID()}`,
     createdBy: USER,
   });
+}
+
+async function seedFulfilledQueuedWithdrawal(overrides: {
+  fulfilledAt: string;
+  shares?: string;
+  assetsPaid?: string;
+}) {
+  const deposit = await seedVaultDeposit({
+    provider: "veda",
+    vault: `VedaQueueVault${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 44),
+  });
+  const requestId = `earn_vault_withdrawal_request_${crypto.randomUUID()}`;
+  const requestAddress = `QueuePda${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 44);
+  const shares = overrides.shares ?? "4.25";
+  const assetsPaid = overrides.assetsPaid ?? "4.20";
+  await getDb(env)
+    .prepare(
+      `INSERT INTO earn_vault_withdrawal_requests (
+         id, organization_id, project_id, environment, provider, position_id,
+         custody_wallet_id, owner_address, vault_address, token_mint, share_mint,
+         request_address, status, shares, quoted_assets, share_decimals,
+         asset_decimals, discount_bps, nonce, creation_timestamp,
+         maturity_timestamp, deadline_timestamp, client_request_id,
+         idempotency_fingerprint, creation_signature, closing_signature,
+         assets_paid, fulfilled_at, created_by
+       ) VALUES (
+         ?, ?, ?, 'sandbox', 'veda', ?, ?, ?, ?, ?, ?, ?, 'fulfilled',
+         ?, ?, 6, 6, 25, 7, 1700000000, 1700000060, 1700000120,
+         ?, ?, ?, ?, ?, ?, ?
+       )`
+    )
+    .bind(
+      requestId,
+      ORG,
+      PROJECT_A,
+      deposit.position.id,
+      WALLET_A,
+      PUBLIC_KEY_A,
+      deposit.position.vault_address,
+      TOKEN_MINT,
+      SHARE_MINT,
+      requestAddress,
+      shares,
+      assetsPaid,
+      crypto.randomUUID(),
+      `fp_${crypto.randomUUID()}`,
+      `request_sig_${crypto.randomUUID()}`,
+      `solver_sig_${crypto.randomUUID()}`,
+      assetsPaid,
+      overrides.fulfilledAt,
+      USER
+    )
+    .run();
+  return { requestId, position: deposit.position, requestAddress, shares, assetsPaid };
 }
 
 async function seedProgramWithdrawal(overrides: { amountUsd?: string } = {}) {
@@ -340,6 +403,60 @@ beforeEach(async () => {
 });
 
 describe("GET /v1/earn/movements", () => {
+  it("projects only fulfilled queued exits as finalized solver payouts", async () => {
+    const fulfilled = await seedFulfilledQueuedWithdrawal({
+      fulfilledAt: "2026-09-18T08:00:00.000Z",
+      shares: "4.25",
+      assetsPaid: "4.20",
+    });
+
+    const body = await movementsJson("?direction=withdrawal&status=finalized");
+    expect(body.movements).toHaveLength(1);
+    expect(body.movements[0]).toMatchObject({
+      id: `earn_queue_fulfillment_${fulfilled.requestId}`,
+      executionModel: "vault_direct",
+      direction: "withdrawal",
+      status: "finalized",
+      denomination: SHARE_MINT,
+      amountRequested: "4.25",
+      amountSettled: "4.25",
+      tokenAmount: "4.20",
+      tokenMint: TOKEN_MINT,
+      destinationAddress: PUBLIC_KEY_A,
+      providerReference: fulfilled.requestAddress,
+      settledAt: "2026-09-18T08:00:00.000Z",
+    });
+    expect(body.movements[0]?.sourceAddress).toBeUndefined();
+    expect(body.movements[0]?.signature).toMatch(/^solver_sig_/);
+    expect(
+      (await movementsJson(`?sourceAddress=${fulfilled.position.vault_address}`)).movements
+    ).toHaveLength(0);
+    expect(
+      (await movementsJson(`?destinationAddress=${PUBLIC_KEY_A}`)).movements.map(({ id }) => id)
+    ).toContain(`earn_queue_fulfillment_${fulfilled.requestId}`);
+  });
+
+  it("pages queued fulfillment projections by authoritative settlement time", async () => {
+    const older = await seedFulfilledQueuedWithdrawal({
+      fulfilledAt: "2026-09-18T07:00:00.000Z",
+    });
+    const newer = await seedFulfilledQueuedWithdrawal({
+      fulfilledAt: "2026-09-18T09:00:00.000Z",
+    });
+
+    const first = await movementsJson("?direction=withdrawal&limit=1");
+    expect(first.movements.map(({ id }) => id)).toEqual([
+      `earn_queue_fulfillment_${newer.requestId}`,
+    ]);
+    expect(first.hasMore).toBe(true);
+    const second = await movementsJson(
+      `?direction=withdrawal&limit=1&before=${encodeURIComponent(first.nextCursor ?? "")}`
+    );
+    expect(second.movements.map(({ id }) => id)).toEqual([
+      `earn_queue_fulfillment_${older.requestId}`,
+    ]);
+  });
+
   it("hides another project's vault movement", async () => {
     const movement = await seedVaultDeposit({ projectId: PROJECT_A, walletId: WALLET_A });
     const body = (await (await listMovementsAsProduction()).json()) as {

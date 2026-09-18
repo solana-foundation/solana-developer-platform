@@ -218,6 +218,12 @@ describe("OpenAPI spec", () => {
       }),
     ]);
 
+    expect(
+      JSON.stringify(
+        publicDocument.paths?.["/v1/earn/external-wallet/positions"]?.get?.responses?.["200"]
+      )
+    ).toContain('"unlockTimestamp"');
+
     const anonymousRequestExamples = [
       {
         path: "/v1/earn/external-wallet/deposit-transactions",

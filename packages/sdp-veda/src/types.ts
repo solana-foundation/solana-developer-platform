@@ -190,6 +190,176 @@ export interface VedaWithdrawQuote {
   issues: readonly VedaDepositQuoteIssue[];
 }
 
+export interface VedaWithdrawalOptionsInput {
+  vault: Address;
+}
+
+export interface VedaQueuedWithdrawalTerms {
+  assetMint: Address;
+  allowWithdrawals: boolean;
+  secondsToMaturity: number;
+  minimumSecondsToDeadline: number;
+  minimumDiscountBps: number;
+  maximumDiscountBps: number;
+  /** Canonical decimal shares, converted from the queue's atomic minimum. */
+  minimumShares: string;
+  shareDecimals: number;
+}
+
+/** Instant and queued routes are independent; this type never chooses one. */
+export interface VedaWithdrawalOptions {
+  instant: boolean;
+  queued: boolean;
+  withdrawAuthority: Address;
+  queueState: Address | null;
+  /** Null when the SDP-facing vault asset has no queue configuration. */
+  queueAsset: VedaQueuedWithdrawalTerms | null;
+}
+
+export interface VedaQueuedWithdrawalQuoteInput {
+  vault: Address;
+  shares: string;
+  discountBps: number;
+  /** Seconds after maturity for which the solver may fulfil the request. */
+  deadlineSeconds: number;
+}
+
+/** A point-in-time SDK preview, not authoritative landed request state. */
+export interface VedaQueuedWithdrawalQuote {
+  assetMint: Address;
+  shares: string;
+  shareDecimals: number;
+  assets: string;
+  assetDecimals: number;
+  discountBps: number;
+  /** Unix epoch seconds, represented as a string for JSON safety. */
+  maturityTimestamp: string;
+  /** Unix epoch seconds, represented as a string for JSON safety. */
+  deadlineTimestamp: string;
+  issues: readonly VedaDepositQuoteIssue[];
+}
+
+export interface VedaQueuedWithdrawalRequestInput extends VedaQueuedWithdrawalQuoteInput {
+  owner: Address;
+  /** Sponsor for the ATA and signer-funded queue accounts this plan creates. */
+  rentPayer?: Address;
+}
+
+export interface VedaQueuedWithdrawalExpectedRequest {
+  assetMint: Address;
+  shares: string;
+  assets: string;
+  discountBps: number;
+  maturityTimestamp: string;
+  deadlineTimestamp: string;
+}
+
+/**
+ * A request transaction plus its deterministic PDA and pre-execution preview.
+ * The landed account/event replaces `expectedRequest` as lifecycle truth.
+ */
+export interface VedaQueuedWithdrawalRequestPlan extends VedaInstructionPlan {
+  requestAddress: Address;
+  expectedRequest: VedaQueuedWithdrawalExpectedRequest;
+}
+
+export interface VedaQueuedWithdrawalCancelInput {
+  vault: Address;
+  owner: Address;
+  request: Address;
+}
+
+export interface VedaQueuedWithdrawalRequestsInput {
+  vault: Address;
+  owner: Address;
+}
+
+export interface VedaQueuedWithdrawalRequestInputByAddress {
+  vault: Address;
+  request: Address;
+}
+
+export type VedaQueuedWithdrawalRequestStatus =
+  | "pending"
+  | "fulfillable"
+  | "expiredCancelable"
+  | "closedOrUnknown";
+
+export interface VedaQueuedWithdrawalRequest {
+  requestAddress: Address;
+  vault: Address;
+  owner: Address;
+  nonce: string;
+  assetMint: Address;
+  shares: string;
+  assets: string;
+  creationTimestamp: string;
+  maturityTimestamp: string;
+  deadlineTimestamp: string;
+  status: Exclude<VedaQueuedWithdrawalRequestStatus, "closedOrUnknown">;
+}
+
+export type VedaQueuedWithdrawalRequestLookup =
+  | {
+      requestAddress: Address;
+      status: "closedOrUnknown";
+      request: null;
+    }
+  | {
+      requestAddress: Address;
+      status: Exclude<VedaQueuedWithdrawalRequestStatus, "closedOrUnknown">;
+      request: VedaQueuedWithdrawalRequest;
+    };
+
+/** Trusted queue identity and mint scales used to decode lifecycle events. */
+export interface VedaWithdrawalLifecycleScales {
+  /** Only `Program data:` emitted by this exact program is eligible. */
+  queueProgramAddress: Address;
+  shareDecimals: number;
+  assetDecimals: number;
+}
+
+export type VedaWithdrawalLifecycleEvent =
+  | {
+      kind: "withdrawalRequested";
+      queueState: Address;
+      requestAddress: Address;
+      vaultId: string;
+      owner: Address;
+      assetMint: Address;
+      nonce: string;
+      shares: string;
+      assets: string;
+      creationTimestamp: string;
+      maturityTimestamp: string;
+      deadlineTimestamp: string;
+    }
+  | {
+      kind: "withdrawalCancelled";
+      queueState: Address;
+      requestAddress: Address;
+      vaultId: string;
+      owner: Address;
+      assetMint: Address;
+      nonce: string;
+      sharesReturned: string;
+      cancelledAt: string;
+    }
+  | {
+      kind: "withdrawalFulfilled";
+      queueState: Address;
+      requestAddress: Address;
+      vaultId: string;
+      owner: Address;
+      assetMint: Address;
+      nonce: string;
+      sharesBurned: string;
+      assetsPaid: string;
+      vaultAssetsOut: string;
+      excessReturned: string;
+      fulfilledAt: string;
+    };
+
 export interface VedaDepositQuoteInput {
   /** The vault-state account address — its `providerReference` in the catalogue. */
   vault: Address;
@@ -238,6 +408,8 @@ export interface VedaPosition {
    * between, and never a claim the chain state does not make.
    */
   withdrawableShares: string;
+  /** Unix epoch seconds when the shares unlock, or null when no lock is reported. */
+  unlockTimestamp: string | null;
   /**
    * What those shares are worth in the vault's SDP-facing deposit asset, as a
    * decimal string. Undefined when the valuation could not be read — the caller

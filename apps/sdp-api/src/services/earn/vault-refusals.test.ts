@@ -16,6 +16,7 @@ describe("rethrowVaultProviderFailure", () => {
     "DEPOSIT_REFUSED",
     "WITHDRAW_REFUSED",
     "COMPLIANCE_APPROVAL_REQUIRED",
+    "INVALID_QUEUE_PARAMETERS",
   ])("maps provider refusal %s to a caller 400", (code) => {
     expect(() =>
       rethrowVaultProviderFailure(new TestProviderError(code, "provider refused the request"))
@@ -24,6 +25,23 @@ describe("rethrowVaultProviderFailure", () => {
         code: "BAD_REQUEST",
         statusCode: 400,
         message: "provider refused the request",
+      })
+    );
+  });
+
+  it("maps a queue request that closed during cancellation build to a 409", () => {
+    expect(() =>
+      rethrowVaultProviderFailure(
+        new TestProviderError(
+          "WITHDRAWAL_REQUEST_NOT_FOUND",
+          "The queued withdrawal no longer exists or is already closed"
+        )
+      )
+    ).toThrow(
+      expect.objectContaining({
+        code: "CONFLICT",
+        statusCode: 409,
+        message: "The queued withdrawal no longer exists or is already closed",
       })
     );
   });

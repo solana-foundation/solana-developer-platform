@@ -25,6 +25,10 @@ export type SdpVedaErrorCode =
   | "DEPOSIT_REFUSED"
   /** The vault refuses this exit right now (paused, locked, restricted). */
   | "WITHDRAW_REFUSED"
+  /** Queue discount/deadline values are invalid, or cancellation is too early. */
+  | "INVALID_QUEUE_PARAMETERS"
+  /** The named queue request is already closed or does not exist. */
+  | "WITHDRAWAL_REQUEST_NOT_FOUND"
   /** The vault requires an external compliance approval SDP does not implement. */
   | "COMPLIANCE_APPROVAL_REQUIRED"
   /** The vault's configuration cannot be expressed by SDP's deposit contract. */

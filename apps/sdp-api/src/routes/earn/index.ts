@@ -50,6 +50,24 @@ import {
   previewEarnProgramWithdrawal,
   retargetEarnProgram,
 } from "./handlers/program";
+import {
+  cancelEarnVaultWithdrawalRequest,
+  createEarnExternalWalletQueuedWithdrawalPreview,
+  createEarnExternalWalletWithdrawalRequest,
+  createEarnExternalWalletWithdrawalRequestCancellation,
+  createEarnExternalWalletWithdrawalRequestCancelTransaction,
+  createEarnExternalWalletWithdrawalRequestTransaction,
+  createEarnVaultQueuedWithdrawalPreview,
+  createEarnVaultWithdrawalRequest,
+  extractEarnVaultWithdrawalRequestPolicyCandidate,
+  findEarnVaultWithdrawalRequestIdempotentKeyReplay,
+  getEarnExternalWalletWithdrawalOptions,
+  getEarnExternalWalletWithdrawalRequest,
+  getEarnVaultWithdrawalOptions,
+  getEarnVaultWithdrawalRequest,
+  listEarnExternalWalletWithdrawalRequests,
+  listEarnVaultWithdrawalRequests,
+} from "./handlers/queued-withdrawals";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
   admitEarnVaultRuntimeExecution,
@@ -71,8 +89,12 @@ import {
 import { getEarnVaultShareReconciliation } from "./handlers/vault-reconciliation";
 import {
   earnExternalWalletDepositTransactionSchema,
+  earnExternalWalletQueuedWithdrawalPreviewSchema,
   earnExternalWalletSubmitSchema,
+  earnExternalWalletWithdrawalOptionsSchema,
   earnExternalWalletWithdrawalPreviewSchema,
+  earnExternalWalletWithdrawalRequestCancelTransactionSchema,
+  earnExternalWalletWithdrawalRequestTransactionSchema,
   earnExternalWalletWithdrawalTransactionSchema,
   earnProgramCreateSchema,
   earnProgramRetargetSchema,
@@ -80,7 +102,11 @@ import {
   earnProgramWithdrawalPreviewSchema,
   earnVaultDepositPreviewSchema,
   earnVaultDepositSchema,
+  earnVaultQueuedWithdrawalPreviewSchema,
+  earnVaultWithdrawalOptionsSchema,
   earnVaultWithdrawalPreviewSchema,
+  earnVaultWithdrawalRequestCancelSchema,
+  earnVaultWithdrawalRequestSchema,
   earnVaultWithdrawalSchema,
 } from "./schemas";
 
@@ -265,6 +291,38 @@ optionalAuthEarn.post(
   validateBody(earnExternalWalletWithdrawalTransactionSchema),
   createEarnExternalWalletWithdrawalTransaction
 );
+optionalAuthEarn.post(
+  "/external-wallet/withdrawal-options",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
+  requirePermissionsWhenAuthenticated("earn:read"),
+  anonymousEarnRpcQuota,
+  validateBody(earnExternalWalletWithdrawalOptionsSchema),
+  getEarnExternalWalletWithdrawalOptions
+);
+optionalAuthEarn.post(
+  "/external-wallet/queued-withdrawal-previews",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
+  requirePermissionsWhenAuthenticated("earn:read"),
+  anonymousEarnRpcQuota,
+  validateBody(earnExternalWalletQueuedWithdrawalPreviewSchema),
+  createEarnExternalWalletQueuedWithdrawalPreview
+);
+optionalAuthEarn.post(
+  "/external-wallet/withdrawal-request-transactions",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
+  requirePermissionsWhenAuthenticated("earn:write"),
+  anonymousEarnRpcQuota,
+  validateBody(earnExternalWalletWithdrawalRequestTransactionSchema),
+  createEarnExternalWalletWithdrawalRequestTransaction
+);
+optionalAuthEarn.post(
+  "/external-wallet/withdrawal-request-cancel-transactions",
+  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
+  requirePermissionsWhenAuthenticated("earn:write"),
+  anonymousEarnRpcQuota,
+  validateBody(earnExternalWalletWithdrawalRequestCancelTransactionSchema),
+  createEarnExternalWalletWithdrawalRequestCancelTransaction
+);
 
 // Keyed routes retain dashboard auth, project membership checks, and their
 // existing permission matrix. Give anonymous callers the API-facing contract
@@ -340,6 +398,16 @@ earn.get(
   requirePermissions("earn:read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnExternalWalletEarnings
+);
+earn.get(
+  "/external-wallet/withdrawal-requests",
+  requirePermissions("earn:read"),
+  listEarnExternalWalletWithdrawalRequests
+);
+earn.get(
+  "/external-wallet/withdrawal-requests/:withdrawalRequestId",
+  requirePermissions("earn:read"),
+  getEarnExternalWalletWithdrawalRequest
 );
 
 // Non-custodial ("vault_direct") positions: SDP builds and signs the deposit
@@ -440,6 +508,46 @@ earn.get(
   requirePermissions("earn:read", "wallets:read"),
   getEarnVaultWithdrawal
 );
+earn.post(
+  "/vault-withdrawal-options",
+  requirePermissions("earn:read", "wallets:read"),
+  validateBody(earnVaultWithdrawalOptionsSchema),
+  getEarnVaultWithdrawalOptions
+);
+earn.post(
+  "/vault-queued-withdrawal-previews",
+  requirePermissions("earn:read", "wallets:read"),
+  validateBody(earnVaultQueuedWithdrawalPreviewSchema),
+  createEarnVaultQueuedWithdrawalPreview
+);
+earn.post(
+  "/vault-withdrawal-requests",
+  requirePermissions("earn:write", "wallets:read"),
+  validateBody(earnVaultWithdrawalRequestSchema),
+  policyGate({
+    extract: extractEarnVaultWithdrawalRequestPolicyCandidate,
+    findIdempotentKeyReplay: findEarnVaultWithdrawalRequestIdempotentKeyReplay,
+  }),
+  createEarnVaultWithdrawalRequest
+);
+earn.get(
+  "/vault-withdrawal-requests",
+  requirePermissions("earn:read", "wallets:read"),
+  listEarnVaultWithdrawalRequests
+);
+earn.get(
+  "/vault-withdrawal-requests/:withdrawalRequestId",
+  requirePermissions("earn:read", "wallets:read"),
+  getEarnVaultWithdrawalRequest
+);
+// Recovery is intentionally not policy-gated: after the deadline this only
+// returns escrowed shares to the same owner wallet.
+earn.post(
+  "/vault-withdrawal-requests/:withdrawalRequestId/cancel",
+  requirePermissions("earn:write", "wallets:read"),
+  validateBody(earnVaultWithdrawalRequestCancelSchema),
+  cancelEarnVaultWithdrawalRequest
+);
 earn.get(
   "/vault-positions",
   requirePermissions("earn:read", "wallets:read"),
@@ -480,6 +588,18 @@ earn.post(
   requirePermissions("earn:write"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawal
+);
+earn.post(
+  "/external-wallet/withdrawal-requests",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletSubmitSchema),
+  createEarnExternalWalletWithdrawalRequest
+);
+earn.post(
+  "/external-wallet/withdrawal-request-cancellations",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletSubmitSchema),
+  createEarnExternalWalletWithdrawalRequestCancellation
 );
 
 // The cross-provider movement feed (source: earn_movements). One chronological
