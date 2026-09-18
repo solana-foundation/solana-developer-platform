@@ -26,8 +26,9 @@ let strategyCache:
 /**
  * The catalogue changes rarely and the dashboard polls often. Reading it once
  * every few minutes keeps the steady-state refresh to two SDP calls and one
- * RPC read. A submitted movement adds one short-lived chain-aware detail read
- * so confirmation reaches the UI without waiting for the background sweep.
+ * RPC read. An actively watched movement adds one short-lived chain-aware
+ * detail read so confirmation reaches the UI without waiting for the
+ * background sweep.
  */
 async function listStrategies(
   client: EmbeddedYieldClient
@@ -40,7 +41,9 @@ async function listStrategies(
   return strategies;
 }
 
-export async function loadDashboard(): Promise<DashboardData> {
+export async function loadDashboard(
+  activeMovementIds: readonly string[] = []
+): Promise<DashboardData> {
   const config = getConfig();
   const { owner, feePayer } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
@@ -50,7 +53,7 @@ export async function loadDashboard(): Promise<DashboardData> {
   );
   const tokenMint = requireDepositMint(strategy);
 
-  const [positions, allMovements, checking] = await Promise.all([
+  let [positions, allMovements, checking] = await Promise.all([
     client.listPositions(owner.address),
     client.listMovements(owner.address),
     readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
@@ -58,14 +61,27 @@ export async function loadDashboard(): Promise<DashboardData> {
 
   // Scope by strategy, never by open-position ids: SDP drops a position from
   // the list once it closes, but its movements (and their payouts) remain.
+  const confirmation = await refreshConfirmingMovements(
+    client,
+    allMovements.filter((movement) => belongsToStrategy(movement, strategy)),
+    activeMovementIds
+  );
+  const movements = confirmation.movements;
+
+  // The first balance reads can race the detail read that discovers Solana
+  // confirmation. Re-read them after that handoff so the response uses balance
+  // snapshots requested after confirmation instead of the earlier reads.
+  if (confirmation.reachedConfirmation) {
+    [positions, checking] = await Promise.all([
+      client.listPositions(owner.address),
+      readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
+    ]);
+  }
+
   const position =
     positions
       .filter((candidate) => belongsToStrategy(candidate, strategy))
       .find(isOpenPosition) ?? null;
-  const movements = await refreshConfirmingMovements(
-    client,
-    allMovements.filter((movement) => belongsToStrategy(movement, strategy))
-  );
   const { total, ...savings } = summarizeSavings(checking, position, movements);
 
   return {
@@ -93,11 +109,19 @@ export async function loadDashboard(): Promise<DashboardData> {
  */
 export async function refreshConfirmingMovements(
   client: Pick<EmbeddedYieldClient, "getMovement">,
-  movements: readonly YieldMovement[]
-): Promise<YieldMovement[]> {
-  return Promise.all(
+  movements: readonly YieldMovement[],
+  activeMovementIds: readonly string[]
+): Promise<{
+  movements: YieldMovement[];
+  reachedConfirmation: boolean;
+}> {
+  const active = new Set(activeMovementIds);
+  const refreshed = await Promise.all(
     movements.map(async (movement) => {
-      if (movement.status !== "requested" && movement.status !== "submitted") {
+      if (
+        !active.has(movement.movementId) ||
+        (movement.status !== "requested" && movement.status !== "submitted")
+      ) {
         return movement;
       }
       try {
@@ -109,6 +133,17 @@ export async function refreshConfirmingMovements(
       }
     })
   );
+  return {
+    movements: refreshed,
+    reachedConfirmation: refreshed.some((movement, index) => {
+      const previous = movements[index];
+      return (
+        previous !== undefined &&
+        (previous.status === "requested" || previous.status === "submitted") &&
+        (movement.status === "confirmed" || movement.status === "finalized")
+      );
+    }),
+  };
 }
 
 /** Move money from checking into savings. */

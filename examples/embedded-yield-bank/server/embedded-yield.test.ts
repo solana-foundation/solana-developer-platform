@@ -76,8 +76,15 @@ describe("Embedded Yield orchestration", () => {
       .mockResolvedValue({ ...submitted, status: "confirmed" });
 
     await expect(
-      refreshConfirmingMovements({ getMovement }, [submitted, confirmed])
-    ).resolves.toEqual([{ ...submitted, status: "confirmed" }, confirmed]);
+      refreshConfirmingMovements(
+        { getMovement },
+        [submitted, confirmed],
+        [submitted.movementId]
+      )
+    ).resolves.toEqual({
+      movements: [{ ...submitted, status: "confirmed" }, confirmed],
+      reachedConfirmation: true,
+    });
     expect(getMovement).toHaveBeenCalledTimes(1);
     expect(getMovement).toHaveBeenCalledWith(submitted.movementId);
   });
@@ -87,8 +94,36 @@ describe("Embedded Yield orchestration", () => {
     const getMovement = vi.fn().mockRejectedValue(new Error("RPC unavailable"));
 
     await expect(
-      refreshConfirmingMovements({ getMovement }, [submitted])
-    ).resolves.toEqual([submitted]);
+      refreshConfirmingMovements(
+        { getMovement },
+        [submitted],
+        [submitted.movementId]
+      )
+    ).resolves.toEqual({
+      movements: [submitted],
+      reachedConfirmation: false,
+    });
+  });
+
+  it("does not detail-read historical movements outside the active watch set", async () => {
+    const historical = movement("submitted", "historical");
+    const active = movement("submitted", "active");
+    const getMovement = vi
+      .fn()
+      .mockResolvedValue({ ...active, status: "confirmed" });
+
+    await expect(
+      refreshConfirmingMovements(
+        { getMovement },
+        [historical, active],
+        [active.movementId]
+      )
+    ).resolves.toEqual({
+      movements: [historical, { ...active, status: "confirmed" }],
+      reachedConfirmation: true,
+    });
+    expect(getMovement).toHaveBeenCalledTimes(1);
+    expect(getMovement).toHaveBeenCalledWith(active.movementId);
   });
 });
 

@@ -48,10 +48,6 @@ export function reconcileMovementPolling(
   );
   const next = polling?.movementIds.filter((id) => !terminalIds.has(id)) ?? [];
 
-  for (const movement of movements.filter(isPendingMovement)) {
-    if (!next.includes(movement.movementId)) next.push(movement.movementId);
-  }
-
   if (!next.length) return { polling: undefined, timedOut: false };
   if (polling && now >= polling.expiresAt) {
     return { polling: undefined, timedOut: true };

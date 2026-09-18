@@ -42,6 +42,26 @@ describe("movement polling", () => {
     expect(result.timedOut).toBe(true);
   });
 
+  it("does not start fast polling for historical pending movements", () => {
+    const pending = createMovement("submitted");
+
+    const initial = reconcileMovementPolling(undefined, [pending], 0);
+    const afterTimeout = reconcileMovementPolling(
+      startMovementPolling(undefined, pending.movementId, 0),
+      [pending],
+      SETTLEMENT_POLL_TIMEOUT_MS
+    );
+    const later = reconcileMovementPolling(
+      afterTimeout.polling,
+      [pending],
+      SETTLEMENT_POLL_TIMEOUT_MS + 1
+    );
+
+    expect(initial).toEqual({ polling: undefined, timedOut: false });
+    expect(afterTimeout).toEqual({ polling: undefined, timedOut: true });
+    expect(later).toEqual({ polling: undefined, timedOut: false });
+  });
+
   it("stops customer-facing polling as soon as a movement is confirmed", () => {
     const movement = createMovement("confirmed");
     const polling = startMovementPolling(undefined, movement.movementId, 0);

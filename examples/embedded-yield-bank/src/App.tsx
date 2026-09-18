@@ -94,7 +94,9 @@ export function App() {
     refreshInProgress.current = true;
     const id = ++requestId.current;
     try {
-      const next = await getDashboard();
+      const next = await getDashboard(
+        movementPollingRef.current?.movementIds ?? []
+      );
       if (id !== requestId.current) return;
       latestData.current = next;
       setData(next);

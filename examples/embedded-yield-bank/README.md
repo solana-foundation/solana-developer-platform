@@ -68,14 +68,15 @@ handlers in [`src/app/api`](src/app/api).
   control. The transfer dialog closes as soon as SDP accepts the movement while
   balances and activity update in place.
 - A normal refresh costs two SDP calls (positions, movements) and one RPC read.
-  While movements are awaiting confirmation, one chain-aware detail read per
-  movement makes the UI reflect Solana confirmation immediately. The strategy
+  While a transfer submitted from this browser tab awaits confirmation, one
+  chain-aware detail read makes the UI reflect Solana confirmation immediately.
+  Historical unresolved movements do not restart fast polling. The strategy
   catalogue is cached server-side for five minutes.
 - While a transfer this browser submitted is pending, the page shows the
   balances it will produce and keeps the total fixed. At `confirmed`, the UI
-  shows `Settled` and hands back to live balances. SDP continues tracking
-  protocol finalization in the background without holding the customer in a
-  loading state.
+  shows `Settled` and hands back to balance snapshots requested after that
+  confirmation. SDP continues tracking protocol finalization in the background
+  without holding the customer in a loading state.
 - API responses and outbound SDP reads use `no-store` caching.
 - Submit retries reuse one `Idempotency-Key`.
 - Quote-derived slippage floors and the amount-to-shares conversion use exact
