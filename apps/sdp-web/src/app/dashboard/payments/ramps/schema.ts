@@ -49,8 +49,17 @@ const withdrawAmount = z
  * deposit step gates on them for that provider alone. Required by provider
  * rather than outright: making them mandatory for all seven would block six
  * providers that never send them.
+ *
+ * The rule is deliberately shallow, because the provider is the authority. The
+ * Coinbase client strips spaces, parens and hyphens and sends the rest
+ * (packages/sdp-payments/src/ramps/providers/coinbase/client.ts), and the API
+ * itself only requires a non-empty string. So this accepts the punctuation the
+ * client removes and bounds the DIGITS by E.164, rather than inventing a
+ * country-by-country rule that would reject real numbers.
  */
-const BUYER_PHONE_PATTERN = /^\+?[0-9 ()-]{7,20}$/;
+const BUYER_PHONE_ALLOWED_CHARACTERS = /^\+?[0-9 ()-]+$/;
+const BUYER_PHONE_MIN_DIGITS = 7;
+const BUYER_PHONE_MAX_DIGITS = 15;
 
 const depositSelectionBase = makeRampSelectionSchema(
   "Select a destination wallet.",
@@ -62,21 +71,31 @@ const depositSelectionBase = makeRampSelectionSchema(
 
 const buyerEmailSchema = z.string().email();
 
-export const BUYER_EMAIL_MESSAGE = "Enter the buyer's email address.";
-export const BUYER_PHONE_MESSAGE = "Enter the buyer's phone number.";
-
-/** Null when the value would satisfy Coinbase, the message to show otherwise. */
-export function buyerEmailError(value: string): string | null {
-  return buyerEmailSchema.safeParse(value.trim()).success ? null : BUYER_EMAIL_MESSAGE;
+/** Whether the value would satisfy Coinbase's create-order. */
+export function isValidBuyerEmail(value: string): boolean {
+  return buyerEmailSchema.safeParse(value.trim()).success;
 }
 
-export function buyerPhoneError(value: string): string | null {
-  return BUYER_PHONE_PATTERN.test(value.trim()) ? null : BUYER_PHONE_MESSAGE;
+/**
+ * Counts digits rather than characters: `()---- --` is nine characters and no
+ * phone number at all.
+ */
+export function isValidBuyerPhone(value: string): boolean {
+  const trimmed = value.trim();
+  if (!BUYER_PHONE_ALLOWED_CHARACTERS.test(trimmed)) {
+    return false;
+  }
+  const digits = trimmed.replace(/[^0-9]/g, "").length;
+  return digits >= BUYER_PHONE_MIN_DIGITS && digits <= BUYER_PHONE_MAX_DIGITS;
 }
 
 /**
  * Shared by the deposit step gate and the full selection schema, so the Next
  * button and the quote agree on what a complete Coinbase selection is.
+ *
+ * The issue messages are internal reasons, never shown: the wizard reads these
+ * schemas as a pass/fail boolean. BuyerContactFields renders the translated
+ * copy from the catalogue.
  */
 function requireCoinbaseBuyerContact(
   value: { provider: RampProviderId | null; buyerEmail: string; buyerPhone: string },
@@ -85,13 +104,11 @@ function requireCoinbaseBuyerContact(
   if (value.provider !== "coinbase") {
     return;
   }
-  const emailError = buyerEmailError(value.buyerEmail);
-  if (emailError !== null) {
-    ctx.addIssue({ code: "custom", path: ["buyerEmail"], message: emailError });
+  if (!isValidBuyerEmail(value.buyerEmail)) {
+    ctx.addIssue({ code: "custom", path: ["buyerEmail"], message: "buyer email is not valid" });
   }
-  const phoneError = buyerPhoneError(value.buyerPhone);
-  if (phoneError !== null) {
-    ctx.addIssue({ code: "custom", path: ["buyerPhone"], message: phoneError });
+  if (!isValidBuyerPhone(value.buyerPhone)) {
+    ctx.addIssue({ code: "custom", path: ["buyerPhone"], message: "buyer phone is not valid" });
   }
 }
 

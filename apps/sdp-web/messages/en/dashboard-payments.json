@@ -270,7 +270,9 @@
       "buyerEmailLabel": "Buyer email",
       "buyerEmailPlaceholder": "buyer@example.com",
       "buyerPhoneLabel": "Buyer phone",
-      "buyerPhonePlaceholder": "+1 555 123 4567"
+      "buyerPhonePlaceholder": "+1 555 123 4567",
+      "buyerEmailInvalid": "Enter the buyer's email address.",
+      "buyerPhoneInvalid": "Enter the buyer's phone number."
     },
     "onchainSend": {
       "noAssets": "This wallet has no assets available to send.",

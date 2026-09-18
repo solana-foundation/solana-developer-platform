@@ -3,7 +3,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
-import { buyerEmailError, buyerPhoneError } from "../../schema";
+import { isValidBuyerEmail, isValidBuyerPhone } from "../../schema";
 
 type BuyerContactFieldsProps = {
   email: string;
@@ -27,8 +27,14 @@ export function BuyerContactFields({
   const t = useTranslations();
   // Only complain about what the user has actually typed. An untouched field
   // leaves Next disabled, which is the same signal every other step gives.
-  const emailIssue = email.trim().length > 0 ? buyerEmailError(email) : null;
-  const phoneIssue = phone.trim().length > 0 ? buyerPhoneError(phone) : null;
+  const emailIssue =
+    email.trim().length > 0 && !isValidBuyerEmail(email)
+      ? t("DashboardPayments.ramps.buyerEmailInvalid")
+      : null;
+  const phoneIssue =
+    phone.trim().length > 0 && !isValidBuyerPhone(phone)
+      ? t("DashboardPayments.ramps.buyerPhoneInvalid")
+      : null;
 
   return (
     <div className="space-y-4 rounded-2xl border border-border-default bg-fill-subtle px-4 py-4">

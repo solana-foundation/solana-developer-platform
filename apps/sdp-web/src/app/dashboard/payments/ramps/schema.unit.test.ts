@@ -73,6 +73,37 @@ describe("deposit buyer contact", () => {
     expect(depositSelectionSchema.safeParse(moonpay).success).toBe(true);
   });
 
+  it.each([
+    ["()---- --", "punctuation only, no digits"],
+    ["12 (34) 5", "six digits padded with separators"],
+    ["+1234567890123456", "sixteen digits, past the E.164 bound"],
+    ["555 123 4567 ext 9", "letters are not separators"],
+  ])("rejects %s (%s)", (buyerPhone) => {
+    const result = depositSelectionSchema.safeParse({
+      ...depositFields,
+      provider: "coinbase" as const,
+      buyerEmail: "buyer@example.com",
+      buyerPhone,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.path.join("."))).toEqual(["buyerPhone"]);
+  });
+
+  it.each([["+15551234567"], ["+1 (555) 123-4567"], ["5551234"], ["+44 20 7946 0958"]])(
+    "accepts %s",
+    (buyerPhone) => {
+      const result = depositSelectionSchema.safeParse({
+        ...depositFields,
+        provider: "coinbase" as const,
+        buyerEmail: "buyer@example.com",
+        buyerPhone,
+      });
+
+      expect(result.success).toBe(true);
+    }
+  );
+
   it("rejects a phone that is not a phone", () => {
     const result = depositSelectionSchema.safeParse({
       ...depositFields,
