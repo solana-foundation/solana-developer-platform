@@ -229,9 +229,12 @@ describe("resolveVaultDirectClient", () => {
 
   it("resolves WisdomTree as vault-direct with eligibility and withdraw, I/O-free", async () => {
     const createRpc = vi.spyOn(solanaRpc, "createRpc");
-    const { supportsDepositEligibility, supportsVaultDirect, supportsVaultWithdraw } = await import(
-      "@sdp/earn/capabilities"
-    );
+    const {
+      supportsDepositEligibility,
+      supportsVaultDirect,
+      supportsVaultProviderOrderWithdraw,
+      supportsVaultWithdraw,
+    } = await import("@sdp/earn/capabilities");
 
     const client = resolveVaultDirectClient(executionEnv, "wisdomtree", createVaultDeadline());
 
@@ -239,6 +242,7 @@ describe("resolveVaultDirectClient", () => {
     if (!client) throw new Error("expected WisdomTree vault-direct client");
     expect(supportsVaultDirect(client)).toBe(true);
     expect(supportsVaultWithdraw(client)).toBe(true);
+    expect(supportsVaultProviderOrderWithdraw(client)).toBe(true);
     expect(supportsDepositEligibility(client)).toBe(true);
     expect(createRpc).not.toHaveBeenCalled();
   });

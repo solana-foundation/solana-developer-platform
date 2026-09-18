@@ -78,7 +78,8 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
  * the row's own cluster exactly as the deposit routes gate
  * (`earnDepositSlippagePolicy`). A row that reads null never meets a build that
  * demands `minSharesOut` — including a devnet Kamino row, whose program cannot
- * enforce one.
+ * enforce one, and an asynchronous next-NAV provider whose on-chain leg
+ * deliberately cannot.
  */
 export function mapToEarnStrategy(
   row: EarnStrategyRow,

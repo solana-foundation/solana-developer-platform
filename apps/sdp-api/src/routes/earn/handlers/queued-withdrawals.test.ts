@@ -26,6 +26,16 @@ const position = {
   ownerAddress: "7YfVedaQueueOwner111111111111111111111111111",
 };
 
+function withdrawalClient(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    buildVaultDeposit: vi.fn(),
+    readVaultPositions: vi.fn(),
+    sponsoredPrograms: vi.fn(),
+    buildVaultWithdrawal: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe("queued withdrawal handler contracts", () => {
   beforeEach(() => {
     capabilities.instant = null;
@@ -33,9 +43,22 @@ describe("queued withdrawal handler contracts", () => {
   });
 
   it("keeps instant-only providers available and leaves queue-only fields null", async () => {
-    capabilities.instant = { buildVaultWithdrawal: vi.fn() };
+    capabilities.instant = withdrawalClient();
     await expect(readOptions({ env } as never, "sandbox", position)).resolves.toEqual({
       instant: true,
+      providerOrder: false,
+      queued: false,
+      withdrawAuthority: null,
+      queueState: null,
+      queueAsset: null,
+    });
+  });
+
+  it("advertises a provider-managed redemption order without calling it instant", async () => {
+    capabilities.instant = withdrawalClient({ vaultWithdrawalSettlement: "provider_order" });
+    await expect(readOptions({ env } as never, "production", position)).resolves.toEqual({
+      instant: false,
+      providerOrder: true,
       queued: false,
       withdrawAuthority: null,
       queueState: null,
@@ -44,10 +67,11 @@ describe("queued withdrawal handler contracts", () => {
   });
 
   it("intersects static instant capability with live provider availability", async () => {
-    capabilities.instant = { buildVaultWithdrawal: vi.fn() };
+    capabilities.instant = withdrawalClient();
     capabilities.queued = {
       getWithdrawalOptions: vi.fn().mockResolvedValue({
         instant: false,
+        providerOrder: false,
         queued: false,
         withdrawAuthority: position.ownerAddress,
         queueState: null,
@@ -56,6 +80,7 @@ describe("queued withdrawal handler contracts", () => {
     };
     await expect(readOptions({ env } as never, "sandbox", position)).resolves.toMatchObject({
       instant: false,
+      providerOrder: false,
       queued: false,
     });
   });

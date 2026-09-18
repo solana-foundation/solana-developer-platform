@@ -4,7 +4,7 @@ Kit-native instruction building for WisdomTree Connect's tokenized funds on
 Solana, plus live position reads. It builds unsigned plans and reads chain
 state; it never signs, never submits, never touches a database. Signing and
 submission belong to the API. The Connect REST client (OAuth, products,
-on-receipt wallets, wallet eligibility) lives in
+on-receipt wallets, deposit admission) lives in
 `@sdp/earn/providers/wisdomtree/connect` — this package consumes it and adds
 the chain half.
 
@@ -32,10 +32,12 @@ Consequences that differ from Kamino:
 
 - **`minSharesOut` is refused, never ignored.** Settlement happens at a NAV
   struck after the transfer lands; no instruction can encode a share floor.
-- **A confirmed movement is not a settled order.** The ledger's `finalized`
-  means the on-chain leg landed; the fund tokens (or redemption USDC) arrive
-  via WisdomTree's transfer agent afterwards, and positions surface them
-  because position reads are live chain reads. Order-status polling against
+- **A confirmed movement is not a settled order.** Even after Solana reports
+  the payment/share leg finalized, the ledger deliberately parks the movement
+  at `confirmed`: fund tokens (or redemption USDC) arrive later through
+  WisdomTree's transfer agent. `finalized` is reserved for a future
+  authenticated, correlated provider-completion signal. Position reads still
+  surface assets from live chain state. Order-status polling against
   `GET /api/orders/*` is deliberately NOT wired yet — see "Not done" below.
 
 ## The compliance model is the integration's spine
@@ -47,9 +49,12 @@ issuer (registrar-issued credential) to move or receive fund tokens. Three
 layers in SDP, none redundant:
 
 1. **API-side pre-check** (`EarnDepositEligibilityProvider`, money-in only):
-   the Connect wallet registry answers registered+approved before USDC leaves,
-   so an unverified wallet gets a refusal with the provider's reason instead
-   of "USDC left and nothing came back". Fail-closed on unknown statuses.
+   in one authenticated Connect context, the wallet registry must report the
+   sender Approved AND the products shelf must contain the requested registry
+   fund with `can_trade === true` before USDC leaves. A valid negative result
+   always gets the same generic refusal: the optional-auth build route must not
+   reveal whether a wallet is registered, its KYC state, or the organization's
+   product entitlements. Malformed/upstream responses fail closed.
 2. **Hook account resolution** (`transfer-hook.ts`): the standard SPL
    tlv-account-resolution algorithm, evaluated against the hook's LIVE
    ExtraAccountMetaList. WTGXX's real list (measured 2026-08-28): a
@@ -64,14 +69,24 @@ layers in SDP, none redundant:
 A hook entry demanding an extra SIGNER is refused outright: the only signer a
 transfer carries is the owner.
 
+### Supported Connect organization model
+
+Admission currently supports only Connect's **direct/omnibus credential**
+model. `GET /api/organizations/me` identifies the organization whose wallet
+registry and credential-scoped product shelf SDP checks. A moderator B2B2C
+credential requires an explicit, durable mapping from an SDP organization to
+the correct Connect child-organization GUID. No such mapping exists today, so
+the integration does not guess a child organization and does not claim
+moderator-mode support.
+
 ## Build-time mint verification
 
-`verifyFundMint` compares the LIVE mint (owner program, decimals, hook
-program) against the measured registry in `@sdp/types/wisdomtree-programs`
-before any plan is built — builder truth for a vaultless provider. The
-registry is measurements, not docs: every fund row was decoded from the
-mainnet mint account (`fixtures.test-helper.ts` carries the verbatim WTGXX
-image the tests parse).
+`verifyFundMint` compares the LIVE mint (owner program, initialized/paused
+state, decimals, hook program) against the measured registry in
+`@sdp/types/wisdomtree-programs` before any plan is built — builder truth for
+a vaultless provider. The registry is measurements, not docs: every fund row
+was decoded from the mainnet mint account (`fixtures.test-helper.ts` carries
+the verbatim WTGXX image the tests parse).
 
 ## UNVERIFIED wire fields — first things to re-measure when credentials arrive
 
@@ -83,21 +98,41 @@ constant or reader in `@sdp/earn/providers/wisdomtree/connect.ts`:
   Ethereum values; confirm via `GET /api/orders/order-mapping`).
 - The organization guid field name (three spellings accepted).
 - Wallet `status` vocabulary (only `"approved"` passes; fail-closed).
-- The `/api/orders/all` envelope (bare array and `{orders}` both accepted).
+- The on-receipt order lifecycle/correlation fields needed to reconcile a
+  Solana transfer with the later provider settlement.
 
 ## Smoke test — the mainnet-fork proof
 
-`src/smoke.surfpool.test.ts`, env-gated (`WISDOMTREE_SMOKE_RPC_URL` +
-`WISDOMTREE_SMOKE_SIGNER`), never in CI. Run `surfpool start --no-tui`
-(mainnet fork), fund the throwaway signer via `surfnet_setAccount` /
-`surfnet_setTokenAccount` cheatcodes, and it proves against the REAL mint and
-hook: the subscription leg lands, an unverified wallet's redemption fails at
-the KYC stage, and a local round trip succeeds after cheatcodes install the
-exact non-transferable credential ATAs the live hook resolves. The two delayed
-transfer-agent settlements are explicit state transitions in that test; it
-does not claim to exercise the Connect API or WisdomTree's off-chain
-settlement implementation. Last run 2026-09-01: all 33 package tests passed,
-including the live-hook rejection and the emulated-settlement round trip.
+`src/smoke.surfpool.test.ts` is opt-in and never part of the ordinary offline
+suite. It deliberately refuses anonymous/impersonated-holder testing. From the
+repository root, provide a mainnet RPC, packed **production** Connect
+credentials, and a user-controlled mainnet signer that really holds SOL, USDC,
+WTGXX, and a live WisdomTree credential. Preload the three required variables
+from a secure environment or secret manager; do not inline their values in an
+interactive shell command where history can retain them. Then run the
+Docker-only wrapper (the host never needs Node or pnpm):
+
+```bash
+scripts/kora-surfpool/e2e-wisdomtree.sh
+```
+
+The wrapper passes all three values into a pinned linux/amd64 container by
+inherited environment-variable **names**, never values in process arguments;
+all Node/pnpm work stays inside that image. The test checks the signer assets on
+the remote mainnet first, resolves the real Purchase and Sale on-receipt wallets
+through `getWisdomTreeOnReceiptWallet`, cryptographically signs every Surfpool
+simulation with signature verification enabled, and asserts one-atom exact
+source/destination deltas for both real on-receipt transfers.
+
+Its negative hook control uses the same real signer and a fresh recipient. The
+only `surfnet_*` state write clones the signer's real registrar credential
+account shape into that recipient's exact derived KYC ATA; all cheatcodes are
+then permanently locked before the positive hook and on-receipt proofs. There
+is no SOL, USDC, or WTGXX funding shortcut, no noop/impersonated signer, no
+fake settlement, and no broadcast. Consequently the proof exercises Connect
+wallet resolution and the real on-chain legs, but does **not** claim that
+WisdomTree struck NAV, delivered subscription shares, paid redemption proceeds,
+or completed an actual transfer-agent order.
 
 ## Not done, deliberately — the go-live checklist
 
@@ -114,7 +149,9 @@ including the live-hook rejection and the emulated-settlement round trip.
 - **Fund Data (Dataspan) rates**: catalogue rows carry no `currentApy` until
   the second credential exists and its routes are measured. Missing renders
   "—", never a fabricated rate.
-- **Business prerequisites**: a WisdomTree Connect agreement (moderator-org
-  model for B2B2C partners), per-wallet KYC registration, and packed
+- **Business prerequisites**: a WisdomTree Connect agreement using the
+  currently supported direct/omnibus credential model, per-wallet KYC
+  registration, fund entitlement, and packed
   credentials in `WISDOMTREE_API_KEY` / `WISDOMTREE_SANDBOX_API_KEY`
-  (format on `EarnRuntimeEnvironment`).
+  (format on `EarnRuntimeEnvironment`). Moderator B2B2C operation remains
+  blocked on a durable SDP-org-to-Connect-child mapping.

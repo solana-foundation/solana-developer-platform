@@ -5,6 +5,7 @@ import type {
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultProvider,
+  EarnVaultProviderOrderWithdrawProvider,
   EarnVaultQueuedWithdrawProvider,
   EarnVaultWithdrawProvider,
   EarnVaultWithdrawQuoteProvider,
@@ -120,6 +121,21 @@ export function supportsVaultWithdraw(
   if (!supportsVaultDirect(client)) return false;
   const candidate = client as Partial<Record<(typeof VAULT_WITHDRAW_METHODS)[number], unknown>>;
   return VAULT_WITHDRAW_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+/**
+ * Distinguish a provider-managed redemption order from an atomic payout.
+ * Requires the ordinary withdrawal builder first: the declaration describes
+ * how that builder settles, and cannot advertise a route on its own.
+ */
+export function supportsVaultProviderOrderWithdraw(
+  client: EarnVaultProvider
+): client is EarnVaultProviderOrderWithdrawProvider {
+  if (!supportsVaultWithdraw(client)) return false;
+  return (
+    (client as Partial<EarnVaultProviderOrderWithdrawProvider>).vaultWithdrawalSettlement ===
+    "provider_order"
+  );
 }
 
 const VAULT_DEPOSIT_QUOTE_METHODS = ["quoteVaultDeposit"] as const satisfies readonly Exclude<

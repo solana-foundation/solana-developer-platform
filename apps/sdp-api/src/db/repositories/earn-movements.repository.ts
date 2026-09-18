@@ -4,7 +4,11 @@ import type {
   EarnMovementStatus,
   SdpEnvironment,
 } from "@sdp/types";
-import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types";
+import {
+  EARN_MOVEMENT_TRANSITIONS,
+  EARN_PROVIDER_DEPOSIT_SETTLEMENT,
+  EARN_PROVIDER_WITHDRAWAL_SETTLEMENT,
+} from "@sdp/types";
 import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
 import { conflict } from "@/lib/errors";
 
@@ -917,18 +921,44 @@ function allowedSourceStatuses(model: EarnExecutionModel, toStatus: string): rea
 const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
 const NON_ZERO_DIGIT = /[1-9]/;
 
-/**
- * Deposit and withdrawal routes expose different status vocabularies.
- *
- * The legacy deposit DTO ends at `confirmed`, while withdrawals expose the
- * unified ledger where `confirmed` is optimistic and only `finalized` or
- * `failed` is terminal. Keep this direction-aware or recovery can silently
- * drop a confirmed withdrawal before finalization.
- */
-const SETTLED_VAULT_STATUSES_BY_DIRECTION = {
-  deposit: ["confirmed", "finalized", "failed"],
-  withdrawal: ["finalized", "failed"],
+const ATOMIC_VAULT_PROVIDERS_BY_DIRECTION = {
+  deposit: Object.entries(EARN_PROVIDER_DEPOSIT_SETTLEMENT)
+    .filter(([, settlement]) => settlement === "atomic")
+    .map(([provider]) => provider),
+  withdrawal: Object.entries(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT)
+    .filter(([, settlement]) => settlement === "atomic")
+    .map(([provider]) => provider),
+} as const satisfies Record<EarnMovementDirection, readonly string[]>;
+
+const ATOMIC_SETTLED_STATUSES_BY_DIRECTION = {
+  // The legacy deposit DTO has no finality state and has always stopped at
+  // confirmed for atomic providers. Keep that compatibility boundary here.
+  deposit: ["confirmed", "finalized"],
+  withdrawal: ["finalized"],
 } as const satisfies Record<EarnMovementDirection, readonly EarnMovementStatus[]>;
+
+/**
+ * A failed movement is terminal for every provider. Success is terminal only
+ * for a provider whose Solana leg is itself atomic. Provider orders (and
+ * unknown historical providers) remain discoverable even if a legacy row says
+ * finalized; a future authenticated provider reconciler must introduce its
+ * own durable completion fact before this predicate can close those rows.
+ */
+function vaultSettlementFilter(
+  direction: EarnMovementDirection,
+  settled: boolean | undefined
+): { clause: string; values: readonly unknown[] } {
+  if (settled === undefined) return { clause: "", values: [] };
+  const predicate =
+    "(status = 'failed' OR (provider = ANY (?::text[]) AND status = ANY (?::text[])))";
+  return {
+    clause: settled ? `AND ${predicate}` : `AND NOT ${predicate}`,
+    values: [
+      [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION[direction]],
+      [...ATOMIC_SETTLED_STATUSES_BY_DIRECTION[direction]],
+    ],
+  };
+}
 
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   return {
@@ -1173,16 +1203,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       }
       const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
       const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
-      const settledClause =
-        params.settled === undefined
-          ? ""
-          : params.settled
-            ? "AND status = ANY (?::text[])"
-            : "AND NOT (status = ANY (?::text[]))";
-      const settledValues =
-        params.settled === undefined
-          ? []
-          : [[...SETTLED_VAULT_STATUSES_BY_DIRECTION[params.direction]]];
+      const settledFilter = vaultSettlementFilter(params.direction, params.settled);
       const result = await db
         .prepare(
           // An EXACT project match. `project_id` is nullable only through
@@ -1196,7 +1217,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                AND direction = ?
                AND custody_wallet_id = ANY (?::text[])
                AND project_id = ?
-               ${settledClause}
+               ${settledFilter.clause}
                ${beforeClause}
              ORDER BY created_at DESC, id DESC
              LIMIT ?`
@@ -1207,7 +1228,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           params.direction,
           params.custodyWalletIds,
           params.projectId,
-          ...settledValues,
+          ...settledFilter.values,
           ...beforeValues,
           params.limit + 1
         )

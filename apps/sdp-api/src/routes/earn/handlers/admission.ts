@@ -179,10 +179,11 @@ export function isStrategyDepositable(
  * build enforces a floor for this provider on this row's cluster in this
  * environment: every production deposit, plus any provider whose builder
  * refuses an implicit floor — minus a Kamino row hosted on a cluster whose
- * kvault build lacks the floor instruction (devnet), where no floor can be
- * enforced and none is asked for. The catalogue publishes that same policy as
- * `depositSlippage` (from the same `host_cluster`), so a caller who follows the
- * row they were shown never trips this.
+ * kvault build lacks the floor instruction (devnet), and minus a next-NAV
+ * subscription whose on-chain leg cannot encode a share floor, which
+ * deliberately publishes null instead. The catalogue publishes that same
+ * policy as `depositSlippage` (from the same `host_cluster`), so a caller who
+ * follows the row they were shown never trips this.
  */
 export function assertDepositFloorPresent(
   provider: string,

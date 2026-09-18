@@ -84,7 +84,7 @@ export interface WisdomTreeFund {
 export const WISDOMTREE_FUNDS: readonly WisdomTreeFund[] = [
   {
     exchangeCode: "WTGXX",
-    name: "WisdomTree Government Money Market Digital Fund",
+    name: "WisdomTree Treasury Money Market Digital Fund",
     // biome-ignore lint/security/noSecrets: a public Solana mint address, not a credential
     mint: "Em46fxxwgY2RRoUbBMSbEjJwY62x3ESMNdhnsGpEKewm",
     decimals: 9,

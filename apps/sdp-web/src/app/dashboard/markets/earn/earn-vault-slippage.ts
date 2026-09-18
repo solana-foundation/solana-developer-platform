@@ -5,14 +5,16 @@ import { useEffect, useRef, useState } from "react";
 /**
  * Slippage-floor machinery shared by the vault DEPOSIT and WITHDRAW modals.
  *
- * Both directions follow the same contract: quote the provider's live rate,
- * derive the floor as `quotedQuantity × (1 − toleranceBps/10⁴)`, and refuse to
- * submit without a quote — arithmetic on the caller's own input is only right
- * while the share rate happens to be 1:1. One copy of that machinery, because
- * two copies of a funds-protection rule is how one drifts (the same reasoning
- * that extracted `earn-idempotency-key-store`). Helpers only — the disclosure
- * COMPONENT lives in `earn-vault-slippage-section.tsx`, because a module that
- * exports both components and helpers breaks Fast Refresh's state preservation.
+ * When a direction publishes a non-null floor policy, quote the provider's
+ * live rate, derive the floor as
+ * `quotedQuantity × (1 − toleranceBps/10⁴)`, and refuse to submit without a
+ * quote — arithmetic on the caller's own input is only right while the share
+ * rate happens to be 1:1. A next-NAV provider order publishes null and bypasses
+ * this machinery because its later settlement cannot be bounded on chain. One
+ * copy of the funds-protection rule prevents drift. Helpers only — the
+ * disclosure COMPONENT lives in `earn-vault-slippage-section.tsx`, because a
+ * module that exports both components and helpers breaks Fast Refresh's state
+ * preservation.
  */
 
 export function atomsToDecimalString(atoms: bigint, decimals: number): string {

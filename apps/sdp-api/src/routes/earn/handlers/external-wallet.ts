@@ -752,7 +752,9 @@ export async function createEarnExternalWalletDepositTransaction(
 
   // The share floor the catalogue promised (`depositSlippage`) is the one the
   // build enforces: every production deposit carries one, derived from the
-  // provider's live quote and enforced by its on-chain instruction.
+  // provider's live quote and enforced by its on-chain instruction. A next-NAV
+  // provider order publishes null because its later settlement cannot be
+  // bounded by the on-chain payment leg.
   assertDepositFloorPresent(provider, environment, body.minSharesOut, strategy.host_cluster);
 
   // Surfacing, entitlement, catalogue admission and the SDP-wide exposure cap

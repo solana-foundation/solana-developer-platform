@@ -356,6 +356,13 @@ export async function listWisdomTreeSolanaWallets(
   ctx: EarnRuntimeContext
 ): Promise<WisdomTreeWalletRecord[]> {
   const guid = await getWisdomTreeOrganizationGuid(ctx);
+  return listWisdomTreeSolanaWalletsForOrganization(ctx, guid);
+}
+
+async function listWisdomTreeSolanaWalletsForOrganization(
+  ctx: EarnRuntimeContext,
+  guid: string
+): Promise<WisdomTreeWalletRecord[]> {
   const response = await connectGetJson<{ data?: unknown }>(
     ctx,
     `/api/organizations/${guid}/wallets`
@@ -367,45 +374,71 @@ export async function listWisdomTreeSolanaWallets(
   const lanes = Object.entries(data as Record<string, unknown>)
     .filter(([blockchain]) => blockchain.toLowerCase().includes("solana"))
     .map(([, wallets]) => wallets);
-  return lanes.flatMap((lane) => (Array.isArray(lane) ? lane.map(readWisdomTreeWalletRecord) : []));
+  return lanes.flatMap((lane) => {
+    if (!Array.isArray(lane)) {
+      throw providerUnavailable("WisdomTree returned a malformed Solana wallets lane");
+    }
+    return lane.map(readWisdomTreeWalletRecord);
+  });
 }
 
-export interface WisdomTreeWalletEligibility {
+export interface WisdomTreeDepositEligibility {
   eligible: boolean;
   reason?: string;
 }
 
 /**
- * Is `address` registered AND approved with WisdomTree Connect?
- *
- * This is the API-side half of WisdomTree's KYC model — the on-chain half is
- * the transfer hook, which would fail the settlement leg anyway. Checking here
- * turns "your deposit landed at WisdomTree and nothing came back" into a
- * refusal the caller can act on BEFORE money moves. Fail-closed throughout:
- * unregistered, unapproved and unknown-status wallets are all ineligible.
+ * Deliberately shared by every valid-but-ineligible admission outcome. The
+ * external-wallet build route can be called without authentication, so naming
+ * whether the wallet is absent, pending, or approved-but-unentitled would turn
+ * it into a public KYC/tradability oracle.
  */
-export async function checkWisdomTreeWalletEligibility(
+export const WISDOMTREE_DEPOSIT_INELIGIBLE_REASON =
+  "This WisdomTree deposit is unavailable for the selected wallet and fund.";
+
+const wisdomTreeDepositIneligible = (): WisdomTreeDepositEligibility => ({
+  eligible: false,
+  reason: WISDOMTREE_DEPOSIT_INELIGIBLE_REASON,
+});
+
+/**
+ * Is `address` registered and approved, AND is `exchangeCode` tradable for the
+ * organization authenticated by this credential?
+ *
+ * This intentionally implements Connect's direct/omnibus credential model:
+ * `/api/organizations/me` is the organization whose wallet registry and
+ * organization-scoped product shelf SDP checks. A moderator credential needs
+ * an explicit, durable SDP-organization -> Connect child-organization mapping;
+ * none exists, so this code MUST NOT guess a child GUID or claim moderator
+ * support.
+ *
+ * This is the API-side half of WisdomTree's admission model — the on-chain
+ * half is the transfer hook, which would fail the settlement leg anyway.
+ * Checking both dimensions here refuses the transfer before money moves.
+ * Structurally malformed provider responses throw PROVIDER_UNAVAILABLE;
+ * well-formed negative results all return the same non-enumerating reason.
+ */
+export async function checkWisdomTreeDepositEligibility(
   ctx: EarnRuntimeContext,
-  address: string
-): Promise<WisdomTreeWalletEligibility> {
-  const wallets = await listWisdomTreeSolanaWallets(ctx);
+  input: { address: string; exchangeCode: string }
+): Promise<WisdomTreeDepositEligibility> {
+  // Resolve `/me` exactly once, then perform both admission reads using the
+  // same runtime context and cached bearer token. The products endpoint is
+  // scoped by that token; the wallets endpoint is scoped by the resolved GUID.
+  const guid = await getWisdomTreeOrganizationGuid(ctx);
+  const wallets = await listWisdomTreeSolanaWalletsForOrganization(ctx, guid);
+  const products = await listWisdomTreeProducts(ctx);
+
+  const address = input.address.trim();
   const match = wallets.find((wallet) => wallet.public_key?.trim() === address);
-  if (!match) {
-    return {
-      eligible: false,
-      reason:
-        "This wallet is not registered with WisdomTree Connect. Fund tokens can only settle " +
-        "to a wallet WisdomTree has verified (KYC) and approved.",
-    };
-  }
-  const status = match.status?.trim().toLowerCase() ?? "";
-  if (!WISDOMTREE_APPROVED_WALLET_STATUSES.has(status)) {
-    return {
-      eligible: false,
-      reason: `This wallet is registered with WisdomTree Connect but its status is "${
-        match.status ?? "unknown"
-      }", not approved.`,
-    };
+  const status = match?.status?.trim().toLowerCase() ?? "";
+  const walletApproved = WISDOMTREE_APPROVED_WALLET_STATUSES.has(status);
+  const productTradable = products.some(
+    (product) => product.exchange_code?.trim() === input.exchangeCode && product.can_trade === true
+  );
+
+  if (!walletApproved || !productTradable) {
+    return wisdomTreeDepositIneligible();
   }
   return { eligible: true };
 }

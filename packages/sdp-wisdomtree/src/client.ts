@@ -8,9 +8,9 @@ import type {
   EarnVaultInstruction,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
+  EarnVaultProviderOrderWithdrawProvider,
   EarnVaultTransactionPlan,
   EarnVaultWithdrawInput,
-  EarnVaultWithdrawProvider,
 } from "@sdp/earn/types";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
@@ -67,8 +67,8 @@ export function toEarnVaultTransactionPlan(
 
 /**
  * WisdomTree as an EXECUTING provider: the catalogue + eligibility client plus
- * the vault-direct capability, money in, money OUT (`EarnVaultWithdrawProvider`),
- * and position reads.
+ * the vault-direct capability, money in, money OUT through a provider-managed
+ * redemption order, and position reads.
  *
  * Lives here rather than in `@sdp/earn` so the hourly catalogue cron never
  * loads `@solana/kit`. The arrow points inward: this package depends on
@@ -76,8 +76,11 @@ export function toEarnVaultTransactionPlan(
  */
 export class WisdomTreeVaultDirectClient
   extends WisdomTreeEarnClient
-  implements EarnVaultWithdrawProvider
+  implements EarnVaultProviderOrderWithdrawProvider
 {
+  /** The redemption transaction transfers shares; WisdomTree pays USDC later. */
+  readonly vaultWithdrawalSettlement = "provider_order" as const;
+
   constructor(
     private readonly resolveProvenRpcUrl: (
       ctx: EarnRuntimeContext,

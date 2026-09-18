@@ -37,10 +37,10 @@ export interface WisdomTreeDepositPlanInput {
 
 /**
  * Verify the live fund mint against the measured registry before any plan is
- * built against it: owner program, decimals, and transfer-hook program must
- * all match, or the instrument has drifted from what SDP audited and the build
- * refuses. This is the builder-truth half of `assetIdentity` — for a vaultless
- * provider the mint account IS the live state a vault read would be.
+ * built against it: owner program, initialization, decimals, transfer-hook,
+ * and live pause state must be safe, or the build refuses. A paused fund is
+ * especially dangerous for subscriptions: the USDC leg itself is an ordinary
+ * transfer and could land even though WisdomTree cannot deliver shares.
  */
 export async function verifyFundMint(
   reader: WisdomTreeChainReader,
@@ -61,6 +61,15 @@ export async function verifyFundMint(
     );
   }
   const parsed = parseFundMint(account.data);
+  if (!parsed.initialized) {
+    throw new SdpWisdomTreeError("MINT_MISMATCH", `Fund mint ${fund.mint} is not initialized.`);
+  }
+  if (parsed.paused === true) {
+    throw new SdpWisdomTreeError(
+      "MINT_MISMATCH",
+      `Fund mint ${fund.mint} is paused; refusing to move money while settlement is disabled.`
+    );
+  }
   if (parsed.decimals !== fund.decimals) {
     throw new SdpWisdomTreeError(
       "MINT_MISMATCH",

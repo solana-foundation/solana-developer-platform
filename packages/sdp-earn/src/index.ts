@@ -13,6 +13,7 @@ export {
   supportsDepositEligibility,
   supportsLiveMetrics,
   supportsPortfolioWallets,
+  supportsVaultProviderOrderWithdraw,
   supportsVaultQueuedWithdraw,
   supportsWithdrawalApprovals,
 } from "./capabilities";
@@ -56,6 +57,7 @@ export type {
   EarnRuntimeContext,
   EarnRuntimeEnvironment,
   EarnVaultProvider,
+  EarnVaultProviderOrderWithdrawProvider,
   EarnVaultQueuedWithdrawalCancelInput,
   EarnVaultQueuedWithdrawalExpectedRequest,
   EarnVaultQueuedWithdrawalLifecycleEvent,

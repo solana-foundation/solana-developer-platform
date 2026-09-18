@@ -91,11 +91,10 @@ const earnStrategySchema = z
     depositSlippage: earnStrategySlippagePolicySchema.nullable().openapi({
       description:
         "Non-null when a deposit build for this strategy, in your environment, refuses to run " +
-        "without an explicit `minSharesOut`: every production deposit, and every deposit into a " +
-        "provider whose builder refuses an implicit floor. Quote the deposit first and derive " +
-        "the floor from the live figure minus a chosen tolerance. Null only for a sandbox " +
-        "deposit into a provider with no floor of its own, where the deposit takes the live " +
-        "rate. Answered per request, like `fundable`.",
+        "without an explicit `minSharesOut`. Quote the deposit first and derive the floor from " +
+        "the live figure minus a chosen tolerance. Most production strategies are non-null; a " +
+        "next-NAV subscription may be null when no on-chain instruction can enforce a floor. " +
+        "Answered per request, like `fundable`.",
     }),
     withdrawalSlippage: earnStrategySlippagePolicySchema.nullable().openapi({
       description:
@@ -222,7 +221,7 @@ export const earnExternalWalletDepositTransactionRequest = z
     minSharesOut: earnDecimalAmountSchema.optional().openapi({
       description:
         "Slippage floor in share units. Required exactly when the selected strategy's " +
-        "`depositSlippage` is non-null, which it always is for a production deposit. Derive it " +
+        "`depositSlippage` is non-null. Derive it " +
         "from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.",
       example: "24.9",
     }),

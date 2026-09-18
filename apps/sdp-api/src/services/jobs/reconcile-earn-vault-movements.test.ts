@@ -89,12 +89,12 @@ beforeEach(async () => {
   reconcileEarnVaultQueuedWithdrawals.mockResolvedValue(undefined);
 });
 
-async function seedMovement(lastValidBlockHeight = "100") {
+async function seedMovement(lastValidBlockHeight = "100", provider = "kamino") {
   return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: ORG,
     projectId: PROJECT,
     environment: "sandbox",
-    provider: "kamino",
+    provider,
     vaultAddress: `vault_${crypto.randomUUID()}`,
     custodyWalletId: WALLET,
     shareMint: "So11111111111111111111111111111111111111112",
@@ -110,9 +110,9 @@ async function seedMovement(lastValidBlockHeight = "100") {
   });
 }
 
-async function seedWithdrawal(lastValidBlockHeight = "100") {
+async function seedWithdrawal(lastValidBlockHeight = "100", provider = "kamino") {
   const repository = createPostgresEarnMovementsRepository(getDb(env));
-  const deposit = await seedMovement();
+  const deposit = await seedMovement("100", provider);
   await repository.advanceVaultMovement({
     movementId: deposit.movement.id,
     organizationId: ORG,
@@ -124,7 +124,7 @@ async function seedWithdrawal(lastValidBlockHeight = "100") {
     organizationId: ORG,
     projectId: PROJECT,
     environment: "sandbox",
-    provider: "kamino",
+    provider,
     positionId: deposit.position.id,
     vaultAddress: deposit.position.vault_address as string,
     custodyWalletId: WALLET,
@@ -511,6 +511,110 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     });
     expect(getTransaction).not.toHaveBeenCalled();
     expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+});
+
+describe("provider-order settlement boundary", () => {
+  it("keeps a finalized payment leg non-terminal until the provider settles the deposit", async () => {
+    const seeded = await seedMovement("100", "wisdomtree");
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    await reconcileEarnVaultMovements(env);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "confirmed",
+      // The payment moved on chain, but WisdomTree has not delivered shares.
+      amount_settled: "1",
+      settled_at: null,
+      token_amount_settled: null,
+    });
+    const claimable = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).claimUnsettledVaultMovements(256);
+    expect(claimable.map((movement) => movement.id)).toContain(seeded.movement.id);
+    expect(getTransaction).not.toHaveBeenCalled();
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("does not value or close a provider-order redemption when only its share leg finalized", async () => {
+    const seeded = await seedWithdrawal("100", "wisdomtree");
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    // These would make the generic atomic path value and close the position if
+    // the provider-order guard were ever bypassed.
+    getTransaction.mockResolvedValue(landedPayout(seeded.position.owner_address ?? "", "1000000"));
+    readVaultPositions.mockResolvedValue(
+      liveSnapshot(seeded.position, seeded.position.owner_address ?? "", "0")
+    );
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({
+      status: "confirmed",
+      // Exact shares left the wallet; cash settlement is still provider truth.
+      amount_settled: "1",
+      settled_at: null,
+      token_amount_settled: null,
+    });
+    await expect(
+      createPostgresEarnMovementsRepository(getDb(env)).closeVaultPositionIfEmpty({
+        positionId: seeded.position.id,
+        organizationId: ORG,
+        observedUpdatedAt: seeded.position.updated_at,
+      })
+    ).resolves.toBe(false);
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({ closed_at: null });
+    expect(getTransaction).not.toHaveBeenCalled();
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a historical provider is absent from the execution registry", async () => {
+    const deposit = await seedMovement("100", "retired_provider");
+    const withdrawal = await seedWithdrawal("100", "retired_provider");
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    await reconcileEarnVaultMovementReadThrough(env, deposit.movement);
+    await reconcileEarnVaultMovementReadThrough(env, withdrawal.movement);
+
+    await expect(ledgerRow(deposit.movement.id)).resolves.toMatchObject({
+      status: "confirmed",
+      settled_at: null,
+      token_amount_settled: null,
+    });
+    await expect(ledgerRow(withdrawal.movement.id)).resolves.toMatchObject({
+      status: "confirmed",
+      settled_at: null,
+      token_amount_settled: null,
+    });
+    await expect(positionRow(withdrawal.position.id)).resolves.toMatchObject({ closed_at: null });
+    expect(getTransaction).not.toHaveBeenCalled();
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("leaves atomic provider finalization and position closing unchanged", async () => {
+    const seeded = await seedWithdrawal();
+    const receiver = seeded.movement.destination_address ?? seeded.movement.owner_address ?? "";
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockResolvedValue(landedPayout(receiver, "1000000"));
+    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, receiver, "0"));
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({
+      status: "finalized",
+      settled_at: expect.any(String),
+      token_amount_settled: "1",
+    });
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({
+      closed_at: expect.any(String),
+    });
   });
 });
 

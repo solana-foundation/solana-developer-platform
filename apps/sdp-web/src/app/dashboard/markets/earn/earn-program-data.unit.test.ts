@@ -3,8 +3,10 @@ import type {
   EarnProgramWithdrawalRecord,
   EarnProgramWithdrawalRecordStatus,
   EarnStrategy,
+  EarnVaultDepositRecord,
   EarnVaultDepositRequest,
   EarnVaultPosition,
+  EarnVaultWithdrawal,
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +23,8 @@ import {
   fetchEarnStrategies,
   fetchEarnVaultPositions,
   fetchEarnVaultWithdrawalRequests,
+  isEarnVaultDepositInFlight,
+  isEarnVaultWithdrawalInFlight,
 } from "./earn-program-data";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -70,6 +74,51 @@ function stubCatalogue(total: number, pageSize = 100) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("provider-order settlement watches", () => {
+  const deposit = {
+    movementId: "earn_movement_deposit",
+    positionId: "earn_position_1",
+    provider: "wisdomtree",
+    providerReference: "WTGXX",
+    status: "confirmed",
+    signature: "signature",
+    amount: "1",
+    failureReason: null,
+    createdAt: TIMESTAMP,
+    confirmedAt: TIMESTAMP,
+  } satisfies EarnVaultDepositRecord;
+  const withdrawal = {
+    movementId: "earn_movement_withdrawal",
+    positionId: "earn_position_1",
+    provider: "wisdomtree",
+    providerReference: "WTGXX",
+    status: "finalized",
+    signature: "signature",
+    shares: "1",
+    shareMint: "share_mint",
+    failureReason: null,
+    createdAt: TIMESTAMP,
+    confirmedAt: TIMESTAMP,
+    settledAt: TIMESTAMP,
+  } satisfies EarnVaultWithdrawal;
+
+  it("keeps confirmed provider-order deposits in flight after reload", () => {
+    expect(isEarnVaultDepositInFlight(deposit)).toBe(true);
+    expect(isEarnVaultDepositInFlight({ ...deposit, provider: "retired_provider" })).toBe(true);
+    expect(isEarnVaultDepositInFlight({ ...deposit, provider: "kamino" })).toBe(false);
+    expect(isEarnVaultDepositInFlight({ ...deposit, status: "failed" })).toBe(false);
+  });
+
+  it("does not trust a provider-order finalized row without provider completion", () => {
+    expect(isEarnVaultWithdrawalInFlight(withdrawal)).toBe(true);
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, provider: "retired_provider" })).toBe(
+      true
+    );
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, provider: "kamino" })).toBe(false);
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, status: "failed" })).toBe(false);
+  });
 });
 
 describe("earnVaultMovementRefreshInterval", () => {

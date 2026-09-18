@@ -222,6 +222,53 @@ export const EARN_PROVIDER_DEPOSIT_STYLE = {
 } as const satisfies Record<EarnProviderId, EarnDepositStyle>;
 
 /**
+ * What Solana finality proves for a deposit.
+ *
+ * `atomic` means the transaction itself delivers the position asset.
+ * `provider_order` means it submits only the provider-facing payment leg; the
+ * provider strikes and delivers shares later.
+ */
+export const EARN_PROVIDER_DEPOSIT_SETTLEMENT = {
+  veda: "atomic",
+  upshift: "atomic",
+  perena: "atomic",
+  kamino: "atomic",
+  jupiter_lend: "atomic",
+  ondo: "atomic",
+  wisdomtree: "provider_order",
+} as const satisfies Record<EarnProviderId, "atomic" | "provider_order">;
+
+/**
+ * What Solana finality proves for a withdrawal.
+ *
+ * Kept separate from the deposit table even though today's values match: a
+ * provider can add an atomic exit without changing how subscriptions settle.
+ */
+export const EARN_PROVIDER_WITHDRAWAL_SETTLEMENT = {
+  veda: "atomic",
+  upshift: "atomic",
+  perena: "atomic",
+  kamino: "atomic",
+  jupiter_lend: "atomic",
+  ondo: "atomic",
+  wisdomtree: "provider_order",
+} as const satisfies Record<EarnProviderId, "atomic" | "provider_order">;
+
+/** Unknown providers fail closed because atomicity is a positive settlement claim. */
+export function earnProviderDepositSettlement(provider: string): "atomic" | "provider_order" {
+  return Object.hasOwn(EARN_PROVIDER_DEPOSIT_SETTLEMENT, provider)
+    ? EARN_PROVIDER_DEPOSIT_SETTLEMENT[provider as EarnProviderId]
+    : "provider_order";
+}
+
+/** Unknown providers fail closed because atomicity is a positive settlement claim. */
+export function earnProviderWithdrawalSettlement(provider: string): "atomic" | "provider_order" {
+  return Object.hasOwn(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT, provider)
+    ? EARN_PROVIDER_WITHDRAWAL_SETTLEMENT[provider as EarnProviderId]
+    : "provider_order";
+}
+
+/**
  * Deposit shape for an OPEN provider string, defaulting to `vault_direct`.
  *
  * The default is the conservative one: `custodial` is the claim that SDP holds a
@@ -247,11 +294,10 @@ export function earnDepositStyle(provider: string): EarnDepositStyle {
  * tolerance covers exactly what it can: the rate moving between the quote and
  * the transaction landing.
  *
- * `null` means the PROVIDER declares no floor of its own; the provider keeps
- * whatever floor semantics its API contract has. It is not the whole answer:
- * every production deposit still carries a floor, and
- * `earnDepositSlippagePolicy` folds the environment in. Read that, never this
- * map, to decide whether a build needs `minSharesOut`.
+ * `null` means the PROVIDER declares no tolerance of its own. It is not the
+ * whole answer: `earnDepositSlippagePolicy` also folds in environment and
+ * whether the provider can encode a floor at all. Read that function, never
+ * this map, to decide whether a build needs `minSharesOut`.
  * Exhaustive over `EarnProviderId` so a new provider must state its policy.
  */
 export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
@@ -275,6 +321,28 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   ondo: { defaultToleranceBps: 50 },
   wisdomtree: null,
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
+
+/**
+ * Whether a provider can encode a deposit share floor at all. WisdomTree's
+ * subscription transaction sends USDC before the transfer agent strikes NAV,
+ * so no Solana instruction can enforce `minSharesOut` for that later event.
+ */
+export const EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT = {
+  veda: "enforceable",
+  upshift: "enforceable",
+  perena: "enforceable",
+  kamino: "enforceable",
+  jupiter_lend: "enforceable",
+  ondo: "enforceable",
+  wisdomtree: "unsupported",
+} as const satisfies Record<EarnProviderId, "enforceable" | "unsupported">;
+
+/** Unknown providers fail closed to the ordinary enforceable-floor policy. */
+export function earnDepositFloorSupport(provider: string): "enforceable" | "unsupported" {
+  return Object.hasOwn(EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT, provider)
+    ? EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT[provider as EarnProviderId]
+    : "enforceable";
+}
 
 /** Slippage-floor policy for an OPEN provider string — fails closed to none. */
 export function earnDepositSlippageFloor(provider: string): { defaultToleranceBps: number } | null {
@@ -301,7 +369,9 @@ export const EARN_PRODUCTION_DEPOSIT_DEFAULT_TOLERANCE_BPS = 10;
  * Cluster first: a floor the row's program cannot enforce is no floor, so a
  * Kamino row hosted on a cluster whose kvault build lacks
  * `deposit_with_min_shares_out` (devnet, per `KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`)
- * answers null and the build takes the legacy instruction. Then the provider: a
+ * answers null and the build takes the legacy instruction. Then capability: an
+ * asynchronous next-NAV subscription that cannot encode a floor returns null
+ * rather than advertising protection it cannot enforce. Then the provider: a
  * builder that refuses an implicit floor requires one in every environment.
  * Then the environment: every production deposit carries a caller-chosen share
  * floor derived from the live quote, because without one a vault deposit
@@ -321,6 +391,7 @@ export function earnDepositSlippagePolicy(
 ): { defaultToleranceBps: number } | null {
   const cluster = hostCluster ?? CLUSTER_BY_SDP_ENVIRONMENT[environment];
   if (provider === "kamino" && !KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT[cluster]) return null;
+  if (earnDepositFloorSupport(provider) === "unsupported") return null;
   const declared = earnDepositSlippageFloor(provider);
   if (declared) return declared;
   return environment === "production"
@@ -390,6 +461,10 @@ export const EARN_PROVIDER_DEPLOYED_CLUSTERS = {
   kamino: deployedClusters(KAMINO_KVAULT_PROGRAM_IDS),
   jupiter_lend: deployedClusters(JUPITER_LEND_EARN_PROGRAM_IDS),
   ondo: deployedClusters(ONDO_DEPLOYMENTS),
+  // Registered but deliberately not depositable until the organization model
+  // and provider-order settlement are release-ready. Mainnet identities live
+  // in `wisdomtree-programs.ts`; this is the money-in admission gate.
+  wisdomtree: [],
 } as const satisfies Record<EarnProviderId, readonly SolanaCluster[]>;
 
 /**
