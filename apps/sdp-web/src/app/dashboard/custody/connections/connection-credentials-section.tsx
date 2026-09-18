@@ -48,13 +48,17 @@ function maskedAppId(credential: LifecycleCredential): string {
  * blocked, so this callout sits above the cards that show them disabled.
  */
 function PendingRotationCallout({
+  canCancel,
   canManageCustody,
+  currentInUse,
   onCancel,
   onSettle,
   pending,
   t,
 }: {
+  canCancel: boolean;
   canManageCustody: boolean;
+  currentInUse: boolean;
   onCancel: () => void;
   onSettle: () => void;
   pending: boolean;
@@ -63,13 +67,24 @@ function PendingRotationCallout({
   return (
     <Callout variant="warning" className="mt-3" title={t("DashboardCustody.rotationPendingTitle")}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p>{t("DashboardCustody.rotationPendingBody")}</p>
+        <p>
+          {t(
+            currentInUse
+              ? "DashboardCustody.rotationPendingBody"
+              : "DashboardCustody.rotationUnusedBody"
+          )}
+        </p>
         {canManageCustody ? (
           <span className="flex shrink-0 items-center gap-2">
-            <Button size="sm" onClick={onSettle} disabled={pending}>
+            <Button size="sm" onClick={onSettle} disabled={pending || !currentInUse}>
               {t("DashboardCustody.rotationPendingRetry")}
             </Button>
-            <Button size="sm" variant="secondary" onClick={onCancel} disabled={pending}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={onCancel}
+              disabled={pending || !canCancel}
+            >
               {t("DashboardCustody.rotationPendingCancel")}
             </Button>
           </span>
@@ -90,11 +105,11 @@ function PendingRotationCallout({
 function CurrentCredentialCard({
   badge,
   canAct,
-  canManageCustody,
+  canDeactivate,
+  connectionId,
   credential,
   hasPendingRotation,
   impact,
-  isDeactivated,
   managedHere,
   onDeactivate,
   onRotate,
@@ -103,11 +118,11 @@ function CurrentCredentialCard({
 }: {
   badge: { variant: "outline" | "warning" | "success"; label: string };
   canAct: boolean;
-  canManageCustody: boolean;
+  canDeactivate: boolean;
+  connectionId: string;
   credential: LifecycleCredential;
   hasPendingRotation: boolean;
   impact: CustodyCredentialLifecycle["impact"];
-  isDeactivated: boolean;
   managedHere: boolean;
   onDeactivate: () => void;
   onRotate: () => void;
@@ -115,7 +130,11 @@ function CurrentCredentialCard({
   t: ReturnType<typeof useTranslations>;
 }) {
   const formatDate = useDateFormatter();
-  const sharedConnectionCount = impact.connections.length - 1;
+  const otherConnections = impact.connections.filter(({ id }) => id !== connectionId);
+  const showControls =
+    credential.status === "active" ||
+    credential.status === "pending" ||
+    credential.status === "creating";
 
   return (
     <div className="rounded-xl border border-border-default p-4">
@@ -142,11 +161,11 @@ function CurrentCredentialCard({
             {t("DashboardCustody.credentialVersionUntracked")}
           </CredentialRow>
         )}
-        {managedHere && sharedConnectionCount > 0 ? (
+        {managedHere && otherConnections.length > 0 ? (
           <CredentialRow label={t("DashboardCustody.credentialAlsoUsedBy")}>
             {t("DashboardCustody.credentialAlsoUsedByValue", {
-              count: sharedConnectionCount,
-              projects: impact.projects.length,
+              count: otherConnections.length,
+              projects: new Set(otherConnections.map(({ projectId }) => projectId)).size,
             })}
           </CredentialRow>
         ) : null}
@@ -158,32 +177,41 @@ function CurrentCredentialCard({
         </p>
       )}
 
-      {isDeactivated ? (
-        <p className="mt-3 text-sm text-tertiary">{t("DashboardCustody.credentialNoLongerUsed")}</p>
-      ) : (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            disabled={!canAct || hasPendingRotation || pending}
-            onClick={onRotate}
-            iconLeft={<RefreshCwIcon className="size-4" />}
-          >
-            {t("DashboardCustody.rotateAction")}
-          </Button>
-          {/* Rendered even when unavailable so the reason beside it has
-              something to explain. */}
-          {managedHere ? null : (
-            <Button size="sm" variant="secondary" disabled>
-              {t("DashboardCustody.rollbackAction")}
-            </Button>
-          )}
-          {canManageCustody && managedHere ? (
-            <Button size="sm" variant="ghost" onClick={onDeactivate} disabled={pending}>
-              {t("DashboardCustody.deactivateCredentialsConfirm")}
-            </Button>
+      {credential.status === "deactivated" ? (
+        <p className="mt-3 text-sm text-tertiary">
+          {t("DashboardCustody.deactivateCredentialsSuccessDescription")}
+        </p>
+      ) : showControls ? (
+        <>
+          {managedHere && credential.status === "active" && impact.connections.length === 0 ? (
+            <p className="mt-3 text-sm text-tertiary">
+              {t("DashboardCustody.credentialNoLongerUsed")}
+            </p>
           ) : null}
-        </div>
-      )}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              disabled={!canAct || hasPendingRotation || pending}
+              onClick={onRotate}
+              iconLeft={<RefreshCwIcon className="size-4" />}
+            >
+              {t("DashboardCustody.rotateAction")}
+            </Button>
+            {/* Rendered even when unavailable so the reason beside it has
+              something to explain. */}
+            {managedHere ? null : (
+              <Button size="sm" variant="secondary" disabled>
+                {t("DashboardCustody.rollbackAction")}
+              </Button>
+            )}
+            {canDeactivate ? (
+              <Button size="sm" variant="ghost" onClick={onDeactivate} disabled={pending}>
+                {t("DashboardCustody.deactivateCredentialsConfirm")}
+              </Button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -191,7 +219,7 @@ function CurrentCredentialCard({
 /**
  * The credential the previous rotation retired, and the window in which it can
  * still be restored. Rendered only while that window is open: once the API
- * stops returning `rollback`, the secret is gone and there is nothing to show.
+ * stops returning `rollback`, restoration is no longer available.
  */
 function PreviousCredentialCard({
   canAct,
@@ -210,7 +238,7 @@ function PreviousCredentialCard({
 
   // Owns the whole "is there anything to roll back to" question, rather than
   // leaving four derived values on the caller: once the API stops returning
-  // `rollback`, the secret is gone and there is no card.
+  // `rollback`, restoration is no longer available and there is no card.
   if (!lifecycle.rollback) {
     return null;
   }
@@ -264,45 +292,26 @@ function PreviousCredentialCard({
 }
 
 /**
- * Which of the three states the current credential is in.
- *
  * `creating` and `pending` both mean the same thing to a reader — nothing has
  * verified this credential yet — so they share one badge.
  */
 function resolveCredentialBadge(
   credential: LifecycleCredential,
-  isDeactivated: boolean,
   t: ReturnType<typeof useTranslations>
 ): { variant: "outline" | "warning" | "success"; label: string } {
-  if (isDeactivated) {
+  if (credential.status === "deactivated") {
+    return { variant: "outline", label: t("DashboardCustody.connectionStatusDeactivated") };
+  }
+  if (credential.status === "retired") {
     return { variant: "outline", label: t("DashboardCustody.credentialRetired") };
+  }
+  if (credential.status === "failed_validation") {
+    return { variant: "warning", label: t("DashboardCustody.credentialValidationFailed") };
   }
   if (credential.status === "pending" || credential.status === "creating") {
     return { variant: "warning", label: t("DashboardCustody.credentialUnverified") };
   }
   return { variant: "success", label: t("DashboardCustody.connectionStatusActive") };
-}
-
-/**
- * Whether rotation and rollback are live at all.
- *
- * Four conditions, and only the first is about permission: the other three are
- * about the credential being something SDP holds, still uses, and has verified.
- * Everything else on this card is read-only by nature, not by policy.
- */
-function canActOnCredential({
-  canManageCustody,
-  credential,
-  isDeactivated,
-  managedHere,
-}: {
-  canManageCustody: boolean;
-  credential: LifecycleCredential;
-  isDeactivated: boolean;
-  managedHere: boolean;
-}): boolean {
-  const isUnverified = credential.status === "pending" || credential.status === "creating";
-  return canManageCustody && managedHere && !isDeactivated && !isUnverified;
 }
 
 /** The section's frame, for the two states that have no credential to show. */
@@ -322,55 +331,6 @@ function CredentialsNotice({
         {message}
       </Callout>
     </section>
-  );
-}
-
-/** Mounted only where the actions behind them are live. */
-function CredentialDialogs({
-  connectionId,
-  deactivateOpen,
-  lifecycle,
-  onCloseDeactivate,
-  onCloseRollback,
-  onCloseRotate,
-  provider,
-  rollbackOpen,
-  rotateOpen,
-}: {
-  connectionId: string;
-  deactivateOpen: boolean;
-  lifecycle: CustodyCredentialLifecycle;
-  onCloseDeactivate: () => void;
-  onCloseRollback: () => void;
-  onCloseRotate: () => void;
-  provider: CustodyProvider;
-  rollbackOpen: boolean;
-  rotateOpen: boolean;
-}) {
-  return (
-    <>
-      <RotateCredentialsModal
-        isOpen={rotateOpen}
-        onClose={onCloseRotate}
-        lifecycle={lifecycle}
-        provider={provider}
-        connectionId={connectionId}
-      />
-      <RollbackDialog
-        isOpen={rollbackOpen}
-        onClose={onCloseRollback}
-        lifecycle={lifecycle}
-        provider={provider}
-        connectionId={connectionId}
-      />
-      <DeactivateCredentialsDialog
-        isOpen={deactivateOpen}
-        onClose={onCloseDeactivate}
-        lifecycle={lifecycle}
-        provider={provider}
-        connectionId={connectionId}
-      />
-    </>
   );
 }
 
@@ -449,8 +409,12 @@ export function ConnectionCredentialsSection({
   const credential = lifecycle.providerCredential;
   const candidate = lifecycle.rotationCandidate;
   const managedHere = isCredentialManagedHere(credential);
-  const isDeactivated = connection.status === "deactivated";
-  const canAct = canActOnCredential({ canManageCustody, credential, isDeactivated, managedHere });
+  const currentInUse = credential.status === "active" && lifecycle.impact.connections.length > 0;
+  const canAct = canManageCustody && managedHere && currentInUse;
+  const canDeactivate =
+    canManageCustody &&
+    managedHere &&
+    (credential.status === "active" || credential.status === "pending");
 
   // Both take the id rather than closing over `candidate`, because only the
   // branch that renders these buttons knows a candidate exists.
@@ -485,7 +449,11 @@ export function ConnectionCredentialsSection({
 
       {candidate ? (
         <PendingRotationCallout
+          canCancel={
+            candidate.status === "pending" || (candidate.status === "creating" && currentInUse)
+          }
           canManageCustody={canManageCustody}
+          currentInUse={currentInUse}
           onCancel={() => handleCancelCandidate(candidate.id)}
           onSettle={() => handleSettleCandidate(candidate.id)}
           pending={pending}
@@ -495,13 +463,13 @@ export function ConnectionCredentialsSection({
 
       <div className="mt-3 grid gap-4 @3xl/connection-credentials:grid-cols-2">
         <CurrentCredentialCard
-          badge={resolveCredentialBadge(credential, isDeactivated, t)}
+          badge={resolveCredentialBadge(credential, t)}
           canAct={canAct}
-          canManageCustody={canManageCustody}
+          canDeactivate={canDeactivate}
+          connectionId={connection.id}
           credential={credential}
           hasPendingRotation={Boolean(candidate)}
           impact={lifecycle.impact}
-          isDeactivated={isDeactivated}
           managedHere={managedHere}
           onDeactivate={() => setDeactivateOpen(true)}
           onRotate={() => setRotateOpen(true)}
@@ -519,16 +487,30 @@ export function ConnectionCredentialsSection({
       </div>
 
       {canAct ? (
-        <CredentialDialogs
-          connectionId={connection.id}
-          deactivateOpen={deactivateOpen}
+        <>
+          <RotateCredentialsModal
+            isOpen={rotateOpen}
+            onClose={() => setRotateOpen(false)}
+            lifecycle={lifecycle}
+            provider={provider}
+            connectionId={connection.id}
+          />
+          <RollbackDialog
+            isOpen={rollbackOpen}
+            onClose={() => setRollbackOpen(false)}
+            lifecycle={lifecycle}
+            provider={provider}
+            connectionId={connection.id}
+          />
+        </>
+      ) : null}
+      {canDeactivate ? (
+        <DeactivateCredentialsDialog
+          isOpen={deactivateOpen}
+          onClose={() => setDeactivateOpen(false)}
           lifecycle={lifecycle}
-          onCloseDeactivate={() => setDeactivateOpen(false)}
-          onCloseRollback={() => setRollbackOpen(false)}
-          onCloseRotate={() => setRotateOpen(false)}
           provider={provider}
-          rollbackOpen={rollbackOpen}
-          rotateOpen={rotateOpen}
+          connectionId={connection.id}
         />
       ) : null}
     </section>
