@@ -292,6 +292,26 @@ describe("in-flight transfers", () => {
       )
     ).toEqual({ reflected: [transfer], waiting: [] });
   });
+
+  it("hands netted opposite-direction transfers back as one snapshot", () => {
+    const base = dashboard({ checking: "19", savings: "1", total: "20" });
+    const deposit = {
+      movementId: "deposit",
+      direction: "deposit" as const,
+      amount: "2",
+      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+    };
+    const withdrawal = {
+      movementId: "withdrawal",
+      direction: "withdrawal" as const,
+      amount: "2",
+      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+    };
+
+    expect(
+      partitionSettledTransfersBySnapshot(base, base, [deposit, withdrawal])
+    ).toEqual({ reflected: [deposit, withdrawal], waiting: [] });
+  });
 });
 
 function dashboard(input: {

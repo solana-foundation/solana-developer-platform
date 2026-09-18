@@ -195,8 +195,15 @@ export function partitionSettledTransfersBySnapshot(
   const waiting: InFlightTransfer[] = [];
   let nextBase = base;
 
+  // Opposite-direction transfers can cancel each other out. Check their
+  // combined effect first so a live snapshot at the net result releases every
+  // projection even when no individual transfer target appears on its own.
+  if (settled.length && snapshotReflectsTransfers(base, live, settled)) {
+    return { reflected: [...settled], waiting };
+  }
+
   for (const transfer of settled) {
-    if (snapshotReflectsTransfer(nextBase, live, transfer)) {
+    if (snapshotReflectsTransfers(nextBase, live, [transfer])) {
       reflected.push(transfer);
       nextBase = foldSettledTransfers(nextBase, [transfer]);
     } else {
@@ -207,29 +214,37 @@ export function partitionSettledTransfersBySnapshot(
   return { reflected, waiting };
 }
 
-function snapshotReflectsTransfer(
+function snapshotReflectsTransfers(
   base: DashboardData,
   live: DashboardData,
-  transfer: InFlightTransfer
+  transfers: readonly InFlightTransfer[]
 ): boolean {
   const baseSavings = base.savings.balance;
   const liveSavings = live.savings.balance;
   if (baseSavings === undefined || liveSavings === undefined) return false;
 
-  const projected = foldSettledTransfers(base, [transfer]);
+  const projected = foldSettledTransfers(base, transfers);
   const projectedSavings = projected.savings.balance;
   if (projectedSavings === undefined) return false;
 
-  if (transfer.direction === "deposit") {
-    return (
-      compareDecimals(live.checking.balance, projected.checking.balance) <= 0 &&
-      compareDecimals(liveSavings, projectedSavings) >= 0
-    );
-  }
   return (
-    compareDecimals(live.checking.balance, projected.checking.balance) >= 0 &&
-    compareDecimals(liveSavings, projectedSavings) <= 0
+    hasReachedProjection(
+      base.checking.balance,
+      projected.checking.balance,
+      live.checking.balance
+    ) && hasReachedProjection(baseSavings, projectedSavings, liveSavings)
   );
+}
+
+function hasReachedProjection(
+  base: string,
+  projected: string,
+  live: string
+): boolean {
+  const direction = compareDecimals(projected, base);
+  const progress = compareDecimals(live, projected);
+  if (direction === 0) return progress === 0;
+  return direction > 0 ? progress >= 0 : progress <= 0;
 }
 
 function shiftBalance(
