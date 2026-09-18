@@ -4,10 +4,10 @@ import {
   ConnectionsRequestError,
   type CustodyConnectionListItem,
   fetchConnectionPickerOptions,
+  fetchConnectionsPage,
   fetchProviderConnections,
   fetchWalletsByConnection,
   parseConnectionsFilters,
-  selectConnectionsPage,
   summarizeProviderConnections,
 } from "./connections.data";
 
@@ -61,32 +61,18 @@ describe("fetchProviderConnections", () => {
     });
   }
 
-  it("reads the project's connections at the endpoint's widest page size", async () => {
+  // The narrowing is the server's, so the total it pages against is this
+  // provider's total. Filtering after the read counted every provider's
+  // connections towards a cap only one of them was meant to spend.
+  it("asks the endpoint for one provider at the widest page size", async () => {
     const request = vi.fn(async () => slice([], 0, 0));
 
     await fetchProviderConnections(request, "privy");
 
     expect(request).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith(
-      "/internal/dashboard/custody/connections?limit=50&offset=0"
+      "/internal/dashboard/custody/connections?limit=50&offset=0&provider=privy"
     );
-  });
-
-  it("keeps only the requested provider's connections", async () => {
-    const request = vi.fn(async () =>
-      slice(
-        [connection("conn-privy"), { ...connection("conn-turnkey"), provider: "turnkey" as const }],
-        0,
-        2
-      )
-    );
-
-    const project = await fetchProviderConnections(request, "privy");
-
-    expect(project.connections.map((row) => row.id)).toEqual(["conn-privy"]);
-    // Completeness is about the read, not about the filter: every row the
-    // project holds was seen, even though only one survived the narrowing.
-    expect(project.complete).toBe(true);
   });
 
   it("pages until the project's total is covered", async () => {
@@ -101,7 +87,7 @@ describe("fetchProviderConnections", () => {
     expect(project.connections).toHaveLength(51);
     expect(project.complete).toBe(true);
     expect(request).toHaveBeenLastCalledWith(
-      "/internal/dashboard/custody/connections?limit=50&offset=50"
+      "/internal/dashboard/custody/connections?limit=50&offset=50&provider=privy"
     );
   });
 
@@ -181,36 +167,74 @@ describe("fetchProviderConnections", () => {
   });
 });
 
-describe("selectConnectionsPage", () => {
-  const rows = Array.from({ length: 25 }, (_, index) => connection(`conn-${index}`));
+describe("fetchConnectionsPage", () => {
+  function page(connections: CustodyConnectionListItem[], offset: number, total: number) {
+    return jsonResponse({
+      data: { connections, pagination: { limit: 20, offset, total } },
+    });
+  }
 
-  it("slices the requested page and counts the whole set", () => {
-    const { result, filters } = selectConnectionsPage(rows, { page: 2 });
+  it("asks the server for exactly the page on screen", async () => {
+    const rows = Array.from({ length: 5 }, (_, index) => connection(`conn-${index}`));
+    const request = vi.fn(async () => page(rows, 20, 25));
 
+    const { result, filters } = await fetchConnectionsPage(request, "privy", { page: 2 });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(
+      "/internal/dashboard/custody/connections?limit=20&offset=20&provider=privy"
+    );
     expect(filters.page).toBe(2);
-    expect(result.connections.map((row) => row.id)).toEqual([
-      "conn-20",
-      "conn-21",
-      "conn-22",
-      "conn-23",
-      "conn-24",
-    ]);
     expect(result.pagination).toEqual({ limit: 20, offset: 20, total: 25 });
   });
 
-  it("clamps a page past the end to the last one that exists", () => {
-    const { result, filters } = selectConnectionsPage(rows, { page: 9 });
+  // The whole point of the provider parameter: page 11 of a project whose
+  // privy connections start past the first 200 rows of every provider's is a
+  // single indexed read, not an inventory walk that gave up before reaching it.
+  it("reaches a deep page without reading everything before it", async () => {
+    const request = vi.fn(async () => page([connection("conn-deep")], 200, 240));
+
+    const { result } = await fetchConnectionsPage(request, "privy", { page: 11 });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(result.connections.map((row) => row.id)).toEqual(["conn-deep"]);
+  });
+
+  it("lands on the last page that exists when the bookmark is stale", async () => {
+    const rows = Array.from({ length: 5 }, (_, index) => connection(`conn-${index}`));
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(page([], 160, 25))
+      .mockResolvedValueOnce(page(rows, 20, 25));
+
+    const { result, filters } = await fetchConnectionsPage(request, "privy", { page: 9 });
 
     expect(filters.page).toBe(2);
     expect(result.connections).toHaveLength(5);
+    expect(request).toHaveBeenLastCalledWith(
+      "/internal/dashboard/custody/connections?limit=20&offset=20&provider=privy"
+    );
   });
 
-  it("leaves an empty project on page 1", () => {
-    const { result, filters } = selectConnectionsPage([], { page: 4 });
+  // An empty page 1 is the empty state, not a stale URL — re-reading it would
+  // only ask the same question twice.
+  it("leaves an empty project on page 1 after one request", async () => {
+    const request = vi.fn(async () => page([], 0, 0));
 
+    const { result, filters } = await fetchConnectionsPage(request, "privy", { page: 1 });
+
+    expect(request).toHaveBeenCalledTimes(1);
     expect(filters.page).toBe(1);
-    expect(result.pagination.total).toBe(0);
     expect(result.connections).toEqual([]);
+  });
+
+  it("throws a typed error carrying the response status", async () => {
+    const request = vi.fn(async () => new Response(null, { status: 403 }));
+
+    await expect(fetchConnectionsPage(request, "privy", { page: 1 })).rejects.toMatchObject({
+      name: "ConnectionsRequestError",
+      status: 403,
+    });
   });
 });
 
@@ -308,6 +332,9 @@ describe("fetchConnectionPickerOptions", () => {
 
     const options = await fetchConnectionPickerOptions(request, "privy");
 
+    expect(request).toHaveBeenCalledWith(
+      "/internal/dashboard/custody/connections?limit=50&offset=0&provider=privy"
+    );
     expect(options.map((option) => option.id)).toEqual([
       "conn-active",
       "conn-pending",
@@ -315,12 +342,9 @@ describe("fetchConnectionPickerOptions", () => {
     ]);
   });
 
-  it("drops deactivated connections and other providers", async () => {
+  it("drops deactivated connections", async () => {
     const deactivated = { ...connection("conn-dead"), status: "deactivated" as const };
-    const otherProvider = { ...connection("conn-turnkey"), provider: "turnkey" as const };
-    const request = vi.fn(async () =>
-      page([connection("conn-active"), deactivated, otherProvider])
-    );
+    const request = vi.fn(async () => page([connection("conn-active"), deactivated]));
 
     const options = await fetchConnectionPickerOptions(request, "privy");
 

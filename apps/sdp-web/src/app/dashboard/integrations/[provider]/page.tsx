@@ -3,11 +3,11 @@ import type { CustodyConfigSummary, OrganizationRpcProvider } from "@sdp/types";
 import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import {
-  type ConnectionsPageResult,
+  type ConnectionsProjectSummary,
+  fetchConnectionsPage,
   fetchProviderConnections,
   fetchWalletsByConnection,
   parseConnectionsFilters,
-  selectConnectionsPage,
   summarizeProviderConnections,
 } from "@/app/dashboard/custody/connections/connections.data";
 import {
@@ -159,6 +159,24 @@ async function getRpcCredentialMode(
 }
 
 /**
+ * What the banners above the table assert, or a summary that admits it knows
+ * nothing. Degraded on its own because it costs several requests where the
+ * table costs one, and a hiccup on the third of them is no reason to blank a
+ * table that loaded: `complete: false` is already the signal every caller reads
+ * to stay quiet rather than state something it could not check.
+ */
+async function getCustodyConnectionsSummary(
+  request: SdpApiClient["request"],
+  provider: KnownCustodyProvider
+): Promise<ConnectionsProjectSummary> {
+  try {
+    return summarizeProviderConnections(await fetchProviderConnections(request, provider));
+  } catch {
+    return { activeCount: 0, defaultConnection: null, signingPaused: false, complete: false };
+  }
+}
+
+/**
  * The project's custody connections for this provider, plus their wallets.
  *
  * Returns `null` when the section does not apply (not a custody provider, or
@@ -167,8 +185,9 @@ async function getRpcCredentialMode(
  * a member's behalf returns 403 every time. Not permitted is its own answer,
  * not a failed request.
  *
- * The wallet read degrades on its own: a connection list without wallet
- * columns is still worth rendering, and the cells say so.
+ * Only the page read is load-bearing. The wallet read and the project summary
+ * each degrade on their own: a connection list without wallet columns, or
+ * without the banners above it, is still worth rendering, and both say so.
  */
 async function getCustodyConnections(
   request: SdpApiClient["request"],
@@ -180,18 +199,18 @@ async function getCustodyConnections(
     return "restricted" as const;
   }
   try {
-    const [project, wallets] = await Promise.all([
-      fetchProviderConnections(request, provider),
+    const [page, summary, wallets] = await Promise.all([
+      fetchConnectionsPage(request, provider, parseConnectionsFilters(searchParams)),
+      getCustodyConnectionsSummary(request, provider),
       fetchWalletsByConnection(request).then(
         (byConnection) => ({ ok: true as const, byConnection }),
         () => ({ ok: false as const })
       ),
     ]);
-    const page = selectConnectionsPage(project.connections, parseConnectionsFilters(searchParams));
     return {
-      result: page.result satisfies ConnectionsPageResult,
+      result: page.result,
       filters: page.filters,
-      summary: summarizeProviderConnections(project),
+      summary,
       walletsByConnection: wallets.ok ? Object.fromEntries(wallets.byConnection) : {},
       walletsUnavailable: !wallets.ok,
     };

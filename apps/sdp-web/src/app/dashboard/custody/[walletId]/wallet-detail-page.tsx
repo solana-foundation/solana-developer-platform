@@ -255,7 +255,11 @@ export default async function WalletDetailPage({
   // needs `custody:admin` and returns null without it, which degrades to the
   // connection id: still the answer to "which connection", just unnamed.
   const connection = wallet.custodyConnectionId
-    ? await fetchConnectionListItem(apiClient.request, wallet.custodyConnectionId)
+    ? await fetchConnectionListItem(
+        apiClient.request,
+        wallet.custodyConnectionId,
+        provider ?? undefined
+      )
     : null;
 
   return (

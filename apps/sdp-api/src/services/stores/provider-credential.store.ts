@@ -1,4 +1,8 @@
-import type { CustodyConnectionCheckStatus, CustodyWalletStatus } from "@sdp/types";
+import type {
+  CustodyConnectionCheckStatus,
+  CustodyProvider,
+  CustodyWalletStatus,
+} from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
@@ -578,17 +582,25 @@ export class ProviderCredentialStore {
    * first, joined with the safe credential columns the dashboard may show.
    * Secret references never leave this query. Distinct from
    * listProjectConnections, the setup planner's locking read.
+   *
+   * `provider` narrows the page *and* the count together, which is the whole
+   * point of it living here. A caller that pages over every provider and
+   * filters afterwards is counting one thing and showing another: with more
+   * connections than it reads, that caller silently drops the older ones of the
+   * provider it wanted and still presents the remainder as the full inventory.
    */
   async listProjectConnectionsPage(
     organizationId: string,
     projectId: string,
-    options: { limit: number; offset: number }
+    options: { limit: number; offset: number; provider?: CustodyProvider }
   ): Promise<{ connections: ProjectConnectionListRow[]; total: number }> {
+    const providerFilter = options.provider ? " AND provider = ?" : "";
+    const providerParams = options.provider ? [options.provider] : [];
     const totalRow = await this.db.queryOne<{ total: number | string }>(
       `SELECT COUNT(*) AS total
          FROM custody_connections
-        WHERE organization_id = ? AND project_id = ?`,
-      [organizationId, projectId]
+        WHERE organization_id = ? AND project_id = ?${providerFilter}`,
+      [organizationId, projectId, ...providerParams]
     );
     const connections = await this.db.queryMany<ProjectConnectionListRow>(
       `SELECT c.id,
@@ -619,10 +631,10 @@ export class ProviderCredentialStore {
          LEFT JOIN custody_wallets default_wallet
            ON default_wallet.id = c.default_custody_wallet_id
           AND default_wallet.custody_connection_id = c.id
-        WHERE c.organization_id = ? AND c.project_id = ?
+        WHERE c.organization_id = ? AND c.project_id = ?${options.provider ? " AND c.provider = ?" : ""}
         ORDER BY c.created_at DESC, c.id DESC
         LIMIT ? OFFSET ?`,
-      [organizationId, projectId, options.limit, options.offset]
+      [organizationId, projectId, ...providerParams, options.limit, options.offset]
     );
     return { connections, total: Number(totalRow?.total ?? 0) };
   }

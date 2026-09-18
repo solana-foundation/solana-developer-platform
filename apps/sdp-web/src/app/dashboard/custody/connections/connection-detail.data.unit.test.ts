@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   type CustodyCredentialLifecycle,
   canRollBack,
+  fetchConnectionListItem,
   isCredentialManagedHere,
   type LifecycleCredential,
   ROLLBACK_WINDOW_MS,
@@ -104,5 +105,66 @@ describe("rollback availability", () => {
       },
     });
     expect(canRollBack(lifecycle, NOW)).toEqual({ available: false, reason: "expired" });
+  });
+});
+
+describe("fetchConnectionListItem", () => {
+  function listRow(id: string) {
+    return {
+      id,
+      provider: "privy" as const,
+      label: "Treasury",
+      status: "active" as const,
+      isDefault: true,
+      isRuntimeExecutionAllowed: true,
+      defaultCustodyWalletId: null,
+      createdAt: "2026-08-10T09:00:00.000Z",
+      activatedAt: "2026-08-10T09:05:00.000Z",
+      lastCheck: null,
+      pendingWalletLabel: null,
+    };
+  }
+
+  function page(connections: ReturnType<typeof listRow>[], offset: number, total: number) {
+    return new Response(
+      JSON.stringify({ data: { connections, pagination: { limit: 50, offset, total } } }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  // Four pages spent on other providers is how this walk used to end one row
+  // short of the connection it was sent to find.
+  it("narrows the walk to the provider the caller knows", async () => {
+    const request = vi.fn(async () => page([listRow("conn-1")], 0, 1));
+
+    await expect(fetchConnectionListItem(request, "conn-1", "privy")).resolves.toMatchObject({
+      id: "conn-1",
+    });
+    expect(request).toHaveBeenCalledWith(
+      "/internal/dashboard/custody/connections?limit=50&offset=0&provider=privy"
+    );
+  });
+
+  it("walks the project unnarrowed when the provider is unknown", async () => {
+    const request = vi.fn(async () => page([listRow("conn-1")], 0, 1));
+
+    await fetchConnectionListItem(request, "conn-1");
+
+    expect(request).toHaveBeenCalledWith(
+      "/internal/dashboard/custody/connections?limit=50&offset=0"
+    );
+  });
+
+  it("gives up rather than paging forever, and says nothing instead", async () => {
+    const request = vi.fn(async (path: string) =>
+      page(
+        [listRow(`conn-${new URL(path, "https://sdp.test").searchParams.get("offset")}`)],
+        0,
+        1000
+      )
+    );
+
+    await expect(fetchConnectionListItem(request, "conn-missing", "privy")).resolves.toBeNull();
+    expect(request).toHaveBeenCalledTimes(4);
   });
 });

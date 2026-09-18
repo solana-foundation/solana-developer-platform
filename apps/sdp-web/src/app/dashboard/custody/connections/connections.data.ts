@@ -53,8 +53,8 @@ export interface ConnectionsFilters {
 }
 
 /**
- * Every connection the project holds with one provider, and whether that is
- * genuinely all of them.
+ * The connections the project holds with one provider, as far as a bounded read
+ * could see them, and whether that turned out to be all of them.
  */
 export interface ProviderConnections {
   connections: CustodyConnectionListItem[];
@@ -114,19 +114,25 @@ export function buildConnectionsSearchParams(
 const CONNECTIONS_FETCH_LIMIT = 50;
 
 /**
- * Four requests' worth. Past this the loader stops and says so rather than
- * walking an unbounded list on every render of the provider page.
+ * Four requests' worth. Past this the summary read stops and says so rather
+ * than walking an unbounded list on every render of the provider page.
  */
 const CONNECTIONS_FETCH_MAX = 200;
 
 async function fetchConnectionsSlice(
   request: SdpApiClient["request"],
-  offset: number,
-  limit: number
+  { provider, limit, offset }: { provider: CustodyProvider; limit: number; offset: number }
 ): Promise<ConnectionsPageResult> {
-  const res = await request(
-    `/internal/dashboard/custody/connections?limit=${limit}&offset=${offset}`
-  );
+  // `provider` narrows the count and the slice together, server-side. Filtering
+  // a page after reading it would leave the row count and the total counting
+  // different things, and would drop this provider's older connections as soon
+  // as the project held more of others than one read covers.
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    provider,
+  });
+  const res = await request(`/internal/dashboard/custody/connections?${query.toString()}`);
   if (!res.ok) {
     throw new ConnectionsRequestError(res.status);
   }
@@ -134,15 +140,52 @@ async function fetchConnectionsSlice(
 }
 
 /**
- * Every connection the project holds with one provider.
+ * The rows for one page of the table.
  *
- * The endpoint pages over the project's connections of *all* providers, so
- * narrowing to one has to happen after the read — and narrowing a single page
- * would leave the row count and the page count counting different things.
- * Reading the project through and slicing in memory keeps the table, its
- * pagination and the banners above it derived from one complete set, and keeps
- * a connection belonging to another provider off this provider's page, where
- * its rows would link to the wrong detail route.
+ * One request for the page the user is looking at, never the whole inventory:
+ * because the endpoint narrows to the provider itself, its `total` is this
+ * provider's total and the rows are this provider's page, at any project size.
+ *
+ * A `?page=` past the end (a stale URL, or an inventory that shrank under the
+ * bookmark) costs one more request and lands on the last page that exists,
+ * rather than rendering the empty state over a project that still has
+ * connections. The page it settled on is returned so the footer, the URL and
+ * the rows agree.
+ */
+export async function fetchConnectionsPage(
+  request: SdpApiClient["request"],
+  provider: CustodyProvider,
+  filters: ConnectionsFilters
+): Promise<{ result: ConnectionsPageResult; filters: ConnectionsFilters }> {
+  const read = (page: number) =>
+    fetchConnectionsSlice(request, {
+      provider,
+      limit: CONNECTIONS_PAGE_SIZE,
+      offset: (page - 1) * CONNECTIONS_PAGE_SIZE,
+    });
+
+  const result = await read(filters.page);
+  // Rows on the page settle it whatever the total says, and a page within range
+  // is served as it came back — an empty page 1 is the empty state, not a stale
+  // bookmark, and re-reading it would only ask the same question twice.
+  const lastPage = Math.max(1, Math.ceil(result.pagination.total / CONNECTIONS_PAGE_SIZE));
+  if (result.connections.length > 0 || filters.page <= lastPage) {
+    return { result, filters };
+  }
+  return { result: await read(lastPage), filters: { ...filters, page: lastPage } };
+}
+
+/**
+ * This provider's connections, for the claims that are about the project rather
+ * than about the page: whether a default exists at all, and whether signing is
+ * paused everywhere.
+ *
+ * Bounded on purpose. Those two questions need every connection, and no
+ * endpoint answers them directly, so the read walks pages until it runs out or
+ * hits the cap — and when it hits the cap it says so, which is what lets the
+ * callers stay quiet instead of stating something they could not check. The
+ * table itself never comes from here: it is paged by the server, so nothing on
+ * screen is bounded by this cap.
  */
 export async function fetchProviderConnections(
   request: SdpApiClient["request"],
@@ -153,7 +196,11 @@ export async function fetchProviderConnections(
   let total = 0;
 
   do {
-    const page = await fetchConnectionsSlice(request, offset, CONNECTIONS_FETCH_LIMIT);
+    const page = await fetchConnectionsSlice(request, {
+      provider,
+      limit: CONNECTIONS_FETCH_LIMIT,
+      offset,
+    });
     total = page.pagination.total;
     // A short page against a nonzero total means rows moved under the read.
     // Stopping beats looping on an offset the server has already declined to
@@ -165,35 +212,7 @@ export async function fetchProviderConnections(
     offset += page.connections.length;
   } while (offset < total && offset < CONNECTIONS_FETCH_MAX);
 
-  return {
-    connections: collected.filter((connection) => connection.provider === provider),
-    complete: offset >= total,
-  };
-}
-
-/**
- * The rows for one page of the table.
- *
- * A `?page=` past the end (a stale URL, or an inventory that shrank under the
- * bookmark) clamps to the last page that exists rather than rendering the empty
- * state over a project that still has connections. The clamped number is
- * returned so the footer and the URL agree with what is on screen.
- */
-export function selectConnectionsPage(
-  connections: CustodyConnectionListItem[],
-  filters: ConnectionsFilters
-): { result: ConnectionsPageResult; filters: ConnectionsFilters } {
-  const pageCount = Math.max(1, Math.ceil(connections.length / CONNECTIONS_PAGE_SIZE));
-  const page = Math.min(filters.page, pageCount);
-  const offset = (page - 1) * CONNECTIONS_PAGE_SIZE;
-
-  return {
-    result: {
-      connections: connections.slice(offset, offset + CONNECTIONS_PAGE_SIZE),
-      pagination: { limit: CONNECTIONS_PAGE_SIZE, offset, total: connections.length },
-    },
-    filters: { ...filters, page },
-  };
+  return { connections: collected, complete: offset >= total };
 }
 
 /**
@@ -234,10 +253,12 @@ export async function fetchConnectionPickerOptions(
   provider: CustodyProvider
 ): Promise<CustodyConnectionListItem[]> {
   try {
-    const page = await fetchConnectionsSlice(request, 0, CONNECTIONS_FETCH_LIMIT);
-    return page.connections.filter(
-      (connection) => connection.provider === provider && connection.status !== "deactivated"
-    );
+    const page = await fetchConnectionsSlice(request, {
+      provider,
+      limit: CONNECTIONS_FETCH_LIMIT,
+      offset: 0,
+    });
+    return page.connections.filter((connection) => connection.status !== "deactivated");
   } catch {
     return [];
   }

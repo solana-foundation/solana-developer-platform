@@ -1,6 +1,7 @@
 import {
   CUSTODY_CONNECTION_LIFECYCLES,
   CUSTODY_PROVIDERS,
+  type CustodyProvider,
   type CustodyWalletSummary,
   PROVIDER_CREDENTIAL_STATUSES,
 } from "@sdp/types";
@@ -137,24 +138,32 @@ export async function fetchCredentialLifecycle(
  * currently permitted through it.
  *
  * Found by paging the project's own list rather than by a dedicated endpoint,
- * because there isn't one. The page walk is bounded: a project with more
- * connections than this has other problems, and the header degrades to hiding
- * the two optional facts rather than failing the page.
+ * because there isn't one. The page walk is bounded, so a caller that knows
+ * which provider the connection belongs to passes it: the walk then covers that
+ * provider's inventory rather than spending its four pages on connections of
+ * every other provider and stopping short of the one it was sent to find.
+ * Callers that do not know it — a legacy wallet carrying no provider — walk the
+ * project unnarrowed, as before.
  *
  * Returns `null` when the row cannot be found or read; every caller treats
- * that as "show the rest".
+ * that as "show the rest", so an exhausted walk costs the two optional facts
+ * rather than the page.
  */
 export async function fetchConnectionListItem(
   request: SdpApiClient["request"],
-  connectionId: string
+  connectionId: string,
+  provider?: CustodyProvider
 ): Promise<CustodyConnectionListItem | null> {
   const pageSize = 50;
   const maxPages = 4;
   try {
     for (let page = 0; page < maxPages; page += 1) {
-      const res = await request(
-        `/internal/dashboard/custody/connections?limit=${pageSize}&offset=${page * pageSize}`
-      );
+      const query = new URLSearchParams({
+        limit: String(pageSize),
+        offset: String(page * pageSize),
+      });
+      if (provider) query.set("provider", provider);
+      const res = await request(`/internal/dashboard/custody/connections?${query.toString()}`);
       if (!res.ok) return null;
       const parsed = connectionsPageEnvelopeSchema.parse(await res.json()).data;
       const match = parsed.connections.find((row) => row.id === connectionId);

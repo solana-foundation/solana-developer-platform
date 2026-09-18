@@ -93,7 +93,9 @@ export default async function CustodyConnectionPage({
       (rows) => ({ ok: true as const, rows }),
       () => ({ ok: false as const, rows: [] })
     ),
-    fetchConnectionListItem(client.request, connectionId),
+    // Safe to narrow by the URL's provider: the redirect above has already
+    // established that it is the connection's own.
+    fetchConnectionListItem(client.request, connectionId, provider),
   ]);
 
   return (
