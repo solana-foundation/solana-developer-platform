@@ -95,6 +95,7 @@ import {
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
 import {
+  assertDepositFloorPresent,
   assertStrategyDepositable,
   assertVaultDepositAdmissible,
   assertVaultDepositEnvironmentOpen,
@@ -405,14 +406,11 @@ export async function extractEarnVaultDepositPolicyCandidate(
     );
   }
 
-  // Every production deposit carries a caller-chosen share floor. The
-  // dashboard derives it from a live quote and rejects stale quotes by TTL
-  // (PRO-1691); the provider builder enforces the exact value on-chain.
-  if (environment === "production" && body.minSharesOut === undefined) {
-    throw badRequest(
-      "minSharesOut is required for this production vault deposit because the provider supports a share floor."
-    );
-  }
+  // The share floor the catalogue promised (`depositSlippage`) is the one the
+  // build enforces: every production deposit carries one, derived by the
+  // dashboard from a live quote and rejected when stale (PRO-1691); the
+  // provider builder enforces the exact value on-chain.
+  assertDepositFloorPresent(strategy.provider, environment, body.minSharesOut);
 
   const tokenMint = strategy.deposit_mints[0];
   if (!tokenMint) {

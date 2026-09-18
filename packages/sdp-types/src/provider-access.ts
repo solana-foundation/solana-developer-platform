@@ -231,8 +231,11 @@ export function earnDepositStyle(provider: string): EarnDepositStyle {
  * tolerance covers exactly what it can: the rate moving between the quote and
  * the transaction landing.
  *
- * `null` means the dashboard sends no derived floor and renders no slippage
- * control; the provider keeps whatever floor semantics its API contract has.
+ * `null` means the PROVIDER declares no floor of its own; the provider keeps
+ * whatever floor semantics its API contract has. It is not the whole answer:
+ * every production deposit still carries a floor, and
+ * `earnDepositSlippagePolicy` folds the environment in. Read that, never this
+ * map, to decide whether a build needs `minSharesOut`.
  * Exhaustive over `EarnProviderId` so a new provider must state its policy.
  */
 export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
@@ -253,6 +256,39 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
 export function earnDepositSlippageFloor(provider: string): { defaultToleranceBps: number } | null {
   return Object.hasOwn(EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR, provider)
     ? EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR[provider as EarnProviderId]
+    : null;
+}
+
+/**
+ * Tolerance a PRODUCTION deposit starts from when its provider declares no
+ * floor of its own. 10 bps: a vault share rate moves by accrued yield, not by
+ * a market, so the distance between quote and landing is small; the same
+ * figure Veda and Jupiter Lend declare for the same kind of instrument.
+ */
+export const EARN_PRODUCTION_DEPOSIT_DEFAULT_TOLERANCE_BPS = 10;
+
+/**
+ * The floor policy a deposit build ENFORCES for one provider in one
+ * environment: the one answer to "does this build need `minSharesOut`". The
+ * catalogue publishes it as `depositSlippage`, both deposit routes gate on it
+ * (`assertDepositFloorPresent`), and the dashboard reads the published field,
+ * so none of them can disagree with the others.
+ *
+ * Provider first: a builder that refuses an implicit floor requires one in
+ * every environment. Then the environment: every production deposit carries a
+ * caller-chosen share floor derived from the live quote, because without one a
+ * vault deposit accepts any number of shares (the pinned Kamino SDK builds the
+ * legacy instruction). Only a sandbox deposit into a provider with no policy
+ * of its own takes the live rate.
+ */
+export function earnDepositSlippagePolicy(
+  provider: string,
+  environment: SdpEnvironment
+): { defaultToleranceBps: number } | null {
+  const declared = earnDepositSlippageFloor(provider);
+  if (declared) return declared;
+  return environment === "production"
+    ? { defaultToleranceBps: EARN_PRODUCTION_DEPOSIT_DEFAULT_TOLERANCE_BPS }
     : null;
 }
 

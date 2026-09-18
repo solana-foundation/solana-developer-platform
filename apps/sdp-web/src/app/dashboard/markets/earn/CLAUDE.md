@@ -375,7 +375,12 @@ program create still sends the body `requestId` form.
   past the TTL without re-quoting first: still satisfiable proceeds with the
   floor the user reviewed, a rate beyond it stops client-side through the
   blown-floor copy and control. Held floors bypass the check — a replay must
-  carry the floor its key was minted with, verbatim.
+  carry the floor its key was minted with, verbatim. The floor POLICY (whether
+  the control renders at all, and its default tolerance) is the catalogue row's
+  `depositSlippage`, which the API answers per environment
+  (`earnDepositSlippagePolicy` in @sdp/types: every production row is
+  non-null), never the provider map, so a production Kamino deposit is floored
+  like any other.
 - `@/lib/idempotency-key-store.ts` — the shared machinery behind BOTH tracking
   modules (storage tiers, quota divergence, approval holds, entry bounds), plus
   `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted

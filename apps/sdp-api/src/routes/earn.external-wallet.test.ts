@@ -810,6 +810,11 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       { apiKey: PROD_API_KEY.raw }
     );
     expect(missingFloor.status).toBe(400);
+    const missingFloorBody = (await missingFloor.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(missingFloorBody.error.code).toBe("BAD_REQUEST");
+    expect(missingFloorBody.error.message).toContain("POST /v1/earn/vault-deposit-previews");
     expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
 
     const res = await post(

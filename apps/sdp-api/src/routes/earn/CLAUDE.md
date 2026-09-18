@@ -496,9 +496,15 @@ organization's own custody wallets.
     (PRO-1777). One gate, `assertVaultDepositEnvironmentOpen` (admission.ts),
     inside `assertVaultDepositAdmissible` and the preview. The dashboard reads
     the same predicate, so it never advertises an action the API will refuse.
-  - `minSharesOut` is required for every production deposit. Slippage-capable
-    providers quote the live share rate, and their builders encode the caller's
-    exact floor in the provider instruction. Jupiter Lend uses
+  - `minSharesOut` is required exactly when `earnDepositSlippagePolicy(provider,
+    environment)` (@sdp/types) is non-null: every production deposit, plus any
+    provider whose builder refuses an implicit floor. `assertDepositFloorPresent`
+    (handlers/admission.ts) is the ONE guard both deposit routes call, and the
+    catalogue publishes the same answer as `depositSlippage`, so a row never
+    promises what the build refuses (a Kamino production row reads non-null
+    with the 10 bps default). Slippage-capable providers quote the live share
+    rate, and their builders encode the caller's exact floor in the provider
+    instruction. Jupiter Lend uses
     `depositWithMinAmountOut`; its withdrawal twin uses
     `redeemWithMinAmountOut` with the caller's `minAmountOut`.
   - `Idempotency-Key` is **REQUIRED** and body `requestId` is rejected. There is
@@ -1020,9 +1026,9 @@ after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
 
 - `POST /external-wallet/deposit-transactions`: **build + simulate + compile,
   never sign.** Body `{strategyId, ownerAddress, feePayer?, amount,
-  minSharesOut?}`. Both tiers enforce environment capability, production
-  floor, surfacing, catalogue admission, and the vault exposure cap through
-  the same `assertVaultDepositAdmissible` function as the custody path.
+  minSharesOut?}`. Both tiers enforce environment capability, the share floor
+  (`assertDepositFloorPresent`), surfacing, catalogue admission, and the vault
+  exposure cap through the same admission helpers as the custody path.
   Entitlement runs only when a credential supplied a tenant. The provider plan
   is built for the OWNER and returned with
   `{transactionId, transaction, sponsored}`. Authenticated builds persist

@@ -469,6 +469,39 @@ describe("Earn routes — environment scoping", () => {
     const body = (await res.json()) as { data: { strategies: Array<{ id: string }> } };
     expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([sandbox.id]);
   });
+
+  it("publishes depositSlippage for the caller's environment, the same answer the build gates on", async () => {
+    // Kamino declares no floor of its own, yet every production deposit
+    // carries one (`assertDepositFloorPresent`). The row must say so, or a
+    // caller who follows the catalogue builds without a floor and meets a 400.
+    await seedAuth();
+    await seedSessionAuth();
+    const sandbox = await seedStrategy();
+    const production = await seedStrategy({
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
+
+    const sandboxRow = await getEarn(`/v1/earn/strategies/${sandbox.id}`);
+    expect(sandboxRow.status).toBe(200);
+    const sandboxBody = (await sandboxRow.json()) as {
+      data: { strategy: { provider: string; depositSlippage: unknown } };
+    };
+    expect(sandboxBody.data.strategy).toMatchObject({ provider: "kamino", depositSlippage: null });
+
+    const productionRow = await getEarnAsSession(
+      `/v1/earn/strategies/${production.id}`,
+      TEST_PRODUCTION_PROJECT.id
+    );
+    expect(productionRow.status).toBe(200);
+    const productionBody = (await productionRow.json()) as {
+      data: { strategy: { provider: string; depositSlippage: unknown } };
+    };
+    expect(productionBody.data.strategy).toMatchObject({
+      provider: "kamino",
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+    });
+  });
 });
 
 describe("Earn routes — session-caller environment resolution", () => {

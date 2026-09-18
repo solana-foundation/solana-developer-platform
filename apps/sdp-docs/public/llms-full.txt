@@ -918,27 +918,31 @@ All endpoints live under `/v1/earn`. Every code sample uses one Solana SDK, `@so
 | Submit signed transactions through SDP | No | Yes, `earn:write` |
 | Track movements, positions, balances, and earnings | No | Yes, `earn:read` |
 
-Keyless requests use the deployment's environment (the preview deployment is Solana devnet) and create no record: the response carries no `movementId`, and you sign, broadcast, and track the transaction yourself. Keyed requests carry your project and environment, can name a `feePayer`, and can be submitted to SDP, which records the movement before broadcast and reconciles it to a terminal state.
+Keyless requests use the deployment's environment and create no record: the response carries no `movementId`, and you sign, broadcast, and track the transaction yourself. `api.solana.com` runs the production environment, so a keyless catalogue is the Solana mainnet shelf and a signed keyless build moves real funds; there is no keyless sandbox. Keyed requests carry your project's environment (sandbox runs on devnet), can name a `feePayer`, and can be submitted to SDP, which records the movement before broadcast and reconciles it to a terminal state.
 
 **The key.** Create a Developer API key for your project in the dashboard; that role includes `earn:read` and `earn:write`. Start in sandbox, which runs on devnet. A strategy is depositable when `fundable` is `true` and `status` is `active`.
 
 ## Without an API key
 
-List the catalogue and build a deposit with nothing but a strategy id and the customer's funded devnet wallet:
+List the catalogue, quote the deposit, and build it with nothing but a strategy id and the customer's funded wallet. Every production deposit carries a share floor, so the quote is not optional here: set `<MIN_SHARES_OUT>` to the quote's `sharesOut` less the tolerance your customer accepts (`depositSlippage.defaultToleranceBps` is the suggested start; see [Floors and previews](#floors-and-previews)).
 
 ```bash
-export SDP_API_URL=https://api-preview.solana.com
+export SDP_API_URL=https://api.solana.com
 
 curl --fail-with-body --silent --show-error "$SDP_API_URL/v1/earn/strategies"
 
 curl --fail-with-body --silent --show-error \
   --request POST \
   --header 'Content-Type: application/json' \
-  --data '{ "strategyId": "<STRATEGY_ID>", "ownerAddress": "<OWNER_ADDRESS>", "amount": "1" }' \
+  --data '{ "strategyId": "<STRATEGY_ID>", "amount": "1" }' \
+  "$SDP_API_URL/v1/earn/vault-deposit-previews"
+
+curl --fail-with-body --silent --show-error \
+  --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{ "strategyId": "<STRATEGY_ID>", "ownerAddress": "<OWNER_ADDRESS>", "amount": "1", "minSharesOut": "<MIN_SHARES_OUT>" }' \
   "$SDP_API_URL/v1/earn/external-wallet/deposit-transactions"
 ```
-
-If the strategy's `depositSlippage` is non-null, call `POST /v1/earn/vault-deposit-previews` first and include a quote-derived `minSharesOut` (see [Floors and previews](#floors-and-previews)).
 
 Sign and broadcast the response's base64 `transaction.transaction` yourself. `build` is the parsed JSON of the build response; `owner` is a kit `CryptoKeyPair` here, or your wallet's signer in a real app:
 
@@ -951,7 +955,7 @@ Sign and broadcast the response's base64 `transaction.transaction` yourself. `bu
   partiallySignTransaction,
 } from "@solana/kit";
 
-const rpc = createSolanaRpc("https://api.devnet.solana.com");
+const rpc = createSolanaRpc("https://api.mainnet-beta.solana.com");
 const transaction = getTransactionDecoder().decode(
   getBase64Encoder().encode(build.data.transaction.transaction),
 );
@@ -994,7 +998,7 @@ Two fields gate what you may offer:
 - **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive: the row is browse-only (a mainnet strategy seen from sandbox, for example).
 - **`status`** is the catalogue lifecycle; only `active` strategies accept new deposits. Positions in a strategy that later pauses stay fully withdrawable: money out is never gated by money-in rules.
 
-`depositSlippage` and `withdrawalSlippage` say whether that direction needs a quote-derived floor; see [Floors and previews](#floors-and-previews). `feeSponsored` describes SDP's own Treasury paymaster and has no effect on Embedded Yield builds: your customer pays unless you name a `feePayer`.
+`depositSlippage` and `withdrawalSlippage` say whether that direction needs a quote-derived floor in your environment; every production row's `depositSlippage` is non-null. See [Floors and previews](#floors-and-previews). `feeSponsored` describes SDP's own Treasury paymaster and has no effect on Embedded Yield builds: your customer pays unless you name a `feePayer`.
 
 Jupiter Lend contributes its mainnet USDT Earn market (deposits mint jlUSDT receipt tokens; withdrawals redeem them when protocol liquidity allows). Ondo contributes USDY on mainnet with no vault program: a deposit is a USDC to USDY swap through Jupiter, the position is the wallet's USDY balance, a withdrawal is the reverse swap, and both directions require a live quote. Both are mainnet-only and appear in sandbox as browse-only rows.
 
@@ -1036,7 +1040,7 @@ const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transac
 // { transactionId, transaction, lastValidBlockHeight, feePayer?, ... }
 ```
 
-Add `minSharesOut` when the strategy's `depositSlippage` is non-null ([Floors and previews](#floors-and-previews)).
+Add `minSharesOut` whenever the strategy's `depositSlippage` is non-null; on production that is every strategy ([Floors and previews](#floors-and-previews)).
 
 **Sign.** Hand the base64 `transaction.transaction` to the customer's wallet and get signed bytes back. With a kit wallet signer (for example `useWalletAccountTransactionSigner` from `@solana/react`):
 
@@ -1171,8 +1175,10 @@ Both previews work for every provider and are the figures to show a customer bef
 
 | Field | Non-null | Null |
 | --- | --- | --- |
-| `depositSlippage` | The build requires `minSharesOut`. Preview first and derive the floor from `sharesOut` minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). | `minSharesOut` is optional; the deposit takes the live rate. |
+| `depositSlippage` | The build requires `minSharesOut`. Preview first and derive the floor from `sharesOut` minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). | `minSharesOut` is optional; the deposit takes the live rate. Only a sandbox row answers null. |
 | `withdrawalSlippage` | The build requires `minAmountOut`, derived from `assetsOut` the same way. | The vault's withdraw instruction takes only a share amount, so no floor can be enforced on chain. Do not pass `minAmountOut`; the build refuses it with a 400. |
+
+`depositSlippage` is answered for your environment, like `fundable`: every production deposit requires `minSharesOut`, whatever the provider, and a provider whose builder refuses an implicit floor requires one in sandbox too. `withdrawalSlippage` depends on the provider alone. A build that omits a floor its row said it needs fails with a 400 that names the preview endpoint.
 
 Derive a floor from the live quote, never from the amount you sent; the tolerance covers only the state moving between the quote and the transaction landing. The generated module includes `floorForTolerance`, an exact decimal floor without a JavaScript number round-trip, and applies it only for strategies that require one.
 

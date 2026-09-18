@@ -75,7 +75,7 @@ import {
   type earnExternalWalletWithdrawalPreviewSchema,
   type earnExternalWalletWithdrawalTransactionSchema,
 } from "../schemas";
-import { assertVaultDepositAdmissible } from "./admission";
+import { assertDepositFloorPresent, assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
@@ -753,13 +753,10 @@ export async function createEarnExternalWalletDepositTransaction(
   }
   const provider = strategy.provider;
 
-  // Every production deposit carries a caller-chosen share floor derived from
-  // the provider's live quote and enforced by its on-chain instruction.
-  if (environment === "production" && body.minSharesOut === undefined) {
-    throw badRequest(
-      "minSharesOut is required for this production vault deposit because the provider supports a share floor."
-    );
-  }
+  // The share floor the catalogue promised (`depositSlippage`) is the one the
+  // build enforces: every production deposit carries one, derived from the
+  // provider's live quote and enforced by its on-chain instruction.
+  assertDepositFloorPresent(provider, environment, body.minSharesOut);
 
   // Surfacing, entitlement, catalogue admission and the SDP-wide exposure cap
   // (ADR 0004 layer 1), in the custody deposit's order and from the same

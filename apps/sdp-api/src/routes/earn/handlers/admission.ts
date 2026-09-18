@@ -1,7 +1,11 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
 import { isVaultDirectDepositEnabled, type SdpEnvironment } from "@sdp/types";
-import { type EarnProviderId, earnDepositStyle } from "@sdp/types/provider-access";
+import {
+  type EarnProviderId,
+  earnDepositSlippagePolicy,
+  earnDepositStyle,
+} from "@sdp/types/provider-access";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { getAuth } from "@/lib/auth";
@@ -167,4 +171,26 @@ export function isStrategyDepositable(
   } catch {
     return false;
   }
+}
+
+/**
+ * The share-floor gate both deposit routes call before building. It refuses a
+ * request that omits `minSharesOut` when `earnDepositSlippagePolicy` says the
+ * build enforces a floor for this provider in this environment: every
+ * production deposit, plus any provider whose builder refuses an implicit
+ * floor. The catalogue publishes that same policy as `depositSlippage`, so a
+ * caller who follows the row they were shown never trips this.
+ */
+export function assertDepositFloorPresent(
+  provider: string,
+  environment: SdpEnvironment,
+  minSharesOut: string | undefined
+): void {
+  if (minSharesOut !== undefined) return;
+  if (earnDepositSlippagePolicy(provider, environment) === null) return;
+  throw badRequest(
+    environment === "production"
+      ? "minSharesOut is required: every production deposit carries a share floor. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut."
+      : `minSharesOut is required: ${provider} deposits carry a share floor in every environment. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut.`
+  );
 }
