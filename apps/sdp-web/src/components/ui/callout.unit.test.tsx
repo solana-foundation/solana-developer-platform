@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { Callout, type CalloutVariant } from "./callout";
 
 const VARIANT_TOKENS: Record<CalloutVariant, string[]> = {
+  // Carries no status colour: it is for statements that are neither good news
+  // nor bad, such as an outcome nobody could confirm.
+  neutral: ["border-border-default", "bg-fill-subtle", "text-secondary"],
   info: ["border-info-border", "bg-info-bg", "text-info"],
   success: ["border-success-border", "bg-success-bg", "text-success"],
   warning: ["border-warning-border", "bg-warning-bg", "text-warning"],

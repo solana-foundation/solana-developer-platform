@@ -105,19 +105,22 @@ async function seedCredentialAndConnection(input: {
   createdAt: string;
   failureCode?: string;
   pendingWalletLabel?: string;
+  provider?: string;
 }): Promise<void> {
+  const provider = input.provider ?? "privy";
   const db = getDb(env);
   await db
     .prepare(
       `INSERT INTO provider_credentials
          (id, organization_id, project_id, provider, label, scope, source, storage_backend,
           encrypted_secret_payload, status)
-       VALUES (?, ?, ?, 'privy', ?, 'project', 'stored', 'encrypted_db', ?, 'active')`
+       VALUES (?, ?, ?, ?, ?, 'project', 'stored', 'encrypted_db', ?, 'active')`
     )
     .bind(
       input.credentialId,
       ORG.id,
       PROJECT.id,
+      provider,
       input.label ?? `Label ${input.credentialId}`,
       SECRET_PAYLOAD
     )
@@ -128,12 +131,13 @@ async function seedCredentialAndConnection(input: {
          (id, organization_id, project_id, provider, scope, provider_credential_id,
           provider_credential_scope_key, status, setup_metadata,
           last_check_status, last_check_at, last_check_failure_code, activated_at, created_at)
-       VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, 'project', ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
     )
     .bind(
       input.connectionId,
       ORG.id,
       PROJECT.id,
+      provider,
       input.credentialId,
       PROJECT.id,
       input.status,
@@ -188,6 +192,15 @@ async function selectConnection(connectionId: string): Promise<void> {
     )
     .bind(ORG.id, PROJECT.id, connectionId)
     .run();
+}
+
+async function requestConnections(query = ""): Promise<Response> {
+  const { app, token } = buildApp();
+  return app.request(
+    `/internal/dashboard/custody/connections${query}`,
+    { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT.id } },
+    env
+  );
 }
 
 async function listConnections(query = ""): Promise<{
@@ -379,6 +392,82 @@ describe("internal custody connections", () => {
         defaultCustodyWalletId: "cwlt_read_flag_off",
       }),
     ]);
+  });
+
+  // The page and the count have to narrow together. Filtering after a
+  // provider-blind page drops this provider's older connections as soon as the
+  // project holds more than one page of them, and still calls what is left the
+  // whole inventory.
+  it("narrows the page and the total to one provider together", async () => {
+    await seedCredentialAndConnection({
+      credentialId: "pcred_filter_privy_old",
+      connectionId: "ccon_filter_privy_old",
+      label: "Older Privy",
+      status: "pending",
+      createdAt: "2026-08-01T00:00:00.000Z",
+    });
+    await seedCredentialAndConnection({
+      credentialId: "pcred_filter_other",
+      connectionId: "ccon_filter_other",
+      label: "Newer Turnkey",
+      status: "pending",
+      createdAt: "2026-08-05T00:00:00.000Z",
+      provider: "turnkey",
+    });
+
+    const all = await listConnections();
+    expect(all.pagination.total).toBe(2);
+
+    const privy = await listConnections("?provider=privy");
+    expect(privy.connections.map((row) => row.id)).toEqual(["ccon_filter_privy_old"]);
+    expect(privy.pagination.total).toBe(1);
+
+    const turnkey = await listConnections("?provider=turnkey");
+    expect(turnkey.connections.map((row) => row.id)).toEqual(["ccon_filter_other"]);
+    expect(turnkey.pagination.total).toBe(1);
+  });
+
+  // The newest page being all one provider is exactly the shape that used to
+  // hide the other provider's rows from a caller that filtered afterwards.
+  it("reaches a provider's connections past a page filled by another", async () => {
+    for (let index = 0; index < 3; index += 1) {
+      await seedCredentialAndConnection({
+        credentialId: `pcred_filter_newer_${index}`,
+        connectionId: `ccon_filter_newer_${index}`,
+        status: "pending",
+        createdAt: `2026-09-0${index + 1}T00:00:00.000Z`,
+        provider: "turnkey",
+      });
+    }
+    await seedCredentialAndConnection({
+      credentialId: "pcred_filter_buried",
+      connectionId: "ccon_filter_buried",
+      label: "Buried Privy",
+      status: "pending",
+      createdAt: "2026-08-01T00:00:00.000Z",
+    });
+
+    // A provider-blind first page of that size sees only the Turnkey rows.
+    const blind = await listConnections("?limit=3");
+    expect(blind.connections.map((row) => row.provider)).toEqual(["turnkey", "turnkey", "turnkey"]);
+
+    const privy = await listConnections("?provider=privy&limit=3");
+    expect(privy.connections.map((row) => row.id)).toEqual(["ccon_filter_buried"]);
+    expect(privy.pagination.total).toBe(1);
+  });
+
+  // Ignoring an unusable filter would widen it back to every provider, which is
+  // how a page ends up listing connections that are not its own.
+  it("refuses an unknown provider rather than ignoring the filter", async () => {
+    await seedCredentialAndConnection({
+      credentialId: "pcred_filter_reject",
+      connectionId: "ccon_filter_reject",
+      status: "pending",
+      createdAt: "2026-08-01T00:00:00.000Z",
+    });
+
+    const response = await requestConnections("?provider=not_a_provider");
+    expect(response.status).toBe(400);
   });
 
   it("bounds the page size and honors offsets", async () => {

@@ -1,4 +1,8 @@
-import { CUSTODY_CONNECTION_FAILURE_CODES } from "@sdp/types";
+import {
+  CUSTODY_CONNECTION_FAILURE_CODES,
+  CUSTODY_PROVIDERS,
+  type CustodyProvider,
+} from "@sdp/types";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -73,9 +77,21 @@ internalCustody.get("/connections", async (c) => {
     ? Math.min(Math.max(Math.trunc(rawOffset), 0), Number.MAX_SAFE_INTEGER)
     : 0;
 
+  // Narrowing to one provider belongs here, with the count and the slice, not
+  // in a caller that pages over every provider and filters afterwards: that
+  // caller drops this provider's older connections as soon as the project holds
+  // more than it reads, and still presents what is left as the whole inventory.
+  // An unrecognised value is refused rather than ignored — silently widening a
+  // filter is how a page ends up showing another provider's connections.
+  const rawProvider = c.req.query("provider");
+  if (rawProvider !== undefined && !CUSTODY_PROVIDERS.includes(rawProvider as never)) {
+    throw badRequestParams({ errors: { provider: ["Unknown custody provider"] } });
+  }
+  const provider = rawProvider as CustodyProvider | undefined;
+
   const store = new ProviderCredentialStore(getDb(c.env));
   const [{ connections, total }, availability] = await Promise.all([
-    store.listProjectConnectionsPage(auth.organizationId, projectId, { limit, offset }),
+    store.listProjectConnectionsPage(auth.organizationId, projectId, { limit, offset, provider }),
     getProviderAvailability(c.env, getDb(c.env), auth.organizationId),
   ]);
 

@@ -69,7 +69,10 @@ describe("PrivyCredentialForm", () => {
   });
 
   it("submits with an idempotency key and routes to wallets on success", async () => {
-    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({ status: "success" });
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
+      status: "success",
+      connectionId: "cconn_test",
+    });
     const user = userEvent.setup();
     renderForm();
 
@@ -80,7 +83,10 @@ describe("PrivyCredentialForm", () => {
   });
 
   it("refreshes wallet inventories in the current project after install without replaying commands", async () => {
-    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({ status: "success" });
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
+      status: "success",
+      connectionId: "conn_test",
+    });
     const walletRead = vi.fn(async () => "New Connection wallet");
     const otherProjectRead = vi.fn(async () => "Other project changed");
     const command = vi.fn(async () => "Replayed command");
@@ -148,7 +154,7 @@ describe("PrivyCredentialForm", () => {
   it("mints a fresh key and clears the rejected secret after a terminal failure", async () => {
     vi.mocked(submitPrivyCredentialAction)
       .mockResolvedValueOnce({ status: "failed", message: "Privy rejected these credentials." })
-      .mockResolvedValueOnce({ status: "success" });
+      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     renderForm();
 
@@ -172,7 +178,7 @@ describe("PrivyCredentialForm", () => {
         status: "invalid",
         message: "Fill in every required credential field.",
       })
-      .mockResolvedValueOnce({ status: "success" });
+      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     renderForm();
 
@@ -198,7 +204,7 @@ describe("PrivyCredentialForm", () => {
   it("freezes the payload and replays it verbatim when the outcome is unknown", async () => {
     vi.mocked(submitPrivyCredentialAction)
       .mockResolvedValueOnce({ status: "error", message: "network dropped" })
-      .mockResolvedValueOnce({ status: "success" });
+      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     renderForm();
 
@@ -219,7 +225,7 @@ describe("PrivyCredentialForm", () => {
     const onLock = vi.fn();
     vi.mocked(submitPrivyCredentialAction)
       .mockResolvedValueOnce({ status: "error", message: "network dropped" })
-      .mockResolvedValueOnce({ status: "success" });
+      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -260,7 +266,10 @@ describe("PrivyCredentialForm", () => {
       message: "Install checks are not enabled for this organization",
       connectionId: "conn_1",
     });
-    vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({ status: "success" });
+    vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({
+      status: "success",
+      connectionId: "cconn_test",
+    });
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -315,7 +324,7 @@ describe("PrivyCredentialForm", () => {
         message: "Privy rejected these credentials.",
         connectionId: "conn_1",
       })
-      .mockResolvedValueOnce({ status: "success" });
+      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     renderForm();
 
@@ -340,7 +349,7 @@ describe("PrivyCredentialForm", () => {
     const onLock = vi.fn();
     vi.mocked(submitPrivyCredentialAction)
       .mockRejectedValueOnce(new Error("fetch failed"))
-      .mockResolvedValueOnce({ status: "success" });
+      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -367,7 +376,7 @@ describe("PrivyCredentialForm", () => {
     });
     vi.mocked(recheckPrivyCredentialAction)
       .mockRejectedValueOnce(new Error("fetch failed"))
-      .mockResolvedValueOnce({ status: "success" });
+      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     renderForm();
 
@@ -385,7 +394,10 @@ describe("PrivyCredentialForm", () => {
       status: "retry_unknown",
       connectionId: "conn_1",
     });
-    vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({ status: "success" });
+    vi.mocked(recheckPrivyCredentialAction).mockResolvedValue({
+      status: "success",
+      connectionId: "cconn_test",
+    });
     const user = userEvent.setup();
     renderForm();
 

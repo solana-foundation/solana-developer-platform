@@ -14,6 +14,28 @@ export function formatWalletMeta(value: string, start = 8, end = 6): string {
   return truncateMiddle(value, start, end);
 }
 
+/**
+ * A creation date, rendered identically on the server and in the browser.
+ *
+ * `timeZone` is pinned rather than left to the environment: otherwise the
+ * server formats in its zone and the viewer's browser in theirs, and the two
+ * disagree often enough — anywhere near midnight UTC — to trip hydration.
+ * Returns the raw value for an unparseable date rather than "Invalid Date".
+ */
+export function formatCreatedDate(value: string, locale: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString(locale, {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 export function formatPurpose(value: string | null, t: Translate): string | null {
   if (!value) {
     return null;

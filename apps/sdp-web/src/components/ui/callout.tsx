@@ -1,14 +1,21 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-type CalloutVariant = "info" | "success" | "warning" | "danger";
+type CalloutVariant = "neutral" | "info" | "success" | "warning" | "danger";
 
 /**
  * Variant names track `badge.tsx`, which already calls the error tokens `danger`.
  * Two names for one status would be worse than the mismatch between the variant
  * and the token it resolves to.
+ *
+ * `neutral` carries no status colour on purpose. It is for statements that are
+ * neither good news nor bad — an outcome that could not be confirmed, or a
+ * permission the viewer simply does not hold. Both were previously hand-rolled
+ * from these same tokens precisely to avoid alarming a reader about something
+ * that has not gone wrong.
  */
 const variantClassNames: Record<CalloutVariant, string> = {
+  neutral: "border-border-default bg-fill-subtle text-secondary",
   info: "border-info-border bg-info-bg text-info",
   success: "border-success-border bg-success-bg text-success",
   warning: "border-warning-border bg-warning-bg text-warning",
@@ -16,6 +23,7 @@ const variantClassNames: Record<CalloutVariant, string> = {
 };
 
 const liveRoles: Record<CalloutVariant, "alert" | "status"> = {
+  neutral: "status",
   info: "status",
   success: "status",
   warning: "alert",

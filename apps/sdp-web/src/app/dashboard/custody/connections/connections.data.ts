@@ -3,6 +3,7 @@ import {
   CUSTODY_CONNECTION_FAILURE_CODES,
   CUSTODY_CONNECTION_LIFECYCLES,
   CUSTODY_PROVIDERS,
+  type CustodyProvider,
   type CustodyWalletSummary,
 } from "@sdp/types";
 import { z } from "zod";
@@ -39,7 +40,7 @@ const connectionsPageResultSchema = z.object({
   }),
 });
 
-const connectionsPageEnvelopeSchema = z.object({
+export const connectionsPageEnvelopeSchema = z.object({
   data: connectionsPageResultSchema,
 });
 
@@ -49,6 +50,31 @@ export type ConnectionsPageResult = z.infer<typeof connectionsPageResultSchema>;
 
 export interface ConnectionsFilters {
   page: number;
+}
+
+/**
+ * The connections the project holds with one provider, as far as a bounded read
+ * could see them, and whether that turned out to be all of them.
+ */
+export interface ProviderConnections {
+  connections: CustodyConnectionListItem[];
+  complete: boolean;
+}
+
+/**
+ * What the banners above the table and the Make-default dialog assert, derived
+ * from the whole project rather than the rows currently on screen.
+ */
+export interface ConnectionsProjectSummary {
+  activeCount: number;
+  defaultConnection: { id: string; label: string } | null;
+  signingPaused: boolean;
+  /**
+   * False when the project holds more connections than the loader reads. The
+   * table is still correct as far as it goes; the project-level claims are not,
+   * so callers stay quiet instead of stating them.
+   */
+  complete: boolean;
 }
 
 export class ConnectionsRequestError extends Error {
@@ -84,14 +110,54 @@ export function buildConnectionsSearchParams(
   return query;
 }
 
-export async function fetchConnectionsPage(
+/**
+ * The address the table's page can be shared and reloaded at.
+ *
+ * Every other query parameter is carried over: the connections table is one
+ * section of a provider page, and the parameters it does not own are not its to
+ * drop. Page 1 is the absence of the parameter, which is how the footer's own
+ * links spell it, so the canonical URL and a click through the footer agree.
+ */
+export function buildConnectionsPageUrl(
+  pathname: string,
+  searchParams: SearchParams,
+  page: number
+): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchParams)) {
+    if (key === "page" || value === undefined) continue;
+    for (const entry of Array.isArray(value) ? value : [value]) {
+      query.append(key, entry);
+    }
+  }
+  if (page > 1) query.set("page", String(page));
+  const search = query.toString();
+  return search ? `${pathname}?${search}` : pathname;
+}
+
+/** The widest slice the endpoint serves; asking for more is silently clamped there. */
+const CONNECTIONS_FETCH_LIMIT = 50;
+
+/**
+ * Four requests' worth. Past this the summary read stops and says so rather
+ * than walking an unbounded list on every render of the provider page.
+ */
+const CONNECTIONS_FETCH_MAX = 200;
+
+async function fetchConnectionsSlice(
   request: SdpApiClient["request"],
-  filters: ConnectionsFilters
+  { provider, limit, offset }: { provider: CustodyProvider; limit: number; offset: number }
 ): Promise<ConnectionsPageResult> {
-  const offset = (filters.page - 1) * CONNECTIONS_PAGE_SIZE;
-  const res = await request(
-    `/internal/dashboard/custody/connections?limit=${CONNECTIONS_PAGE_SIZE}&offset=${offset}`
-  );
+  // `provider` narrows the count and the slice together, server-side. Filtering
+  // a page after reading it would leave the row count and the total counting
+  // different things, and would drop this provider's older connections as soon
+  // as the project held more of others than one read covers.
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    provider,
+  });
+  const res = await request(`/internal/dashboard/custody/connections?${query.toString()}`);
   if (!res.ok) {
     throw new ConnectionsRequestError(res.status);
   }
@@ -99,45 +165,134 @@ export async function fetchConnectionsPage(
 }
 
 /**
- * An empty slice with a nonzero total is never trustworthy, whether the page
- * was past the end or an in-range page emptied by concurrent deletions with a
- * stale count in the same response. Only rows, or a zero total, settle a page.
+ * One page of the table, or the page the caller should be on instead.
+ *
+ * `out_of_range` is a stale `?page=` — a bookmark, or an inventory that shrank
+ * under one. It names the last page that exists and reads nothing further,
+ * because the answer is a redirect rather than a render: serving the last
+ * page's rows under a URL that still says page 9 leaves the footer and the
+ * address bar disagreeing, and every reload or share of that link pays for the
+ * out-of-range read again.
  */
-function isSettledPage(result: ConnectionsPageResult): boolean {
-  return result.connections.length > 0 || result.pagination.total === 0;
+export type ConnectionsPageRead =
+  | { status: "ok"; result: ConnectionsPageResult; filters: ConnectionsFilters }
+  | { status: "out_of_range"; page: number };
+
+/**
+ * The rows for one page of the table.
+ *
+ * One request, for the page the user is looking at, never the whole inventory:
+ * because the endpoint narrows to the provider itself, its `total` is this
+ * provider's total and the rows are this provider's page, at any project size.
+ */
+export async function fetchConnectionsPage(
+  request: SdpApiClient["request"],
+  provider: CustodyProvider,
+  filters: ConnectionsFilters
+): Promise<ConnectionsPageRead> {
+  const result = await fetchConnectionsSlice(request, {
+    provider,
+    limit: CONNECTIONS_PAGE_SIZE,
+    offset: (filters.page - 1) * CONNECTIONS_PAGE_SIZE,
+  });
+
+  // Rows on the page settle it whatever the total says, and a page within range
+  // is served as it came back — an empty page 1 is the empty state, not a stale
+  // bookmark, and redirecting it would only ask the same question twice.
+  const lastPage = Math.max(1, Math.ceil(result.pagination.total / CONNECTIONS_PAGE_SIZE));
+  if (result.connections.length > 0 || filters.page <= lastPage) {
+    return { status: "ok", result, filters };
+  }
+  return { status: "out_of_range", page: lastPage };
 }
 
 /**
- * A `?page=` whose slice comes back empty despite a nonzero total (stale URL,
- * shrunk inventory, or an in-range page emptied under the read) would render
- * the project-wide empty state while connections still exist. Clamp to the
- * last page the total implies and refetch; if that is still empty, fall back
- * to page 1, whose slice is definitionally the inventory's own answer.
+ * This provider's connections, for the claims that are about the project rather
+ * than about the page: whether a default exists at all, and whether signing is
+ * paused everywhere.
+ *
+ * Bounded on purpose. Those two questions need every connection, and no
+ * endpoint answers them directly, so the read walks pages until it runs out or
+ * hits the cap — and when it hits the cap it says so, which is what lets the
+ * callers stay quiet instead of stating something they could not check. The
+ * table itself never comes from here: it is paged by the server, so nothing on
+ * screen is bounded by this cap.
  */
-export async function resolveConnectionsPage(
+export async function fetchProviderConnections(
   request: SdpApiClient["request"],
-  filters: ConnectionsFilters
-): Promise<{ result: ConnectionsPageResult; filters: ConnectionsFilters }> {
-  const result = await fetchConnectionsPage(request, filters);
-  if (isSettledPage(result)) {
-    return { result, filters };
-  }
+  provider: CustodyProvider
+): Promise<ProviderConnections> {
+  const collected: CustodyConnectionListItem[] = [];
+  let offset = 0;
+  let total = 0;
 
-  const clamped = {
-    page: Math.max(1, Math.ceil(result.pagination.total / CONNECTIONS_PAGE_SIZE)),
-  };
-  if (clamped.page !== filters.page) {
-    const clampedResult = await fetchConnectionsPage(request, clamped);
-    if (isSettledPage(clampedResult)) {
-      return { result: clampedResult, filters: clamped };
+  do {
+    const page = await fetchConnectionsSlice(request, {
+      provider,
+      limit: CONNECTIONS_FETCH_LIMIT,
+      offset,
+    });
+    total = page.pagination.total;
+    // A short page against a nonzero total means rows moved under the read.
+    // Stopping beats looping on an offset the server has already declined to
+    // fill; `complete` then reports what the caller is missing.
+    if (page.connections.length === 0) {
+      break;
     }
-  }
+    collected.push(...page.connections);
+    offset += page.connections.length;
+  } while (offset < total && offset < CONNECTIONS_FETCH_MAX);
 
-  const firstPage = { page: 1 };
-  if (filters.page === firstPage.page) {
-    return { result, filters };
+  return { connections: collected, complete: offset >= total };
+}
+
+/**
+ * The project-level facts the table's banners state.
+ *
+ * Deliberately not derived from the visible page: "no default connection" and
+ * "signing is paused" are claims about the project, and a default sitting on
+ * page 2 would have made both of them false alarms.
+ */
+export function summarizeProviderConnections(
+  project: ProviderConnections
+): ConnectionsProjectSummary {
+  const active = project.connections.filter((connection) => connection.status === "active");
+  const current = active.find((connection) => connection.isDefault) ?? null;
+
+  return {
+    activeCount: active.length,
+    defaultConnection: current ? { id: current.id, label: current.label } : null,
+    signingPaused:
+      active.length > 0 && active.every((connection) => !connection.isRuntimeExecutionAllowed),
+    complete: project.complete,
+  };
+}
+
+/**
+ * The connections a wallet can be created in, for the setup wizard's picker.
+ *
+ * Deactivated connections are dropped — they can never accept a wallet — while
+ * pending and failed ones are kept so the picker can show them disabled with a
+ * reason, rather than leave the user wondering where their connection went.
+ *
+ * Returns `[]` instead of throwing on any failure: the endpoint requires
+ * `custody:admin`, and someone allowed to create a wallet without it must still
+ * reach the wizard's provider form.
+ */
+export async function fetchConnectionPickerOptions(
+  request: SdpApiClient["request"],
+  provider: CustodyProvider
+): Promise<CustodyConnectionListItem[]> {
+  try {
+    const page = await fetchConnectionsSlice(request, {
+      provider,
+      limit: CONNECTIONS_FETCH_LIMIT,
+      offset: 0,
+    });
+    return page.connections.filter((connection) => connection.status !== "deactivated");
+  } catch {
+    return [];
   }
-  return { result: await fetchConnectionsPage(request, firstPage), filters: firstPage };
 }
 
 /**
