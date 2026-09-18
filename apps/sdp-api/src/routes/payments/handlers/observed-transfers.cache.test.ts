@@ -1,3 +1,4 @@
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { Signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "@/test/helpers/env";
@@ -29,6 +30,7 @@ function parsedSolTransfer(lamports: string) {
   return {
     slot: 42,
     blockTime: 1700000000,
+    confirmations: null,
     meta: {
       err: null,
       fee: 5000,
@@ -154,6 +156,29 @@ describe("observed-transfers parsed-transaction cache", () => {
     expect(first).toHaveLength(1);
   });
 
+  it("does not cache confirmed-but-not-finalized results until they finalize", async () => {
+    let fetchCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      fetchCount += 1;
+      // Same signature observed twice on different fork branches before it
+      // roots: first with 1000 lamports, then re-landed with 2000. A cached
+      // body would serve the stale amount forever.
+      return jsonRpcResponse({
+        result: { ...parsedSolTransfer(fetchCount === 1 ? "1000" : "2000"), confirmations: 5 },
+      });
+    });
+
+    const signatures = [signatureEntry(0)];
+    const first = await buildObservedTransfersForSignatures(env, signatures, context);
+    const second = await buildObservedTransfersForSignatures(env, signatures, context);
+
+    expect(fetchCount).toBe(2);
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(first[0]?.amount).toBe(formatDecimalAmount(1000n, 9));
+    expect(second[0]?.amount).toBe(formatDecimalAmount(2000n, 9));
+  });
+
   it("does not cache null results so a just-submitted transfer appears as soon as the chain indexes it", async () => {
     let fetchCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
@@ -195,7 +220,7 @@ describe("observed-transfers parsed-transaction cache", () => {
     let fetchCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       fetchCount += 1;
-      return jsonRpcResponse({ result: { slot: 1 } });
+      return jsonRpcResponse({ result: { slot: 1, confirmations: null } });
     });
 
     const allSignatures = Array.from(

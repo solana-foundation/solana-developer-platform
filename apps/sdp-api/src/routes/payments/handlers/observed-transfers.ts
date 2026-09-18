@@ -62,6 +62,10 @@ interface ParsedTransactionResponse {
   };
   result?: {
     blockTime?: number | null;
+    // Number of confirmed blocks since signature confirmation, or null once
+    // the transaction roots into a finalized block. Only finalized bodies are
+    // fork-proof, so only they may be cached.
+    confirmations?: number | null;
     meta?: {
       err?: unknown;
       fee?: number;
@@ -306,12 +310,12 @@ export async function resolveWalletTokenAccountAddresses(
 type ParsedTransaction = NonNullable<ParsedTransactionResponse["result"]>;
 
 /**
- * Cap on cached parsed transactions. A confirmed transaction's instructions
- * and balances are immutable, so entries never need revalidation; the bound
- * exists only to keep memory flat as signatures rotate through the FIFO.
- * Fork-sensitive metadata (slot, blockTime) is never read from cached bodies:
- * a confirmed transaction can be dropped and re-land in a different slot, so
- * those fields always come fresh from signature history (see
+ * Cap on cached parsed transactions. Only finalized transaction bodies are
+ * cached — a finalized transaction's instructions, balances, and placement are
+ * immutable, so entries never need revalidation; the bound exists only to keep
+ * memory flat as signatures rotate through the FIFO. Fork-sensitive metadata
+ * (slot, blockTime) is additionally always taken from the fresh
+ * signature-history entry rather than the cached body (see
  * buildObservedTransferRows).
  */
 export const PARSED_TRANSACTION_CACHE_MAX_ENTRIES = 1_000;
@@ -368,6 +372,18 @@ function writeParsedTransactionCache(signature: string, parsed: ParsedTransactio
   });
 }
 
+/**
+ * A body is fork-proof only once it roots into a finalized block. Solana RPC
+ * reports `confirmations: null` for finalized transactions; a number means the
+ * transaction only sits on a confirmed branch that a fork can still drop and
+ * re-land with different metadata (slot, blockTime, status, inner
+ * instructions, token balances). A missing field is treated as not finalized —
+ * never cache on a guess.
+ */
+function isFinalizedParsedTransaction(parsed: ParsedTransaction): boolean {
+  return parsed.confirmations === null;
+}
+
 async function fetchParsedTransactionFromRpc(
   env: Env,
   signature: string
@@ -416,14 +432,15 @@ async function fetchParsedTransaction(
 
   const pending = fetchParsedTransactionFromRpc(env, signature)
     .then((parsedTransaction) => {
-      // Only cache confirmed bodies. A null means the transaction is not yet
+      // Only cache finalized bodies. A null means the transaction is not yet
       // indexed at the confirmed commitment; caching it would hide a
       // just-submitted transfer until the TTL lapsed, delaying on-chain
-      // status. Failures stay uncached too, so the next read retries.
-      // Cached bodies are only used for the immutable transaction data —
-      // slot and blockTime are fork-sensitive at the confirmed commitment
-      // and are always read fresh from signature history instead.
-      if (parsedTransaction) {
+      // status. A confirmed-but-not-finalized body stays uncached too: a
+      // fork can still drop and re-land it with different metadata, so it is
+      // served fresh on every read until it roots (the fetch happens per
+      // read, so freshness is never traded for the cache). Failures stay
+      // uncached so the next read retries.
+      if (parsedTransaction && isFinalizedParsedTransaction(parsedTransaction)) {
         writeParsedTransactionCache(signature, parsedTransaction);
       }
       return parsedTransaction;
