@@ -85,6 +85,54 @@ export interface InFlightTransfer {
 }
 
 /**
+ * A movement returned by a successful submit request may not be present in the
+ * next dashboard read yet. Keep that response in this tab so activity appears
+ * immediately and a withdrawal can show its requested token amount until SDP
+ * reports the exact settled payout.
+ */
+export interface SubmittedTransfer {
+  movement: YieldMovement;
+  requestedTokenAmount: string;
+}
+
+export function applySubmittedTransfers(
+  live: DashboardData,
+  submitted: readonly SubmittedTransfer[]
+): DashboardData {
+  if (!submitted.length) return live;
+
+  const submittedById = new Map(
+    submitted.map((transfer) => [transfer.movement.movementId, transfer])
+  );
+  const liveIds = new Set(
+    live.movements.map((movement) => movement.movementId)
+  );
+  const optimisticOnly = submitted
+    .filter((transfer) => !liveIds.has(transfer.movement.movementId))
+    .map(({ movement, requestedTokenAmount }) => ({
+      ...movement,
+      tokenAmount: movement.tokenAmount ?? requestedTokenAmount,
+    }))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  return {
+    ...live,
+    movements: [
+      ...optimisticOnly,
+      ...live.movements.map((movement) => {
+        const submittedTransfer = submittedById.get(movement.movementId);
+        return movement.tokenAmount === null && submittedTransfer
+          ? {
+              ...movement,
+              tokenAmount: submittedTransfer.requestedTokenAmount,
+            }
+          : movement;
+      }),
+    ],
+  };
+}
+
+/**
  * An internal transfer never changes the total, but its two sides settle on
  * different reads (RPC for checking, SDP for savings) and can disagree for a
  * few seconds. Show the balances a transfer will produce while it is pending
@@ -104,9 +152,6 @@ export function applyInFlight(
         : negate(transfer.amount)
     )
   );
-  const requested = new Map(
-    inFlight.map((transfer) => [transfer.movementId, transfer.amount])
-  );
   return {
     ...live,
     checking: {
@@ -120,14 +165,6 @@ export function applyInFlight(
       withdrawable: shiftBalance(base.savings.withdrawable, intoSavings),
     },
     total: base.total,
-    movements: live.movements.map((movement) =>
-      movement.tokenAmount === null && requested.has(movement.movementId)
-        ? {
-            ...movement,
-            tokenAmount: requested.get(movement.movementId) ?? null,
-          }
-        : movement
-    ),
   };
 }
 

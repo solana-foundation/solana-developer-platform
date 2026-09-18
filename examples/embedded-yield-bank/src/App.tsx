@@ -25,6 +25,7 @@ import {
 import {
   ACTIVE_MOVEMENT_REFRESH_MS,
   applyInFlight,
+  applySubmittedTransfers,
   foldSettledTransfers,
   type InFlightTransfer,
   isPendingMovement,
@@ -33,6 +34,7 @@ import {
   reconcileInFlight,
   reconcileMovementPolling,
   SETTLEMENT_POLL_TIMEOUT_MS,
+  type SubmittedTransfer,
   startMovementPolling,
 } from "@/lib/movements";
 import type { DashboardData } from "@/types";
@@ -58,6 +60,19 @@ const TRANSFER_COPY: Record<
   },
 };
 
+function confirmationDescription(
+  cluster: DashboardData["wallet"]["cluster"] | undefined,
+  state: "Confirmed" | "Confirming"
+): string {
+  const network =
+    cluster === "mainnet-beta"
+      ? "Solana mainnet"
+      : cluster === "devnet"
+        ? "Solana devnet"
+        : "Solana";
+  return `${state} on ${network}`;
+}
+
 export function App() {
   const [data, setData] = useState<DashboardData>();
   const [error, setError] = useState<string>();
@@ -70,6 +85,9 @@ export function App() {
   // Transfers submitted from this tab, plus the balances from just before the
   // first one. The view projects them until SDP reports settlement.
   const [inFlight, setInFlight] = useState<InFlightTransfer[]>([]);
+  const [submittedTransfers, setSubmittedTransfers] = useState<
+    SubmittedTransfer[]
+  >([]);
   const inFlightRef = useRef<InFlightTransfer[]>([]);
   const inFlightBase = useRef<DashboardData>(undefined);
   const movementToastIds = useRef(
@@ -164,7 +182,13 @@ export function App() {
             TRANSFER_COPY[
               transfer.direction === "deposit" ? "to-savings" : "to-checking"
             ].done,
-            { id: toastId }
+            {
+              id: toastId,
+              description: confirmationDescription(
+                latestData.current?.wallet.cluster,
+                "Confirmed"
+              ),
+            }
           );
           movementToastIds.current.delete(transfer.movementId);
         }
@@ -181,7 +205,10 @@ export function App() {
               transfer.direction === "deposit" ? "to-savings" : "to-checking"
             ];
           const toastId = movementToastIds.current.get(transfer.movementId);
-          toast.error(copy.failed, { id: toastId });
+          toast.error(copy.failed, {
+            id: toastId,
+            description: "No money was moved.",
+          });
           movementToastIds.current.delete(transfer.movementId);
         }
         for (const transfer of timedOut) {
@@ -267,6 +294,12 @@ export function App() {
       const { movement } = await (direction === "to-savings"
         ? createDeposit(amount)
         : createWithdrawal(amount));
+      setSubmittedTransfers((current) => [
+        { movement, requestedTokenAmount: amount },
+        ...current.filter(
+          (transfer) => transfer.movement.movementId !== movement.movementId
+        ),
+      ]);
       if (movement.status === "failed") {
         throw new Error(movement.failureReason ?? copy.failed);
       }
@@ -294,15 +327,19 @@ export function App() {
         movementToastIds.current.set(movement.movementId, toastId);
         toast.info(copy.pending, {
           id: toastId,
-          description:
-            latestData.current?.wallet.cluster === "mainnet-beta"
-              ? "Confirming on Solana mainnet"
-              : latestData.current?.wallet.cluster === "devnet"
-                ? "Confirming on Solana devnet"
-                : "Confirming on Solana",
+          description: confirmationDescription(
+            latestData.current?.wallet.cluster,
+            "Confirming"
+          ),
         });
       } else {
-        toast.success(copy.done, { id: toastId });
+        toast.success(copy.done, {
+          id: toastId,
+          description: confirmationDescription(
+            latestData.current?.wallet.cluster,
+            "Confirmed"
+          ),
+        });
       }
       // The projected balances and pending activity are already visible. Let
       // the dialog close now while confirmation refreshes silently.
@@ -317,10 +354,13 @@ export function App() {
     }
   }
 
+  const activity = data
+    ? applySubmittedTransfers(data, submittedTransfers)
+    : data;
   const view =
-    data && inFlight.length && inFlightBase.current
-      ? applyInFlight(inFlightBase.current, data, inFlight)
-      : data;
+    activity && inFlight.length && inFlightBase.current
+      ? applyInFlight(inFlightBase.current, activity, inFlight)
+      : activity;
 
   return (
     <>
