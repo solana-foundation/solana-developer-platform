@@ -721,7 +721,7 @@
       "receipt": "Receipt",
       "status": "Status",
       "payinId": "Pay-in ID",
-      "fiatSent": "Fiat sent",
+      "fiatSent": "Amount converted",
       "cryptoToReceive": "Crypto to receive"
     },
     "requestFailed": "Request failed.",
