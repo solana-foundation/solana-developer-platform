@@ -7,6 +7,7 @@ import {
   recheckPrivyCredentialAction,
   submitPrivyCredentialAction,
 } from "@/app/dashboard/custody/byok-actions";
+import { SecretField } from "@/app/dashboard/custody/connections/secret-field";
 import { getCustodyProviderEntry } from "@/app/dashboard/custody/provider-catalog";
 import { useWalletInventoryRefresh } from "@/app/dashboard/custody/use-wallet-inventory-refresh";
 import { Button } from "@/components/ui/button";
@@ -82,22 +83,13 @@ function CredentialFields({
         </p>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="byok-app-secret">{t("DashboardCustody.providerPrivyAppSecret")}</Label>
-        <Input
-          id="byok-app-secret"
-          name="appSecret"
-          type="password"
-          autoComplete="off"
-          required
-          value={appSecret}
-          onChange={(event) => onAppSecretChange(event.currentTarget.value)}
-          className={FIELD_INPUT_CLASS}
-        />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerPrivyAppSecretDescription")}
-        </p>
-      </div>
+      <SecretField
+        name="appSecret"
+        label={t("DashboardCustody.providerPrivyAppSecret")}
+        hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
+        value={appSecret}
+        onChange={onAppSecretChange}
+      />
 
       <div className="space-y-2">
         <Label htmlFor="byok-wallet-label">

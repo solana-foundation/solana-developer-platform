@@ -278,7 +278,7 @@
     "providerPrivyAppId": "Privy app ID",
     "providerPrivyAppIdDescription": "Enter the app ID from your Privy dashboard. SDP displays only redacted metadata after submission.",
     "providerPrivyAppSecret": "Privy app secret",
-    "providerPrivyAppSecretDescription": "Enter the app secret from your Privy dashboard. This value is write-only and is never displayed again.",
+    "providerPrivyAppSecretDescription": "Enter the app secret from your Privy dashboard. After saving, this secret cannot be viewed again.",
     "providerInitialWalletLabel": "Initial wallet label",
     "providerInitialWalletLabelDescription": "Optionally name the default wallet created when the connection check succeeds.",
     "apiKeyAdminDescription": "Admin includes custody and platform-level privileges. Developer excludes custody actions.",
