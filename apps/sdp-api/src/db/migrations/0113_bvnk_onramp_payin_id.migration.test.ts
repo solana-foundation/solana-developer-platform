@@ -10,6 +10,13 @@ const migrationPath = path.join(
   "postgres/0113_bvnk_onramp_payin_id.sql"
 );
 const migrationSql = readFileSync(migrationPath, "utf8");
+const previousMigrationSql = readFileSync(
+  path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "postgres/0112_bvnk_funding_wallet_per_fiat.sql"
+  ),
+  "utf8"
+);
 let client: Client;
 
 beforeAll(async () => {
@@ -89,6 +96,83 @@ async function insertBvnkTransfer(params: {
 }
 
 describe("0113 BVNK on-ramp pay-in id pivot", () => {
+  it("0112_then_0113_leave_production_wallets_and_their_in_flight_transfers_untouched", async () => {
+    await client.query(
+      "DROP INDEX IF EXISTS counterparty_provider_accounts_active_funding_wallet_unique"
+    );
+    await client.query(
+      `CREATE UNIQUE INDEX counterparty_provider_accounts_active_funding_wallet_unique
+         ON counterparty_provider_accounts(counterparty_id, provider, (metadata->>'onrampKey'))
+         WHERE status = 'active' AND kind = 'funding_wallet'`
+    );
+    await seedOrganizationAndProjects();
+    await insertFundingRow({
+      id: "cpa_seq_production",
+      projectId: "prj_0113_production",
+      counterpartyId: "cpty_0113_production",
+      provider: "bvnk",
+      providerStatus: "funding_wallet_locked",
+      metadata: { transferId: "xfr_seq_production" },
+    });
+    await insertBvnkTransfer({
+      id: "xfr_seq_production",
+      projectId: "prj_0113_production",
+      counterpartyId: "cpty_0113_production",
+      status: "settling",
+      providerData: { bvnk: {} },
+    });
+    await insertFundingRow({
+      id: "cpa_seq_sandbox",
+      projectId: "prj_0113",
+      counterpartyId: "cpty_0113",
+      provider: "bvnk",
+      providerStatus: "funding_wallet_locked",
+      metadata: { transferId: "xfr_seq_sandbox" },
+    });
+    await insertBvnkTransfer({
+      id: "xfr_seq_sandbox",
+      projectId: "prj_0113",
+      counterpartyId: "cpty_0113",
+      status: "settling",
+      providerData: { bvnk: {} },
+    });
+
+    await client.query(previousMigrationSql);
+    await client.query(migrationSql);
+
+    const wallets = await client.query<{
+      id: string;
+      status: string;
+      provider_status: string | null;
+      metadata: Record<string, unknown>;
+    }>(
+      `SELECT id, status, provider_status, metadata FROM counterparty_provider_accounts
+       WHERE id IN ('cpa_seq_production', 'cpa_seq_sandbox') ORDER BY id`
+    );
+    expect(wallets.rows).toEqual([
+      {
+        id: "cpa_seq_production",
+        status: "active",
+        provider_status: "funding_wallet_locked",
+        metadata: { transferId: "xfr_seq_production" },
+      },
+      {
+        id: "cpa_seq_sandbox",
+        status: "archived",
+        provider_status: "funding_wallet_locked",
+        metadata: {},
+      },
+    ]);
+    const transfers = await client.query<{ id: string; status: string; error: string | null }>(
+      `SELECT id, status, error FROM payment_transfers
+       WHERE id IN ('xfr_seq_production', 'xfr_seq_sandbox') ORDER BY id`
+    );
+    expect(transfers.rows).toEqual([
+      { id: "xfr_seq_production", status: "settling", error: null },
+      { id: "xfr_seq_sandbox", status: "failed", error: "BVNK on-ramp payment rules retired" },
+    ]);
+  });
+
   it("resets sandbox locked funding wallets and fails in-flight sandbox on-ramp transfers", async () => {
     await seedOrganizationAndProjects();
     await insertFundingRow({

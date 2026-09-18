@@ -11,6 +11,7 @@ WHERE prj.id=cpa.project_id
   AND prj.environment='sandbox'
   AND cpa.kind='funding_wallet'
   AND cpa.provider='bvnk'
+  AND cpa.status='active'
   AND cpa.provider_status='funding_wallet_locked';
 
 UPDATE payment_transfers pt

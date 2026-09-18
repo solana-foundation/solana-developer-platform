@@ -54,7 +54,9 @@ describe("0112 BVNK funding wallet per fiat", () => {
     );
     await client.query(
       `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
-       VALUES ('cpty_0112', 'org_0112', 'prj_0112', 'individual', 'Ada 0112')`
+       VALUES
+         ('cpty_0112', 'org_0112', 'prj_0112', 'individual', 'Ada 0112'),
+         ('cpty_0112_production', 'org_0112', 'prj_0112_production', 'individual', 'Prod 0112')`
     );
     await client.query(
       `INSERT INTO counterparty_provider_accounts (
@@ -62,7 +64,8 @@ describe("0112 BVNK funding wallet per fiat", () => {
          provider_customer_reference, kind, fiat_currency, metadata
        ) VALUES
          ('cpa_funding_0112_a', 'org_0112', 'prj_0112', 'cpty_0112', 'bvnk', 'bvnk_0112_a', 'funding_wallet', 'USD', '{"onrampKey":"USD:USDC_SOLANA:dest-a"}'),
-         ('cpa_funding_0112_b', 'org_0112', 'prj_0112', 'cpty_0112', 'bvnk', 'bvnk_0112_b', 'funding_wallet', 'USD', '{"onrampKey":"USD:USDC_SOLANA:dest-b"}')`
+         ('cpa_funding_0112_b', 'org_0112', 'prj_0112', 'cpty_0112', 'bvnk', 'bvnk_0112_b', 'funding_wallet', 'USD', '{"onrampKey":"USD:USDC_SOLANA:dest-b"}'),
+         ('cpa_funding_0112_production', 'org_0112', 'prj_0112_production', 'cpty_0112_production', 'bvnk', 'bvnk_0112_production', 'funding_wallet', 'USD', '{"onrampKey":"USD:USDC_SOLANA:dest-prod"}')`
     );
 
     await client.query(migrationSql);
@@ -77,6 +80,11 @@ describe("0112 BVNK funding wallet per fiat", () => {
     expect(rows.rows).toEqual([
       { id: "cpa_funding_0112_a", status: "archived", metadata: {} },
       { id: "cpa_funding_0112_b", status: "archived", metadata: {} },
+      {
+        id: "cpa_funding_0112_production",
+        status: "active",
+        metadata: { onrampKey: "USD:USDC_SOLANA:dest-prod" },
+      },
     ]);
 
     await client.query(
