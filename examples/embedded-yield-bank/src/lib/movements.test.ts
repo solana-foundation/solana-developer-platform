@@ -3,6 +3,7 @@ import type { DashboardData, YieldMovement } from "@/types";
 import {
   ACTIVE_MOVEMENT_REFRESH_MS,
   applyInFlight,
+  applySubmittedTransfers,
   foldSettledTransfers,
   isMovementAwaitingFinality,
   isPendingMovement,
@@ -10,6 +11,7 @@ import {
   partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
+  reconcileSubmittedTransfers,
   SETTLEMENT_POLL_TIMEOUT_MS,
   startMovementPolling,
 } from "./movements";
@@ -127,34 +129,6 @@ describe("in-flight transfers", () => {
     expect(view.savings.balance).toBe("3");
     expect(view.savings.withdrawable).toBe("3");
     expect(view.total).toBe("20");
-  });
-
-  it("fills a pending withdrawal's amount from the request until it settles", () => {
-    const base = dashboard({ checking: "17", savings: "3", total: "20" });
-    const pending: YieldMovement = {
-      ...createMovement("submitted"),
-      direction: "withdrawal",
-      tokenAmount: null,
-    };
-    const live = dashboard({
-      checking: "17",
-      savings: "3",
-      total: "20",
-      movements: [pending],
-    });
-
-    const view = applyInFlight(base, live, [
-      {
-        movementId: "movement-1",
-        direction: "withdrawal",
-        amount: "1.5",
-        expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
-      },
-    ]);
-
-    expect(view.checking.balance).toBe("18.5");
-    expect(view.savings.balance).toBe("1.5");
-    expect(view.movements[0]?.tokenAmount).toBe("1.5");
   });
 
   it("folds a settled transfer into the base so the rest projects from fresh footing", () => {
@@ -318,6 +292,143 @@ describe("in-flight transfers", () => {
         [deposit, withdrawal]
       )
     ).toEqual({ reflected: [deposit, withdrawal], waiting: [] });
+  });
+});
+
+describe("submitted transfer activity", () => {
+  const withdrawal: YieldMovement = {
+    ...createMovement("submitted"),
+    direction: "withdrawal",
+    tokenAmount: null,
+  };
+  const submitted = [{ movement: withdrawal, requestedTokenAmount: "1.5" }];
+
+  it("adds the submit response immediately when the dashboard read is stale", () => {
+    const live = dashboard({ checking: "17", savings: "3", total: "20" });
+
+    const view = applySubmittedTransfers(live, submitted);
+
+    expect(view.movements).toEqual([{ ...withdrawal, tokenAmount: "1.5" }]);
+  });
+
+  it("uses the live status without losing the requested withdrawal amount", () => {
+    const confirmed = {
+      ...withdrawal,
+      status: "confirmed" as const,
+      signature: "confirmed-signature",
+    };
+    const live = dashboard({
+      checking: "18.5",
+      savings: "1.5",
+      total: "20",
+      movements: [confirmed],
+    });
+
+    const view = applySubmittedTransfers(live, submitted);
+
+    expect(view.movements).toHaveLength(1);
+    expect(view.movements[0]).toMatchObject({
+      status: "confirmed",
+      signature: "confirmed-signature",
+      tokenAmount: "1.5",
+    });
+  });
+
+  it("prefers the exact API payout once it is available", () => {
+    const finalized = {
+      ...withdrawal,
+      status: "finalized" as const,
+      tokenAmount: "1.49",
+    };
+    const live = dashboard({
+      checking: "18.49",
+      savings: "1.5",
+      total: "19.99",
+      movements: [finalized],
+    });
+
+    const view = applySubmittedTransfers(live, submitted);
+
+    expect(view.movements).toHaveLength(1);
+    expect(view.movements[0]?.tokenAmount).toBe("1.49");
+  });
+
+  it("sorts optimistic and live activity together by creation time", () => {
+    const olderSubmission = {
+      movement: {
+        ...withdrawal,
+        createdAt: "2026-09-17T00:00:00.000Z",
+      },
+      requestedTokenAmount: "1.5",
+    };
+    const newerLive = {
+      ...createMovement("confirmed"),
+      movementId: "movement-2",
+      createdAt: "2026-09-17T00:00:01.000Z",
+    };
+    const live = dashboard({
+      checking: "17",
+      savings: "3",
+      total: "20",
+      movements: [newerLive],
+    });
+
+    const view = applySubmittedTransfers(live, [olderSubmission]);
+
+    expect(view.movements.map((movement) => movement.movementId)).toEqual([
+      "movement-2",
+      "movement-1",
+    ]);
+  });
+
+  it("never presents a failed withdrawal as money moved", () => {
+    const failed = { ...withdrawal, status: "failed" as const };
+    const optimistic = applySubmittedTransfers(
+      dashboard({ checking: "17", savings: "3", total: "20" }),
+      [{ movement: failed, requestedTokenAmount: "1.5" }]
+    );
+    const live = applySubmittedTransfers(
+      dashboard({
+        checking: "17",
+        savings: "3",
+        total: "20",
+        movements: [failed],
+      }),
+      submitted
+    );
+
+    expect(optimistic.movements[0]?.tokenAmount).toBeNull();
+    expect(live.movements[0]?.tokenAmount).toBeNull();
+  });
+
+  it("prunes overlays after an exact amount or failure reaches the live ledger", () => {
+    const pending = { movement: withdrawal, requestedTokenAmount: "1.5" };
+    const exact = {
+      movement: { ...withdrawal, movementId: "exact" },
+      requestedTokenAmount: "2",
+    };
+    const failed = {
+      movement: { ...withdrawal, movementId: "failed" },
+      requestedTokenAmount: "3",
+    };
+    const localFailure = {
+      movement: {
+        ...withdrawal,
+        movementId: "local-failure",
+        status: "failed" as const,
+      },
+      requestedTokenAmount: "4",
+    };
+    const current = [pending, exact, failed, localFailure];
+    const live = [
+      { ...withdrawal, movementId: "exact", tokenAmount: "1.99" },
+      { ...withdrawal, movementId: "failed", status: "failed" as const },
+      { ...withdrawal, status: "confirmed" as const },
+    ];
+
+    const remaining = reconcileSubmittedTransfers(current, live);
+
+    expect(remaining).toEqual([pending]);
   });
 });
 

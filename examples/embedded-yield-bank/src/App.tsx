@@ -25,6 +25,7 @@ import {
 import {
   ACTIVE_MOVEMENT_REFRESH_MS,
   applyInFlight,
+  applySubmittedTransfers,
   foldSettledTransfers,
   type InFlightTransfer,
   isPendingMovement,
@@ -32,7 +33,9 @@ import {
   partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
+  reconcileSubmittedTransfers,
   SETTLEMENT_POLL_TIMEOUT_MS,
+  type SubmittedTransfer,
   startMovementPolling,
 } from "@/lib/movements";
 import type { DashboardData } from "@/types";
@@ -58,6 +61,42 @@ const TRANSFER_COPY: Record<
   },
 };
 
+function confirmationDescription(
+  cluster: DashboardData["wallet"]["cluster"] | undefined,
+  state: "Confirmed" | "Confirming"
+): string {
+  const network =
+    cluster === "mainnet-beta"
+      ? "Solana mainnet"
+      : cluster === "devnet"
+        ? "Solana devnet"
+        : "Solana";
+  return `${state} on ${network}`;
+}
+
+function showSettledTransferToasts(
+  settled: readonly InFlightTransfer[],
+  completedMovementIds: Set<string>,
+  movementToastIds: Map<string, ReturnType<typeof toast.loading>>,
+  cluster: DashboardData["wallet"]["cluster"] | undefined
+) {
+  for (const transfer of settled) {
+    if (completedMovementIds.has(transfer.movementId)) continue;
+    completedMovementIds.add(transfer.movementId);
+    const toastId = movementToastIds.get(transfer.movementId);
+    toast.success(
+      TRANSFER_COPY[
+        transfer.direction === "deposit" ? "to-savings" : "to-checking"
+      ].done,
+      {
+        id: toastId,
+        description: confirmationDescription(cluster, "Confirmed"),
+      }
+    );
+    movementToastIds.delete(transfer.movementId);
+  }
+}
+
 export function App() {
   const [data, setData] = useState<DashboardData>();
   const [error, setError] = useState<string>();
@@ -70,6 +109,9 @@ export function App() {
   // Transfers submitted from this tab, plus the balances from just before the
   // first one. The view projects them until SDP reports settlement.
   const [inFlight, setInFlight] = useState<InFlightTransfer[]>([]);
+  const [submittedTransfers, setSubmittedTransfers] = useState<
+    SubmittedTransfer[]
+  >([]);
   const inFlightRef = useRef<InFlightTransfer[]>([]);
   const inFlightBase = useRef<DashboardData>(undefined);
   const movementToastIds = useRef(
@@ -103,6 +145,9 @@ export function App() {
       if (id !== requestId.current) return;
       latestData.current = next;
       setData(next);
+      setSubmittedTransfers((current) =>
+        reconcileSubmittedTransfers(current, next.movements)
+      );
       const reconciliation = reconcileMovementPolling(
         movementPollingRef.current,
         next.movements
@@ -156,18 +201,12 @@ export function App() {
             reflectedOrExpired
           );
         }
-        for (const transfer of settled) {
-          if (completedMovementIds.current.has(transfer.movementId)) continue;
-          completedMovementIds.current.add(transfer.movementId);
-          const toastId = movementToastIds.current.get(transfer.movementId);
-          toast.success(
-            TRANSFER_COPY[
-              transfer.direction === "deposit" ? "to-savings" : "to-checking"
-            ].done,
-            { id: toastId }
-          );
-          movementToastIds.current.delete(transfer.movementId);
-        }
+        showSettledTransferToasts(
+          settled,
+          completedMovementIds.current,
+          movementToastIds.current,
+          latestData.current?.wallet.cluster
+        );
         if (expired.length) {
           toast.warning("Balances are taking longer to update", {
             id: "balance-sync-timeout",
@@ -181,7 +220,10 @@ export function App() {
               transfer.direction === "deposit" ? "to-savings" : "to-checking"
             ];
           const toastId = movementToastIds.current.get(transfer.movementId);
-          toast.error(copy.failed, { id: toastId });
+          toast.error(copy.failed, {
+            id: toastId,
+            description: "No money was moved.",
+          });
           movementToastIds.current.delete(transfer.movementId);
         }
         for (const transfer of timedOut) {
@@ -270,6 +312,12 @@ export function App() {
       if (movement.status === "failed") {
         throw new Error(movement.failureReason ?? copy.failed);
       }
+      setSubmittedTransfers((current) => [
+        { movement, requestedTokenAmount: amount },
+        ...current.filter(
+          (transfer) => transfer.movement.movementId !== movement.movementId
+        ),
+      ]);
       if (isPendingMovement(movement)) {
         const polling = startMovementPolling(
           movementPollingRef.current,
@@ -294,15 +342,19 @@ export function App() {
         movementToastIds.current.set(movement.movementId, toastId);
         toast.info(copy.pending, {
           id: toastId,
-          description:
-            latestData.current?.wallet.cluster === "mainnet-beta"
-              ? "Confirming on Solana mainnet"
-              : latestData.current?.wallet.cluster === "devnet"
-                ? "Confirming on Solana devnet"
-                : "Confirming on Solana",
+          description: confirmationDescription(
+            latestData.current?.wallet.cluster,
+            "Confirming"
+          ),
         });
       } else {
-        toast.success(copy.done, { id: toastId });
+        toast.success(copy.done, {
+          id: toastId,
+          description: confirmationDescription(
+            latestData.current?.wallet.cluster,
+            "Confirmed"
+          ),
+        });
       }
       // The projected balances and pending activity are already visible. Let
       // the dialog close now while confirmation refreshes silently.
@@ -317,37 +369,74 @@ export function App() {
     }
   }
 
+  const activity = data
+    ? applySubmittedTransfers(data, submittedTransfers)
+    : data;
   const view =
-    data && inFlight.length && inFlightBase.current
-      ? applyInFlight(inFlightBase.current, data, inFlight)
-      : data;
+    activity && inFlight.length && inFlightBase.current
+      ? applyInFlight(inFlightBase.current, activity, inFlight)
+      : activity;
 
   return (
     <>
-      <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
-        <BankSidebar />
-        <div className="min-w-0 flex-1 lg:p-1">
-          <MobileHeader />
-          <main className="min-h-[calc(100svh-57px)] bg-background lg:h-full lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-foreground/5">
-            {!data && !error ? <DashboardSkeleton /> : null}
-            {error && !data ? (
-              <SetupError message={error} onRetry={() => void refresh()} />
-            ) : null}
-            {view ? (
-              <OverviewDashboard
-                data={view}
-                refreshing={refreshing}
-                busy={busy}
-                onRefresh={() => void refreshWithProgress()}
-                onDeposit={(amount) => transfer("to-savings", amount)}
-                onWithdraw={(amount) => transfer("to-checking", amount)}
-              />
-            ) : null}
-          </main>
-        </div>
-      </div>
+      <BankShell
+        loading={!data && !error}
+        error={!data ? error : undefined}
+        view={view}
+        refreshing={refreshing}
+        busy={busy}
+        onRetry={() => void refresh()}
+        onRefresh={() => void refreshWithProgress()}
+        onDeposit={(amount) => transfer("to-savings", amount)}
+        onWithdraw={(amount) => transfer("to-checking", amount)}
+      />
       <Toaster richColors position="bottom-right" />
     </>
+  );
+}
+
+function BankShell({
+  loading,
+  error,
+  view,
+  refreshing,
+  busy,
+  onRetry,
+  onRefresh,
+  onDeposit,
+  onWithdraw,
+}: {
+  loading: boolean;
+  error?: string;
+  view?: DashboardData;
+  refreshing: boolean;
+  busy: boolean;
+  onRetry: () => void;
+  onRefresh: () => void;
+  onDeposit: (amount: string) => Promise<void>;
+  onWithdraw: (amount: string) => Promise<void>;
+}) {
+  return (
+    <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
+      <BankSidebar />
+      <div className="min-w-0 flex-1 lg:p-1">
+        <MobileHeader />
+        <main className="min-h-[calc(100svh-57px)] bg-background lg:h-full lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-foreground/5">
+          {loading ? <DashboardSkeleton /> : null}
+          {error ? <SetupError message={error} onRetry={onRetry} /> : null}
+          {view ? (
+            <OverviewDashboard
+              data={view}
+              refreshing={refreshing}
+              busy={busy}
+              onRefresh={onRefresh}
+              onDeposit={onDeposit}
+              onWithdraw={onWithdraw}
+            />
+          ) : null}
+        </main>
+      </div>
+    </div>
   );
 }
 
