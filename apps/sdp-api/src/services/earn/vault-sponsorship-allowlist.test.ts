@@ -103,12 +103,28 @@ describe("Kora harness allowlist covers every executing Earn provider", () => {
     expect(allowed.size).toBeGreaterThan(5);
   });
 
+  const executingProviders = EARN_PROVIDERS.filter((provider) => {
+    const client = resolveEarnExecutionClient({} as Env, provider, createVaultDeadline());
+    // `resolveEarnExecutionClient` answers null (not a catalogue client) when a
+    // provider cannot execute, so the truthiness guard must match the case body.
+    return !!client && supportsVaultDirect(client);
+  });
+
+  it("resolved at least one vault-direct provider, or every case below passes vacuously", () => {
+    // Guards the guard, second axis: if the execution registry ever stops
+    // resolving clients (a bad rebase, a narrowed capability), every provider
+    // case would take its no-client branch and this file would stay green
+    // while checking nothing.
+    expect([...executingProviders].length).toBeGreaterThan(0);
+  });
+
   it.each(EARN_PROVIDERS)("%s", (provider) => {
     const client = resolveEarnExecutionClient({} as Env, provider, createVaultDeadline());
     if (!client || !supportsVaultDirect(client)) {
       // This deployment cannot execute for the provider, so it has nothing to
-      // sponsor. Not a skip: "no executing client" is the assertion.
-      expect(true).toBe(true);
+      // sponsor. Not a skip: "no executing client" is the assertion, and the
+      // resolved-at-least-one guard above keeps this branch from silently
+      // swallowing every provider.
       return;
     }
 

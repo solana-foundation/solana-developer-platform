@@ -10,6 +10,7 @@ import {
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { badRequest, transactionExpired } from "@/lib/errors";
+import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -340,7 +341,7 @@ function submitResult(overrides: Record<string, unknown> = {}) {
 function post(
   path: string,
   body: Record<string, unknown>,
-  options: { idempotencyKey?: string | null; apiKey?: string | null } = {}
+  options: { idempotencyKey?: string | null; apiKey?: string | null; ip?: string } = {}
 ) {
   return app.request(
     `/v1/earn/external-wallet/${path}`,
@@ -352,6 +353,7 @@ function post(
           : { Authorization: `Bearer ${options.apiKey ?? TEST_API_KEY.raw}` }),
         "Content-Type": "application/json",
         ...(options.idempotencyKey == null ? {} : { "Idempotency-Key": options.idempotencyKey }),
+        ...(options.ip === undefined ? {} : { "X-Forwarded-For": options.ip }),
       },
       body: JSON.stringify(body),
     },
@@ -1348,10 +1350,42 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     const res = await post(
       "deposit-transactions",
       { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
-      { apiKey: null }
+      { apiKey: null, ip: "203.0.113.7" }
+    );
+    expect(res.status).toBe(200);
+    // The client ADDRESS paid one charge from its own counter — the "by
+    // client address" half of this contract, which a bare 200 would never
+    // prove.
+    expect(await readRateLimitCount(env, "metered:earn-rpc:anonymous:ip:203.0.113.7")).toBe(1);
+    // ...and the org pool the exhausted keys share was not touched.
+    expect(await readRateLimitCount(env, `metered:earn-provider-read:org:${TEST_ORG.id}`)).toBe(
+      1000
     );
 
-    expect(res.status).toBe(200);
+    // Once THAT address reaches its own ceiling, the meter refuses it without
+    // paying for the RPC probe.
+    await seedRateLimit(
+      env,
+      "metered:earn-rpc:anonymous:ip:203.0.113.7",
+      EARN_ANONYMOUS_RPC_QUOTA.maxRequests(env)
+    );
+    const refused = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null, ip: "203.0.113.7" }
+    );
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledTimes(1);
+
+    // The CONTRAST: a different address meters independently of the exhausted one.
+    const otherAddress = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null, ip: "203.0.113.8" }
+    );
+    expect(otherAddress.status).toBe(200);
+    expect(await readRateLimitCount(env, "metered:earn-rpc:anonymous:ip:203.0.113.8")).toBe(1);
   });
 
   it("never lets an exhausted quota stand between the owner and its exit", async () => {
