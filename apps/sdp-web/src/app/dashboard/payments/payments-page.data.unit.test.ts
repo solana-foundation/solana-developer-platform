@@ -1,8 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import type { PaymentsDashboardWallet } from "@sdp/types";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { FetchResult } from "./payments-page.data";
 import {
   fetchDashboardPaymentTransfersForWallets,
   fetchPaymentsWallets,
   fetchPaymentTransfers,
+  WALLET_TRANSFERS_DEADLINE_MS,
 } from "./payments-page.data";
 
 describe("fetchPaymentsWallets", () => {
@@ -134,6 +137,167 @@ describe("fetchPaymentsWallets", () => {
       ok: false,
       error: "Invalid custody wallet response",
     });
+  });
+});
+
+function transfersResponse(data: unknown[]): Response {
+  return new Response(JSON.stringify({ data }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function transferFor(custodyWalletId: string) {
+  return {
+    id: `transfer-${custodyWalletId}`,
+    custodyWalletId,
+    providerWalletId: `provider-${custodyWalletId}`,
+    status: "confirmed",
+    signature: `signature-${custodyWalletId}`,
+    rampsMemo: {},
+    createdAt: "2026-09-15T10:00:00.000Z",
+  };
+}
+
+/** A request that answers only when aborted, the way a hung wallet read behaves. */
+function hangingUntilAborted(init: RequestInit | undefined): Promise<Response> {
+  return new Promise((_, reject) => {
+    init?.signal?.addEventListener("abort", () =>
+      reject(new DOMException("aborted", "AbortError"))
+    );
+  });
+}
+
+const twoWallets: FetchResult<PaymentsDashboardWallet[]> = {
+  ok: true,
+  data: [
+    {
+      id: "wallet-fast",
+      walletId: "provider-fast",
+      publicKey: "address-fast",
+      label: null,
+      provider: "privy",
+      custodyConfigId: "config",
+      isRuntimeExecutionAllowed: true,
+    },
+    {
+      id: "wallet-slow",
+      walletId: "provider-slow",
+      publicKey: "address-slow",
+      label: null,
+      provider: "privy",
+      custodyConfigId: "config",
+      isRuntimeExecutionAllowed: true,
+    },
+  ],
+};
+
+const withDeadline = { walletDeadlineMs: WALLET_TRANSFERS_DEADLINE_MS };
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("fetchDashboardPaymentTransfersForWallets deadline", () => {
+  it("returns what arrived when a wallet misses its deadline, and aborts that read", async () => {
+    vi.useFakeTimers();
+    const signals = new Map<string, AbortSignal | undefined>();
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      const custodyWalletId = new URL(`https://example.test${path}`).searchParams.get(
+        "custodyWalletId"
+      );
+      if (custodyWalletId === null) return transfersResponse([]);
+      signals.set(custodyWalletId, init?.signal ?? undefined);
+      return custodyWalletId === "wallet-slow"
+        ? hangingUntilAborted(init)
+        : transfersResponse([transferFor(custodyWalletId)]);
+    });
+
+    const pending = fetchDashboardPaymentTransfersForWallets(request, twoWallets, 20, withDeadline);
+    await vi.advanceTimersByTimeAsync(WALLET_TRANSFERS_DEADLINE_MS - 1);
+    expect(signals.get("wallet-slow")?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await pending;
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.map((transfer) => transfer.id)).toEqual(["transfer-wallet-fast"]);
+    expect(result.walletsNotLoaded).toBe(1);
+    expect(signals.get("wallet-slow")?.aborted).toBe(true);
+    expect(signals.get("wallet-fast")?.aborted).toBe(false);
+  });
+
+  it("reports wallets that did not load even when nothing arrived", async () => {
+    vi.useFakeTimers();
+    const request = vi.fn(async (path: string, init?: RequestInit) =>
+      new URL(`https://example.test${path}`).searchParams.has("custodyWalletId")
+        ? hangingUntilAborted(init)
+        : transfersResponse([])
+    );
+
+    const pending = fetchDashboardPaymentTransfersForWallets(request, twoWallets, 20, withDeadline);
+    await vi.advanceTimersByTimeAsync(WALLET_TRANSFERS_DEADLINE_MS);
+    const result = await pending;
+
+    // Empty, but not "no transfers": the caller is told two wallets are missing.
+    expect(result).toMatchObject({ ok: true, data: [], walletsNotLoaded: 2 });
+  });
+
+  it("counts every wallet as loaded when all answer in time", async () => {
+    const request = vi.fn(async (path: string) => {
+      const custodyWalletId = new URL(`https://example.test${path}`).searchParams.get(
+        "custodyWalletId"
+      );
+      return transfersResponse(custodyWalletId ? [transferFor(custodyWalletId)] : []);
+    });
+
+    const result = await fetchDashboardPaymentTransfersForWallets(
+      request,
+      twoWallets,
+      20,
+      withDeadline
+    );
+
+    expect(result.walletsNotLoaded).toBe(0);
+    expect(result.data).toHaveLength(2);
+  });
+
+  // Nothing can say how many wallets are missing when the list of them failed.
+  it("reports unknown coverage when the wallet list itself failed", async () => {
+    const request = vi.fn(async () => transfersResponse([]));
+
+    const result = await fetchDashboardPaymentTransfersForWallets(
+      request,
+      { ok: false, error: "wallets unavailable" },
+      20,
+      withDeadline
+    );
+
+    expect(result.walletsNotLoaded).toBeNull();
+  });
+
+  it("waits on every wallet when the caller sets no deadline", async () => {
+    vi.useFakeTimers();
+    let answerSlowWallet: (() => void) | undefined;
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      const custodyWalletId = new URL(`https://example.test${path}`).searchParams.get(
+        "custodyWalletId"
+      );
+      if (custodyWalletId !== "wallet-slow") {
+        return transfersResponse(custodyWalletId ? [transferFor(custodyWalletId)] : []);
+      }
+      expect(init?.signal).toBeUndefined();
+      return new Promise<Response>((resolve) => {
+        answerSlowWallet = () => resolve(transfersResponse([transferFor(custodyWalletId)]));
+      });
+    });
+
+    const pending = fetchDashboardPaymentTransfersForWallets(request, twoWallets, 20);
+    await vi.advanceTimersByTimeAsync(WALLET_TRANSFERS_DEADLINE_MS * 4);
+    answerSlowWallet?.();
+    const result = await pending;
+
+    expect(result.walletsNotLoaded).toBe(0);
+    expect(result.data).toHaveLength(2);
   });
 });
 

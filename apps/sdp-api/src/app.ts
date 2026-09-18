@@ -155,6 +155,14 @@ function getSafeSigningErrorMessage(err: SigningError): string {
   }
 }
 
+/**
+ * Maps a fee payment port failure to the public error contract.
+ *
+ * These come from the transaction fee sponsor (Kora), never from the custody
+ * signer, so the copy names the sponsor: telling a caller their signing
+ * provider is down sends them to check custody when custody is fine. Codes and
+ * statuses are unchanged; clients branch on those.
+ */
 function mapFeePaymentError(err: FeePaymentError): {
   status: 400 | 422 | 429 | 502 | 503;
   code: string;
@@ -189,7 +197,7 @@ function mapFeePaymentError(err: FeePaymentError): {
       return {
         status: 429,
         code: err.code,
-        message: "The signing provider is busy. Try again.",
+        message: "The transaction fee sponsor is busy. Try again.",
       };
     case "PROVIDER_REJECTED":
       // The provider returned a structured refusal of these exact bytes
@@ -202,14 +210,14 @@ function mapFeePaymentError(err: FeePaymentError): {
         status: 422,
         code: "SIGNING_REJECTED",
         message:
-          "The signing provider rejected this transaction. Retrying will not help; check the transaction and provider policy.",
+          "The transaction fee sponsor rejected this transaction. Retrying will not help; check the transaction and sponsorship policy.",
       };
     case "PROVIDER_NOT_AVAILABLE":
     case "NETWORK_ERROR":
       return {
         status: 503,
         code: "PROVIDER_UNAVAILABLE",
-        message: "The signing provider is temporarily unavailable. Try again.",
+        message: "Transaction fees can't be sponsored right now. Try again.",
       };
     default:
       return {

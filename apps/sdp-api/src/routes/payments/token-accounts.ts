@@ -28,11 +28,30 @@ interface GetSplTokenBalancesOptions {
   tokenLabelsByMint?: TokenLabelsByMint;
 }
 
+function issuedTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string | null {
+  return tokenLabelsByMint?.get(mint)?.trim() || null;
+}
+
 export function resolveTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string {
-  const issuedLabel = tokenLabelsByMint?.get(mint)?.trim();
+  const issuedLabel = issuedTokenLabel(mint, tokenLabelsByMint);
   if (issuedLabel) return issuedLabel;
   const wellKnownToken = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   return wellKnownToken ? wellKnownToken.symbol : mint;
+}
+
+/**
+ * Renames each balance to the label the organization issued its mint under, where it
+ * did. For balances read without labels, so the read can start before the labels are
+ * known and be shared across callers whose labels differ.
+ */
+export function withIssuedTokenLabels<T extends { mint: string; token: string }>(
+  balances: readonly T[],
+  tokenLabelsByMint: TokenLabelsByMint
+): T[] {
+  return balances.map((balance) => {
+    const issuedLabel = issuedTokenLabel(balance.mint, tokenLabelsByMint);
+    return issuedLabel ? { ...balance, token: issuedLabel } : balance;
+  });
 }
 
 export async function resolveMintDecimals(
@@ -71,7 +90,7 @@ export async function getSplTokenBalances(
   Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
 > {
   const balancesByMint = new Map<string, { amount: bigint; decimals: number; uiAmount: string }>();
-
+  // One read per token program, independent of each other, so neither waits.
   const responses = await Promise.all(
     SPL_TOKEN_PROGRAM_IDS.map((programId) =>
       rpc

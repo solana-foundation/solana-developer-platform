@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   issuance: vi.fn(),
   buildHomeActivityRows: vi.fn((): unknown[] => []),
-  computeTodaysVolume: vi.fn(() => 0),
   fetchOrgIssuanceActivity: vi.fn(),
   fetchDashboardPaymentTransfers: vi.fn(),
   fetchPaymentsIssuedTokenSymbols: vi.fn(),
@@ -13,12 +12,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/flags", () => ({ issuance: mocks.issuance }));
 vi.mock("@/app/dashboard/home-page.data", () => ({
   buildHomeActivityRows: mocks.buildHomeActivityRows,
-  computeTodaysVolume: mocks.computeTodaysVolume,
   fetchOrgIssuanceActivity: mocks.fetchOrgIssuanceActivity,
 }));
 vi.mock("@/app/dashboard/payments/payments-page.data", () => ({
   fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,
+  WALLET_TRANSFERS_DEADLINE_MS: 2_500,
 }));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
 vi.mock("@/lib/request-tracing", () => ({
@@ -40,7 +39,11 @@ describe("GET /api/dashboard/home/activity feature gates", () => {
     vi.clearAllMocks();
     mocks.issuance.mockResolvedValue(false);
     mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
-    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({ ok: true, data: [] });
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: [],
+      walletsNotLoaded: 0,
+    });
   });
 
   it("does not request or return issuance data while Issuance is disabled", async () => {
@@ -85,6 +88,57 @@ describe("GET /api/dashboard/home/activity feature gates", () => {
 
     expect(body.data.activityError).toBe("Shared.homeWorkspace.paymentsActivityUnavailable");
     expect(body.data.activityNotice).toContain("Shared.homeWorkspace.issuanceActivityUnavailable");
+  });
+
+  it("says the list is partial when some wallets did not load, without an error", async () => {
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: [{ id: "transfer_1" }],
+      walletsNotLoaded: 1,
+    });
+    mocks.buildHomeActivityRows.mockReturnValueOnce([{ id: "transfer_1", sourceKind: "payment" }]);
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(body.data.activityError).toBeNull();
+    expect(body.data.activityNotice).toBe("Shared.homeWorkspace.somePaymentsActivityUnavailable");
+    // Volume is its own read, so the list carries no total to understate.
+    expect(body.data).not.toHaveProperty("todaysVolume");
+    // Home is the caller that can say the list is partial, so it is the one that sets a deadline.
+    expect(mocks.fetchDashboardPaymentTransfers).toHaveBeenCalledWith(expect.anything(), 20, {
+      walletDeadlineMs: 2_500,
+    });
+  });
+
+  it("reports activity unavailable, not empty, when no wallet loaded and nothing else did", async () => {
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: [],
+      walletsNotLoaded: 2,
+    });
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(body.data.activityRows).toEqual([]);
+    expect(body.data.activityError).toBe("Shared.homeWorkspace.paymentsActivityUnavailable");
+  });
+
+  // The wallet list itself failed, so this is persisted history only and how
+  // many wallets are missing is unknown.
+  it("says the list is partial when the wallet list failed", async () => {
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: [{ id: "transfer_1" }],
+      walletsNotLoaded: null,
+    });
+    mocks.buildHomeActivityRows.mockReturnValueOnce([{ id: "transfer_1", sourceKind: "payment" }]);
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(body.data.activityNotice).toBe("Shared.homeWorkspace.somePaymentsActivityUnavailable");
   });
 
   it("returns a traced 500 when the dashboard client cannot be created", async () => {

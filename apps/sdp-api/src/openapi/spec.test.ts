@@ -465,6 +465,12 @@ describe("OpenAPI spec", () => {
     );
   });
 
+  it("documents unavailable aggregates instead of partial wallet totals", () => {
+    const operation = createOpenApiDocument().paths?.["/v1/wallets/aggregate"]?.get;
+    expect(operation?.responses).toHaveProperty("503");
+    expect(operation?.description).toContain("rather than returning an incomplete total");
+  });
+
   it("documents counterparty ramp requirements", () => {
     const doc = createOpenApiDocument();
 

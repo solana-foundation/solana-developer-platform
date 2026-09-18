@@ -6,7 +6,7 @@ import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, conflict } from "@/lib/errors";
+import { AppError, badRequest, conflict, serviceUnavailable } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -47,46 +47,19 @@ import type {
   setDefaultWalletSchema,
   updateWalletSchema,
 } from "../schemas";
-
-const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
-
-interface CacheEntry<T> {
-  expiresAt: number;
-  value: T;
-}
-
-const walletBalanceCache = new Map<string, CacheEntry<CustodyWalletTokenBalance[]>>();
+import {
+  clearWalletBalanceCache,
+  readWalletBalances,
+  type WalletBalanceTarget,
+} from "../wallet-balances";
 
 export function clearWalletCaches() {
-  walletBalanceCache.clear();
+  clearWalletBalanceCache();
 }
 
-function readCache<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
-  const entry = cache.get(key);
-  if (!entry) {
-    return null;
-  }
-
-  if (entry.expiresAt <= Date.now()) {
-    cache.delete(key);
-    return null;
-  }
-
-  return entry.value;
-}
-
-function writeCache<T>(cache: Map<string, CacheEntry<T>>, key: string, value: T, ttlMs: number): T {
-  cache.set(key, {
-    value,
-    expiresAt: Date.now() + ttlMs,
-  });
-
-  return value;
-}
-
-function buildWalletBalanceCacheKey(c: AppContext, publicKey: string): string {
+function buildWalletBalanceCacheScope(c: AppContext): string {
   const auth = getAuth(c);
-  return `${auth.organizationId}:${auth.projectId ?? "org"}:${publicKey}`;
+  return `${auth.organizationId}:${auth.projectId ?? "org"}`;
 }
 
 function logWalletStep(
@@ -223,92 +196,27 @@ function resolveWalletFilters(
 
 async function getBalancesByWalletId(
   c: AppContext,
-  walletPublicKeys: Array<{ id: string; walletId: string; publicKey: string }>,
+  walletPublicKeys: WalletBalanceTarget[],
   options: { includeUsdValues?: boolean } = {}
 ) {
-  const rpc = solanaRpc.createRpc(c.env);
-  const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
-  const balanceEntries = await Promise.all(
-    walletPublicKeys.map(async (wallet) => {
-      const cacheKey = buildWalletBalanceCacheKey(c, wallet.publicKey);
-      const cachedBalances = readCache(walletBalanceCache, cacheKey);
-      if (cachedBalances) {
-        return [wallet.id, cachedBalances] as const;
-      }
-
-      const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
-        solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address),
-        tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, {
-          tokenLabelsByMint,
-        }),
-      ]);
-      const lamports =
-        solBalanceResult.status === "fulfilled" ? (solBalanceResult.value?.lamports ?? 0n) : 0n;
-      const splBalances = splBalancesResult.status === "fulfilled" ? splBalancesResult.value : [];
-
-      if (solBalanceResult.status === "rejected") {
-        getLogger().error(
-          {
-            requestId: c.get("requestId"),
-            walletId: wallet.walletId,
-            publicKey: wallet.publicKey,
-            error:
-              solBalanceResult.reason instanceof Error
-                ? solBalanceResult.reason.message
-                : String(solBalanceResult.reason),
-          },
-          "getBalancesByWalletId: failed to fetch SOL balance"
-        );
-      }
-
-      if (splBalancesResult.status === "rejected") {
-        getLogger().error(
-          {
-            requestId: c.get("requestId"),
-            walletId: wallet.walletId,
-            publicKey: wallet.publicKey,
-            error:
-              splBalancesResult.reason instanceof Error
-                ? splBalancesResult.reason.message
-                : String(splBalancesResult.reason),
-          },
-          "getBalancesByWalletId: failed to fetch SPL balances"
-        );
-      }
-
-      // A partial observation is not a zero balance. Omit this wallet's
-      // balance field entirely so callers can distinguish an RPC failure from
-      // a successful empty account, and never cache a synthetic zero that
-      // would survive the transient failure for the cache TTL.
-      if (solBalanceResult.status === "rejected" || splBalancesResult.status === "rejected") {
-        return null;
-      }
-
-      const walletBalances = writeCache(
-        walletBalanceCache,
-        cacheKey,
-        [
-          {
-            token: "SOL",
-            mint: tokenAccounts.SOL_MINT,
-            amount: lamports.toString(),
-            uiAmount: formatDecimalAmount(lamports, 9),
-            decimals: 9,
-          },
-          ...splBalances,
-        ],
-        WALLET_BALANCE_CACHE_TTL_MS
-      );
-
-      return [wallet.id, walletBalances] as const;
-    })
+  // Labels and chain reads start together; neither needs the other until both are in.
+  const [tokenLabelsByMint, observedBalances] = await Promise.all([
+    resolveIssuedTokenLabelsByMint(c),
+    readWalletBalances(
+      solanaRpc.createRpc(c.env),
+      buildWalletBalanceCacheScope(c),
+      walletPublicKeys,
+      c.get("requestId")
+    ),
+  ]);
+  const labeledBalances = new Map(
+    [...observedBalances].map(([walletId, balances]) => [
+      walletId,
+      tokenAccounts.withIssuedTokenLabels(balances, tokenLabelsByMint),
+    ])
   );
 
-  const balancesByWalletId = balanceEntries.filter(
-    (entry): entry is readonly [string, CustodyWalletTokenBalance[]] => entry !== null
-  );
-
-  const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, new Map(balancesByWalletId));
+  const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, labeledBalances);
 
   if (options.includeUsdValues === false) {
     return balancesMap;
@@ -780,10 +688,17 @@ export const getWalletAggregate = async (c: AppContext) => {
     walletCount: wallets.length,
   });
 
+  const walletBalances = wallets.map((wallet) => {
+    const balances = balancesByWalletId.get(wallet.id);
+    if (balances === undefined) {
+      throw serviceUnavailable("Wallet balances are temporarily unavailable. Try again.");
+    }
+    return balances;
+  });
   const aggregateStartedAt = performance.now();
   const aggregatedBalances = await attachUsdValuesToBalances(
     c.env,
-    aggregateTrackedWalletBalances(wallets.map((wallet) => balancesByWalletId.get(wallet.id) ?? []))
+    aggregateTrackedWalletBalances(walletBalances)
   );
   logWalletStep("aggregate_wallets", "attach_usd_values", aggregateStartedAt, {
     balanceCount: aggregatedBalances.length,
