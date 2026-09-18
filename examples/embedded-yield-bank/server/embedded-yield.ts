@@ -25,7 +25,9 @@ let strategyCache:
 
 /**
  * The catalogue changes rarely and the dashboard polls often. Reading it once
- * every few minutes keeps each refresh to three SDP calls and one RPC read.
+ * every few minutes keeps the steady-state refresh to two SDP calls and one
+ * RPC read. A submitted movement adds one short-lived chain-aware detail read
+ * so confirmation reaches the UI without waiting for the background sweep.
  */
 async function listStrategies(
   client: EmbeddedYieldClient
@@ -60,8 +62,9 @@ export async function loadDashboard(): Promise<DashboardData> {
     positions
       .filter((candidate) => belongsToStrategy(candidate, strategy))
       .find(isOpenPosition) ?? null;
-  const movements = allMovements.filter((movement) =>
-    belongsToStrategy(movement, strategy)
+  const movements = await refreshConfirmingMovements(
+    client,
+    allMovements.filter((movement) => belongsToStrategy(movement, strategy))
   );
   const { total, ...savings } = summarizeSavings(checking, position, movements);
 
@@ -81,6 +84,31 @@ export async function loadDashboard(): Promise<DashboardData> {
       checkedAt: new Date().toISOString(),
     },
   };
+}
+
+/**
+ * Detail reads check the exact signature on Solana and advance a submitted
+ * movement immediately. Confirmation is the UI finish line; finalized rows no
+ * longer need a fast read because SDP continues that bookkeeping itself.
+ */
+export async function refreshConfirmingMovements(
+  client: Pick<EmbeddedYieldClient, "getMovement">,
+  movements: readonly YieldMovement[]
+): Promise<YieldMovement[]> {
+  return Promise.all(
+    movements.map(async (movement) => {
+      if (movement.status !== "requested" && movement.status !== "submitted") {
+        return movement;
+      }
+      try {
+        return await client.getMovement(movement.movementId);
+      } catch {
+        // Keep the last durable state on a transient detail-read failure. The
+        // next browser refresh and SDP's background reconciler both retry.
+        return movement;
+      }
+    })
+  );
 }
 
 /** Move money from checking into savings. */

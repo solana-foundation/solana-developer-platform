@@ -1,6 +1,8 @@
 import type { DashboardData, YieldMovement } from "@/types";
 import { addDecimals } from "./decimal";
 
+/** Fast enough to surface normal Solana confirmation without request fan-out. */
+export const ACTIVE_MOVEMENT_REFRESH_MS = 1_000;
 export const SETTLEMENT_POLL_TIMEOUT_MS = 2 * 60_000;
 
 export interface MovementPolling {
@@ -8,8 +10,18 @@ export interface MovementPolling {
   expiresAt: number;
 }
 
+/** Customer-visible completion: Solana confirmation is enough to show Done. */
+export function isSettledMovement(movement: YieldMovement): boolean {
+  return movement.status === "confirmed" || movement.status === "finalized";
+}
+
 export function isPendingMovement(movement: YieldMovement): boolean {
-  return !["finalized", "failed"].includes(movement.status);
+  return !isSettledMovement(movement) && movement.status !== "failed";
+}
+
+/** Internal bookkeeping may keep advancing after the UI already says Settled. */
+export function isMovementAwaitingFinality(movement: YieldMovement): boolean {
+  return movement.status !== "finalized" && movement.status !== "failed";
 }
 
 export function startMovementPolling(
@@ -106,25 +118,36 @@ export function applyInFlight(
 }
 
 /**
- * Split this tab's in-flight transfers by what the ledger now says: the ones
- * that finalized (their effect is real and belongs in the base), and the ones
- * still pending or not yet listed. A failed transfer is in neither: it moved
- * nothing, so it is dropped without touching any balance.
+ * Split this tab's in-flight transfers by their customer-visible result. A
+ * confirmed transfer is settled in the UI immediately; SDP continues tracking
+ * protocol finalization in the background. Failed transfers moved nothing.
  */
 export function reconcileInFlight(
   inFlight: readonly InFlightTransfer[],
   movements: readonly YieldMovement[]
-): { finalized: InFlightTransfer[]; remaining: InFlightTransfer[] } {
+): {
+  settled: InFlightTransfer[];
+  failed: InFlightTransfer[];
+  remaining: InFlightTransfer[];
+} {
   const status = new Map(
     movements.map((movement) => [movement.movementId, movement.status])
   );
   return {
-    finalized: inFlight.filter(
-      (transfer) => status.get(transfer.movementId) === "finalized"
+    settled: inFlight.filter((transfer) => {
+      const current = status.get(transfer.movementId);
+      return current === "confirmed" || current === "finalized";
+    }),
+    failed: inFlight.filter(
+      (transfer) => status.get(transfer.movementId) === "failed"
     ),
     remaining: inFlight.filter((transfer) => {
       const current = status.get(transfer.movementId);
-      return current !== "finalized" && current !== "failed";
+      return (
+        current === undefined ||
+        current === "requested" ||
+        current === "submitted"
+      );
     }),
   };
 }

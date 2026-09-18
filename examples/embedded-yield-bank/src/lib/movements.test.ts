@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { DashboardData, YieldMovement } from "@/types";
 import {
+  ACTIVE_MOVEMENT_REFRESH_MS,
   applyInFlight,
   foldSettledTransfers,
+  isMovementAwaitingFinality,
+  isPendingMovement,
+  isSettledMovement,
   reconcileInFlight,
   reconcileMovementPolling,
   SETTLEMENT_POLL_TIMEOUT_MS,
@@ -10,6 +14,10 @@ import {
 } from "./movements";
 
 describe("movement polling", () => {
+  it("checks active Solana movements every second", () => {
+    expect(ACTIVE_MOVEMENT_REFRESH_MS).toBe(1_000);
+  });
+
   it("keeps polling while a submitted movement is absent from a stale read", () => {
     const polling = startMovementPolling(undefined, "movement-1", 0);
     const result = reconcileMovementPolling(
@@ -34,8 +42,8 @@ describe("movement polling", () => {
     expect(result.timedOut).toBe(true);
   });
 
-  it("stops tracking a submitted movement after it becomes terminal", () => {
-    const movement = createMovement("finalized");
+  it("stops customer-facing polling as soon as a movement is confirmed", () => {
+    const movement = createMovement("confirmed");
     const polling = startMovementPolling(undefined, movement.movementId, 0);
     const result = reconcileMovementPolling(polling, [movement], 1);
 
@@ -45,6 +53,15 @@ describe("movement polling", () => {
 });
 
 describe("in-flight transfers", () => {
+  it("treats confirmed and finalized as settled in the UI", () => {
+    expect(isSettledMovement(createMovement("confirmed"))).toBe(true);
+    expect(isSettledMovement(createMovement("finalized"))).toBe(true);
+    expect(isPendingMovement(createMovement("submitted"))).toBe(true);
+    expect(isPendingMovement(createMovement("confirmed"))).toBe(false);
+    expect(isMovementAwaitingFinality(createMovement("confirmed"))).toBe(true);
+    expect(isMovementAwaitingFinality(createMovement("finalized"))).toBe(false);
+  });
+
   it("shows the balances a pending transfer will produce and keeps the total", () => {
     const base = dashboard({ checking: "19", savings: "1", total: "20" });
     const live = dashboard({
@@ -111,7 +128,7 @@ describe("in-flight transfers", () => {
     expect(view.total).toBe("20");
   });
 
-  it("folds only finalized transfers and drops failed ones without applying them", () => {
+  it("folds confirmed transfers and drops failed ones without applying them", () => {
     const inFlight = [
       { movementId: "ok", direction: "deposit" as const, amount: "2" },
       { movementId: "bad", direction: "deposit" as const, amount: "5" },
@@ -119,20 +136,24 @@ describe("in-flight transfers", () => {
       { movementId: "unseen", direction: "deposit" as const, amount: "3" },
     ];
     const movements = [
-      { ...createMovement("finalized"), movementId: "ok" },
+      { ...createMovement("confirmed"), movementId: "ok" },
       { ...createMovement("failed"), movementId: "bad" },
       { ...createMovement("submitted"), movementId: "slow" },
     ];
 
-    const { finalized, remaining } = reconcileInFlight(inFlight, movements);
+    const { failed, remaining, settled } = reconcileInFlight(
+      inFlight,
+      movements
+    );
 
-    expect(finalized.map((transfer) => transfer.movementId)).toEqual(["ok"]);
+    expect(settled.map((transfer) => transfer.movementId)).toEqual(["ok"]);
+    expect(failed.map((transfer) => transfer.movementId)).toEqual(["bad"]);
     expect(remaining.map((transfer) => transfer.movementId)).toEqual([
       "slow",
       "unseen",
     ]);
     const base = dashboard({ checking: "19", savings: "1", total: "20" });
-    expect(foldSettledTransfers(base, finalized).checking.balance).toBe("17");
+    expect(foldSettledTransfers(base, settled).checking.balance).toBe("17");
   });
 
   it("returns live data untouched once nothing is in flight", () => {

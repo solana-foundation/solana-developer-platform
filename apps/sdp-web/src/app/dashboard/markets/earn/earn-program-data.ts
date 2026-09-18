@@ -1007,8 +1007,9 @@ export function useEarnVaultDepositOutcome(
 // ---------------------------------------------------------------------------
 // Vault withdrawals (PRO-1702) — the deposit seam's exit mirror. One
 // deliberate vocabulary difference: this surface speaks the unified LEDGER's
-// own statuses (`requested … finalized`), where `confirmed` is NOT terminal —
-// so everything here keys terminality on
+// own statuses (`requested … finalized`). Customer UI treats `confirmed` as
+// Done, while this background watcher continues through the durable ledger
+// outcome. Everything here therefore keys watcher terminality on
 // `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`, never the legacy deposit set.
 // ---------------------------------------------------------------------------
 

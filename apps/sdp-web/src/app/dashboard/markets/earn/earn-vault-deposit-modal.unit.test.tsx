@@ -93,9 +93,10 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultDoneStatus": "Awaiting confirmation",
   "DashboardEarn.deposit.vaultSettlingNote":
     "Your vault position will refresh after the chain confirms it.",
-  "DashboardEarn.deposit.vaultConfirmedTitle": "Deposit confirmed",
-  "DashboardEarn.deposit.vaultConfirmedBody": "The deposit is confirmed on Solana.",
-  "DashboardEarn.deposit.vaultConfirmedStatus": "Confirmed",
+  "DashboardEarn.deposit.vaultConfirmedTitle": "Deposit complete",
+  "DashboardEarn.deposit.vaultConfirmedBody":
+    "The deposit is confirmed on Solana and your position is active.",
+  "DashboardEarn.deposit.vaultConfirmedStatus": "Deposited",
   "DashboardEarn.deposit.vaultConfirmedNote":
     "Your live vault position will refresh automatically.",
   "DashboardEarn.deposit.vaultTransaction": "Transaction",
@@ -791,7 +792,7 @@ describe("EarnVaultDepositModal", () => {
   it.each([
     ["pending", "Deposit pending", "Pending"],
     ["submitted", "Deposit submitted", "Pending"],
-    ["confirmed", "Deposit confirmed", "Active"],
+    ["confirmed", "Deposit complete", "Active"],
   ] as const)(
     "renders a truthful %s result and refresh callback",
     async (status, title, statusLabel) => {

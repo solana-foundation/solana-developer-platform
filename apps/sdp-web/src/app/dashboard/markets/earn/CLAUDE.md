@@ -383,10 +383,13 @@ program create still sends the body `requestId` form.
   one drifts.
 - **The withdrawal outcome poll uses the UNIFIED ledger vocabulary**:
   `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct` (`finalized | failed`),
-  `confirmed` still in flight because `EarnVaultWithdrawal` speaks the
-  ledger's own words. This is the OPPOSITE of the deposit poll's rule (legacy
-  DTO, legacy terminal set); the two sets sit side by side in
-  `earn-program-data.ts` with the reasoning attached to each.
+  because `EarnVaultWithdrawal` speaks the ledger's own words. That backend
+  polling contract is intentionally stricter than presentation: the UI treats
+  `confirmed` as complete, removes foreground loading, and projects the
+  resulting balance while the poll continues to protocol finality. This is the
+  OPPOSITE of the deposit poll's rule (legacy DTO, legacy terminal set); the two
+  sets sit side by side in `earn-program-data.ts` with the reasoning attached
+  to each.
 
 ## Where these seams are consumed — do not delete them as dead code
 
@@ -433,8 +436,9 @@ transaction reached the network, which is the one case where the customer's
 money is genuinely in the air. **Keep using
 `EARN_TERMINAL_VAULT_MOVEMENT_STATUSES` here, not the similarly named
 `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`** (PRO-1705): that one is the
-unified ledger's vocabulary, where `confirmed` is NOT terminal because
-`finalized` exists after it. This poll reads the legacy wire field, so switching
+unified ledger's vocabulary, where the background watcher continues past
+`confirmed` because `finalized` exists after it. Customer-facing UI still
+treats `confirmed` as Done. This poll reads the legacy wire field, so switching
 to the unified set would make it wait for a `finalized` nothing writes yet and
 never stop. An unreadable poll returns `undefined` and keeps
 polling; a read that failed says nothing about whether the deposit landed.

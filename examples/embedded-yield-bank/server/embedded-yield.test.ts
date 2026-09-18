@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { YieldStrategy } from "../src/types";
-import { assertBuiltFeePayer, deriveWithdrawalFloor } from "./embedded-yield";
+import type { YieldMovement, YieldStrategy } from "../src/types";
+import {
+  assertBuiltFeePayer,
+  deriveWithdrawalFloor,
+  refreshConfirmingMovements,
+} from "./embedded-yield";
 import { SdpApiError } from "./sdp-client";
 
 describe("Embedded Yield orchestration", () => {
@@ -63,7 +67,52 @@ describe("Embedded Yield orchestration", () => {
       "unexpected fee payer"
     );
   });
+
+  it("refreshes only movements still waiting for confirmation", async () => {
+    const submitted = movement("submitted", "submitted");
+    const confirmed = movement("confirmed", "confirmed");
+    const getMovement = vi
+      .fn()
+      .mockResolvedValue({ ...submitted, status: "confirmed" });
+
+    await expect(
+      refreshConfirmingMovements({ getMovement }, [submitted, confirmed])
+    ).resolves.toEqual([{ ...submitted, status: "confirmed" }, confirmed]);
+    expect(getMovement).toHaveBeenCalledTimes(1);
+    expect(getMovement).toHaveBeenCalledWith(submitted.movementId);
+  });
+
+  it("keeps the durable status when a confirmation read is unavailable", async () => {
+    const submitted = movement("submitted", "submitted");
+    const getMovement = vi.fn().mockRejectedValue(new Error("RPC unavailable"));
+
+    await expect(
+      refreshConfirmingMovements({ getMovement }, [submitted])
+    ).resolves.toEqual([submitted]);
+  });
 });
+
+function movement(
+  status: YieldMovement["status"],
+  movementId: string
+): YieldMovement {
+  return {
+    movementId,
+    positionId: "position",
+    provider: "provider",
+    providerReference: "vault",
+    direction: "deposit",
+    status,
+    signature: "signature",
+    amount: "1",
+    denomination: "usdc",
+    tokenMint: "usdc",
+    tokenAmount: "1",
+    failureReason: null,
+    createdAt: "2026-09-18T00:00:00.000Z",
+    settledAt: null,
+  };
+}
 
 function strategy(
   withdrawalSlippage: YieldStrategy["withdrawalSlippage"]

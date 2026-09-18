@@ -16,7 +16,11 @@ import {
   formatTime,
   shortAddress,
 } from "@/lib/format";
-import { isPendingMovement } from "@/lib/movements";
+import {
+  isMovementAwaitingFinality,
+  isPendingMovement,
+  isSettledMovement,
+} from "@/lib/movements";
 import { cn } from "@/lib/utils";
 import type { DashboardData, YieldMovement } from "@/types";
 import { arrivalCopy, TransferDialog } from "./transfer-dialog";
@@ -41,6 +45,7 @@ export function OverviewDashboard({
   const { token, checking, savings, wallet, connection } = data;
   const { strategy } = savings;
   const settling = data.movements.filter(isPendingMovement);
+  const earningsUpdating = data.movements.some(isMovementAwaitingFinality);
   const depositsOpen = strategy.fundable && strategy.status === "active";
 
   async function copyWalletAddress() {
@@ -162,7 +167,7 @@ export function OverviewDashboard({
               ? "—"
               : formatAmount(savings.balance, token.symbol)
           }
-          {...savingsDetail(savings, token.symbol, settling.length > 0)}
+          {...savingsDetail(savings, token.symbol, earningsUpdating)}
           footer={`${strategy.name} · ${
             strategy.liquidityTerm === "instant"
               ? "Withdraw anytime"
@@ -224,13 +229,15 @@ function Dot() {
 function savingsDetail(
   savings: DashboardData["savings"],
   symbol: string,
-  settling: boolean
+  earningsUpdating: boolean
 ): { detail: string; positive?: boolean } {
   if (savings.position === null && savings.earned === "0")
     return { detail: "Start earning with your first transfer" };
   if (savings.earned === undefined) {
     return {
-      detail: settling ? "Earnings update shortly" : "Earnings unavailable",
+      detail: earningsUpdating
+        ? "Earnings accrue automatically"
+        : "Earnings unavailable",
     };
   }
   if (savings.earned === "0") return { detail: "Nothing earned yet" };
@@ -336,7 +343,7 @@ function ActivityRow({
 }
 
 function MovementStatus({ movement }: { movement: YieldMovement }) {
-  if (movement.status === "finalized") {
+  if (isSettledMovement(movement)) {
     return (
       <Badge variant="outline" className="status-success">
         <span className="status-dot" />
