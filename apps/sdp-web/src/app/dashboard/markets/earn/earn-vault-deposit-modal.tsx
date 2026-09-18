@@ -35,12 +35,8 @@ import {
   parseUnsignedDecimal,
 } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
-import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
-import {
-  shortenMarketAddress,
-  sumDecimalStrings,
-  TransactionLink,
-} from "./earn-market-presentation";
+import { formatTokenQuantity, formatUsd, shortenMarketAddress, tokenSymbol } from "./earn-format";
+import { sumDecimalStrings, TransactionLink } from "./earn-market-presentation";
 import {
   createEarnVaultDeposit,
   type EarnVaultDeposit,
@@ -58,6 +54,15 @@ import {
   vaultDepositIdempotencyKeyStore,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
+import {
+  mergeObservedVaultMovement,
+  observableVaultMovement,
+  vaultApprovalPending,
+  vaultMovementHappened,
+  vaultMovementPanelKey,
+  vaultMovementProcessing,
+  vaultMovementProgressStep,
+} from "./earn-vault-movement";
 import {
   atomsToDecimalString,
   derivedMinOut,
@@ -189,8 +194,8 @@ type DepositOutcome =
     }
   | {
       kind: "deposit";
+      movement: EarnVaultDeposit;
       amount: string;
-      deposit: EarnVaultDeposit;
       walletName: string;
       /**
        * The approval executor won the race: it executed this exact intent
@@ -206,39 +211,6 @@ type DepositOutcome =
 type DepositSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: DepositOutcome; deposited?: EarnVaultDeposit };
-
-function shouldProjectDepositBalance(outcome: DepositOutcome): boolean {
-  return outcome.kind === "deposit" && !outcome.absorbedByApproval;
-}
-
-function shouldProjectDepositIntent(outcome: DepositOutcome, swapActive: boolean): boolean {
-  return !swapActive && shouldProjectDepositBalance(outcome);
-}
-
-function observableDepositMovementId(outcome: DepositOutcome | null): string | undefined {
-  if (outcome?.kind !== "deposit" || outcome.absorbedByApproval) return undefined;
-  return outcome.deposit.movementId;
-}
-
-function mergeObservedDeposit(
-  outcome: DepositOutcome | null,
-  observedDeposit: EarnVaultDepositRecord | undefined
-): DepositOutcome | null {
-  if (outcome?.kind !== "deposit" || !observedDeposit) return outcome;
-  return { ...outcome, deposit: { ...outcome.deposit, ...observedDeposit } };
-}
-
-function depositProgressStep(outcome: DepositOutcome | null, step: "details" | "review"): number {
-  if (!outcome) return step === "review" ? 1 : 0;
-  if (outcome.kind === "approval_pending") return 2;
-  return earnVaultDepositUiState(outcome.deposit.status).progressStep;
-}
-
-function depositPanelKey(outcome: DepositOutcome | null, step: "details" | "review"): string {
-  if (!outcome) return `form:${step}`;
-  if (outcome.kind === "approval_pending") return "outcome:approval";
-  return outcome.absorbedByApproval ? "outcome:deposit:absorbed" : "outcome:deposit";
-}
 
 function depositAssetMetadata(strategy: EarnStrategy) {
   const depositMint = strategy.depositMints[0];
@@ -314,18 +286,7 @@ function resolveDepositSubmission(
     return { kind: "error", message: result.error || fallbackError };
   }
   if (result.data.kind === "approval_pending") {
-    return {
-      kind: "outcome",
-      outcome: {
-        kind: "approval_pending",
-        ...(result.data.approvalRequestId
-          ? { approvalRequestId: result.data.approvalRequestId }
-          : {}),
-        ...(result.data.walletOperationId
-          ? { walletOperationId: result.data.walletOperationId }
-          : {}),
-      },
-    };
+    return { kind: "outcome", outcome: vaultApprovalPending(result.data) };
   }
 
   const deposit = result.data.deposit;
@@ -344,13 +305,13 @@ function resolveDepositSubmission(
   if (deposit.replayed && keyWasHeld) {
     return {
       kind: "outcome",
-      outcome: { kind: "deposit", amount, deposit, walletName, absorbedByApproval: true },
+      outcome: { kind: "deposit", amount, movement: deposit, walletName, absorbedByApproval: true },
       deposited: deposit,
     };
   }
   return {
     kind: "outcome",
-    outcome: { kind: "deposit", amount, deposit, walletName },
+    outcome: { kind: "deposit", amount, movement: deposit, walletName },
     deposited: deposit,
   };
 }
@@ -582,7 +543,7 @@ function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
     };
   }
 
-  switch (outcome.deposit.status) {
+  switch (outcome.movement.status) {
     case "confirmed":
       return {
         title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
@@ -622,7 +583,7 @@ function DepositMovementResult({
   const t = useTranslations();
   const locale = useLocale();
 
-  const { deposit } = outcome;
+  const { movement: deposit } = outcome;
   // The absorbed case overrides the status copy: whatever state the movement is
   // in, the headline is that THIS submission moved nothing.
   const copy = depositMovementCopy(outcome, t);
@@ -1279,23 +1240,20 @@ export function EarnVaultDepositModal({
   const submittingRef = useRef(false);
   const requestControllerRef = useRef<AbortController | null>(null);
   const observedDeposit = useEarnVaultDepositOutcome(
-    observableDepositMovementId(outcome),
+    observableVaultMovement(outcome)?.movementId,
     undefined,
     onMovementUpdated
   );
-  const visibleOutcome = mergeObservedDeposit(outcome, observedDeposit);
-  const progressStep = depositProgressStep(visibleOutcome, step);
+  const visibleOutcome = mergeObservedVaultMovement(outcome, observedDeposit);
+  const progressStep = vaultMovementProgressStep(visibleOutcome, step, earnVaultDepositUiState);
   const progressSteps = [
     t("DashboardEarn.deposit.flowDetails"),
     t("DashboardEarn.deposit.flowReview"),
     t("DashboardEarn.deposit.flowProcessing"),
     t("DashboardEarn.deposit.flowComplete"),
   ];
-  const movementProcessing =
-    visibleOutcome?.kind === "deposit" &&
-    !visibleOutcome.absorbedByApproval &&
-    (visibleOutcome.deposit.status === "pending" || visibleOutcome.deposit.status === "submitted");
-  const panelKey = depositPanelKey(visibleOutcome, step);
+  const movementProcessing = vaultMovementProcessing(visibleOutcome, ["pending", "submitted"]);
+  const panelKey = vaultMovementPanelKey(visibleOutcome, step, "deposit");
   const contentRef = useModalFocus({
     focusKey: panelKey,
     initialFocusSelector: "[data-modal-focus-target]",
@@ -1534,7 +1492,7 @@ export function EarnVaultDepositModal({
         // A swap request is denominated in the funding token while the
         // position is denominated in the vault token. Wait for the provider
         // value instead of presenting those unlike amounts as one balance.
-        projectBalance: shouldProjectDepositIntent(resolution.outcome, swapActive),
+        projectBalance: !swapActive && vaultMovementHappened(resolution.outcome),
       });
     }
   }

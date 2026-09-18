@@ -33,7 +33,7 @@ import {
  * distinguish every six-decimal value once balances exceed 2^53, while the
  * API deliberately carries these amounts as strings.
  */
-export const compareUsdDecimals = compareUnsignedDecimals;
+const compareUsdDecimals = compareUnsignedDecimals;
 
 export function isPositiveUsdAmount(value: string): boolean {
   const amount = parseUnsignedDecimal(value, { trim: false });

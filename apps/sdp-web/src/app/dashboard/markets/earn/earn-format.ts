@@ -79,6 +79,22 @@ export function tokenSymbol(mint: string): string {
   return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? truncateMiddle(mint, 4, 4);
 }
 
+export function shortenMarketAddress(value: string): string {
+  return value.length <= 16 ? value : truncateMiddle(value, 6, 6);
+}
+
+/**
+ * A vault position's display name: the label the provider gave it, or the
+ * shortened provider reference when it arrives unnamed. One rule for every
+ * surface that names a position.
+ */
+export function positionDisplayName(position: {
+  label: string;
+  providerReference: string;
+}): string {
+  return position.label || shortenMarketAddress(position.providerReference);
+}
+
 export function formatTokenQuantity(
   value: string | undefined,
   locale: string,

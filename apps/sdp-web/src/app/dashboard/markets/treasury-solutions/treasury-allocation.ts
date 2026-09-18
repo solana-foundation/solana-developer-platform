@@ -2,7 +2,7 @@ import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/sola
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import { isIntlDecimalLiteral } from "../earn/earn-format";
-import { sumDecimalStrings } from "../earn/earn-market-presentation";
+import { earnStrategyReferenceKey, sumDecimalStrings } from "../earn/earn-market-presentation";
 
 /**
  * Portfolio-level allocation for the Treasury overview (PRO-1723): available
@@ -234,15 +234,16 @@ export function estimatedTreasuryApy({
 
   const strategyByReference = new Map(
     strategies.map((strategy) => [
-      JSON.stringify([strategy.provider, strategy.providerReference]),
+      earnStrategyReferenceKey(strategy.provider, strategy.providerReference),
       strategy,
     ])
   );
   const values = open.map((position) => position.tokenValue);
   const rates = open.map(
     (position) =>
-      strategyByReference.get(JSON.stringify([position.provider, position.providerReference]))
-        ?.currentApy
+      strategyByReference.get(
+        earnStrategyReferenceKey(position.provider, position.providerReference)
+      )?.currentApy
   );
   if (
     values.some((value) => value === undefined || !isIntlDecimalLiteral(value)) ||

@@ -32,9 +32,6 @@ import {
   partySlotSchema,
 } from "./use-dvp-parties";
 
-export { CUSTOM } from "./use-dvp-leg";
-export type { DvpPartySlot } from "./use-dvp-parties";
-
 /** A month out at end of day, local: long enough to fund and settle, well inside the program's cap. */
 function defaultExpiry(): string {
   const date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -85,6 +82,11 @@ export interface DvpCreateForm {
   destinations: DvpDestinations;
   /** Whether the whole form can be submitted: legs, parties and payouts. */
   ready: boolean;
+  /**
+   * Everything `ready` demands except the expiry, which the review step owns
+   * and its picker can clear. Gates the parties stage's Continue.
+   */
+  readyIgnoringExpiry: boolean;
   /** Whether the two party slots are complete and the addresses differ. */
   partiesReady: boolean;
   /** Both slots resolve to the SAME address: the program refuses one party. */
@@ -97,19 +99,17 @@ export interface DvpCreateForm {
 }
 
 /**
- * Whether the form describes a trade that can be created.
+ * Whether the form describes a trade that can be created, apart from the
+ * expiry.
  *
  * Pure and outside the hook: it is a dozen independent conditions, and holding
  * them inline made the hook's control flow mostly this one expression.
  */
-function canCreateTrade(input: {
+function tradeAnsweredWithoutExpiry(input: {
   asset: DvpLeg;
   cash: DvpLeg;
-  /** Both party slots filled and the two addresses differ. */
   partiesReady: boolean;
   destinationLooksWrong: boolean;
-  /** The expiry datetime; the picker's Clear can empty it on review. */
-  expiry: string;
 }): boolean {
   const { asset, cash } = input;
   // Never while a leg's scale is still being read. The amount would be encoded
@@ -127,13 +127,7 @@ function canCreateTrade(input: {
   // a round trip that costs a custody-provider call.
   const partiesUsable = Boolean(input.partiesReady && !input.destinationLooksWrong);
 
-  return (
-    legsResolved &&
-    legsAccepted &&
-    amountsResolved &&
-    partiesUsable &&
-    input.expiry.trim().length > 0
-  );
+  return legsResolved && legsAccepted && amountsResolved && partiesUsable;
 }
 
 /**
@@ -183,13 +177,13 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   const parties = deriveDvpParties({ partyA: values.partyA, partyB: values.partyB }, context);
   const { expiry, refString } = values;
 
-  const ready = canCreateTrade({
+  const readyIgnoringExpiry = tradeAnsweredWithoutExpiry({
     asset,
     cash,
     partiesReady: parties.ready,
     destinationLooksWrong: destinations.anyLooksWrong,
-    expiry,
   });
+  const ready = readyIgnoringExpiry && expiry.trim().length > 0;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -239,6 +233,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     refString,
     destinations,
     ready,
+    readyIgnoringExpiry,
     partiesReady: parties.ready,
     sameAddress: parties.sameAddress,
     request: parties.request,
