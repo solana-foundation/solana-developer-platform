@@ -4,7 +4,7 @@ import {
   type EarnProviderId,
   type EarnStrategy,
   type EarnStrategyResponse,
-  earnDepositSlippageFloor,
+  earnDepositSlippagePolicy,
   earnWithdrawSlippageFloor,
   isEarnProviderSurfaced,
   type ListEarnStrategiesResponse,
@@ -67,13 +67,18 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
  * gate: the flag plus the cluster allowlist `resolveVaultSponsorship` reads at
  * execution, answered for the row's own cluster. A row that is not fundable is
  * never sponsored (there is no movement to sponsor), so the two agree.
+ *
+ * `depositSlippage` is derived per request too: every production deposit
+ * carries a share floor, so the field answers for the caller's environment
+ * exactly as the deposit routes gate (`earnDepositSlippagePolicy`). A row that
+ * reads null never meets a build that demands `minSharesOut`.
  */
 export function mapToEarnStrategy(
   row: EarnStrategyRow,
   environment: SdpEnvironment,
   env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED">
 ): EarnStrategy {
-  const depositSlippage = earnDepositSlippageFloor(row.provider);
+  const depositSlippage = earnDepositSlippagePolicy(row.provider, environment);
   const withdrawalSlippage = earnWithdrawSlippageFloor(row.provider);
   const fundable = isClusterFundableInEnvironment(row.host_cluster, environment);
   return {

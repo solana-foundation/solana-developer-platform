@@ -4,8 +4,8 @@ import { decimalScale } from "@sdp/solana/amount";
 import {
   EARN_SWAP_DEFAULT_SLIPPAGE_BPS,
   type EarnStrategy,
+  type EarnStrategySlippagePolicy,
   type EarnSwapSourceToken,
-  earnDepositSlippageFloor,
   earnSwapSourceTokens,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
@@ -258,7 +258,7 @@ function deriveDepositFormState(input: {
   selectedWallet: EarnFundingWallet | undefined;
   selectedWalletBalance: string | undefined;
   slippageInput: string;
-  slippagePolicy: ReturnType<typeof earnDepositSlippageFloor>;
+  slippagePolicy: EarnStrategySlippagePolicy | null;
   strategyId: string;
   t: Translation;
 }) {
@@ -1140,7 +1140,7 @@ interface DepositReviewStepProps {
   slippageInput: string;
   slippageInvalid: boolean;
   slippageOpen: boolean;
-  slippagePolicy: ReturnType<typeof earnDepositSlippageFloor>;
+  slippagePolicy: EarnStrategySlippagePolicy | null;
   strategy: EarnStrategy;
   submitBlocked: boolean;
   submitError: string | null;
@@ -1262,10 +1262,12 @@ export function EarnVaultDepositModal({
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
   const [walletId, setWalletId] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState("");
-  // Declared per provider in @sdp/types: non-null means this provider REQUIRES
-  // an explicit share floor, which the dashboard derives from a LIVE quote and
-  // never from the deposit amount. Null renders no slippage control at all.
-  const slippagePolicy = earnDepositSlippageFloor(strategy.provider);
+  // The catalogue row's own answer, published per environment by the API
+  // (`earnDepositSlippagePolicy` in @sdp/types): non-null means the build
+  // REQUIRES an explicit share floor, which the dashboard derives from a LIVE
+  // quote and never from the deposit amount. Every production row is non-null.
+  // Null renders no slippage control at all.
+  const slippagePolicy = strategy.depositSlippage;
   const [slippageInput, setSlippageInput] = useState(() =>
     slippagePolicy ? String(slippagePolicy.defaultToleranceBps) : ""
   );

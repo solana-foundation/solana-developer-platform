@@ -1113,7 +1113,13 @@ describe("slippage tolerance helpers", () => {
 });
 
 describe("slippage-floored providers", () => {
-  const vedaStrategy: EarnStrategy = { ...strategy, provider: "veda" };
+  // The modal reads the floor policy off the catalogue row, which the API
+  // answers per environment; the provider name alone decides nothing.
+  const vedaStrategy: EarnStrategy = {
+    ...strategy,
+    provider: "veda",
+    depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+  };
 
   function primeQuote(sharesOut: string, blockingIssues: { code: string; message: string }[] = []) {
     mocks.fetchEarnVaultDepositPreview.mockResolvedValue({
@@ -1134,6 +1140,37 @@ describe("slippage-floored providers", () => {
     await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
     return user;
   }
+
+  it("takes the policy from the row, so a production Kamino row gets the floor too", async () => {
+    // Kamino declares no floor of its own; production requires one anyway and
+    // the API says so on the row. The modal must follow the row, not the
+    // provider, or a production Kamino deposit goes out unprotected and 400s.
+    primeQuote("0.99999");
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{
+          ...strategy,
+          hostCluster: "mainnet-beta",
+          depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+        }}
+        onClose={vi.fn()}
+      />
+    );
+    await enterVedaDepositAmount("1.000000");
+    await screen.findByText("Deposit submitted");
+    expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
+      strategyId: strategy.id,
+      custodyWalletId: "wallet_1",
+      amount: "1",
+      minSharesOut: "0.99899",
+    });
+  });
 
   it("reads the confirm note from the strategy, not the quote", async () => {
     // The quote does not claim sponsorship; the strategy does. The strategy
