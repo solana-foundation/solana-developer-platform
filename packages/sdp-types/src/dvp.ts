@@ -46,7 +46,7 @@ export const DVP_LEG_OUTCOMES = [
   "overfunded",
   /** The escrow token account is frozen. */
   "frozen",
-  /** A previously observed deposit has been reclaimed. */
+  /** The escrow's latest recorded transfer took tokens out, and it holds less than the trade requires. */
   "reclaimed",
   /** The open trade expired before settlement. */
   "expired",
@@ -60,6 +60,26 @@ export const DVP_LEG_OUTCOMES = [
   "closed",
 ] as const;
 export type DvpLegOutcome = (typeof DVP_LEG_OUTCOMES)[number];
+
+/** What one movement in or out of a leg's escrow was, as far as the trade can tell. */
+export const DVP_LEG_TRANSFER_KINDS = [
+  /** Tokens paid into the escrow, by anyone. */
+  "deposit",
+  /** Tokens taken out of the escrow before any close. */
+  "reclaim",
+  /** The settlement's outflow. */
+  "delivery",
+  /** The cancellation's or rejection's outflow. */
+  "refund",
+  /** An outflow after the close: a late deposit recovered. */
+  "recovery",
+  /**
+   * An outflow from a closed trade whose closing transaction is not among the
+   * leg's transfers, so it cannot be told apart from a reclaim or the close.
+   */
+  "withdrawal",
+] as const;
+export type DvpLegTransferKind = (typeof DVP_LEG_TRANSFER_KINDS)[number];
 
 /**
  * Whether a DvP trade can settle, derived by the API from the cluster clock read

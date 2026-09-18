@@ -60,6 +60,10 @@ const PARTY_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
+/** A transfer the escrow ledger holds for a seeded trade. */
+const FUNDING_TRANSFER_SIGNATURE =
+  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
+
 let originalMarkets: string | undefined;
 
 async function seedAuth(): Promise<void> {
@@ -1262,6 +1266,16 @@ describe("DvP routes", () => {
         observation: { escrowAAmount: "1000" },
       });
       await seedClaim("dvp_full", "a", "sig_live_claim", "sig_funding_receipt");
+      // What the reconciler read off leg A's escrow (PRO-1941).
+      await getDb(env)
+        .prepare(
+          `INSERT INTO dvp_leg_transfers
+             (trade_id, side, signature, direction, amount, slot, block_time, fee_payer, finalized,
+              sequence)
+           VALUES ('dvp_full', 'a', ?, 'in', '1000', '420', '1789000000', ?, true, 1)`
+        )
+        .bind(FUNDING_TRANSFER_SIGNATURE, PARTY_A_ADDRESS)
+        .run();
       const { createdAt, updatedAt } = await readTradeTimestamps("dvp_full");
 
       const res = await app.request("/v1/dvp/trades/dvp_full", { headers: authHeaders() }, env);
@@ -1298,6 +1312,17 @@ describe("DvP routes", () => {
             },
             fundingSignature: "sig_funding_receipt",
             outcome: "funded",
+            transfers: [
+              {
+                signature: FUNDING_TRANSFER_SIGNATURE,
+                direction: "in",
+                kind: "deposit",
+                amount: "1000",
+                slot: "420",
+                blockTime: "2026-09-10T00:26:40.000Z",
+                feePayer: PARTY_A_ADDRESS,
+              },
+            ],
           },
           b: {
             party: {
@@ -1318,6 +1343,7 @@ describe("DvP routes", () => {
             funding: null,
             fundingSignature: null,
             outcome: "awaiting",
+            transfers: [],
           },
         },
         kind: "principal",
@@ -1390,6 +1416,7 @@ describe("DvP routes", () => {
             funding: null,
             fundingSignature: null,
             outcome: "awaiting",
+            transfers: [],
           },
           b: {
             party: {
@@ -1410,6 +1437,7 @@ describe("DvP routes", () => {
             funding: null,
             fundingSignature: null,
             outcome: "awaiting",
+            transfers: [],
           },
         },
         kind: "principal",
@@ -1492,6 +1520,7 @@ describe("DvP routes", () => {
         funding: null,
         fundingSignature: null,
         outcome: "awaiting",
+        transfers: [],
       });
       // Both sides held by the creator's wallets: bilateral.
       expect(second.kind).toBe("bilateral");
@@ -1801,6 +1830,8 @@ describe("DvP routes", () => {
           observedAmount: null,
           frozen: null,
           outcome: "awaiting",
+          // No sweep has read this escrow's history yet.
+          transfers: [],
         });
         expect(trade.legs.b).toEqual({
           party: {
@@ -1821,6 +1852,7 @@ describe("DvP routes", () => {
           observedAmount: null,
           frozen: null,
           outcome: "awaiting",
+          transfers: [],
         });
         // The inbound shape carries neither the creator's derived kind nor the
         // funding claims — both belong to organizations that can read the row.

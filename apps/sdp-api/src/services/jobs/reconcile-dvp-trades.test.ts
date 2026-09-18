@@ -2,6 +2,7 @@ import { getBase58Decoder, signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import { createPostgresDvpLegTransferRepository } from "@/db/repositories/dvp-leg-transfer.repository";
 import { createPostgresDvpTradeRepository } from "@/db/repositories/dvp-trade.repository.postgres";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -19,6 +20,11 @@ vi.mock("@sdp/rpc/solana", () => ({
 }));
 vi.mock("@/services/dvp/read-chain", () => ({ readDvpTradeObservation }));
 vi.mock("@/services/dvp/closing-transaction", () => ({ resolveDvpClose }));
+const syncDvpLegTransfers = vi.hoisted(() => vi.fn());
+vi.mock("@/services/dvp/leg-transfers", () => ({
+  syncDvpLegTransfers,
+  createDvpEscrowHistoryReader: () => ({}),
+}));
 
 const { reconcileDvpTrades } = await import("./reconcile-dvp-trades");
 
@@ -155,6 +161,7 @@ describe("reconcileDvpTrades", () => {
     // receipt rows survive. Tests that exercise a dead broadcast override.
     getSignatureStatusesMock.mockResolvedValue(LANDED_STATUS);
     resolveDvpClose.mockResolvedValue({ kind: "absent" });
+    syncDvpLegTransfers.mockResolvedValue(0);
     readDvpTradeObservation.mockResolvedValue(observation());
 
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -227,6 +234,92 @@ describe("reconcileDvpTrades", () => {
     // recorded reading time is a claim with no provenance.
     expect(row?.observed_at).toBeTruthy();
     expect(row?.observed_cluster_timestamp).toBe(clusterUnixTimestamp.toString());
+  });
+
+  /**
+   * PRO-1941. Each leg's escrow history is read into the transfer ledger when
+   * the leg may have moved: never read, the trade changed, or its last complete
+   * read is five minutes old. The read itself is `syncDvpLegTransfers`.
+   */
+  describe("escrow transfer ledger", () => {
+    async function scanned(tradeId: string, scannedAt: string | null) {
+      const transfers = createPostgresDvpLegTransferRepository(getDb(env));
+      for (const side of ["a", "b"] as const) {
+        await transfers.saveScan(tradeId, { side, cursor: null, scannedAt });
+      }
+    }
+
+    async function quiet(tradeId: string) {
+      await seedTrade(tradeId, "created");
+      await getDb(env)
+        .prepare("UPDATE dvp_trades SET escrow_a_amount = '0', escrow_b_amount = '0' WHERE id = ?")
+        .bind(tradeId)
+        .run();
+    }
+
+    it("reads both legs of a trade whose history was never read", async () => {
+      await seedTrade("dvp_ledger_new", "created");
+
+      await reconcileDvpTrades(env);
+
+      expect(
+        syncDvpLegTransfers.mock.calls.map(([, , leg, scan]) => [leg.tradeId, leg.side, scan])
+      ).toEqual([
+        ["dvp_ledger_new", "a", null],
+        ["dvp_ledger_new", "b", null],
+      ]);
+      // History is read back no further than the trade's own creation.
+      const row = await getDb(env)
+        .prepare("SELECT created_at FROM dvp_trades WHERE id = ?")
+        .bind("dvp_ledger_new")
+        .first<{ created_at: string }>();
+      expect(syncDvpLegTransfers.mock.calls[0]?.[2]).toMatchObject({
+        createdAt: row?.created_at,
+      });
+    });
+
+    it("leaves legs read a moment ago alone while nothing about the trade changed", async () => {
+      await quiet("dvp_ledger_quiet");
+      await scanned("dvp_ledger_quiet", new Date().toISOString());
+
+      await reconcileDvpTrades(env);
+
+      expect(syncDvpLegTransfers).not.toHaveBeenCalled();
+    });
+
+    it("reads again once the escrow balance moved, however recent the last read", async () => {
+      await quiet("dvp_ledger_moved");
+      await scanned("dvp_ledger_moved", new Date().toISOString());
+      readDvpTradeObservation.mockResolvedValue(observation({ legA: leg(500n) }));
+
+      await reconcileDvpTrades(env);
+
+      expect(syncDvpLegTransfers).toHaveBeenCalledTimes(2);
+    });
+
+    // A deposit and a reclaim between two sweeps leave the balance unchanged.
+    it("reads again when the last complete read is stale or never finished", async () => {
+      await quiet("dvp_ledger_stale");
+      await scanned("dvp_ledger_stale", new Date(Date.now() - 6 * 60_000).toISOString());
+      await quiet("dvp_ledger_unfinished");
+      await scanned("dvp_ledger_unfinished", null);
+
+      await reconcileDvpTrades(env);
+
+      expect(syncDvpLegTransfers).toHaveBeenCalledTimes(4);
+    });
+
+    it("still records the observation when the transfer read fails", async () => {
+      await seedTrade("dvp_ledger_down", "created");
+      syncDvpLegTransfers.mockRejectedValue(new Error("429 Too Many Requests"));
+      readDvpTradeObservation.mockResolvedValue(
+        observation({ legA: leg(1000n), legB: leg(2000n) })
+      );
+
+      await reconcileDvpTrades(env);
+
+      await expect(statusOf("dvp_ledger_down")).resolves.toMatchObject({ status: "funded" });
+    });
   });
 
   // The program judges expiry by its own Clock. A cluster clock already past

@@ -11,11 +11,58 @@
  * `symbolA`/`symbolB` ARE included; they are read off the mint on chain.
  */
 
-import type { DvpLegOutcome, DvpSettlementAvailability } from "@sdp/types";
+import type { DvpLegOutcome, DvpLegTransferKind, DvpSettlementAvailability } from "@sdp/types";
+import type { DvpTradeRow } from "@/db/repositories";
+import type {
+  DvpLegTransfer,
+  DvpLegTransferDirection,
+  DvpTradeLegTransfers,
+} from "@/db/repositories/dvp-leg-transfer.repository";
 import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
 import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
+import { deriveDvpLegTransferKinds } from "@/services/dvp/leg-transfer-kind";
 import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import type { DvpActionWallet } from "./action-wallets";
+
+/** One token movement in or out of a leg's escrow, as read off the chain. */
+export interface DvpLegTransferResponse {
+  signature: string;
+  direction: DvpLegTransferDirection;
+  /** What the movement was, as far as the trade can tell. */
+  kind: DvpLegTransferKind;
+  /** Base units moved, always positive. */
+  amount: string;
+  slot: string;
+  /** When the block was produced, or null when the cluster recorded no time. */
+  blockTime: string | null;
+  feePayer: string;
+}
+
+/**
+ * A leg's transfers, oldest first, each named. The escrow's history is public
+ * on chain, so the trade's organization and a party see the same list.
+ *
+ * @param trade - The trade's status and closing transaction, which name each outflow.
+ * @param transfers - The leg's recorded transfers.
+ * @returns The wire shape.
+ */
+export function toDvpLegTransfersResponse(
+  trade: Pick<DvpTradeRow, "status" | "closeSignature">,
+  transfers: readonly DvpLegTransfer[]
+): DvpLegTransferResponse[] {
+  return deriveDvpLegTransferKinds(trade, transfers).map(({ transfer, kind }) => ({
+    signature: transfer.signature,
+    direction: transfer.direction,
+    kind,
+    amount: transfer.amount,
+    slot: transfer.slot,
+    blockTime:
+      transfer.blockTime === null
+        ? null
+        : new Date(Number(transfer.blockTime) * 1000).toISOString(),
+    feePayer: transfer.feePayer,
+  }));
+}
 
 /** One party of the trade, as a party who is not the author may see it. */
 interface DvpInboundPartyResponse {
@@ -47,6 +94,8 @@ interface DvpInboundLegResponse {
   /** Null when the reconciler has not looked yet, which is not the same as thawed. */
   frozen: boolean | null;
   outcome: DvpLegOutcome;
+  /** Every token movement in and out of the escrow the reconciler has read. */
+  transfers: DvpLegTransferResponse[];
 }
 
 export interface DvpInboundTradeResponse {
@@ -98,12 +147,14 @@ function inboundParty(
  * @param callerAddresses - The caller's custody wallets (address → wallet identity).
  * @param mintImages - Each mint's issued-token image resolved for the CALLER's
  *   organization, so the creator's issued token never lends it artwork.
+ * @param transfers - The trade's recorded escrow transfers, by leg.
  * @returns The wire shape a party viewer receives.
  */
 export function toDvpInboundResponse(
   inbound: DvpInboundTrade,
   callerAddresses: ReadonlyMap<string, DvpCallerWallet>,
   mintImages: ReadonlyMap<string, string | null>,
+  transfers: DvpTradeLegTransfers,
   actionWallets?: ReadonlyMap<string, DvpActionWallet>
 ): DvpInboundTradeResponse {
   const { trade, side, party } = inbound;
@@ -131,7 +182,8 @@ export function toDvpInboundResponse(
         settlementDestination: trade.userASettlementDestination,
         observedAmount: trade.escrowAAmount,
         frozen: trade.escrowAFrozen,
-        outcome: deriveDvpLegOutcome(trade, "a"),
+        outcome: deriveDvpLegOutcome(trade, "a", transfers.a),
+        transfers: toDvpLegTransfersResponse(trade, transfers.a),
       },
       b: {
         party: inboundParty(trade.userB, callerAddresses, actionWallets),
@@ -146,7 +198,8 @@ export function toDvpInboundResponse(
         settlementDestination: trade.userBSettlementDestination,
         observedAmount: trade.escrowBAmount,
         frozen: trade.escrowBFrozen,
-        outcome: deriveDvpLegOutcome(trade, "b"),
+        outcome: deriveDvpLegOutcome(trade, "b", transfers.b),
+        transfers: toDvpLegTransfersResponse(trade, transfers.b),
       },
     },
     expiryTimestamp: trade.expiryTimestamp,

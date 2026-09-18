@@ -13,6 +13,10 @@ import {
   createPostgresDvpLegFundingClaimRepository,
   type DvpLegFundingClaim,
 } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import {
+  createPostgresDvpLegTransferRepository,
+  type DvpTradeLegTransfers,
+} from "@/db/repositories/dvp-leg-transfer.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -52,7 +56,11 @@ import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { resolveCloseAction, resolveLegAction } from "./action-context";
 import { type DvpActionWallet, readDvpActionWallets } from "./action-wallets";
-import { toDvpInboundResponse } from "./inbound-response";
+import {
+  type DvpLegTransferResponse,
+  toDvpInboundResponse,
+  toDvpLegTransfersResponse,
+} from "./inbound-response";
 import { assertJudgedDvpCustodyWallet } from "./policy";
 import {
   type createDvpTradeSchema,
@@ -193,7 +201,12 @@ function fundingSignatureFor(
  * transfer-hook mint the refund can revert settlement), and null is "not
  * checked", not zero.
  */
-function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | null) {
+function legResponse(
+  leg: LegInput,
+  party: PartyRef,
+  fundingSignature: string | null,
+  transfers: DvpLegTransferResponse[]
+) {
   const funding =
     leg.observedAmount === null
       ? null
@@ -228,6 +241,8 @@ function legResponse(leg: LegInput, party: PartyRef, fundingSignature: string | 
     funding,
     /** The transfer this organization sent into the escrow. @see {@link fundingSignatureFor} */
     fundingSignature,
+    /** Every token movement in and out of the escrow, whoever sent it, oldest first, each named. */
+    transfers,
   };
 }
 
@@ -242,6 +257,8 @@ interface TradeReadContext {
   fundingClaims: ReadonlyMap<DvpTradeSide, DvpLegFundingClaim>;
   /** Issued-token image per mint for the requesting org/project; a mint it never issued is absent and reads as null. */
   mintImages: ReadonlyMap<string, string | null>;
+  /** The trade's recorded escrow transfers, by leg. */
+  legTransfers: DvpTradeLegTransfers;
 }
 
 /**
@@ -273,7 +290,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           name: row.nameA,
           imageUrl: mintAImage === undefined ? null : mintAImage,
           frozen: row.escrowAFrozen,
-          outcome: deriveDvpLegOutcome(row, "a"),
+          outcome: deriveDvpLegOutcome(row, "a", context.legTransfers.a),
         },
         resolveParty(
           row.userA,
@@ -282,7 +299,8 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           context.counterpartyLabels,
           context.actionWallets
         ),
-        fundingSignatureFor(context.fundingClaims, "a")
+        fundingSignatureFor(context.fundingClaims, "a"),
+        toDvpLegTransfersResponse(row, context.legTransfers.a)
       ),
       b: legResponse(
         {
@@ -297,7 +315,7 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           name: row.nameB,
           imageUrl: mintBImage === undefined ? null : mintBImage,
           frozen: row.escrowBFrozen,
-          outcome: deriveDvpLegOutcome(row, "b"),
+          outcome: deriveDvpLegOutcome(row, "b", context.legTransfers.b),
         },
         resolveParty(
           row.userB,
@@ -306,7 +324,8 @@ function toTradeResponse(row: DvpTradeRow, context: TradeReadContext) {
           context.counterpartyLabels,
           context.actionWallets
         ),
-        fundingSignatureFor(context.fundingClaims, "b")
+        fundingSignatureFor(context.fundingClaims, "b"),
+        toDvpLegTransfersResponse(row, context.legTransfers.b)
       ),
     },
     /** The caller's standing, derived per caller. @see {@link deriveDvpTradeKind} */
@@ -358,6 +377,34 @@ async function readCounterpartyLabels(
     offset: 0,
   });
   return new Map(rows.map((row) => [row.account_id, row.counterparty_display_name]));
+}
+
+/**
+ * The recorded escrow transfers of every trade on the page, in one query. A
+ * trade the ledger holds nothing for reads as two empty lists.
+ */
+async function readLegTransfers(
+  env: Env,
+  tradeIds: readonly string[]
+): Promise<Map<string, DvpTradeLegTransfers>> {
+  return createPostgresDvpLegTransferRepository(getDb(env)).listForTrades(tradeIds);
+}
+
+/** One trade's entry in a page's ledger read, which answers for every id it was asked. */
+function legTransfersFor(
+  legTransfers: ReadonlyMap<string, DvpTradeLegTransfers>,
+  tradeId: string
+): DvpTradeLegTransfers {
+  const transfers = legTransfers.get(tradeId);
+  if (transfers === undefined) {
+    throw new Error(`transfer ledger read did not answer for trade ${tradeId}`);
+  }
+  return transfers;
+}
+
+/** One trade's recorded escrow transfers, by leg. */
+async function readTradeLegTransfers(env: Env, tradeId: string): Promise<DvpTradeLegTransfers> {
+  return legTransfersFor(await readLegTransfers(env, [tradeId]), tradeId);
 }
 
 /**
@@ -479,6 +526,8 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
         counterpartyLabels,
         fundingClaims: new Map<DvpTradeSide, DvpLegFundingClaim>(),
         mintImages,
+        // Nothing has been read off a trade this request just created.
+        legTransfers: { a: [], b: [] },
       }),
     },
     201
@@ -694,12 +743,18 @@ export const listInboundTrades = async (c: AppContext) => {
   // Once for the page, scoped to the CALLER's organization like every other
   // read here: the party sees its own issued tokens' artwork, never the
   // creating org's.
-  const mintImages = await readMintImages(
-    c.env,
-    auth.organizationId,
-    projectId,
-    inbound.trades.flatMap((entry) => [entry.trade.mintA, entry.trade.mintB])
-  );
+  const [mintImages, legTransfers] = await Promise.all([
+    readMintImages(
+      c.env,
+      auth.organizationId,
+      projectId,
+      inbound.trades.flatMap((entry) => [entry.trade.mintA, entry.trade.mintB])
+    ),
+    readLegTransfers(
+      c.env,
+      inbound.trades.map((entry) => entry.trade.id)
+    ),
+  ]);
 
   const actionWallets = await readDvpActionWallets(
     c.env,
@@ -708,8 +763,14 @@ export const listInboundTrades = async (c: AppContext) => {
     inbound.callerAddresses
   );
   return success(c, {
-    trades: inbound.trades.map((trade) =>
-      toDvpInboundResponse(trade, inbound.callerAddresses, mintImages, actionWallets)
+    trades: inbound.trades.map((entry) =>
+      toDvpInboundResponse(
+        entry,
+        inbound.callerAddresses,
+        mintImages,
+        legTransfersFor(legTransfers, entry.trade.id),
+        actionWallets
+      )
     ),
   });
 };
@@ -761,8 +822,8 @@ export const listTrades = async (c: AppContext) => {
   );
 
   // Resolved once for the page; claims stay index-aligned with the trades.
-  const [callerAddresses, counterpartyLabels, fundingClaimsByTrade, mintImages] = await Promise.all(
-    [
+  const [callerAddresses, counterpartyLabels, fundingClaimsByTrade, mintImages, legTransfers] =
+    await Promise.all([
       callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
       readCounterpartyLabels(c.env, auth.organizationId, projectId, trades),
       Promise.all(trades.map((trade) => readFundingClaims(c.env, trade.id))),
@@ -772,8 +833,11 @@ export const listTrades = async (c: AppContext) => {
         projectId,
         trades.flatMap((trade) => [trade.mintA, trade.mintB])
       ),
-    ]
-  );
+      readLegTransfers(
+        c.env,
+        trades.map((trade) => trade.id)
+      ),
+    ]);
   return success(c, {
     trades: trades.map((trade, index) =>
       toTradeResponse(trade, {
@@ -781,6 +845,7 @@ export const listTrades = async (c: AppContext) => {
         counterpartyLabels,
         fundingClaims: fundingClaimsByTrade[index],
         mintImages,
+        legTransfers: legTransfersFor(legTransfers, trade.id),
       })
     ),
   });
@@ -813,12 +878,14 @@ export const getTrade = async (c: AppContext) => {
   // every few seconds, closed ones once a minute for late deposits.
   const observed = await observeDvpTradeIfStale(c.env, trade);
 
-  const [callerAddresses, counterpartyLabels, fundingClaims, mintImages] = await Promise.all([
-    callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
-    readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
-    readFundingClaims(c.env, observed.id),
-    readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
-  ]);
+  const [callerAddresses, counterpartyLabels, fundingClaims, mintImages, legTransfers] =
+    await Promise.all([
+      callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
+      readCounterpartyLabels(c.env, auth.organizationId, projectId, [observed]),
+      readFundingClaims(c.env, observed.id),
+      readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
+      readTradeLegTransfers(c.env, observed.id),
+    ]);
   const actionWallets = await readDvpActionWallets(
     c.env,
     { organizationId: auth.organizationId, projectId, auth },
@@ -833,6 +900,7 @@ export const getTrade = async (c: AppContext) => {
         counterpartyLabels,
         fundingClaims,
         mintImages,
+        legTransfers,
       }),
     },
   });
@@ -903,7 +971,7 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
   // claim-row RLS scopes them to the funding org. The mint images resolve
   // against the CALLER's organization too, so the creator's issued token never
   // lends its artwork across the tenant boundary.
-  const [callerAddresses, fundingClaims, mintImages] = await Promise.all([
+  const [callerAddresses, fundingClaims, mintImages, legTransfers] = await Promise.all([
     callerPartyAddresses(c.env, {
       organizationId: auth.organizationId,
       projectId,
@@ -911,6 +979,7 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
     }),
     readFundingClaims(c.env, observed.id),
     readMintImages(c.env, auth.organizationId, projectId, [observed.mintA, observed.mintB]),
+    readTradeLegTransfers(c.env, observed.id),
   ]);
 
   const actionWallets = await readDvpActionWallets(
@@ -927,6 +996,7 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
         counterpartyLabels: new Map<string, string>(),
         fundingClaims,
         mintImages,
+        legTransfers,
       }),
       // Theirs, not ours: a party gets the trade without the creator's fields.
       refString: null,

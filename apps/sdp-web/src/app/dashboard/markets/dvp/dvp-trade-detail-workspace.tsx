@@ -2,6 +2,8 @@
 
 import type { DvpLegOutcome, DvpTradeSide, SolanaCluster } from "@sdp/types";
 import {
+  ArrowDownLeftIcon,
+  ArrowUpRightIcon,
   CheckIcon,
   ChevronRightIcon,
   CircleCheckIcon,
@@ -38,11 +40,12 @@ import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "../../activity-format-utils";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
-import { truncateMiddle } from "../truncate-middle";
 import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
+  type DvpLegTransfer,
+  type DvpLegTransferKind,
   type DvpPartyRef,
   type DvpTrade,
   type DvpTradeKind,
@@ -54,6 +57,7 @@ import {
   isDvpTradeClosed,
   isDvpTradeOpen,
   legFundingRatio,
+  legTransfers,
   overFundedLegs,
 } from "./dvp-trade";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
@@ -110,10 +114,6 @@ function CopyableAddress({
       <span className="sr-only">{label}</span>
     </button>
   );
-}
-
-function shortenSignature(signature: string): string {
-  return truncateMiddle(signature, 8, 8);
 }
 
 /**
@@ -327,6 +327,97 @@ function LegFooterFrame({
   );
 }
 
+/** Each movement's label, by what the trade can tell it was. */
+const TRANSFER_KIND_KEYS = {
+  deposit: "DashboardMarkets.dvp.transferDeposit",
+  reclaim: "DashboardMarkets.dvp.transferReclaim",
+  delivery: "DashboardMarkets.dvp.transferDelivery",
+  refund: "DashboardMarkets.dvp.transferRefund",
+  recovery: "DashboardMarkets.dvp.transferRecovery",
+  withdrawal: "DashboardMarkets.dvp.transferWithdrawal",
+} as const satisfies Record<DvpLegTransferKind, MessageKey>;
+
+/** One movement: what it was, how much, when, and its transaction. */
+function LegTransferRow({
+  cluster,
+  leg,
+  transfer,
+}: {
+  cluster: SolanaCluster;
+  leg: DvpTradeLeg;
+  transfer: DvpLegTransfer;
+}) {
+  const t = useTranslations();
+  const DirectionIcon = transfer.direction === "in" ? ArrowDownLeftIcon : ArrowUpRightIcon;
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-1 text-xs">
+      {/* What and how much wrap as two whole units on a phone, never mid-amount,
+          and the time keeps its own column. */}
+      <span className="flex flex-wrap items-center gap-x-3">
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-primary">
+          <DirectionIcon aria-hidden className="h-3 w-3 shrink-0 text-tertiary" />
+          {t(TRANSFER_KIND_KEYS[transfer.kind])}
+        </span>
+        <span className="whitespace-nowrap text-secondary tabular-nums">
+          {formatLegAmount(transfer.amount, leg.decimals)}
+          {leg.symbol ? ` ${leg.symbol}` : ""}
+        </span>
+      </span>
+      <span className="inline-flex items-center gap-1.5 text-tertiary tabular-nums">
+        {transfer.blockTime === null ? null : (
+          <span suppressHydrationWarning>{formatTimestamp(transfer.blockTime, t)}</span>
+        )}
+        <a
+          aria-label={t("DashboardMarkets.dvp.viewTransaction")}
+          className="text-secondary hover:text-primary"
+          href={explorerTxUrl(transfer.signature, cluster)}
+          rel="noreferrer noopener"
+          target="_blank"
+        >
+          <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
+        </a>
+      </span>
+    </li>
+  );
+}
+
+/**
+ * Every movement in and out of the escrow, oldest first: each deposit, whoever
+ * sent it, and what a reclaim, the settlement or the cancellation took out.
+ */
+function LegTransferList({
+  cluster,
+  leg,
+  transfers,
+}: {
+  cluster: SolanaCluster;
+  leg: DvpTradeLeg;
+  transfers: readonly DvpLegTransfer[];
+}) {
+  const t = useTranslations();
+  const [visibleCount, setVisibleCount] = useState(5);
+  const earlierCount = Math.max(0, transfers.length - visibleCount);
+  return (
+    <div className="space-y-2">
+      {earlierCount > 0 ? (
+        <Button variant="ghost" size="sm" onClick={() => setVisibleCount((count) => count + 5)}>
+          {t("DashboardMarkets.dvp.showEarlierTransfers", { count: earlierCount })}
+        </Button>
+      ) : null}
+      <ul className="flex flex-col">
+        {transfers.slice(-visibleCount).map((transfer) => (
+          <LegTransferRow
+            cluster={cluster}
+            key={transfer.signature}
+            leg={leg}
+            transfer={transfer}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function LegFundingFooter({
   cluster,
   leg,
@@ -340,6 +431,11 @@ function LegFundingFooter({
   reclaim: ReactNode | undefined;
 }) {
   const t = useTranslations();
+  const transfers = legTransfers(leg);
+  const history =
+    transfers !== null && transfers.length > 0 ? (
+      <LegTransferList cluster={cluster} leg={leg} transfers={transfers} />
+    ) : null;
 
   if (receiving) {
     return (
@@ -360,30 +456,15 @@ function LegFundingFooter({
             <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
           </a>
         </span>
+        {history}
       </LegFooterFrame>
     );
   }
 
-  if (leg.fundingSignature) {
+  if (history !== null) {
     return (
-      <LegFooterFrame caption={t("DashboardMarkets.dvp.txFundingSent")} trailing={reclaim}>
-        <span className="inline-flex items-center gap-1.5">
-          <CopyableAddress
-            address={leg.fundingSignature}
-            className="px-0 hover:bg-transparent"
-            display={shortenSignature(leg.fundingSignature)}
-            label={t("DashboardMarkets.dvp.txFundingSent")}
-          />
-          <a
-            aria-label={t("DashboardMarkets.dvp.txFundingSent")}
-            className="text-secondary hover:text-primary"
-            href={explorerTxUrl(leg.fundingSignature, cluster)}
-            rel="noreferrer noopener"
-            target="_blank"
-          >
-            <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
-          </a>
-        </span>
+      <LegFooterFrame caption={t("DashboardMarkets.dvp.transfersLabel")} trailing={reclaim}>
+        {history}
       </LegFooterFrame>
     );
   }

@@ -97,9 +97,13 @@ export interface DvpTradeRow {
   // Last observed escrow state. Null until the reconciler has looked.
   escrowAAmount: string | null;
   escrowBAmount: string | null;
-  /** Highest observed escrow balance while the trade was open. */
+  /**
+   * Highest observed escrow balance while the trade was open. Kept, but no
+   * longer decides `reclaimed`: a high-water mark cannot tell a refunded reclaim
+   * from one that was not, so the leg outcome reads the transfer ledger instead.
+   */
   escrowAPeakAmount: string | null;
-  /** Highest observed escrow balance while the trade was open. */
+  /** Highest observed escrow balance while the trade was open. @see escrowAPeakAmount */
   escrowBPeakAmount: string | null;
   escrowAFrozen: boolean | null;
   escrowBFrozen: boolean | null;

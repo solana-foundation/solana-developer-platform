@@ -11,10 +11,13 @@
  * that lists the fields it expects would pass straight through that.
  */
 
+import { address, signature } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
+import type { DvpTradeLegTransfers } from "@/db/repositories/dvp-leg-transfer.repository";
+import { dvpInboundTradeSchema } from "@/openapi/schemas/dvp";
 import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
-import { toDvpInboundResponse } from "./inbound-response";
+import { toDvpInboundResponse, toDvpLegTransfersResponse } from "./inbound-response";
 
 const SECRET_REF = "internal-desk-ref-4417";
 const SECRET_ORG = "org_the_agent_desk";
@@ -33,6 +36,9 @@ const CALLER_ADDRESSES = new Map<string, DvpCallerWallet>([
 
 /** No mint is issued by the viewer's organization, so every image resolves null. */
 const NO_MINT_IMAGES = new Map<string, string | null>();
+
+/** Nothing read off either escrow yet. */
+const NO_TRANSFERS: DvpTradeLegTransfers = { a: [], b: [] };
 
 function inbound(): DvpInboundTrade {
   const trade = {
@@ -83,7 +89,12 @@ function inbound(): DvpInboundTrade {
 
 describe("toDvpInboundResponse", () => {
   it("tells the party which leg is theirs and which address matched", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
+    const response = toDvpInboundResponse(
+      inbound(),
+      CALLER_ADDRESSES,
+      NO_MINT_IMAGES,
+      NO_TRANSFERS
+    );
 
     expect(response.yourSide).toBe("b");
     expect(response.yourParty).toBe(USER_B);
@@ -92,7 +103,12 @@ describe("toDvpInboundResponse", () => {
   // The escrow address is the entire integration for a party: without it there
   // is nothing they can act on and discovery is pointless.
   it("gives them the escrow to pay and the amount owed", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
+    const response = toDvpInboundResponse(
+      inbound(),
+      CALLER_ADDRESSES,
+      NO_MINT_IMAGES,
+      NO_TRANSFERS
+    );
 
     expect(response.legs.b.escrow).toBe("6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y");
     expect(response.legs.b.amount).toBe("250000000");
@@ -100,7 +116,12 @@ describe("toDvpInboundResponse", () => {
   });
 
   it("returns the full leg shape with its server-derived outcome", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
+    const response = toDvpInboundResponse(
+      inbound(),
+      CALLER_ADDRESSES,
+      NO_MINT_IMAGES,
+      NO_TRANSFERS
+    );
 
     expect(response.legs.b).toEqual({
       party: {
@@ -120,7 +141,95 @@ describe("toDvpInboundResponse", () => {
       observedAmount: null,
       frozen: false,
       outcome: "awaiting",
+      transfers: [],
     });
+  });
+
+  // PRO-1941. The escrow's history is public on chain, so a party sees the
+  // same transfers the creator does, each leg its own.
+  it("lists each leg's escrow transfers, oldest first, with the block time as an instant", () => {
+    const deposit = {
+      tradeId: "dvp_inbound_1",
+      side: "b" as const,
+      signature: signature(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+      ),
+      direction: "in" as const,
+      amount: "250000000",
+      slot: "420",
+      blockTime: "1789000000",
+      feePayer: address(USER_B),
+      finalized: true,
+      sequence: "1",
+    };
+
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES, {
+      a: [],
+      b: [deposit, { ...deposit, direction: "out", slot: "421", blockTime: null }],
+    });
+
+    expect(response.legs.a.transfers).toEqual([]);
+    expect(response.legs.b.transfers).toEqual([
+      {
+        signature: deposit.signature,
+        direction: "in",
+        kind: "deposit",
+        amount: "250000000",
+        slot: "420",
+        blockTime: "2026-09-10T00:26:40.000Z",
+        feePayer: USER_B,
+      },
+      {
+        signature: deposit.signature,
+        direction: "out",
+        // Out of an open trade's escrow: only a reclaim moves tokens there.
+        kind: "reclaim",
+        amount: "250000000",
+        slot: "421",
+        blockTime: null,
+        feePayer: USER_B,
+      },
+    ]);
+    // The documented shape is the served shape.
+    expect(dvpInboundTradeSchema.parse(response).legs.b.transfers).toHaveLength(2);
+    // The creator's view goes through the same mapping.
+    expect(toDvpLegTransfersResponse(inbound().trade, [deposit])).toEqual([
+      response.legs.b.transfers[0],
+    ]);
+  });
+
+  // PRO-1941. A party reads the same leg state the creator does, from the
+  // same ledger: the peak on the row decides nothing.
+  it("derives each leg's outcome from its own transfers", () => {
+    const entry = inbound();
+    const deposit = {
+      tradeId: entry.trade.id,
+      side: "a" as const,
+      signature: signature(
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+      ),
+      direction: "in" as const,
+      amount: "100000000",
+      slot: "420",
+      blockTime: "1789000000",
+      feePayer: address(USER_A),
+      finalized: true,
+      sequence: "1",
+    };
+    const reclaim = { ...deposit, direction: "out" as const, amount: "60000000", slot: "421" };
+    const shortLeg = { ...entry, trade: { ...entry.trade, escrowAAmount: "40000000" } };
+
+    const reclaimed = toDvpInboundResponse(shortLeg, CALLER_ADDRESSES, NO_MINT_IMAGES, {
+      a: [deposit, reclaim],
+      b: [],
+    });
+    const refunded = toDvpInboundResponse(shortLeg, CALLER_ADDRESSES, NO_MINT_IMAGES, {
+      a: [deposit, reclaim, { ...reclaim, direction: "in", amount: "20000000", slot: "422" }],
+      b: [],
+    });
+
+    expect(reclaimed.legs.a.outcome).toBe("reclaimed");
+    expect(refunded.legs.a.outcome).toBe("partial");
   });
 
   // The image is the CALLER's organization's fact, resolved against its own
@@ -131,14 +240,19 @@ describe("toDvpInboundResponse", () => {
       ["AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE", "https://cdn.example.test/dusd.png"],
       ["ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1", null],
     ]);
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, mintImages);
+    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, mintImages, NO_TRANSFERS);
 
     expect(response.legs.b.imageUrl).toBe("https://cdn.example.test/dusd.png");
     expect(response.legs.a.imageUrl).toBeNull();
   });
 
   it("reads an absent mint as null instead of inventing an image", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
+    const response = toDvpInboundResponse(
+      inbound(),
+      CALLER_ADDRESSES,
+      NO_MINT_IMAGES,
+      NO_TRANSFERS
+    );
 
     expect(response.legs.a.imageUrl).toBeNull();
     expect(response.legs.b.imageUrl).toBeNull();
@@ -147,7 +261,12 @@ describe("toDvpInboundResponse", () => {
   // Everything above is on chain already. A party holding the PDA can decode
   // all of it, so withholding it would protect nothing and break the feature.
   it("passes through the terms, which are public on chain anyway", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
+    const response = toDvpInboundResponse(
+      inbound(),
+      CALLER_ADDRESSES,
+      NO_MINT_IMAGES,
+      NO_TRANSFERS
+    );
 
     expect(response.swapDvp).toBe("BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
     expect(response.legs.a.mint).toBe("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1");
@@ -160,7 +279,12 @@ describe("toDvpInboundResponse", () => {
   // though the property is present. `wallet` carries the CALLER's own custody
   // wallet identity for their side, null for the other.
   it("answers each leg's party as a derived object, wallet from the caller's own wallets", () => {
-    const response = toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES);
+    const response = toDvpInboundResponse(
+      inbound(),
+      CALLER_ADDRESSES,
+      NO_MINT_IMAGES,
+      NO_TRANSFERS
+    );
 
     expect(response.legs.a.party).toEqual({
       address: USER_A,
@@ -181,7 +305,8 @@ describe("toDvpInboundResponse", () => {
     const response = toDvpInboundResponse(
       inbound(),
       new Map<string, DvpCallerWallet>([[USER_B, { id: "cwlt_unnamed", name: null }]]),
-      NO_MINT_IMAGES
+      NO_MINT_IMAGES,
+      NO_TRANSFERS
     );
 
     expect(response.legs.b.party.wallet).toEqual({ id: "cwlt_unnamed", name: null });
@@ -201,7 +326,9 @@ describe("toDvpInboundResponse", () => {
     ["the creating org's custody wallet", SECRET_WALLET],
     ["the idempotency key", SECRET_IDEMPOTENCY],
   ])("does not disclose %s", (_label, secret) => {
-    const json = JSON.stringify(toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES));
+    const json = JSON.stringify(
+      toDvpInboundResponse(inbound(), CALLER_ADDRESSES, NO_MINT_IMAGES, NO_TRANSFERS)
+    );
 
     expect(json).not.toContain(secret);
   });
