@@ -31,6 +31,10 @@ export const listEarnStrategiesQuerySchema = z.object({
   // environment's own cluster — the shelf the caller can act on. Naming the
   // foreign cluster browses its mirrored sub-shelf; rows stay fundable: false.
   cluster: z.enum(SOLANA_CLUSTERS).optional(),
+  // The shelf an ANONYMOUS caller reads (PRO-1998). It has no project, so it
+  // picks: production, the real-money shelf, unless it asks for sandbox. A
+  // tenant caller's shelf is its project's; naming a different one is a 400.
+  environment: z.enum(["sandbox", "production"]).optional(),
 });
 
 // ---------------------------------------------------------------------------

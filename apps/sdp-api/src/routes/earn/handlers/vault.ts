@@ -80,7 +80,7 @@ import type { AppContext } from "../context";
 import {
   earnRuntime,
   getEarnRepository,
-  resolveKeylessEarnEnvironment,
+  requireEarnStrategyForCaller,
   resolveSdpEnvironment,
 } from "../context";
 import {
@@ -138,13 +138,10 @@ export async function createEarnVaultDepositPreview(
   c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const environment = resolveKeylessEarnEnvironment(c);
   const auth = getOptionalAuth(c);
-
-  const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
-  if (!strategy || strategy.environment !== environment) {
-    throw notFound("Earn strategy");
-  }
+  // The row names the shelf: a tenant caller must own it, an anonymous caller
+  // chose it (PRO-1998).
+  const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {
     throw badRequest(
       `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`

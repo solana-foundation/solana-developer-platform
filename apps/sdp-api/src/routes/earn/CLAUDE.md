@@ -623,8 +623,9 @@ organization's own custody wallets.
     from CONFIGURATION: the flag, plus a Kora for that cluster
     (`isFeePaymentConfiguredForCluster`, @sdp/payments): `KORA_RPC_URL` serves
     the `SOLANA_NETWORK` cluster, `KORA_RPC_URL_MAINNET` / `KORA_RPC_URL_DEVNET`
-    the other; there is no built-in default URL. Flipping `SOLANA_NETWORK`
-    re-points the bare trio, so rewire `KORA_RPC_URL` in the same change. The movement's cluster rides `SponsorshipScope.cluster`, so the
+    the other; there is no built-in default URL. The bare trio is legacy: the
+    project's environment picks the cluster, so a deployment wires BOTH suffix
+    trios (PRO-2007) and never relies on `SOLANA_NETWORK` to pick a paymaster. The movement's cluster rides `SponsorshipScope.cluster`, so the
     matching Kora signs, the matching budget network is charged and the fee is
     priced on the matching RPC (`createClusterRpc`). Opening mainnet is wiring
     the mainnet Kora in after its policy is opened and `sbp_mainnet_global`
@@ -1014,8 +1015,10 @@ fork a keyed and anonymous route with duplicate behavior.
   vault routes, programs, and the aggregate feed. These retain the existing
   permission and project boundaries.
 - **Environment:** an authenticated project is authoritative. A keyless call
-  maps the deployment's validated `ENVIRONMENT` directly to the Earn product
-  environment. A request parameter must never select production.
+  has no project, so the caller picks the shelf: `?environment=` on the list
+  (production when omitted) and the named strategy's own `environment` on
+  quotes and builds (`requireEarnStrategyForCaller`, context.ts). The
+  deployment's `ENVIRONMENT` never selects a cluster (PRO-1998).
 - **Anonymous accounting:** catalogue reads use a generous per-IP tier. Quotes
   and builds use a tighter per-IP tier plus an independently configurable RPC
   budget. Structured logs carry the tier, normalized route, and decision.
@@ -1286,8 +1289,8 @@ here. `EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
 each provider is deployed on; withdrawals remain open independently.
 
 **Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
-`SOLANA_MAINNET_RPC_URL`, falling back to the canonical default only when its
-configured `SOLANA_NETWORK` matches the requested cluster, and
+`SOLANA_MAINNET_RPC_URL` (set both on every deployment, PRO-2009; the
+canonical-default fallback for the `SOLANA_NETWORK` cluster is legacy), and
 `assertClusterEndpoint` proves the endpoint by GENESIS HASH before anything is
 built against it (cached per endpoint). One process serves both environments, so
 the old cluster-agnostic read silently built against whichever chain the single
@@ -1420,8 +1423,9 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   callers use the key's (project-derived) environment; dashboard/session
   callers use the membership-verified `x-project-id` project's environment; a
   request with neither fails closed (500), never defaults to sandbox. The
-  keyless-capable Earn handlers are the single exception: only when no tenant
-  has authenticated, they map the validated deployment `ENVIRONMENT`. A
+  keyless-capable Earn handlers are the single exception: with no tenant
+  authenticated, the caller's `?environment=` or the named strategy's row
+  decides (PRO-1998), never the deployment's `ENVIRONMENT`. A
   production-project dashboard session therefore drives provider production.
 - `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
   Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so

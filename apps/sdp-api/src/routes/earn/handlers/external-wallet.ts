@@ -59,11 +59,7 @@ import {
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import type { AppContext } from "../context";
-import {
-  getEarnRepository,
-  resolveKeylessEarnEnvironment,
-  resolveSdpEnvironment,
-} from "../context";
+import { requireEarnStrategyForCaller, resolveSdpEnvironment } from "../context";
 import {
   type earnExternalWalletDepositTransactionSchema,
   earnExternalWalletEarningsQuerySchema,
@@ -631,6 +627,8 @@ type ExternalWalletExitLocator =
 
 interface ResolvedExternalWalletExitBase {
   buildContext: ExternalWalletBuildContext;
+  /** The tenant's environment, or the named strategy's for an anonymous exit. */
+  environment: ReturnType<typeof resolveSdpEnvironment>;
   provider: string;
   vaultAddress: string;
   tokenMint: string;
@@ -652,11 +650,11 @@ type ResolvedExternalWalletExit = ResolvedExternalWalletExitBase &
  */
 async function resolveExternalWalletExit(
   c: AppContext,
-  locator: ExternalWalletExitLocator,
-  environment: ReturnType<typeof resolveSdpEnvironment>
+  locator: ExternalWalletExitLocator
 ): Promise<ResolvedExternalWalletExit> {
   const authenticated = getAuthenticatedEarnRequest(c);
   if (authenticated) {
+    const environment = resolveSdpEnvironment(c);
     if (!("positionId" in locator)) {
       throw badRequest("positionId is required for an authenticated external-wallet exit");
     }
@@ -669,6 +667,7 @@ async function resolveExternalWalletExit(
     if (!position) throw notFound("Earn external-wallet position");
     return {
       buildContext: toExternalWalletBuildContext(authenticated),
+      environment,
       provider: position.provider,
       positionId: position.id,
       strategyId: null,
@@ -686,8 +685,8 @@ async function resolveExternalWalletExit(
       "strategyId and ownerAddress are required for an anonymous external-wallet exit"
     );
   }
-  const strategy = await getEarnRepository(c).getStrategyById(locator.strategyId);
-  if (!strategy || strategy.environment !== environment) throw notFound("Earn strategy");
+  // The row names the shelf; an anonymous caller chose it (PRO-1998).
+  const { strategy, environment } = await requireEarnStrategyForCaller(c, locator.strategyId);
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {
     throw badRequest(`${strategy.provider} does not support external-wallet exits.`);
   }
@@ -696,6 +695,7 @@ async function resolveExternalWalletExit(
   if (!strategy.share_mint) throw internalError(`Earn strategy ${strategy.id} has no share mint`);
   return {
     buildContext: {},
+    environment,
     provider: strategy.provider,
     positionId: null,
     strategyId: strategy.id,
@@ -725,13 +725,10 @@ export async function createEarnExternalWalletDepositTransaction(
   c: ValidatedBodyContext<typeof earnExternalWalletDepositTransactionSchema>
 ) {
   const body: EarnExternalWalletDepositTransactionBody = c.req.valid("json");
-  const environment = resolveKeylessEarnEnvironment(c);
   const authenticated = getAuthenticatedEarnRequest(c);
-
-  const strategy = await getEarnRepository(c).getStrategyById(body.strategyId);
-  if (!strategy || strategy.environment !== environment) {
-    throw notFound("Earn strategy");
-  }
+  // The row names the shelf: a tenant caller must own it, an anonymous caller
+  // chose it (PRO-1998).
+  const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
   const tokenMint = strategy.deposit_mints[0];
   if (!tokenMint) {
     throw internalError(`Earn strategy ${strategy.id} has no deposit mint`);
@@ -889,8 +886,8 @@ export async function createEarnExternalWalletWithdrawalTransaction(
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalTransactionSchema>
 ) {
   const body: EarnExternalWalletWithdrawalTransactionBody = c.req.valid("json");
-  const environment = resolveKeylessEarnEnvironment(c);
-  const target = await resolveExternalWalletExit(c, body, environment);
+  const target = await resolveExternalWalletExit(c, body);
+  const environment = target.environment;
 
   // Same provider-policy exit floor as the custody withdrawal: a non-null
   // `withdrawalSlippage` refuses a floor-less build (caller-fixable 400,
@@ -950,8 +947,8 @@ export async function createEarnExternalWalletWithdrawalPreview(
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalPreviewSchema>
 ) {
   const body: EarnExternalWalletWithdrawalPreviewBody = c.req.valid("json");
-  const environment = resolveKeylessEarnEnvironment(c);
-  const target = await resolveExternalWalletExit(c, body, environment);
+  const target = await resolveExternalWalletExit(c, body);
+  const environment = target.environment;
 
   const deadline = createVaultDeadline();
   const client = resolveVaultWithdrawClient(c.env, target.provider, deadline);

@@ -30,12 +30,14 @@ records the movement before broadcast, and reconciles its final state.
 
 ## Environment selection
 
-An authenticated project determines its own environment. A keyless request
-uses an Earn-only exhaustive mapping from the deployment's validated
-`ENVIRONMENT`: `development` selects sandbox and `production` selects
-production. Unknown deployment modes fail closed. Request input never selects
-production. This keeps catalogue curation and transaction construction on one
-operator-controlled network.
+An authenticated project determines its own environment, and every deployment
+serves both clusters by project. A keyless request has no project, so the
+caller picks the shelf: `GET /v1/earn/strategies?environment=` names it
+(production when omitted), and a quote or build follows the environment of the
+strategy it names. A key that names another environment is refused with 400.
+The deployment's own `ENVIRONMENT` never selects a cluster. This revisits the
+earlier "request input never selects production" rule: an anonymous production
+build moves no funds, and its RPC spend is metered per client address.
 
 ## Contract ownership
 
