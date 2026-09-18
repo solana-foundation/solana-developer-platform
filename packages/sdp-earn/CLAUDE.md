@@ -520,7 +520,12 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
   provider's own sentence is the most useful thing on this path. It picks the
   first NON-BLANK of `error` / `message` / `reason` — the first *present* one
   would let `error: ""` beside a real `message` select the blank and fall back,
-  discarding an explanation the body did carry.
+  discarding an explanation the body did carry. The chosen sentence, and
+  whatever an `errorDetails` normalizer lifts, go through `@sdp/redaction`
+  before they land on the error (PRO-1995): the message is returned to API
+  callers, and the envelope redacts credentials only. `@sdp/redaction` is the
+  package's one dependency besides `@sdp/types`; it is dependency-free, so the
+  hourly cron still loads no chain SDK.
 - **The withdrawal preview takes an OPTIONAL amount** (PRO-1675).
   `EarnPortfolioWithdrawalPreviewInput.amountUsd` may be omitted to ask the
   liquidity question; a provider client must then OMIT the field from its wire
