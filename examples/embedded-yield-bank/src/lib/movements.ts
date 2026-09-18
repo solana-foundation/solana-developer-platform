@@ -227,6 +227,16 @@ function snapshotReflectsTransfers(
   const projectedSavings = projected.savings.balance;
   if (projectedSavings === undefined) return false;
 
+  // A settled batch whose transfers cancel out has no projection left to
+  // preserve. Release the old base even when yield or unrelated wallet
+  // activity has moved the live balances since submission.
+  if (
+    compareDecimals(projected.checking.balance, base.checking.balance) === 0 &&
+    compareDecimals(projectedSavings, baseSavings) === 0
+  ) {
+    return true;
+  }
+
   return (
     hasReachedProjection(
       base.checking.balance,

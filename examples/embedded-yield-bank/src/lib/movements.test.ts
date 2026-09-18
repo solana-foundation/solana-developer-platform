@@ -311,6 +311,13 @@ describe("in-flight transfers", () => {
     expect(
       partitionSettledTransfersBySnapshot(base, base, [deposit, withdrawal])
     ).toEqual({ reflected: [deposit, withdrawal], waiting: [] });
+    expect(
+      partitionSettledTransfersBySnapshot(
+        base,
+        dashboard({ checking: "19.01", savings: "1.02", total: "20.03" }),
+        [deposit, withdrawal]
+      )
+    ).toEqual({ reflected: [deposit, withdrawal], waiting: [] });
   });
 });
 
