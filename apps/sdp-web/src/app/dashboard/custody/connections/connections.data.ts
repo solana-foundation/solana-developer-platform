@@ -110,6 +110,31 @@ export function buildConnectionsSearchParams(
   return query;
 }
 
+/**
+ * The address the table's page can be shared and reloaded at.
+ *
+ * Every other query parameter is carried over: the connections table is one
+ * section of a provider page, and the parameters it does not own are not its to
+ * drop. Page 1 is the absence of the parameter, which is how the footer's own
+ * links spell it, so the canonical URL and a click through the footer agree.
+ */
+export function buildConnectionsPageUrl(
+  pathname: string,
+  searchParams: SearchParams,
+  page: number
+): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchParams)) {
+    if (key === "page" || value === undefined) continue;
+    for (const entry of Array.isArray(value) ? value : [value]) {
+      query.append(key, entry);
+    }
+  }
+  if (page > 1) query.set("page", String(page));
+  const search = query.toString();
+  return search ? `${pathname}?${search}` : pathname;
+}
+
 /** The widest slice the endpoint serves; asking for more is silently clamped there. */
 const CONNECTIONS_FETCH_LIMIT = 50;
 
@@ -140,39 +165,45 @@ async function fetchConnectionsSlice(
 }
 
 /**
+ * One page of the table, or the page the caller should be on instead.
+ *
+ * `out_of_range` is a stale `?page=` — a bookmark, or an inventory that shrank
+ * under one. It names the last page that exists and reads nothing further,
+ * because the answer is a redirect rather than a render: serving the last
+ * page's rows under a URL that still says page 9 leaves the footer and the
+ * address bar disagreeing, and every reload or share of that link pays for the
+ * out-of-range read again.
+ */
+export type ConnectionsPageRead =
+  | { status: "ok"; result: ConnectionsPageResult; filters: ConnectionsFilters }
+  | { status: "out_of_range"; page: number };
+
+/**
  * The rows for one page of the table.
  *
- * One request for the page the user is looking at, never the whole inventory:
+ * One request, for the page the user is looking at, never the whole inventory:
  * because the endpoint narrows to the provider itself, its `total` is this
  * provider's total and the rows are this provider's page, at any project size.
- *
- * A `?page=` past the end (a stale URL, or an inventory that shrank under the
- * bookmark) costs one more request and lands on the last page that exists,
- * rather than rendering the empty state over a project that still has
- * connections. The page it settled on is returned so the footer, the URL and
- * the rows agree.
  */
 export async function fetchConnectionsPage(
   request: SdpApiClient["request"],
   provider: CustodyProvider,
   filters: ConnectionsFilters
-): Promise<{ result: ConnectionsPageResult; filters: ConnectionsFilters }> {
-  const read = (page: number) =>
-    fetchConnectionsSlice(request, {
-      provider,
-      limit: CONNECTIONS_PAGE_SIZE,
-      offset: (page - 1) * CONNECTIONS_PAGE_SIZE,
-    });
+): Promise<ConnectionsPageRead> {
+  const result = await fetchConnectionsSlice(request, {
+    provider,
+    limit: CONNECTIONS_PAGE_SIZE,
+    offset: (filters.page - 1) * CONNECTIONS_PAGE_SIZE,
+  });
 
-  const result = await read(filters.page);
   // Rows on the page settle it whatever the total says, and a page within range
   // is served as it came back — an empty page 1 is the empty state, not a stale
-  // bookmark, and re-reading it would only ask the same question twice.
+  // bookmark, and redirecting it would only ask the same question twice.
   const lastPage = Math.max(1, Math.ceil(result.pagination.total / CONNECTIONS_PAGE_SIZE));
   if (result.connections.length > 0 || filters.page <= lastPage) {
-    return { result, filters };
+    return { status: "ok", result, filters };
   }
-  return { result: await read(lastPage), filters: { ...filters, page: lastPage } };
+  return { status: "out_of_range", page: lastPage };
 }
 
 /**

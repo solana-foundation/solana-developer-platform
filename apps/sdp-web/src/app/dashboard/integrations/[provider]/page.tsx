@@ -3,6 +3,7 @@ import type { CustodyConfigSummary, OrganizationRpcProvider } from "@sdp/types";
 import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import {
+  buildConnectionsPageUrl,
   type ConnectionsProjectSummary,
   fetchConnectionsPage,
   fetchProviderConnections,
@@ -38,7 +39,7 @@ import {
   findProvidersWithOwnKey,
   findServingProvider,
 } from "../rpc-serving-provider.server";
-import { IntegrationDetailView } from "./integration-detail-view";
+import { type CustodyConnectionsContext, IntegrationDetailView } from "./integration-detail-view";
 
 async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
   const res = await request("/v1/wallets/configs");
@@ -188,15 +189,20 @@ async function getCustodyConnectionsSummary(
  * Only the page read is load-bearing. The wallet read and the project summary
  * each degrade on their own: a connection list without wallet columns, or
  * without the banners above it, is still worth rendering, and both say so.
+ *
+ * `out_of_range` is not a context to render but an address to send the user to,
+ * so it is kept distinct from one — the caller redirects on it.
  */
 async function getCustodyConnections(
   request: SdpApiClient["request"],
   provider: KnownCustodyProvider,
   canManage: boolean,
   searchParams: Record<string, string | string[] | undefined>
-) {
+): Promise<
+  { kind: "context"; context: CustodyConnectionsContext } | { kind: "out_of_range"; page: number }
+> {
   if (!canManage) {
-    return "restricted" as const;
+    return { kind: "context", context: "restricted" };
   }
   try {
     const [page, summary, wallets] = await Promise.all([
@@ -207,15 +213,21 @@ async function getCustodyConnections(
         () => ({ ok: false as const })
       ),
     ]);
+    if (page.status === "out_of_range") {
+      return { kind: "out_of_range", page: page.page };
+    }
     return {
-      result: page.result,
-      filters: page.filters,
-      summary,
-      walletsByConnection: wallets.ok ? Object.fromEntries(wallets.byConnection) : {},
-      walletsUnavailable: !wallets.ok,
+      kind: "context",
+      context: {
+        result: page.result,
+        filters: page.filters,
+        summary,
+        walletsByConnection: wallets.ok ? Object.fromEntries(wallets.byConnection) : {},
+        walletsUnavailable: !wallets.ok,
+      },
     };
   } catch {
-    return null;
+    return { kind: "context", context: null };
   }
 }
 
@@ -350,8 +362,9 @@ export default async function IntegrationDetailPage({
 
   const connectionsProvider = resolveConnectionsProvider(provider, custodyEnabled);
   const custodyConnectionsApply = connectionsProvider !== null && (await privyByok());
+  const resolvedSearchParams = (await searchParams) ?? {};
 
-  const [availability, connectedProviders, credentialModeState, byokState, custodyConnections] =
+  const [availability, connectedProviders, credentialModeState, byokState, connectionsRead] =
     await Promise.all([
       fetchProviderAvailability(projectClient.request, organizationId),
       custodyEnabled
@@ -364,10 +377,24 @@ export default async function IntegrationDetailPage({
             projectClient.request,
             connectionsProvider,
             dashboardAccess.capabilities.canManageCustody,
-            (await searchParams) ?? {}
+            resolvedSearchParams
           )
         : Promise.resolve(null),
     ]);
+
+  // A `?page=` past the end is answered with the address that page lives at,
+  // not with its rows under the stale URL: served in place, the footer read
+  // page 2 while the address bar still said page 9, and every reload or share
+  // of that link paid for the out-of-range read and the correction again.
+  if (connectionsRead?.kind === "out_of_range") {
+    redirect(
+      buildConnectionsPageUrl(
+        `/dashboard/integrations/${provider}`,
+        resolvedSearchParams,
+        connectionsRead.page
+      )
+    );
+  }
 
   const byok = resolveByokProps(byokState);
   const detail = resolveDetail({
@@ -385,7 +412,7 @@ export default async function IntegrationDetailPage({
   return (
     <IntegrationDetailView
       detail={detail}
-      custodyConnections={custodyConnections}
+      custodyConnections={connectionsRead?.context ?? null}
       canManageCustody={dashboardAccess.capabilities.canManageCustody}
       rpc={
         detail.family === "rpc"

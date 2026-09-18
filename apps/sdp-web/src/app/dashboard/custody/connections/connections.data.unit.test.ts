@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildConnectionsPageUrl,
   buildConnectionsSearchParams,
   ConnectionsRequestError,
   type CustodyConnectionListItem,
@@ -51,6 +52,27 @@ describe("buildConnectionsSearchParams", () => {
   it("omits the default page and keeps overrides", () => {
     expect(buildConnectionsSearchParams({ page: 2 }, { page: 1 }).toString()).toBe("");
     expect(buildConnectionsSearchParams({ page: 1 }, { page: 4 }).toString()).toBe("page=4");
+  });
+});
+
+describe("buildConnectionsPageUrl", () => {
+  const path = "/dashboard/integrations/privy";
+
+  it("replaces a stale page and spells page 1 the way the footer does", () => {
+    expect(buildConnectionsPageUrl(path, { page: "9" }, 2)).toBe(`${path}?page=2`);
+    expect(buildConnectionsPageUrl(path, { page: "9" }, 1)).toBe(path);
+  });
+
+  // The table is one section of the page; the parameters it does not own are
+  // not its to drop on the way to a corrected URL.
+  it("carries every other parameter over, repeats included", () => {
+    expect(buildConnectionsPageUrl(path, { page: "9", tab: "keys", ref: ["a", "b"] }, 3)).toBe(
+      `${path}?tab=keys&ref=a&ref=b&page=3`
+    );
+  });
+
+  it("drops parameters that were never set", () => {
+    expect(buildConnectionsPageUrl(path, { page: undefined, tab: undefined }, 1)).toBe(path);
   });
 });
 
@@ -178,14 +200,18 @@ describe("fetchConnectionsPage", () => {
     const rows = Array.from({ length: 5 }, (_, index) => connection(`conn-${index}`));
     const request = vi.fn(async () => page(rows, 20, 25));
 
-    const { result, filters } = await fetchConnectionsPage(request, "privy", { page: 2 });
+    const read = await fetchConnectionsPage(request, "privy", { page: 2 });
 
     expect(request).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith(
       "/internal/dashboard/custody/connections?limit=20&offset=20&provider=privy"
     );
-    expect(filters.page).toBe(2);
-    expect(result.pagination).toEqual({ limit: 20, offset: 20, total: 25 });
+    expect(read).toMatchObject({ status: "ok", filters: { page: 2 } });
+    expect(read.status === "ok" && read.result.pagination).toEqual({
+      limit: 20,
+      offset: 20,
+      total: 25,
+    });
   });
 
   // The whole point of the provider parameter: page 11 of a project whose
@@ -194,38 +220,45 @@ describe("fetchConnectionsPage", () => {
   it("reaches a deep page without reading everything before it", async () => {
     const request = vi.fn(async () => page([connection("conn-deep")], 200, 240));
 
-    const { result } = await fetchConnectionsPage(request, "privy", { page: 11 });
+    const read = await fetchConnectionsPage(request, "privy", { page: 11 });
 
     expect(request).toHaveBeenCalledTimes(1);
-    expect(result.connections.map((row) => row.id)).toEqual(["conn-deep"]);
+    expect(read.status === "ok" && read.result.connections.map((row) => row.id)).toEqual([
+      "conn-deep",
+    ]);
   });
 
-  it("lands on the last page that exists when the bookmark is stale", async () => {
-    const rows = Array.from({ length: 5 }, (_, index) => connection(`conn-${index}`));
-    const request = vi
-      .fn()
-      .mockResolvedValueOnce(page([], 160, 25))
-      .mockResolvedValueOnce(page(rows, 20, 25));
+  // Reading the last page here would render rows the caller has to throw away:
+  // the answer is the address they live at, which only the caller can redirect
+  // to.
+  it("names the last page that exists without reading it", async () => {
+    const request = vi.fn(async () => page([], 160, 25));
 
-    const { result, filters } = await fetchConnectionsPage(request, "privy", { page: 9 });
+    const read = await fetchConnectionsPage(request, "privy", { page: 9 });
 
-    expect(filters.page).toBe(2);
-    expect(result.connections).toHaveLength(5);
-    expect(request).toHaveBeenLastCalledWith(
-      "/internal/dashboard/custody/connections?limit=20&offset=20&provider=privy"
-    );
+    expect(read).toEqual({ status: "out_of_range", page: 2 });
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
-  // An empty page 1 is the empty state, not a stale URL — re-reading it would
+  it("sends an emptied project back to page 1", async () => {
+    const request = vi.fn(async () => page([], 80, 0));
+
+    await expect(fetchConnectionsPage(request, "privy", { page: 5 })).resolves.toEqual({
+      status: "out_of_range",
+      page: 1,
+    });
+  });
+
+  // An empty page 1 is the empty state, not a stale URL — redirecting it would
   // only ask the same question twice.
-  it("leaves an empty project on page 1 after one request", async () => {
+  it("leaves an empty project on page 1", async () => {
     const request = vi.fn(async () => page([], 0, 0));
 
-    const { result, filters } = await fetchConnectionsPage(request, "privy", { page: 1 });
+    const read = await fetchConnectionsPage(request, "privy", { page: 1 });
 
     expect(request).toHaveBeenCalledTimes(1);
-    expect(filters.page).toBe(1);
-    expect(result.connections).toEqual([]);
+    expect(read).toMatchObject({ status: "ok", filters: { page: 1 } });
+    expect(read.status === "ok" && read.result.connections).toEqual([]);
   });
 
   it("throws a typed error carrying the response status", async () => {
