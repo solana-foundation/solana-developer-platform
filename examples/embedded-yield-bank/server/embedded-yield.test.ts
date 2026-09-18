@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { YieldStrategy } from "../src/types";
-import { assertBuiltFeePayer, deriveWithdrawalFloor } from "./embedded-yield";
+import type { YieldMovement, YieldStrategy } from "../src/types";
+import {
+  assertBuiltFeePayer,
+  deriveWithdrawalFloor,
+  refreshConfirmingMovements,
+} from "./embedded-yield";
 import { SdpApiError } from "./sdp-client";
 
 describe("Embedded Yield orchestration", () => {
@@ -63,7 +67,87 @@ describe("Embedded Yield orchestration", () => {
       "unexpected fee payer"
     );
   });
+
+  it("refreshes only movements still waiting for confirmation", async () => {
+    const submitted = movement("submitted", "submitted");
+    const confirmed = movement("confirmed", "confirmed");
+    const getMovement = vi
+      .fn()
+      .mockResolvedValue({ ...submitted, status: "confirmed" });
+
+    await expect(
+      refreshConfirmingMovements(
+        { getMovement },
+        [submitted, confirmed],
+        [submitted.movementId]
+      )
+    ).resolves.toEqual({
+      movements: [{ ...submitted, status: "confirmed" }, confirmed],
+      reachedConfirmation: true,
+    });
+    expect(getMovement).toHaveBeenCalledTimes(1);
+    expect(getMovement).toHaveBeenCalledWith(submitted.movementId);
+  });
+
+  it("keeps the durable status when a confirmation read is unavailable", async () => {
+    const submitted = movement("submitted", "submitted");
+    const getMovement = vi.fn().mockRejectedValue(new Error("RPC unavailable"));
+
+    await expect(
+      refreshConfirmingMovements(
+        { getMovement },
+        [submitted],
+        [submitted.movementId]
+      )
+    ).resolves.toEqual({
+      movements: [submitted],
+      reachedConfirmation: false,
+    });
+  });
+
+  it("does not detail-read historical movements outside the active watch set", async () => {
+    const historical = movement("submitted", "historical");
+    const active = movement("submitted", "active");
+    const getMovement = vi
+      .fn()
+      .mockResolvedValue({ ...active, status: "confirmed" });
+
+    await expect(
+      refreshConfirmingMovements(
+        { getMovement },
+        [historical, active],
+        [active.movementId]
+      )
+    ).resolves.toEqual({
+      movements: [historical, { ...active, status: "confirmed" }],
+      reachedConfirmation: true,
+    });
+    expect(getMovement).toHaveBeenCalledTimes(1);
+    expect(getMovement).toHaveBeenCalledWith(active.movementId);
+  });
 });
+
+function movement(
+  status: YieldMovement["status"],
+  movementId: string
+): YieldMovement {
+  return {
+    movementId,
+    positionId: "position",
+    provider: "provider",
+    providerReference: "vault",
+    direction: "deposit",
+    status,
+    signature: "signature",
+    amount: "1",
+    denomination: "usdc",
+    tokenMint: "usdc",
+    tokenAmount: "1",
+    failureReason: null,
+    createdAt: "2026-09-18T00:00:00.000Z",
+    settledAt: null,
+  };
+}
 
 function strategy(
   withdrawalSlippage: YieldStrategy["withdrawalSlippage"]

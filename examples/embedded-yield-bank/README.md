@@ -59,16 +59,27 @@ handlers in [`src/app/api`](src/app/api).
   any request body can reach the server-side signer.
 - No secret uses a `NEXT_PUBLIC_` prefix and no secret is serialized into page
   props or API responses.
-- Transfer routes submit promptly. The browser polls the dashboard route every
-  8 seconds while a transfer is settling (30 seconds otherwise), gives up after
-  two minutes, and backs off for exactly the `Retry-After` SDP sends on a 429.
-  This avoids holding a serverless function open while Solana settles.
-- Each refresh costs two SDP calls (positions, movements) and one RPC read:
-  the strategy catalogue is cached server-side for five minutes.
+- Transfer routes submit promptly. The browser polls every second until
+  Solana confirms the transfer, then returns to a 30-second background refresh.
+  It gives up after two minutes and backs off for exactly the `Retry-After` SDP
+  sends on a 429. This avoids holding a serverless function open.
+- Active refreshes are single-flight and silent. A slow RPC read cannot fan out
+  overlapping requests, flash a loading skeleton, or animate the manual refresh
+  control. The transfer dialog closes as soon as SDP accepts the movement while
+  balances and activity update in place.
+- A normal refresh costs two SDP calls (positions, movements) and one RPC read.
+  While a transfer submitted from this browser tab awaits confirmation, one
+  chain-aware detail read makes the UI reflect Solana confirmation immediately.
+  Historical unresolved movements do not restart fast polling. The strategy
+  catalogue is cached server-side for five minutes.
 - While a transfer this browser submitted is pending, the page shows the
-  balances it will produce and keeps the total fixed, then hands back to live
-  data once SDP records settlement. SDP reconciles pending movements once a
-  minute, so "Settling" can show for up to about two minutes.
+  balances it will produce and keeps the total fixed. At `confirmed`, the UI
+  shows `Settled` and keeps that projection until both live account balances
+  fully reflect the transfer. Each transfer has its own two-minute deadline, so
+  one slow movement cannot clear or pause a newer projection. Overlapping
+  deposits and withdrawals reconcile against their combined net effect. SDP
+  continues tracking protocol finalization in the background without holding
+  the customer in a loading state.
 - API responses and outbound SDP reads use `no-store` caching.
 - Submit retries reuse one `Idempotency-Key`.
 - Quote-derived slippage floors and the amount-to-shares conversion use exact
@@ -189,9 +200,10 @@ that Vercel exposes as `VERCEL_PROJECT_PRODUCTION_URL`.
 - Positions in strategies other than the featured one are hidden. Set
   `DEMO_STRATEGY_ID` to the strategy you deposited into if a balance seems to
   be missing.
-- Wait for a submitted transfer to finalize before comparing balances. The
-  dashboard refreshes automatically for up to two minutes, then pauses and
-  prompts for a manual refresh if settlement is still unresolved.
+- Wait for a submitted transfer to show `Settled` before comparing balances.
+  `Settled` begins at Solana confirmation; SDP records protocol finalization in
+  the background. The dashboard refreshes automatically for up to two minutes,
+  then pauses and prompts for a manual refresh if confirmation is unresolved.
 
 ## Validation
 

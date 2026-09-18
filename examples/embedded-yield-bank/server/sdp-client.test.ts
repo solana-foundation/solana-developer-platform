@@ -47,4 +47,22 @@ describe("EmbeddedYieldClient", () => {
     );
     expect(request.body).not.toContain("test-api-key");
   });
+
+  it("reads a movement through the chain-aware detail endpoint", async () => {
+    const movement = {
+      movementId: "movement/with space",
+      status: "confirmed",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ data: { movement } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new EmbeddedYieldClient(config).getMovement(movement.movementId)
+    ).resolves.toEqual(movement);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://127.0.0.1:8787/v1/earn/external-wallet/movements/movement%2Fwith%20space"
+    );
+  });
 });

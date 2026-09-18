@@ -184,6 +184,27 @@ describe("EarnVaultWithdrawModal", () => {
       projectBalance: true,
     });
   });
+
+  it("renders a confirmed withdrawal as complete while finalization continues", async () => {
+    const confirmed = withdrawal("confirmed");
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "withdrawal", withdrawal: confirmed },
+    });
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+
+    expect(await screen.findByText("Withdrawal complete")).toBeTruthy();
+    expect(screen.getByText(/confirmed on Solana and complete in the dashboard/)).toBeTruthy();
+    expect(screen.getByText("Active")).toBeTruthy();
+    expect(document.querySelector(".earn-processing-modal")).toBeNull();
+    expect(document.querySelector('[data-earn-outcome="success"]')).toBeTruthy();
+    expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeTruthy();
+  });
 });
 
 describe("exit slippage floors (quote-derived)", () => {

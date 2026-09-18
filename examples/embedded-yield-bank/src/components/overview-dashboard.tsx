@@ -16,7 +16,11 @@ import {
   formatTime,
   shortAddress,
 } from "@/lib/format";
-import { isPendingMovement } from "@/lib/movements";
+import {
+  isMovementAwaitingFinality,
+  isPendingMovement,
+  isSettledMovement,
+} from "@/lib/movements";
 import { cn } from "@/lib/utils";
 import type { DashboardData, YieldMovement } from "@/types";
 import { arrivalCopy, TransferDialog } from "./transfer-dialog";
@@ -41,7 +45,7 @@ export function OverviewDashboard({
   const { token, checking, savings, wallet, connection } = data;
   const { strategy } = savings;
   const settling = data.movements.filter(isPendingMovement);
-  const depositsOpen = strategy.fundable && strategy.status === "active";
+  const earningsUpdating = data.movements.some(isMovementAwaitingFinality);
 
   async function copyWalletAddress() {
     try {
@@ -72,7 +76,7 @@ export function OverviewDashboard({
           onClick={onRefresh}
           disabled={refreshing}
         >
-          <RefreshCwIcon className={refreshing ? "animate-spin" : undefined} />
+          <RefreshCwIcon className={cn(refreshing && "animate-spin")} />
         </Button>
       </header>
 
@@ -95,16 +99,11 @@ export function OverviewDashboard({
             {formatAmount(data.total ?? checking.balance, token.symbol)}
           </span>
           {/* Fixed height so the buttons below never jump when this toggles. */}
-          <span className="flex min-h-5 items-center text-sm text-muted-foreground">
-            {settling.length ? (
-              <Badge variant="outline" className="status-warning">
-                <span className="status-dot status-dot-live" />
-                {settlingCopy(settling, token.symbol)}
-              </Badge>
-            ) : data.total === undefined ? (
-              "Savings is being valued. Checking is shown for now."
-            ) : null}
-          </span>
+          <TotalBalanceStatus
+            settling={settling}
+            total={data.total}
+            symbol={token.symbol}
+          />
         </div>
         <div className="flex flex-wrap gap-2">
           <TransferDialog
@@ -114,13 +113,10 @@ export function OverviewDashboard({
             strategy={strategy}
             feesPaidBy={wallet.feesPaidBy}
             busy={busy}
-            disabledReason={
-              !depositsOpen
-                ? "Savings is not accepting deposits right now"
-                : checking.balance === "0"
-                  ? "Add funds to checking first"
-                  : undefined
-            }
+            disabledReason={depositDisabledReason(
+              strategy.fundable && strategy.status === "active",
+              checking.balance
+            )}
             onSubmit={onDeposit}
           />
           <TransferDialog
@@ -131,15 +127,7 @@ export function OverviewDashboard({
             strategy={strategy}
             feesPaidBy={wallet.feesPaidBy}
             busy={busy}
-            disabledReason={
-              savings.position === null
-                ? "Nothing in savings yet"
-                : savings.withdrawable === undefined
-                  ? "Savings balance is still updating"
-                  : savings.withdrawable === "0"
-                    ? "Nothing available to move right now"
-                    : undefined
-            }
+            disabledReason={withdrawalDisabledReason(savings)}
             onSubmit={onWithdraw}
           />
         </div>
@@ -157,40 +145,13 @@ export function OverviewDashboard({
           icon={PiggyBankIcon}
           name="Savings"
           badge={formatApy(strategy.currentApy)}
-          amount={
-            savings.balance === undefined
-              ? "—"
-              : formatAmount(savings.balance, token.symbol)
-          }
-          {...savingsDetail(savings, token.symbol, settling.length > 0)}
-          footer={`${strategy.name} · ${
-            strategy.liquidityTerm === "instant"
-              ? "Withdraw anytime"
-              : `Withdrawals arrive ${arrivalCopy(strategy).toLowerCase()}`
-          }`}
+          amount={savingsBalance(savings.balance, token.symbol)}
+          {...savingsDetail(savings, token.symbol, earningsUpdating)}
+          footer={savingsFooter(strategy)}
         />
       </section>
 
-      <section className="flex flex-col gap-4">
-        <h2 className="text-base font-semibold tracking-[-0.01em]">
-          Recent activity
-        </h2>
-        {data.movements.length ? (
-          <ul className="divide-y rounded-2xl border">
-            {data.movements.map((movement) => (
-              <ActivityRow
-                key={movement.movementId}
-                movement={movement}
-                symbol={token.symbol}
-              />
-            ))}
-          </ul>
-        ) : (
-          <div className="flex min-h-28 items-center justify-center rounded-2xl border border-dashed text-sm text-muted-foreground">
-            Your transfers will show up here.
-          </div>
-        )}
-      </section>
+      <RecentActivity movements={data.movements} symbol={token.symbol} />
 
       <footer className="flex flex-wrap items-center gap-x-2 border-t pt-5 text-xs text-muted-foreground">
         <span className="flex items-center gap-2">
@@ -201,6 +162,97 @@ export function OverviewDashboard({
         Updated {formatTime(connection.checkedAt)}
       </footer>
     </div>
+  );
+}
+
+function TotalBalanceStatus({
+  settling,
+  total,
+  symbol,
+}: {
+  settling: YieldMovement[];
+  total?: string;
+  symbol: string;
+}) {
+  if (settling.length) {
+    return (
+      <span className="flex min-h-5 items-center text-sm text-muted-foreground">
+        <Badge variant="outline" className="status-warning">
+          <span className="status-dot status-dot-live" />
+          {settlingCopy(settling, symbol)}
+        </Badge>
+      </span>
+    );
+  }
+  return (
+    <span className="flex min-h-5 items-center text-sm text-muted-foreground">
+      {total === undefined
+        ? "Savings is being valued. Checking is shown for now."
+        : null}
+    </span>
+  );
+}
+
+function depositDisabledReason(
+  depositsOpen: boolean,
+  checkingBalance: string
+): string | undefined {
+  if (!depositsOpen) return "Savings is not accepting deposits right now";
+  if (checkingBalance === "0") return "Add funds to checking first";
+  return undefined;
+}
+
+function withdrawalDisabledReason(
+  savings: DashboardData["savings"]
+): string | undefined {
+  if (savings.position === null) return "Nothing in savings yet";
+  if (savings.withdrawable === undefined)
+    return "Savings balance is still updating";
+  if (savings.withdrawable === "0")
+    return "Nothing available to move right now";
+  return undefined;
+}
+
+function savingsBalance(balance: string | undefined, symbol: string): string {
+  return balance === undefined ? "—" : formatAmount(balance, symbol);
+}
+
+function savingsFooter(strategy: DashboardData["savings"]["strategy"]): string {
+  const availability =
+    strategy.liquidityTerm === "instant"
+      ? "Withdraw anytime"
+      : `Withdrawals arrive ${arrivalCopy(strategy).toLowerCase()}`;
+  return `${strategy.name} · ${availability}`;
+}
+
+function RecentActivity({
+  movements,
+  symbol,
+}: {
+  movements: YieldMovement[];
+  symbol: string;
+}) {
+  return (
+    <section className="flex flex-col gap-4">
+      <h2 className="text-base font-semibold tracking-[-0.01em]">
+        Recent activity
+      </h2>
+      {movements.length ? (
+        <ul className="divide-y rounded-2xl border">
+          {movements.map((movement) => (
+            <ActivityRow
+              key={movement.movementId}
+              movement={movement}
+              symbol={symbol}
+            />
+          ))}
+        </ul>
+      ) : (
+        <div className="flex min-h-28 items-center justify-center rounded-2xl border border-dashed text-sm text-muted-foreground">
+          Your transfers will show up here.
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -224,13 +276,15 @@ function Dot() {
 function savingsDetail(
   savings: DashboardData["savings"],
   symbol: string,
-  settling: boolean
+  earningsUpdating: boolean
 ): { detail: string; positive?: boolean } {
   if (savings.position === null && savings.earned === "0")
     return { detail: "Start earning with your first transfer" };
   if (savings.earned === undefined) {
     return {
-      detail: settling ? "Earnings update shortly" : "Earnings unavailable",
+      detail: earningsUpdating
+        ? "Earnings accrue automatically"
+        : "Earnings unavailable",
     };
   }
   if (savings.earned === "0") return { detail: "Nothing earned yet" };
@@ -336,7 +390,7 @@ function ActivityRow({
 }
 
 function MovementStatus({ movement }: { movement: YieldMovement }) {
-  if (movement.status === "finalized") {
+  if (isSettledMovement(movement)) {
     return (
       <Badge variant="outline" className="status-success">
         <span className="status-dot" />

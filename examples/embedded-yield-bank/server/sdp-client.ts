@@ -186,6 +186,14 @@ export class EmbeddedYieldClient {
     );
   }
 
+  /** Read one movement through SDP's chain-aware detail endpoint. */
+  async getMovement(movementId: string): Promise<YieldMovement> {
+    const data = await this.request<{ movement: YieldMovement }>(
+      `/v1/earn/external-wallet/movements/${encodeURIComponent(movementId)}`
+    );
+    return data.movement;
+  }
+
   /** Open positions for the wallet. SDP omits a position once it is closed. */
   async listPositions(ownerAddress: string): Promise<YieldPosition[]> {
     return this.allowUnknownOwner(

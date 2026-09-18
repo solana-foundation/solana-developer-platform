@@ -222,6 +222,8 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-transactions");
     expect(code).toContain("/v1/earn/external-wallet/withdrawals");
     expect(code).toContain("waitForEarnMovement");
+    expect(code).toContain("intervalMs = 1_000");
+    expect(code).toContain('movement.status === "confirmed"');
     expect(code).toContain('movement.status === "finalized"');
     expect(code).not.toContain("Buffer.from");
     expect(code).toContain("earnedUnavailableReason");

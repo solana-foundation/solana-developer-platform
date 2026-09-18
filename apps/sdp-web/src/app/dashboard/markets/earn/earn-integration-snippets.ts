@@ -243,8 +243,8 @@ export async function submitEarnDeposit({
 
 /**
  * One movement. Statuses: requested (recorded, not yet seen on the network),
- * submitted, confirmed, finalized, failed. Only finalized and failed are
- * terminal; confirmed can still be dropped by a fork.
+ * submitted, confirmed, finalized, failed. Treat confirmed as Done in the UI;
+ * SDP continues tracking finalized or failed as the durable ledger outcome.
  */
 export async function getEarnMovement(movementId: string) {
   const data = await sdpFetch(
@@ -257,12 +257,16 @@ export async function getEarnMovement(movementId: string) {
 
 export async function waitForEarnMovement(
   movementId: string,
-  { signal, intervalMs = 2_000 }: { signal?: AbortSignal; intervalMs?: number } = {}
+  { signal, intervalMs = 1_000 }: { signal?: AbortSignal; intervalMs?: number } = {}
 ) {
   while (true) {
     signal?.throwIfAborted();
     const movement = await getEarnMovement(movementId);
-    if (movement.status === "finalized" || movement.status === "failed") return movement;
+    if (
+      movement.status === "confirmed" ||
+      movement.status === "finalized" ||
+      movement.status === "failed"
+    ) return movement;
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, intervalMs);
       signal?.addEventListener("abort", () => {

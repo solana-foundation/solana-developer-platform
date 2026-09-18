@@ -838,7 +838,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ).toBeTruthy();
   });
 
-  it("shows live withdrawal settlement beside the affected position", async () => {
+  it("shows a confirmed withdrawal as complete beside the affected position", async () => {
     const user = userEvent.setup();
     mocks.vaultWithdrawals = [
       {
@@ -852,17 +852,17 @@ describe("TreasurySolutionsWorkspace", () => {
 
     renderWorkspace();
 
-    const status = await screen.findByRole("button", {
-      name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
+    const positionRow = (await screen.findAllByText("Steakhouse USDC"))
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!positionRow) throw new Error("Expected affected position row");
+    const status = within(positionRow).getByRole("button", {
+      name: "Active: This position is active.",
     });
     expect(status.closest("tr")?.textContent).toContain("Steakhouse USDC");
 
     await user.hover(status);
-    expect(
-      await screen.findByText(
-        "A deposit or withdrawal is still settling. Follow the flow for detailed progress."
-      )
-    ).toBeTruthy();
+    expect(await screen.findByText("This position is active.")).toBeTruthy();
   });
 
   it("keeps a locally submitted deposit newest without comparing browser and server clocks", async () => {
@@ -924,11 +924,16 @@ describe("TreasurySolutionsWorkspace", () => {
       </I18nProvider>
     );
 
-    expect(
-      await screen.findByRole("button", {
-        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
-      })
-    ).toBeTruthy();
+    await waitFor(() => {
+      const positionRow = screen
+        .getAllByText("Steakhouse USDC")
+        .map((element) => element.closest("tr"))
+        .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+      if (!positionRow) throw new Error("Expected affected position row");
+      expect(
+        within(positionRow).getByRole("button", { name: "Active: This position is active." })
+      ).toBeTruthy();
+    });
   });
 
   it("updates the deposit badge from the fast detail poll without a toast", async () => {
@@ -1313,7 +1318,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ).toBeTruthy();
   });
 
-  it("projects a finalized withdrawal into the position balance with the same status update", async () => {
+  it("projects a confirmed withdrawal into the position balance with the same status update", async () => {
     const user = userEvent.setup();
     const movementId = "earn_vault_withdrawal_balance_projection";
     renderWorkspace();
@@ -1340,7 +1345,7 @@ describe("TreasurySolutionsWorkspace", () => {
         failureReason: null,
         movementId,
         positionId: "earn_vault_position_live",
-        status: "finalized",
+        status: "confirmed",
       });
     });
 

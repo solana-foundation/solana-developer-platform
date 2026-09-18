@@ -315,7 +315,7 @@ function createVaultBalanceProjection(
 function vaultBalanceProjectionIsVisible(activity: TrackedVaultActivity): boolean {
   return activity.kind === "deposit"
     ? activity.movement.status === "confirmed"
-    : activity.movement.status === "finalized";
+    : activity.movement.status === "confirmed" || activity.movement.status === "finalized";
 }
 
 function balanceProjectionReachedProvider(

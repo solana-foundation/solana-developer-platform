@@ -308,9 +308,9 @@ function withdrawalResultCopy(
       return {
         title: t("DashboardEarn.vaultWithdraw.confirmedTitle"),
         body: t("DashboardEarn.vaultWithdraw.confirmedBody"),
-        note: t("DashboardEarn.vaultWithdraw.settlingNote"),
+        note: t("DashboardEarn.vaultWithdraw.balanceRefreshNote"),
         status: t("DashboardEarn.vaultWithdraw.confirmedStatus"),
-        statusVariant: "warning",
+        statusVariant: "success",
       };
     case "finalized":
       return {
@@ -324,7 +324,7 @@ function withdrawalResultCopy(
       return {
         title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
         body: t("DashboardEarn.vaultWithdraw.submittedBody"),
-        note: t("DashboardEarn.vaultWithdraw.settlingNote"),
+        note: t("DashboardEarn.vaultWithdraw.balanceRefreshNote"),
         status: t("DashboardEarn.vaultWithdraw.submittedStatus"),
         statusVariant: "default",
       };
@@ -362,9 +362,7 @@ function WithdrawalMovementResult({
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
   const processing =
     !outcome.absorbedByApproval &&
-    (withdrawal.status === "requested" ||
-      withdrawal.status === "submitted" ||
-      withdrawal.status === "confirmed");
+    (withdrawal.status === "requested" || withdrawal.status === "submitted");
 
   return (
     <>
@@ -750,8 +748,7 @@ export function EarnVaultWithdrawModal({
     visibleOutcome?.kind === "withdrawal" &&
     !visibleOutcome.absorbedByApproval &&
     (visibleOutcome.withdrawal.status === "requested" ||
-      visibleOutcome.withdrawal.status === "submitted" ||
-      visibleOutcome.withdrawal.status === "confirmed");
+      visibleOutcome.withdrawal.status === "submitted");
   const panelKey = withdrawalPanelKey(visibleOutcome, step);
   const contentRef = useModalFocus({
     focusKey: panelKey,

@@ -23,21 +23,22 @@ import {
   getDashboard,
 } from "@/lib/api";
 import {
+  ACTIVE_MOVEMENT_REFRESH_MS,
   applyInFlight,
   foldSettledTransfers,
   type InFlightTransfer,
   isPendingMovement,
   type MovementPolling,
+  partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
+  SETTLEMENT_POLL_TIMEOUT_MS,
   startMovementPolling,
 } from "@/lib/movements";
 import type { DashboardData } from "@/types";
 
-// SDP records settlement on a once-a-minute reconciliation, and each refresh
-// costs three SDP calls plus one RPC read, so poll gently: the in-flight
-// projection already shows the balances a pending transfer will produce.
-const SETTLING_REFRESH_MS = 8_000;
+// Solana confirmation is the customer-visible finish line. Poll quickly until
+// confirmation, then let SDP track protocol finalization in the background.
 const BACKGROUND_REFRESH_MS = 30_000;
 const RATE_LIMIT_PAUSE_MS = 10_000;
 
@@ -65,11 +66,16 @@ export function App() {
   const [movementPolling, setMovementPolling] = useState<MovementPolling>();
   const movementPollingRef = useRef<MovementPolling | undefined>(undefined);
   const requestId = useRef(0);
+  const refreshInProgress = useRef(false);
   // Transfers submitted from this tab, plus the balances from just before the
   // first one. The view projects them until SDP reports settlement.
   const [inFlight, setInFlight] = useState<InFlightTransfer[]>([]);
   const inFlightRef = useRef<InFlightTransfer[]>([]);
   const inFlightBase = useRef<DashboardData>(undefined);
+  const movementToastIds = useRef(
+    new Map<string, ReturnType<typeof toast.loading>>()
+  );
+  const completedMovementIds = useRef(new Set<string>());
   const latestData = useRef<DashboardData>(undefined);
 
   const updateInFlight = useCallback((next: InFlightTransfer[]) => {
@@ -84,95 +90,174 @@ export function App() {
     setMovementPolling(next);
   }, []);
 
-  const refresh = useCallback(
-    async (background = false) => {
-      const id = ++requestId.current;
-      if (background) setRefreshing(true);
-      try {
-        const next = await getDashboard();
-        if (id !== requestId.current) return;
-        latestData.current = next;
-        setData(next);
-        const reconciliation = reconcileMovementPolling(
-          movementPollingRef.current,
+  const refresh = useCallback(async () => {
+    // Solana/RPC reads can occasionally take longer than the one-second
+    // active cadence. Skip that tick instead of fanning out stale reads.
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
+    const id = ++requestId.current;
+    try {
+      const next = await getDashboard(
+        movementPollingRef.current?.movementIds ?? []
+      );
+      if (id !== requestId.current) return;
+      latestData.current = next;
+      setData(next);
+      const reconciliation = reconcileMovementPolling(
+        movementPollingRef.current,
+        next.movements
+      );
+      updateMovementPolling(reconciliation.polling);
+      const current = inFlightRef.current;
+      if (current.length) {
+        const { failed, remaining, settled } = reconcileInFlight(
+          current,
           next.movements
         );
-        updateMovementPolling(reconciliation.polling);
-        const current = inFlightRef.current;
-        if (current.length) {
-          const { finalized, remaining } = reconcileInFlight(
-            current,
-            next.movements
-          );
-          const keep = reconciliation.timedOut ? [] : remaining;
-          // Overlapping transfers: what just finalized becomes part of the
-          // base so the ones still pending project from the balances it
-          // produced. A failed transfer moved nothing and is simply dropped.
-          if (finalized.length && keep.length && inFlightBase.current) {
-            inFlightBase.current = foldSettledTransfers(
+        const balanceReconciliation = inFlightBase.current
+          ? partitionSettledTransfersBySnapshot(
               inFlightBase.current,
-              finalized
-            );
-          }
-          updateInFlight(keep);
+              next,
+              settled
+            )
+          : { reflected: settled, waiting: [] };
+        const now = Date.now();
+        const expired = balanceReconciliation.waiting.filter(
+          (transfer) => now >= transfer.expiresAt
+        );
+        const waiting = balanceReconciliation.waiting.filter(
+          (transfer) => now < transfer.expiresAt
+        );
+        const timedOutMovementIds = new Set(reconciliation.timedOutMovementIds);
+        const timedOut = remaining.filter((transfer) =>
+          timedOutMovementIds.has(transfer.movementId)
+        );
+        const activeRemaining = remaining.filter(
+          (transfer) => !timedOutMovementIds.has(transfer.movementId)
+        );
+        const keepIds = new Set(
+          [...activeRemaining, ...waiting].map(
+            (transfer) => transfer.movementId
+          )
+        );
+        const keep = current.filter((transfer) =>
+          keepIds.has(transfer.movementId)
+        );
+        // Overlapping transfers: what just settled becomes part of the
+        // base so the ones still pending project from the balances it
+        // produced. A failed transfer moved nothing and is simply dropped.
+        const reflectedOrExpired = [
+          ...balanceReconciliation.reflected,
+          ...expired,
+        ];
+        if (reflectedOrExpired.length && keep.length && inFlightBase.current) {
+          inFlightBase.current = foldSettledTransfers(
+            inFlightBase.current,
+            reflectedOrExpired
+          );
         }
-        if (reconciliation.timedOut) {
-          toast.warning("Settlement is taking longer than expected", {
-            id: "settlement-timeout",
-            description: "Automatic refresh paused. Refresh to check again.",
+        for (const transfer of settled) {
+          if (completedMovementIds.current.has(transfer.movementId)) continue;
+          completedMovementIds.current.add(transfer.movementId);
+          const toastId = movementToastIds.current.get(transfer.movementId);
+          toast.success(
+            TRANSFER_COPY[
+              transfer.direction === "deposit" ? "to-savings" : "to-checking"
+            ].done,
+            { id: toastId }
+          );
+          movementToastIds.current.delete(transfer.movementId);
+        }
+        if (expired.length) {
+          toast.warning("Balances are taking longer to update", {
+            id: "balance-sync-timeout",
+            description:
+              "The transfer is settled. Refresh to check the latest live balances.",
           });
         }
-        setError(undefined);
-      } catch (caught) {
-        if (id !== requestId.current) return;
-        if (caught instanceof ApiError && caught.status === 429) {
-          pausedUntil.current =
-            Date.now() + (caught.retryAfterMs ?? RATE_LIMIT_PAUSE_MS);
-          if (latestData.current) return;
+        for (const transfer of failed) {
+          const copy =
+            TRANSFER_COPY[
+              transfer.direction === "deposit" ? "to-savings" : "to-checking"
+            ];
+          const toastId = movementToastIds.current.get(transfer.movementId);
+          toast.error(copy.failed, { id: toastId });
+          movementToastIds.current.delete(transfer.movementId);
         }
-        setError(
-          caught instanceof Error ? caught.message : "Unable to load the demo"
-        );
-      } finally {
-        if (id === requestId.current) setRefreshing(false);
+        for (const transfer of timedOut) {
+          const toastId = movementToastIds.current.get(transfer.movementId);
+          if (toastId !== undefined) toast.dismiss(toastId);
+          movementToastIds.current.delete(transfer.movementId);
+        }
+        updateInFlight(keep);
       }
-    },
-    [updateMovementPolling, updateInFlight]
-  );
+      if (reconciliation.timedOutMovementIds.length) {
+        toast.warning("Settlement is taking longer than expected", {
+          id: "settlement-timeout",
+          description:
+            "Automatic refresh paused for timed-out transfers. Refresh to check again.",
+        });
+      }
+      setError(undefined);
+    } catch (caught) {
+      if (id !== requestId.current) return;
+      if (caught instanceof ApiError && caught.status === 429) {
+        pausedUntil.current =
+          Date.now() + (caught.retryAfterMs ?? RATE_LIMIT_PAUSE_MS);
+        if (latestData.current) return;
+      }
+      setError(
+        caught instanceof Error ? caught.message : "Unable to load the demo"
+      );
+    } finally {
+      refreshInProgress.current = false;
+    }
+  }, [updateMovementPolling, updateInFlight]);
+
+  const refreshWithProgress = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   // Keep balances live like a bank app: a quick cadence while a transfer is
-  // settling, a slow one otherwise, and nothing while the tab is hidden.
+  // settling or confirmed balances are catching up, a slow one otherwise,
+  // and nothing while the tab is hidden.
   useEffect(() => {
-    const interval = movementPolling
-      ? SETTLING_REFRESH_MS
-      : BACKGROUND_REFRESH_MS;
+    const interval =
+      movementPolling || inFlight.length
+        ? ACTIVE_MOVEMENT_REFRESH_MS
+        : BACKGROUND_REFRESH_MS;
     const timer = window.setInterval(() => {
       if (
         document.visibilityState === "visible" &&
         Date.now() >= pausedUntil.current
       ) {
-        void refresh(true);
+        void refresh();
       }
     }, interval);
     return () => window.clearInterval(timer);
-  }, [movementPolling, refresh]);
+  }, [inFlight.length, movementPolling, refresh]);
 
-  // Provider valuations can lag the ledger by a beat. Once the last pending
-  // transfer settles, take one more look so savings catches up on its own.
+  // After the last projection hands back to a reflected balance snapshot, take
+  // one more look so the normal background view starts from fresh data.
   const wasSettling = useRef(false);
   useEffect(() => {
-    const settling = movementPolling !== undefined;
+    const settling = movementPolling !== undefined || inFlight.length > 0;
     if (wasSettling.current && !settling) {
-      const timer = window.setTimeout(() => void refresh(true), 3_000);
+      const timer = window.setTimeout(() => void refresh(), 3_000);
       wasSettling.current = settling;
       return () => window.clearTimeout(timer);
     }
     wasSettling.current = settling;
-  }, [movementPolling, refresh]);
+  }, [inFlight.length, movementPolling, refresh]);
 
   async function transfer(direction: TransferDirection, amount: string) {
     const copy = TRANSFER_COPY[direction];
@@ -186,9 +271,14 @@ export function App() {
         throw new Error(movement.failureReason ?? copy.failed);
       }
       if (isPendingMovement(movement)) {
-        updateMovementPolling(
-          startMovementPolling(movementPollingRef.current, movement.movementId)
+        const polling = startMovementPolling(
+          movementPollingRef.current,
+          movement.movementId
         );
+        const expiresAt =
+          polling.expiresAtByMovement[movement.movementId] ??
+          Date.now() + SETTLEMENT_POLL_TIMEOUT_MS;
+        updateMovementPolling(polling);
         if (!inFlightRef.current.length) {
           inFlightBase.current = latestData.current;
         }
@@ -198,17 +288,20 @@ export function App() {
             movementId: movement.movementId,
             direction: direction === "to-savings" ? "deposit" : "withdrawal",
             amount,
+            expiresAt,
           },
         ]);
+        movementToastIds.current.set(movement.movementId, toastId);
+        toast.info(copy.pending, {
+          id: toastId,
+          description: "Confirming on Solana devnet",
+        });
+      } else {
+        toast.success(copy.done, { id: toastId });
       }
-      toast.success(copy.done, {
-        id: toastId,
-        description:
-          movement.status === "finalized"
-            ? undefined
-            : "Settling on Solana devnet",
-      });
-      await refresh(true);
+      // The projected balances and pending activity are already visible. Let
+      // the dialog close now while confirmation refreshes silently.
+      void refresh();
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : copy.failed, {
         id: toastId,
@@ -240,7 +333,7 @@ export function App() {
                 data={view}
                 refreshing={refreshing}
                 busy={busy}
-                onRefresh={() => void refresh(true)}
+                onRefresh={() => void refreshWithProgress()}
                 onDeposit={(amount) => transfer("to-savings", amount)}
                 onWithdraw={(amount) => transfer("to-checking", amount)}
               />

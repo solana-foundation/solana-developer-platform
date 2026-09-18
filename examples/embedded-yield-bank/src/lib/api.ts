@@ -13,8 +13,15 @@ export class ApiError extends Error {
   }
 }
 
-export async function getDashboard(): Promise<DashboardData> {
-  return request<DashboardData>("/api/dashboard");
+export async function getDashboard(
+  activeMovementIds: readonly string[] = []
+): Promise<DashboardData> {
+  const search = new URLSearchParams();
+  for (const movementId of activeMovementIds) {
+    search.append("movementId", movementId);
+  }
+  const query = search.toString();
+  return request<DashboardData>(`/api/dashboard${query ? `?${query}` : ""}`);
 }
 
 /** Checking to savings. */

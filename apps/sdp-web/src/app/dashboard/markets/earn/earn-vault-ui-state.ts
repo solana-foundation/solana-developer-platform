@@ -23,7 +23,7 @@ const DEPOSIT_UI_STATE: Readonly<Record<EarnVaultMovementStatus, EarnVaultUiStat
 const WITHDRAWAL_UI_STATE: Readonly<Record<EarnVaultDirectMovementStatus, EarnVaultUiState>> = {
   requested: { positionStatus: "pending", progressStep: 2 },
   submitted: { positionStatus: "pending", progressStep: 2 },
-  confirmed: { positionStatus: "pending", progressStep: 2 },
+  confirmed: { positionStatus: "active", progressStep: 3 },
   finalized: { positionStatus: "active", progressStep: 3 },
   failed: { positionStatus: "active", progressStep: 2 },
 };

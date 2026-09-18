@@ -183,7 +183,7 @@ const { movement } = await sdpFetch(
 );
 ```
 
-Statuses are `requested` (SDP recorded the signed transaction but has not yet seen it on the network), `submitted`, `confirmed`, `finalized`, `failed`. Only `finalized` and `failed` are terminal; `confirmed` is optimistic and can still be dropped by a fork, so keep polling past it. A `failed` movement carries a `failureReason`.
+Statuses are `requested` (SDP recorded the signed transaction but has not yet seen it on the network), `submitted`, `confirmed`, `finalized`, `failed`. Treat `confirmed` as **Done** in customer-facing UI: stop the foreground spinner, show the updated balance, and let the customer continue. SDP keeps reconciling the movement to the durable ledger outcome, `finalized` or `failed`, in the background. Use `finalized` only when your own backend needs an irreversible signal for accounting or another high-stakes side effect. A `failed` movement carries a `failureReason`.
 
 ## 3. Who pays fees and rent
 
@@ -320,7 +320,7 @@ Recovery across that split is yours: persist the swap signature and the `followU
 Work through this in sandbox before you go live. Each item is something SDP cannot check for you.
 
 - Your submit path retries an uncertain response with the same signed bytes and the same `Idempotency-Key`, rebuilds on `409 TRANSACTION_EXPIRED`, and looks up the movement on any other `409`.
-- Your UI polls past `confirmed` and only treats `finalized` and `failed` as terminal.
+- Your UI treats `confirmed` as Done and leaves foreground loading immediately. Any backend workflow that needs irreversible finality keeps tracking `finalized` or `failed` without blocking the customer.
 - Absent fields render as absent (a dash, never `$0`), and you handle every status in the vocabulary rather than collapsing unknown ones.
 - If you accept swap-funded deposits, you have run one small split-swap recovery drill on mainnet: a swap broadcast, a simulated crash, and the follow-up deposit rebuilt from persisted state. Sandbox cannot exercise it.
 - If you sponsor fees, the sponsor key meets every point in [Protect the sponsor key](#protect-the-sponsor-key), and the spend alerts have fired at least once in a drill.
