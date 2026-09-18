@@ -647,6 +647,87 @@ interface WithdrawalReviewStepProps {
   submitting: boolean;
 }
 
+function ProviderOrderReviewRows({ amount }: { amount: string }) {
+  const t = useTranslations();
+
+  return (
+    <div className="flex items-baseline justify-between gap-5">
+      <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.sharesLabel")}</dt>
+      <dd className="text-right tabular-nums text-primary">{amount}</dd>
+    </div>
+  );
+}
+
+function AtomicReviewRows({
+  amount,
+  assetSymbol,
+  minAmountOut,
+  quote,
+}: {
+  amount: string;
+  assetSymbol: string;
+  minAmountOut: string | undefined;
+  quote: VaultQuoteState<EarnVaultWithdrawalPreview>;
+}) {
+  const locale = useLocale();
+  const t = useTranslations();
+
+  return (
+    <>
+      <div className="flex items-baseline justify-between gap-5">
+        <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.amountLabel")}</dt>
+        <dd className="text-right tabular-nums text-primary">{formatUsd(amount, locale)}</dd>
+      </div>
+      <div className="flex items-baseline justify-between gap-5">
+        <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
+        <dd className="text-right text-primary">{assetSymbol}</dd>
+      </div>
+      {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.expectedAmount")}</dt>
+          <dd className="text-right tabular-nums text-primary">
+            {formatTokenQuantity(quote.preview.assetsOut, locale, assetSymbol)}
+          </dd>
+        </div>
+      ) : null}
+      {minAmountOut !== undefined ? (
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
+          <dd className="text-right tabular-nums text-primary">
+            {formatTokenQuantity(minAmountOut, locale, assetSymbol)}
+          </dd>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function ReviewAmountRows({
+  amount,
+  assetSymbol,
+  minAmountOut,
+  quote,
+  settlement,
+}: {
+  amount: string;
+  assetSymbol: string;
+  minAmountOut: string | undefined;
+  quote: VaultQuoteState<EarnVaultWithdrawalPreview>;
+  settlement: EarnVaultWithdrawalSettlement;
+}) {
+  if (settlement === "provider_order") {
+    return <ProviderOrderReviewRows amount={amount} />;
+  }
+  return (
+    <AtomicReviewRows
+      amount={amount}
+      assetSymbol={assetSymbol}
+      minAmountOut={minAmountOut}
+      quote={quote}
+    />
+  );
+}
+
 function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
   const {
     amount,
@@ -668,7 +749,6 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
     submitError,
     submitting,
   } = props;
-  const locale = useLocale();
   const t = useTranslations();
 
   return (
@@ -680,42 +760,13 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
           <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
           <dd className="max-w-64 text-right text-primary">{positionDisplayName(position)}</dd>
         </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">
-            {t(
-              settlement === "provider_order"
-                ? "DashboardEarn.vaultWithdraw.sharesLabel"
-                : "DashboardEarn.vaultWithdraw.amountLabel"
-            )}
-          </dt>
-          <dd className="text-right tabular-nums text-primary">
-            {settlement === "provider_order" ? amount : formatUsd(amount, locale)}
-          </dd>
-        </div>
-        {settlement === "provider_order" ? null : (
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
-            <dd className="text-right text-primary">{assetSymbol}</dd>
-          </div>
-        )}
-        {settlement !== "provider_order" &&
-        quote.kind === "quoted" &&
-        quote.preview.blockingIssues.length === 0 ? (
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.expectedAmount")}</dt>
-            <dd className="text-right tabular-nums text-primary">
-              {formatTokenQuantity(quote.preview.assetsOut, locale, assetSymbol)}
-            </dd>
-          </div>
-        ) : null}
-        {settlement !== "provider_order" && minAmountOut !== undefined ? (
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
-            <dd className="text-right tabular-nums text-primary">
-              {formatTokenQuantity(minAmountOut, locale, assetSymbol)}
-            </dd>
-          </div>
-        ) : null}
+        <ReviewAmountRows
+          amount={amount}
+          assetSymbol={assetSymbol}
+          minAmountOut={minAmountOut}
+          quote={quote}
+          settlement={settlement}
+        />
       </dl>
 
       {settlement === "provider_order" ? null : (
