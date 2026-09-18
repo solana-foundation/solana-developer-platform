@@ -59,7 +59,6 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /transfer-batches",
       "GET /transfer-batches/:batchId",
       "POST /ramps/coinbase/events",
-      "POST /ramps/moneygram/events",
       "POST /ramps/offramp/estimate",
       "POST /ramps/onramp/estimate",
       "POST /ramps/sandbox/simulate",

@@ -1,15 +1,11 @@
 "use client";
 
-import type { MoneygramRampEvent, PaymentRampQuote } from "@sdp/types";
+import type { PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
 import { address } from "@solana/kit";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
-import {
-  createTransfer,
-  postMoneygramRampEvent,
-} from "@/app/dashboard/payments/payments-workspace.data";
+import { createTransfer } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { MONEYGRAM_SDK_URL } from "@/lib/moneygram-sdk";
 import {
@@ -33,19 +29,6 @@ interface MoneygramOnChainTransaction {
   rawTransaction: unknown;
 }
 
-interface MoneygramTransactionRecord {
-  id: string;
-  type: string;
-  status: string;
-  amount: number;
-  referenceNumber?: string;
-}
-
-interface MoneygramWidgetError {
-  transactionId?: string;
-  reason: string;
-}
-
 interface MoneygramRampsConfig {
   container: HTMLElement;
   sessionToken: string;
@@ -63,9 +46,6 @@ interface MoneygramRampsConfig {
     mockMode: boolean;
   };
   onSignTransaction: (tx: MoneygramOnChainTransaction) => Promise<string>;
-  onComplete?: (transaction: MoneygramTransactionRecord) => void;
-  onError?: (error: MoneygramWidgetError) => void;
-  onClose?: () => void;
 }
 
 interface MoneygramRampsHandle {
@@ -161,7 +141,7 @@ export function MoneygramRampWidget({
     if (!container) {
       return;
     }
-    const { sessionId, sessionToken, widgetUrl } = quote;
+    const { sessionToken, widgetUrl } = quote;
     // The widget URL becomes the SDK's API base, so only HTTPS MoneyGram
     // widget hosts may ever be mounted — anything else fails closed.
     if (!isTrustedRampDestination(widgetUrl, MONEYGRAM_WIDGET_APPROVED_HOSTS)) {
@@ -173,18 +153,6 @@ export function MoneygramRampWidget({
     container.appendChild(mountPoint);
     let cancelled = false;
     let handle: MoneygramRampsHandle | null = null;
-
-    const post = (event: MoneygramRampEvent) => {
-      postMoneygramRampEvent(event, t).catch((error) => {
-        toast.error(t("DashboardPayments.ramps.moneygramEventFailed"), {
-          description:
-            error instanceof Error
-              ? error.message
-              : t("DashboardPayments.ramps.eventRequestFailed"),
-          position: "bottom-right",
-        });
-      });
-    };
 
     loadRampsSdk(MONEYGRAM_SDK_URL)
       .then((sdk) => {
@@ -237,61 +205,7 @@ export function MoneygramRampWidget({
               );
             }
             signedTransferIdRef.current = transfer.id;
-            await postMoneygramRampEvent(
-              {
-                kind: "signed",
-                sessionId,
-                cryptoTransferId: transfer.id,
-              },
-              t
-            );
             return transfer.signature;
-          },
-          onComplete: (transaction) => {
-            if (direction === "onramp") {
-              post({
-                kind: "onramp_completed",
-                sessionId,
-                transactionId: transaction.id,
-                status: transaction.status,
-                amount: transaction.amount,
-                ...(transaction.referenceNumber
-                  ? { referenceNumber: transaction.referenceNumber }
-                  : {}),
-              });
-              return;
-            }
-            const cryptoTransferId = signedTransferIdRef.current;
-            if (!cryptoTransferId) {
-              toast.error(t("DashboardPayments.ramps.moneygramCompletionBeforeTransfer"), {
-                position: "bottom-right",
-              });
-              return;
-            }
-            post({
-              kind: "completed",
-              sessionId,
-              cryptoTransferId,
-              transactionId: transaction.id,
-              payoutAmount: transaction.amount,
-              payoutStatus: transaction.status,
-              ...(transaction.referenceNumber
-                ? { referenceNumber: transaction.referenceNumber }
-                : {}),
-            });
-          },
-          onError: (error) => {
-            const cryptoTransferId = signedTransferIdRef.current;
-            post({
-              kind: "errored",
-              sessionId,
-              reason: error.reason,
-              ...(cryptoTransferId ? { cryptoTransferId } : {}),
-              ...(error.transactionId ? { transactionId: error.transactionId } : {}),
-            });
-          },
-          onClose: () => {
-            post({ kind: "closed", sessionId });
           },
         });
         handle.open();
