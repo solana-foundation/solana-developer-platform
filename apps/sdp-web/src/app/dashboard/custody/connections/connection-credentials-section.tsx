@@ -380,6 +380,42 @@ function useDateFormatter() {
 }
 
 /**
+ * Derives what the viewer can do to these credentials from the lifecycle and
+ * the custody permission.
+ *
+ * A restricted or failed read has no lifecycle, so it permits nothing.
+ */
+function resolveCredentialActions(
+  lifecycle: CustodyCredentialLifecycle | "restricted" | null,
+  canManageCustody: boolean
+) {
+  const availableLifecycle = typeof lifecycle === "object" ? lifecycle : null;
+  if (availableLifecycle === null) {
+    return {
+      availableLifecycle,
+      managedHere: false,
+      currentInUse: false,
+      canAct: false,
+      canDeactivate: false,
+    };
+  }
+
+  const credential = availableLifecycle.providerCredential;
+  const managedHere = isCredentialManagedHere(credential);
+  const currentInUse =
+    credential.status === "active" && availableLifecycle.impact.connections.length > 0;
+  const canManageHere = canManageCustody && managedHere;
+  return {
+    availableLifecycle,
+    managedHere,
+    currentInUse,
+    canAct: canManageHere && currentInUse,
+    canDeactivate:
+      canManageHere && (credential.status === "active" || credential.status === "pending"),
+  };
+}
+
+/**
  * The credentials behind this connection, and what can be done to them.
  *
  * Three shapes, decided by the data rather than by the caller:
@@ -413,13 +449,8 @@ export function ConnectionCredentialsSection({
   const [rotationOpen, setRotationOpen] = useState(false);
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
-  const availableLifecycle = typeof lifecycle === "object" ? lifecycle : null;
-  const managedHere =
-    availableLifecycle !== null && isCredentialManagedHere(availableLifecycle.providerCredential);
-  const currentInUse =
-    availableLifecycle?.providerCredential.status === "active" &&
-    availableLifecycle.impact.connections.length > 0;
-  const canAct = canManageCustody && managedHere && currentInUse;
+  const { availableLifecycle, managedHere, currentInUse, canAct, canDeactivate } =
+    resolveCredentialActions(lifecycle, canManageCustody);
   // Keep the controller mounted across dismissal and refresh so an unresolved
   // rotation resumes with the original payload, key and credential target.
   const rotationModal = rotationLifecycle ? (
@@ -481,10 +512,6 @@ export function ConnectionCredentialsSection({
 
   const credential = lifecycle.providerCredential;
   const candidate = lifecycle.rotationCandidate;
-  const canDeactivate =
-    canManageCustody &&
-    managedHere &&
-    (credential.status === "active" || credential.status === "pending");
 
   // Both take the id rather than closing over `candidate`, because only the
   // branch that renders these buttons knows a candidate exists.
