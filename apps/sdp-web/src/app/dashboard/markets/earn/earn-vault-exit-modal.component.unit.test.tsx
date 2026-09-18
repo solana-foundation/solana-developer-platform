@@ -160,4 +160,37 @@ describe("EarnVaultExitModal", () => {
     expect(screen.queryByText("instant flow")).toBeNull();
     expect(screen.queryByText("async flow")).toBeNull();
   });
+
+  it("retries through an abortable fetch so a superseded attempt cannot win", async () => {
+    mocks.fetchOptions.mockResolvedValue({ kind: "unavailable" });
+    renderModal();
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(mocks.fetchOptions.mock.calls[0]?.[1]).toBeInstanceOf(AbortSignal);
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(mocks.fetchOptions).toHaveBeenCalledTimes(2));
+    expect(mocks.fetchOptions.mock.calls[1]?.[1]).toBeInstanceOf(AbortSignal);
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("recovers into the route chooser after a successful retry", async () => {
+    mocks.fetchOptions.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValue({
+      kind: "ready",
+      value: {
+        positionId: position.id,
+        instant: true,
+        queued: false,
+        withdrawAuthority: null,
+        queueState: null,
+        queueAsset: null,
+      },
+    });
+    renderModal();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("instant flow")).toBeTruthy();
+  });
 });

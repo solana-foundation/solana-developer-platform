@@ -469,7 +469,11 @@ function StrategyWalletDetails({
                       position.shares ??
                       t("DashboardMarkets.earnProgram.valueUnavailable")}
                   </p>
-                  {unlockTime && !isPositiveDecimal(position.withdrawableShares ?? "0") ? (
+                  {/* Absent means the provider read failed, not locked — coercing
+                      it to zero would show an unlock date the data never claimed. */}
+                  {unlockTime &&
+                  position.withdrawableShares !== undefined &&
+                  !isPositiveDecimal(position.withdrawableShares) ? (
                     <p className="mt-1 text-[11px] leading-4 text-tertiary">
                       {t("DashboardMarkets.earnProgram.sharesUnlockAt", {
                         time: unlockTime,

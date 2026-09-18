@@ -19,7 +19,7 @@ import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { isPositiveDecimal } from "./earn-decimal";
+import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import {
   formatEpochSeconds,
@@ -45,6 +45,7 @@ import {
   isEarnVaultQueuedWithdrawalTerminal,
 } from "./earn-vault-queued-withdrawal-presentation";
 import {
+  VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   validateVaultWithdrawalAmount,
   vaultWithdrawalAvailableAmount,
   vaultWithdrawalSharesForAmount,
@@ -244,10 +245,15 @@ function useQueuedWithdrawalRequestView(
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const cancelKey = useRef<string | null>(null);
-  const request =
-    cancelResult && (!observed || cancelResult.updatedAt >= observed.updatedAt)
-      ? cancelResult
-      : (observed ?? submitted);
+  // Compare freshness as instants, not raw strings: the record schema only
+  // types `updatedAt` as a string, so mixed fractional-seconds formatting
+  // could order two ISO strings lexicographically against their true order
+  // and let a stale poll override a just-confirmed cancel. An unparseable
+  // timestamp makes the comparison false, so the server-observed record wins.
+  const cancelIsFresh =
+    cancelResult !== null &&
+    (!observed || Date.parse(cancelResult.updatedAt) >= Date.parse(observed.updatedAt));
+  const request = cancelIsFresh ? cancelResult : (observed ?? submitted);
 
   async function cancel() {
     if (cancelling || request.status !== "expiredCancelable") return;
@@ -532,6 +538,7 @@ function QueueDetails({
   onDeadlineChange,
   onDiscountChange,
   onMax,
+  overAvailableAmount,
   terms,
 }: {
   amount: string;
@@ -547,6 +554,7 @@ function QueueDetails({
   onDeadlineChange: (value: string) => void;
   onDiscountChange: (value: string) => void;
   onMax: () => void;
+  overAvailableAmount: boolean;
   terms: EarnVaultQueuedWithdrawalTerms;
 }) {
   const t = useTranslations();
@@ -572,6 +580,7 @@ function QueueDetails({
             id="earn-queued-withdraw-amount"
             inputMode="decimal"
             leadingAddon={<span aria-hidden="true">$</span>}
+            maxDecimals={VAULT_WITHDRAWAL_AMOUNT_DECIMALS}
             onChange={(event: ChangeEvent<HTMLInputElement>) => {
               onAmountChange(event.target.value);
             }}
@@ -590,6 +599,11 @@ function QueueDetails({
           {amountError ? (
             <p className="text-xs text-error" role="alert">
               {amountError}
+            </p>
+          ) : null}
+          {overAvailableAmount ? (
+            <p className="text-xs text-warning" role="status">
+              {t("DashboardEarn.vaultWithdraw.overAmount")}
             </p>
           ) : null}
         </div>
@@ -657,6 +671,13 @@ export function EarnVaultQueuedWithdrawModal({
   const amountValidation = validateVaultWithdrawalAmount(amount);
   const availableAmount = vaultWithdrawalAvailableAmount(position);
   const shares = queueSharesForAmount(amountValidation, position);
+  // Same derivation as the instant exit modal: without it, an over-available
+  // amount disables Continue with no explanation, because the shares
+  // conversion silently answers undefined for an amount above the ceiling.
+  const overAvailableAmount =
+    amountValidation.kind === "valid" && availableAmount !== undefined
+      ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
+      : false;
   const discountBps = Number(discount);
   const deadlineSeconds = Number(deadline);
   const termsValid = isQueueTermsValid(discountBps, deadlineSeconds, terms);
@@ -723,6 +744,7 @@ export function EarnVaultQueuedWithdrawModal({
                   onMax={() => {
                     if (availableAmount) setAmount(availableAmount);
                   }}
+                  overAvailableAmount={overAvailableAmount}
                   terms={terms}
                 />
               ) : (

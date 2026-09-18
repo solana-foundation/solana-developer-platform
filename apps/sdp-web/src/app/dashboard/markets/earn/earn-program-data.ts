@@ -317,38 +317,75 @@ interface PositionPage<Position> {
 }
 
 /**
- * The cursor-paging loop shared by the two live-position collections. The
- * `seenCursors` guard turns a server that repeats or rewinds its cursor into a
- * thrown error instead of a loop, and the page-limit fallthrough throws rather
- * than returning the prefix collected so far.
+ * The cursor-paging loop every keyset-paged earn read shares. There is one
+ * copy on purpose: the guard ladder here is what stops a bad server from
+ * hurting the customer, and five drifting restatements of it had already
+ * started to diverge.
+ *
+ * - The `seenCursors` guard turns a server that repeats or rewinds its cursor
+ *   into a thrown error instead of a loop.
+ * - A `hasMore` page shorter than the requested page size is refused the same
+ *   way: a server that reports more rows than it returned in one page is
+ *   contradicting itself, and the page-total readers already refuse that.
+ * - The page-limit fallthrough throws rather than returning the prefix
+ *   collected so far — a partial portfolio is worse than an error because it
+ *   can hide money.
  */
-async function fetchAllPositionPages<Position>(
-  path: (query: URLSearchParams) => string,
-  subject: string
-): Promise<Position[]> {
-  const positions: Position[] = [];
+async function fetchAllCursorPages<T>(input: {
+  /** Names the collection in the thrown pagination errors. */
+  subject: string;
+  pageSize: number;
+  fetchPage: (
+    before: string | undefined
+  ) => Promise<{ items: T[]; hasMore: boolean; nextCursor: string | null }>;
+}): Promise<T[]> {
+  const items: T[] = [];
   const seenCursors = new Set<string>();
   let before: string | undefined;
 
-  for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
-    if (before) query.set("before", before);
+  for (let page = 0; page < EARN_PAGE_LIMIT; page += 1) {
+    const result = await input.fetchPage(before);
+    items.push(...result.items);
+    if (!result.hasMore) return items;
 
-    const body = await requestJsonOk<{ data: PositionPage<Position> }>(path(query));
-
-    positions.push(...body.data.positions);
-    if (!body.data.hasMore) return positions;
-
-    const nextCursor = body.data.nextCursor;
+    const nextCursor = result.nextCursor;
     if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error(`${subject} pagination did not advance`);
+      throw new Error(`${input.subject} pagination did not advance`);
+    }
+    if (result.items.length < input.pageSize) {
+      throw new Error(`${input.subject} pagination returned a short page while reporting more`);
     }
     seenCursors.add(nextCursor);
     before = nextCursor;
   }
 
   // A partial portfolio is worse than an error because it can hide money.
-  throw new Error(`${subject} pagination exceeded its safety limit`);
+  throw new Error(`${input.subject} pagination exceeded its safety limit`);
+}
+
+/**
+ * Reads every page of one live-position collection over the shared cursor
+ * pager.
+ */
+async function fetchAllPositionPages<Position>(
+  path: (query: URLSearchParams) => string,
+  subject: string
+): Promise<Position[]> {
+  return fetchAllCursorPages<Position>({
+    subject,
+    pageSize: EARN_PAGE_SIZE,
+    async fetchPage(before) {
+      const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
+      if (before) query.set("before", before);
+
+      const body = await requestJsonOk<{ data: PositionPage<Position> }>(path(query));
+      return {
+        items: body.data.positions,
+        hasMore: body.data.hasMore,
+        nextCursor: body.data.nextCursor,
+      };
+    },
+  });
 }
 
 /**
@@ -589,15 +626,6 @@ const earnVaultDepositsPageSchema = z.object({
   }),
 });
 
-const VAULT_MOVEMENTS_PAGE_SIZE = 100;
-
-/**
- * Hard stop on the paging loop, same reason as the other readers: a server that
- * never stops advancing its cursor must not spin forever. 20 pages x 100 is far
- * past any plausible number of simultaneously in-flight vault movements.
- */
-const VAULT_MOVEMENTS_PAGE_LIMIT = 20;
-
 interface VaultMovementPage<T> {
   items: T[];
   hasMore: boolean;
@@ -609,34 +637,23 @@ async function fetchAllVaultMovementPages<T>(input: {
   settled?: boolean;
   parsePage: (value: unknown) => VaultMovementPage<T> | null;
 }): Promise<T[]> {
-  const items: T[] = [];
-  const seenCursors = new Set<string>();
-  let before: string | null = null;
+  return fetchAllCursorPages<T>({
+    subject: `Vault ${input.resource}`,
+    pageSize: EARN_PAGE_SIZE,
+    async fetchPage(before) {
+      const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
+      if (input.settled !== undefined) query.set("settled", String(input.settled));
+      if (before) query.set("before", before);
 
-  for (let page = 0; page < VAULT_MOVEMENTS_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(VAULT_MOVEMENTS_PAGE_SIZE) });
-    if (input.settled !== undefined) query.set("settled", String(input.settled));
-    if (before) query.set("before", before);
-
-    const result = await dashboardFetch<unknown>(
-      `/api/dashboard/markets/earn/vault-${input.resource}?${query.toString()}`
-    );
-    if (!result.ok) throw new Error(result.error);
-    const body = input.parsePage(result.data);
-    if (!body) throw new Error(`Invalid vault ${input.resource} response`);
-
-    items.push(...body.items);
-    if (!body.hasMore) return items;
-
-    const nextCursor = body.nextCursor;
-    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error(`Vault ${input.resource} pagination did not advance`);
-    }
-    seenCursors.add(nextCursor);
-    before = nextCursor;
-  }
-
-  throw new Error(`Vault ${input.resource} pagination exceeded its safety limit`);
+      const result = await dashboardFetch<unknown>(
+        `/api/dashboard/markets/earn/vault-${input.resource}?${query.toString()}`
+      );
+      if (!result.ok) throw new Error(result.error);
+      const body = input.parsePage(result.data);
+      if (!body) throw new Error(`Invalid vault ${input.resource} response`);
+      return body;
+    },
+  });
 }
 
 /**
@@ -1393,33 +1410,35 @@ const queuedRequestPageSchema = z.object({
   }),
 });
 
+/**
+ * Pages the durable recovery feed over the shared cursor pager, exactly like
+ * the live-position and vault-movement readers: a silently short read here is
+ * a still-recoverable request that stops being surfaced.
+ */
 export async function fetchEarnVaultWithdrawalRequests(
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultWithdrawalRequestRecord[]> {
-  const requests: EarnVaultWithdrawalRequestRecord[] = [];
-  const seen = new Set<string>();
-  let before: string | undefined;
+  return fetchAllCursorPages<EarnVaultWithdrawalRequestRecord>({
+    subject: "Queued withdrawal requests",
+    pageSize: EARN_PAGE_SIZE,
+    async fetchPage(before) {
+      const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
+      if (before) query.set("before", before);
+      if (options.settled !== undefined) query.set("settled", String(options.settled));
 
-  for (let page = 0; page < EARN_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
-    if (before) query.set("before", before);
-    if (options.settled !== undefined) query.set("settled", String(options.settled));
-    const result = await dashboardFetch<unknown>(
-      `/api/dashboard/markets/earn/vault-withdrawal-requests?${query}`
-    );
-    if (!result.ok) throw new Error(result.error);
-    const parsed = queuedRequestPageSchema.safeParse(result.data);
-    if (!parsed.success) throw new Error("Invalid queued withdrawal request page");
-    requests.push(...parsed.data.data.withdrawalRequests);
-    if (!parsed.data.data.hasMore) return requests;
-    const next = parsed.data.data.nextCursor;
-    if (!next || next === before || seen.has(next)) {
-      throw new Error("Queued withdrawal request pagination did not advance");
-    }
-    seen.add(next);
-    before = next;
-  }
-  throw new Error("Queued withdrawal request pagination exceeded its safety limit");
+      const result = await dashboardFetch<unknown>(
+        `/api/dashboard/markets/earn/vault-withdrawal-requests?${query}`
+      );
+      if (!result.ok) throw new Error(result.error);
+      const parsed = queuedRequestPageSchema.safeParse(result.data);
+      if (!parsed.success) throw new Error("Invalid queued withdrawal request page");
+      return {
+        items: parsed.data.data.withdrawalRequests,
+        hasMore: parsed.data.data.hasMore,
+        nextCursor: parsed.data.data.nextCursor,
+      };
+    },
+  });
 }
 
 export function isEarnVaultWithdrawalRequestInFlight(
