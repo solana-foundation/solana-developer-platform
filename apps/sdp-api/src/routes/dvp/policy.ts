@@ -18,8 +18,11 @@
  * the two recovery paths ungoverned is what keeps a gated settle safe, because a
  * settle whose approval arrives after the trade expires can always be unwound.
  *
- * `dvp_reclaim` is therefore NOT added as an operation type. Declaring one with
- * no call site is the state the audit flagged in the first place.
+ * Neither gets an operation type, therefore: `dvp_reclaim` is not added, and
+ * `dvp_cancel` is removed from `WALLET_OPERATION_TYPES`. It had no call site,
+ * which is the state the audit flagged in the first place, and it was offered
+ * in the API-key policy authoring picker, so an organization could write a
+ * `dvp_cancel` rule and silently get nothing.
  *
  * **Family.** Both use `program`, which is what Earn's vault and program
  * movements use (`routes/earn/handlers/vault.ts:520`) and the same shape: a

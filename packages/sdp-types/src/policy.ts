@@ -3,15 +3,17 @@ export type PolicyDefaultAction = "allow" | "deny" | "approval_required" | "revi
 export type EffectivePolicySource = "implicit_default_allow" | "customer_profile";
 
 export const WALLET_OPERATION_TYPES = [
-  // Settling a DvP trade moves BOTH legs in one transaction and closes the
-  // trade permanently; cancelling refunds both. They are the only two actions
-  // the settlement authority can take, and both are irreversible, which is
-  // exactly the shape an org should be able to require approval on.
-  "dvp_cancel",
   // Moving SDP's own leg into escrow. A spend from a custody wallet like any
   // other, and irreversible once the escrow holds it: only settle, cancel or
   // reclaim get it back.
   "dvp_fund",
+  // Settling delivers both legs in one transaction and closes the trade
+  // permanently. Cancel and reclaim, the paths that get an escrow's tokens back
+  // out, are deliberately NOT declared: gating an exit can strand a deposit, so
+  // no rule may govern them (`apps/sdp-api/src/routes/dvp/policy.ts`). An
+  // operation type with no call site is the state the audit flagged, so the two
+  // ungated actions get no type rather than one an org can write a dead rule
+  // against.
   "dvp_settle",
   "earn_program_withdrawal",
   "earn_vault_deposit",
