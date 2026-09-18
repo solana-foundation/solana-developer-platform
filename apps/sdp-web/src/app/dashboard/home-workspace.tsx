@@ -66,6 +66,7 @@ interface HomeWorkspaceProps {
 
 const HOME_ACTIVITY_KEY = "dashboard-home-activity";
 const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
+const HOME_ACTIVITY_REFRESH_INTERVAL_MS = 60_000;
 
 /** Table text that ellipsizes, with a full-value tooltip only while it actually overflows. */
 function TruncatedTableText({ value, className }: { value: string; className?: string }) {
@@ -561,7 +562,9 @@ export function HomeWorkspace({
     () => fetchHomeActivity(),
     {
       revalidateOnFocus: true,
-      refreshInterval: 20_000,
+      refreshInterval: HOME_ACTIVITY_REFRESH_INTERVAL_MS,
+      refreshWhenHidden: false,
+      refreshWhenOffline: false,
     },
     {
       key: "home-activity",

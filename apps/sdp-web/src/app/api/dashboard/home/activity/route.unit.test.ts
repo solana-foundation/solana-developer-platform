@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   buildHomeActivityRows: vi.fn((): unknown[] => []),
   computeTodaysVolume: vi.fn(() => 0),
   fetchOrgIssuanceActivity: vi.fn(),
-  fetchDashboardPaymentTransfers: vi.fn(),
+  fetchPaymentTransfers: vi.fn(),
   fetchPaymentsIssuedTokenSymbols: vi.fn(),
   createSdpApiClient: vi.fn(),
 }));
@@ -17,7 +17,7 @@ vi.mock("@/app/dashboard/home-page.data", () => ({
   fetchOrgIssuanceActivity: mocks.fetchOrgIssuanceActivity,
 }));
 vi.mock("@/app/dashboard/payments/payments-page.data", () => ({
-  fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
+  fetchPaymentTransfers: mocks.fetchPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,
 }));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
@@ -40,13 +40,17 @@ describe("GET /api/dashboard/home/activity feature gates", () => {
     vi.clearAllMocks();
     mocks.issuance.mockResolvedValue(false);
     mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
-    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({ ok: true, data: [] });
+    mocks.fetchPaymentTransfers.mockResolvedValue({ ok: true, data: [] });
   });
 
-  it("does not request or return issuance data while Issuance is disabled", async () => {
+  it("loads persisted payments once without observed wallet fan-out", async () => {
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
 
     expect(response.status).toBe(200);
+    expect(mocks.fetchPaymentTransfers).toHaveBeenCalledOnce();
+    expect(mocks.fetchPaymentTransfers).toHaveBeenCalledWith(expect.any(Function), 20, {
+      includeObserved: false,
+    });
     expect(mocks.fetchOrgIssuanceActivity).not.toHaveBeenCalled();
     expect(mocks.fetchPaymentsIssuedTokenSymbols).not.toHaveBeenCalled();
     expect(mocks.buildHomeActivityRows).toHaveBeenCalledWith([], [], expect.any(Function), {});
@@ -76,7 +80,7 @@ describe("GET /api/dashboard/home/activity feature gates", () => {
 
   it("reports unavailable activity sources without fabricating rows", async () => {
     mocks.issuance.mockResolvedValue(true);
-    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({ ok: false, data: null });
+    mocks.fetchPaymentTransfers.mockResolvedValue({ ok: false, data: null });
     mocks.fetchOrgIssuanceActivity.mockResolvedValue({ ok: false, data: null });
     mocks.fetchPaymentsIssuedTokenSymbols.mockResolvedValue({ ok: false, data: null });
 
