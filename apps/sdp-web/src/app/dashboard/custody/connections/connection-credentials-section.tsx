@@ -410,6 +410,7 @@ export function ConnectionCredentialsSection({
   const [rotationLifecycle, setRotationLifecycle] = useState<CustodyCredentialLifecycle | null>(
     null
   );
+  const [rotationOpen, setRotationOpen] = useState(false);
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
   const availableLifecycle = typeof lifecycle === "object" ? lifecycle : null;
@@ -419,17 +420,35 @@ export function ConnectionCredentialsSection({
     availableLifecycle?.providerCredential.status === "active" &&
     availableLifecycle.impact.connections.length > 0;
   const canAct = canManageCustody && managedHere && currentInUse;
-  // A refresh can fail or change the active credential. Keep the open dialog
-  // mounted so it can settle its original attempt, without enabling a new one.
+  // Keep the controller mounted across dismissal and refresh so an unresolved
+  // rotation resumes with the original payload, key and credential target.
   const rotationModal = rotationLifecycle ? (
-    <RotateCredentialsModal
-      isOpen
-      onClose={() => setRotationLifecycle(null)}
-      lifecycle={availableLifecycle ?? rotationLifecycle}
-      provider={provider}
-      connectionId={connection.id}
-      canRotate={canAct}
-    />
+    <>
+      <RotateCredentialsModal
+        isOpen={rotationOpen}
+        onClose={(preserveAttempt) => {
+          setRotationOpen(false);
+          if (!preserveAttempt) setRotationLifecycle(null);
+        }}
+        lifecycle={availableLifecycle ?? rotationLifecycle}
+        provider={provider}
+        connectionId={connection.id}
+        canRotate={canAct}
+      />
+      {!rotationOpen ? (
+        <Callout variant="warning" title={t("DashboardCustody.rotateUnknownTitle")}>
+          <p>{t("DashboardCustody.rotateResumeHint")}</p>
+          <Button
+            className="mt-3"
+            size="sm"
+            variant="secondary"
+            onClick={() => setRotationOpen(true)}
+          >
+            {t("DashboardCustody.rotateResumeAction")}
+          </Button>
+        </Callout>
+      ) : null}
+    </>
   ) : null;
 
   if (lifecycle === "restricted") {
@@ -520,11 +539,14 @@ export function ConnectionCredentialsSection({
             canDeactivate={canDeactivate}
             connectionId={connection.id}
             credential={credential}
-            hasPendingRotation={Boolean(candidate)}
+            hasPendingRotation={Boolean(candidate) || rotationLifecycle !== null}
             impact={lifecycle.impact}
             managedHere={managedHere}
             onDeactivate={() => setDeactivateOpen(true)}
-            onRotate={() => setRotationLifecycle(lifecycle)}
+            onRotate={() => {
+              setRotationLifecycle(lifecycle);
+              setRotationOpen(true);
+            }}
             pending={pending}
             t={t}
           />

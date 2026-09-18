@@ -32,7 +32,7 @@ export function RotateCredentialsModal({
   canRotate,
 }: {
   isOpen: boolean;
-  onClose: () => void;
+  onClose: (preserveAttempt: boolean) => void;
   lifecycle: CustodyCredentialLifecycle;
   provider: CustodyProvider;
   connectionId: string;
@@ -40,54 +40,7 @@ export function RotateCredentialsModal({
 }) {
   const t = useTranslations();
   const { pending, run } = useCustodyAction();
-  const [recoveryLocked, setRecoveryLocked] = useState(false);
-  const closeDisabled = pending || recoveryLocked;
-
-  // Closing unmounts the form, so an unresolved attempt must settle first.
-  return (
-    <Modal
-      isOpen={isOpen}
-      onClose={closeDisabled ? undefined : onClose}
-      closeDisabled={closeDisabled}
-      size="lg"
-      ariaLabel={t("DashboardCustody.rotateTitle")}
-    >
-      <RotateCredentialsForm
-        canRotate={canRotate}
-        connectionId={connectionId}
-        lifecycle={lifecycle}
-        onClose={onClose}
-        onRecoveryLockChange={setRecoveryLocked}
-        pending={pending}
-        provider={provider}
-        run={run}
-        t={t}
-      />
-    </Modal>
-  );
-}
-
-function RotateCredentialsForm({
-  canRotate,
-  connectionId,
-  lifecycle,
-  onClose,
-  onRecoveryLockChange,
-  pending,
-  provider,
-  run,
-  t,
-}: {
-  canRotate: boolean;
-  connectionId: string;
-  lifecycle: CustodyCredentialLifecycle;
-  onClose: () => void;
-  onRecoveryLockChange: (locked: boolean) => void;
-  pending: boolean;
-  provider: CustodyProvider;
-  run: ReturnType<typeof useCustodyAction>["run"];
-  t: ReturnType<typeof useTranslations>;
-}) {
+  // Keep the attempt outside Modal's children, which unmount while it is hidden.
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
@@ -95,6 +48,7 @@ function RotateCredentialsForm({
 
   const connectionCount = lifecycle.impact.connections.length;
   const fieldsDisabled = pending || attempt !== null || !canRotate;
+  const handleClose = () => onClose(attempt !== null);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -111,8 +65,6 @@ function RotateCredentialsForm({
       formData.set("appSecret", appSecret);
       setAttempt(formData);
     }
-    onRecoveryLockChange(true);
-
     const result = await run(() => rotateCredentialsAction(formData, attempt !== null), {
       successTitle: t("DashboardCustody.rotateSuccessTitle"),
       successDescription: t("DashboardCustody.rotateSuccessDescription", {
@@ -127,7 +79,6 @@ function RotateCredentialsForm({
 
     setAttempt(null);
     setAppSecret("");
-    onRecoveryLockChange(false);
 
     // Only a conclusive refusal permits a corrected intent under a fresh key.
     if (result.status === "failed") {
@@ -135,66 +86,69 @@ function RotateCredentialsForm({
     }
 
     if (result.status === "success") {
-      onClose();
+      onClose(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5 p-6" data-custody-rotate-form>
-      <h2 className="text-lg font-medium text-primary">{t("DashboardCustody.rotateTitle")}</h2>
+    <Modal
+      isOpen={isOpen}
+      onClose={pending ? undefined : handleClose}
+      closeDisabled={pending}
+      size="lg"
+      ariaLabel={t("DashboardCustody.rotateTitle")}
+    >
+      <form onSubmit={handleSubmit} className="space-y-5 p-6" data-custody-rotate-form>
+        <h2 className="text-lg font-medium text-primary">{t("DashboardCustody.rotateTitle")}</h2>
 
-      <CredentialImpactList impact={lifecycle.impact} provider={provider} />
+        <CredentialImpactList impact={lifecycle.impact} provider={provider} />
 
-      {attempt && !pending ? (
-        <Callout variant="warning">{t("DashboardCustody.rotateRetryHint")}</Callout>
-      ) : null}
+        {attempt && !pending ? (
+          <Callout variant="warning">{t("DashboardCustody.rotateRetryHint")}</Callout>
+        ) : null}
 
-      <div className="space-y-2">
-        <Label htmlFor="custody-rotate-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
-        <Input
-          id="custody-rotate-app-id"
-          name="appId"
-          required
+        <div className="space-y-2">
+          <Label htmlFor="custody-rotate-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
+          <Input
+            id="custody-rotate-app-id"
+            name="appId"
+            required
+            disabled={fieldsDisabled}
+            value={appId}
+            onChange={(event) => setAppId(event.target.value)}
+          />
+        </div>
+
+        <SecretField
+          name="appSecret"
+          label={t("DashboardCustody.rotateNewSecretLabel")}
+          hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
+          value={appSecret}
+          onChange={setAppSecret}
           disabled={fieldsDisabled}
-          value={appId}
-          onChange={(event) => setAppId(event.target.value)}
         />
-      </div>
 
-      <SecretField
-        name="appSecret"
-        label={t("DashboardCustody.rotateNewSecretLabel")}
-        hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
-        value={appSecret}
-        onChange={setAppSecret}
-        disabled={fieldsDisabled}
-      />
-
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={onClose}
-          disabled={pending || attempt !== null}
-        >
-          {t("DashboardCustody.cancel")}
-        </Button>
-        <Button
-          type="submit"
-          disabled={pending || (!attempt && !canRotate)}
-          iconLeft={
-            pending ? (
-              <Loader2Icon aria-hidden className="size-4 animate-spin" />
-            ) : (
-              <RefreshCwIcon aria-hidden className="size-4" />
-            )
-          }
-        >
-          {attempt
-            ? t("Shared.SharedComponents.retry")
-            : t("DashboardCustody.rotateConfirm", { count: connectionCount })}
-        </Button>
-      </div>
-    </form>
+        <div className="flex items-center justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={handleClose} disabled={pending}>
+            {t(attempt ? "DashboardCustody.close" : "DashboardCustody.cancel")}
+          </Button>
+          <Button
+            type="submit"
+            disabled={pending || (!attempt && !canRotate)}
+            iconLeft={
+              pending ? (
+                <Loader2Icon aria-hidden className="size-4 animate-spin" />
+              ) : (
+                <RefreshCwIcon aria-hidden className="size-4" />
+              )
+            }
+          >
+            {attempt
+              ? t("Shared.SharedComponents.retry")
+              : t("DashboardCustody.rotateConfirm", { count: connectionCount })}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

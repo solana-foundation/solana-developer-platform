@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -51,7 +51,11 @@ const lifecycle: CustodyCredentialLifecycle = {
   rollback: null,
 };
 
-function modal(onClose: () => void, currentLifecycle = lifecycle, canRotate = true) {
+function modal(
+  onClose: (preserveAttempt: boolean) => void,
+  currentLifecycle = lifecycle,
+  canRotate = true
+) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
       <RotateCredentialsModal
@@ -61,6 +65,29 @@ function modal(onClose: () => void, currentLifecycle = lifecycle, canRotate = tr
         provider="privy"
         connectionId="cconn_1"
         canRotate={canRotate}
+      />
+    </I18nProvider>
+  );
+}
+
+function section(currentLifecycle: CustodyCredentialLifecycle | "restricted" | null) {
+  return (
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <ConnectionCredentialsSection
+        lifecycle={currentLifecycle}
+        connection={{
+          id: "cconn_1",
+          provider: "privy",
+          label: "Production signing",
+          status: "active",
+          completion: null,
+          isDefault: true,
+          canComplete: false,
+          canReplaceCredentials: false,
+          canCancel: false,
+        }}
+        provider="privy"
+        canManageCustody
       />
     </I18nProvider>
   );
@@ -128,8 +155,7 @@ describe("rotation recovery", () => {
       );
       expect(screen.getByLabelText("Privy app ID")).toHaveProperty("disabled", true);
       expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", true);
-      expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", true);
-      await userEvent.keyboard("{Escape}");
+      expect(screen.getByRole("button", { name: "Close" })).toHaveProperty("disabled", false);
       expect(onClose).not.toHaveBeenCalled();
 
       await userEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -164,28 +190,6 @@ describe("rotation recovery", () => {
           data: { providerCredential: { id: "pcred_new" }, rotation: { status: "success" } },
         })
       );
-      function section(currentLifecycle: CustodyCredentialLifecycle | "restricted" | null) {
-        return (
-          <I18nProvider locale="en" messages={getMessages("en")}>
-            <ConnectionCredentialsSection
-              lifecycle={currentLifecycle}
-              connection={{
-                id: "cconn_1",
-                provider: "privy",
-                label: "Production signing",
-                status: "active",
-                completion: null,
-                isDefault: true,
-                canComplete: false,
-                canReplaceCredentials: false,
-                canCancel: false,
-              }}
-              provider="privy"
-              canManageCustody
-            />
-          </I18nProvider>
-        );
-      }
       const view = render(section(lifecycle));
       await userEvent.click(screen.getByRole("button", { name: "Rotate credentials" }));
       await submitCredentials();
@@ -262,9 +266,9 @@ describe("rotation recovery", () => {
     await waitFor(() => expect(rotation).toHaveBeenCalledTimes(1));
     expect(screen.getByLabelText("Privy app ID")).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", true);
-    expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Close" })).toHaveProperty("disabled", true);
     await userEvent.keyboard("{Escape}");
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).not.toHaveBeenCalled();
     resolveRotation?.(
       Response.json({
@@ -306,9 +310,14 @@ describe("rotation recovery", () => {
     expect(rotation).toHaveBeenCalledTimes(2);
   });
 
-  it.each([403, 409])(
-    "keeps the original unknown attempt after a replay receives HTTP %s",
-    async (status) => {
+  it.each([
+    { status: 401, refreshed: "unavailable", close: "footer" },
+    { status: 403, refreshed: "restricted", close: "escape" },
+    { status: 409, refreshed: "retired", close: "header" },
+    { status: 409, refreshed: "candidate", close: "backdrop" },
+  ])(
+    "resumes the original attempt after HTTP $status, $close close and $refreshed refresh",
+    async ({ status, refreshed, close }) => {
       const rotation = mockApi();
       rotation.mockResolvedValueOnce(
         Response.json({ error: { message: "Timed out" } }, { status: 503 })
@@ -321,8 +330,8 @@ describe("rotation recovery", () => {
           data: { providerCredential: { id: "pcred_new" }, rotation: { status: "success" } },
         })
       );
-      const onClose = vi.fn();
-      render(modal(onClose));
+      const view = render(section(lifecycle));
+      await userEvent.click(screen.getByRole("button", { name: "Rotate credentials" }));
       await submitCredentials();
       await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
       await userEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -333,10 +342,61 @@ describe("rotation recovery", () => {
         "test-app-secret"
       );
       expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", true);
-      expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", true);
-      expect(onClose).not.toHaveBeenCalled();
+      if (close === "escape") {
+        await userEvent.keyboard("{Escape}");
+      } else if (close === "header") {
+        await userEvent.click(
+          within(screen.getByRole("dialog")).getByRole("button", { name: "Close modal" })
+        );
+      } else if (close === "backdrop") {
+        await userEvent.click(screen.getAllByRole("button", { name: "Close modal" })[0]);
+      } else {
+        await userEvent.click(screen.getByRole("button", { name: "Close" }));
+      }
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.queryByLabelText("New Privy app secret")).toBeNull();
+      expect(screen.getByRole("button", { name: "Rotate credentials" })).toHaveProperty(
+        "disabled",
+        true
+      );
+
+      view.rerender(
+        section(
+          refreshed === "unavailable"
+            ? null
+            : refreshed === "restricted"
+              ? "restricted"
+              : refreshed === "retired"
+                ? {
+                    ...lifecycle,
+                    providerCredential: {
+                      ...lifecycle.providerCredential,
+                      id: "pcred_refreshed",
+                      status: "retired",
+                    },
+                  }
+                : {
+                    ...lifecycle,
+                    rotationCandidate: {
+                      ...lifecycle.providerCredential,
+                      id: "pcred_candidate",
+                      status: "pending",
+                    },
+                  }
+        )
+      );
+      expect(rotation).toHaveBeenCalledTimes(2);
+      await userEvent.click(screen.getByRole("button", { name: "Resume rotation" }));
+      expect(screen.getByLabelText("Privy app ID")).toHaveProperty("value", "test-app-id");
+      expect(screen.getByLabelText("Privy app ID")).toHaveProperty("disabled", true);
+      expect(screen.getByLabelText("New Privy app secret")).toHaveProperty(
+        "value",
+        "test-app-secret"
+      );
+      expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", true);
       await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(screen.queryByRole("button", { name: "Resume rotation" })).toBeNull();
       expect(rotation).toHaveBeenCalledTimes(3);
       const first = rotation.mock.calls[0];
       const originalKey = new Headers(first?.[1]?.headers).get("Idempotency-Key");
@@ -348,4 +408,66 @@ describe("rotation recovery", () => {
       }
     }
   );
+
+  it("allows a corrected intent only after the resumed attempt explicitly fails", async () => {
+    const rotation = mockApi();
+    rotation.mockResolvedValueOnce(
+      Response.json({ error: { message: "Timed out" } }, { status: 503 })
+    );
+    rotation.mockResolvedValueOnce(
+      Response.json({
+        data: {
+          providerCredential: { id: "pcred_candidate" },
+          rotation: { status: "failed", code: "invalid_credentials" },
+        },
+      })
+    );
+    rotation.mockResolvedValueOnce(
+      Response.json({
+        data: { providerCredential: { id: "pcred_new" }, rotation: { status: "success" } },
+      })
+    );
+    render(section(lifecycle));
+    await userEvent.click(screen.getByRole("button", { name: "Rotate credentials" }));
+    await submitCredentials();
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await userEvent.click(screen.getByRole("button", { name: "Resume rotation" }));
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", false);
+    await userEvent.type(screen.getByLabelText("New Privy app secret"), "corrected-secret");
+    await userEvent.click(screen.getByRole("button", { name: "Rotate for 1 connections" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Resume rotation" })).toBeNull();
+    expect(rotation).toHaveBeenCalledTimes(3);
+    const original = rotation.mock.calls[0]?.[1];
+    const replay = rotation.mock.calls[1]?.[1];
+    const corrected = rotation.mock.calls[2]?.[1];
+    const originalKey = new Headers(original?.headers).get("Idempotency-Key");
+    expect(new Headers(replay?.headers).get("Idempotency-Key")).toBe(originalKey);
+    expect(replay?.body).toBe(original?.body);
+    expect(new Headers(corrected?.headers).get("Idempotency-Key")).not.toBe(originalKey);
+    expect(corrected?.body).toBe(
+      JSON.stringify({ fields: { appId: "test-app-id", appSecret: "corrected-secret" } })
+    );
+  });
+
+  it("discards an unsubmitted draft on Cancel instead of offering to resume it", async () => {
+    const rotation = mockApi();
+    render(section(lifecycle));
+    await userEvent.click(screen.getByRole("button", { name: "Rotate credentials" }));
+    await userEvent.type(screen.getByLabelText("Privy app ID"), "draft-app-id");
+    await userEvent.type(screen.getByLabelText("New Privy app secret"), "draft-secret");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume rotation" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Rotate credentials" }));
+    expect(screen.getByLabelText("Privy app ID")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", false);
+    expect(rotation).not.toHaveBeenCalled();
+  });
 });
