@@ -733,6 +733,17 @@ const earnExternalWalletPositionSchema = z
     withdrawableShares: earnLiveDecimalAmountSchema.optional().openapi({
       description: "Live immediately redeemable shares. Absent when hydration is unavailable.",
     }),
+    unlockTimestamp: z
+      .string()
+      .regex(/^\d+$/)
+      .nullable()
+      .optional()
+      .openapi({
+        description:
+          "Unix epoch seconds when provider-locked shares become eligible to exit. Null when " +
+          "no lock applies; absent when live hydration is unavailable.",
+        example: "1789722000",
+      }),
     tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
       description: "Live deposit-token value. Absent when hydration is unavailable.",
     }),

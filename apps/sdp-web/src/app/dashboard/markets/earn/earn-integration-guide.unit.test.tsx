@@ -149,11 +149,11 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getByText("Kamino · Instant liquidity · 6.2% APY")).toBeTruthy();
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
 
-    // All four concerns stay visible as navigation, while only the active code
+    // All five concerns stay visible as navigation, while only the active code
     // slice renders. This keeps the whole flow findable without a wizard.
-    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw"];
+    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw", "Asynchronous exits"];
     const serverFlow = screen.getByLabelText("Server flow");
-    expect(within(serverFlow).getAllByRole("button")).toHaveLength(4);
+    expect(within(serverFlow).getAllByRole("button")).toHaveLength(5);
     expect(
       within(serverFlow).getByRole("button", { name: "Client" }).getAttribute("aria-pressed")
     ).toBe("true");
@@ -204,7 +204,7 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("strategyId: STRATEGY_ID");
     expect(code).not.toContain("sourceTokenMint");
     expect(code).not.toContain("EMBEDDED_YIELD_STRATEGY");
-    expect(code.match(/return data\.transaction;/g)).toHaveLength(2);
+    expect(code.match(/return data\.transaction;/g)).toHaveLength(4);
     expect(code).not.toContain("custodyWalletId");
     expect(code).not.toContain("vault-deposits");
     expect(code).not.toContain("requestId");
@@ -221,6 +221,8 @@ describe("EarnIntegrationGuide", () => {
     expect(code).not.toContain("/v1/earn/external-wallet/positions/");
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-transactions");
     expect(code).toContain("/v1/earn/external-wallet/withdrawals");
+    expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-transactions");
+    expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-cancel-transactions");
     expect(code).toContain("waitForEarnMovement");
     expect(code).toContain("intervalMs = 1_000");
     expect(code).toContain('movement.status === "confirmed"');

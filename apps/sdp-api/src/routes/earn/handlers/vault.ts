@@ -653,7 +653,7 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
   return null;
 }
 
-function resolveEarnVaultCustodyWallet(
+export function resolveEarnVaultCustodyWallet(
   wallets: readonly CustodyRuntimeWalletProjection[],
   custodyWalletId: string
 ): CustodyRuntimeWalletProjection {
@@ -662,7 +662,7 @@ function resolveEarnVaultCustodyWallet(
   throw walletNotFound();
 }
 
-function assertBoundWalletIdentifierIsUnique(
+export function assertBoundWalletIdentifierIsUnique(
   auth: EarnVaultDepositResolved["auth"],
   wallets: readonly CustodyRuntimeWalletProjection[],
   wallet: CustodyRuntimeWalletProjection
@@ -1031,7 +1031,7 @@ function decodeVaultMovementCursor(cursor: string): { createdAt: string; id: str
  * below from either coercing a blank vault address into a chain read or
  * repeating the same assertion six times.
  */
-interface VaultHolding {
+export interface VaultHolding {
   id: string;
   provider: string;
   vaultAddress: string;
@@ -1045,7 +1045,7 @@ interface VaultHolding {
   updatedAt: string;
 }
 
-function toVaultHolding(row: EarnPositionRow): VaultHolding {
+export function toVaultHolding(row: EarnPositionRow): VaultHolding {
   if (!row.vault_address || !row.custody_wallet_id || !row.token_mint || !row.share_mint) {
     throw internalError(`Earn vault position ${row.id} is missing its instrument identity`);
   }
@@ -1168,6 +1168,7 @@ export async function listEarnVaultPositions(c: AppContext) {
         // Absent (not zero) when the chain read failed or returned nothing.
         shares: hydrated?.shares,
         withdrawableShares: hydrated?.withdrawableShares,
+        unlockTimestamp: hydrated?.unlockTimestamp,
         tokenValue: hydrated?.tokenValue,
       };
     }),

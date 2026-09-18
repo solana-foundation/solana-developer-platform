@@ -117,6 +117,39 @@ balance with a live one.
   session auth. Every tenant read and signed-transaction submit remains
   authenticated.
 
+### Queued vault withdrawals (Veda)
+
+Queued exits are a separate durable resource, not a slow `earn_movement`.
+The owner-signed request only escrows shares; a later solver transaction pays
+assets, and a post-deadline owner-signed cancellation returns shares. Persist
+the lifecycle in `earn_vault_withdrawal_requests` plus its signed action rows.
+Only a verified `withdrawalFulfilled` close is projected into movement/activity
+reads, using the solver transaction's closing signature and payout; request and
+cancel transactions remain request history and must never be labelled payouts.
+
+The custody options/preview/create/list/detail/cancel routes are keyed. External
+wallet options, preview, unsigned request build, and unsigned cancel build use
+the optional-auth contract: anonymous calls are per-IP RPC-metered and persist
+nothing; valid keyed calls retain tenant/permission checks and durable builds.
+External submits and request history are keyed. A presented invalid credential
+always returns 401 rather than falling back to anonymous. Cancellation is an
+exit-recovery path: policy gates do not strand it, and a caller with write access
+to the exact org-owned custody wallet may recover a request whose initiating
+project was deleted; list/detail history remains exact-project scoped.
+
+The scheduled reconciler independently advances both signed-action finality and
+provider PDA state. Landed request terms and terminal quantities come from Veda
+lifecycle events/PDA reads, and Veda log parsing accepts `Program data:` only
+inside the configured queue program's active log frame. A closed PDA without a
+matching finalized close event stays `closed_or_unknown`; missing signature
+history never proves that a live escrow failed. See ADR 0003 for the full state
+machine and recovery rationale.
+
+These runtime routes are intentionally absent from public OpenAPI. Promotion is
+an EARN-027 security-scope change and requires named security sign-off plus the
+pinned public-operation update; do not add generated docs or OpenAPI paths as a
+side effect of implementation.
+
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.

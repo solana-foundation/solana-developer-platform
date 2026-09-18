@@ -295,6 +295,56 @@ export const buildEarnVaultWithdrawalFingerprint = (
     })
   );
 
+export interface EarnVaultQueuedWithdrawalFingerprintInput {
+  environment: string;
+  provider: string;
+  positionId: string;
+  shares: string;
+  discountBps: number;
+  deadlineSeconds: number;
+  /** Exact unsigned build consumed by an external-wallet submit. */
+  transactionId?: string;
+}
+
+/** Intent identity for the transaction that creates a long-lived queue request. */
+export const buildEarnVaultQueuedWithdrawalFingerprint = (
+  input: EarnVaultQueuedWithdrawalFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_vault_queued_withdrawal_request",
+      environment: input.environment,
+      provider: input.provider,
+      positionId: input.positionId,
+      shares: normalizeDecimalString(input.shares),
+      discountBps: input.discountBps,
+      deadlineSeconds: input.deadlineSeconds,
+      transactionId: input.transactionId ?? null,
+    })
+  );
+
+export interface EarnVaultQueuedWithdrawalCancelFingerprintInput {
+  environment: string;
+  withdrawalRequestId: string;
+  requestAddress: string;
+  /** Exact unsigned build consumed by an external-wallet submit. */
+  transactionId?: string;
+}
+
+/** Intent identity for the recovery transaction returning escrowed shares. */
+export const buildEarnVaultQueuedWithdrawalCancelFingerprint = (
+  input: EarnVaultQueuedWithdrawalCancelFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_vault_queued_withdrawal_cancel",
+      environment: input.environment,
+      withdrawalRequestId: input.withdrawalRequestId,
+      requestAddress: input.requestAddress,
+      transactionId: input.transactionId ?? null,
+    })
+  );
+
 export interface EarnExternalWalletDepositFingerprintInput {
   environment: string;
   provider: string;

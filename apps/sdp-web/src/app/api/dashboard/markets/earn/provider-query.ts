@@ -221,6 +221,42 @@ export function vaultWithdrawalsProxyQuery(request: Request): ProxyQueryValidati
   return vaultMovementsProxyQuery(request, "withdrawals");
 }
 
+/** Strict passthrough for the durable queued-withdrawal lifecycle feed. */
+export function vaultWithdrawalRequestsProxyQuery(request: Request): ProxyQueryValidation {
+  const incoming = new URL(request.url).searchParams;
+  const allowed = new Set(["limit", "before", "status", "settled"]);
+  const label = "Vault withdrawal requests";
+
+  const rejected =
+    rejectUnknownParams(incoming, allowed, "vault withdrawal requests") ??
+    rejectDuplicateParams(incoming, allowed, label);
+  if (rejected) return rejected;
+
+  const query = new URLSearchParams();
+  const limitRejected = validateLimit(incoming, label, query);
+  if (limitRejected) return limitRejected;
+  const cursorRejected = validateCursor(incoming, label, query);
+  if (cursorRejected) return cursorRejected;
+
+  const status = incoming.get("status");
+  if (status !== null) {
+    if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(status)) {
+      return { ok: false, message: `${label} status is invalid` };
+    }
+    query.set("status", status);
+  }
+
+  const settled = incoming.get("settled");
+  if (settled !== null) {
+    if (settled !== "true" && settled !== "false") {
+      return { ok: false, message: `${label} settled filter must be true or false` };
+    }
+    query.set("settled", settled);
+  }
+
+  return { ok: true, query: query.size > 0 ? `?${query}` : "" };
+}
+
 /**
  * Strict allowlist for the cross-provider movement feed, same posture as the two
  * readers above: consumed only by our typed client, so an unknown or duplicated

@@ -29,6 +29,7 @@ import {
   fetchEarnVaultWithdrawalsByRequestId,
   useEarnVaultWithdrawalOutcome,
 } from "./earn-program-data";
+import { EarnVaultApprovalResult } from "./earn-vault-approval-result";
 import {
   mergeObservedVaultMovement,
   observableVaultMovement,
@@ -199,48 +200,12 @@ function WithdrawalApprovalResult({
   outcome: Extract<WithdrawalOutcome, { kind: "approval_pending" }>;
   onClose: () => void;
 }) {
-  const t = useTranslations();
-
   return (
-    <>
-      <EarnOutcomeMark tone="warning" />
-      <div className="flex items-center gap-2 pr-8">
-        <h2
-          className="text-base font-medium text-primary outline-none"
-          data-modal-focus-target
-          tabIndex={-1}
-        >
-          {t("DashboardEarn.vaultWithdraw.approvalTitle")}
-        </h2>
-        <Badge variant="warning">{t("DashboardEarn.vaultWithdraw.approvalStatus")}</Badge>
-      </div>
-      <p className="mt-2 text-sm leading-5 text-secondary">
-        {t("DashboardEarn.vaultWithdraw.approvalBody")}
-      </p>
-      {outcome.approvalRequestId || outcome.walletOperationId ? (
-        <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-          {outcome.approvalRequestId ? (
-            <div className="flex items-start justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultApprovalRequest")}</dt>
-              <dd className="max-w-64 break-all text-right text-primary">
-                {outcome.approvalRequestId}
-              </dd>
-            </div>
-          ) : null}
-          {outcome.walletOperationId ? (
-            <div className="flex items-start justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.withdraw.referenceLabel")}</dt>
-              <dd className="max-w-64 break-all text-right text-primary">
-                {outcome.walletOperationId}
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-      ) : null}
-      <div className="mt-5 flex justify-end">
-        <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
-      </div>
-    </>
+    <EarnVaultApprovalResult
+      approvalRequestId={outcome.approvalRequestId}
+      onClose={onClose}
+      walletOperationId={outcome.walletOperationId}
+    />
   );
 }
 

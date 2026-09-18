@@ -23,9 +23,13 @@ const SHARED_TABLES: Record<string, string> = {
   earn_execution_models: "shared movement vocabulary (0062_earn_movements)",
   earn_movement_directions: "shared movement vocabulary (0062_earn_movements)",
   earn_movement_statuses: "shared movement vocabulary (0062_earn_movements)",
+  earn_vault_withdrawal_request_statuses: "shared queued-withdrawal request vocabulary (0113)",
+  earn_vault_withdrawal_action_statuses: "shared queued-withdrawal action vocabulary (0113)",
   helius_rings_asset_allowlist: "platform reference data seeded by 0057_helius_rings",
   ramp_webhook_events:
     "system webhook inbox; rows are persisted before tenant resolution and only system jobs read them",
+  earn_vault_withdrawal_request_pda_leases:
+    "public chain PDA coordination only; contains no tenant, owner, or intent data",
 };
 
 interface TableSecurityRow {

@@ -253,9 +253,14 @@ Money OUT is a separate capability, `EarnVaultWithdrawProvider` /
 `supportsVaultWithdraw`, which BOTH implement now — Kamino since PRO-1702 and
 Veda's instant redemption since ADR 0003's "instant lands first" step, both
 through `POST /v1/earn/vault-withdrawals`. Veda's QUEUED exit
-(`boring_onchain_queue`) remains unimplemented: its lifecycle is settled by a
-solver Veda operates and does not fit the movement model, so it waits on its
-own capability and schema (`docs/decisions/0003-veda-vault-withdrawals.md` §4).
+(`boring_onchain_queue`) is a separate `EarnVaultQueuedWithdrawProvider`
+capability because landing its holder-signed request only escrows shares. Its
+request, optional solver fulfillment, and post-deadline cancellation live in a
+dedicated durable request model rather than pretending the request transaction
+paid assets. SDP observes provider lifecycle events to distinguish fulfillment
+from cancellation after the request PDA closes; it never acts as Veda's solver
+or silently substitutes the queue for an instant exit. See
+`docs/decisions/0003-veda-vault-withdrawals.md` §4.
 
 The split is not taxonomy either way: "can build a deposit" must not silently
 assert "can build an exit SDP can carry" — a deposit-only provider's exit

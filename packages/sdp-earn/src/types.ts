@@ -550,6 +550,186 @@ export interface EarnVaultWithdrawQuote {
   blockingIssues: readonly EarnVaultDepositQuoteIssue[];
 }
 
+/** The vault whose independently available instant/queued exit routes are read. */
+export interface EarnVaultWithdrawalOptionsInput {
+  providerReference: string;
+}
+
+/** Asset-specific limits the provider's queued exit enforces. */
+export interface EarnVaultQueuedWithdrawalTerms {
+  assetMint: string;
+  allowWithdrawals: boolean;
+  /** Delay between request creation and the first instant a solver may fulfil it. */
+  secondsToMaturity: number;
+  /** Minimum cancellation window after maturity. */
+  minimumSecondsToDeadline: number;
+  minimumDiscountBps: number;
+  maximumDiscountBps: number;
+  /** Minimum request size, canonical to the vault share mint. */
+  minimumShares: string;
+  shareDecimals: number;
+}
+
+/** Independently reported exit routes. The provider never chooses one for the caller. */
+export interface EarnVaultWithdrawalOptions {
+  instant: boolean;
+  queued: boolean;
+  /** Queue authority when the provider exposes a queued exit; null for instant-only providers. */
+  withdrawAuthority: string | null;
+  queueState: string | null;
+  /** Null when the SDP-facing asset has no queue configuration. */
+  queueAsset: EarnVaultQueuedWithdrawalTerms | null;
+}
+
+export interface EarnVaultQueuedWithdrawalQuoteInput {
+  providerReference: string;
+  shares: string;
+  discountBps: number;
+  /** Seconds after maturity for which a solver may fulfil the request. */
+  deadlineSeconds: number;
+}
+
+/** A pre-execution queue preview. It is not authoritative landed chain state. */
+export interface EarnVaultQueuedWithdrawalQuote {
+  assetMint: string;
+  shares: string;
+  shareDecimals: number;
+  assets: string;
+  assetDecimals: number;
+  discountBps: number;
+  /** Unix epoch seconds, serialized as a string to remain JSON-safe. */
+  maturityTimestamp: string;
+  /** Unix epoch seconds, serialized as a string to remain JSON-safe. */
+  deadlineTimestamp: string;
+  blockingIssues: readonly EarnVaultDepositQuoteIssue[];
+}
+
+export interface EarnVaultQueuedWithdrawalRequestInput extends EarnVaultQueuedWithdrawalQuoteInput {
+  owner: string;
+  /** Same sponsorship contract as vault deposits and instant withdrawals. */
+  rentPayer?: string;
+}
+
+/** Intent metadata expected from the request transaction, before it lands. */
+export interface EarnVaultQueuedWithdrawalExpectedRequest {
+  assetMint: string;
+  shares: string;
+  assets: string;
+  discountBps: number;
+  maturityTimestamp: string;
+  deadlineTimestamp: string;
+}
+
+/**
+ * A queue-request transaction plus the deterministic request identity it names.
+ * `expectedRequest` is an SDK preview; the landed account/event replaces it as
+ * lifecycle truth after confirmation.
+ */
+export interface EarnVaultQueuedWithdrawalRequestPlan extends EarnVaultTransactionPlan {
+  requestAddress: string;
+  expectedRequest: EarnVaultQueuedWithdrawalExpectedRequest;
+}
+
+export interface EarnVaultQueuedWithdrawalCancelInput {
+  providerReference: string;
+  owner: string;
+  requestAddress: string;
+}
+
+export interface EarnVaultQueuedWithdrawalRequestsInput {
+  providerReference: string;
+  owner: string;
+}
+
+export interface EarnVaultQueuedWithdrawalRequestInputByAddress {
+  providerReference: string;
+  requestAddress: string;
+}
+
+export type EarnVaultQueuedWithdrawalRequestStatus =
+  | "pending"
+  | "fulfillable"
+  | "expiredCancelable"
+  | "closedOrUnknown";
+
+/** One still-open queue request, read from provider truth. */
+export interface EarnVaultQueuedWithdrawalRequest {
+  requestAddress: string;
+  providerReference: string;
+  owner: string;
+  nonce: string;
+  assetMint: string;
+  shares: string;
+  assets: string;
+  creationTimestamp: string;
+  maturityTimestamp: string;
+  deadlineTimestamp: string;
+  status: Exclude<EarnVaultQueuedWithdrawalRequestStatus, "closedOrUnknown">;
+}
+
+export type EarnVaultQueuedWithdrawalRequestLookup =
+  | {
+      requestAddress: string;
+      status: "closedOrUnknown";
+      request: null;
+    }
+  | {
+      requestAddress: string;
+      status: Exclude<EarnVaultQueuedWithdrawalRequestStatus, "closedOrUnknown">;
+      request: EarnVaultQueuedWithdrawalRequest;
+    };
+
+/**
+ * Provider-neutral input for decoding one finalized transaction's queued-exit
+ * lifecycle logs. The provider owns the trusted program/configuration used to
+ * authenticate those logs; the reconciler supplies only durable request
+ * identity and mint scales.
+ */
+export interface EarnVaultQueuedWithdrawalLifecycleInput {
+  providerReference: string;
+  requestAddress: string;
+  logs: readonly string[] | null;
+  shareDecimals: number;
+  assetDecimals: number;
+}
+
+/**
+ * Canonical lifecycle facts emitted by any asynchronous vault-exit provider.
+ * Provider SDK types and provider-specific event metadata stop at the adapter.
+ */
+export type EarnVaultQueuedWithdrawalLifecycleEvent =
+  | {
+      kind: "withdrawalRequested";
+      requestAddress: string;
+      owner: string;
+      assetMint: string;
+      nonce: string;
+      shares: string;
+      assets: string;
+      creationTimestamp: string;
+      maturityTimestamp: string;
+      deadlineTimestamp: string;
+    }
+  | {
+      kind: "withdrawalCancelled";
+      requestAddress: string;
+      owner: string;
+      assetMint: string;
+      nonce: string;
+      sharesReturned: string;
+      cancelledAt: string;
+    }
+  | {
+      kind: "withdrawalFulfilled";
+      requestAddress: string;
+      owner: string;
+      assetMint: string;
+      nonce: string;
+      sharesBurned: string;
+      assetsPaid: string;
+      fulfilledAt: string;
+    };
+
 export interface EarnVaultDepositQuoteInput {
   /** Vault address — the strategy's `providerReference`. */
   providerReference: string;
@@ -607,6 +787,8 @@ export interface EarnVaultPositionSnapshot {
   shares: string;
   /** Unstaked shares the provider can redeem immediately. */
   withdrawableShares: string;
+  /** Unix epoch seconds when the shares unlock; null when the provider reports no lock. */
+  unlockTimestamp?: string | null;
   /** Value of those shares in the deposit token; omitted when unreadable. */
   tokenValue?: string;
   tokenMint: string;
@@ -715,6 +897,47 @@ export interface EarnVaultWithdrawQuoteProvider extends EarnVaultWithdrawProvide
     ctx: EarnRuntimeContext,
     input: EarnVaultWithdrawQuoteInput
   ): Promise<EarnVaultWithdrawQuote>;
+}
+
+/**
+ * Optional capability for a long-lived queued exit. It is deliberately
+ * separate from `EarnVaultWithdrawProvider`: landing a request escrows shares
+ * but does not pay assets, and a provider-operated solver settles it later.
+ */
+export interface EarnVaultQueuedWithdrawProvider extends EarnVaultDirectProvider {
+  getWithdrawalOptions(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawalOptionsInput
+  ): Promise<EarnVaultWithdrawalOptions>;
+  quoteQueuedWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalQuoteInput
+  ): Promise<EarnVaultQueuedWithdrawalQuote>;
+  buildQueuedWithdrawalRequest(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalRequestInput
+  ): Promise<EarnVaultQueuedWithdrawalRequestPlan>;
+  buildQueuedWithdrawalCancel(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalCancelInput
+  ): Promise<EarnVaultTransactionPlan>;
+  readQueuedWithdrawalRequests(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalRequestsInput
+  ): Promise<EarnVaultQueuedWithdrawalRequest[]>;
+  readQueuedWithdrawalRequest(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalRequestInputByAddress
+  ): Promise<EarnVaultQueuedWithdrawalRequestLookup>;
+  /**
+   * Authenticate and decode finalized lifecycle logs using this provider's
+   * own program/configuration. Required with the queue capability so the
+   * durable reconciler never imports or branches on a concrete provider.
+   */
+  decodeQueuedWithdrawalLifecycleEvents(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalLifecycleInput
+  ): Promise<readonly EarnVaultQueuedWithdrawalLifecycleEvent[]>;
 }
 
 /**

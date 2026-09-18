@@ -213,6 +213,80 @@ describe("EmbeddedYieldDashboard", () => {
     expect(within(details).queryByText("Pending")).toBeNull();
   });
 
+  it("does not describe fully withdrawable shares as locked when the provider retains a past timestamp", () => {
+    mocks.summary = {
+      walletCount: 1,
+      positionCount: 1,
+      unavailablePositionCount: 0,
+      totalsByToken: [],
+      totalsByStrategy: [
+        {
+          provider: "veda",
+          providerReference: "vault_1",
+          label: "Veda USDC",
+          ownerAddresses: ["11111111111111111111111111111111"],
+          positions: [
+            positionFixture({
+              provider: "veda",
+              label: "Veda USDC",
+              withdrawableShares: "5.9",
+              unlockTimestamp: "1756684800",
+            }),
+          ],
+          walletCount: 1,
+          positionCount: 1,
+          totalsByToken: [],
+        },
+      ],
+    };
+
+    renderWithEnglish(
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    );
+    fireEvent.click(screen.getByRole("row", { name: "View customer wallets for Veda USDC" }));
+
+    const details = screen.getByRole("region", { name: "Veda USDC" });
+    expect(within(details).getByText("5.9")).toBeTruthy();
+    expect(within(details).queryByText(/Locked shares unlock/)).toBeNull();
+  });
+
+  it("does not crash or render a lock date for an out-of-range provider timestamp", () => {
+    mocks.summary = {
+      walletCount: 1,
+      positionCount: 1,
+      unavailablePositionCount: 0,
+      totalsByToken: [],
+      totalsByStrategy: [
+        {
+          provider: "veda",
+          providerReference: "vault_1",
+          label: "Veda USDC",
+          ownerAddresses: ["11111111111111111111111111111111"],
+          positions: [
+            positionFixture({
+              provider: "veda",
+              label: "Veda USDC",
+              withdrawableShares: "0",
+              unlockTimestamp: "99999999999999999999",
+            }),
+          ],
+          walletCount: 1,
+          positionCount: 1,
+          totalsByToken: [],
+        },
+      ],
+    };
+
+    renderWithEnglish(
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    );
+    fireEvent.click(screen.getByRole("row", { name: "View customer wallets for Veda USDC" }));
+
+    const details = screen.getByRole("region", { name: "Veda USDC" });
+    expect(within(details).getByText("0")).toBeTruthy();
+    expect(within(details).queryByText(/Locked shares unlock/)).toBeNull();
+  });
+
   it("withholds a strategy total when its live value is unavailable", () => {
     mocks.summary = {
       walletCount: 1,

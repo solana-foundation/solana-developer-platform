@@ -40,7 +40,12 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { truncateMiddle } from "../truncate-middle";
-import { earnStrategyLiquidityLabel, formatProviderAmount } from "./earn-format";
+import { isPositiveDecimal } from "./earn-decimal";
+import {
+  earnStrategyLiquidityLabel,
+  formatEpochSeconds,
+  formatProviderAmount,
+} from "./earn-format";
 import { earnMintAsset, earnStrategyReferenceKey } from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 
@@ -411,6 +416,7 @@ function StrategyWalletDetails({
         <div className="divide-y divide-border-subtle">
           {positions.map((position) => {
             const asset = earnMintAsset(position.tokenMint);
+            const unlockTime = formatEpochSeconds(position.unlockTimestamp, locale);
             return (
               <article
                 key={position.id}
@@ -463,6 +469,13 @@ function StrategyWalletDetails({
                       position.shares ??
                       t("DashboardMarkets.earnProgram.valueUnavailable")}
                   </p>
+                  {unlockTime && !isPositiveDecimal(position.withdrawableShares ?? "0") ? (
+                    <p className="mt-1 text-[11px] leading-4 text-tertiary">
+                      {t("DashboardMarkets.earnProgram.sharesUnlockAt", {
+                        time: unlockTime,
+                      })}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-1">
                   <a

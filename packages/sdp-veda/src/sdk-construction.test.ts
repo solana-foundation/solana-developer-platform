@@ -62,9 +62,19 @@ describe("cluster binding", () => {
     const builders = sdk.match(/assertPlanTargetsCluster\(/g) ?? [];
     // Every plan builder must guard its OUTPUT: construction is a convention
     // inside one function, the assertion is a property of what we emit.
-    expect(builders.length).toBeGreaterThanOrEqual(1);
-    const body = sdk.slice(sdk.indexOf("export async function buildVedaDepositPlan"));
-    expect(body).toContain("assertPlanTargetsCluster(");
+    expect(builders.length).toBeGreaterThanOrEqual(4);
+    for (const name of [
+      "buildVedaDepositPlan",
+      "buildVedaWithdrawPlan",
+      "buildVedaQueuedWithdrawalRequestPlan",
+      "buildVedaQueuedWithdrawalCancelPlan",
+    ]) {
+      const start = sdk.indexOf(`export async function ${name}`);
+      const next = sdk.indexOf("\nexport async function ", start + 1);
+      const body = sdk.slice(start, next === -1 ? undefined : next);
+      expect(start, `${name} must remain exported`).toBeGreaterThanOrEqual(0);
+      expect(body, name).toContain("assertPlanTargetsCluster(");
+    }
   });
 
   /**

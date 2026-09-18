@@ -52,26 +52,29 @@ export async function listEarnMovements(c: AppContext) {
   const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
   const custodyWalletIds = [...new Set(scopedWallets.map((wallet) => wallet.id))];
 
-  const { rows, hasMore } = await createPostgresEarnMovementsRepository(getDb(c.env)).listMovements(
-    {
-      organizationId: auth.organizationId,
-      environment,
-      projectId,
-      custodyWalletIds,
-      limit: query.limit,
-      before,
-      direction: query.direction,
-      status: query.status,
-      provider: query.provider,
-      positionId: query.positionId,
-      sourceAddress: query.sourceAddress,
-      destinationAddress: query.destinationAddress,
-    }
-  );
+  const repository = createPostgresEarnMovementsRepository(getDb(c.env));
+  const { rows, hasMore } = await repository.listMovements({
+    organizationId: auth.organizationId,
+    environment,
+    projectId,
+    custodyWalletIds,
+    limit: query.limit,
+    before,
+    direction: query.direction,
+    status: query.status,
+    provider: query.provider,
+    positionId: query.positionId,
+    sourceAddress: query.sourceAddress,
+    destinationAddress: query.destinationAddress,
+  });
+  const tokenMints = await repository.listPositionTokenMints({
+    organizationId: auth.organizationId,
+    positionIds: rows.map((row) => row.position_id),
+  });
 
   const last = rows.at(-1);
   const response: EarnMovementsPage = {
-    movements: rows.map(toEarnMovementRecord),
+    movements: rows.map((row) => toEarnMovementRecord(row, tokenMints)),
     hasMore,
     nextCursor: hasMore && last ? encodeKeysetCursor(last.created_at, last.id) : null,
   };
@@ -88,7 +91,17 @@ export async function listEarnMovements(c: AppContext) {
  * idempotency fingerprint, and the caller's request id — none of which describe
  * the money that moved.
  */
-function toEarnMovementRecord(row: EarnMovementRow): EarnMovementRecord {
+function toEarnMovementRecord(
+  row: EarnMovementRow,
+  tokenMints: ReadonlyMap<string, string>
+): EarnMovementRecord {
+  const tokenMint = tokenMints.get(row.position_id);
+  const valuedVaultWithdrawal =
+    row.execution_model === "vault_direct" &&
+    row.direction === "withdrawal" &&
+    row.status === "finalized" &&
+    row.token_amount_settled !== null &&
+    tokenMint !== undefined;
   return {
     id: row.id,
     provider: row.provider,
@@ -99,6 +112,8 @@ function toEarnMovementRecord(row: EarnMovementRow): EarnMovementRecord {
     denomination: row.denomination,
     amountRequested: row.amount_requested,
     amountSettled: row.amount_settled ?? undefined,
+    tokenAmount: valuedVaultWithdrawal ? (row.token_amount_settled ?? undefined) : undefined,
+    tokenMint: valuedVaultWithdrawal ? tokenMint : undefined,
     feeAmount: row.fee_amount ?? undefined,
     minSharesOut: row.min_shares_out ?? undefined,
     sharesOut: row.shares_out ?? undefined,

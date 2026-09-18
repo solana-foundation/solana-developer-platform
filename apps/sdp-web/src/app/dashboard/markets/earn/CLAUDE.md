@@ -68,12 +68,17 @@ api/dashboard/markets/earn/
   vault-deposits/[movementId]/       GET one recorded deposit (poll to terminal)
   vault-withdrawals/route.ts         POST create (vault exit) · GET the movement list
   vault-withdrawals/[movementId]/    GET one recorded withdrawal
+  vault-withdrawal-options/route.ts  POST live instant/queued route discovery
+  vault-queued-withdrawal-previews/  POST live queue terms preview
+  vault-withdrawal-requests/         POST create · GET durable request list
+    [withdrawalRequestId]/           GET one request (poll to terminal)
+    [withdrawalRequestId]/cancel/    POST cancel after the recovery deadline
   vault-positions/route.ts           GET list (keyset cursor)
   movements/route.ts                 GET the cross-provider ledger feed
                                      (keyset cursor + equality filters)
 ```
 
-`provider-query.ts` holds FIVE validators with deliberately different failure
+`provider-query.ts` holds SEVEN validators with deliberately different failure
 modes. `programProxyQuery` is permissive-by-omission — an unrecognized param is
 dropped — because those routes predate the typed client and are reachable with
 arbitrary query strings. `vaultPositionsProxyQuery` is **strict**: it is
@@ -85,6 +90,9 @@ reshaping the page. A typo must not return a different page of someone's money.
 `requestId` is validated to the API's OWN `[\x20-\x7e]{1,255}` idempotency-key
 shape, because a tidier rule would 400 a legitimate key containing a slash.
 `vaultWithdrawalsProxyQuery` is its exit mirror, parameter for parameter.
+`vaultWithdrawalRequestsProxyQuery` adds a strict `settled=true|false` filter so
+the recovery surface asks the server for open requests instead of downloading
+and filtering terminal history.
 `earnMovementsProxyQuery` (PRO-1705) is strict in the same way over the
 cross-provider feed, and its filter values are checked for SHAPE and length only,
 never against a vocabulary: `status` is per execution model and `provider` is an
@@ -96,9 +104,9 @@ is the honest result.
 tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
 API on its own. A route forwards one deliberately, per header, through the
 optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/` and `vault-withdrawals/` are the
-two routes that opt in, forwarding that single header and nothing else; the
-program create still sends the body `requestId` form.
+(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
+queued request create/cancel routes opt in, forwarding that single header and
+nothing else; the program create still sends the body `requestId` form.
 
 ## Routes
 
@@ -353,6 +361,15 @@ program create still sends the body `requestId` form.
   Its five-second detail poll reports the terminal movement back to Treasury;
   Treasury keeps the latest state in the Active positions status column rather
   than announcing a long-running chain result with a toast.
+- `earn-vault-exit-modal.tsx` and `earn-vault-queued-withdraw-modal.tsx` — route
+  discovery is live per position. When instant and queued routes coexist the
+  customer must choose explicitly; SDP never infers timing or price preference.
+  Queue discount/deadline defaults and bounds come from the provider's live
+  terms, and the provider preview must resolve before shares can be escrowed.
+- `earn-vault-withdrawal-requests-card.tsx` — durable queued-request recovery.
+  Its discovery read asks the server for `settled=false`, then polls request
+  detail through terminal state. An expired request exposes an idempotent cancel
+  action that recovers escrowed shares; closing the create modal never hides it.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
   (fingerprint: project, position, shares, minAmountOut — the derived exit
   floor is in there for the same reason the deposit's is) under its own

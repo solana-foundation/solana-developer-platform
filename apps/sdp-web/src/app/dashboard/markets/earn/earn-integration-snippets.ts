@@ -31,6 +31,8 @@ export interface EarnIntegrationSections {
   portfolio: string;
   /** Money out: preview, build the exit, customer signs, submit. */
   withdraw: string;
+  /** Asynchronous money out: request, observe solver outcome, or recover shares. */
+  asyncWithdraw: string;
 }
 
 export type EarnIntegrationStrategy = Pick<
@@ -378,7 +380,143 @@ export async function submitEarnWithdrawal({
   return data.withdrawal;
 }`;
 
-  return { client, deposit, portfolio, withdraw };
+  const asyncWithdraw = `/**
+ * Read instant and queued routes independently. Never auto-select: an instant
+ * redemption pays now, while a queued request escrows shares for the provider.
+ */
+export async function getEarnWithdrawalOptions(positionId: string) {
+  return sdpFetch("/v1/earn/external-wallet/withdrawal-options", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ positionId }),
+  });
+}
+
+/** Preview exact queue terms from live chain state before building. */
+export async function previewEarnQueuedWithdrawal({
+  positionId,
+  shares,
+  discountBps,
+  deadlineSeconds,
+}: {
+  positionId: string;
+  shares: string;
+  discountBps: number;
+  deadlineSeconds: number;
+}) {
+  return sdpFetch("/v1/earn/external-wallet/queued-withdrawal-previews", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ positionId, shares, discountBps, deadlineSeconds }),
+  });
+}
+
+/**
+ * Build an unsigned queue request. Landing this transaction escrows shares; it
+ * does NOT pay assets. The provider's solve authority may fulfil after maturity.
+ */
+export async function buildEarnQueuedWithdrawalRequest({
+  positionId,
+  shares,
+  discountBps,
+  deadlineSeconds,
+  feePayer,
+}: {
+  positionId: string;
+  shares: string;
+  discountBps: number;
+  deadlineSeconds: number;
+  feePayer?: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-request-transactions", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({
+      positionId,
+      shares,
+      discountBps,
+      deadlineSeconds,
+      ...(feePayer ? { feePayer } : {}),
+    }),
+  });
+  // Includes requestAddress and the expected quote/timestamps.
+  return data.transaction;
+}
+
+export async function submitEarnQueuedWithdrawalRequest(input: {
+  transactionId: string;
+  signedTransaction: string;
+  idempotencyKey: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-requests", {
+    method: "POST",
+    headers: sdpHeaders({ "Idempotency-Key": input.idempotencyKey }),
+    body: JSON.stringify({
+      transactionId: input.transactionId,
+      signedTransaction: input.signedTransaction,
+    }),
+  });
+  return data.withdrawalRequest;
+}
+
+/**
+ * Poll this durable object, not the request-creation transaction. Terminal
+ * states are fulfilled, cancelled, and failed. closedOrUnknown is retryable:
+ * SDP is still indexing the close event to distinguish payout from recovery.
+ */
+export async function getEarnQueuedWithdrawalRequest(withdrawalRequestId: string) {
+  const data = await sdpFetch(
+    \`/v1/earn/external-wallet/withdrawal-requests/\${encodeURIComponent(withdrawalRequestId)}\`,
+    { headers: sdpHeaders() }
+  );
+  return data.withdrawalRequest;
+}
+
+/**
+ * Once status is expiredCancelable, build the holder's recovery transaction.
+ * Cancelling before the deadline is rejected by the provider's queue program.
+ */
+export async function buildEarnQueuedWithdrawalCancellation({
+  withdrawalRequestId,
+  feePayer,
+}: {
+  withdrawalRequestId: string;
+  feePayer?: string;
+}) {
+  const data = await sdpFetch(
+    "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+    {
+      method: "POST",
+      headers: sdpHeaders(),
+      body: JSON.stringify({
+        withdrawalRequestId,
+        ...(feePayer ? { feePayer } : {}),
+      }),
+    }
+  );
+  return data.transaction;
+}
+
+export async function submitEarnQueuedWithdrawalCancellation(input: {
+  transactionId: string;
+  signedTransaction: string;
+  idempotencyKey: string;
+}) {
+  const data = await sdpFetch(
+    "/v1/earn/external-wallet/withdrawal-request-cancellations",
+    {
+      method: "POST",
+      headers: sdpHeaders({ "Idempotency-Key": input.idempotencyKey }),
+      body: JSON.stringify({
+        transactionId: input.transactionId,
+        signedTransaction: input.signedTransaction,
+      }),
+    }
+  );
+  return data.withdrawalRequest;
+}`;
+
+  return { client, deposit, portfolio, withdraw, asyncWithdraw };
 }
 
 /** The sections joined into the one server module they document. */
@@ -387,5 +525,11 @@ export function buildEarnServerIntegration(
   apiBaseUrl?: string
 ): string {
   const sections = buildEarnIntegrationSections(strategy, apiBaseUrl);
-  return [sections.client, sections.deposit, sections.portfolio, sections.withdraw].join("\n\n");
+  return [
+    sections.client,
+    sections.deposit,
+    sections.portfolio,
+    sections.withdraw,
+    sections.asyncWithdraw,
+  ].join("\n\n");
 }

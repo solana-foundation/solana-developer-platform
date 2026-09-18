@@ -35,7 +35,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
 | `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | None |
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None |
-| `@sdp/veda` | Kit-native Veda SVM vault deposit plans and position reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/veda` | Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
 | `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
 | `sdp-web` | Dashboard application. | `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types` |

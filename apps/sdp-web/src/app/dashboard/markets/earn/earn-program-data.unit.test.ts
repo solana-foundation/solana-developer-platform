@@ -5,10 +5,12 @@ import type {
   EarnStrategy,
   EarnVaultDepositRequest,
   EarnVaultPosition,
+  EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createEarnVaultDeposit,
+  createEarnVaultWithdrawalRequest,
   earnExternalWalletSummaryRefreshInterval,
   earnProgramsRefreshInterval,
   earnVaultMovementRefreshInterval,
@@ -18,6 +20,7 @@ import {
   fetchEarnProgramWithdrawals,
   fetchEarnStrategies,
   fetchEarnVaultPositions,
+  fetchEarnVaultWithdrawalRequests,
 } from "./earn-program-data";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -801,5 +804,133 @@ describe("earnProgramsRefreshInterval", () => {
 
   it("does not poll before the read resolves", () => {
     expect(earnProgramsRefreshInterval(undefined)).toBe(0);
+  });
+});
+
+function queuedWithdrawalRequest(withdrawalRequestId: string): EarnVaultWithdrawalRequestRecord {
+  return {
+    withdrawalRequestId,
+    positionId: "position_1",
+    provider: "veda",
+    providerReference: "vault_1",
+    ownerAddress: "owner_1",
+    requestAddress: `${withdrawalRequestId}_account`,
+    status: "pending",
+    assetMint: USDC,
+    shareMint: "Share1111111111111111111111111111111111111",
+    shares: "5",
+    quotedAssets: "4.995",
+    shareDecimals: 6,
+    assetDecimals: 6,
+    discountBps: 10,
+    nonce: "1",
+    creationTimestamp: "1789722000",
+    maturityTimestamp: "1789722060",
+    deadlineTimestamp: "1789722180",
+    creationSignature: "request_signature",
+    cancelSignature: null,
+    closingSignature: null,
+    assetsPaid: null,
+    failureReason: null,
+    fulfilledAt: null,
+    cancelledAt: null,
+    createdAt: TIMESTAMP,
+    updatedAt: TIMESTAMP,
+  };
+}
+
+describe("fetchEarnVaultWithdrawalRequests", () => {
+  it("uses the server-side unsettled filter while paging the durable recovery feed", async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (input: string) => {
+      calls.push(input);
+      const before = new URL(input, "https://sdp.test").searchParams.get("before");
+      return new Response(
+        JSON.stringify({
+          data: {
+            withdrawalRequests: [queuedWithdrawalRequest(before ? "request_2" : "request_1")],
+            hasMore: before === null,
+            nextCursor: before === null ? "cursor_2" : null,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const requests = await fetchEarnVaultWithdrawalRequests({ settled: false });
+
+    expect(requests.map((request) => request.withdrawalRequestId)).toEqual([
+      "request_1",
+      "request_2",
+    ]);
+    expect(calls).toEqual([
+      "/api/dashboard/markets/earn/vault-withdrawal-requests?limit=100&settled=false",
+      "/api/dashboard/markets/earn/vault-withdrawal-requests?limit=100&before=cursor_2&settled=false",
+    ]);
+  });
+
+  it("normalizes a policy-held request into an approval-pending outcome", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code: "SIGNING_PENDING",
+                message: "Wallet operation requires policy approval",
+                details: {
+                  approvalRequestId: "approval_1",
+                  walletOperationId: "operation_1",
+                },
+              },
+            }),
+            { status: 202, headers: { "Content-Type": "application/json" } }
+          )
+      )
+    );
+
+    const result = await createEarnVaultWithdrawalRequest(
+      { positionId: "position_1", shares: "5", discountBps: 25, deadlineSeconds: 360 },
+      "queued-request-key"
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      status: 202,
+      data: {
+        kind: "approval_pending",
+        message: "Wallet operation requires policy approval",
+        approvalRequestId: "approval_1",
+        walletOperationId: "operation_1",
+      },
+    });
+  });
+
+  it("refuses an approval hold returned with a success status other than 202", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: { code: "SIGNING_PENDING", message: "Requires policy approval" },
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } }
+          )
+      )
+    );
+
+    const result = await createEarnVaultWithdrawalRequest(
+      { positionId: "position_1", shares: "5", discountBps: 25, deadlineSeconds: 360 },
+      "queued-request-key"
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 201,
+      error: "Invalid queued withdrawal response",
+    });
   });
 });
