@@ -44,6 +44,7 @@ import {
   type PaymentRampEstimate,
   type PaymentRampInstruction,
   type PaymentRampQuote,
+  type PolicyCandidate,
   type RampProviderEstimateResult,
   type SdpEnvironment,
 } from "@sdp/types";
@@ -343,6 +344,43 @@ async function resolveRampQuoteRequest(
  * @param c - Request context.
  * @returns The candidate, validated body, resolved resources, and raw payload.
  */
+/**
+ * What a policy decision is allowed to remember about an on-ramp quote.
+ *
+ * The gate embeds this into `rawPayload.executionRequest`, and `rawPayload` is
+ * persisted on the wallet-operation row. Without it the gate falls back to the
+ * whole validated body, which for Coinbase carries the buyer's email and phone.
+ * A policy decision does not need those, so they are left out.
+ *
+ * This is an allowlist on purpose: a field added to the quote body does not join
+ * the audit record by default, it joins only when someone adds it here.
+ */
+type OnrampQuoteExecutionRequestBody = {
+  provider: CreateOnrampQuoteBody["provider"];
+  counterpartyId: string;
+  destinationCustodyWalletId: string;
+  assetRail: CreateOnrampQuoteBody["assetRail"];
+  fiatCurrency: CreateOnrampQuoteBody["fiatCurrency"];
+  fiatAmount: string;
+  rampsMemo?: Record<string, string>;
+  domain?: string;
+};
+
+export function onrampQuoteExecutionRequestBody(
+  input: CreateOnrampQuoteBody
+): OnrampQuoteExecutionRequestBody {
+  return {
+    provider: input.provider,
+    counterpartyId: input.counterpartyId,
+    destinationCustodyWalletId: input.destinationCustodyWalletId,
+    assetRail: input.assetRail,
+    fiatCurrency: input.fiatCurrency,
+    fiatAmount: input.fiatAmount,
+    rampsMemo: input.rampsMemo,
+    domain: input.domain,
+  };
+}
+
 export async function extractOnrampQuotePolicyCandidate(
   c: ValidatedBodyContext<typeof createOnrampQuoteSchema>
 ): Promise<PolicyGateExtraction> {
@@ -354,25 +392,34 @@ export async function extractOnrampQuotePolicyCandidate(
     input.destinationCustodyWalletId
   );
 
+  const candidate: PolicyCandidate = {
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    custodyWalletId: wallet.id,
+    walletId: wallet.walletId,
+    apiKeyId: scope.auth.apiKeyId,
+    actor: walletOperationActorFromAuth(scope.auth),
+    source: "api",
+    operationFamily: "ramp",
+    operationType: "ramp_onramp_quote",
+    asset: rampTransferTokenMint(input.assetRail, c.env),
+    amount: input.fiatAmount,
+    destination: walletAddress,
+    context: {},
+    providerExtensions: { provider: input.provider },
+  };
+
+  // Known gap: a Coinbase quote under an approval-requiring policy is queued like
+  // any other, but its replay rebuilds from an execution request that deliberately
+  // omits the buyer's contact, so the approved replay is refused by the provider.
+  // Left as a bug on Zach's call, pending a decision on what replaying an approval
+  // means and whether contact may be stored temporarily.
+
   return {
-    candidate: {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      custodyWalletId: wallet.id,
-      walletId: wallet.walletId,
-      apiKeyId: scope.auth.apiKeyId,
-      actor: walletOperationActorFromAuth(scope.auth),
-      source: "api",
-      operationFamily: "ramp",
-      operationType: "ramp_onramp_quote",
-      asset: rampTransferTokenMint(input.assetRail, c.env),
-      amount: input.fiatAmount,
-      destination: walletAddress,
-      context: {},
-      providerExtensions: { provider: input.provider },
-    },
+    candidate,
     legs: [],
     body: input,
+    executionRequestBody: onrampQuoteExecutionRequestBody(input),
     resolved: { scope, projectId, counterparty, wallet, walletAddress },
     rawPayload: {
       provider: input.provider,
@@ -1114,6 +1161,8 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
         domain: input.domain,
+        email: input.email,
+        phone: input.phone,
       });
       break;
     }
