@@ -1,4 +1,5 @@
-import type { YieldMovement } from "@/types";
+import type { DashboardData, YieldMovement } from "@/types";
+import { addDecimals } from "./decimal";
 
 export const SETTLEMENT_POLL_TIMEOUT_MS = 2 * 60_000;
 
@@ -50,4 +51,109 @@ export function reconcileMovementPolling(
     },
     timedOut: false,
   };
+}
+
+export interface InFlightTransfer {
+  movementId: string;
+  direction: YieldMovement["direction"];
+  amount: string;
+}
+
+/**
+ * An internal transfer never changes the total, but its two sides settle on
+ * different reads (RPC for checking, SDP for savings) and can disagree for a
+ * few seconds. While a transfer this session submitted is still pending, show
+ * the balances it will produce, then hand back to live data once it settles.
+ */
+export function applyInFlight(
+  base: DashboardData,
+  live: DashboardData,
+  inFlight: readonly InFlightTransfer[]
+): DashboardData {
+  if (!inFlight.length) return live;
+  const intoSavings = addDecimals(
+    inFlight.map((transfer) =>
+      transfer.direction === "deposit"
+        ? transfer.amount
+        : negate(transfer.amount)
+    )
+  );
+  const requested = new Map(
+    inFlight.map((transfer) => [transfer.movementId, transfer.amount])
+  );
+  return {
+    ...live,
+    checking: {
+      balance: floorAtZero(
+        addDecimals([base.checking.balance, negate(intoSavings)])
+      ),
+    },
+    savings: {
+      ...live.savings,
+      balance: shiftBalance(base.savings.balance, intoSavings),
+      withdrawable: shiftBalance(base.savings.withdrawable, intoSavings),
+    },
+    total: base.total,
+    movements: live.movements.map((movement) =>
+      movement.tokenAmount === null && requested.has(movement.movementId)
+        ? {
+            ...movement,
+            tokenAmount: requested.get(movement.movementId) ?? null,
+          }
+        : movement
+    ),
+  };
+}
+
+/**
+ * Split this tab's in-flight transfers by what the ledger now says: the ones
+ * that finalized (their effect is real and belongs in the base), and the ones
+ * still pending or not yet listed. A failed transfer is in neither: it moved
+ * nothing, so it is dropped without touching any balance.
+ */
+export function reconcileInFlight(
+  inFlight: readonly InFlightTransfer[],
+  movements: readonly YieldMovement[]
+): { finalized: InFlightTransfer[]; remaining: InFlightTransfer[] } {
+  const status = new Map(
+    movements.map((movement) => [movement.movementId, movement.status])
+  );
+  return {
+    finalized: inFlight.filter(
+      (transfer) => status.get(transfer.movementId) === "finalized"
+    ),
+    remaining: inFlight.filter((transfer) => {
+      const current = status.get(transfer.movementId);
+      return current !== "finalized" && current !== "failed";
+    }),
+  };
+}
+
+/**
+ * When one of several overlapping transfers finalizes, move its effect into
+ * the base so the transfers still pending project from the balances that
+ * transfer actually produced, not from the snapshot taken before it started.
+ */
+export function foldSettledTransfers(
+  base: DashboardData,
+  settled: readonly InFlightTransfer[]
+): DashboardData {
+  return applyInFlight(base, base, settled);
+}
+
+function shiftBalance(
+  balance: string | undefined,
+  shift: string
+): string | undefined {
+  return balance === undefined
+    ? undefined
+    : floorAtZero(addDecimals([balance, shift]));
+}
+
+function negate(value: string): string {
+  return value.startsWith("-") ? value.slice(1) : `-${value}`;
+}
+
+function floorAtZero(value: string): string {
+  return value.startsWith("-") ? "0" : value;
 }

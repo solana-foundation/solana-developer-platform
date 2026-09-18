@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { YieldMovement } from "@/types";
+import type { DashboardData, YieldMovement } from "@/types";
 import {
+  applyInFlight,
+  foldSettledTransfers,
+  reconcileInFlight,
   reconcileMovementPolling,
   SETTLEMENT_POLL_TIMEOUT_MS,
   startMovementPolling,
@@ -41,16 +44,159 @@ describe("movement polling", () => {
   });
 });
 
+describe("in-flight transfers", () => {
+  it("shows the balances a pending transfer will produce and keeps the total", () => {
+    const base = dashboard({ checking: "19", savings: "1", total: "20" });
+    const live = dashboard({
+      checking: "19",
+      savings: "3",
+      total: "22",
+      movements: [{ ...createMovement("submitted"), tokenAmount: "2" }],
+    });
+
+    const view = applyInFlight(base, live, [
+      { movementId: "movement-1", direction: "deposit", amount: "2" },
+    ]);
+
+    expect(view.checking.balance).toBe("17");
+    expect(view.savings.balance).toBe("3");
+    expect(view.savings.withdrawable).toBe("3");
+    expect(view.total).toBe("20");
+  });
+
+  it("fills a pending withdrawal's amount from the request until it settles", () => {
+    const base = dashboard({ checking: "17", savings: "3", total: "20" });
+    const pending: YieldMovement = {
+      ...createMovement("submitted"),
+      direction: "withdrawal",
+      tokenAmount: null,
+    };
+    const live = dashboard({
+      checking: "17",
+      savings: "3",
+      total: "20",
+      movements: [pending],
+    });
+
+    const view = applyInFlight(base, live, [
+      { movementId: "movement-1", direction: "withdrawal", amount: "1.5" },
+    ]);
+
+    expect(view.checking.balance).toBe("18.5");
+    expect(view.savings.balance).toBe("1.5");
+    expect(view.movements[0]?.tokenAmount).toBe("1.5");
+  });
+
+  it("folds a settled transfer into the base so the rest projects from fresh footing", () => {
+    const base = dashboard({ checking: "19", savings: "1", total: "20" });
+    const first = {
+      movementId: "m1",
+      direction: "deposit" as const,
+      amount: "2",
+    };
+    const second = {
+      movementId: "m2",
+      direction: "deposit" as const,
+      amount: "3",
+    };
+
+    const folded = foldSettledTransfers(base, [first]);
+    expect(folded.checking.balance).toBe("17");
+    expect(folded.savings.balance).toBe("3");
+
+    const live = dashboard({ checking: "17", savings: "3", total: "20" });
+    const view = applyInFlight(folded, live, [second]);
+    expect(view.checking.balance).toBe("14");
+    expect(view.savings.balance).toBe("6");
+    expect(view.total).toBe("20");
+  });
+
+  it("folds only finalized transfers and drops failed ones without applying them", () => {
+    const inFlight = [
+      { movementId: "ok", direction: "deposit" as const, amount: "2" },
+      { movementId: "bad", direction: "deposit" as const, amount: "5" },
+      { movementId: "slow", direction: "deposit" as const, amount: "1" },
+      { movementId: "unseen", direction: "deposit" as const, amount: "3" },
+    ];
+    const movements = [
+      { ...createMovement("finalized"), movementId: "ok" },
+      { ...createMovement("failed"), movementId: "bad" },
+      { ...createMovement("submitted"), movementId: "slow" },
+    ];
+
+    const { finalized, remaining } = reconcileInFlight(inFlight, movements);
+
+    expect(finalized.map((transfer) => transfer.movementId)).toEqual(["ok"]);
+    expect(remaining.map((transfer) => transfer.movementId)).toEqual([
+      "slow",
+      "unseen",
+    ]);
+    const base = dashboard({ checking: "19", savings: "1", total: "20" });
+    expect(foldSettledTransfers(base, finalized).checking.balance).toBe("17");
+  });
+
+  it("returns live data untouched once nothing is in flight", () => {
+    const live = dashboard({ checking: "17", savings: "3", total: "20" });
+    expect(applyInFlight(live, live, [])).toBe(live);
+  });
+});
+
+function dashboard(input: {
+  checking: string;
+  savings: string;
+  total: string;
+  movements?: YieldMovement[];
+}): DashboardData {
+  return {
+    wallet: {
+      address: "owner",
+      cluster: "devnet",
+      feesPaidBy: "northstar",
+    },
+    token: { mint: "usdc-mint", symbol: "USDC" },
+    checking: { balance: input.checking },
+    savings: {
+      strategy: {
+        id: "strategy",
+        provider: "kamino",
+        providerReference: "vault",
+        name: "Kamino Vault USDC",
+        sourceKind: "defi",
+        depositMints: ["usdc-mint"],
+        liquidityTerm: "instant",
+        status: "active",
+        hostCluster: "devnet",
+        fundable: true,
+        depositSlippage: null,
+        withdrawalSlippage: null,
+      },
+      position: null,
+      balance: input.savings,
+      withdrawable: input.savings,
+      earned: "0",
+    },
+    total: input.total,
+    movements: input.movements ?? [],
+    connection: {
+      apiLabel: "Local SDP",
+      checkedAt: "2026-09-17T00:00:00.000Z",
+    },
+  };
+}
+
 function createMovement(status: YieldMovement["status"]): YieldMovement {
   return {
     movementId: "movement-1",
     positionId: "position-1",
     provider: "kamino",
+    providerReference: "vault",
     direction: "deposit",
     status,
     signature: "signature",
     amount: "25",
-    denomination: "USDC",
+    denomination: "usdc-mint",
+    tokenMint: "usdc-mint",
+    tokenAmount: "25",
     failureReason: null,
     createdAt: "2026-09-17T00:00:00.000Z",
     settledAt: status === "finalized" ? "2026-09-17T00:00:01.000Z" : null,
