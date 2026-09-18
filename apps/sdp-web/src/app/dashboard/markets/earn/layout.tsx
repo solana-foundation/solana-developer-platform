@@ -8,9 +8,9 @@ import { earn } from "@/flags";
  *
  * Next serves this segment only behind the next.config redirect to
  * `/dashboard/markets/embedded-yield`, but a flag gate must not depend on a
- * routing redirect one line away in a different file: the layout is what makes
- * a hand-typed alias URL 404 before any page renders, the same contract every
- * other alias segment carries (`dashboard/wallets` for Custody).
+ * routing redirect one line away in a different file. This layout preserves
+ * the gate if that redirect is removed or bypassed, matching the contract of
+ * other alias segments (`dashboard/wallets` for Custody).
  */
 export default async function EarnLayout({ children }: { children: ReactNode }) {
   if (!(await earn())) {
