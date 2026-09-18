@@ -68,7 +68,7 @@ api/dashboard/markets/earn/
   vault-deposits/[movementId]/       GET one recorded deposit (poll to terminal)
   vault-withdrawals/route.ts         POST create (vault exit) · GET the movement list
   vault-withdrawals/[movementId]/    GET one recorded withdrawal
-  vault-withdrawal-options/route.ts  POST live instant/queued route discovery
+  vault-withdrawal-options/route.ts  POST atomic/provider-order/queue discovery
   vault-queued-withdrawal-previews/  POST live queue terms preview
   vault-withdrawal-requests/         POST create · GET durable request list
     [withdrawalRequestId]/           GET one request (poll to terminal)
@@ -362,10 +362,13 @@ nothing else; the program create still sends the body `requestId` form.
   Treasury keeps the latest state in the Active positions status column rather
   than announcing a long-running chain result with a toast.
 - `earn-vault-exit-modal.tsx` and `earn-vault-queued-withdraw-modal.tsx` — route
-  discovery is live per position. When instant and queued routes coexist the
-  customer must choose explicitly; SDP never infers timing or price preference.
-  Queue discount/deadline defaults and bounds come from the provider's live
-  terms, and the provider preview must resolve before shares can be escrowed.
+  discovery is live per position. Atomic, provider-order, and queued routes are
+  presented as distinct settlement choices; when multiple routes coexist the
+  customer must choose explicitly. Queue discount/deadline defaults and bounds
+  come from the provider's live terms, and the provider preview must resolve
+  before shares can be escrowed. A provider-order route takes exact shares,
+  never a dollar estimate: its cash amount does not exist until the later NAV
+  strike and provider settlement.
 - `earn-vault-withdrawal-requests-card.tsx` — durable queued-request recovery.
   Its discovery read asks the server for `settled=false`, then polls request
   detail through terminal state. An expired request exposes an idempotent cancel
@@ -395,9 +398,11 @@ nothing else; the program create still sends the body `requestId` form.
   carry the floor its key was minted with, verbatim. The floor POLICY (whether
   the control renders at all, and its default tolerance) is the catalogue row's
   `depositSlippage`, which the API answers per environment
-  (`earnDepositSlippagePolicy` in @sdp/types: Kamino declares 10 bps in every
-  environment and every production row is non-null), never the provider map,
-  so a Kamino deposit is always floored.
+  (`earnDepositSlippagePolicy` in @sdp/types), never the provider map. Kamino
+  declares 10 bps in every environment and is always floored; most production
+  deposits are floored, while a next-NAV provider order publishes null because
+  its later transfer-agent settlement cannot be bounded by the Solana payment
+  leg.
 - `earn-vault-movement.ts`: the submit-outcome rules BOTH vault modals share:
   when a submission counts as money moved (`observableVaultMovement`), how a
   watcher's fresher record folds into it, the stepper position and focus-panel
@@ -413,12 +418,18 @@ nothing else; the program create still sends the body `requestId` form.
 - **The withdrawal outcome poll uses the UNIFIED ledger vocabulary**:
   `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct` (`finalized | failed`),
   because `EarnVaultWithdrawal` speaks the ledger's own words. That backend
-  polling contract is intentionally stricter than presentation: the UI treats
-  `confirmed` as complete, removes foreground loading, and projects the
-  resulting balance while the poll continues to protocol finality. This is the
-  OPPOSITE of the deposit poll's rule (legacy DTO, legacy terminal set); the two
-  sets sit side by side in `earn-program-data.ts` with the reasoning attached
-  to each.
+  polling contract is intentionally stricter than atomic-route presentation:
+  an atomic withdrawal may treat `confirmed` as complete and project its
+  resulting balance while polling continues to protocol finality. A
+  provider-order withdrawal does neither in PRESENTATION: `confirmed` covers
+  only the share leg, stays visibly pending provider settlement, and projects
+  no cash or balance change. Its WATCH, however, is terminal at `confirmed`
+  (`PROVIDER_ORDER_WATCH_TERMINAL_STATUSES`): the reconciler caps a
+  provider-order row there, the NAV strike after it has no wire state to
+  observe, and watching past the strongest wire fact would poll forever with
+  `onSettled` never firing. This is the OPPOSITE of the deposit poll's rule
+  (legacy DTO, legacy terminal set); the sets sit side by side in
+  `earn-program-data.ts` with the reasoning attached to each.
 
 ## Where these seams are consumed — do not delete them as dead code
 
@@ -466,11 +477,16 @@ money is genuinely in the air. **Keep using
 `EARN_TERMINAL_VAULT_MOVEMENT_STATUSES` here, not the similarly named
 `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`** (PRO-1705): that one is the
 unified ledger's vocabulary, where the background watcher continues past
-`confirmed` because `finalized` exists after it. Customer-facing UI still
-treats `confirmed` as Done. This poll reads the legacy wire field, so switching
-to the unified set would make it wait for a `finalized` nothing writes yet and
-never stop. An unreadable poll returns `undefined` and keeps
-polling; a read that failed says nothing about whether the deposit landed.
+`confirmed` because `finalized` exists after it. This legacy poll still stops
+at `confirmed` because no later wire state exists — for either settlement
+kind: a provider-order deposit parks at `confirmed` the same way, so the
+"provider settlement" step is presentation-only, never a watch state. Atomic
+presentation may call `confirmed` Done, while provider-order presentation
+stays pending provider settlement and projects no balance. Switching to the
+unified set would make the poll wait for a `finalized` nothing writes yet and
+never stop. An unreadable
+poll returns `undefined` and keeps polling; a read that failed says nothing
+about whether the deposit landed.
 
 Two tiers, deliberately at different clocks, exactly as the withdrawal side
 does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap

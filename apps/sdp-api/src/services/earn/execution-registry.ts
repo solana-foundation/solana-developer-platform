@@ -32,6 +32,7 @@ import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
 } from "@sdp/veda";
+import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { createOndoSwapPort } from "./ondo-swap-port";
@@ -203,6 +204,11 @@ export function resolveEarnExecutionClient(
     );
     assertOndoNotPortfolioProvider(client);
     return instrumentVendorPort("ondo", client);
+  }
+  if (provider === "wisdomtree") {
+    const client = new WisdomTreeVaultDirectClient(provenRpcUrl, runOperation);
+    assertWisdomTreeNotPortfolioProvider(client);
+    return instrumentVendorPort("wisdomtree", client);
   }
   return null;
 }

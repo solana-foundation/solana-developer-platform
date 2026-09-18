@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1.7
+
+# Surfpool 1.5.0 publishes a Linux x64 native binding but no Linux arm64
+# binding. The wrapper builds and runs this image as linux/amd64 on every host.
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03
+
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    SDP_WISDOMTREE_SURFPOOL_IN_CONTAINER=1
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && corepack enable \
+ && corepack prepare pnpm@10.16.0 --activate
+
+WORKDIR /repo
+COPY . .
+
+# Dependencies live only in the image. The integration package contributes the
+# pinned embedded Surfpool runtime; the WisdomTree filter carries the SDK/test.
+RUN --mount=type=cache,id=sdp-wisdomtree-surfpool-pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile \
+      --filter @sdp/wisdomtree... \
+      --filter @sdp/api-integration...
+
+CMD ["bash", "scripts/kora-surfpool/e2e-wisdomtree.sh"]

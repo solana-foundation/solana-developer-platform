@@ -131,6 +131,7 @@ async function seedScope(): Promise<void> {
 async function createPosition(params: {
   projectId?: string;
   walletId?: string;
+  provider?: string;
   providerReference?: string;
   signature?: string;
   requestId?: string;
@@ -141,7 +142,7 @@ async function createPosition(params: {
     organizationId: ORG,
     projectId: params.projectId ?? PROJECT_A,
     environment: "sandbox",
-    provider: "kamino",
+    provider: params.provider ?? "kamino",
     vaultAddress: providerReference,
     custodyWalletId: walletId,
     sourceAddress: PUBLIC_KEY_A,
@@ -768,17 +769,51 @@ describe("GET /v1/earn/vault-deposits", () => {
   it("returns only in-flight movements when asked, so recovery cannot be paged out", async () => {
     const inFlight = await createPosition({ providerReference: "vault_settled_pending" });
     const settled = await createPosition({ providerReference: "vault_settled_confirmed" });
-    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+    const providerOrder = await createPosition({
+      provider: "wisdomtree",
+      providerReference: "vault_provider_order_confirmed",
+    });
+    const legacyFinalizedProviderOrder = await createPosition({
+      provider: "wisdomtree",
+      providerReference: "vault_provider_order_legacy_finalized",
+    });
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    await repository.advanceVaultMovement({
       movementId: settled.movement.id,
       organizationId: ORG,
       toStatus: "confirmed",
       confirmedAt: new Date(0).toISOString(),
     });
+    await repository.advanceVaultMovement({
+      movementId: providerOrder.movement.id,
+      organizationId: ORG,
+      toStatus: "confirmed",
+      confirmedAt: new Date(0).toISOString(),
+    });
+    await repository.advanceVaultMovement({
+      movementId: legacyFinalizedProviderOrder.movement.id,
+      organizationId: ORG,
+      toStatus: "confirmed",
+      confirmedAt: new Date(0).toISOString(),
+    });
+    await repository.advanceVaultMovement({
+      movementId: legacyFinalizedProviderOrder.movement.id,
+      organizationId: ORG,
+      toStatus: "finalized",
+      confirmedAt: new Date(0).toISOString(),
+      settledAt: new Date(0).toISOString(),
+    });
 
     const open = (await (await listDeposits("?settled=false")).json()) as {
       data: { deposits: Array<{ movementId: string; status: string }> };
     };
-    expect(open.data.deposits.map((deposit) => deposit.movementId)).toEqual([inFlight.movement.id]);
+    expect(new Set(open.data.deposits.map((deposit) => deposit.movementId))).toEqual(
+      new Set([
+        inFlight.movement.id,
+        providerOrder.movement.id,
+        legacyFinalizedProviderOrder.movement.id,
+      ])
+    );
 
     const closed = (await (await listDeposits("?settled=true")).json()) as {
       data: { deposits: Array<{ movementId: string }> };

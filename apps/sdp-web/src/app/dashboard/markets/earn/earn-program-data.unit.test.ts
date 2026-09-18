@@ -3,8 +3,10 @@ import type {
   EarnProgramWithdrawalRecord,
   EarnProgramWithdrawalRecordStatus,
   EarnStrategy,
+  EarnVaultDepositRecord,
   EarnVaultDepositRequest,
   EarnVaultPosition,
+  EarnVaultWithdrawal,
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +23,8 @@ import {
   fetchEarnStrategies,
   fetchEarnVaultPositions,
   fetchEarnVaultWithdrawalRequests,
+  isEarnVaultDepositInFlight,
+  isEarnVaultWithdrawalInFlight,
 } from "./earn-program-data";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -70,6 +74,55 @@ function stubCatalogue(total: number, pageSize = 100) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("provider-order settlement watches", () => {
+  const deposit = {
+    movementId: "earn_movement_deposit",
+    positionId: "earn_position_1",
+    provider: "wisdomtree",
+    providerReference: "WTGXX",
+    status: "confirmed",
+    signature: "signature",
+    amount: "1",
+    failureReason: null,
+    createdAt: TIMESTAMP,
+    confirmedAt: TIMESTAMP,
+  } satisfies EarnVaultDepositRecord;
+  const withdrawal = {
+    movementId: "earn_movement_withdrawal",
+    positionId: "earn_position_1",
+    provider: "wisdomtree",
+    providerReference: "WTGXX",
+    status: "finalized",
+    signature: "signature",
+    shares: "1",
+    shareMint: "share_mint",
+    failureReason: null,
+    createdAt: TIMESTAMP,
+    confirmedAt: TIMESTAMP,
+    settledAt: TIMESTAMP,
+  } satisfies EarnVaultWithdrawal;
+
+  it("watches a confirmed provider-order deposit like any other wire-terminal row", () => {
+    expect(isEarnVaultDepositInFlight(deposit)).toBe(false);
+    expect(isEarnVaultDepositInFlight({ ...deposit, provider: "retired_provider" })).toBe(false);
+    expect(isEarnVaultDepositInFlight({ ...deposit, provider: "kamino" })).toBe(false);
+    expect(isEarnVaultDepositInFlight({ ...deposit, status: "failed" })).toBe(false);
+  });
+
+  it("releases a provider-order withdrawal from the watch at the chain leg", () => {
+    expect(isEarnVaultWithdrawalInFlight(withdrawal)).toBe(false);
+    // The reconciler parks provider-order rows at `confirmed`; that is the
+    // strongest wire fact, so the watch stops there instead of polling forever.
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, status: "confirmed" })).toBe(false);
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, status: "submitted" })).toBe(true);
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, provider: "retired_provider" })).toBe(
+      false
+    );
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, provider: "kamino" })).toBe(false);
+    expect(isEarnVaultWithdrawalInFlight({ ...withdrawal, status: "failed" })).toBe(false);
+  });
 });
 
 describe("earnVaultMovementRefreshInterval", () => {

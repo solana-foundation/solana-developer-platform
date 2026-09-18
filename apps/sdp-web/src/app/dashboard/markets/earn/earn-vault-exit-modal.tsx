@@ -193,10 +193,10 @@ function ExitRouteChooser({
 }
 
 /**
- * Resolves provider capabilities first and makes the user choose when both
- * routes exist. A long-lived request and an instant payout are never
- * interchangeable outcomes, so this component never applies a preference or
- * fallback. Mechanism dispatch is isolated from this provider-neutral chooser.
+ * Resolves provider capabilities first and makes the user choose when multiple
+ * routes exist. Atomic payout, provider-settled redemption, and a long-lived
+ * queue request are never interchangeable outcomes, so this component never
+ * applies a preference or fallback. Mechanism dispatch stays provider-neutral.
  */
 export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
   const { position } = props;
@@ -224,8 +224,10 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
       <EarnVaultAsyncWithdrawModal
         environment={props.environment}
         onClose={props.onClose}
+        onMovementUpdated={props.onMovementUpdated}
         onRequested={props.onAsyncRequest}
         onSettled={props.onAsyncRequestSettled}
+        onWithdrawn={props.onWithdrawn}
         position={position}
         projectId={props.projectId}
         route={asyncRoute}

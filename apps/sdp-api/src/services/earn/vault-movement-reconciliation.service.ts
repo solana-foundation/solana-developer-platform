@@ -1,3 +1,4 @@
+import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
 import {
   createRpc,
   getSignatureStatuses,
@@ -9,6 +10,7 @@ import {
 import { compareDecimalAmounts, formatDecimalAmount, isDecimalString } from "@sdp/solana/amount";
 import {
   EARN_TERMINAL_MOVEMENT_STATUSES,
+  earnProviderDepositSettlement,
   type SdpEnvironment,
   type SolanaCluster,
 } from "@sdp/types";
@@ -26,6 +28,7 @@ import {
   earnClusterFor,
   resolveClusterRpcUrl,
   resolveVaultDirectClient,
+  resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
@@ -336,6 +339,19 @@ async function reconcileMovement(
     return "failed";
   }
   if (status?.confirmationStatus === "finalized") {
+    if (usesProviderOrderSettlement(env, movement)) {
+      // The payment/share leg is irreversible, but Connect has not yet
+      // reported that the subscription/redemption order settled. The current
+      // ledger has no `awaiting_provider` state, so preserve the strongest
+      // honest non-terminal fact it can express. In particular, never stamp
+      // settled_at/token_amount_settled or close the position from this leg.
+      if (movement.status === "confirmed") return "unchanged";
+      await advanceTransaction(ledger, movement, {
+        toStatus: "confirmed",
+        confirmedAt: new Date().toISOString(),
+      });
+      return "confirmed";
+    }
     await settleMovement(env, ledger, movement, chain);
     return "settled";
   }
@@ -394,6 +410,26 @@ async function reconcileMovement(
   });
   await markSubmitted(ledger, movement);
   return "resubmitted";
+}
+
+/**
+ * Whether Solana finality records only the opening leg of a provider-managed
+ * order rather than economic settlement.
+ *
+ * Deposits declare this in the shared provider table. Withdrawals declare it
+ * on the executing client capability, so this guard follows the builder that
+ * actually produced the transaction instead of inferring semantics from an id.
+ * An unrecognized historical provider also stays non-terminal: atomicity is a
+ * positive settlement claim and must never be inferred from registry drift.
+ * A future Connect order reconciler must correlate and authenticate provider
+ * completion before it advances one of these rows beyond `confirmed`.
+ */
+function usesProviderOrderSettlement(env: Env, movement: EarnMovementRow): boolean {
+  if (movement.direction === "deposit") {
+    return earnProviderDepositSettlement(movement.provider) === "provider_order";
+  }
+  const client = resolveVaultWithdrawClient(env, movement.provider, createVaultDeadline());
+  return client === null || supportsVaultProviderOrderWithdraw(client);
 }
 
 async function markSubmitted(

@@ -68,6 +68,16 @@
       "types": "./src/providers/ondo/client.ts",
       "import": "./src/providers/ondo/client.ts",
       "default": "./src/providers/ondo/client.ts"
+    },
+    "./providers/wisdomtree/client": {
+      "types": "./src/providers/wisdomtree/client.ts",
+      "import": "./src/providers/wisdomtree/client.ts",
+      "default": "./src/providers/wisdomtree/client.ts"
+    },
+    "./providers/wisdomtree/connect": {
+      "types": "./src/providers/wisdomtree/connect.ts",
+      "import": "./src/providers/wisdomtree/connect.ts",
+      "default": "./src/providers/wisdomtree/connect.ts"
     }
   },
   "scripts": {

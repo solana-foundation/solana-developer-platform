@@ -403,10 +403,10 @@ export async function extractEarnVaultDepositPolicyCandidate(
     );
   }
 
-  // The share floor the catalogue promised (`depositSlippage`) is the one the
-  // build enforces: every production deposit carries one, derived by the
-  // dashboard from a live quote and rejected when stale (PRO-1691); the
-  // provider builder enforces the exact value on-chain.
+  // The share-floor policy the catalogue promised (`depositSlippage`) is the
+  // one the build enforces. A non-null policy requires the dashboard's fresh
+  // quote-derived floor (PRO-1691); a next-NAV provider order publishes null
+  // because no on-chain instruction can bound its later settlement.
   assertDepositFloorPresent(strategy.provider, environment, body.minSharesOut);
 
   const tokenMint = strategy.deposit_mints[0];
