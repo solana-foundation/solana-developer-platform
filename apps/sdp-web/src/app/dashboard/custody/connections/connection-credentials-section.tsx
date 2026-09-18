@@ -94,6 +94,61 @@ function PendingRotationCallout({
   );
 }
 
+function CredentialDetails({
+  connectionId,
+  credential,
+  impact,
+  managedHere,
+  t,
+}: {
+  connectionId: string;
+  credential: LifecycleCredential;
+  impact: CustodyCredentialLifecycle["impact"];
+  managedHere: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const formatDate = useDateFormatter();
+  const otherConnections = impact.connections.filter(({ id }) => id !== connectionId);
+
+  return (
+    <>
+      <dl className="mt-3 space-y-1">
+        {managedHere ? null : (
+          <CredentialRow label={t("DashboardCustody.credentialManagedIn")}>
+            {t("DashboardCustody.credentialDeploymentBadge")}
+          </CredentialRow>
+        )}
+        <CredentialRow label={t("DashboardCustody.credentialAppId")}>
+          <span className="font-mono text-xs">{maskedAppId(credential)}</span>
+        </CredentialRow>
+        {managedHere ? (
+          <CredentialRow label={t("DashboardCustody.credentialInUseSince")}>
+            {formatDate(credential.createdAt) ?? "—"}
+          </CredentialRow>
+        ) : (
+          <CredentialRow label={t("DashboardCustody.credentialVersion")}>
+            {t("DashboardCustody.credentialVersionUntracked")}
+          </CredentialRow>
+        )}
+        {managedHere && otherConnections.length > 0 ? (
+          <CredentialRow label={t("DashboardCustody.credentialAlsoUsedBy")}>
+            {t("DashboardCustody.credentialAlsoUsedByValue", {
+              count: otherConnections.length,
+              projects: new Set(otherConnections.map(({ projectId }) => projectId)).size,
+            })}
+          </CredentialRow>
+        ) : null}
+      </dl>
+
+      {managedHere ? null : (
+        <p className="mt-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-3 text-sm leading-6 text-secondary">
+          {t("DashboardCustody.credentialDeploymentExplainer")}
+        </p>
+      )}
+    </>
+  );
+}
+
 /**
  * The credential this connection signs with today.
  *
@@ -129,8 +184,6 @@ function CurrentCredentialCard({
   pending: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const formatDate = useDateFormatter();
-  const otherConnections = impact.connections.filter(({ id }) => id !== connectionId);
   const showControls =
     credential.status === "active" ||
     credential.status === "pending" ||
@@ -143,39 +196,13 @@ function CurrentCredentialCard({
         <Badge variant={badge.variant}>{badge.label}</Badge>
       </div>
 
-      <dl className="mt-3 space-y-1">
-        {managedHere ? null : (
-          <CredentialRow label={t("DashboardCustody.credentialManagedIn")}>
-            {t("DashboardCustody.credentialDeploymentBadge")}
-          </CredentialRow>
-        )}
-        <CredentialRow label={t("DashboardCustody.credentialAppId")}>
-          <span className="font-mono text-xs">{maskedAppId(credential)}</span>
-        </CredentialRow>
-        {managedHere ? (
-          <CredentialRow label={t("DashboardCustody.credentialInUseSince")}>
-            {formatDate(credential.createdAt) ?? "—"}
-          </CredentialRow>
-        ) : (
-          <CredentialRow label={t("DashboardCustody.credentialVersion")}>
-            {t("DashboardCustody.credentialVersionUntracked")}
-          </CredentialRow>
-        )}
-        {managedHere && otherConnections.length > 0 ? (
-          <CredentialRow label={t("DashboardCustody.credentialAlsoUsedBy")}>
-            {t("DashboardCustody.credentialAlsoUsedByValue", {
-              count: otherConnections.length,
-              projects: new Set(otherConnections.map(({ projectId }) => projectId)).size,
-            })}
-          </CredentialRow>
-        ) : null}
-      </dl>
-
-      {managedHere ? null : (
-        <p className="mt-3 rounded-xl border border-border-default bg-fill-subtle px-4 py-3 text-sm leading-6 text-secondary">
-          {t("DashboardCustody.credentialDeploymentExplainer")}
-        </p>
-      )}
+      <CredentialDetails
+        connectionId={connectionId}
+        credential={credential}
+        impact={impact}
+        managedHere={managedHere}
+        t={t}
+      />
 
       {credential.status === "deactivated" ? (
         <p className="mt-3 text-sm text-tertiary">
