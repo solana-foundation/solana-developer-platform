@@ -161,6 +161,8 @@ export function useRampWizard<TId extends string>(
     amount: "",
     provider: null,
     counterpartyId: initialCounterpartyId,
+    buyerEmail: "",
+    buyerPhone: "",
   });
 
   const { mutate: mutateSwrCache } = useSWRConfig();

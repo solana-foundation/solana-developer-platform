@@ -265,7 +265,14 @@
         "preparingDescription": "We are waiting for the transfer record tied to this quote.",
         "waitingForPayment": "Waiting for payment",
         "waitingForPaymentHostedDescription": "Complete the payment in the provider window above. This deposit updates automatically once the provider confirms it."
-      }
+      },
+      "buyerContactHint": "Coinbase needs the buyer's contact details to create the order. They are sent with the quote and not stored.",
+      "buyerEmailLabel": "Buyer email",
+      "buyerEmailPlaceholder": "buyer@example.com",
+      "buyerPhoneLabel": "Buyer phone",
+      "buyerPhonePlaceholder": "+1 555 123 4567",
+      "buyerEmailInvalid": "Enter the buyer's email address.",
+      "buyerPhoneInvalid": "Enter the buyer's phone number."
     },
     "onchainSend": {
       "noAssets": "This wallet has no assets available to send.",
