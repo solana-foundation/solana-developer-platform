@@ -62,10 +62,6 @@ interface ParsedTransactionResponse {
   };
   result?: {
     blockTime?: number | null;
-    // Number of confirmed blocks since signature confirmation, or null once
-    // the transaction roots into a finalized block. Only finalized bodies are
-    // fork-proof, so only they may be cached.
-    confirmations?: number | null;
     meta?: {
       err?: unknown;
       fee?: number;
@@ -373,17 +369,14 @@ function writeParsedTransactionCache(signature: string, parsed: ParsedTransactio
 }
 
 /**
- * A body is fork-proof only once it roots into a finalized block. Solana RPC
- * reports `confirmations: null` for finalized transactions; a number means the
- * transaction only sits on a confirmed branch that a fork can still drop and
- * re-land with different metadata (slot, blockTime, status, inner
- * instructions, token balances). A missing field is treated as not finalized —
- * never cache on a guess.
+ * A body is fork-proof only once it roots into a finalized block. Finality is
+ * reported by the fresh signature-history entry (`getSignaturesForAddress`
+ * returns each signature's `confirmationStatus`), not by the transaction body:
+ * `getTransaction` responses carry no finality field at all, so the history —
+ * which this request just fetched — is the only current source. Anything short
+ * of "finalized" keeps the body uncached: a fork can still drop and re-land a
+ * merely-confirmed transaction with different metadata.
  */
-function isFinalizedParsedTransaction(parsed: ParsedTransaction): boolean {
-  return parsed.confirmations === null;
-}
-
 async function fetchParsedTransactionFromRpc(
   env: Env,
   signature: string
@@ -418,7 +411,8 @@ async function fetchParsedTransactionFromRpc(
 
 async function fetchParsedTransaction(
   env: Env,
-  signature: string
+  signature: string,
+  isFinalized: boolean
 ): Promise<ParsedTransactionResponse["result"]> {
   const cached = readCachedParsedTransaction(signature);
   if (cached) {
@@ -432,15 +426,16 @@ async function fetchParsedTransaction(
 
   const pending = fetchParsedTransactionFromRpc(env, signature)
     .then((parsedTransaction) => {
-      // Only cache finalized bodies. A null means the transaction is not yet
-      // indexed at the confirmed commitment; caching it would hide a
-      // just-submitted transfer until the TTL lapsed, delaying on-chain
-      // status. A confirmed-but-not-finalized body stays uncached too: a
-      // fork can still drop and re-land it with different metadata, so it is
-      // served fresh on every read until it roots (the fetch happens per
-      // read, so freshness is never traded for the cache). Failures stay
-      // uncached so the next read retries.
-      if (parsedTransaction && isFinalizedParsedTransaction(parsedTransaction)) {
+      // Cache a body only once the fresh signature history reports the
+      // signature finalized. A null means the transaction is not yet indexed
+      // at the confirmed commitment; caching it would hide a just-submitted
+      // transfer until the TTL lapsed, delaying on-chain status. A
+      // confirmed-but-not-finalized body stays uncached too: a fork can still
+      // drop and re-land it with different metadata, so it is served fresh on
+      // every read until it roots (the fetch happens per read, so freshness
+      // is never traded for the cache). Failures stay uncached so the next
+      // read retries.
+      if (parsedTransaction && isFinalized) {
         writeParsedTransactionCache(signature, parsedTransaction);
       }
       return parsedTransaction;
@@ -792,7 +787,14 @@ export async function buildObservedTransfersForSignatures(
     signatures,
     SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
     async (signatureInfo) => {
-      const parsedTransaction = await fetchParsedTransaction(env, String(signatureInfo.signature));
+      // The history entry was fetched fresh for this request, so its
+      // confirmationStatus is the current finality signal for the body gate.
+      const isFinalized = signatureInfo.confirmationStatus === "finalized";
+      const parsedTransaction = await fetchParsedTransaction(
+        env,
+        String(signatureInfo.signature),
+        isFinalized
+      );
       return buildObservedTransferRows(parsedTransaction, signatureInfo, context);
     }
   );

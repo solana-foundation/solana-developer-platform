@@ -582,6 +582,14 @@ export interface SignatureInfo {
   slot: bigint;
   blockTime: bigint | null;
   err: unknown | null;
+  /**
+   * Commitment level the RPC currently reports for this signature
+   * ("processed" | "confirmed" | "finalized"), or null when unknown. Callers
+   * that must distinguish finality (e.g. to decide whether a transaction body
+   * is immutable) should treat everything short of "finalized" — including an
+   * absent field from older mocks/callers — as not finalized.
+   */
+  confirmationStatus?: Commitment | null;
 }
 
 /**
@@ -613,6 +621,7 @@ export async function getSignaturesForAddress(
     slot: item.slot,
     blockTime: item.blockTime ?? null,
     err: item.err ?? null,
+    confirmationStatus: item.confirmationStatus ?? null,
   }));
 }
 

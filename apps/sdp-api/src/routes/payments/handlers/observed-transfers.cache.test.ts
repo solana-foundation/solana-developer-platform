@@ -17,20 +17,25 @@ const context = {
   walletIdsByAddress: new Map([[WALLET_ADDRESS, "wal_cache_test"]]),
 };
 
-function signatureEntry(index: number) {
+function signatureEntry(
+  index: number,
+  confirmationStatus: "confirmed" | "finalized" = "finalized"
+) {
   return {
     signature: `sig_${index}` as unknown as Signature,
     slot: BigInt(index),
     blockTime: 1700000000n,
     err: null,
+    confirmationStatus,
   };
 }
 
 function parsedSolTransfer(lamports: string) {
+  // Mirrors a real getTransaction response: there is no finality field on the
+  // body, so caching decisions must come from the signature history instead.
   return {
     slot: 42,
     blockTime: 1700000000,
-    confirmations: null,
     meta: {
       err: null,
       fee: 5000,
@@ -108,6 +113,7 @@ describe("observed-transfers parsed-transaction cache", () => {
           slot: 777n,
           blockTime: 1800000000n,
           err: null,
+          confirmationStatus: "finalized",
         },
       ],
       context
@@ -127,6 +133,7 @@ describe("observed-transfers parsed-transaction cache", () => {
           slot: 778n,
           blockTime: 1800000100n,
           err: null,
+          confirmationStatus: "finalized",
         },
       ],
       context
@@ -156,7 +163,7 @@ describe("observed-transfers parsed-transaction cache", () => {
     expect(first).toHaveLength(1);
   });
 
-  it("does not cache confirmed-but-not-finalized results until they finalize", async () => {
+  it("does not cache confirmed-but-not-finalized results until the history reports finality", async () => {
     let fetchCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       fetchCount += 1;
@@ -164,19 +171,62 @@ describe("observed-transfers parsed-transaction cache", () => {
       // roots: first with 1000 lamports, then re-landed with 2000. A cached
       // body would serve the stale amount forever.
       return jsonRpcResponse({
-        result: { ...parsedSolTransfer(fetchCount === 1 ? "1000" : "2000"), confirmations: 5 },
+        result: parsedSolTransfer(fetchCount === 1 ? "1000" : "2000"),
       });
     });
 
     const signatures = [signatureEntry(0)];
+
+    // While the fresh history still reports "confirmed", every read refetches
+    // and sees whatever branch the confirmed ledger currently reports.
+    const first = await buildObservedTransfersForSignatures(
+      env,
+      [signatureEntry(0, "confirmed")],
+      context
+    );
+    const confirmedEntry = [{ ...signatureEntry(0, "confirmed") }];
+    const second = await buildObservedTransfersForSignatures(env, confirmedEntry, context);
+    expect(fetchCount).toBe(2);
+    expect(first[0]?.amount).toBe(formatDecimalAmount(1000n, 9));
+    expect(second[0]?.amount).toBe(formatDecimalAmount(2000n, 9));
+
+    // Once the fresh history reports "finalized", the body is immutable: it
+    // is fetched once more, then cached.
+    const third = await buildObservedTransfersForSignatures(
+      env,
+      [signatureEntry(0, "finalized")],
+      context
+    );
+    expect(fetchCount).toBe(3);
+    expect(third).toHaveLength(1);
+
+    const fourth = await buildObservedTransfersForSignatures(env, signatures, context);
+    expect(fetchCount).toBe(3);
+    expect(fourth).toEqual(third);
+  });
+
+  it("never caches when the history entry carries no confirmation status", async () => {
+    let fetchCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      fetchCount += 1;
+      return jsonRpcResponse({ result: parsedSolTransfer("1000") });
+    });
+
+    // Finality is unknown — treat as not finalized and refetch every read.
+    const signatures = [
+      {
+        signature: "sig_0" as unknown as Signature,
+        slot: 0n,
+        blockTime: 1700000000n,
+        err: null,
+      },
+    ];
     const first = await buildObservedTransfersForSignatures(env, signatures, context);
     const second = await buildObservedTransfersForSignatures(env, signatures, context);
 
     expect(fetchCount).toBe(2);
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
-    expect(first[0]?.amount).toBe(formatDecimalAmount(1000n, 9));
-    expect(second[0]?.amount).toBe(formatDecimalAmount(2000n, 9));
   });
 
   it("does not cache null results so a just-submitted transfer appears as soon as the chain indexes it", async () => {
@@ -220,7 +270,7 @@ describe("observed-transfers parsed-transaction cache", () => {
     let fetchCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       fetchCount += 1;
-      return jsonRpcResponse({ result: { slot: 1, confirmations: null } });
+      return jsonRpcResponse({ result: { slot: 1 } });
     });
 
     const allSignatures = Array.from(
