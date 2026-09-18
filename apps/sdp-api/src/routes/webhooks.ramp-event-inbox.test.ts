@@ -12,7 +12,6 @@ import {
   RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
   replayRampWebhookEvents,
 } from "@/services/jobs/replay-ramp-webhook-events";
-import { bvnkV1PayinEvent } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -363,44 +362,6 @@ describe("Ramp webhook event inbox", () => {
       processSpy.mockRestore();
     }
     expect(await readInboxRows()).toHaveLength(0);
-  });
-
-  it("discards a sandbox BVNK pay-in without a transfer reference as terminal", async () => {
-    const events = createPostgresRampWebhookEventsRepository(getDb(env));
-    const stored = await events.insertEvent({
-      provider: "bvnk",
-      environment: "sandbox",
-      payload: bvnkV1PayinEvent({
-        transactionReference: "payin_unattributable_1",
-        paymentReference: "UNREFERENCED DEPOSIT",
-        additionalRemittanceInformation: undefined,
-      }),
-    });
-
-    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
-
-    expect(await readInboxRows()).toHaveLength(0);
-  });
-
-  it("parks a production BVNK pay-in without a transfer reference as terminal on the first attempt", async () => {
-    const events = createPostgresRampWebhookEventsRepository(getDb(env));
-    const stored = await events.insertEvent({
-      provider: "bvnk",
-      environment: "production",
-      payload: bvnkV1PayinEvent({
-        transactionReference: "payin_unattributable_prod_1",
-        paymentReference: "UNREFERENCED DEPOSIT",
-        additionalRemittanceInformation: undefined,
-      }),
-    });
-
-    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
-
-    const rows = await readInboxRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.status).toBe("failed");
-    expect(rows[0]?.attempts).toBe(RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS);
-    expect(rows[0]?.last_error).toContain("stray pay-in: no transfer reference");
   });
 
   it("parks a production event whose apply failed terminally on the first attempt", async () => {

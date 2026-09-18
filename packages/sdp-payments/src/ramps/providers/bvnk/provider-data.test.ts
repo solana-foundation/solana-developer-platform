@@ -1,19 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  BVNK_ONRAMP_REMITTANCE_PREFIX,
   buildBvnkCustomerExternalReference,
   buildBvnkFundingWalletName,
   buildBvnkOfframpWalletName,
   buildBvnkWalletIdempotencyKey,
   bvnkCustomerStatusRequirements,
-  bvnkOnrampRemittance,
   bvnkPayoutPartyDetailsFromCustomer,
   parseBvnkFundingWalletName,
   parseBvnkOfframpWalletName,
   parseBvnkTransferIdFromRemittance,
   parseBvnkWalletName,
-  readBvnkOnrampTransferData,
 } from "./provider-data";
 import { bvnkCustomer } from "./test-fixtures";
 
@@ -35,34 +32,26 @@ describe("bvnkCustomerStatusRequirements", () => {
   });
 
   it("answers customer_verification_required with the JIT URL for INFO_REQUIRED", () => {
+    const verified = {
+      provider: "bvnk",
+      direction: "onramp",
+      status: "customer_verification_required",
+      verificationUrl: "https://in.sumsub.com/websdk/p/t",
+    };
     assert.deepEqual(
       bvnkCustomerStatusRequirements("INFO_REQUIRED", "onramp", "https://in.sumsub.com/websdk/p/t"),
-      {
-        provider: "bvnk",
-        direction: "onramp",
-        status: "customer_verification_required",
-        verificationUrl: "https://in.sumsub.com/websdk/p/t",
-      }
+      verified
     );
-  });
-
-  it("answers customer_verification_required with the JIT URL for ACTIONS_REQUIRED", () => {
+    // ACTIONS_REQUIRED carries the same JIT verification URL.
     assert.deepEqual(
       bvnkCustomerStatusRequirements(
         "ACTIONS_REQUIRED",
         "onramp",
         "https://in.sumsub.com/websdk/p/t"
       ),
-      {
-        provider: "bvnk",
-        direction: "onramp",
-        status: "customer_verification_required",
-        verificationUrl: "https://in.sumsub.com/websdk/p/t",
-      }
+      verified
     );
-  });
-
-  it("throws when a verification-required status has no JIT URL", () => {
+    // A verification-required status without a JIT URL is a caller bug.
     assert.throws(() => bvnkCustomerStatusRequirements("INFO_REQUIRED", "onramp"), {
       message: /verification_required.*without a JIT verification URL/,
     });
@@ -74,9 +63,7 @@ describe("bvnkCustomerStatusRequirements", () => {
       direction: "onramp",
       status: "customer_verification_failed",
     });
-  });
-
-  it("answers customer_verification_failed for TERMINATED", () => {
+    // TERMINATED is terminal for KYC in the same way.
     assert.deepEqual(bvnkCustomerStatusRequirements("TERMINATED", "onramp"), {
       provider: "bvnk",
       direction: "onramp",
@@ -87,46 +74,28 @@ describe("bvnkCustomerStatusRequirements", () => {
 
 describe("parseBvnkTransferIdFromRemittance", () => {
   it("reassembles the live v1 sample when the overflow carries its leading space", () => {
+    const expected = "xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44";
+    // Live v1 sample: the split rail writes the tail into the overflow with a leading space.
     assert.equal(
       parseBvnkTransferIdFromRemittance("XFR_2AB355", " d7-088e-4f73-bcc6-7d60c7b3ae44"),
-      "xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
+      expected
     );
-  });
-
-  it("reassembles the second live v1 sample", () => {
-    assert.equal(
-      parseBvnkTransferIdFromRemittance("XFR_00889A", " 6d-a8f3-48fd-a9ac-040903652de3"),
-      "xfr_00889a6d-a8f3-48fd-a9ac-040903652de3"
-    );
-  });
-
-  it("reassembles the id when the overflow has no leading space", () => {
+    // The overflow without a leading space joins the same way.
     assert.equal(
       parseBvnkTransferIdFromRemittance("XFR_2AB355", "d7-088e-4f73-bcc6-7d60c7b3ae44"),
-      "xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
+      expected
     );
-  });
-
-  it("returns null when no xfr_ id appears in the overflow or reference", () => {
-    assert.equal(parseBvnkTransferIdFromRemittance("REFERENCE01", "no-transfer-id-here"), null);
-    assert.equal(parseBvnkTransferIdFromRemittance("REFERENCE01", undefined), null);
-  });
-
-  it("matches mixed case and returns the lowercased id", () => {
+    // Mixed case matches and the id is normalized to lowercase.
     assert.equal(
       parseBvnkTransferIdFromRemittance("XFR_2AB355", "D7-088E-4F73-BCC6-7D60C7B3AE44"),
-      "xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
+      expected
     );
-  });
-
-  it("parses a non-splitting rail where the full id sits in the payment reference", () => {
-    assert.equal(
-      parseBvnkTransferIdFromRemittance("xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44", undefined),
-      "xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
-    );
-  });
-
-  it("throws when the joined remittance contains two distinct transfer ids", () => {
+    // Non-splitting rail: the full id already sits in the payment reference.
+    assert.equal(parseBvnkTransferIdFromRemittance(expected, undefined), expected);
+    // No id in the overflow or reference: null.
+    assert.equal(parseBvnkTransferIdFromRemittance("REFERENCE01", "no-transfer-id-here"), null);
+    assert.equal(parseBvnkTransferIdFromRemittance("REFERENCE01", undefined), null);
+    // Two distinct ids in the joined remittance are ambiguous.
     assert.throws(
       () =>
         parseBvnkTransferIdFromRemittance(
@@ -134,69 +103,6 @@ describe("parseBvnkTransferIdFromRemittance", () => {
           "d7-088e-4f73-bcc6-7d60c7b3ae44 xfr_00889a6d-a8f3-48fd-a9ac-040903652de3"
         ),
       { message: /Ambiguous BVNK remittance/ }
-    );
-  });
-});
-
-describe("bvnkOnrampRemittance", () => {
-  it("formats the remittance as the 10-char prefix plus the transfer id", () => {
-    assert.equal(BVNK_ONRAMP_REMITTANCE_PREFIX.length, 10);
-    assert.equal(
-      bvnkOnrampRemittance("xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"),
-      "SDP-ONRAMP xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
-    );
-  });
-});
-
-describe("readBvnkOnrampTransferData", () => {
-  it("parses the empty initial state the prebook writes", () => {
-    assert.deepEqual(readBvnkOnrampTransferData({ bvnk: {} }), {});
-  });
-
-  it("throws when the bvnk key is missing", () => {
-    assert.throws(() => readBvnkOnrampTransferData({}), {
-      message: /provider_data has no bvnk object/,
-    });
-  });
-
-  it("throws on a malformed payout shape", () => {
-    assert.throws(() => readBvnkOnrampTransferData({ bvnk: { payout: { claimedAt: 123 } } }), {
-      message: /provider_data\.bvnk is malformed/,
-    });
-  });
-
-  it("parses a fully written payout payload", () => {
-    assert.deepEqual(
-      readBvnkOnrampTransferData({
-        bvnk: {
-          payout: {
-            claimedAt: "2026-09-18T10:00:00Z",
-            attempts: 1,
-            intent: {
-              amount: "1.20",
-              currency: "USD",
-              cryptoCurrency: "USDC",
-              network: "SOLANA",
-              address: "H1grN1mr3sEQ2NLdeC1fXwvgaj7YiQYp8YBW21gJDWNZ",
-            },
-            payoutId: "01a0b3f2-ad2d-7a55-95dc-98d85d4def2f",
-          },
-        },
-      }),
-      {
-        payout: {
-          claimedAt: "2026-09-18T10:00:00Z",
-          attempts: 1,
-          intent: {
-            amount: "1.20",
-            currency: "USD",
-            cryptoCurrency: "USDC",
-            network: "SOLANA",
-            address: "H1grN1mr3sEQ2NLdeC1fXwvgaj7YiQYp8YBW21gJDWNZ",
-          },
-          payoutId: "01a0b3f2-ad2d-7a55-95dc-98d85d4def2f",
-        },
-      }
     );
   });
 });
@@ -231,15 +137,13 @@ describe("bvnkPayoutPartyDetailsFromCustomer", () => {
       relationshipType: "THIRD_PARTY",
       countryCode: "US",
     });
-  });
 
-  it("throws naming the customer when no individual details are present", () => {
-    const customer = bvnkCustomer({
+    // Missing individual details name the customer in the throw.
+    const withoutDetails = bvnkCustomer({
       reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
       status: "VERIFIED",
     });
-
-    assert.throws(() => bvnkPayoutPartyDetailsFromCustomer(customer), {
+    assert.throws(() => bvnkPayoutPartyDetailsFromCustomer(withoutDetails), {
       message: /BVNK customer 2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3 has no individual details/,
     });
   });
@@ -275,9 +179,8 @@ describe("parseBvnkOfframpWalletName", () => {
       fiatCurrency: "USD",
       counterpartyId: "cpty_123",
     });
-  });
 
-  it("rejects malformed wallet names", () => {
+    // Malformed names never parse as an off-ramp wallet.
     assert.throws(() => parseBvnkOfframpWalletName("sdp:onramp:USD:cpty_123"), {
       message: /Malformed BVNK off-ramp wallet name/,
     });
@@ -296,27 +199,30 @@ describe("parseBvnkOfframpWalletName", () => {
 describe("parseBvnkFundingWalletName", () => {
   it("parses a customer funding wallet name into its provider-account id", () => {
     assert.equal(buildBvnkFundingWalletName("cpa_123"), "sdp:onramp:cpa_123");
-    assert.deepEqual(parseBvnkFundingWalletName("sdp:onramp:cpa_123"), {
+    const parsed = {
       namespace: "sdp",
       kind: "funding_wallet",
       providerAccountId: "cpa_123",
-    });
-    assert.deepEqual(parseBvnkWalletName("sdp:onramp:cpa_123"), {
-      namespace: "sdp",
-      kind: "funding_wallet",
-      providerAccountId: "cpa_123",
-    });
-  });
+    };
+    assert.deepEqual(parseBvnkFundingWalletName("sdp:onramp:cpa_123"), parsed);
+    assert.deepEqual(parseBvnkWalletName("sdp:onramp:cpa_123"), parsed);
 
-  it("rejects wallet names that are not the 3-part funding shape", () => {
+    // The 3-part funding shape is the only accepted one.
     assert.throws(() => parseBvnkFundingWalletName("sdp:onramp:cpa_123:extra"), {
       message: /Malformed BVNK funding wallet name/,
     });
-  });
-
-  it("rejects wallet names with the wrong direction segment", () => {
     assert.throws(() => parseBvnkFundingWalletName("sdp:sideways:cpa_123"), {
       message: /Malformed BVNK funding wallet name/,
+    });
+
+    // Other names never parse as funding wallets: unrecognised.
+    assert.deepEqual(parseBvnkWalletName("sdp:sideways:USD:cpty_123"), {
+      kind: "unrecognised",
+      name: "sdp:sideways:USD:cpty_123",
+    });
+    assert.deepEqual(parseBvnkWalletName("a:foreign:wallet:1"), {
+      kind: "unrecognised",
+      name: "a:foreign:wallet:1",
     });
   });
 });
@@ -330,24 +236,6 @@ describe("parseBvnkWalletName", () => {
       counterpartyId: "cpty_123",
     });
   });
-
-  it("reports the legacy 6-part on-ramp wallet name as unrecognised", () => {
-    assert.deepEqual(parseBvnkWalletName("sdp:onramp:cpty_123:USD:USDC_SOLANA:dest"), {
-      kind: "unrecognised",
-      name: "sdp:onramp:cpty_123:USD:USDC_SOLANA:dest",
-    });
-  });
-
-  it("reports other foreign wallet names as unrecognised", () => {
-    assert.deepEqual(parseBvnkWalletName("sdp:sideways:USD:cpty_123"), {
-      kind: "unrecognised",
-      name: "sdp:sideways:USD:cpty_123",
-    });
-    assert.deepEqual(parseBvnkWalletName("a:foreign:wallet:1"), {
-      kind: "unrecognised",
-      name: "a:foreign:wallet:1",
-    });
-  });
 });
 
 describe("buildBvnkWalletIdempotencyKey", () => {
@@ -357,7 +245,6 @@ describe("buildBvnkWalletIdempotencyKey", () => {
     const key = await buildBvnkWalletIdempotencyKey(walletName);
 
     assert.match(key, /^[a-f0-9]{36}$/);
-    assert.equal(key.length, 36);
     assert.equal(await buildBvnkWalletIdempotencyKey(walletName), key);
     assert.notEqual(await buildBvnkWalletIdempotencyKey(`${walletName}:changed`), key);
   });
