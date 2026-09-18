@@ -9,8 +9,9 @@ import type { EarnRuntimeEnvironment } from "./types";
  * lives on chain (Kamino's devnet vaults, Veda's).
  *
  * ── Why this package speaks JSON-RPC at all ─────────────────────────────────
- * `@sdp/earn` runs inside the hourly catalogue cron and its only dependency is
- * `@sdp/types`. A chain SDK here would be loaded on every pass in both
+ * `@sdp/earn` runs inside the hourly catalogue cron and its only dependencies
+ * are `@sdp/types` and the dependency-free `@sdp/redaction`. A chain SDK here
+ * would be loaded on every pass in both
  * environments to read a handful of accounts, which is why the execution
  * packages (`@sdp/kamino`, `@sdp/veda`) exist as separate consumers. The cost of
  * that rule is this file: base58, base64 and one RPC helper, hand-rolled.
