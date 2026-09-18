@@ -226,7 +226,6 @@ function bvnkWalletBankAccount(wallet: BvnkLedgerWalletV2): BvnkBankFundingDetai
   return {
     accountNumber: instrument.accountNumber,
     code: instrument.bankDetails.bic,
-    paymentReference: instrument.remittanceInformationPrefix,
     ...(nid !== undefined && nid.type === "ROUTING_NUMBER" ? { routingNumber: nid.value } : {}),
     bankName: instrument.bankDetails.name,
   };
@@ -1381,6 +1380,7 @@ export async function bvnkOnrampQuote(
       throw internalError("BVNK funding wallet has no fiat payment instrument yet.");
     }
     const paymentReference = bvnkOnrampRemittance(input.transferId);
+    const instrument = wallet.paymentInstruments?.[0];
     const instruction: BvnkFiatFundingInstruction = {
       provider: "bvnk",
       kind: "fiat_funding",
@@ -1389,11 +1389,11 @@ export async function bvnkOnrampQuote(
       fiatCurrency: input.fiatCurrency,
       beneficiaryAddress: input.destinationWalletAddress,
       network: input.network,
-      bankAccount,
+      bankAccount: { ...bankAccount, paymentReference },
       paymentReference,
-      ...(bankAccount.paymentReference === undefined
+      ...(instrument?.remittanceInformationPrefix === undefined
         ? {}
-        : { remittanceInformationPrefix: bankAccount.paymentReference }),
+        : { remittanceInformationPrefix: instrument.remittanceInformationPrefix }),
       instructionsNotes: `Include ${paymentReference} in the bank transfer reference to receive crypto on ${input.network}.`,
     };
     const updated = await getPaymentsRepository(c).updateTransferStatusGuarded({

@@ -1281,6 +1281,24 @@ describe("Counterparties Routes", () => {
       );
     }
 
+    function bvnkOnrampAdvanceRequest(counterpartyId: string) {
+      return app.request(
+        `/v1/counterparties/${counterpartyId}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "bvnk",
+            direction: "onramp",
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            destinationCustodyWalletId: TEST_CP_CUSTODY_WALLET_ID,
+          }),
+        },
+        env
+      );
+    }
+
     function seedFundingWallet(
       counterpartyId: string,
       input: {
@@ -1321,7 +1339,7 @@ describe("Counterparties Routes", () => {
           bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID, name: input.name })
         );
 
-      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+      const res = await bvnkOnrampAdvanceRequest(counterparty.id);
 
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({
@@ -1487,7 +1505,7 @@ describe("Counterparties Routes", () => {
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2")
         .mockResolvedValue(bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID }));
 
-      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+      const res = await bvnkOnrampAdvanceRequest(counterparty.id);
 
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({
@@ -1526,7 +1544,7 @@ describe("Counterparties Routes", () => {
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2")
         .mockResolvedValue(bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID, paymentInstruments: [] }));
 
-      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+      const res = await bvnkOnrampAdvanceRequest(counterparty.id);
 
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({

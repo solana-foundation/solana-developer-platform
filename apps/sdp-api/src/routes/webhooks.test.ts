@@ -30,6 +30,7 @@ import {
   bvnkCryptoPayoutStatusChangeEvent,
   bvnkPlatformCustomerStatusChangeEvent,
   bvnkPlatformCustomerUpdateEvent,
+  bvnkSeedCustomerReference,
   bvnkV1PayinEvent,
   bvnkV2PayinStatusChangeEvent,
   bvnkWalletStatusChangeEvent,
@@ -1245,7 +1246,7 @@ describe("BVNK ramp webhook", () => {
         `INSERT INTO counterparties (
            id, organization_id, project_id, external_id, entity_type, display_name,
            provider_data, status, created_by
-         ) VALUES (?, ?, ?, ?, 'individual', 'Production Webhook Buyer', {}, 'active', ?)`
+         ) VALUES (?, ?, ?, ?, 'individual', 'Production Webhook Buyer', '{}', 'active', ?)`
       )
       .bind(productionCounterpartyId, ORG_ID, `${PROJECT_ID}_production`, null, USER_ID)
       .run()
@@ -1279,7 +1280,10 @@ describe("BVNK ramp webhook", () => {
         "outbound",
         "awaiting_payment",
         "bvnk",
-        "019f0ce4-98ab-7424-a968-fc323266b8ed",
+        // The provider reference is the SDP off-ramp transfer reference
+        // (unique per transfer), so two seeded off-ramp rows can never collide
+        // on the payment_transfers provider-reference uniqueness.
+        buildBvnkOfframpReference(transferId),
         "manual_instructions",
         "USD",
         null,
@@ -1480,7 +1484,10 @@ describe("BVNK ramp webhook", () => {
       fundingWalletEvent(FUNDING_WALLET_ID, { customerId: "another-customer" })
     );
 
-    await expectTerminalWebhookEvent("sandbox", "belongs to another customer");
+    // Sandbox terminal errors are deleted by the inbox (R16), so the terminal
+    // parking is observed as the event row's absence — a non-terminal error
+    // would leave a pending row behind.
+    await expectNoBvnkWebhookEvents();
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
 
@@ -1497,7 +1504,10 @@ describe("BVNK ramp webhook", () => {
 
     await sendBvnkWebhook(fundingWalletEvent("a:funding:wallet:other:1"));
 
-    await expectTerminalWebhookEvent("sandbox", "targets a different wallet");
+    // Sandbox terminal errors are deleted by the inbox (R16), so the terminal
+    // parking is observed as the event row's absence — a non-terminal error
+    // would leave a pending row behind.
+    await expectNoBvnkWebhookEvents();
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
 
@@ -1628,7 +1638,6 @@ describe("BVNK ramp webhook", () => {
       projectId: PROJECT_ID,
       name: "payin_settles",
       createdBy: USER_ID,
-      customerReference: CUSTOMER_REFERENCE,
       fundingWalletReference: WALLET_ID,
     });
     await seedOnrampTransfer(transferId, "awaiting_payment", counterpartyId, {
@@ -1641,7 +1650,7 @@ describe("BVNK ramp webhook", () => {
         paymentReference: "SDP-ONRAMP",
         additionalRemittanceInformation: `xfr_${transferId.slice(4)}`,
         amount: 149.5,
-        customerReference: CUSTOMER_REFERENCE,
+        customerReference: bvnkSeedCustomerReference("payin_settles"),
       })
     );
 
@@ -1664,7 +1673,7 @@ describe("BVNK ramp webhook", () => {
       receivedAmount: "149.5",
       receivedCurrency: "USD",
       walletId: WALLET_ID,
-      customerId: CUSTOMER_REFERENCE,
+      customerId: bvnkSeedCustomerReference("payin_settles"),
     });
     await expectNoBvnkWebhookEvents();
   });
@@ -1676,14 +1685,14 @@ describe("BVNK ramp webhook", () => {
       receivedAmount: "149.5",
       receivedCurrency: "USD",
       walletId: WALLET_ID,
-      customerId: CUSTOMER_REFERENCE,
+      customerId: bvnkSeedCustomerReference("payin_replay"),
     };
     await seedPayinApplied({ name: "payin_replay", transferId, payin: payinFacts });
     const payload = bvnkV1PayinEvent({
       transactionReference: payinFacts.id,
       amount: 149.5,
       walletId: WALLET_ID,
-      customerReference: CUSTOMER_REFERENCE,
+      customerReference: bvnkSeedCustomerReference("payin_replay"),
       paymentReference: "SDP-ONRAMP",
       additionalRemittanceInformation: `xfr_${transferId.slice(4)}`,
     });
@@ -1732,7 +1741,7 @@ describe("BVNK ramp webhook", () => {
         receivedAmount: "149.5",
         receivedCurrency: "USD",
         walletId: WALLET_ID,
-        customerId: CUSTOMER_REFERENCE,
+        customerId: bvnkSeedCustomerReference("payin_conflict"),
       },
     });
 
@@ -1741,7 +1750,7 @@ describe("BVNK ramp webhook", () => {
         transactionReference: "payin_conflict_1",
         amount: 300,
         walletId: WALLET_ID,
-        customerReference: CUSTOMER_REFERENCE,
+        customerReference: bvnkSeedCustomerReference("payin_conflict"),
       }),
       undefined,
       "production"
@@ -1900,7 +1909,6 @@ describe("BVNK ramp webhook", () => {
       projectId: input.projectId ?? PROJECT_ID,
       name: input.name,
       createdBy: USER_ID,
-      customerReference: CUSTOMER_REFERENCE,
       fundingWalletReference: WALLET_ID,
       transferId: input.transferId,
       destinationAddress: "dest",
@@ -1937,7 +1945,6 @@ describe("BVNK ramp webhook", () => {
       projectId: input.projectId ?? PROJECT_ID,
       name: input.name,
       createdBy: USER_ID,
-      customerReference: CUSTOMER_REFERENCE,
       fundingWalletReference: WALLET_ID,
       transferId: input.transferId,
       destinationAddress: "dest",
@@ -1946,7 +1953,7 @@ describe("BVNK ramp webhook", () => {
         receivedAmount: "9.9",
         receivedCurrency: "USD",
         walletId: WALLET_ID,
-        customerId: CUSTOMER_REFERENCE,
+        customerId: bvnkSeedCustomerReference(input.name),
       },
       claimedAt: "2026-09-18T00:00:00.000Z",
       intent: PAYOUT_INTENT,
@@ -2252,7 +2259,10 @@ describe("BVNK ramp webhook", () => {
     });
     await sendBvnkWebhook(event);
 
-    await expectTerminalWebhookEvent("sandbox", "has no customer link in this environment");
+    // Sandbox terminal errors are deleted by the inbox (R16), so the terminal
+    // parking is observed as the event row's absence — a non-terminal error
+    // would leave a pending row behind.
+    await expectNoBvnkWebhookEvents();
   });
 
   it("acknowledges a non-SIGNED agreement session without changing the row", async () => {

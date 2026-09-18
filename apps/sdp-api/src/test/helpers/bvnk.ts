@@ -540,16 +540,31 @@ export async function seedBvnkOnrampTransfer(
 }
 
 /**
+ * Derives the BVNK customer reference a seeded counterparty's customer link
+ * stores: deterministic and unique per counterparty (the counterparty id is
+ * `cpty_<name>`), so no two seeds can collide on the
+ * `(provider, provider_customer_reference)` uniqueness of active customer
+ * links. Webhook fixtures that must match the seeded link use this same
+ * builder.
+ *
+ * @param name - The seed's name suffix (the counterparty id sans `cpty_`).
+ * @returns The BVNK customer reference stored on the seeded customer link.
+ */
+export function bvnkSeedCustomerReference(name: string): string {
+  return `customer_${name}`;
+}
+
+/**
  * Seeds a counterparty, its BVNK customer link, and its provisioned USD
  * funding wallet in one call — the tenant scope every BVNK on-ramp flow
  * (webhook, cancel, simulate, reconciler) starts from. The funding wallet row
  * is created through `seedBvnkFundingWallet` so the claim/assign transitions
- * run exactly like production.
+ * run exactly like production. The customer link reference is derived from
+ * the counterparty id (see {@link bvnkSeedCustomerReference}), never shared
+ * between seeds.
  *
  * @param db - Test database receiving the rows.
- * @param input - Tenant scope, a name suffix for stable ids, the provider
- *   customer reference, and the BVNK ledger wallet reference the funding
- *   wallet adopts.
+ * @param input - Tenant scope and a name suffix for stable ids.
  * @returns The counterparty id and the funding wallet reference.
  */
 export async function seedBvnkOnrampCounterpartyAndFundingWallet(
@@ -558,12 +573,12 @@ export async function seedBvnkOnrampCounterpartyAndFundingWallet(
     organizationId: string;
     projectId: string;
     name: string;
-    customerReference: string;
     fundingWalletReference: string;
     createdBy: string;
   }
 ): Promise<{ counterpartyId: string; fundingReference: string }> {
   const counterpartyId = `cpty_${input.name}`;
+  const providerCustomerReference = bvnkSeedCustomerReference(input.name);
   await db
     .prepare(
       `INSERT INTO counterparties (
@@ -585,14 +600,14 @@ export async function seedBvnkOnrampCounterpartyAndFundingWallet(
       input.organizationId,
       input.projectId,
       counterpartyId,
-      input.customerReference
+      providerCustomerReference
     )
     .run();
   await seedBvnkFundingWallet(db, {
     organizationId: input.organizationId,
     projectId: input.projectId,
     counterpartyId,
-    providerCustomerReference: input.customerReference,
+    providerCustomerReference,
     walletId: input.fundingWalletReference,
     providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
     metadata: {},
@@ -614,7 +629,6 @@ export interface SeedBvnkOnrampPayinAppliedInput {
   projectId: string;
   name: string;
   createdBy: string;
-  customerReference: string;
   fundingWalletReference: string;
   transferId: string;
   destinationAddress: string;

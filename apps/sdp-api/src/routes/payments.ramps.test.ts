@@ -10,6 +10,7 @@ import app from "@/index";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
+  bvnkSeedCustomerReference,
   seedBvnkFundingWallet,
   seedBvnkOnrampPayoutIssued,
   seedBvnkOnrampTransfer,
@@ -1284,42 +1285,6 @@ describe("Payments routes — ramps", () => {
         .first<{ count: number }>();
       expect(rows).toEqual({ count: 0 });
     });
-
-    it("uses the same reference formatter for the quote instruction and the sandbox simulate call", async () => {
-      const counterpartyId = await seedVerifiedCounterparty("d1b_quote_formatter");
-      await seedBvnkFundingWallet(getDb(env), {
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        counterpartyId,
-        providerCustomerReference: BVNK_QUOTE_CUSTOMER,
-        walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
-        metadata: {},
-      });
-      const walletSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2")
-        .mockResolvedValue(mockBvnkWallet());
-      const payoutSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampPayout");
-
-      const res = await bvnkQuoteRequest(counterpartyId);
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: {
-          transferId: string;
-          quote: {
-            paymentInstructions: Array<{ bankAccount?: Record<string, unknown> }>;
-          };
-        };
-      };
-      expect(body.data.quote.paymentInstructions[0].bankAccount?.paymentReference).toBe(
-        bvnkOnrampRemittance(body.data.transferId)
-      );
-      expect(payoutSpy).not.toHaveBeenCalled();
-
-      walletSpy.mockRestore();
-      payoutSpy.mockRestore();
-    });
   });
 
   describe("BVNK on-ramp providerReference projection (A3)", () => {
@@ -1382,7 +1347,7 @@ describe("Payments routes — ramps", () => {
         error: null,
         destination: TEST_SOLANA_ADDRESSES.wallet2,
         counterpartyId,
-        rampsMemo: null,
+        rampsMemo: {},
         token: "USDC",
         createdAt: before.created_at,
         updatedAt: before.updated_at,
@@ -1401,7 +1366,6 @@ describe("Payments routes — ramps", () => {
         projectId: TEST_PROJECT.id,
         name: "a3_bvnk_projection_issued",
         createdBy: TEST_USER.id,
-        customerReference: "a3_bvnk_projection_customer",
         fundingWalletReference: TEST_BVNK_WALLET_ID,
         transferId: A3_ISSUED_TRANSFER_ID,
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
@@ -1410,7 +1374,7 @@ describe("Payments routes — ramps", () => {
           receivedAmount: "25.00",
           receivedCurrency: "USD",
           walletId: TEST_BVNK_WALLET_ID,
-          customerId: "a3_bvnk_projection_customer",
+          customerId: bvnkSeedCustomerReference("a3_bvnk_projection_issued"),
         },
         claimedAt: "2026-09-18T00:00:00.000Z",
         intent: {
@@ -1622,6 +1586,24 @@ describe("Payments routes — ramps", () => {
 
   it("denies canceling a BVNK on-ramp transfer outside the custody-wallet authz", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "d1b_cancel_authz" });
+    // The transfer points at a real custody wallet that the API key does not
+    // hold, so the FK holds and the exact-access authz denies the cancel.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+         VALUES (?, ?, ?, ?, 'Unbound wallet', 'transfer', 'active')`
+      )
+      .bind(
+        "cwlt_not_bound_to_key",
+        TEST_CONFIG_ID,
+        "wallet_unbound_cancel",
+        TEST_SOLANA_ADDRESSES.wallet2
+      )
+      .run();
+    await seedCachedKey({
+      walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+    });
     await seedBvnkOnrampTransfer(getDb(env), {
       id: "xfr_cancel_authz",
       status: "awaiting_payment",

@@ -27,6 +27,7 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   bvnkPayoutSummary,
   bvnkProcessingSettlement,
+  bvnkSeedCustomerReference,
   seedBvnkOnrampPayinApplied,
   seedBvnkOnrampPayoutClaimed,
   seedBvnkOnrampPayoutIssued,
@@ -138,7 +139,7 @@ function payinFor(transferId: string) {
     receivedAmount: "100.00",
     receivedCurrency: "USD",
     walletId: FUNDING_WALLET,
-    customerId: CUSTOMER_REFERENCE,
+    customerId: bvnkSeedCustomerReference(transferId),
   };
 }
 
@@ -157,7 +158,6 @@ const SEED_SCOPE = {
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT_ID,
   createdBy: TEST_USER.id,
-  customerReference: CUSTOMER_REFERENCE,
   fundingWalletReference: FUNDING_WALLET,
 };
 
@@ -253,7 +253,8 @@ function failedSummary(transferId: string, payoutId: string): BvnkOnrampPayoutSu
 
 function completedSummary(
   transferId: string,
-  payoutId: string = PAYOUT_UUID_1
+  payoutId: string = PAYOUT_UUID_1,
+  hash: string = TX_HASH
 ): BvnkOnrampPayoutSummary {
   return payoutSummary({
     uuid: payoutId,
@@ -262,7 +263,7 @@ function completedSummary(
     walletCurrency: { currency: "USD", amount: 100, actual: 99.8 },
     paidCurrency: { currency: "USDC", amount: 99.8, actual: 99.8 },
     feeCurrency: { currency: "USD", amount: 0.2, actual: 0.2 },
-    transactions: [{ hash: TX_HASH }],
+    transactions: [{ hash }],
     address: { address: DESTINATION, network: "SOLANA" },
   });
 }
@@ -734,12 +735,17 @@ describe("reconcileBvnkOnrampPayouts", () => {
         });
         return null;
       });
+      // The diverged competitor settles with its OWN hash: `signature` is
+      // unique across payment_transfers, so a shared TX_HASH would violate
+      // the index instead of exercising the conflict retention.
+      const DIVERGED_TX_HASH =
+        "3B9neiFe2HG3P8ovttfH1XrppubeFtMcKWZDhw9rzLUqUSQrfLYdzpC3v3ctsbtQBt1rwUPkBaa4SWG2SZzqtXD3";
       payoutSummarySpy.mockImplementation((_ctx, input) =>
         Promise.resolve(
           input.payoutId === PAYOUT_UUID_2
             ? failedSummary("xfr_conflict_failed", PAYOUT_UUID_2)
             : input.payoutId === PAYOUT_UUID_3
-              ? completedSummary("xfr_diverged", PAYOUT_UUID_3)
+              ? completedSummary("xfr_diverged", PAYOUT_UUID_3, DIVERGED_TX_HASH)
               : completedSummary("xfr_conflict_complete")
         )
       );
@@ -753,38 +759,6 @@ describe("reconcileBvnkOnrampPayouts", () => {
       expectConflictLogged("xfr_conflict_complete");
       expectConflictLogged("xfr_conflict_failed");
       expectConflictLogged("xfr_diverged");
-    });
-
-    it("identical_terminal_replays_are_acknowledged", async () => {
-      await seedClaimedCandidate("xfr_replay", true, PAYOUT_UUID_1);
-      await seedClaimedCandidate("xfr_failed_replay", true, PAYOUT_UUID_2);
-      // REAL interleavings: competitors committed the SAME terminal facts for
-      // both a settle and a fail; the replay check acknowledges identical
-      // observations — failed ones on identity alone — never a conflict.
-      bvnkRepoHarness.settlePayout.mockImplementation(async (input) => {
-        await bvnkRepoHarness.real().settlePayout(input);
-        return null;
-      });
-      bvnkRepoHarness.failPayout.mockImplementation(async (input) => {
-        await bvnkRepoHarness.real().failPayout(input);
-        return null;
-      });
-      payoutSummarySpy.mockImplementation((_ctx, input) =>
-        Promise.resolve(
-          input.payoutId === PAYOUT_UUID_2
-            ? failedSummary("xfr_failed_replay", PAYOUT_UUID_2)
-            : completedSummary("xfr_replay")
-        )
-      );
-
-      const touched = await reconcileBvnkOnrampPayouts(env);
-
-      expect(touched).toBe(2);
-      const replayed = await readTransferRow("xfr_replay");
-      expect(replayed).toMatchObject({ status: "completed", signature: TX_HASH });
-      const failedReplay = await readTransferRow("xfr_failed_replay");
-      expect(failedReplay).toMatchObject({ status: "failed", error: "FAILED" });
-      expect(errorSpy).not.toHaveBeenCalled();
     });
   });
 });

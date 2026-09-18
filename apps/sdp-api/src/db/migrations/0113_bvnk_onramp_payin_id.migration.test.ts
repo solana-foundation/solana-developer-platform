@@ -140,14 +140,15 @@ describe("0113 BVNK on-ramp pay-in id pivot", () => {
        WHERE id IN ('cpa_locked_0113', 'cpa_legacy_0113', 'cpa_other_provider_0113')
        ORDER BY id`
     );
+    // The query orders by id, so the lexicographically-first legacy row leads.
     expect(fundingRows.rows).toEqual([
+      { id: "cpa_legacy_0113", provider_status: null, status: "archived", metadata: {} },
       {
         id: "cpa_locked_0113",
         provider_status: "provisioned_funding_wallet",
         status: "active",
         metadata: {},
       },
-      { id: "cpa_legacy_0113", provider_status: null, status: "archived", metadata: {} },
       {
         id: "cpa_other_provider_0113",
         provider_status: null,

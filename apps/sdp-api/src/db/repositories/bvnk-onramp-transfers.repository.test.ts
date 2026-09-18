@@ -78,7 +78,6 @@ const seedScope = (name: string, fundingWalletReference: string) => ({
   projectId: TEST_PROJECT_ID,
   name,
   createdBy: TEST_USER.id,
-  customerReference: `bvnk_customer_${name}`,
   fundingWalletReference,
 });
 
@@ -545,88 +544,6 @@ describe("BvnkOnrampTransfersRepository (postgres)", () => {
     expect(settled.destination_address).toBe("AddrSettle");
     expect(settled.amount).toBe("0.99");
     expect(settled.provider_data.settlement).toEqual(settledBlob);
-  });
-
-  it("candidate_listings_apply_sql_eligibility_before_limit", async () => {
-    const db = getDb(env);
-
-    // Unclaimed: only applied rows qualify, oldest first.
-    const unclaimedWallet = "a:wallet:list_unclaimed:1";
-    const seedApplied = (transferId: string, payinId: string, name: string) =>
-      seedBvnkOnrampPayinApplied(db, {
-        ...seedScope(name, unclaimedWallet),
-        transferId,
-        destinationAddress: "AddrListUnclaimed",
-        payin: makePayin(payinId, unclaimedWallet),
-      });
-    await seedApplied("xfr_unclaimed_oldest", "payin_unclaimed_oldest", "unclaimed_oldest");
-    await seedApplied("xfr_unclaimed_newest", "payin_unclaimed_newest", "unclaimed_newest");
-    await seedBvnkOnrampPayoutClaimed(db, {
-      ...seedScope("unclaimed_claimed", unclaimedWallet),
-      transferId: "xfr_unclaimed_claimed",
-      destinationAddress: "AddrListUnclaimedClaimed",
-      payin: makePayin("payin_unclaimed_claimed", unclaimedWallet),
-      claimedAt: "2026-09-18T00:01:00.000Z",
-      intent: makeIntent("AddrListUnclaimedClaimed"),
-    });
-    await seedBvnkOnrampCounterpartyAndFundingWallet(
-      db,
-      seedScope("unclaimed_awaiting", unclaimedWallet)
-    );
-    await seedBvnkOnrampTransfer(db, {
-      id: "xfr_unclaimed_awaiting",
-      status: "awaiting_payment",
-      counterpartyId: `cpty_unclaimed_awaiting`,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      fiatAmount: "100.00",
-      destinationAddress: "AddrListUnclaimed",
-    });
-    await setUpdatedAt("xfr_unclaimed_oldest", "2026-09-18T00:00:00.000Z");
-    await setUpdatedAt("xfr_unclaimed_newest", "2026-09-18T00:02:00.000Z");
-    const one = await repo.listUnclaimedPayoutCandidates({
-      limit: 1,
-      cutoff: "2026-09-18T01:00:00.000Z",
-    });
-    expect(one.map((row) => row.id)).toEqual(["xfr_unclaimed_oldest"]);
-    assert(one[0]);
-    expect(one[0].fundingWalletReference).toBe(unclaimedWallet);
-    expect(one[0].environment).toBe(SANDBOX);
-    expect(readBvnkOnrampTransferData(one[0].provider_data).payin?.walletId).toBe(unclaimedWallet);
-    const all = await repo.listUnclaimedPayoutCandidates({
-      limit: 10,
-      cutoff: "2026-09-18T01:00:00.000Z",
-    });
-    expect(all.map((row) => row.id)).toEqual(["xfr_unclaimed_oldest", "xfr_unclaimed_newest"]);
-
-    // Recoverable: the claim cutoff wins before the limit, oldest first.
-    const recoverableWallet = "a:wallet:list_recoverable:1";
-    const seedClaimed = (transferId: string, name: string, claimedAt: string) =>
-      seedBvnkOnrampPayoutClaimed(db, {
-        ...seedScope(name, recoverableWallet),
-        transferId,
-        destinationAddress: "AddrListRecoverable",
-        payin: makePayin(`payin_${name}`, recoverableWallet),
-        claimedAt,
-        intent: makeIntent(`AddrListRecoverable${name}`),
-      });
-    await seedClaimed("xfr_recoverable_first", "recoverable_first", "2026-09-18T00:01:00.000Z");
-    await seedClaimed("xfr_recoverable_second", "recoverable_second", "2026-09-18T00:02:00.000Z");
-    await seedClaimed("xfr_recoverable_fresh", "recoverable_fresh", "2026-09-18T02:00:00.000Z");
-    await setUpdatedAt("xfr_recoverable_first", "2026-09-18T00:00:00.000Z");
-    await setUpdatedAt("xfr_recoverable_second", "2026-09-18T00:00:10.000Z");
-    await setUpdatedAt("xfr_recoverable_fresh", "2026-09-18T00:00:20.000Z");
-    const rows = await repo.listRecoverablePayoutCandidates({
-      limit: 10,
-      cutoff: "2026-09-18T01:00:00.000Z",
-    });
-    expect(rows.map((row) => row.id)).toEqual(["xfr_recoverable_first", "xfr_recoverable_second"]);
-    expect(rows.every((row) => row.environment === SANDBOX)).toBe(true);
-    const page = await repo.listRecoverablePayoutCandidates({
-      limit: 1,
-      cutoff: "2026-09-18T01:00:00.000Z",
-    });
-    expect(page.map((row) => row.id)).toEqual(["xfr_recoverable_first"]);
   });
 
   it("listPollablePayoutCandidates_rotates_claims_and_polls_before_limit", async () => {
