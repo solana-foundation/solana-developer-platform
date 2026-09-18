@@ -87,6 +87,54 @@ describe("observed-transfers parsed-transaction cache", () => {
     expect(second).toEqual(first);
   });
 
+  it("uses fresh signature-history slot and blockTime instead of cached RPC metadata", async () => {
+    let fetchCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      fetchCount += 1;
+      // Body was confirmed in slot 42 at blockTime 1700000000.
+      return jsonRpcResponse({ result: parsedSolTransfer("1000") });
+    });
+
+    // First read: the signature history reports the transaction landing in
+    // slot 777 at blockTime 1800000000, so those fresh values must win over
+    // the cached body's fork-sensitive copy.
+    const [first] = await buildObservedTransfersForSignatures(
+      env,
+      [
+        {
+          signature: "sig_0" as unknown as Signature,
+          slot: 777n,
+          blockTime: 1800000000n,
+          err: null,
+        },
+      ],
+      context
+    );
+
+    expect(first?.slot).toBe(777);
+    expect(first?.block_time).toBe(new Date(1800000000 * 1_000).toISOString());
+
+    // Second read: the body is served from cache (no extra fetch), but a new
+    // history entry reflecting a fork re-landing the signature in a different
+    // slot must still take effect.
+    const [second] = await buildObservedTransfersForSignatures(
+      env,
+      [
+        {
+          signature: "sig_0" as unknown as Signature,
+          slot: 778n,
+          blockTime: 1800000100n,
+          err: null,
+        },
+      ],
+      context
+    );
+
+    expect(fetchCount).toBe(1);
+    expect(second?.slot).toBe(778);
+    expect(second?.block_time).toBe(new Date(1800000100 * 1_000).toISOString());
+  });
+
   it("coalesces concurrent fetches for the same signature", async () => {
     let fetchCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {

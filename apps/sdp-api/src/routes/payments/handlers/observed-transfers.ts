@@ -158,6 +158,17 @@ function resolveObservedTimestamp(blockTime: bigint | number | null | undefined)
   return new Date().toISOString();
 }
 
+function resolveObservedSlot(
+  freshSlot: bigint | null | undefined,
+  cachedSlot: number | null | undefined
+): number | null {
+  if (typeof freshSlot === "bigint") {
+    return Number(freshSlot);
+  }
+
+  return typeof cachedSlot === "number" && Number.isFinite(cachedSlot) ? cachedSlot : null;
+}
+
 function readInstructionInfoString(
   info: Record<string, unknown> | undefined,
   key: string
@@ -295,9 +306,13 @@ export async function resolveWalletTokenAccountAddresses(
 type ParsedTransaction = NonNullable<ParsedTransactionResponse["result"]>;
 
 /**
- * Cap on cached parsed transactions. A confirmed transaction's parsed body is
- * immutable, so entries never need revalidation; the bound exists only to keep
- * memory flat as signatures rotate through the FIFO.
+ * Cap on cached parsed transactions. A confirmed transaction's instructions
+ * and balances are immutable, so entries never need revalidation; the bound
+ * exists only to keep memory flat as signatures rotate through the FIFO.
+ * Fork-sensitive metadata (slot, blockTime) is never read from cached bodies:
+ * a confirmed transaction can be dropped and re-land in a different slot, so
+ * those fields always come fresh from signature history (see
+ * buildObservedTransferRows).
  */
 export const PARSED_TRANSACTION_CACHE_MAX_ENTRIES = 1_000;
 
@@ -405,6 +420,9 @@ async function fetchParsedTransaction(
       // indexed at the confirmed commitment; caching it would hide a
       // just-submitted transfer until the TTL lapsed, delaying on-chain
       // status. Failures stay uncached too, so the next read retries.
+      // Cached bodies are only used for the immutable transaction data —
+      // slot and blockTime are fork-sensitive at the confirmed commitment
+      // and are always read fresh from signature history instead.
       if (parsedTransaction) {
         writeParsedTransactionCache(signature, parsedTransaction);
       }
@@ -421,13 +439,23 @@ async function fetchParsedTransaction(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
 function buildObservedTransferRows(
   parsedTransaction: ParsedTransactionResponse["result"],
-  signature: string,
-  fallbackBlockTime: bigint | number | null,
+  signatureInfo: SignatureHistoryEntry,
   context: ObservedTransferContext
 ): TransferRow[] {
   if (!parsedTransaction) {
     return [];
   }
+
+  const signature = String(signatureInfo.signature);
+  // A transaction confirmed on a minority fork can be dropped and re-land in a
+  // different slot, so slot and blockTime always come from the fresh
+  // signature-history entry; the cached body's copy is only a fallback for
+  // history entries that lack the metadata.
+  const timestamp = resolveObservedTimestamp(
+    signatureInfo.blockTime ?? parsedTransaction.blockTime
+  );
+  const slot = resolveObservedSlot(signatureInfo.slot, parsedTransaction.slot);
+  const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
 
   const accountKeys = (parsedTransaction.transaction?.message?.accountKeys ?? [])
     .map((accountKey) => resolveParsedAccountKey(accountKey))
@@ -468,9 +496,6 @@ function buildObservedTransferRows(
           : current.decimals,
     });
   }
-
-  const timestamp = resolveObservedTimestamp(parsedTransaction.blockTime ?? fallbackBlockTime);
-  const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
 
   for (const instruction of flattenParsedInstructions({ result: parsedTransaction })) {
     const parsedType = instruction.parsed?.type;
@@ -533,7 +558,7 @@ function buildObservedTransferRows(
         signed_transaction: null,
         last_valid_block_height: null,
         submission_started_at: null,
-        slot: parsedTransaction.slot ?? null,
+        slot,
         block_time: timestamp,
         fee: parsedTransaction.meta?.fee ?? null,
         error: null,
@@ -621,7 +646,7 @@ function buildObservedTransferRows(
         signed_transaction: null,
         last_valid_block_height: null,
         submission_started_at: null,
-        slot: parsedTransaction.slot ?? null,
+        slot,
         block_time: timestamp,
         fee: parsedTransaction.meta?.fee ?? null,
         error: null,
@@ -717,7 +742,7 @@ function buildObservedTransferRows(
       signed_transaction: null,
       last_valid_block_height: null,
       submission_started_at: null,
-      slot: parsedTransaction.slot ?? null,
+      slot,
       block_time: timestamp,
       fee: parsedTransaction.meta?.fee ?? null,
       error: null,
@@ -751,12 +776,7 @@ export async function buildObservedTransfersForSignatures(
     SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
     async (signatureInfo) => {
       const parsedTransaction = await fetchParsedTransaction(env, String(signatureInfo.signature));
-      return buildObservedTransferRows(
-        parsedTransaction,
-        String(signatureInfo.signature),
-        signatureInfo.blockTime,
-        context
-      );
+      return buildObservedTransferRows(parsedTransaction, signatureInfo, context);
     }
   );
 
