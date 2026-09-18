@@ -333,7 +333,11 @@
       "agreementRequiredTitle": "Xem lại và chấp nhận thỏa thuận",
       "agreementRequiredDescription": "BVNK yêu cầu Counterparty chấp nhận thỏa thuận nền tảng cho nơi cư trú thuế của họ trước khi thu thập thông tin của họ.",
       "viewAgreement": "Xem thỏa thuận",
-      "acceptAgreements": "Tôi đồng ý và tiếp tục"
+      "acceptAgreements": "Tôi đồng ý và tiếp tục",
+      "agreementSigningTitle": "Đang xác nhận thỏa thuận",
+      "agreementSigningDescription": "Đang chờ nhà cung cấp xác nhận thỏa thuận đã ký. Việc này thường mất vài giây.",
+      "agreementConsentPrefix": "Tôi đã đọc và đồng ý với",
+      "privacyPolicy": "chính sách quyền riêng tư"
     },
     "lightspark": {
       "verificationRequiredTitle": "Xác minh danh tính",
@@ -665,7 +669,12 @@
       "providerAccountStatus": "Trạng thái",
       "copyCustomerId": "Sao chép mã khách hàng",
       "customerIdCopied": "Đã sao chép mã khách hàng",
-      "noPayoutAccounts": "Chưa có tài khoản thanh toán."
+      "noPayoutAccounts": "Chưa có tài khoản thanh toán.",
+      "taxResidence": "Nơi cư trú thuế",
+      "agreementSigned": "Đã ký",
+      "agreementAwaitingSignature": "Chờ ký",
+      "viewAgreement": "Thỏa thuận",
+      "viewPrivacyPolicy": "Chính sách quyền riêng tư"
     },
     "playground": {
       "moonPay": "MoonPay",

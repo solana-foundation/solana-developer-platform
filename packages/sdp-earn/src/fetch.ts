@@ -1,3 +1,4 @@
+import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { SdpEarnError, type SdpEarnErrorCode } from "./errors";
 
@@ -18,6 +19,10 @@ export interface ProviderRequestInit<TBody> {
    * shape stays in the provider client that understands it. Return `undefined`
    * for anything unrecognized; it must never be the reason a call fails, so a
    * throw from here is swallowed and the original provider error stands.
+   *
+   * Whatever it returns is run through the telemetry denylist before it lands
+   * on `details`: the fields it lifts come straight from the provider's body,
+   * and `details` is returned to API callers and logged as-is.
    */
   errorDetails?: (parsed: unknown, status: number) => Record<string, unknown> | undefined;
   /**
@@ -64,7 +69,13 @@ export function classifyProviderStatus(status: number): SdpEarnErrorCode {
 }
 
 /**
- * The provider's own explanation, from whichever field it puts it in.
+ * The provider's own explanation, from whichever field it puts it in, scrubbed.
+ *
+ * Providers echo request fields back in a refusal ("owner <address> already
+ * registered for <email>"). That sentence becomes `SdpEarnError.message`, which
+ * is both logged and returned to the API caller, and the API envelope redacts
+ * credentials only. So the telemetry denylist runs here, at the one place every
+ * provider's error passes through, the same as the ramps twin of this helper.
  *
  * `error` is read BOTH as an object carrying `message` and as a bare string,
  * because providers disagree: a rejected write answered with
@@ -86,11 +97,10 @@ export function extractProviderErrorMessage(payload: unknown, fallback: string):
   // The first NON-BLANK candidate, not merely the first PRESENT one: a body
   // carrying `error: ""` beside a real `message` would otherwise select the
   // blank and degrade to the fallback, discarding the explanation it did send.
-  return (
-    [error, record.message, record.reason].find(
-      (candidate): candidate is string => typeof candidate === "string" && candidate.trim() !== ""
-    ) ?? fallback
+  const message = [error, record.message, record.reason].find(
+    (candidate): candidate is string => typeof candidate === "string" && candidate.trim() !== ""
   );
+  return message === undefined ? fallback : scrubTelemetryString(message);
 }
 
 export async function providerFetch<TBody = never>(
@@ -145,10 +155,12 @@ export async function providerFetchJson<TResponse, TBody = never>(
   if (!response.ok) {
     // The normalizer is a nicety on an already-failing path: a provider client
     // that mis-reads an unfamiliar body must not turn a clean 409 into an
-    // unhandled crash, so its own failure is discarded.
+    // unhandled crash, so its own failure is discarded. Its output is scrubbed
+    // inside the same guard: a scrub failure drops the details rather than
+    // passing an unscrubbed body fragment through.
     let extra: Record<string, unknown> | undefined;
     try {
-      extra = init.errorDetails?.(parsed, response.status);
+      extra = scrubTelemetry(init.errorDetails?.(parsed, response.status));
     } catch {
       extra = undefined;
     }

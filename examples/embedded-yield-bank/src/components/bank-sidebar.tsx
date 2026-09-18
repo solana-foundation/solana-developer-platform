@@ -1,9 +1,9 @@
 import {
   ArrowLeftRightIcon,
-  ChartNoAxesCombinedIcon,
   ChevronDownIcon,
   CircleHelpIcon,
   CreditCardIcon,
+  LandmarkIcon,
   LayoutDashboardIcon,
   SettingsIcon,
   StarIcon,
@@ -12,11 +12,12 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
+/** Only Overview is wired up. The rest keeps the shell looking like a bank. */
 const navigation = [
   { label: "Overview", icon: LayoutDashboardIcon, active: true },
-  { label: "Accounts", icon: CreditCardIcon },
-  { label: "Move money", icon: ArrowLeftRightIcon },
-  { label: "Yield", icon: ChartNoAxesCombinedIcon },
+  { label: "Accounts", icon: LandmarkIcon },
+  { label: "Transfers", icon: ArrowLeftRightIcon },
+  { label: "Cards", icon: CreditCardIcon },
 ];
 
 export function BankSidebar() {

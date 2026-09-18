@@ -27,7 +27,7 @@ function withI18n({ children }: { children: ReactNode }) {
 
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 const originalFetch = global.fetch;
 
@@ -63,6 +63,37 @@ describe("useDvpTradeActions", () => {
 
     await act(async () => await result.current.act("settle"));
 
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  // 202 is an ok status, so without its own branch the success read fails on an
+  // approval envelope and the action reports as unconfirmed: a held funding
+  // looking like a broken one.
+  it.each([
+    ["fund", "Funding pending approval"],
+    ["settle", "Settlement pending approval"],
+  ] as const)("says %s is pending approval when policy holds it", async (action, expected) => {
+    global.fetch = respond(202, {
+      error: { code: "SIGNING_PENDING", details: { approvalRequestId: "appr_1" } },
+    }) as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(async () =>
+      action === "fund"
+        ? await result.current.act("fund", { side: "a", walletId: "cwlt_1", symbol: "ATD" })
+        : await result.current.act("settle")
+    );
+
+    expect(toast.info).toHaveBeenCalledWith(
+      expected,
+      expect.objectContaining({
+        description:
+          "This wallet's policy requires approval before it sends. Nothing has moved yet.",
+      })
+    );
+    expect(toast.error).not.toHaveBeenCalled();
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   });
 

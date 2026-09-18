@@ -6,10 +6,14 @@ describe("checkPrivyCredential", () => {
     vi.restoreAllMocks();
   });
 
-  it("authenticates one bounded Privy wallet-list request", async () => {
+  it("accepts an empty app without triggering the Privy limit=1 failure", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(jsonResponse({ data: [] }, 200));
+      .mockImplementation(async (input) =>
+        new URL(String(input)).searchParams.get("limit") === "1"
+          ? jsonResponse({ error: "Unable to process request" }, 500)
+          : jsonResponse({ data: [] }, 200)
+      );
 
     await expect(
       checkPrivyCredential(
@@ -19,18 +23,15 @@ describe("checkPrivyCredential", () => {
     ).resolves.toBe("success");
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://privy.example.test/v1/wallets?limit=1&chain_type=solana",
-      {
-        method: "GET",
-        headers: {
-          // Base64 of dummy test credentials "app-123:secret"; fetch is mocked.
-          Authorization: "Basic YXBwLTEyMzpzZWNyZXQ=",
-          "privy-app-id": "app-123",
-        },
-        signal: expect.any(AbortSignal),
-      }
-    );
+    expect(fetchMock).toHaveBeenCalledWith("https://privy.example.test/v1/wallets", {
+      method: "GET",
+      headers: {
+        // Base64 of dummy test credentials "app-123:secret"; fetch is mocked.
+        Authorization: "Basic YXBwLTEyMzpzZWNyZXQ=",
+        "privy-app-id": "app-123",
+      },
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("classifies a 401 response as a conclusive credential failure", async () => {

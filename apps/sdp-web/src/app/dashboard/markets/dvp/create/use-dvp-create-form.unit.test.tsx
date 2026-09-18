@@ -12,13 +12,40 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { useDvpCreateForm } from "./use-dvp-create-form";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
+/**
+ * Every chosen mint is inspected for eligibility now, listed ones included, and
+ * the form waits for that answer. Unless a test stubs its own, it comes back
+ * eligible.
+ */
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          mint: {
+            decimals: 6,
+            name: null,
+            symbol: null,
+            tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+            eligible: true,
+            blockedBy: null,
+          },
+        },
+      }),
+    })
+  );
+});
 
 function withI18n({ children }: { children: ReactNode }) {
   return (
@@ -129,7 +156,7 @@ describe("useDvpCreateForm", () => {
     expect(result.current.ready).toBe(false);
   });
 
-  it("becomes ready once both legs and both parties are set", () => {
+  it("becomes ready once both legs and both parties are set", async () => {
     const { result } = setup();
 
     fillParties(result);
@@ -138,7 +165,46 @@ describe("useDvpCreateForm", () => {
     act(() => result.current.cash.setChoice(result.current.cashOptions[0].mint));
     act(() => result.current.cash.setAmount("25"));
 
-    expect(result.current.ready).toBe(true);
+    // Both mints are inspected before the form is ready.
+    await waitFor(() => expect(result.current.ready).toBe(true));
+  });
+
+  // PRO-1951. Everything else is filled; the one thing wrong is a mint create
+  // would refuse, and that alone holds the form.
+  it("is not ready while a leg's mint would be refused at create", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            mint: {
+              decimals: 6,
+              name: null,
+              symbol: null,
+              tokenProgram: TOKEN_2022,
+              eligible: false,
+              blockedBy: "TransferHook",
+            },
+          },
+        }),
+      })
+    );
+    try {
+      const { result } = setup();
+
+      fillParties(result);
+      act(() => result.current.asset.setChoice(ASSET_MINT));
+      act(() => result.current.asset.setAmount("10"));
+      act(() => result.current.cash.setChoice(result.current.cashOptions[0].mint));
+      act(() => result.current.cash.setAmount("25"));
+
+      await waitFor(() => expect(result.current.asset.ineligible).toBe(true));
+      expect(result.current.ready).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   /**
@@ -153,6 +219,8 @@ describe("useDvpCreateForm", () => {
    * the form is submittable again.
    */
   it("holds a pasted mint un-submittable until its lookup settles", async () => {
+    // This one's lookup fails, which is how it settles with no scale at all.
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
     const { result } = setup({ ...context, tokens: [] });
 
     act(() => result.current.asset.setCustom("AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE"));
@@ -214,6 +282,20 @@ describe("useDvpCreateForm", () => {
       act(() => result.current.asset.setChoice(ASSET_MINT));
 
       expect(result.current.assetBalance).toMatchObject({ amount: "0", decimals: 6 });
+    });
+
+    // PRO-1851. The page no longer waits on balances. One that was never
+    // loaded is unknown, and reading it as zero would claim the wallet holds none.
+    it("reports nothing, not zero, when balances were not loaded", () => {
+      const unloaded = { ...context, wallets: [{ ...context.wallets[0], balances: null }] };
+      const { result } = renderHook(() => useDvpCreateForm("devnet", unloaded), {
+        wrapper: withI18n,
+      });
+
+      act(() => result.current.setParty("a", { mode: "wallet", walletId: "cwlt_1" }));
+      act(() => result.current.asset.setChoice(ASSET_MINT));
+
+      expect(result.current.assetBalance).toBeNull();
     });
 
     // The asset slot names a wallet that is not the cash leg's, and a pasted

@@ -264,6 +264,17 @@ export interface IdempotencyKeyStore {
    */
   claim(fingerprint: string): string;
   /**
+   * `claim` paired with the answer to "did this call hand back a live key or
+   * mint a fresh one?" — answered from the SAME read that produced the key. A
+   * caller that mints request-scoped state alongside the key (the vault flows'
+   * quote-derived floor) must replay that state when the key is reused, and
+   * the flag has to describe the key it is attached to: answering it from a
+   * separate, TTL-sensitive read can disagree with `claim` — an entry expiring
+   * between the two reads would report a reuse while `claim` minted fresh, and
+   * the previous key's remembered state would ride a brand-new key.
+   */
+  claimReportingReuse(fingerprint: string): { key: string; wasReused: boolean };
+  /**
    * Pin a key for as long as an approval hold on it is live: an approval
    * answers to a human and can take hours, far past the default TTL, and a
    * lapsed key there resubmits into a SECOND approval request for one intent.
@@ -284,7 +295,7 @@ export interface IdempotencyKeyStore {
 }
 
 type HeldIdempotencyKeyResolution =
-  | { kind: "key"; key: string; wasHeld: boolean }
+  | { kind: "key"; key: string; wasHeld: boolean; wasReused: boolean }
   | { kind: "aborted" }
   | { kind: "unavailable" };
 
@@ -295,7 +306,17 @@ type HeldIdempotencyKeyLookup = { kind: "found" } | { kind: "absent" } | { kind:
  *
  * `wasHeld` is load-bearing: an approval can execute between the preflight and
  * POST, so the response must distinguish that absorbed race from a fresh
- * submission. Both vault money flows use this exact lifecycle.
+ * submission.
+ *
+ * `wasReused` is load-bearing for a KEPT-key retry — a key a prior ambiguous
+ * attempt (a 5xx, a lost answer, an unreadable 2xx) left live in the store. The
+ * caller must resubmit the request-scoped state that key was MINTED with (the
+ * vault flows' quote-derived floor), because the API's own idempotency
+ * fingerprint includes that state: pairing the reused key with a freshly
+ * derived value is refused with a 409, which the caller then reads as "nothing
+ * was written" and retires — letting the next submit mint a fresh key while
+ * the first attempt may already have executed. Both vault money flows use this
+ * exact lifecycle.
  */
 export async function resolveHeldIdempotencyKey(
   store: IdempotencyKeyStore,
@@ -303,16 +324,28 @@ export async function resolveHeldIdempotencyKey(
   signal: AbortSignal,
   fetchRecorded: (key: string) => Promise<HeldIdempotencyKeyLookup>
 ): Promise<HeldIdempotencyKeyResolution> {
-  const key = store.claim(fingerprint);
-  if (!store.isHeld(fingerprint)) return { kind: "key", key, wasHeld: false };
+  const claimed = store.claimReportingReuse(fingerprint);
+  const key = claimed.key;
+  if (!store.isHeld(fingerprint)) {
+    return { kind: "key", key, wasHeld: false, wasReused: claimed.wasReused };
+  }
 
   const recorded = await fetchRecorded(key);
   if (signal.aborted) return { kind: "aborted" };
   if (recorded.kind === "unavailable") return { kind: "unavailable" };
-  if (recorded.kind === "absent") return { kind: "key", key, wasHeld: true };
+  if (recorded.kind === "absent") {
+    return { kind: "key", key, wasHeld: true, wasReused: claimed.wasReused };
+  }
 
+  // The hold is over and a movement was recorded under the key: this
+  // submission is a NEW intent, so it goes out under a fresh key with fresh
+  // request-scoped state — never a replay of the executed movement's. The
+  // reuse flag still rides the claim that produced the key: if the release
+  // above failed to land, the claim hands back the same key and the flag says
+  // so honestly.
   store.release(fingerprint);
-  return { kind: "key", key: store.claim(fingerprint), wasHeld: false };
+  const fresh = store.claimReportingReuse(fingerprint);
+  return { kind: "key", key: fresh.key, wasHeld: false, wasReused: fresh.wasReused };
 }
 
 type IdempotencyKeyOutcome =
@@ -461,18 +494,27 @@ export function createFloorMemo(storageKey: string): FloorMemo {
 
 /** One per money flow, each under its own versioned `sessionStorage` key. */
 export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore {
+  /** One read decides reuse and produces the key, so the two can never disagree. */
+  function claimReporting(fingerprint: string): { key: string; wasReused: boolean } {
+    const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
+    const existing = entries.find((entry) => entry.id === fingerprint);
+    if (existing) return { key: existing.value, wasReused: true };
+
+    const key = crypto.randomUUID();
+    writeEntries(storeKey, [
+      ...entries.filter((entry) => entry.id !== fingerprint),
+      { id: fingerprint, value: key, createdAt: Date.now() },
+    ]);
+    return { key, wasReused: false };
+  }
+
   return {
     claim(fingerprint) {
-      const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
-      const existing = entries.find((entry) => entry.id === fingerprint);
-      if (existing) return existing.value;
+      return claimReporting(fingerprint).key;
+    },
 
-      const key = crypto.randomUUID();
-      writeEntries(storeKey, [
-        ...entries.filter((entry) => entry.id !== fingerprint),
-        { id: fingerprint, value: key, createdAt: Date.now() },
-      ]);
-      return key;
+    claimReportingReuse(fingerprint) {
+      return claimReporting(fingerprint);
     },
 
     hold(fingerprint) {

@@ -958,7 +958,13 @@
       "statusFundedTooEarly": "Đã nạp",
       "toastReclaimed": "Khoản nạp của bạn đang được hoàn trả.",
       "txFundingSent": "Gửi từ Wallet của bạn",
-      "viewTransaction": "Xem giao dịch"
+      "viewTransaction": "Xem giao dịch",
+      "legRefusedTradeClosing": "Giao dịch này đang được thanh toán hoặc hủy, nên không có gì được gửi đi.",
+      "closeRefusedFailedOnChain": "Mạng đã từ chối thao tác này, nên không có gì được chuyển. Hãy làm mới giao dịch để xem trạng thái hiện tại.",
+      "closeRefusedInProgress": "Giao dịch này đang được thanh toán hoặc hủy. Hãy quay lại sau một chút.",
+      "closeRefusedLegMoving": "Một leg vẫn đang được cấp vốn hoặc hoàn trả. Hãy thử lại khi nó hoàn tất.",
+      "toastCancelSent": "Đã gửi lệnh hủy. Giao dịch sẽ cập nhật khi được xác nhận.",
+      "toastSettleSent": "Đã gửi lệnh thanh toán. Giao dịch sẽ cập nhật khi được xác nhận."
     }
   }
 }

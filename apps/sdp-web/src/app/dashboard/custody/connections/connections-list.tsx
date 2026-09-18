@@ -1,19 +1,22 @@
 "use client";
 
-import type {
-  CustodyConnectionFailureCode,
-  CustodyConnectionLifecycle,
-  CustodyWalletSummary,
-} from "@sdp/types";
-import { CableIcon, PlusIcon } from "lucide-react";
+import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types";
+import { CableIcon, MoreHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 import { formatCustodyProviderName } from "@/app/dashboard/custody/provider-catalog";
 import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import {
@@ -26,63 +29,21 @@ import {
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
+import { ConnectionStatusCell } from "./connection-status";
 import {
   buildConnectionsSearchParams,
   CONNECTIONS_PAGE_SIZE,
   type ConnectionsFilters,
   type ConnectionsPageResult,
+  type ConnectionsProjectSummary,
   type CustodyConnectionListItem,
 } from "./connections.data";
+import { MakeDefaultDialog } from "./make-default-dialog";
 
 const PROVIDER_COLUMN_CLASS = "hidden @2xl/connections-table:table-cell";
 const CREATED_COLUMN_CLASS = "hidden @4xl/connections-table:table-cell";
 
-const STATUS_BADGE_VARIANTS: Record<CustodyConnectionLifecycle, BadgeVariant> = {
-  pending: "warning",
-  checking: "info",
-  active: "success",
-  failed: "danger",
-  deactivated: "outline",
-};
-
 type Translate = ReturnType<typeof useTranslations>;
-
-function statusLabel(status: CustodyConnectionLifecycle, t: Translate): string {
-  switch (status) {
-    case "pending":
-      return t("DashboardCustody.connectionStatusPending");
-    case "checking":
-      return t("DashboardCustody.connectionStatusChecking");
-    case "active":
-      return t("DashboardCustody.connectionStatusActive");
-    case "failed":
-      return t("DashboardCustody.connectionStatusFailed");
-    case "deactivated":
-      return t("DashboardCustody.connectionStatusDeactivated");
-  }
-}
-
-/**
- * Short, secret-free explanation for a conclusively failed install. Codes come
- * from the installation service; anything unrecognized gets the generic line.
- */
-function failureHint(failureCode: CustodyConnectionFailureCode | null, t: Translate): string {
-  switch (failureCode) {
-    case "invalid_credentials":
-      return t("DashboardCustody.connectionFailureInvalidCredentials");
-    case "provider_account_already_connected":
-      return t("DashboardCustody.connectionFailureAccountAlreadyConnected");
-    case "wallet_conflict":
-      return t("DashboardCustody.connectionFailureWalletConflict");
-    case "provider_response_unknown":
-    case null:
-      return t("DashboardCustody.connectionFailureGeneric");
-    default: {
-      const exhaustive: never = failureCode;
-      return exhaustive;
-    }
-  }
-}
 
 function formatDate(value: string | null, locale: string, t: Translate): string {
   if (!value) return t("DashboardCustody.never");
@@ -151,20 +112,29 @@ function WalletCell({
 export function ConnectionsList({
   result,
   filters,
+  summary,
   walletsByConnection,
   walletsUnavailable,
   canManageCustody,
+  provider,
+  projectName,
+  emptyStateAction,
 }: {
   result: ConnectionsPageResult;
   filters: ConnectionsFilters;
+  summary: ConnectionsProjectSummary;
   walletsByConnection: Record<string, CustodyWalletSummary[]>;
   walletsUnavailable: boolean;
   canManageCustody: boolean;
+  provider: CustodyProvider;
+  projectName: string;
+  emptyStateAction?: React.ReactNode;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
+  const [defaultTarget, setDefaultTarget] = useState<CustodyConnectionListItem | null>(null);
 
   const { connections, pagination } = result;
   const pageCount = Math.max(1, Math.ceil(pagination.total / CONNECTIONS_PAGE_SIZE));
@@ -174,14 +144,8 @@ export function ConnectionsList({
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   };
 
-  const addConnectionAction = canManageCustody ? (
-    <Button asChild size="sm">
-      <Link href="/dashboard/wallets/setup?provider=privy">
-        <PlusIcon className="size-4" />
-        {t("DashboardCustody.addConnection")}
-      </Link>
-    </Button>
-  ) : null;
+  const connectionHref = (connectionId: string) =>
+    `/dashboard/integrations/${provider}/connections/${encodeURIComponent(connectionId)}`;
 
   // Keyed on the slice, not the total: a deletion race can hand page 1 an
   // empty slice with a stale nonzero count, and a rowless table is never the
@@ -190,39 +154,35 @@ export function ConnectionsList({
     return (
       <ListEmptyState
         icon={<CableIcon className="size-5" />}
-        message={t("DashboardCustody.connectionsEmpty")}
+        message={t("DashboardCustody.connectionsEmptyInProject", { project: projectName })}
         description={t("DashboardCustody.connectionsEmptyDescription")}
-        action={addConnectionAction}
+        action={emptyStateAction}
       />
     );
   }
 
   return (
     <div className="@container/connections-table flex min-w-0 flex-1 flex-col">
-      <div
-        className="flex flex-col gap-3 border-b border-border-default p-4 sm:flex-row sm:items-center sm:justify-between"
-        data-connections-toolbar
-      >
-        <p className="text-sm text-secondary">{t("DashboardCustody.connectionsDescription")}</p>
-        {addConnectionAction}
-      </div>
       <Table className="[&_table]:w-full [&_table]:min-w-0 [&_table]:table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[30%] @2xl/connections-table:w-[26%]">
+            <TableHead className="w-[30%] @2xl/connections-table:w-[24%]">
               {t("DashboardCustody.connectionColumn")}
             </TableHead>
-            <TableHead className={cn(PROVIDER_COLUMN_CLASS, "w-[16%]")}>
+            <TableHead className={cn(PROVIDER_COLUMN_CLASS, "w-[14%]")}>
               {t("DashboardCustody.provider")}
             </TableHead>
-            <TableHead className="w-[38%] @2xl/connections-table:w-[30%]">
+            <TableHead className="w-[34%] @2xl/connections-table:w-[28%]">
               {t("DashboardCustody.wallets")}
             </TableHead>
-            <TableHead className="w-[32%] @2xl/connections-table:w-[18%] @4xl/connections-table:w-[16%]">
+            <TableHead className="w-[28%] @2xl/connections-table:w-[18%] @4xl/connections-table:w-[16%]">
               {t("DashboardCustody.status")}
             </TableHead>
             <TableHead className={cn(CREATED_COLUMN_CLASS, "w-[12%]")}>
               {t("DashboardCustody.created")}
+            </TableHead>
+            <TableHead className="w-[8%]">
+              <span className="sr-only">{t("DashboardCustody.actions")}</span>
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -230,7 +190,18 @@ export function ConnectionsList({
           {connections.map((connection) => (
             <TableRow key={connection.id} data-connection-id={connection.id}>
               <TableCell className="font-medium">
-                <span className="block truncate">{connection.label}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <Link
+                    href={connectionHref(connection.id)}
+                    className="truncate hover:underline"
+                    data-connection-link
+                  >
+                    {connection.label}
+                  </Link>
+                  {connection.isDefault ? (
+                    <Badge variant="outline">{t("DashboardCustody.defaultBadge")}</Badge>
+                  ) : null}
+                </span>
                 <span className="mt-1 block truncate font-mono text-[11px] font-normal text-tertiary">
                   {formatWalletMeta(connection.id, 10, 6)}
                 </span>
@@ -251,17 +222,43 @@ export function ConnectionsList({
                 />
               </TableCell>
               <TableCell className="text-xs">
-                <Badge variant={STATUS_BADGE_VARIANTS[connection.status]}>
-                  {statusLabel(connection.status, t)}
-                </Badge>
-                {connection.status === "failed" ? (
-                  <span className="mt-1 block text-[11px] text-tertiary">
-                    {failureHint(connection.lastCheck?.failureCode ?? null, t)}
-                  </span>
-                ) : null}
+                <ConnectionStatusCell
+                  status={connection.status}
+                  failureCode={connection.lastCheck?.failureCode ?? null}
+                  isRuntimeExecutionAllowed={connection.isRuntimeExecutionAllowed}
+                />
               </TableCell>
               <TableCell className={cn(CREATED_COLUMN_CLASS, "text-xs text-secondary")}>
                 {formatDate(connection.createdAt, locale, t)}
+              </TableCell>
+              <TableCell className="text-right">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t("DashboardCustody.connectionRowActions", {
+                        label: connection.label,
+                      })}
+                    >
+                      <MoreHorizontalIcon aria-hidden className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem asChild>
+                      <Link href={connectionHref(connection.id)}>
+                        {t("DashboardCustody.openConnection")}
+                      </Link>
+                    </DropdownMenuItem>
+                    {/* Only an active connection can take signing, and making
+                        the current default the default again is a no-op. */}
+                    {canManageCustody && connection.status === "active" && !connection.isDefault ? (
+                      <DropdownMenuItem onSelect={() => setDefaultTarget(connection)}>
+                        {t("DashboardCustody.makeDefaultAction")}
+                      </DropdownMenuItem>
+                    ) : null}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </TableCell>
             </TableRow>
           ))}
@@ -273,6 +270,22 @@ export function ConnectionsList({
           page={filters.page}
           pageCount={pageCount}
           onPageChange={goToPage}
+        />
+      ) : null}
+
+      {defaultTarget ? (
+        <MakeDefaultDialog
+          isOpen
+          onClose={() => setDefaultTarget(null)}
+          connectionId={defaultTarget.id}
+          label={defaultTarget.label}
+          provider={provider}
+          projectName={projectName}
+          // The project's default, not this page's: found among the visible
+          // rows alone, a default on another page made the dialog tell the user
+          // the project had none.
+          currentDefaultLabel={summary.defaultConnection?.label ?? null}
+          currentDefaultKnown={summary.complete}
         />
       ) : null}
     </div>

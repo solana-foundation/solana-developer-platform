@@ -9,7 +9,6 @@ import {
   type EarnExternalWalletPosition,
   type EarnExternalWalletPositionSummary,
   type EarnExternalWalletPositionSummaryResponse,
-  type EarnExternalWalletPositionsPage,
   type EarnPortfolioToken,
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
@@ -24,7 +23,6 @@ import {
   type EarnVaultDirectMovementStatus,
   type EarnVaultMovementStatus,
   type EarnVaultPosition,
-  type EarnVaultPositionsPage,
   type EarnVaultWithdrawal,
   type EarnVaultWithdrawalRequest,
   type ListEarnProgramsResponse,
@@ -42,32 +40,12 @@ import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { earnQueryKeys } from "./earn-query-key";
-import {
-  EARN_PROGRAM_CREATE_PROVIDER,
-  EARN_PROGRAM_CREATION_ENABLED,
-  isEarnVaultDepositAvailable,
-  SURFACED_CUSTODIAL_EARN_PROVIDERS,
-  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
-} from "./earn-surfacing";
 
 export type {
-  EarnExternalWalletPosition,
-  EarnExternalWalletPositionSummary,
-  EarnExternalWalletPositionSummaryResponse,
-  EarnExternalWalletPositionsPage,
   EarnProgram,
-  EarnProgramWithdrawalPreviewResponse,
-  EarnProgramWithdrawalRecord,
-  EarnProgramWithdrawalResponse,
   EarnVaultDeposit,
   EarnVaultDepositRecord,
-  EarnVaultDepositRequest,
-  EarnVaultPosition,
-  EarnVaultPositionsPage,
   EarnVaultWithdrawal,
-  EarnVaultWithdrawalRequest,
-  ListEarnProgramsResponse,
-  ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types";
 
 /**
@@ -88,20 +66,6 @@ export type {
  * a stable head. The overview sorts a copy newest-first only at its card-render
  * boundary, after every page has loaded.
  */
-/**
- * These surfacing values live in `./earn-surfacing` (no `"use client"`) and
- * are re-exported here so client callers keep one import site. They must NOT be
- * declared in this file: a Server Component importing a value from a client
- * module gets a client-reference proxy rather than the value, which silently
- * broke the deposit route's server-side guard. See that file's header.
- */
-export {
-  EARN_PROGRAM_CREATE_PROVIDER,
-  EARN_PROGRAM_CREATION_ENABLED,
-  isEarnVaultDepositAvailable,
-  SURFACED_CUSTODIAL_EARN_PROVIDERS,
-  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
-};
 
 /**
  * Program read outcome. `ready` carries the list and MAY be empty — an empty
@@ -165,14 +129,16 @@ function programPath(programId: string, suffix = ""): string {
 const LIVE_FEED_REFRESH_MS = 15_000;
 const LEDGER_REFRESH_MS = 30_000;
 
-const PROGRAMS_PAGE_SIZE = 100;
-
 /**
- * Hard stop on the paging loop, same reason as STRATEGY_PAGE_LIMIT: a bad
- * `total` must never spin forever. 20 pages × 100 = 2,000 programs, far past
- * anything an organization can plausibly hold.
+ * The paging shape every paged earn read shares. The API caps `pageSize` at
+ * 100, so a full collection pages at EARN_PAGE_SIZE, and every loop stops hard
+ * at EARN_PAGE_LIMIT: a bad `total` or a cursor that never advances must never
+ * spin the client (and the BFF it drives) forever. 20 pages × 100 rows is far
+ * past anything an organization, a partner wallet, or a single program's
+ * ledger can plausibly hold.
  */
-const PROGRAMS_PAGE_LIMIT = 20;
+const EARN_PAGE_SIZE = 100;
+const EARN_PAGE_LIMIT = 20;
 
 /**
  * There is deliberately NO 404 branch. A collection cannot 404 for emptiness,
@@ -190,7 +156,7 @@ const PROGRAMS_PAGE_LIMIT = 20;
 export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
   const programs: EarnProgram[] = [];
 
-  for (let page = 1; page <= PROGRAMS_PAGE_LIMIT; page += 1) {
+  for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
     const { status, body } = await requestJson<{ data: ListEarnProgramsResponse }>(
       // UNFILTERED by provider, deliberately. Positions must show every program
       // the organization holds — a filter pinned to one provider hides money,
@@ -204,7 +170,7 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
       // money at stake. Whenever the org DOES hold a program whose provider is
       // un-credentialed, the API still 503s the whole list (it gates per distinct
       // provider among the rows), so the notice still appears when it matters.
-      `/api/dashboard/markets/earn/programs?page=${page}&pageSize=${PROGRAMS_PAGE_SIZE}`
+      `/api/dashboard/markets/earn/programs?page=${page}&pageSize=${EARN_PAGE_SIZE}`
     );
     // Checked before the range test: a 503 carries no usable body and would
     // otherwise fall into the throw.
@@ -217,7 +183,7 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
     if (programs.length >= body.data.total) {
       return { kind: "ready", programs };
     }
-    if (body.data.programs.length < PROGRAMS_PAGE_SIZE) {
+    if (body.data.programs.length < EARN_PAGE_SIZE) {
       throw new Error("Earn programs pagination ended before the reported total");
     }
   }
@@ -285,15 +251,6 @@ export function useEarnPrograms() {
   return { state: data, error, isLoading, refresh: () => void mutate() };
 }
 
-/** The API caps pageSize at 100, so a full catalogue needs paging. */
-const STRATEGY_PAGE_SIZE = 100;
-
-/**
- * Hard stop on the paging loop. The catalogue is a synced provider list in the
- * low tens, so this only exists so a bad `total` can never spin forever.
- */
-const STRATEGY_PAGE_LIMIT = 20;
-
 /**
  * The whole active catalogue. The list endpoint has no provider filter and
  * offers no sort control, so callers filter and order client-side — which only
@@ -308,17 +265,17 @@ const STRATEGY_PAGE_LIMIT = 20;
 export async function fetchEarnStrategies(cluster?: SolanaCluster): Promise<EarnStrategy[]> {
   const strategies: EarnStrategy[] = [];
 
-  for (let page = 1; page <= STRATEGY_PAGE_LIMIT; page += 1) {
+  for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
     const clusterParam = cluster ? `&cluster=${cluster}` : "";
     const body = await requestJsonOk<{ data: ListEarnStrategiesResponse }>(
-      `/api/dashboard/markets/earn/strategies?page=${page}&pageSize=${STRATEGY_PAGE_SIZE}${clusterParam}`
+      `/api/dashboard/markets/earn/strategies?page=${page}&pageSize=${EARN_PAGE_SIZE}${clusterParam}`
     );
 
     strategies.push(...body.data.strategies);
     if (strategies.length >= body.data.total) {
       return strategies;
     }
-    if (body.data.strategies.length < STRATEGY_PAGE_SIZE) {
+    if (body.data.strategies.length < EARN_PAGE_SIZE) {
       throw new Error("Earn strategies pagination ended before the reported total");
     }
   }
@@ -343,8 +300,47 @@ export function useEarnStrategies(options?: { cluster?: SolanaCluster }) {
   return { strategies: data, error, isLoading, refresh: () => void mutate() };
 }
 
-const VAULT_POSITIONS_PAGE_SIZE = 100;
-const VAULT_POSITIONS_PAGE_LIMIT = 20;
+/** The keyset page both live-position collections return. */
+interface PositionPage<Position> {
+  positions: Position[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/**
+ * The cursor-paging loop shared by the two live-position collections. The
+ * `seenCursors` guard turns a server that repeats or rewinds its cursor into a
+ * thrown error instead of a loop, and the page-limit fallthrough throws rather
+ * than returning the prefix collected so far.
+ */
+async function fetchAllPositionPages<Position>(
+  path: (query: URLSearchParams) => string,
+  subject: string
+): Promise<Position[]> {
+  const positions: Position[] = [];
+  const seenCursors = new Set<string>();
+  let before: string | undefined;
+
+  for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
+    const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
+    if (before) query.set("before", before);
+
+    const body = await requestJsonOk<{ data: PositionPage<Position> }>(path(query));
+
+    positions.push(...body.data.positions);
+    if (!body.data.hasMore) return positions;
+
+    const nextCursor = body.data.nextCursor;
+    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
+      throw new Error(`${subject} pagination did not advance`);
+    }
+    seenCursors.add(nextCursor);
+    before = nextCursor;
+  }
+
+  // A partial portfolio is worse than an error because it can hide money.
+  throw new Error(`${subject} pagination exceeded its safety limit`);
+}
 
 /**
  * Reads every vault position held by the selected project. The API uses an
@@ -352,30 +348,10 @@ const VAULT_POSITIONS_PAGE_LIMIT = 20;
  * progression — not row count — decides when the read is complete.
  */
 export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
-  const positions: EarnVaultPosition[] = [];
-  const seenCursors = new Set<string>();
-  let before: string | undefined;
-
-  for (let page = 1; page <= VAULT_POSITIONS_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(VAULT_POSITIONS_PAGE_SIZE) });
-    if (before) query.set("before", before);
-
-    const body = await requestJsonOk<{ data: EarnVaultPositionsPage }>(
-      `/api/dashboard/markets/earn/vault-positions?${query}`
-    );
-
-    positions.push(...body.data.positions);
-    if (!body.data.hasMore) return positions;
-
-    const nextCursor = body.data.nextCursor;
-    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error("Vault positions pagination did not advance");
-    }
-    seenCursors.add(nextCursor);
-    before = nextCursor;
-  }
-
-  throw new Error("Vault positions pagination exceeded its safety limit");
+  return fetchAllPositionPages<EarnVaultPosition>(
+    (query) => `/api/dashboard/markets/earn/vault-positions?${query}`,
+    "Vault positions"
+  );
 }
 
 /** Live position values refresh while the surface is mounted. */
@@ -388,16 +364,6 @@ export function useEarnVaultPositions() {
   return { positions: data, error, isLoading, refresh: () => void mutate() };
 }
 
-const EXTERNAL_WALLET_POSITIONS_PAGE_SIZE = 100;
-
-/**
- * Hard stop on the paging loop, same reason as the other readers' page limits:
- * a server that never stops advancing its cursor must not spin this client
- * (and the BFF it drives) forever. 20 pages × 100 = 2,000 live positions for
- * one end-user wallet, far past anything a partner wallet can plausibly hold.
- */
-const EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT = 20;
-
 /**
  * Reads every live position for exactly one partner end-user wallet.
  * Kept at the strict dashboard boundary for the planned wallet drill-down.
@@ -405,30 +371,11 @@ const EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT = 20;
 export async function fetchEarnExternalWalletPositions(
   ownerAddress: string
 ): Promise<EarnExternalWalletPosition[]> {
-  const positions: EarnExternalWalletPosition[] = [];
-  const seenCursors = new Set<string>();
-  let before: string | undefined;
-
-  for (let page = 1; page <= EXTERNAL_WALLET_POSITIONS_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(EXTERNAL_WALLET_POSITIONS_PAGE_SIZE) });
-    if (before) query.set("before", before);
-    const body = await requestJsonOk<{ data: EarnExternalWalletPositionsPage }>(
-      `/api/dashboard/markets/earn/external-wallet/positions/${encodeURIComponent(ownerAddress)}?${query}`
-    );
-
-    positions.push(...body.data.positions);
-    if (!body.data.hasMore) return positions;
-
-    const nextCursor = body.data.nextCursor;
-    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error("External-wallet positions pagination did not advance");
-    }
-    seenCursors.add(nextCursor);
-    before = nextCursor;
-  }
-
-  // A partial portfolio is worse than an error because it can hide money.
-  throw new Error("External-wallet positions pagination exceeded its safety limit");
+  return fetchAllPositionPages<EarnExternalWalletPosition>(
+    (query) =>
+      `/api/dashboard/markets/earn/external-wallet/positions/${encodeURIComponent(ownerAddress)}?${query}`,
+    "External-wallet positions"
+  );
 }
 
 export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
@@ -1269,9 +1216,6 @@ export function fetchEarnWithdrawal(
   );
 }
 
-const PROGRAM_WITHDRAWALS_PAGE_SIZE = 100;
-const PROGRAM_WITHDRAWALS_PAGE_LIMIT = 20;
-
 /**
  * Read a program's complete durable withdrawal ledger. Returning a partial
  * history would make an in-flight payout disappear after a reload, so every
@@ -1283,17 +1227,17 @@ export async function fetchEarnProgramWithdrawals(
 ): Promise<EarnProgramWithdrawalRecord[]> {
   const withdrawals: EarnProgramWithdrawalRecord[] = [];
 
-  for (let page = 1; page <= PROGRAM_WITHDRAWALS_PAGE_LIMIT; page += 1) {
+  for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
     const query = new URLSearchParams({
       page: String(page),
-      pageSize: String(PROGRAM_WITHDRAWALS_PAGE_SIZE),
+      pageSize: String(EARN_PAGE_SIZE),
     });
     const body = await requestJsonOk<{ data: ListEarnProgramWithdrawalsResponse }>(
       `${programPath(programId, "/withdrawals")}?${query}`
     );
 
     const ledgerPage = body.data;
-    if (ledgerPage.page !== page || ledgerPage.pageSize !== PROGRAM_WITHDRAWALS_PAGE_SIZE) {
+    if (ledgerPage.page !== page || ledgerPage.pageSize !== EARN_PAGE_SIZE) {
       throw new Error("Earn withdrawal ledger pagination did not match the requested page");
     }
     if (!Number.isSafeInteger(ledgerPage.total) || ledgerPage.total < 0) {
@@ -1305,7 +1249,7 @@ export async function fetchEarnProgramWithdrawals(
     if (withdrawals.length > ledgerPage.total) {
       throw new Error("Earn withdrawal ledger returned more rows than its reported total");
     }
-    if (ledgerPage.withdrawals.length < PROGRAM_WITHDRAWALS_PAGE_SIZE) {
+    if (ledgerPage.withdrawals.length < EARN_PAGE_SIZE) {
       throw new Error("Earn withdrawal ledger pagination ended before the reported total");
     }
   }

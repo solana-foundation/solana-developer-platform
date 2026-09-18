@@ -1,31 +1,44 @@
-import type { ApiErrorBody, DashboardData, MoneyMovementResult } from "@/types";
+import type { ApiErrorBody, DashboardData, TransferResult } from "@/types";
+
+export class ApiError extends Error {
+  readonly status: number;
+  /** How long the server asked us to wait before asking again. */
+  readonly retryAfterMs: number | undefined;
+
+  constructor(status: number, message: string, retryAfterMs?: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
 
 export async function getDashboard(): Promise<DashboardData> {
   return request<DashboardData>("/api/dashboard");
 }
 
-export async function createDeposit(
-  strategyId: string,
-  amount: string
-): Promise<MoneyMovementResult> {
-  return request<MoneyMovementResult>("/api/deposits", {
+/** Checking to savings. */
+export async function createDeposit(amount: string): Promise<TransferResult> {
+  return request<TransferResult>("/api/deposits", {
     method: "POST",
-    body: JSON.stringify({ strategyId, amount }),
+    body: JSON.stringify({ amount }),
   });
 }
 
+/** Savings to checking. */
 export async function createWithdrawal(
-  positionId: string,
-  shares: string
-): Promise<MoneyMovementResult> {
-  return request<MoneyMovementResult>("/api/withdrawals", {
+  amount: string
+): Promise<TransferResult> {
+  return request<TransferResult>("/api/withdrawals", {
     method: "POST",
-    body: JSON.stringify({ positionId, shares }),
+    body: JSON.stringify({ amount }),
   });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  // Resolve against the origin, not the document URL: a page opened as
+  // user:pass@host keeps those credentials in its URL, and fetch refuses them.
+  const response = await fetch(new URL(path, window.location.origin), {
     ...init,
     headers: {
       Accept: "application/json",
@@ -38,8 +51,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     | null;
 
   if (!response.ok) {
-    throw new Error(
-      payload?.error?.message ?? `Request failed with ${response.status}`
+    const retryAfter = Number(response.headers.get("retry-after"));
+    throw new ApiError(
+      response.status,
+      payload?.error?.message ?? `Request failed with ${response.status}`,
+      Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1_000
+        : undefined
     );
   }
   if (!payload?.data)

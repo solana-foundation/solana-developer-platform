@@ -6,6 +6,7 @@ import {
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { truncateMiddle } from "../truncate-middle";
 import {
   type EarnVaultDepositAvailability,
   earnVaultDepositOnlyEnvironment,
@@ -75,7 +76,7 @@ export function formatUsd(
 }
 
 export function tokenSymbol(mint: string): string {
-  return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+  return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? truncateMiddle(mint, 4, 4);
 }
 
 export function formatTokenQuantity(

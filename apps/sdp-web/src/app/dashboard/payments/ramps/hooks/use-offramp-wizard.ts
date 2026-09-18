@@ -24,7 +24,8 @@ import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { offrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
-import { getRampTransferState } from "../ramp-transfer-state";
+import { submitOfframpDeposit } from "../offramp-deposit";
+import { getRampTransferState, heldRampApprovalRequestId } from "../ramp-transfer-state";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
 import {
   memoSummaryDetails,
@@ -90,7 +91,9 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     reset: resetCreateTransfer,
   } = useSWRMutation(
     paymentsQueryKeys.createTransfer(),
-    (_key, { arg }: { arg: CreateTransferInput }) => createTransfer(arg, t)
+    // The quote's `transferId` names the row, so a resend is already the same
+    // transfer; no Idempotency-Key is needed to keep it from moving twice.
+    (_key, { arg }: { arg: CreateTransferInput }) => createTransfer(arg, t, null)
   );
 
   const wizard = useRampWizard<OfframpStepId>(props, {
@@ -280,37 +283,20 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       return;
     }
 
-    const toastId = toast.loading(t("DashboardPayments.ramps.submittingOnchainTransfer"), {
-      position: "bottom-right",
-    });
-
-    try {
-      const transfer = await triggerCreateTransfer({
+    await submitOfframpDeposit(
+      {
         transferId,
         sourceCustodyWalletId: wizard.selectedWallet.id,
         destination: depositTarget.destinationAddress,
         token: address(sourceTokenMint),
         amount: depositTarget.amount,
-      });
-      if (transfer.id !== transferId) {
-        throw new Error(t("DashboardPayments.ramps.transferFailed"));
-      }
-      toast.success(t("DashboardPayments.ramps.transferSubmitted"), {
-        id: toastId,
-        description: transfer.signature
-          ? t("DashboardPayments.ramps.transactionSentSuccessfully")
-          : t("DashboardPayments.ramps.transferStatus", { status: transfer.status }),
-        position: "bottom-right",
-      });
-    } catch (error) {
-      toast.error(t("DashboardPayments.ramps.transferFailed"), {
-        id: toastId,
-        description:
-          error instanceof Error ? error.message : t("DashboardPayments.ramps.transferFailed"),
-        position: "bottom-right",
-      });
-    }
+      },
+      triggerCreateTransfer,
+      t
+    );
   };
+
+  const sendOutcome = onchainSendResult ?? null;
 
   return {
     ...wizard,
@@ -324,7 +310,8 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     hasCryptoDepositInstruction,
     canSendOnchain,
     onchainSendLoading,
-    onchainSendResult: onchainSendResult ?? null,
+    onchainSendResult: sendOutcome,
+    heldApprovalRequestId: heldRampApprovalRequestId(sendOutcome, transferStatus),
     sendCryptoToDeposit,
     quoteExpired,
   };

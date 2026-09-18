@@ -4,6 +4,10 @@ import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
 import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import {
+  formatCustodyProviderName,
+  isKnownCustodyProvider,
+} from "@/app/dashboard/custody/provider-catalog";
 import { privateChannelsInstancePath } from "@/app/dashboard/integrations/private-channels/private-channels-routes";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
@@ -607,6 +611,27 @@ function getIntegrationsPageConfig(
       backAction: {
         href: "/dashboard/integrations",
         label: t("Shared.integrations.backToIntegrations"),
+      },
+    };
+  }
+  // One custody connection. Checked before the catch-all below, which would
+  // otherwise title this "Integrations" and send Back to the catalogue rather
+  // than to the provider that owns the connection.
+  const custodyConnection = /^\/dashboard\/integrations\/([^/]+)\/connections\/[^/]+$/.exec(
+    pathname
+  );
+  if (custodyConnection) {
+    const provider = custodyConnection[1] ?? "";
+    return {
+      title: t("DashboardCustody.connectionPageTitle"),
+      contentWidthClass: "max-w-5xl",
+      backAction: {
+        href: `/dashboard/integrations/${provider}`,
+        label: t("DashboardCustody.backToProvider", {
+          provider: isKnownCustodyProvider(provider)
+            ? formatCustodyProviderName(provider)
+            : provider,
+        }),
       },
     };
   }

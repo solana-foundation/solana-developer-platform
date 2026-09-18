@@ -520,9 +520,7 @@ describe("exact Custody Connection installation routes", () => {
       },
     });
     expect(providerFetch).toHaveBeenCalledTimes(3);
-    expect(providerFetch.mock.calls[0]?.[0]).toBe(
-      "https://privy.example.test/v1/wallets?limit=1&chain_type=solana"
-    );
+    expect(providerFetch.mock.calls[0]?.[0]).toBe("https://privy.example.test/v1/wallets");
     expect(providerFetch.mock.calls[1]?.[0]).toBe(PRIVY_EXTERNAL_WALLET_URL);
     expect(providerFetch.mock.calls[2]).toEqual([
       "https://privy.example.test/v1/wallets",
@@ -1478,7 +1476,7 @@ describe("exact Custody Connection installation routes", () => {
     });
     const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
+      if (init?.method === "GET" && url.endsWith("/wallets")) {
         enterValidation?.();
         await validationGate;
         return privyJson({ data: [] });
@@ -1538,7 +1536,7 @@ describe("exact Custody Connection installation routes", () => {
     let validationCalls = 0;
     const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
+      if (init?.method === "GET" && url.endsWith("/wallets")) {
         validationCalls += 1;
         if (validationCalls === 1) {
           firstValidationEntered?.();
@@ -1604,7 +1602,7 @@ describe("exact Custody Connection installation routes", () => {
     let lookupCalls = 0;
     const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
+      if (init?.method === "GET" && url.endsWith("/wallets")) {
         return privyJson({ data: [] });
       }
       if (url === PRIVY_EXTERNAL_WALLET_URL) {

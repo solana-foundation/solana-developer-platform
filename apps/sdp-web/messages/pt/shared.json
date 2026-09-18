@@ -145,7 +145,13 @@
     "time": "Hora",
     "unknownToken": "Desconhecido",
     "selectExistingOrganizationDescription": "Escolha uma organização existente para continuar.",
-    "loadMore": "Carregar mais"
+    "loadMore": "Carregar mais",
+    "apiKeyValue": "Valor da chave de API",
+    "apiKeyChecking": "Verificando chave",
+    "apiKeyInUse": "Em uso",
+    "apiKeyNotAvailable": "Essa chave não está disponível para este projeto",
+    "apiKeySecretPlaceholder": "Cole a chave completa para esta sessão",
+    "apiKeySecretRequired": "Cole o valor completo da chave de API selecionada antes de executar uma requisição."
   },
   "dashboardShell": {
     "workspace": "Espaço de trabalho",

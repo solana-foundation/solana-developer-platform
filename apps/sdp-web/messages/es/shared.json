@@ -145,7 +145,13 @@
     "unknownToken": "Desconocido",
     "sdpMintedToken": "SDP-Minted",
     "selectExistingOrganizationDescription": "Elige una organización existente para continuar.",
-    "loadMore": "Cargar más"
+    "loadMore": "Cargar más",
+    "apiKeyValue": "Valor de la clave de API",
+    "apiKeyChecking": "Verificando la clave",
+    "apiKeyInUse": "En uso",
+    "apiKeyNotAvailable": "Esa clave no está disponible para este proyecto.",
+    "apiKeySecretPlaceholder": "Pega la clave completa para esta sesión",
+    "apiKeySecretRequired": "Pega el valor completo de la clave de API seleccionada antes de ejecutar una solicitud."
   },
   "dashboardShell": {
     "workspace": "Espacio de trabajo",

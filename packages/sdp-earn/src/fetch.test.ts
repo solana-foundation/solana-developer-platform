@@ -63,6 +63,41 @@ describe("extractProviderErrorMessage", () => {
     assert.equal(extractProviderErrorMessage({ message: 42 }, "fallback"), "fallback");
     assert.equal(extractProviderErrorMessage({ message: "   " }, "fallback"), "fallback");
   });
+
+  it("scrubs the identifiers a provider echoes back", () => {
+    // The message is both logged and returned to the API caller, and the API
+    // envelope redacts credentials only, so PII leaves here or not at all.
+    assert.equal(
+      extractProviderErrorMessage(
+        {
+          message:
+            "ownerAddress=7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU already registered for jane.doe@example.com",
+        },
+        "fallback"
+      ),
+      "ownerAddress=[REDACTED] already registered for [REDACTED_EMAIL]"
+    );
+  });
+
+  it("keeps the part of the message a developer acts on", () => {
+    assert.equal(
+      extractProviderErrorMessage(
+        { error: "Yield source is not fundable on this chain" },
+        "fallback"
+      ),
+      "Yield source is not fundable on this chain"
+    );
+  });
+
+  it("scrubs a credential that leaked into the provider payload", () => {
+    const message = extractProviderErrorMessage(
+      { error: { message: 'unauthorized: {"apiKey":"vault-secret"}' } },
+      "fallback"
+    );
+
+    assert.ok(!message.includes("vault-secret"));
+    assert.ok(message.startsWith("unauthorized"));
+  });
 });
 
 describe("providerFetch", () => {
@@ -314,6 +349,66 @@ describe("providerFetchJson", () => {
     await assert.rejects(
       providerFetchJson("veda", "https://veda.test/deposit", { method: "POST" }),
       earnError("CONFLICT", /^Wallet is rebalancing$/)
+    );
+  });
+
+  it("scrubs the fields a normalizer lifts onto details and keeps this layer's facts", async () => {
+    mock.method(globalThis, "fetch", async () =>
+      jsonResponse(409, {
+        error: "insufficient_funds for jane.doe@example.com",
+        ownerAddress: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+        available: "12.5",
+      })
+    );
+
+    await assert.rejects(
+      providerFetchJson("veda", "https://veda.test/withdraw", {
+        method: "POST",
+        errorDetails: (parsed) => {
+          const body = parsed as { ownerAddress: string; available: string };
+          return {
+            ownerAddress: body.ownerAddress,
+            available: body.available,
+            // A normalizer may not overwrite this layer's facts.
+            provider: "kamino",
+            providerStatus: 200,
+          };
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof SdpEarnError);
+        assert.equal(error.code, "CONFLICT");
+        assert.equal(error.message, "insufficient_funds for [REDACTED_EMAIL]");
+        assert.deepEqual(error.details, {
+          ownerAddress: "[REDACTED]",
+          available: "12.5",
+          provider: "veda",
+          providerStatus: 409,
+        });
+        return true;
+      }
+    );
+  });
+
+  it("drops the normalizer's output, not the error, when the normalizer throws", async () => {
+    mock.method(globalThis, "fetch", async () =>
+      jsonResponse(409, { error: "insufficient_funds" })
+    );
+
+    await assert.rejects(
+      providerFetchJson("veda", "https://veda.test/withdraw", {
+        method: "POST",
+        errorDetails: () => {
+          throw new Error("unfamiliar body");
+        },
+      }),
+      (error: unknown) =>
+        error instanceof SdpEarnError &&
+        error.code === "CONFLICT" &&
+        error.message === "insufficient_funds" &&
+        error.details?.provider === "veda" &&
+        error.details?.providerStatus === 409 &&
+        Object.keys(error.details ?? {}).length === 2
     );
   });
 

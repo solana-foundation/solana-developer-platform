@@ -53,6 +53,14 @@ export interface DvpLeg {
    * different quantity than the one typed.
    */
   pendingLookup: boolean;
+  /**
+   * The chosen mint was read and create would refuse a trade on it, such as a
+   * transfer-hook mint. False while it is unread or could not be read: the API
+   * still refuses at create, so an unknown is never claimed either way.
+   */
+  ineligible: boolean;
+  /** The extension that rules the chosen mint out, when `ineligible`. */
+  blockedBy: string | null;
 }
 
 /**
@@ -76,17 +84,67 @@ export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): 
 
   const token = options.find((option) => option.mint === choice) ?? null;
 
-  // Only a pasted leg needs the lookup; a listed token already carries its
-  // decimals, so this stays idle on the empty string for one.
-  const pasted = usePastedMint(token ? "" : custom);
+  // A listed token already carries its decimals, but not whether a trade on it
+  // would be accepted: an issued token can carry a transfer hook. So the chosen
+  // mint is read either way, and only a pasted one waits on it for its scale.
+  const pasted = usePastedMint(token ? token.mint : custom);
 
-  // Only metadata that belongs to the address currently typed. A resolved
-  // answer for a PREVIOUS address is not a slightly stale answer, it is a
-  // different token, and reading its decimals scales the amount by the wrong
-  // power of ten.
+  const { decimals, ineligible, blockedBy, pendingLookup, symbol } = resolveChosenMint(
+    token,
+    custom,
+    pasted
+  );
+  const resolved = decimals != null ? toBaseUnits(amount, decimals) : null;
+
+  return {
+    amount,
+    baseUnits: resolved?.ok ? resolved.baseUnits : null,
+    choice,
+    custom,
+    decimals,
+    pendingLookup,
+    ineligible,
+    blockedBy,
+    mint: token?.mint ?? custom.trim(),
+    pasted,
+    setAmount,
+    setChoice,
+    setCustom,
+    symbol,
+    token,
+  };
+}
+
+/**
+ * What is known about the mint this leg has chosen: its scale, whether a trade
+ * on it would be refused, and whether either answer is still outstanding.
+ *
+ * Only metadata that belongs to the address chosen NOW counts. A resolved
+ * answer for a PREVIOUS address is not a slightly stale answer, it is a
+ * different token, and reading its decimals scales the amount by the wrong
+ * power of ten.
+ *
+ * @param token - The listed token chosen, or null for a pasted address.
+ * @param custom - The pasted address, as typed.
+ * @param pasted - The inspection for whichever address is chosen.
+ * @returns The leg's mint facts.
+ */
+function resolveChosenMint(
+  token: DvpCreateOption | null,
+  custom: string,
+  pasted: ReturnType<typeof usePastedMint>
+): Pick<DvpLeg, "decimals" | "ineligible" | "blockedBy" | "pendingLookup" | "symbol"> {
+  const inspectedAddress = token?.mint ?? custom.trim();
+  // The inspection answers for the mint chosen NOW. Until it does, the leg is
+  // unresolved even for a listed token whose decimals are already known: its
+  // eligibility is not, and a form that is ready before the answer lands lets
+  // a transfer-hook mint through to the API's refusal instead of the field's.
+  const inspectionMatchesInput = pasted.address === inspectedAddress;
   const pastedMatchesInput = pasted.address === custom.trim();
   const pastedMint = pastedMatchesInput ? pasted.mint : null;
-  const pendingLookup = token === null && (pasted.loading || !pastedMatchesInput);
+  const pendingLookup = inspectedAddress !== "" && (pasted.loading || !inspectionMatchesInput);
+  const inspected = inspectionMatchesInput ? pasted.mint : null;
+  const ineligible = inspected !== null && !inspected.eligible;
 
   // A listed mint carries its decimals. A pasted one is read from the chain by
   // `usePastedMint`.
@@ -102,24 +160,16 @@ export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): 
   // Without a scale the amount has no meaning, so this leg has no base units
   // and submit is blocked rather than a quantity guessed.
   const decimals = token?.decimals ?? pastedMint?.decimals ?? null;
-  const resolved = decimals != null ? toBaseUnits(amount, decimals) : null;
-  const baseUnits = resolved?.ok ? resolved.baseUnits : null;
 
   return {
-    amount,
-    baseUnits,
-    choice,
-    custom,
     decimals,
     pendingLookup,
-    mint: token?.mint ?? custom.trim(),
-    pasted,
-    setAmount,
-    setChoice,
-    setCustom,
+    ineligible,
+    // A lookup that FAILED rules nothing out: create refuses the same mints, so
+    // a reachable form beats blocking every trade on one unavailable RPC read.
+    blockedBy: ineligible ? inspected.blockedBy : null,
     // A pasted mint's own metadata beats the raw address, so a resolved paste
     // reads as its symbol everywhere the summary names the leg.
     symbol: token?.label ?? pastedMint?.symbol ?? pastedMint?.name ?? "",
-    token,
   };
 }

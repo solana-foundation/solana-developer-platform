@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/table";
 
 const BALANCE_SKELETON_IDS = ["one", "two", "three"];
-const STRATEGY_SKELETON_IDS = ["one", "two", "three", "four", "five"];
+const STRATEGY_SKELETON_IDS = ["one", "two", "three"];
 const TREASURY_SECTION_SKELETON_IDS = ["one", "two"];
 const LANDING_PATH_SKELETON_IDS = ["treasury", "program", "dvp"];
 const INTEGRATION_SECTION_SKELETON_IDS = ["client", "deposit", "portfolio", "withdraw"];
@@ -61,7 +61,7 @@ export function TreasurySolutionsSkeleton() {
           <section key={section}>
             <SkeletonBlock className="h-6 w-40" />
             <div className="mt-4 overflow-hidden rounded-2xl border border-border-default">
-              {STRATEGY_SKELETON_IDS.slice(0, 3).map((id) => (
+              {STRATEGY_SKELETON_IDS.map((id) => (
                 <SkeletonBlock
                   className="h-[3.75rem] w-full rounded-none"
                   key={`${section}-${id}`}

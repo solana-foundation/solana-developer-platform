@@ -5,6 +5,7 @@ import {
   parseDecimalAmount,
 } from "@sdp/solana/amount";
 import { BASE58_ADDRESS_PATTERN } from "../base58-address";
+import { truncateMiddle } from "../truncate-middle";
 import type { KaminoVaultAllocation, KaminoVaultAllocations } from "./kamino-allocations-schema";
 
 /**
@@ -49,7 +50,7 @@ function isZeroWeight(pct: string): boolean {
  */
 export function kaminoMarketLabel(marketName: string): string {
   if (!BASE58_ADDRESS_PATTERN.test(marketName)) return marketName;
-  return `${marketName.slice(0, 6)}…${marketName.slice(-4)}`;
+  return truncateMiddle(marketName, 6, 4);
 }
 
 /**
@@ -99,7 +100,7 @@ export function kaminoAllocationsByWeight(
     });
 }
 
-export type KaminoDisclosureRow =
+type KaminoDisclosureRow =
   | { kind: "market"; reserve: string; marketName: string; pct: string }
   | { kind: "idle"; pct: string };
 

@@ -3,15 +3,17 @@ export type PolicyDefaultAction = "allow" | "deny" | "approval_required" | "revi
 export type EffectivePolicySource = "implicit_default_allow" | "customer_profile";
 
 export const WALLET_OPERATION_TYPES = [
-  // Settling a DvP trade moves BOTH legs in one transaction and closes the
-  // trade permanently; cancelling refunds both. They are the only two actions
-  // the settlement authority can take, and both are irreversible, which is
-  // exactly the shape an org should be able to require approval on.
-  "dvp_cancel",
   // Moving SDP's own leg into escrow. A spend from a custody wallet like any
   // other, and irreversible once the escrow holds it: only settle, cancel or
   // reclaim get it back.
   "dvp_fund",
+  // Settling delivers both legs in one transaction and closes the trade
+  // permanently. Cancel and reclaim, the paths that get an escrow's tokens back
+  // out, are deliberately NOT declared: gating an exit can strand a deposit, so
+  // no rule may govern them (`apps/sdp-api/src/routes/dvp/policy.ts`). An
+  // operation type with no call site is the state the audit flagged, so the two
+  // ungated actions get no type rather than one an org can write a dead rule
+  // against.
   "dvp_settle",
   "earn_program_withdrawal",
   "earn_vault_deposit",
@@ -64,14 +66,26 @@ export const WALLET_OPERATION_FAMILIES = [
 
 export type WalletOperationFamily = (typeof WALLET_OPERATION_FAMILIES)[number];
 
-export type WalletOperationStatus =
-  | "created"
-  | "evaluated"
-  | "pending_approval"
-  | "executing"
-  | "completed"
-  | "failed"
-  | "canceled";
+export const WALLET_OPERATION_STATUSES = [
+  "created",
+  "evaluated",
+  "pending_approval",
+  "executing",
+  "completed",
+  "failed",
+  "canceled",
+] as const;
+export type WalletOperationStatus = (typeof WALLET_OPERATION_STATUSES)[number];
+
+export const TERMINAL_WALLET_OPERATION_STATUSES = [
+  "completed",
+  "failed",
+  "canceled",
+] as const satisfies readonly WalletOperationStatus[];
+
+export function isTerminalWalletOperationStatus(status: WalletOperationStatus): boolean {
+  return TERMINAL_WALLET_OPERATION_STATUSES.some((terminal) => terminal === status);
+}
 
 export type PolicyDecision =
   | "allow"
@@ -191,13 +205,34 @@ export type PolicyProviderSyncStatus =
 export type PolicyControlInventoryTarget = "wallet" | "api_key" | "all";
 export type PolicyControlInventoryStatus = "default_allow" | "draft" | "active" | "disabled";
 export type ApprovalGroupStatus = "active" | "archived";
-export type ApprovalRequestStatus =
-  | "pending"
-  | "approved"
-  | "rejected"
-  | "canceled"
-  | "expired"
-  | "failed";
+export const APPROVAL_REQUEST_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+  "canceled",
+  "expired",
+  "failed",
+] as const;
+export type ApprovalRequestStatus = (typeof APPROVAL_REQUEST_STATUSES)[number];
+
+export const UNEXECUTABLE_APPROVAL_REQUEST_STATUSES = [
+  "rejected",
+  "canceled",
+  "expired",
+  "failed",
+] as const satisfies readonly ApprovalRequestStatus[];
+
+export function canReleaseApprovalPaymentKey(
+  status: ApprovalRequestStatus,
+  operationStatus: WalletOperationStatus | undefined
+): boolean {
+  return (
+    UNEXECUTABLE_APPROVAL_REQUEST_STATUSES.some((terminal) => terminal === status) ||
+    (status === "approved" &&
+      operationStatus !== undefined &&
+      isTerminalWalletOperationStatus(operationStatus))
+  );
+}
 
 /**
  * Historical read model: rows predating a vocabulary trim keep their retired

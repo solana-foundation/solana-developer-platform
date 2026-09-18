@@ -52,6 +52,7 @@ function OfframpManualQuoteStep({
   }
 
   const cryptoToken = getCryptoRailAssetLabel(selectedRampPair.assetRail);
+  const depositCopy = { amount: fields.amount.trim(), token: cryptoToken };
 
   return (
     <ManualInstructionsQuote
@@ -60,10 +61,13 @@ function OfframpManualQuoteStep({
       fiatCurrency={selectedRampPair.fiatCurrency}
       cryptoToken={cryptoToken}
       instructions={quote.paymentInstructions}
-      description={t("DashboardPayments.ramps.offrampManualDescription", {
-        amount: fields.amount.trim(),
-        token: cryptoToken,
-      })}
+      // Held for approval: the send is already queued, so asking for it again
+      // would invite a second payment, and the quote is not held while it waits.
+      description={
+        wizard.heldApprovalRequestId === null
+          ? t("DashboardPayments.ramps.offrampManualDescription", depositCopy)
+          : t("DashboardPayments.ramps.offrampHeldDescription", depositCopy)
+      }
     />
   );
 }

@@ -43,7 +43,12 @@ export function apiErrorResponse(error: unknown): Response {
     },
   };
 
-  return Response.json(body, { status, headers: NO_STORE_HEADERS });
+  const headers = new Headers(NO_STORE_HEADERS);
+  if (error instanceof SdpApiError && error.status === 429) {
+    // Let the browser back off for exactly as long as SDP asked.
+    headers.set("Retry-After", String(error.retryAfterSeconds ?? 10));
+  }
+  return Response.json(body, { status, headers });
 }
 
 function errorStatus(error: unknown): number {

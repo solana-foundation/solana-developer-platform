@@ -88,6 +88,9 @@ vouched for by key. Two layers keep raw bodies out of telemetry:
 - The earn fetch layer (`packages/sdp-earn/src/fetch.ts`) never attaches a body to an error.
   `providerFetchJson` lifts only the fields a per-call normalizer names onto
   `SdpEarnError.details`, plus `provider` and `providerStatus`, and drops the rest. The
+  lifted fields go through `scrubTelemetry` and the provider's message through
+  `scrubTelemetryString` before either lands on the error (PRO-1995), the same seam the
+  ramps fetch layer scrubs at, because the API envelope redacts credentials only. The
   vendor-call failure event (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs the error's
   name and code only, pinned by a test that hands it an error carrying a body and an owner.
 - The denylist scrubs a body attached whole under any of its usual names (`providerBody`,
@@ -119,7 +122,7 @@ is not done until it appears here with a test.
 | Dashboard Sentry (browser, server, edge) | `sentryScrubbingHooks` spread into all three `Sentry.init` sites |
 | Dashboard Sentry user | `apps/sdp-web/src/components/sentry-user-context.tsx` — Clerk user id only |
 | Ramp provider error messages | `extractProviderErrorMessage` (`packages/sdp-payments/src/ramps/fetch.ts`) |
-| Earn provider error bodies | `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) keeps named fields and status only; `logVendorCallFailure` (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs name and code only |
+| Earn provider error messages and bodies | `extractProviderErrorMessage` and `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) scrub the message and the named fields they keep; `logVendorCallFailure` (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs name and code only |
 | Fireblocks request/response tracing | `scrubTelemetry` in `keychain-fireblocks.adapter.ts` (writes via `console`, bypassing pino) |
 
 Scrubbing failure is a drop, not a pass-through: if the walker throws inside a Sentry hook

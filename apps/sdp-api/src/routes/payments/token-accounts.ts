@@ -72,15 +72,19 @@ export async function getSplTokenBalances(
 > {
   const balancesByMint = new Map<string, { amount: bigint; decimals: number; uiAmount: string }>();
 
-  for (const programId of SPL_TOKEN_PROGRAM_IDS) {
-    const response = await rpc
-      .getTokenAccountsByOwner(
-        owner,
-        { programId },
-        { encoding: "jsonParsed", commitment: "confirmed" }
-      )
-      .send();
+  const responses = await Promise.all(
+    SPL_TOKEN_PROGRAM_IDS.map((programId) =>
+      rpc
+        .getTokenAccountsByOwner(
+          owner,
+          { programId },
+          { encoding: "jsonParsed", commitment: "confirmed" }
+        )
+        .send()
+    )
+  );
 
+  for (const response of responses) {
     for (const account of response.value) {
       const parsed = parseTokenAmountInfo(account.account.data.parsed.info);
       if (parsed.amount <= 0n) {

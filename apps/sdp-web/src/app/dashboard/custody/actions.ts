@@ -218,11 +218,16 @@ async function createCustodyWalletForProvider(formData: FormData) {
     | "utila"
     | undefined;
   const label = getOptionalString(formData, "label");
+  // A Connection pins the wallet to one specific stored credential, which
+  // `provider` alone cannot do once a project holds several connections of the
+  // same provider. Sending both would leave the API to guess, so the explicit
+  // choice wins and `provider` is dropped.
+  const connectionId = getOptionalString(formData, "connectionId");
 
   const client = await createSdpApiClient();
   await client.fetch("/v1/wallets", {
     method: "POST",
-    body: JSON.stringify({ provider, label }),
+    body: JSON.stringify(connectionId ? { connectionId, label } : { provider, label }),
   });
 }
 

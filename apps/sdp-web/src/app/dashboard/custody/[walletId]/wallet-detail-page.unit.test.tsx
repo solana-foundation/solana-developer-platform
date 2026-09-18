@@ -10,22 +10,32 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
 import { Callout } from "@/components/ui/callout";
+import { getMessages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
 import { getTranslations } from "@/i18n/server";
 
-const { mockAuth, mockIssuanceFlag, mockLoadWalletActivity, mockPoliciesFlag, mockRequest } =
-  vi.hoisted(() => ({
-    mockAuth: vi.fn(),
-    mockIssuanceFlag: vi.fn(),
-    mockLoadWalletActivity: vi.fn(),
-    mockPoliciesFlag: vi.fn(),
-    mockRequest: vi.fn(),
-  }));
+const {
+  mockAuth,
+  mockIssuanceFlag,
+  mockLoadWalletActivity,
+  mockPoliciesFlag,
+  mockPrivyByokFlag,
+  mockRequest,
+} = vi.hoisted(() => ({
+  mockAuth: vi.fn(),
+  mockIssuanceFlag: vi.fn(),
+  mockLoadWalletActivity: vi.fn(),
+  mockPoliciesFlag: vi.fn(),
+  mockPrivyByokFlag: vi.fn(),
+  mockRequest: vi.fn(),
+}));
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
 }));
 
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
   notFound: vi.fn(() => {
     throw new Error("not found");
   }),
@@ -41,6 +51,7 @@ vi.mock("@/i18n/server", () => ({
 vi.mock("@/flags", () => ({
   issuance: mockIssuanceFlag,
   policies: mockPoliciesFlag,
+  privyByok: mockPrivyByokFlag,
 }));
 
 vi.mock("@/lib/sdp-api", () => ({
@@ -129,17 +140,29 @@ function findWalletLabelEditor(
   return findElementProps(node, WalletLabelInlineEditor);
 }
 
+function renderWalletIdentity(page: ReactNode): string {
+  const identity = findElementProps(page, "section");
+  expect(identity).not.toBeNull();
+  return renderToStaticMarkup(
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      {identity?.children}
+    </I18nProvider>
+  );
+}
+
 beforeEach(() => {
   walletOverrides = {};
   mockAuth.mockReset();
   mockIssuanceFlag.mockReset();
   mockLoadWalletActivity.mockReset();
   mockPoliciesFlag.mockReset();
+  mockPrivyByokFlag.mockReset();
   mockRequest.mockReset();
 
   mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
   mockIssuanceFlag.mockResolvedValue(true);
   mockPoliciesFlag.mockResolvedValue(true);
+  mockPrivyByokFlag.mockResolvedValue(true);
   mockLoadWalletActivity.mockResolvedValue({
     ok: true,
     data: {
@@ -165,11 +188,104 @@ beforeEach(() => {
       return Response.json({ data: [] });
     }
 
+    if (path === "/internal/dashboard/custody/connections/connection_one") {
+      return Response.json({
+        data: {
+          connection: {
+            id: "connection_one",
+            provider: "privy",
+            label: "Treasury connection",
+            status: "active",
+            completion: null,
+            isDefault: true,
+            canComplete: false,
+            canReplaceCredentials: false,
+            canCancel: false,
+          },
+        },
+      });
+    }
+
     throw new Error(`Unexpected request: ${path}`);
   });
 });
 
 describe("WalletDetailPage critical path", () => {
+  it("keeps a connection-owned wallet readable without connection requests or links when BYOK is off", async () => {
+    walletOverrides = { custodyConnectionId: "connection_one" };
+    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+    mockPrivyByokFlag.mockResolvedValue(false);
+
+    const page = await WalletDetailPage({
+      params: Promise.resolve({ walletId: "wallet%2Fone" }),
+    });
+
+    expect(
+      mockRequest.mock.calls.some(([path]) => String(path).includes("/custody/connections"))
+    ).toBe(false);
+    const markup = renderWalletIdentity(page);
+    expect(markup).toContain("Fast wallet");
+    expect(markup).not.toContain("/dashboard/integrations/privy/connections/");
+  });
+
+  it("does not request admin-only connection data for a member", async () => {
+    walletOverrides = { custodyConnectionId: "connection_one" };
+    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:member" });
+
+    const page = await WalletDetailPage({
+      params: Promise.resolve({ walletId: "wallet%2Fone" }),
+    });
+
+    expect(
+      mockRequest.mock.calls.some(([path]) => String(path).includes("/custody/connections"))
+    ).toBe(false);
+    const markup = renderWalletIdentity(page);
+    expect(markup).toContain("Fast wallet");
+    expect(markup).not.toContain("/dashboard/integrations/privy/connections/");
+  });
+
+  it("loads the wallet's exact connection and links its label for an admin with BYOK enabled", async () => {
+    walletOverrides = { custodyConnectionId: "connection_one" };
+    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+
+    const page = await WalletDetailPage({
+      params: Promise.resolve({ walletId: "wallet%2Fone" }),
+    });
+
+    expect(
+      mockRequest.mock.calls.filter(([path]) => String(path).includes("/custody/connections"))
+    ).toEqual([["/internal/dashboard/custody/connections/connection_one"]]);
+    const markup = renderWalletIdentity(page);
+    expect(markup).toContain('href="/dashboard/integrations/privy/connections/connection_one"');
+    expect(markup).toContain("Treasury connection");
+  });
+
+  it.each(["http", "network", "invalid response"])(
+    "keeps the wallet readable after a connection lookup %s failure",
+    async (failure) => {
+      walletOverrides = { custodyConnectionId: "connection_one" };
+      mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+      mockRequest.mockImplementation(async (path: string) => {
+        if (path.startsWith("/v1/wallets/wallet%2Fone")) return walletMetadataResponse();
+        if (path === "/internal/dashboard/custody/connections/connection_one") {
+          if (failure === "network") throw new Error("Connection unavailable");
+          if (failure === "invalid response") return Response.json({ data: {} });
+          return new Response(null, { status: 503 });
+        }
+        return new Response(null, { status: 404 });
+      });
+
+      const page = await WalletDetailPage({
+        params: Promise.resolve({ walletId: "wallet%2Fone" }),
+      });
+
+      const markup = renderWalletIdentity(page);
+      expect(markup).toContain("Fast wallet");
+      expect(markup).toContain("wallet/one");
+      expect(markup).toContain("connection_one");
+    }
+  );
+
   it("keeps wallet detail data cards on theme-aware surfaces", async () => {
     const t = await getTranslations();
     const balanceResult = { balances: [solBalance], error: null };

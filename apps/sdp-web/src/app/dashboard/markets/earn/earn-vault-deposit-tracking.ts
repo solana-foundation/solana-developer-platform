@@ -109,19 +109,3 @@ export function recallVaultDepositFloor(fingerprint: string): string | null | un
 export function forgetVaultDepositFloor(fingerprint: string): void {
   vaultDepositFloorMemo.forget(fingerprint);
 }
-
-export function claimVaultDepositIdempotencyKey(fingerprint: string): string {
-  return vaultDepositIdempotencyKeyStore.claim(fingerprint);
-}
-
-export function holdVaultDepositIdempotencyKey(fingerprint: string): void {
-  vaultDepositIdempotencyKeyStore.hold(fingerprint);
-}
-
-export function isVaultDepositIdempotencyKeyHeld(fingerprint: string): boolean {
-  return vaultDepositIdempotencyKeyStore.isHeld(fingerprint);
-}
-
-export function releaseVaultDepositIdempotencyKey(fingerprint: string): void {
-  vaultDepositIdempotencyKeyStore.release(fingerprint);
-}
