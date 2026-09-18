@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const flagMocks = vi.hoisted(() => ({
   custody: vi.fn(),
+  earn: vi.fn(),
   issuance: vi.fn(),
   policies: vi.fn(),
 }));
@@ -19,6 +20,8 @@ import ApprovalsLayout from "./approvals/layout";
 import CustodyWalletPoliciesLayout from "./custody/[walletId]/policy/layout";
 import CustodyLayout from "./custody/layout";
 import IssuanceLayout from "./issuance/layout";
+import EarnAliasLayout from "./markets/earn/layout";
+import EmbeddedYieldLayout from "./markets/embedded-yield/layout";
 import PoliciesLayout from "./policies/layout";
 import TokensLayout from "./tokens/layout";
 import WalletPoliciesLayout from "./wallets/[walletId]/policy/layout";
@@ -81,5 +84,19 @@ describe("dashboard module feature gates", () => {
     await expect(WalletPoliciesLayout({ children: <div>Wallet policy</div> })).rejects.toThrow(
       "NEXT_NOT_FOUND"
     );
+  });
+
+  it("404s every Embedded Yield route when Earn is disabled", async () => {
+    flagMocks.earn.mockResolvedValue(false);
+
+    await expect(EmbeddedYieldLayout({ children: <div>Earn</div> })).rejects.toThrow(
+      "NEXT_NOT_FOUND"
+    );
+  });
+
+  it("404s the Earn alias route when Earn is disabled", async () => {
+    flagMocks.earn.mockResolvedValue(false);
+
+    await expect(EarnAliasLayout({ children: <div>Earn</div> })).rejects.toThrow("NEXT_NOT_FOUND");
   });
 });
