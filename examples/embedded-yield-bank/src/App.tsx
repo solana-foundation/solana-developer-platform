@@ -29,6 +29,7 @@ import {
   type InFlightTransfer,
   isPendingMovement,
   type MovementPolling,
+  partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
   startMovementPolling,
@@ -73,6 +74,7 @@ export function App() {
   const movementToastIds = useRef(
     new Map<string, ReturnType<typeof toast.loading>>()
   );
+  const completedMovementIds = useRef(new Set<string>());
   const latestData = useRef<DashboardData>(undefined);
 
   const updateInFlight = useCallback((next: InFlightTransfer[]) => {
@@ -111,17 +113,42 @@ export function App() {
           current,
           next.movements
         );
-        const keep = reconciliation.timedOut ? [] : remaining;
+        const balanceReconciliation = inFlightBase.current
+          ? partitionSettledTransfersBySnapshot(
+              inFlightBase.current,
+              next,
+              settled
+            )
+          : { reflected: settled, waiting: [] };
+        const now = Date.now();
+        const expired = balanceReconciliation.waiting.filter(
+          (transfer) => now >= transfer.expiresAt
+        );
+        const waiting = balanceReconciliation.waiting.filter(
+          (transfer) => now < transfer.expiresAt
+        );
+        const keepIds = new Set(
+          [...remaining, ...waiting].map((transfer) => transfer.movementId)
+        );
+        const keep = reconciliation.timedOut
+          ? []
+          : current.filter((transfer) => keepIds.has(transfer.movementId));
         // Overlapping transfers: what just settled becomes part of the
         // base so the ones still pending project from the balances it
         // produced. A failed transfer moved nothing and is simply dropped.
-        if (settled.length && keep.length && inFlightBase.current) {
+        const reflectedOrExpired = [
+          ...balanceReconciliation.reflected,
+          ...expired,
+        ];
+        if (reflectedOrExpired.length && keep.length && inFlightBase.current) {
           inFlightBase.current = foldSettledTransfers(
             inFlightBase.current,
-            settled
+            reflectedOrExpired
           );
         }
         for (const transfer of settled) {
+          if (completedMovementIds.current.has(transfer.movementId)) continue;
+          completedMovementIds.current.add(transfer.movementId);
           const toastId = movementToastIds.current.get(transfer.movementId);
           toast.success(
             TRANSFER_COPY[
@@ -130,6 +157,13 @@ export function App() {
             { id: toastId }
           );
           movementToastIds.current.delete(transfer.movementId);
+        }
+        if (expired.length && !reconciliation.timedOut) {
+          toast.warning("Balances are taking longer to update", {
+            id: "balance-sync-timeout",
+            description:
+              "The transfer is settled. Refresh to check the latest live balances.",
+          });
         }
         for (const transfer of failed) {
           const copy =
@@ -182,11 +216,13 @@ export function App() {
   }, [refresh]);
 
   // Keep balances live like a bank app: a quick cadence while a transfer is
-  // settling, a slow one otherwise, and nothing while the tab is hidden.
+  // settling or confirmed balances are catching up, a slow one otherwise,
+  // and nothing while the tab is hidden.
   useEffect(() => {
-    const interval = movementPolling
-      ? ACTIVE_MOVEMENT_REFRESH_MS
-      : BACKGROUND_REFRESH_MS;
+    const interval =
+      movementPolling || inFlight.length
+        ? ACTIVE_MOVEMENT_REFRESH_MS
+        : BACKGROUND_REFRESH_MS;
     const timer = window.setInterval(() => {
       if (
         document.visibilityState === "visible" &&
@@ -196,20 +232,20 @@ export function App() {
       }
     }, interval);
     return () => window.clearInterval(timer);
-  }, [movementPolling, refresh]);
+  }, [inFlight.length, movementPolling, refresh]);
 
-  // Provider valuations can lag the ledger by a beat. Once the last pending
-  // transfer settles, take one more look so savings catches up on its own.
+  // After the last projection hands back to a reflected balance snapshot, take
+  // one more look so the normal background view starts from fresh data.
   const wasSettling = useRef(false);
   useEffect(() => {
-    const settling = movementPolling !== undefined;
+    const settling = movementPolling !== undefined || inFlight.length > 0;
     if (wasSettling.current && !settling) {
       const timer = window.setTimeout(() => void refresh(), 3_000);
       wasSettling.current = settling;
       return () => window.clearTimeout(timer);
     }
     wasSettling.current = settling;
-  }, [movementPolling, refresh]);
+  }, [inFlight.length, movementPolling, refresh]);
 
   async function transfer(direction: TransferDirection, amount: string) {
     const copy = TRANSFER_COPY[direction];
@@ -223,9 +259,11 @@ export function App() {
         throw new Error(movement.failureReason ?? copy.failed);
       }
       if (isPendingMovement(movement)) {
-        updateMovementPolling(
-          startMovementPolling(movementPollingRef.current, movement.movementId)
+        const polling = startMovementPolling(
+          movementPollingRef.current,
+          movement.movementId
         );
+        updateMovementPolling(polling);
         if (!inFlightRef.current.length) {
           inFlightBase.current = latestData.current;
         }
@@ -235,6 +273,7 @@ export function App() {
             movementId: movement.movementId,
             direction: direction === "to-savings" ? "deposit" : "withdrawal",
             amount,
+            expiresAt: polling.expiresAt,
           },
         ]);
         movementToastIds.current.set(movement.movementId, toastId);

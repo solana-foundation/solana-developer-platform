@@ -1,5 +1,5 @@
 import type { DashboardData, YieldMovement } from "@/types";
-import { addDecimals } from "./decimal";
+import { addDecimals, compareDecimals } from "./decimal";
 
 /** Fast enough to surface normal Solana confirmation without request fan-out. */
 export const ACTIVE_MOVEMENT_REFRESH_MS = 1_000;
@@ -65,13 +65,15 @@ export interface InFlightTransfer {
   movementId: string;
   direction: YieldMovement["direction"];
   amount: string;
+  expiresAt: number;
 }
 
 /**
  * An internal transfer never changes the total, but its two sides settle on
  * different reads (RPC for checking, SDP for savings) and can disagree for a
- * few seconds. While a transfer this session submitted is still pending, show
- * the balances it will produce, then hand back to live data once it settles.
+ * few seconds. Show the balances a transfer will produce while it is pending
+ * and while live snapshots catch up after confirmation, then hand back once
+ * both account balances reflect it.
  */
 export function applyInFlight(
   base: DashboardData,
@@ -149,7 +151,7 @@ export function reconcileInFlight(
 }
 
 /**
- * When one of several overlapping transfers finalizes, move its effect into
+ * When one of several overlapping transfers is reflected, move its effect into
  * the base so the transfers still pending project from the balances that
  * transfer actually produced, not from the snapshot taken before it started.
  */
@@ -158,6 +160,57 @@ export function foldSettledTransfers(
   settled: readonly InFlightTransfer[]
 ): DashboardData {
   return applyInFlight(base, base, settled);
+}
+
+/**
+ * Keep confirmed transfers projected until both live account snapshots move
+ * in the expected direction. This prevents a lagging provider valuation from
+ * briefly restoring the balances shown before confirmation.
+ */
+export function partitionSettledTransfersBySnapshot(
+  base: DashboardData,
+  live: DashboardData,
+  settled: readonly InFlightTransfer[]
+): {
+  reflected: InFlightTransfer[];
+  waiting: InFlightTransfer[];
+} {
+  const reflected: InFlightTransfer[] = [];
+  const waiting: InFlightTransfer[] = [];
+  let nextBase = base;
+
+  for (const transfer of settled) {
+    if (snapshotReflectsTransfer(nextBase, live, transfer)) {
+      reflected.push(transfer);
+      nextBase = foldSettledTransfers(nextBase, [transfer]);
+    } else {
+      waiting.push(transfer);
+    }
+  }
+
+  return { reflected, waiting };
+}
+
+function snapshotReflectsTransfer(
+  base: DashboardData,
+  live: DashboardData,
+  transfer: InFlightTransfer
+): boolean {
+  const baseSavings = base.savings.balance;
+  const liveSavings = live.savings.balance;
+  if (baseSavings === undefined || liveSavings === undefined) return false;
+
+  const projected = foldSettledTransfers(base, [transfer]);
+  if (transfer.direction === "deposit") {
+    return (
+      compareDecimals(live.checking.balance, projected.checking.balance) <= 0 &&
+      compareDecimals(liveSavings, baseSavings) > 0
+    );
+  }
+  return (
+    compareDecimals(live.checking.balance, base.checking.balance) > 0 &&
+    compareDecimals(liveSavings, baseSavings) < 0
+  );
 }
 
 function shiftBalance(

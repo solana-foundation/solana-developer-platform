@@ -7,6 +7,7 @@ import {
   isMovementAwaitingFinality,
   isPendingMovement,
   isSettledMovement,
+  partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
   SETTLEMENT_POLL_TIMEOUT_MS,
@@ -92,7 +93,12 @@ describe("in-flight transfers", () => {
     });
 
     const view = applyInFlight(base, live, [
-      { movementId: "movement-1", direction: "deposit", amount: "2" },
+      {
+        movementId: "movement-1",
+        direction: "deposit",
+        amount: "2",
+        expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+      },
     ]);
 
     expect(view.checking.balance).toBe("17");
@@ -116,7 +122,12 @@ describe("in-flight transfers", () => {
     });
 
     const view = applyInFlight(base, live, [
-      { movementId: "movement-1", direction: "withdrawal", amount: "1.5" },
+      {
+        movementId: "movement-1",
+        direction: "withdrawal",
+        amount: "1.5",
+        expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+      },
     ]);
 
     expect(view.checking.balance).toBe("18.5");
@@ -130,11 +141,13 @@ describe("in-flight transfers", () => {
       movementId: "m1",
       direction: "deposit" as const,
       amount: "2",
+      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
     };
     const second = {
       movementId: "m2",
       direction: "deposit" as const,
       amount: "3",
+      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
     };
 
     const folded = foldSettledTransfers(base, [first]);
@@ -150,10 +163,30 @@ describe("in-flight transfers", () => {
 
   it("folds confirmed transfers and drops failed ones without applying them", () => {
     const inFlight = [
-      { movementId: "ok", direction: "deposit" as const, amount: "2" },
-      { movementId: "bad", direction: "deposit" as const, amount: "5" },
-      { movementId: "slow", direction: "deposit" as const, amount: "1" },
-      { movementId: "unseen", direction: "deposit" as const, amount: "3" },
+      {
+        movementId: "ok",
+        direction: "deposit" as const,
+        amount: "2",
+        expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+      },
+      {
+        movementId: "bad",
+        direction: "deposit" as const,
+        amount: "5",
+        expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+      },
+      {
+        movementId: "slow",
+        direction: "deposit" as const,
+        amount: "1",
+        expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+      },
+      {
+        movementId: "unseen",
+        direction: "deposit" as const,
+        amount: "3",
+        expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+      },
     ];
     const movements = [
       { ...createMovement("confirmed"), movementId: "ok" },
@@ -179,6 +212,49 @@ describe("in-flight transfers", () => {
   it("returns live data untouched once nothing is in flight", () => {
     const live = dashboard({ checking: "17", savings: "3", total: "20" });
     expect(applyInFlight(live, live, [])).toBe(live);
+  });
+
+  it("keeps a confirmed deposit projected until both balances reflect it", () => {
+    const base = dashboard({ checking: "19", savings: "1", total: "20" });
+    const transfer = {
+      movementId: "movement-1",
+      direction: "deposit" as const,
+      amount: "2",
+      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+    };
+
+    expect(
+      partitionSettledTransfersBySnapshot(
+        base,
+        dashboard({ checking: "17", savings: "1", total: "18" }),
+        [transfer]
+      )
+    ).toEqual({ reflected: [], waiting: [transfer] });
+    expect(
+      partitionSettledTransfersBySnapshot(
+        base,
+        dashboard({ checking: "17", savings: "3", total: "20" }),
+        [transfer]
+      )
+    ).toEqual({ reflected: [transfer], waiting: [] });
+  });
+
+  it("hands a confirmed withdrawal back after both live balances move", () => {
+    const base = dashboard({ checking: "17", savings: "3", total: "20" });
+    const transfer = {
+      movementId: "movement-1",
+      direction: "withdrawal" as const,
+      amount: "1",
+      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
+    };
+
+    expect(
+      partitionSettledTransfersBySnapshot(
+        base,
+        dashboard({ checking: "18", savings: "2", total: "20" }),
+        [transfer]
+      )
+    ).toEqual({ reflected: [transfer], waiting: [] });
   });
 });
 
