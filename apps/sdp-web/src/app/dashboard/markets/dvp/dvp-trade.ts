@@ -78,7 +78,7 @@ export interface DvpPartyRef {
  * One token movement in or out of a leg's escrow, read off the chain. Parsed at
  * the card rather than trusted: the dashboard and the API deploy separately.
  */
-export const dvpLegTransferSchema = z.object({
+const dvpLegTransferSchema = z.object({
   signature: z.string().min(1),
   direction: z.enum(["in", "out"]),
   /** What the movement was, named by the API from the trade's close. */

@@ -8,8 +8,9 @@ import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { AmountField, MintField, PartySlotPicker, PayoutAddressPicker } from "./dvp-create-fields";
-import type { DvpCreateForm, DvpPartySlot } from "./use-dvp-create-form";
+import type { DvpCreateForm } from "./use-dvp-create-form";
 import { CUSTOM } from "./use-dvp-leg";
+import type { DvpPartySlot } from "./use-dvp-parties";
 
 /** The Token-2022 extension kind the API names when SDP cannot move a mint (`UNSUPPORTED_MINT_EXTENSIONS`). */
 const TRANSFER_HOOK_EXTENSION = "TransferHook";
@@ -166,7 +167,7 @@ function LegChip({ amount, mint, symbol }: { amount: string; mint: string; symbo
 }
 
 /** The trade as an exchange between the two leg rows: seller, asset pill, both-ways arrow, cash pill, buyer. */
-export function ExchangeStrip({ form }: { form: DvpCreateForm }) {
+function ExchangeStrip({ form }: { form: DvpCreateForm }) {
   const t = useTranslations();
   return (
     <div className="my-4 flex items-center justify-center gap-5">

@@ -56,6 +56,8 @@ import {
   earnProviderLabel,
   formatProviderAmount,
   formatUsd,
+  positionDisplayName,
+  shortenMarketAddress,
 } from "../earn/earn-format";
 import {
   EarnDepositAvailabilityBadge,
@@ -63,7 +65,6 @@ import {
   earnStrategyAsset,
   earnStrategyReferenceKey,
   formatProviderApy,
-  shortenMarketAddress,
   sumDecimalStrings,
 } from "../earn/earn-market-presentation";
 import {
@@ -272,6 +273,23 @@ function mergeTrackedVaultMovements<Movement extends { movementId: string; obser
     }
   }
   return next.slice(-MAX_VISIBLE_VAULT_ACTIVITY);
+}
+
+/**
+ * Stamp the incoming movements newest-first with their place in the page's
+ * single activity order, ready for `mergeTrackedVaultMovements`. Shared by the
+ * deposit and withdrawal watchers, whose stamping is otherwise line-for-line
+ * identical. Pure apart from `nextOrder`, and called BEFORE the state updater
+ * runs so the order advances exactly once per observed movement.
+ */
+function observeIncomingVaultMovements<Movement>(
+  incoming: readonly Movement[],
+  nextOrder: () => number
+): (Movement & { observedOrder: number })[] {
+  return [...incoming].reverse().map((movement) => ({
+    ...movement,
+    observedOrder: nextOrder(),
+  }));
 }
 
 function subtractUnsignedDecimalStrings(left: string, right: string): string | undefined {
@@ -1240,7 +1258,7 @@ function ActiveVaultPositionsCard({
                     <TableRow key={position.id}>
                       <TableCell>
                         <TreasuryPositionIdentity
-                          name={position.label || shortenMarketAddress(position.providerReference)}
+                          name={positionDisplayName(position)}
                           provider={earnProviderLabel(position.provider)}
                         />
                       </TableCell>
@@ -2010,10 +2028,10 @@ export function TreasurySolutionsWorkspace({
   // and must not have side effects (StrictMode double-invokes it in dev).
   const addVaultDepositWatches = useCallback(
     (incoming: readonly VaultDepositWatchInput[]) => {
-      const observedIncoming = [...incoming].reverse().map((deposit) => ({
-        ...deposit,
-        observedOrder: ++vaultActivityOrder.current,
-      }));
+      const observedIncoming = observeIncomingVaultMovements(
+        incoming,
+        () => ++vaultActivityOrder.current
+      );
       setVaultDepositWatches((current) =>
         mergeTrackedVaultMovements(current, observedIncoming, settledVaultDepositIds)
       );
@@ -2024,10 +2042,10 @@ export function TreasurySolutionsWorkspace({
   // Same pure-updater and tombstone rules as the deposit watches above.
   const addVaultWithdrawalWatches = useCallback(
     (incoming: readonly VaultWithdrawalWatchInput[]) => {
-      const observedIncoming = [...incoming].reverse().map((withdrawal) => ({
-        ...withdrawal,
-        observedOrder: ++vaultActivityOrder.current,
-      }));
+      const observedIncoming = observeIncomingVaultMovements(
+        incoming,
+        () => ++vaultActivityOrder.current
+      );
       setVaultWithdrawalWatches((current) =>
         mergeTrackedVaultMovements(current, observedIncoming, settledVaultWithdrawalIds)
       );

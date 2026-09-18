@@ -25,8 +25,8 @@ import type {
   DvpCreateOption,
   DvpCreateWallet,
 } from "./dvp-create.data";
-import { CUSTOM } from "./use-dvp-create-form";
 import type { DvpPayout } from "./use-dvp-destinations";
+import { CUSTOM } from "./use-dvp-leg";
 import type { DvpPartySlot } from "./use-dvp-parties";
 
 /** Mirrors MAX_REF_STRING_BYTES in `services/dvp/validate.ts`. */

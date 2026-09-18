@@ -7,7 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { truncateMiddle } from "../truncate-middle";
-import { type EarnDepositAvailabilityLabels, earnDepositAvailabilityLabel } from "./earn-format";
+import {
+  type EarnDepositAvailabilityLabels,
+  earnDepositAvailabilityLabel,
+  shortenMarketAddress,
+} from "./earn-format";
 import type { EarnVaultDepositAvailability } from "./earn-surfacing";
 
 export interface EarnStrategyAsset {
@@ -61,10 +65,6 @@ export function formatProviderApy(value: string | undefined, locale: string): st
     minimumFractionDigits: 1,
     maximumFractionDigits: 2,
   }).format(rate);
-}
-
-export function shortenMarketAddress(value: string): string {
-  return value.length <= 16 ? value : truncateMiddle(value, 6, 6);
 }
 
 /**

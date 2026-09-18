@@ -22,7 +22,7 @@ import { z } from "zod";
  */
 const decimalString = z.string();
 
-export const kaminoVaultAllocationSchema = z.object({
+const kaminoVaultAllocationSchema = z.object({
   reserve: z.string().min(1),
   marketName: z.string().min(1),
   actualPct: decimalString,
