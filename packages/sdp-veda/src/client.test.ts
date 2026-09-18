@@ -376,9 +376,47 @@ describe("readVaultPositions", () => {
     ).rejects.toThrow(/deadline elapsed/);
   });
 
-  it("bounds concurrent vault reads", () => {
-    expect(VEDA_POSITION_READ_CONCURRENCY).toBeGreaterThan(0);
-    expect(VEDA_POSITION_READ_CONCURRENCY).toBeLessThanOrEqual(8);
+  /**
+   * Behavioral, not a constant range-check: an unbounded fan-out
+   * (`Promise.all` over every vault) must fail `maxActive` here, and a cap of
+   * zero must hang this test instead of passing it.
+   */
+  it("bounds concurrent vault reads through the real worker pool", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const releases: Array<() => void> = [];
+    mocks.readVedaPosition.mockImplementation(async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      active -= 1;
+      return position(VAULT_A);
+    });
+
+    const pending = client.readVaultPositions(sandbox, {
+      owner: OWNER,
+      providerReferences: Array.from({ length: VEDA_POSITION_READ_CONCURRENCY + 5 }, () => VAULT_A),
+    });
+
+    // Only the cap may ever be in flight; the rest wait for a release.
+    await vi.waitFor(() =>
+      expect(mocks.readVedaPosition).toHaveBeenCalledTimes(VEDA_POSITION_READ_CONCURRENCY)
+    );
+    expect(maxActive).toBe(VEDA_POSITION_READ_CONCURRENCY);
+    for (const release of releases.splice(0)) release();
+
+    await vi.waitFor(() =>
+      expect(mocks.readVedaPosition).toHaveBeenCalledTimes(VEDA_POSITION_READ_CONCURRENCY * 2)
+    );
+    for (const release of releases.splice(0)) release();
+
+    await vi.waitFor(() =>
+      expect(mocks.readVedaPosition).toHaveBeenCalledTimes(VEDA_POSITION_READ_CONCURRENCY + 5)
+    );
+    for (const release of releases.splice(0)) release();
+
+    await expect(pending).resolves.toHaveLength(VEDA_POSITION_READ_CONCURRENCY + 5);
+    expect(maxActive).toBe(VEDA_POSITION_READ_CONCURRENCY);
   });
 });
 

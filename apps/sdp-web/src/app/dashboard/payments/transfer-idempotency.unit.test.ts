@@ -202,7 +202,16 @@ describe("concurrent transfer submissions", () => {
       sendTransferUnderKey(SUBMISSION, t),
       sendTransferUnderKey(SUBMISSION, t),
     ]);
-    expect(outcomes[0]).toEqual(outcomes[1]);
+    // Both callers report the ONE payment the key joined them into — each
+    // anchored to the literal, so a divergence between them cannot hide.
+    expect(outcomes[0]?.outcome).toEqual({
+      kind: "submitted",
+      transfer: { id: "xfr_2", status: "confirmed" },
+    });
+    expect(outcomes[1]?.outcome).toEqual({
+      kind: "submitted",
+      transfer: { id: "xfr_2", status: "confirmed" },
+    });
     const sends = fetchMock.mock.calls.filter(([input]) =>
       String(input).includes("payments/transfers")
     );
