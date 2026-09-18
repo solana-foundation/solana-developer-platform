@@ -11,7 +11,7 @@ import {
   walletBalanceForMint,
 } from "./earn-vault-deposit-modal";
 import {
-  claimVaultDepositIdempotencyKey,
+  vaultDepositIdempotencyKeyStore,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
 import {
@@ -594,7 +594,7 @@ describe("EarnVaultDepositModal", () => {
     ) as Array<{ id: string; createdAt: number; expiresAt?: number | null }>;
     const held = entries.find((entry) => entry.id === fingerprint);
     expect(held?.expiresAt).toBeNull();
-    expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(
       mocks.createEarnVaultDeposit.mock.calls[0][1]
     );
   });
@@ -657,7 +657,7 @@ describe("EarnVaultDepositModal", () => {
       amount: "1",
       toleranceBps: null,
     });
-    expect(claimVaultDepositIdempotencyKey(fingerprint)).not.toBe(
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).not.toBe(
       mocks.createEarnVaultDeposit.mock.calls[1][1]
     );
   });
