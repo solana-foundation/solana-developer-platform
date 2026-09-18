@@ -8,6 +8,7 @@ import {
 import {
   BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS,
   BVNK_FUNDING_WALLET_FIAT,
+  BVNK_PAYOUT_NETWORK,
   type BvnkCustomerResolution,
   type BvnkOfframpBeneficiary,
   type BvnkOfframpWallet,
@@ -15,7 +16,8 @@ import {
   buildBvnkFundingWalletName,
   buildBvnkOfframpWalletName,
   buildBvnkWalletIdempotencyKey,
-  bvnkRuleEntityFromCustomer,
+  bvnkOnrampRemittance,
+  bvnkPayoutPartyDetailsFromCustomer,
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
   readBvnkData,
@@ -32,15 +34,19 @@ import {
 } from "@sdp/payments/ramps/providers/bvnk/requirements";
 import type {
   BvnkAgreementSession,
+  BvnkCustomer,
   BvnkCustomerIndividual,
   BvnkLedgerWalletProfilesV2,
   BvnkLedgerWalletProfileV2,
   BvnkLedgerWalletV2,
+  BvnkOnrampPayoutInput,
+  BvnkV2WalletListRow,
 } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { isBvnkRuleActive } from "@sdp/payments/ramps/providers/bvnk/schemas";
+import { readStoredBvnkSettlement } from "@sdp/payments/ramps/providers/bvnk/settlement";
 import { buildRequirementSchema } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import { toNumberAmount } from "@sdp/solana/amount";
 import type {
   BvnkBankFundingDetails,
   BvnkFiatFundingInstruction,
@@ -49,23 +55,24 @@ import type {
   CryptoRailId,
   PaymentRampQuote,
 } from "@sdp/types";
-import { BVNK_FUNDING_WALLET_STATUS, isTerminalRampTransferStatus } from "@sdp/types";
+import { BVNK_FUNDING_WALLET_STATUS } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type {
-  BvnkReservedTransfer,
   CollectedFieldData,
   CounterpartyRequirements,
   RampDirection,
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
+import type { BvnkOnrampPayoutIntent } from "@/db/repositories/bvnk-onramp-transfers.repository";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import {
   type BvnkCustomerProviderAccountMetadata,
   bvnkCustomerProviderAccountMetadataSchema,
-  bvnkFundingWalletLockSchema,
   type CounterpartyProviderAccountRow,
+  type CounterpartyProviderAccountsRepository,
   counterpartyProviderAccountUuid,
+  type GetCounterpartyProviderAccountInput,
 } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type {
@@ -88,6 +95,19 @@ import type { Env } from "@/types/env";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
 
 const BVNK_UNRESOLVED_CONSENT_IP = "0.0.0.0";
+
+/** Builds the tenant scope of a BVNK provider-account row. */
+function bvnkAccountScope(
+  counterparty: CounterpartyRow,
+  projectId: string
+): GetCounterpartyProviderAccountInput {
+  return {
+    organizationId: counterparty.organization_id,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: "bvnk",
+  };
+}
 
 /** Creates the pending off-ramp transfer row that anchors a BVNK channel quote. */
 export async function createPendingBvnkOfframpTransfer(
@@ -202,24 +222,27 @@ function bvnkWalletBankAccount(wallet: BvnkLedgerWalletV2): BvnkBankFundingDetai
   if (instrument === undefined) {
     return undefined;
   }
+  const nid = instrument.bankDetails.nid;
   return {
     accountNumber: instrument.accountNumber,
     code: instrument.bankDetails.bic,
     paymentReference: instrument.remittanceInformationPrefix,
+    ...(nid !== undefined && nid.type === "ROUTING_NUMBER" ? { routingNumber: nid.value } : {}),
     bankName: instrument.bankDetails.name,
   };
 }
 
-/** Persists a merchant-owned off-ramp wallet to provider_data.bvnk.offramp.wallets. */
-async function persistBvnkOfframpWallet(
+/** Persists an entry into provider_data.bvnk.offramp. */
+async function persistBvnkOfframpData(
   c: AppContext,
   counterparty: CounterpartyRow,
   projectId: string,
-  fiatCurrency: string,
-  wallet: BvnkLedgerWalletV2
+  mutateOfframp: (
+    providerData: CounterpartyRow["provider_data"],
+    offramp: Record<string, unknown>
+  ) => Record<string, unknown>
 ): Promise<void> {
   const repo = getCounterpartiesRepository(c);
-  // TODO(PRO-1824): Move BVNK merchant-wallet state to counterparty_provider_accounts.
   await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
@@ -230,56 +253,53 @@ async function persistBvnkOfframpWallet(
         bvnk.offramp && typeof bvnk.offramp === "object"
           ? (bvnk.offramp as Record<string, unknown>)
           : {};
-      const wallets = readBvnkOfframpWallets(providerData);
       return {
         ...providerData,
-        bvnk: {
-          ...bvnk,
-          offramp: {
-            ...offramp,
-            wallets: { ...wallets, [fiatCurrency]: { id: wallet.id, status: wallet.status } },
-          },
-        },
+        bvnk: { ...bvnk, offramp: mutateOfframp(providerData, offramp) },
       };
     },
   });
 }
 
+/** Persists a merchant-owned off-ramp wallet to provider_data.bvnk.offramp.wallets. */
+async function persistBvnkOfframpWallet(
+  c: AppContext,
+  counterparty: CounterpartyRow,
+  projectId: string,
+  fiatCurrency: string,
+  wallet: BvnkLedgerWalletV2
+): Promise<void> {
+  await persistBvnkOfframpData(c, counterparty, projectId, (providerData, offramp) => {
+    const wallets = readBvnkOfframpWallets(providerData);
+    return {
+      ...offramp,
+      wallets: { ...wallets, [fiatCurrency]: { id: wallet.id, status: wallet.status } },
+    };
+  });
+}
+
 /**
- * Provisions (or reuses) a merchant-owned BVNK fiat wallet for an off-ramp,
- * keyed per fiat currency in provider_data.bvnk.offramp.wallets — instead of the
- * shared BVNK_WALLET_ID. No customer/KYC: the wallet is owned by the merchant.
- *
- * A freshly-created wallet is not immediately ACTIVE; when a stored wallet is
- * still inactive its status is refreshed from BVNK so the requirements flow can
- * keep returning `customer_funding_account_provisioning` until BVNK activates it.
- */
-/**
- * Admits and resolves a BVNK provisioning step in the tamper-evident ledger.
- * Provider-side objects created here (customers, wallets, payout
- * beneficiaries, payment rules, agreement working sets) decide where future
- * settlements land, so their creation must be attributable; the route path
- * binds the request actor, the webhook path a system actor.
- *
- * Intent/outcome, not a single entry: `begin` writes a durable intent BEFORE
- * the effect — a refused ledger write aborts the step while it is still
- * retryable — and `complete` resolves it with the provider-assigned ids after
- * the local state is persisted. An effect that dies between the two leaves an
- * unresolved intent, which is exactly what the unresolved-intent verification
- * gate pages on; the ledger never claims a creation that did not happen.
+ * Admits and resolves a BVNK provisioning step in the tamper-evident ledger:
+ * `begin` writes a durable intent before the effect (a refused write aborts
+ * the still-retryable step), `complete` resolves it once local state is
+ * persisted, and `fail` records a failed attempt.
  */
 export interface BvnkProvisioningAudit {
   begin(event: { action: string; metadata: Record<string, unknown> }): Promise<AuditIntent>;
   complete(intent: AuditIntent, metadata: Record<string, unknown>): Promise<void>;
-  /** Resolves the intent with a failure outcome, so a routine provider error
-   * does not strand an unresolved intent that pollutes ledger verification.
-   * The outcome records that the ATTEMPT failed, never that the provider-side
-   * object does not exist: an ambiguous error (a timeout after the provider
-   * accepted the call) may have created it, so the entry carries
-   * providerOutcome: "unverified" instead of asserting a definite state. */
+  /** Resolves the intent as a failed attempt, so a routine provider error
+   * does not strand an unresolved intent; ambiguous errors carry
+   * providerOutcome: "unverified". */
   fail(intent: AuditIntent, error: unknown): Promise<void>;
 }
 
+/**
+ * Binds a BVNK provisioning step to the tamper-evident ledger for a counterparty.
+ *
+ * @param c - Request context used for ledger access.
+ * @param counterparty - Counterparty whose provisioning steps are admitted.
+ * @returns The audit facade admitting begin/complete/fail.
+ */
 export function requestProvisioningAudit(
   c: AppContext,
   counterparty: CounterpartyRow
@@ -309,6 +329,17 @@ export function requestProvisioningAudit(
   };
 }
 
+/**
+ * Provisions or reuses the merchant-owned BVNK fiat off-ramp wallet, keyed per
+ * fiat currency; a stored inactive wallet is refreshed from BVNK.
+ *
+ * @param c - Request context used for provider and repository access.
+ * @param ctx - Ramp runtime context used for provider access.
+ * @param counterparty - Counterparty that owns the merchant wallet.
+ * @param projectId - Project that owns the counterparty.
+ * @param fiatCurrency - Fiat currency the wallet is provisioned for.
+ * @returns The stored or created off-ramp wallet.
+ */
 export async function ensureBvnkOfframpWallet(
   c: AppContext,
   ctx: RampRuntimeContext,
@@ -328,10 +359,8 @@ export async function ensureBvnkOfframpWallet(
     }
     return { id: refreshed.id, status: refreshed.status };
   }
-  const walletProfile = selectBvnkWalletProfile(
-    await client.listLedgerWalletProfilesV2(ctx, { currency: fiatCurrency }),
-    fiatCurrency
-  );
+  const profiles = await client.listLedgerWalletProfilesV2(ctx, { currency: fiatCurrency });
+  const walletProfile = selectBvnkWalletProfile(profiles, fiatCurrency);
   const walletName = buildBvnkOfframpWalletName(fiatCurrency, counterparty.id);
   const audit = requestProvisioningAudit(c, counterparty);
   const intent = await audit.begin({
@@ -361,30 +390,12 @@ async function persistBvnkOfframpBeneficiary(
   projectId: string,
   beneficiary: BvnkOfframpBeneficiary
 ): Promise<void> {
-  const repo = getCounterpartiesRepository(c);
-  // TODO(PRO-1824): Move BVNK beneficiary state to counterparty_provider_accounts.
-  await repo.mutateProviderData({
-    counterpartyId: counterparty.id,
-    organizationId: counterparty.organization_id,
-    projectId,
-    mutate(providerData) {
-      const bvnk = readBvnkData(providerData);
-      const offramp =
-        bvnk.offramp && typeof bvnk.offramp === "object"
-          ? (bvnk.offramp as Record<string, unknown>)
-          : {};
-      const beneficiaries = readBvnkOfframpBeneficiaries(providerData);
-      return {
-        ...providerData,
-        bvnk: {
-          ...bvnk,
-          offramp: {
-            ...offramp,
-            beneficiaries: { ...beneficiaries, [beneficiary.key]: beneficiary },
-          },
-        },
-      };
-    },
+  await persistBvnkOfframpData(c, counterparty, projectId, (providerData, offramp) => {
+    const beneficiaries = readBvnkOfframpBeneficiaries(providerData);
+    return {
+      ...offramp,
+      beneficiaries: { ...beneficiaries, [beneficiary.key]: beneficiary },
+    };
   });
 }
 
@@ -400,10 +411,8 @@ async function bvnkOfframpBeneficiaryKey(
 }
 
 /**
- * Registers (or reuses) an off-ramp payout beneficiary from collected bank details,
- * keyed by `${fiat}:${hash(collected)}` so re-submitting the same details reuses the
- * record. PII-light: only a marker is persisted — the deferred payout (BVNK Step C)
- * forwards the raw bank details, which are validated here but not stored.
+ * Registers (or reuses) an off-ramp payout beneficiary from collected bank
+ * details, keyed by fiat and content hash; only a PII-light marker is stored.
  */
 export async function ensureBvnkOfframpBeneficiary(
   c: AppContext,
@@ -450,8 +459,6 @@ export async function ensureBvnkOfframpBeneficiary(
     accountType: bvnkOfframpAccountType(fiatCurrency),
     createdAt: new Date().toISOString(),
   };
-  // The beneficiary marker binds this counterparty to a real-world payout
-  // destination; who registered it is the fact disputes turn on.
   const audit = requestProvisioningAudit(c, input.counterparty);
   const intent = await audit.begin({
     action: "bvnk_offramp_beneficiary_registered",
@@ -526,8 +533,7 @@ function toStoredSessionAgreements(
 }
 
 /**
- * The pre-customer stage recorded on the BVNK customer-link row, resolved
- * without any provider call.
+ * The pre-customer stage recorded on the BVNK customer-link row.
  */
 export type BvnkStoredStage =
   | {
@@ -550,13 +556,10 @@ export type BvnkStoredStage =
     };
 
 /**
- * Reads the pre-customer stage recorded on the BVNK customer-link row without
- * any provider call, so callers can gate or branch on it before deciding
- * whether the stage is actually presented to the client.
+ * Reads the pre-customer stage recorded on the BVNK customer-link row.
  *
  * @param metadata - Stored BVNK customer-link metadata.
- * @returns The pending agreements, the collect step, the claimed-but-unminted
- * session step, or null once the customer exists.
+ * @returns The pending agreements, collect, or claimed-but-unminted session step, or null.
  */
 export function bvnkStoredStage(
   metadata: BvnkCustomerProviderAccountMetadata
@@ -579,10 +582,7 @@ export function bvnkStoredStage(
     };
   }
   if (session.consentSubmittedAt !== undefined) {
-    return {
-      kind: "agreements_submitted",
-      sessionReference: session.reference,
-    };
+    return { kind: "agreements_submitted", sessionReference: session.reference };
   }
   return {
     kind: "agreements_pending",
@@ -592,9 +592,7 @@ export function bvnkStoredStage(
 }
 
 /**
- * Presents a stored stage to the client. The agreement step surfaces the
- * session's static help-centre links recorded at mint; nothing is minted
- * per response.
+ * Presents a stored stage to the client.
  *
  * @param direction - Ramp direction used in the requirement response.
  * @param stage - Stored stage from {@link bvnkStoredStage}.
@@ -613,22 +611,23 @@ export function presentBvnkStoredStage(
         agreements: stage.agreements,
       };
     case "agreements_submitted":
-      return {
-        provider: "bvnk",
-        direction,
-        status: "counterparty_agreement_signing",
-      };
+      return { provider: "bvnk", direction, status: "counterparty_agreement_signing" };
     case "collect_counterparty":
       return bvnkCollectCounterparty(direction, stage.residenceCountryCode);
     case "session_pending":
       return bvnkResidenceRequired(direction);
-    default: {
-      const exhaustive: never = stage;
-      throw internalError(`Unhandled BVNK stored stage: ${String(exhaustive)}`);
-    }
+    default:
+      throw internalError(`Unhandled BVNK stored stage: ${String(stage satisfies never)}`);
   }
 }
 
+/**
+ * Derives the client-facing BVNK requirement from stored customer-link metadata.
+ *
+ * @param direction - Ramp direction used in the requirement response.
+ * @param metadata - Stored customer-link metadata.
+ * @returns The stored stage's requirement, or null once the customer exists.
+ */
 export function bvnkCustomerRequirementsFromMetadata(
   direction: RampDirection,
   metadata: BvnkCustomerProviderAccountMetadata
@@ -637,14 +636,24 @@ export function bvnkCustomerRequirementsFromMetadata(
   return stage === null ? null : presentBvnkStoredStage(direction, stage);
 }
 
+/** Reads the counterparty's BVNK customer-link provider-account row. */
+function readCustomerLinkRow(
+  accounts: CounterpartyProviderAccountsRepository,
+  counterparty: CounterpartyRow,
+  projectId: string
+): Promise<CounterpartyProviderAccountRow | null> {
+  return accounts.getProviderAccount({
+    organizationId: counterparty.organization_id,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: "bvnk",
+  });
+}
+
 /**
- * Claims, mints, and stores a BVNK agreement session for a residence country.
- * The row reservation is claimed before the provider call and the minted
- * session is CAS-written onto it, so a concurrent mint either loses the CAS
- * and converges on the winner's session, or a crash leaves a claimed row that
- * the next residence submit mints from. The residence country is immutable
- * once claimed: the session is always minted for the stored country, and a
- * submit naming a different country is rejected before any provider call.
+ * Claims, mints, and stores a BVNK agreement session for the residence
+ * country claimed on the row; the session is CAS-written so a concurrent
+ * mint converges on the winner, and the country is immutable once claimed.
  *
  * @param c - Request context used for provider and repository access.
  * @param input - Provider client, runtime context, counterparty, project, ramp
@@ -663,12 +672,7 @@ async function mintBvnkAgreementSession(
   }
 ): Promise<{ requirements: CounterpartyRequirements }> {
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const scope = {
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk" as const,
-  };
+  const scope = bvnkAccountScope(input.counterparty, input.projectId);
   const present = (
     metadata: BvnkCustomerProviderAccountMetadata,
     outcome: "assigned" | "converged"
@@ -709,17 +713,11 @@ async function mintBvnkAgreementSession(
   if (claimed.session !== undefined) {
     return present(claimed, "converged");
   }
-  // The agreement session is the provider-side consent artifact this
-  // counterparty will sign; its creation is admitted intent/outcome like the
-  // other BVNK provisioning steps.
   const audit = requestProvisioningAudit(c, input.counterparty);
   const intent = await audit.begin({
     action: "bvnk_agreement_session_created",
     metadata: { countryCode: residenceCountry },
   });
-  // The catch covers only the effect and its durable write: everything after
-  // `complete` runs outside it, so one intent can never collect a success
-  // outcome and then a contradicting failure outcome from the read-back path.
   let assigned: Awaited<ReturnType<typeof accounts.setCustomerLinkSession>>;
   try {
     const session = await input.client.createAgreementSession(input.ctx, {
@@ -750,12 +748,9 @@ async function mintBvnkAgreementSession(
 }
 
 /**
- * Moves the v1 customer reference onto the customer-link row with a
- * compare-and-swap against the stored pre-customer alias, keeping the
- * residence country and signed session and adding `status`. A lost CAS means a concurrent create
- * already assigned the reference, so the row is re-read: the concurrent
- * assignment of the same reference converges, anything else is an internal
- * error.
+ * Moves the v1 customer reference onto the customer-link row, CAS'd against
+ * the stored pre-customer alias; a lost CAS re-reads and converges on the
+ * same reference, anything else is an internal error.
  *
  * @param c - Request context used for repository access.
  * @param input - Tenant scope, row id, the alias to swap from, the pre-customer metadata to keep, and the v1 customer.
@@ -774,32 +769,27 @@ async function assignBvnkCustomerLink(
 ): Promise<BvnkCustomerResolution> {
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
   const assigned = await accounts.assignCustomerLinkReference({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk",
+    ...bvnkAccountScope(input.counterparty, input.projectId),
     id: input.providerAccountId,
     fromProviderCustomerReference: input.fromProviderCustomerReference,
     providerCustomerReference: input.customer.customerReference,
     metadata: { ...input.metadata, status: input.customer.status },
   });
-  if (assigned !== null) {
+  const logCustomerLinkAssignment = (customerReference: string, outcome: string): void => {
     getLogger().info(
       {
         counterparty_id: input.counterparty.id,
-        customer_reference: input.customer.customerReference,
-        outcome: "assigned",
+        customer_reference: customerReference,
+        outcome,
       },
       "[bvnk customer] v1 customer reference assigned to customer link"
     );
+  };
+  if (assigned !== null) {
+    logCustomerLinkAssignment(input.customer.customerReference, "assigned");
     return input.customer;
   }
-  const current = await accounts.getProviderAccount({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk",
-  });
+  const current = await readCustomerLinkRow(accounts, input.counterparty, input.projectId);
   if (
     current === null ||
     current.provider_customer_reference !== input.customer.customerReference
@@ -810,23 +800,12 @@ async function assignBvnkCustomerLink(
   if (metadata.status === undefined) {
     throw internalError("BVNK customer-link row is missing its customer status.");
   }
-  getLogger().info(
-    {
-      counterparty_id: input.counterparty.id,
-      customer_reference: current.provider_customer_reference,
-      outcome: "converged",
-    },
-    "[bvnk customer] v1 customer reference assigned to customer link"
-  );
-  return {
-    customerReference: current.provider_customer_reference,
-    status: metadata.status,
-  };
+  logCustomerLinkAssignment(current.provider_customer_reference, "converged");
+  return { customerReference: current.provider_customer_reference, status: metadata.status };
 }
 
 /**
- * Creates the v1 BVNK customer after the signed agreement session, persisting
- * the v1 reference and status onto the customer-link row.
+ * Creates the v1 BVNK customer from the signed session's collected PII.
  *
  * @param c - Request context used for persistence.
  * @param input - Provider inputs and transient customer data.
@@ -846,9 +825,6 @@ async function createBvnkCustomer(
     metadata: BvnkCustomerProviderAccountMetadata;
   }
 ): Promise<{ customer: BvnkCustomerResolution }> {
-  // Creating the provider customer binds this counterparty's KYC identity at
-  // BVNK; the intent precedes the call, the outcome carries the assigned
-  // reference.
   const audit = requestProvisioningAudit(c, input.counterparty);
   const intent = await audit.begin({
     action: "bvnk_customer_created",
@@ -891,14 +867,8 @@ export async function readBvnkCustomerLink(
   env: Env,
   counterparty: CounterpartyRow
 ): Promise<BvnkCustomerResolution | null> {
-  const link = await createPostgresCounterpartyProviderAccountsRepository(
-    getDb(env)
-  ).getProviderAccount({
-    organizationId: counterparty.organization_id,
-    projectId: counterparty.project_id,
-    counterpartyId: counterparty.id,
-    provider: "bvnk",
-  });
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+  const link = await readCustomerLinkRow(accounts, counterparty, counterparty.project_id);
   if (!link) {
     return null;
   }
@@ -914,12 +884,8 @@ export async function readBvnkCustomerLink(
 }
 
 /**
- * Reads the v1 customer from BVNK by its stored reference, patches status and
- * verification status onto the customer-link row, and returns the resolution
- * with its verification link when BVNK supplies one. A PENDING customer is in
- * review and carries no Sumsub link until BVNK requires action, so the link is
- * only required once the status maps to verification_required, which
- * bvnkCustomerStatusRequirements enforces.
+ * Refreshes the v1 customer from BVNK by its stored reference, patching
+ * status and verification status onto the customer-link row.
  *
  * @param env - Request environment used for repository access.
  * @param ctx - Ramp runtime context used for provider access.
@@ -939,19 +905,14 @@ export async function refreshBvnkCustomerAccount(
   const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomer(ctx, {
     reference: input.customerReference,
   });
-  const verification = latest.verification;
-  const verificationStatus = verification?.status;
+  const verificationStatus = latest.verification?.status;
   const set: BvnkCustomerProviderAccountMetadata = {
     status: latest.status,
     ...(verificationStatus === undefined ? {} : { verificationStatus }),
   };
-  const updated = await createPostgresCounterpartyProviderAccountsRepository(
-    getDb(env)
-  ).patchAccountMetadata({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk",
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+  const updated = await accounts.patchAccountMetadata({
+    ...bvnkAccountScope(input.counterparty, input.projectId),
     id: input.providerAccountId,
     set,
     unset: [],
@@ -965,7 +926,7 @@ export async function refreshBvnkCustomerAccount(
       status: latest.status,
       ...(verificationStatus === undefined ? {} : { verificationStatus }),
     },
-    verificationUrl: verification === undefined ? undefined : verification.url,
+    verificationUrl: latest.verification?.url,
   };
 }
 
@@ -990,10 +951,8 @@ function presentBvnkStoredMetadata(
 }
 
 /**
- * Signs the stored agreement session at BVNK with the consenting user's IP and
- * CAS-records `session.consentSubmittedAt` without touching a `signedAt` the
- * status webhook may already have written. A lost CAS means a concurrent
- * consent already recorded it, so the row is re-read and its stage presented.
+ * Signs the stored agreement session at BVNK with the consenting user's IP,
+ * CAS-recording `session.consentSubmittedAt`.
  *
  * @param c - Request context used for the client IP and repository access.
  * @param input - Provider client, runtime context, counterparty, project, ramp
@@ -1013,16 +972,9 @@ async function recordBvnkAgreementConsent(
   }
 ): Promise<{ requirements: CounterpartyRequirements }> {
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const scope = {
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk" as const,
-  };
+  const scope = bvnkAccountScope(input.counterparty, input.projectId);
   const ipAddress = getClientIp(c);
   const consentIp = ipAddress === null ? BVNK_UNRESOLVED_CONSENT_IP : ipAddress;
-  // Signing registers the consent (and its IP) with the provider — a legal
-  // state change admitted intent/outcome like the other provisioning steps.
   const audit = requestProvisioningAudit(c, input.counterparty);
   const intent = await audit.begin({
     action: "bvnk_agreement_session_signed",
@@ -1071,18 +1023,16 @@ async function recordBvnkAgreementConsent(
 }
 
 /**
- * Advances the BVNK customer lifecycle: mints an agreement session on the
- * first residence step, signs it on consent with the consenting user's IP,
- * creates the v1 customer from the collected PII pack, or refreshes the
- * stored customer from BVNK.
+ * Advances the BVNK customer lifecycle: mints the agreement session, signs it
+ * on consent, creates the v1 customer from the collected PII pack, or
+ * refreshes the stored customer from BVNK.
  *
  * @param c - Request context used for provider and repository access.
  * @param counterparty - Counterparty whose provider state is resolved.
  * @param projectId - Project that owns the counterparty.
  * @param direction - Ramp direction used when returning an intermediate requirement.
- * @param collectedData - Residence country on the first step; the full PII pack
- *   once the session is signed. Only the residence country is stored (the
- *   claim); the PII pack is never persisted.
+ * @param collectedData - Residence country on the first step; the full PII pack once
+ *   signed — only the residence country is stored, never the PII pack.
  * @param agreementConsent - Signs the stored agreement session when true.
  * @returns A refreshed customer or the next agreement requirement.
  */
@@ -1100,12 +1050,7 @@ export async function ensureBvnkCustomer(
   const ctx = rampRuntime(c);
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const existing = await accounts.getProviderAccount({
-    organizationId: counterparty.organization_id,
-    projectId,
-    counterpartyId: counterparty.id,
-    provider: "bvnk",
-  });
+  const existing = await readCustomerLinkRow(accounts, counterparty, projectId);
 
   if (existing) {
     const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(existing.metadata);
@@ -1169,26 +1114,118 @@ export async function ensureBvnkCustomer(
   });
 }
 
+/** Reads the counterparty's per-fiat BVNK funding-wallet row. */
+async function readFundingWalletRow(
+  accounts: CounterpartyProviderAccountsRepository,
+  scope: GetCounterpartyProviderAccountInput,
+  fiatCurrency: string
+): Promise<CounterpartyProviderAccountRow | null> {
+  return accounts.getAccountByKindAndCurrency({ ...scope, kind: "funding_wallet", fiatCurrency });
+}
+
+/** CAS-assigns the funding reference onto the claimed row, re-reading on a lost CAS. */
+async function assignFundingWalletReferenceOrReadBack(
+  accounts: CounterpartyProviderAccountsRepository,
+  scope: GetCounterpartyProviderAccountInput,
+  row: CounterpartyProviderAccountRow,
+  fiatCurrency: string,
+  walletId: string,
+  divergedFrom: string,
+  assignedLogMessage?: string
+): Promise<CounterpartyProviderAccountRow> {
+  const assigned = await accounts.assignFundingWalletReference({
+    ...scope,
+    id: row.id,
+    externalAccountReference: walletId,
+  });
+  if (assigned !== null) {
+    if (assignedLogMessage !== undefined) {
+      getLogger().info(
+        {
+          provider_account_id: assigned.id,
+          wallet_id: walletId,
+          fiat_currency: fiatCurrency,
+        },
+        assignedLogMessage
+      );
+    }
+    return assigned;
+  }
+  const current = await readFundingWalletRow(accounts, scope, fiatCurrency);
+  if (current === null || current.external_account_reference !== walletId) {
+    throw internalError(`BVNK funding wallet reference diverged from the ${divergedFrom} wallet.`);
+  }
+  return current;
+}
+
 /**
- * Claims the per-fiat customer funding wallet row and creates the BVNK wallet
- * for a verified customer. Claim-before-spend: the INSERT on the partial
- * unique index decides the race, the wallet is created only after the row
- * exists, and the wallet id is CAS-written onto the row
- * `WHERE external_account_reference IS NULL`. A lost CAS re-reads the row: a
- * reference equal to the created wallet id is the converged outcome of a
- * concurrent provisioning, anything else fails loudly and nothing is
- * overwritten. BVNK does not deduplicate concurrent creates under one
- * idempotency key, so a claimed row whose reference has not landed is treated
- * as creation in flight until BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS passes:
- * the webhook parks and replay retries once the reference lands. Only a claim
- * older than the window is taken over as a crashed claimer, using the
- * name-hashed idempotency key as a non-concurrent retry that BVNK does dedupe.
+ * Adopts an existing BVNK funding wallet for the claimed row: the wallet list
+ * was queried by customer and currency, so the name is matched locally and
+ * validated per match; more than one fails loudly, exactly one is CAS-assigned.
+ *
+ * @param accounts - The counterparty provider-account repository.
+ * @param scope - Tenant scope of the funding row.
+ * @param row - The claimed funding-wallet row the reference is assigned to.
+ * @param customerLink - The verified customer-link row carrying the provider customer reference.
+ * @param fiatCurrency - The fiat currency the wallet was provisioned for.
+ * @param walletName - The deterministic SDP wallet name to match locally.
+ * @param wallets - Every wallet BVNK returned for the customer and currency.
+ * @returns The row carrying the adopted wallet reference, or null to proceed to create.
+ */
+async function adoptBvnkFundingWalletByName(
+  accounts: CounterpartyProviderAccountsRepository,
+  scope: GetCounterpartyProviderAccountInput,
+  row: CounterpartyProviderAccountRow,
+  customerLink: CounterpartyProviderAccountRow,
+  fiatCurrency: string,
+  walletName: string,
+  wallets: BvnkV2WalletListRow[]
+): Promise<CounterpartyProviderAccountRow | null> {
+  const namedMatches = wallets.filter((wallet) => wallet.name === walletName);
+  for (const wallet of namedMatches) {
+    const walletCurrency = wallet.balance === undefined ? null : wallet.balance.currency;
+    if (
+      wallet.customer.id !== customerLink.provider_customer_reference ||
+      walletCurrency !== fiatCurrency
+    ) {
+      throw internalError(
+        `BVNK funding wallet ${wallet.id} is not the ${fiatCurrency} funding wallet of the customer link`
+      );
+    }
+  }
+  if (namedMatches.length > 1) {
+    const walletIds = namedMatches.map((wallet) => wallet.id).join(", ");
+    throw internalError(
+      `BVNK funding wallet name ${walletName} is held by multiple wallets: ${walletIds}`
+    );
+  }
+  if (namedMatches.length === 0) {
+    return null;
+  }
+  const wallet = namedMatches[0];
+  return assignFundingWalletReferenceOrReadBack(
+    accounts,
+    scope,
+    row,
+    fiatCurrency,
+    wallet.id,
+    "adopted",
+    "[bvnk] funding wallet adopted by customer and currency"
+  );
+}
+
+/**
+ * Claims the per-fiat funding-wallet row, then creates or adopts the BVNK
+ * funding wallet, CAS-writing the reference onto the claimed row.
  *
  * @param env - Process environment used for repository access.
  * @param ctx - Ramp runtime context used for provider access.
- * @param input - Counterparty, project, the verified customer-link row, the
- * fiat currency to provision, and the provisioning audit.
- * @returns The claimed funding-wallet row carrying the created wallet reference.
+ * @param input.counterparty - Counterparty whose funding wallet is provisioned.
+ * @param input.projectId - Project that owns the counterparty.
+ * @param input.customerLink - Verified BVNK customer-link row carrying the provider customer reference.
+ * @param input.fiatCurrency - Fiat currency the funding wallet is provisioned for.
+ * @param input.audit - Provisioning audit admitting the wallet creation intent.
+ * @returns The claimed funding-wallet row carrying the created or adopted wallet reference.
  */
 export async function ensureBvnkFundingWallet(
   env: Env,
@@ -1203,25 +1240,16 @@ export async function ensureBvnkFundingWallet(
 ): Promise<CounterpartyProviderAccountRow> {
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
-  const scope = {
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk" as const,
-  };
+  const scope = bvnkAccountScope(input.counterparty, input.projectId);
   const claimed = await accounts.claimFundingWallet({
     ...scope,
     providerCustomerReference: input.customerLink.provider_customer_reference,
     fiatCurrency: input.fiatCurrency,
     providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
   });
-  let row: CounterpartyProviderAccountRow;
-  if (claimed === null) {
-    const existing = await accounts.getAccountByKindAndCurrency({
-      ...scope,
-      kind: "funding_wallet",
-      fiatCurrency: input.fiatCurrency,
-    });
+  let row = claimed;
+  if (row === null) {
+    const existing = await readFundingWalletRow(accounts, scope, input.fiatCurrency);
     if (existing === null) {
       throw internalError("BVNK funding wallet claim conflicted with no active row.");
     }
@@ -1231,18 +1259,38 @@ export async function ensureBvnkFundingWallet(
     if (Date.now() - Date.parse(existing.updated_at) < BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS) {
       throw internalError(`BVNK funding wallet ${existing.id} creation is in flight`);
     }
-    row = existing;
-  } else {
-    row = claimed;
+    const leased = await accounts.leaseStaleFundingWalletClaim({
+      ...scope,
+      id: existing.id,
+      cutoff: new Date(Date.now() - BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS).toISOString(),
+    });
+    if (leased === null) {
+      throw internalError(`BVNK funding wallet ${existing.id} creation is in flight`);
+    }
+    row = leased;
   }
   const walletName = buildBvnkFundingWalletName(input.customerLink.id);
-  const profile = selectBvnkWalletProfile(
-    await client.listLedgerWalletProfilesV2(ctx, {
-      customerId: input.customerLink.provider_customer_reference,
-      currency: input.fiatCurrency,
-    }),
-    input.fiatCurrency
+  const existingWallets = await client.listLedgerWalletsV2(ctx, {
+    customerId: input.customerLink.provider_customer_reference,
+    currency: input.fiatCurrency,
+  });
+  const adopted = await adoptBvnkFundingWalletByName(
+    accounts,
+    scope,
+    row,
+    input.customerLink,
+    input.fiatCurrency,
+    walletName,
+    existingWallets.content
   );
+  if (adopted !== null) {
+    return adopted;
+  }
+  const profiles = await client.listLedgerWalletProfilesV2(ctx, {
+    customerId: input.customerLink.provider_customer_reference,
+    currency: input.fiatCurrency,
+  });
+  const profile = selectBvnkWalletProfile(profiles, input.fiatCurrency);
   const intent = await input.audit.begin({
     action: "bvnk_funding_wallet_created",
     metadata: { walletName, fiatCurrency: input.fiatCurrency, providerAccountId: row.id },
@@ -1263,24 +1311,14 @@ export async function ensureBvnkFundingWallet(
     await input.audit.fail(intent, error);
     throw error;
   }
-  const assigned = await accounts.assignFundingWalletReference({
-    ...scope,
-    id: row.id,
-    externalAccountReference: wallet.id,
-  });
-  if (assigned === null) {
-    const current = await accounts.getAccountByKindAndCurrency({
-      ...scope,
-      kind: "funding_wallet",
-      fiatCurrency: input.fiatCurrency,
-    });
-    if (current === null || current.external_account_reference !== wallet.id) {
-      throw internalError("BVNK funding wallet reference diverged from the created wallet.");
-    }
-    row = current;
-  } else {
-    row = assigned;
-  }
+  row = await assignFundingWalletReferenceOrReadBack(
+    accounts,
+    scope,
+    row,
+    input.fiatCurrency,
+    wallet.id,
+    "created"
+  );
   await input.audit.complete(intent, { walletId: wallet.id });
   getLogger().info(
     {
@@ -1295,45 +1333,21 @@ export async function ensureBvnkFundingWallet(
 }
 
 /**
- * Deactivates every ACTIVE payment rule on a wallet, optionally only the
- * rules whose reference matches one transfer. This is the single source of
- * truth for rule teardown: SDP stores no rule id, so the wallet's rule list
- * decides which rules to deactivate.
- *
- * @param ctx - Ramp runtime context used for provider access.
- * @param input - The wallet to weed, and the transfer id to restrict the teardown to.
- * @returns The number of rules deactivated.
- */
-export async function deactivateBvnkRules(
-  ctx: RampRuntimeContext,
-  input: { walletId: string; transferId?: string }
-): Promise<number> {
-  const rules = await RAMP_PROVIDER_CLIENTS.bvnk.listOnrampRules(ctx, {
-    walletId: input.walletId,
-  });
-  const active = rules.filter(
-    (rule) =>
-      isBvnkRuleActive(rule.status) &&
-      (input.transferId === undefined || rule.reference === input.transferId)
-  );
-  for (const rule of active) {
-    await RAMP_PROVIDER_CLIENTS.bvnk.deactivateOnrampRule(ctx, { ruleId: rule.id });
-  }
-  return active.length;
-}
-
-/**
- * Builds and locks the BVNK on-ramp quote: weeds stale rules, creates the
- * per-transfer payment rule, and returns the funding instructions. The quote
- * holds the funding wallet lock until the pay-in settles or the client
- * cancels; every failure path releases the lock and fails the prebooked
- * transfer before the original error travels on.
+ * Builds the BVNK on-ramp quote for a prebooked transfer: reads the
+ * provisioned funding wallet, fetches its bank details JIT, and mints the
+ * funding instructions; the status CAS to awaiting_payment is the last
+ * fallible step.
  *
  * @param c - Request context used for repository access.
- * @param input - Counterparty, project, the prebooked transfer id, and the quote's currency and destination fields.
+ * @param input.counterparty - Counterparty whose funding wallet funds the transfer.
+ * @param input.projectId - Project that owns the counterparty.
+ * @param input.transferId - Prebooked transfer id the payment reference is minted from.
+ * @param input.network - Crypto network the funded fiat converts into.
+ * @param input.currency - Crypto currency the funded fiat converts into.
+ * @param input.destinationWalletAddress - Address receiving the converted crypto.
+ * @param input.fiatCurrency - Fiat currency of the funding wallet and deposit.
  * @returns The BVNK on-ramp quote with its funding instructions.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the funding-wallet lock CAS, stale-lock release, and rule provisioning must stay in one explicit order.
 export async function bvnkOnrampQuote(
   c: AppContext,
   input: {
@@ -1347,128 +1361,26 @@ export async function bvnkOnrampQuote(
   }
 ): Promise<{ quote: BvnkOnrampQuote }> {
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const scope = {
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk" as const,
-  };
-  const row = await accounts.getAccountByKindAndCurrency({
-    ...scope,
-    kind: "funding_wallet",
-    fiatCurrency: input.fiatCurrency,
-  });
-  if (
-    row === null ||
-    (row.provider_status !== BVNK_FUNDING_WALLET_STATUS.provisioned &&
-      row.provider_status !== BVNK_FUNDING_WALLET_STATUS.locked)
-  ) {
-    throw counterpartyNotProvisioned("bvnk", "onramp", {
-      fundingWalletStatus: row === null ? null : row.provider_status,
-    });
-  }
-  if (row.external_account_reference === null) {
-    throw counterpartyNotProvisioned("bvnk", "onramp", {
-      fundingWalletStatus: row.provider_status,
-    });
-  }
-  const walletId = row.external_account_reference;
-  const failPrebooked = async (error: string): Promise<void> => {
-    await getPaymentsRepository(c).updateTransferStatusGuarded({
-      transferId: input.transferId,
-      organizationId: input.counterparty.organization_id,
-      projectId: input.projectId,
-      fromStatuses: ["pending"],
-      toStatus: "failed",
-      error,
-      updatedAt: new Date().toISOString(),
-    });
-  };
-  let locked = await accounts.lockFundingWallet({
-    ...scope,
-    id: row.id,
-    transferId: input.transferId,
-  });
-  if (locked === null) {
-    const current = await accounts.getAccountByKindAndCurrency({
-      ...scope,
-      kind: "funding_wallet",
-      fiatCurrency: input.fiatCurrency,
-    });
-    if (current === null || current.external_account_reference === null) {
-      throw internalError("BVNK funding wallet row vanished underneath the lock.");
-    }
-    let blockingTransferId: string | null = null;
-    if (current.provider_status === BVNK_FUNDING_WALLET_STATUS.locked) {
-      const lockMetadata = bvnkFundingWalletLockSchema.parse(current.metadata);
-      blockingTransferId = lockMetadata.transferId;
-      const holding = await getPaymentsRepository(c).getTransferById({
-        transferId: lockMetadata.transferId,
-        organizationId: input.counterparty.organization_id,
-        projectId: input.projectId,
-      });
-      if (holding === null || isTerminalRampTransferStatus(holding.status)) {
-        await deactivateBvnkRules(rampRuntime(c), {
-          walletId: current.external_account_reference,
-          transferId: lockMetadata.transferId,
-        });
-        await accounts.releaseFundingWallet({
-          ...scope,
-          id: current.id,
-          transferId: lockMetadata.transferId,
-        });
-        locked = await accounts.lockFundingWallet({
-          ...scope,
-          id: current.id,
-          transferId: input.transferId,
-        });
-      }
-    }
-    if (locked === null) {
-      const message =
-        blockingTransferId === null
-          ? "BVNK funding wallet is not available for a new quote."
-          : `BVNK funding wallet is reserved by transfer ${blockingTransferId}.`;
-      await failPrebooked(
-        blockingTransferId === null ? message : `funding wallet reserved by ${blockingTransferId}`
-      );
-      throw conflict(
-        message,
-        blockingTransferId === null ? undefined : { transferId: blockingTransferId }
-      );
-    }
-  }
+  const scope = bvnkAccountScope(input.counterparty, input.projectId);
   try {
-    await deactivateBvnkRules(rampRuntime(c), { walletId });
-    const audit = requestProvisioningAudit(c, input.counterparty);
-    const intent = await audit.begin({
-      action: "bvnk_onramp_payment_rule_created",
-      metadata: { transferId: input.transferId, walletId },
-    });
-    try {
-      const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomer(rampRuntime(c), {
-        reference: row.provider_customer_reference,
+    const ctx = rampRuntime(c);
+    const row = await readFundingWalletRow(accounts, scope, input.fiatCurrency);
+    if (
+      row === null ||
+      row.provider_status !== BVNK_FUNDING_WALLET_STATUS.provisioned ||
+      row.external_account_reference === null
+    ) {
+      throw counterpartyNotProvisioned("bvnk", "onramp", {
+        fundingWalletStatus: row === null ? null : row.provider_status,
       });
-      const rule = await RAMP_PROVIDER_CLIENTS.bvnk.createOnrampRule(rampRuntime(c), {
-        reference: input.transferId,
-        walletId,
-        currency: input.currency,
-        network: input.network,
-        beneficiaryAddress: input.destinationWalletAddress,
-        entity: bvnkRuleEntityFromCustomer(latest),
-      });
-      await audit.complete(intent, { ruleId: rule.id });
-    } catch (error) {
-      await audit.fail(intent, error);
-      throw error;
     }
-    const wallet = await RAMP_PROVIDER_CLIENTS.bvnk.getLedgerWalletV2(rampRuntime(c), {
-      walletId,
-    });
+    const walletId = row.external_account_reference;
+    const wallet = await RAMP_PROVIDER_CLIENTS.bvnk.getLedgerWalletV2(ctx, { walletId });
     const bankAccount = bvnkWalletBankAccount(wallet);
     if (bankAccount === undefined) {
       throw internalError("BVNK funding wallet has no fiat payment instrument yet.");
     }
+    const paymentReference = bvnkOnrampRemittance(input.transferId);
     const instruction: BvnkFiatFundingInstruction = {
       provider: "bvnk",
       kind: "fiat_funding",
@@ -1478,7 +1390,11 @@ export async function bvnkOnrampQuote(
       beneficiaryAddress: input.destinationWalletAddress,
       network: input.network,
       bankAccount,
-      instructionsNotes: `Fund your ${input.fiatCurrency} BVNK virtual account to receive crypto on ${input.network}.`,
+      paymentReference,
+      ...(bankAccount.paymentReference === undefined
+        ? {}
+        : { remittanceInformationPrefix: bankAccount.paymentReference }),
+      instructionsNotes: `Include ${paymentReference} in the bank transfer reference to receive crypto on ${input.network}.`,
     };
     const updated = await getPaymentsRepository(c).updateTransferStatusGuarded({
       transferId: input.transferId,
@@ -1498,7 +1414,7 @@ export async function bvnkOnrampQuote(
         provider_account_id: row.id,
         wallet_id: walletId,
       },
-      "[bvnk onramp] quote locked the funding wallet and created its payment rule"
+      "[bvnk onramp] quote issued awaiting_payment funding instructions"
     );
     return {
       quote: {
@@ -1510,22 +1426,111 @@ export async function bvnkOnrampQuote(
       },
     };
   } catch (error) {
-    await accounts.releaseFundingWallet({ ...scope, id: row.id, transferId: input.transferId });
-    await failPrebooked(error instanceof Error ? error.message : String(error));
+    await getPaymentsRepository(c).updateTransferStatusGuarded({
+      transferId: input.transferId,
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      fromStatuses: ["pending"],
+      toStatus: "failed",
+      error: error instanceof Error ? error.message : String(error),
+      updatedAt: new Date().toISOString(),
+    });
     throw error;
   }
 }
 
 /**
- * Derives the client-facing BVNK on-ramp requirement from the funding wallet
- * row after the customer is verified: the provisioning gate while BVNK has no
- * active wallet, the reserved/settling gate while a quote holds the lock, and
- * a null answer (the caller answers `ready`) once the wallet is provisioned.
- * A lock whose transfer is terminal or gone is released inline so the next
- * quote can reclaim the wallet. Off-ramp never consults the funding wallet.
+ * The SINGLE request builder for the BVNK on-ramp payout converting a settled
+ * pay-in into crypto: the first attempt and every recovery reissue call it,
+ * so a recovery spends exactly the claim's validated intent.
+ *
+ * @param input.transferId - The transfer id, used as the provider payout reference.
+ * @param input.bvnkCustomer - Typed BVNK v1 customer whose details become the payout party details.
+ * @param input.customerId - The BVNK customer reference of the funding wallet owner.
+ * @param input.fundingWalletReference - BVNK ledger wallet id the payout debits.
+ * @param input.intent - The validated spend intent persisted at claim time.
+ * @returns The request body for {@link createOnrampPayout}.
+ */
+export function buildBvnkOnrampPayout(input: {
+  transferId: string;
+  bvnkCustomer: BvnkCustomer;
+  customerId: string;
+  fundingWalletReference: string;
+  intent: BvnkOnrampPayoutIntent;
+}): BvnkOnrampPayoutInput {
+  return {
+    walletId: input.fundingWalletReference,
+    amount: toNumberAmount(input.intent.amount),
+    currency: input.intent.currency,
+    reference: input.transferId,
+    customerId: input.customerId,
+    payOutDetails: {
+      code: "crypto",
+      currency: input.intent.cryptoCurrency,
+      network: BVNK_PAYOUT_NETWORK.create,
+      address: input.intent.address,
+    },
+    complianceDetails: {
+      requesterIpAddress: "0.0.0.0",
+      partyDetails: [bvnkPayoutPartyDetailsFromCustomer(input.bvnkCustomer)],
+    },
+  };
+}
+
+/**
+ * Recovers a stale provisioning row whose BVNK wallet already exists: reads
+ * the wallet and CAS-advances the row to `provisioned` once it is ACTIVE with
+ * a FIAT payment instrument.
+ *
+ * @param env - Process environment used for repository access.
+ * @param ctx - Ramp runtime context used for provider access.
+ * @param input.counterparty - Counterparty that owns the funding row.
+ * @param input.projectId - Project that owns the counterparty.
+ * @param input.fundingRow - Stale provisioning funding-wallet row carrying a wallet reference.
+ * @returns Resolves once recovery read the wallet and attempted the CAS.
+ */
+export async function recoverProvisioningBvnkFundingWallet(
+  env: Env,
+  ctx: RampRuntimeContext,
+  input: {
+    counterparty: CounterpartyRow;
+    projectId: string;
+    fundingRow: CounterpartyProviderAccountRow;
+  }
+): Promise<void> {
+  const walletId = input.fundingRow.external_account_reference;
+  if (walletId === null) {
+    return;
+  }
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
+  const scope = bvnkAccountScope(input.counterparty, input.projectId);
+  const wallet = await RAMP_PROVIDER_CLIENTS.bvnk.getLedgerWalletV2(ctx, { walletId });
+  const hasFiatInstrument =
+    wallet.paymentInstruments === undefined
+      ? false
+      : wallet.paymentInstruments.some(
+          (instrument) => instrument.type === "FIAT" && instrument.accountNumber.length > 0
+        );
+  if (wallet.status !== "ACTIVE" || !hasFiatInstrument) {
+    return;
+  }
+  await accounts.updateFundingWalletStatus({
+    ...scope,
+    id: input.fundingRow.id,
+    fromStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
+    toStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+  });
+}
+
+/**
+ * Derives the client-facing BVNK on-ramp requirement from the funding-wallet
+ * row: the provisioning gate while missing or `provisioning`, null once
+ * provisioned, and a loud failure otherwise. Off-ramp never consults it.
  *
  * @param c - Request context used for repository access.
- * @param input - Counterparty, project, and the ramp direction being gated.
+ * @param input.counterparty - Counterparty whose funding wallet is gated.
+ * @param input.projectId - Project that owns the counterparty.
+ * @param input.direction - Ramp direction being gated.
  * @returns The funding-wallet requirement, or null when the caller can answer `ready`.
  */
 export async function bvnkFundingWalletRequirements(
@@ -1536,17 +1541,8 @@ export async function bvnkFundingWalletRequirements(
     return null;
   }
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-  const scope = {
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "bvnk" as const,
-  };
-  const row = await accounts.getAccountByKindAndCurrency({
-    ...scope,
-    kind: "funding_wallet",
-    fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
-  });
+  const scope = bvnkAccountScope(input.counterparty, input.projectId);
+  const row = await readFundingWalletRow(accounts, scope, BVNK_FUNDING_WALLET_FIAT);
   if (row === null || row.provider_status === BVNK_FUNDING_WALLET_STATUS.provisioning) {
     return {
       provider: "bvnk",
@@ -1557,70 +1553,25 @@ export async function bvnkFundingWalletRequirements(
   if (row.provider_status === BVNK_FUNDING_WALLET_STATUS.provisioned) {
     return null;
   }
-  if (row.provider_status !== BVNK_FUNDING_WALLET_STATUS.locked) {
-    throw internalError(
-      `BVNK funding wallet is in unresolvable status: ${String(row.provider_status)}.`
-    );
+  throw internalError(`BVNK funding wallet is in unresolvable status: ${row.provider_status}.`);
+}
+
+/**
+ * The provider-side payout reference the transfer API presents for a BVNK
+ * row: an on-ramp presents the crypto payout uuid once a stored settlement
+ * records it (the stored reference is the SDP transfer id), and omits the
+ * field before that; other BVNK rows keep the stored reference as-is.
+ *
+ * @param row - The payment transfer row being mapped.
+ * @returns The payout uuid, the stored reference, or undefined when the on-ramp has no payout yet.
+ */
+export function bvnkProviderReference(row: PaymentTransferRow): string | undefined {
+  if (row.type !== "onramp") {
+    return row.provider_reference === null ? undefined : row.provider_reference;
   }
-  if (row.external_account_reference === null) {
-    throw internalError("BVNK funding wallet lock has no wallet reference.");
+  const stored = readStoredBvnkSettlement(row.provider_data);
+  if (stored.outcome === "malformed") {
+    throw internalError(`BVNK on-ramp transfer ${row.id} has a malformed stored settlement.`);
   }
-  const walletId = row.external_account_reference;
-  const lockMetadata = bvnkFundingWalletLockSchema.parse(row.metadata);
-  const releaseStaleLock = async (): Promise<CounterpartyRequirements | null> => {
-    await deactivateBvnkRules(rampRuntime(c), { walletId });
-    await accounts.releaseFundingWallet({
-      ...scope,
-      id: row.id,
-      transferId: lockMetadata.transferId,
-    });
-    return null;
-  };
-  const transfer = await getPaymentsRepository(c).getTransferById({
-    transferId: lockMetadata.transferId,
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-  });
-  if (transfer === null) {
-    return releaseStaleLock();
-  }
-  const reservedTransfer = (holding: PaymentTransferRow): BvnkReservedTransfer => ({
-    id: holding.id,
-    fiatAmount: holding.fiat_amount,
-    createdAt: holding.created_at,
-  });
-  switch (transfer.status) {
-    case "pending":
-    case "awaiting_payment":
-      return {
-        provider: "bvnk",
-        direction: input.direction,
-        status: "funding_wallet_reserved",
-        transfer: reservedTransfer(transfer),
-      };
-    case "settling":
-      return {
-        provider: "bvnk",
-        direction: input.direction,
-        status: "funding_wallet_settling",
-        transfer: reservedTransfer(transfer),
-      };
-    case "failed":
-    case "canceled":
-    case "completed":
-    case "expired":
-      return releaseStaleLock();
-    case "processing":
-    case "confirmed":
-    case "finalized":
-      throw internalError(
-        `BVNK funding wallet is locked by a transfer in unresolvable status: ${transfer.status}`
-      );
-    default: {
-      const exhaustive: never = transfer.status;
-      throw internalError(
-        `BVNK funding wallet is locked by a transfer in unresolvable status: ${String(exhaustive)}`
-      );
-    }
-  }
+  return stored.outcome === "present" ? stored.settlement.payoutId : undefined;
 }

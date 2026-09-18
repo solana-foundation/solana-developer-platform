@@ -2,9 +2,11 @@ import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
+  BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS,
   BVNK_FUNDING_WALLET_FIAT,
   buildBvnkPartyDetails,
   bvnkCustomerStatusRequirements,
+  bvnkOnrampRemittance,
   isBvnkCustomerVerified,
   isBvnkWalletActive,
   latestBvnkOfframpBeneficiary,
@@ -33,11 +35,11 @@ import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction";
 import { parseDecimalAmount, toNumberAmount } from "@sdp/solana/amount";
 import {
+  BVNK_FUNDING_WALLET_STATUS,
   CANCELABLE_RAMP_TRANSFER_STATUSES,
   getCryptoRailAssetLabel,
   isCancelableRampTransferStatus,
   isCountryCode,
-  isFundableRampTransferStatus,
   type PaymentRampEstimate,
   type PaymentRampInstruction,
   type PaymentRampQuote,
@@ -63,6 +65,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
+  createPostgresBvnkOnrampTransfersRepository,
   createPostgresCounterpartyProviderAccountsRepository,
   isRampTransferType,
 } from "@/db/repositories";
@@ -91,7 +94,6 @@ import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
-import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
@@ -132,12 +134,14 @@ import {
   bvnkOnrampQuote,
   completePendingBvnkOfframpTransfer,
   createPendingBvnkOfframpTransfer,
-  deactivateBvnkRules,
   ensureBvnkCustomer,
+  ensureBvnkFundingWallet,
   ensureBvnkOfframpBeneficiary,
   ensureBvnkOfframpWallet,
   readBvnkCustomerLink,
+  recoverProvisioningBvnkFundingWallet,
   refreshBvnkCustomerAccount,
+  requestProvisioningAudit,
 } from "./ramps/bvnk";
 import {
   ensureLightsparkCustomer,
@@ -719,6 +723,152 @@ async function bvnkCustomerVerificationRequirements(
   );
 }
 
+/**
+ * Advances the BVNK on-ramp requirements: resolves the customer lifecycle,
+ * provisions or recovers the funding wallet for verified customers, and
+ * answers the funding requirement (R11). Off-ramp answers from the customer
+ * status or provisions the merchant wallet.
+ *
+ * @param c - Request context used for provider and repository access.
+ * @param input - Scoped counterparty requirements submission.
+ * @returns The client-facing requirement state after advancement.
+ */
+async function advanceBvnkRequirements(
+  c: AppContext,
+  input: Extract<ScopedSubmitCounterpartyRequirementsInput, { provider: "bvnk" }> & {
+    counterparty: CounterpartyRow;
+    projectId: string;
+  }
+): Promise<CounterpartyRequirements> {
+  if (input.direction === "offramp" && !isBvnkOfframpCurrency(input.fiatCurrency)) {
+    return {
+      provider: "bvnk",
+      direction: input.direction,
+      status: "unsupported",
+      reason: `BVNK off-ramp does not support payouts in ${input.fiatCurrency}.`,
+    };
+  }
+  const customerResult = await ensureBvnkCustomer(
+    c,
+    input.counterparty,
+    input.projectId,
+    input.direction,
+    input.collectedData,
+    input.agreementConsent
+  );
+  if ("requirements" in customerResult) {
+    return customerResult.requirements;
+  }
+  const customer = customerResult.customer;
+  if (!isBvnkCustomerVerified(customer.status)) {
+    return bvnkCustomerVerificationRequirements(
+      c,
+      {
+        counterparty: input.counterparty,
+        projectId: input.projectId,
+        direction: input.direction,
+      },
+      customer
+    );
+  }
+  if (input.direction === "offramp") {
+    if (!isBvnkOfframpCurrency(input.fiatCurrency)) {
+      throw internalError(`BVNK off-ramp currency was not validated: ${input.fiatCurrency}.`);
+    }
+    const fiatCurrency = input.fiatCurrency;
+    const beneficiary = latestBvnkOfframpBeneficiary(
+      input.counterparty.provider_data,
+      fiatCurrency
+    );
+    if (beneficiary === undefined) {
+      const bankDetails = buildRequirementSchema(bvnkOfframpFields(fiatCurrency)).safeParse(
+        input.collectedData
+      );
+      if (!bankDetails.success) {
+        return {
+          provider: "bvnk",
+          direction: input.direction,
+          status: "collect",
+          fields: bvnkOfframpFields(fiatCurrency),
+        };
+      }
+    }
+    await ensureBvnkOfframpBeneficiary(c, {
+      counterparty: input.counterparty,
+      projectId: input.projectId,
+      fiatCurrency,
+      collectedData: input.collectedData,
+    });
+    const refreshed = await getCounterpartiesRepository(c).getCounterpartyById({
+      counterpartyId: input.counterparty.id,
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+    });
+    if (!refreshed) throw notFound("Counterparty");
+    const wallet = await ensureBvnkOfframpWallet(
+      c,
+      rampRuntime(c),
+      refreshed,
+      input.projectId,
+      fiatCurrency
+    );
+    if (!isBvnkWalletActive(wallet.status)) {
+      return {
+        provider: "bvnk",
+        direction: input.direction,
+        status: "customer_funding_account_provisioning",
+      };
+    }
+    return readyCounterparty("bvnk", input.direction);
+  }
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  const scope = {
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "bvnk" as const,
+  };
+  const fundingRow = await accounts.getAccountByKindAndCurrency({
+    ...scope,
+    kind: "funding_wallet",
+    fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
+  });
+  const claimIsStale =
+    fundingRow !== null &&
+    Date.parse(fundingRow.updated_at) < Date.now() - BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS;
+  if (fundingRow === null || (fundingRow.external_account_reference === null && claimIsStale)) {
+    const customerLink = await accounts.getProviderAccount(scope);
+    if (customerLink === null) {
+      throw internalError(
+        "BVNK on-ramp advancement has no customer link to provision a funding wallet."
+      );
+    }
+    await ensureBvnkFundingWallet(c.env, rampRuntime(c), {
+      counterparty: input.counterparty,
+      projectId: input.projectId,
+      customerLink,
+      fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
+      audit: requestProvisioningAudit(c, input.counterparty),
+    });
+  } else if (
+    fundingRow.provider_status === BVNK_FUNDING_WALLET_STATUS.provisioning &&
+    fundingRow.external_account_reference !== null &&
+    claimIsStale
+  ) {
+    await recoverProvisioningBvnkFundingWallet(c.env, rampRuntime(c), {
+      counterparty: input.counterparty,
+      projectId: input.projectId,
+      fundingRow,
+    });
+  }
+  const funding = await bvnkFundingWalletRequirements(c, {
+    counterparty: input.counterparty,
+    projectId: input.projectId,
+    direction: input.direction,
+  });
+  return funding !== null ? funding : readyCounterparty("bvnk", input.direction);
+}
+
 export async function advanceCounterpartyRequirements(
   c: AppContext,
   input: ScopedSubmitCounterpartyRequirementsInput
@@ -730,95 +880,8 @@ export async function advanceCounterpartyRequirements(
       return readyCounterparty("moneygram", input.direction);
     case "lightspark":
       return advanceLightsparkRequirements(c, input);
-    case "bvnk": {
-      if (input.direction === "offramp" && !isBvnkOfframpCurrency(input.fiatCurrency)) {
-        return {
-          provider: "bvnk",
-          direction: input.direction,
-          status: "unsupported",
-          reason: `BVNK off-ramp does not support payouts in ${input.fiatCurrency}.`,
-        };
-      }
-      const customerResult = await ensureBvnkCustomer(
-        c,
-        input.counterparty,
-        input.projectId,
-        input.direction,
-        input.collectedData,
-        input.agreementConsent
-      );
-      if ("requirements" in customerResult) {
-        return customerResult.requirements;
-      }
-      const customer = customerResult.customer;
-      if (!isBvnkCustomerVerified(customer.status)) {
-        return bvnkCustomerVerificationRequirements(
-          c,
-          {
-            counterparty: input.counterparty,
-            projectId: input.projectId,
-            direction: input.direction,
-          },
-          customer
-        );
-      }
-      if (input.direction === "offramp") {
-        if (!isBvnkOfframpCurrency(input.fiatCurrency)) {
-          throw internalError(`BVNK off-ramp currency was not validated: ${input.fiatCurrency}.`);
-        }
-        const fiatCurrency = input.fiatCurrency;
-        const beneficiary = latestBvnkOfframpBeneficiary(
-          input.counterparty.provider_data,
-          fiatCurrency
-        );
-        if (beneficiary === undefined) {
-          const bankDetails = buildRequirementSchema(bvnkOfframpFields(fiatCurrency)).safeParse(
-            input.collectedData
-          );
-          if (!bankDetails.success) {
-            return {
-              provider: "bvnk",
-              direction: input.direction,
-              status: "collect",
-              fields: bvnkOfframpFields(fiatCurrency),
-            };
-          }
-        }
-        await ensureBvnkOfframpBeneficiary(c, {
-          counterparty: input.counterparty,
-          projectId: input.projectId,
-          fiatCurrency,
-          collectedData: input.collectedData,
-        });
-        const refreshed = await getCounterpartiesRepository(c).getCounterpartyById({
-          counterpartyId: input.counterparty.id,
-          organizationId: input.counterparty.organization_id,
-          projectId: input.projectId,
-        });
-        if (!refreshed) throw notFound("Counterparty");
-        const wallet = await ensureBvnkOfframpWallet(
-          c,
-          rampRuntime(c),
-          refreshed,
-          input.projectId,
-          fiatCurrency
-        );
-        if (!isBvnkWalletActive(wallet.status)) {
-          return {
-            provider: "bvnk",
-            direction: input.direction,
-            status: "customer_funding_account_provisioning",
-          };
-        }
-        return readyCounterparty("bvnk", input.direction);
-      }
-      const funding = await bvnkFundingWalletRequirements(c, {
-        counterparty: input.counterparty,
-        projectId: input.projectId,
-        direction: input.direction,
-      });
-      return funding !== null ? funding : readyCounterparty("bvnk", input.direction);
-    }
+    case "bvnk":
+      return advanceBvnkRequirements(c, input);
     case "mural":
       return resolveMuralRequirements(c, input.counterparty, input.projectId, input.direction);
     case "coinbase":
@@ -1065,7 +1128,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         rampsMemo: input.rampsMemo,
-        providerData: {},
+        providerData: { bvnk: {} },
         serializedTx: null,
         signature: null,
         slot: null,
@@ -1446,6 +1509,13 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
   }
 
+  if (transfer.provider === "bvnk" && transfer.type === "onramp") {
+    if (transfer.custody_wallet_id === null) {
+      throw internalError("BVNK on-ramp transfer has no custody wallet.");
+    }
+    assertPaymentWalletExactAccess(c, transfer.custody_wallet_id, ["payments:write"]);
+  }
+
   const updated = await repository.updateTransferStatusGuarded({
     transferId: transfer.id,
     organizationId: scope.auth.organizationId,
@@ -1456,58 +1526,6 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
   });
   if (!updated) {
     throw conflict("Transfer status changed before it could be canceled.");
-  }
-
-  if (transfer.provider === "bvnk" && transfer.type === "onramp") {
-    if (transfer.counterparty_id === null) {
-      throw internalError("BVNK on-ramp transfer has no counterparty.");
-    }
-    const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-    const accountScope = {
-      organizationId: scope.auth.organizationId,
-      projectId,
-      counterpartyId: transfer.counterparty_id,
-      provider: "bvnk" as const,
-    };
-    const fundingRow = await accounts.getAccountByKindAndCurrency({
-      ...accountScope,
-      kind: "funding_wallet",
-      fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
-    });
-    if (fundingRow === null) {
-      throw internalError("BVNK on-ramp transfer has no funding wallet row.");
-    }
-    if (fundingRow.external_account_reference === null) {
-      throw internalError("BVNK on-ramp transfer has no funding wallet reference.");
-    }
-    await deactivateBvnkRules(rampRuntime(c), {
-      walletId: fundingRow.external_account_reference,
-      transferId: transfer.id,
-    });
-    const released = await accounts.releaseFundingWallet({
-      ...accountScope,
-      id: fundingRow.id,
-      transferId: transfer.id,
-    });
-    if (released === null) {
-      getLogger().info(
-        {
-          counterparty_id: transfer.counterparty_id,
-          transfer_id: transfer.id,
-          provider_account_id: fundingRow.id,
-        },
-        "[bvnk onramp cancel] funding wallet lock not held by this transfer"
-      );
-    }
-    getLogger().info(
-      {
-        counterparty_id: transfer.counterparty_id,
-        transfer_id: transfer.id,
-        provider_account_id: fundingRow.id,
-        wallet_id: fundingRow.external_account_reference,
-      },
-      "[bvnk onramp cancel] funding wallet released"
-    );
   }
 
   return success(c, { transfer: mapTransferRow(updated) });
@@ -1605,8 +1623,8 @@ export async function simulateSandboxTransfer(
       if (transfer.provider !== "bvnk" || transfer.type !== "onramp") {
         throw badRequest("Transfer is not a BVNK on-ramp transfer.");
       }
-      if (!isFundableRampTransferStatus(transfer.status)) {
-        throw badRequest("Transfer is not fundable by a BVNK sandbox pay-in.");
+      if (transfer.status !== "awaiting_payment") {
+        throw badRequest("Transfer is not awaiting payment for a BVNK sandbox pay-in.");
       }
       if (transfer.custody_wallet_id === null) {
         throw internalError("BVNK on-ramp transfer has no destination custody wallet.");
@@ -1639,12 +1657,21 @@ export async function simulateSandboxTransfer(
       if (transfer.fiat_amount === null || transfer.fiat_currency === null) {
         throw internalError("BVNK on-ramp transfer has no fiat amount.");
       }
+      const claimedSimulation = await createPostgresBvnkOnrampTransfersRepository(
+        getDb(c.env)
+      ).claimPayinSimulation({
+        transferId: transfer.id,
+        requestedAt: new Date().toISOString(),
+      });
+      if (claimedSimulation === null) {
+        throw conflict("BVNK sandbox pay-in simulation was already requested for this transfer.");
+      }
       transaction = await RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), {
         walletId: fundingRow.external_account_reference,
         amount: toNumberAmount(transfer.fiat_amount),
         currency: transfer.fiat_currency,
         originatorName: counterparty.display_name,
-        remittanceInformation: transfer.id,
+        remittanceInformation: bvnkOnrampRemittance(transfer.id),
         idempotencyKey: transfer.id,
       });
       break;

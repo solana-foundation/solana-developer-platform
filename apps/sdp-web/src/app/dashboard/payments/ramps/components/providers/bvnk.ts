@@ -45,18 +45,6 @@ export function getBvnkOnboardingCopy(
       icon: XCircleIcon,
       iconClassName: "text-error",
     },
-    funding_wallet_reserved: {
-      title: t("DashboardPayments.bvnk.fundingWalletReservedTitle"),
-      description: t("DashboardPayments.bvnk.fundingWalletReservedDescription"),
-      icon: Loader2Icon,
-      iconClassName: "animate-spin text-secondary",
-    },
-    funding_wallet_settling: {
-      title: t("DashboardPayments.bvnk.fundingWalletSettlingTitle"),
-      description: t("DashboardPayments.bvnk.fundingWalletSettlingDescription"),
-      icon: Loader2Icon,
-      iconClassName: "animate-spin text-secondary",
-    },
     ready: {
       title: t("DashboardPayments.bvnk.readyTitle"),
       description: t("DashboardPayments.bvnk.readyDescription"),

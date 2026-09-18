@@ -376,27 +376,51 @@ export interface CoinbaseRampSettlement {
 }
 
 /**
- * BVNK on-ramp economics captured from the COMPLETE crypto payout webhook:
- * the fiat conversion totals come from the event's money objects
- * (`walletCurrency.actual`, `paidCurrency.actual`, `feeCurrency.actual`),
- * the exchange rate from `exchangeRate.rate`, and the on-chain delivery from
- * `transactions[0].hash`; the pay-in and payout ids are the event's `id` and
- * `uuid`.
+ * BVNK on-ramp settlement economics, from the payout CREATE response
+ * (PROCESSING) until the COMPLETE crypto payout webhook or poll replaces it
+ * with the delivery facts. The processing variant stores the create-time
+ * estimate: the fiat wallet debit, the crypto to receive, the fee legs, the
+ * receipt url BVNK provides at create, and `exchangeRate.rate`. The complete
+ * variant keeps every create-time estimate (the dashboard shows them) and
+ * adds the observed terminal facts separately: the on-chain hash, the actual
+ * settled crypto/fiat, the actual fee/network-fee legs with their currencies,
+ * and the actual exchange rate. Amounts are decimal strings.
  */
-export interface BvnkRampSettlement {
-  provider: "bvnk";
-  status: "COMPLETE";
-  payinId: string;
-  payoutId: string;
-  fiatCurrency: string;
-  fiatAmount: string;
-  cryptoCurrency: string;
-  cryptoAmount: string;
-  feeCurrency: string;
-  feeAmount: string;
-  exchangeRate: number;
-  txHash: string;
-}
+export const bvnkRampProcessingSettlementSchema = z.object({
+  provider: z.literal("bvnk"),
+  status: z.literal("PROCESSING"),
+  payinId: z.string(),
+  payoutId: z.string(),
+  receiptUrl: z.string(),
+  fiatCurrency: z.string(),
+  fiatAmount: z.string(),
+  cryptoCurrency: z.string(),
+  cryptoAmount: z.string(),
+  feeCurrency: z.string(),
+  feeAmount: z.string(),
+  networkFeeCurrency: z.string(),
+  networkFeeAmount: z.string(),
+  exchangeRate: z.string(),
+});
+
+export const bvnkRampCompleteSettlementSchema = bvnkRampProcessingSettlementSchema.extend({
+  status: z.literal("COMPLETE"),
+  txHash: z.string(),
+  cryptoAmountActual: z.string(),
+  fiatAmountActual: z.string(),
+  feeAmountActual: z.string(),
+  feeCurrencyActual: z.string(),
+  networkFeeAmountActual: z.string(),
+  networkFeeCurrencyActual: z.string(),
+  exchangeRateActual: z.string(),
+});
+
+export const bvnkRampSettlementSchema = z.discriminatedUnion("status", [
+  bvnkRampProcessingSettlementSchema,
+  bvnkRampCompleteSettlementSchema,
+]);
+
+export type BvnkRampSettlement = z.infer<typeof bvnkRampSettlementSchema>;
 
 export type RampTransferSettlement =
   | MoonpayRampSettlement
@@ -1195,6 +1219,7 @@ export interface BvnkBankFundingDetails {
   code?: string;
   accountNumberFormat?: string;
   paymentReference?: string;
+  routingNumber?: string;
   bankName?: string;
 }
 
@@ -1209,6 +1234,19 @@ export interface BvnkFiatFundingInstruction {
   beneficiaryAddress: string;
   network: string;
   bankAccount?: BvnkBankFundingDetails;
+  /**
+   * Remittance line the payer must include in the bank transfer reference so
+   * the pay-in webhook can attribute the deposit to this transfer. Set by the
+   * BVNK on-ramp quote via the shared reference formatter; absent only on
+   * instructions serialized before the field existed.
+   */
+  paymentReference?: string;
+  /**
+   * Instrument-scoped remittance prefix BVNK prepends to inbound references.
+   * Shown as its own instruction field, never concatenated into
+   * `paymentReference`.
+   */
+  remittanceInformationPrefix?: string;
   instructionsNotes: string;
 }
 

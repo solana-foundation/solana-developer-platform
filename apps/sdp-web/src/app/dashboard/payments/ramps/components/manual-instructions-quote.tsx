@@ -453,10 +453,19 @@ function BvnkInstruction({
 
       {isReady ? (
         <>
+          <PaymentInstructionField
+            label={t("DashboardPayments.manualInstructions.paymentReferenceRequired")}
+            value={instruction.paymentReference}
+            className="lg:col-span-2"
+          />
           <div className="grid gap-3 lg:grid-cols-2">
             <PaymentInstructionField
-              label={t("DashboardPayments.manualInstructions.bankName")}
-              value={bank?.bankName}
+              label={t("DashboardPayments.manualInstructions.remittancePrefix")}
+              value={instruction.remittanceInformationPrefix}
+            />
+            <PaymentInstructionField
+              label={t("DashboardPayments.manualInstructions.routingNumber")}
+              value={bank?.routingNumber}
             />
             <PaymentInstructionField
               label={t("DashboardPayments.manualInstructions.accountNumber")}
@@ -467,8 +476,8 @@ function BvnkInstruction({
               value={bank?.code}
             />
             <PaymentInstructionField
-              label={t("DashboardPayments.manualInstructions.paymentReference")}
-              value={bank?.paymentReference}
+              label={t("DashboardPayments.manualInstructions.bankName")}
+              value={bank?.bankName}
             />
           </div>
           <div className="rounded-xl bg-fill-subtle px-4 py-3">

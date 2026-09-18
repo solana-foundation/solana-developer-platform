@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { extractProviderErrorMessage } from "./fetch";
+import { afterEach, describe, it } from "node:test";
+import { extractProviderErrorMessage, providerFetch } from "./fetch";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 describe("extractProviderErrorMessage", () => {
   it("scrubs the counterparty fields providers echo back", () => {
@@ -37,5 +43,28 @@ describe("extractProviderErrorMessage", () => {
   it("falls back when the payload carries no message", () => {
     assert.equal(extractProviderErrorMessage({ status: 500 }, "fallback"), "fallback");
     assert.equal(extractProviderErrorMessage(null, "fallback"), "fallback");
+  });
+});
+
+describe("providerFetch abort signal", () => {
+  it("providerFetch_forwards_abort_signal", async () => {
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | null | undefined;
+    globalThis.fetch = async (_input, init) => {
+      capturedSignal = init?.signal;
+      return new Response('{"ok":true}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await providerFetch("bvnk", "https://api.example.test/ping", {
+      method: "GET",
+      signal: controller.signal,
+    });
+
+    assert.equal(capturedSignal, controller.signal);
+    assert.deepEqual(result.parsed, { ok: true });
+    assert.equal(result.raw, '{"ok":true}');
   });
 });

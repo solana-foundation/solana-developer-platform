@@ -1,14 +1,23 @@
+import { SdpPaymentsError } from "@sdp/payments";
+import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import {
   BVNK_FUNDING_WALLET_FIAT,
   type BVNKWallet,
+  type BvnkOnrampTransferData,
   type BvnkUnrecognisedWalletName,
   isBvnkCustomerVerified,
   isBvnkWalletActive,
   parseBvnkCustomerExternalReference,
+  parseBvnkTransferIdFromRemittance,
   parseBvnkWalletName,
   readBvnkOfframpReference,
+  readBvnkOnrampTransferData,
   withBvnkOfframpWalletStatus,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  bvnkPayoutObservationFromSource,
+  readStoredBvnkSettlement,
+} from "@sdp/payments/ramps/providers/bvnk/settlement";
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import {
   BVNK_FUNDING_WALLET_STATUS,
@@ -19,297 +28,328 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { buildInClause } from "@/db/postgres-utils";
 import {
+  createPostgresBvnkOnrampTransfersRepository,
   createPostgresCounterpartyProviderAccountsRepository,
   createSystemCounterpartiesRepository,
 } from "@/db/repositories";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import { bvnkFundingWalletLockSchema } from "@/db/repositories/counterparty-provider-account.repository";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import {
   type BvnkProvisioningAudit,
-  deactivateBvnkRules,
   ensureBvnkFundingWallet,
   refreshBvnkCustomerAccount,
 } from "@/routes/payments/handlers/ramps/bvnk";
+import { applyTerminalBvnkPayoutObservation } from "@/routes/payments/handlers/ramps/bvnk-settlement";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import {
   type BvnkWalletWebhookData,
   type BvnkWebhook,
-  bvnkCryptoPayoutStatusSchema,
   bvnkWebhookEnvelopeSchema,
   bvnkWebhookEventSchema,
   bvnkWebhookSchema,
+  isBvnkCryptoPayoutStatus,
   isBvnkPayinStatus,
 } from "./bvnk.schema";
 import { TerminalRampWebhookError, type WebhookProcessor } from "./processor";
 
 type BvnkParsedWebhook = BvnkWebhook | { event: "ignore"; reason: string };
 
+type BvnkV1PayinData = Extract<BvnkWebhook, { event: "bvnk:payment:payin:status-change" }>["data"];
+
+type BvnkCryptoPayoutData = Extract<
+  BvnkWebhook,
+  { event: "bvnk:payment:crypto:status-change" }
+>["data"];
+
+/** The migration-0113 unique expression index over `provider_data->'bvnk'->'payin'->>'id'`. */
+const BVNK_ONRAMP_PAYIN_UNIQUE_CONSTRAINT = "payment_transfers_bvnk_onramp_payin_id_unique";
+
+function isBvnkOnrampPayinUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "23505" &&
+    "constraint" in error &&
+    (error as { constraint?: unknown }).constraint === BVNK_ONRAMP_PAYIN_UNIQUE_CONSTRAINT
+  );
+}
+
 function webhookRampContext(env: Env, environment: SdpEnvironment): RampRuntimeContext {
   return { env: env as unknown as Record<string, string | undefined>, mode: environment };
 }
 
 /**
- * Applies a BVNK fiat pay-in status-change event: verifies the pay-in names a
- * funding wallet a transfer is locked on and that wallet's customer, records
- * the pay-in id on the lock, and moves the transfer to settling with the
- * observed fiat amount. A replay is acknowledged; a pay-in for an unknown
- * wallet, an unlocked wallet, a different customer, or a second pay-in while
- * the lock is held is logged per the stray-pay-in rule and writes nothing.
+ * Compares the immutable pay-in ownership facts an event carries against the
+ * facts already persisted on a transfer; amounts compare numerically.
+ *
+ * @param data - Parsed v1 pay-in status-change event data.
+ * @param payin - The persisted pay-in ownership facts, when the transfer carries them.
+ * @returns True when every immutable fact is identical.
+ */
+function payinFactsMatch(data: BvnkV1PayinData, payin: BvnkOnrampTransferData["payin"]): boolean {
+  if (payin === undefined) {
+    return false;
+  }
+  return (
+    payin.walletId === data.beneficiary.walletId &&
+    payin.customerId === data.customerReference &&
+    compareDecimalAmounts(payin.receivedAmount, String(data.amount.value)) === 0 &&
+    payin.receivedCurrency === data.amount.currencyCode
+  );
+}
+
+/**
+ * Applies the pay-in replay rule: identical immutable facts are acknowledged
+ * without a write, divergent facts are terminal because the money cannot be
+ * re-attributed.
+ *
+ * @param transfer - The transfer already owning the pay-in id.
+ * @param data - Parsed v1 pay-in status-change event data.
+ */
+async function resolvePayinReplay(
+  transfer: PaymentTransferRow,
+  data: BvnkV1PayinData
+): Promise<void> {
+  const bvnkData = readBvnkOnrampTransferData(transfer.provider_data);
+  if (payinFactsMatch(data, bvnkData.payin)) {
+    getLogger().info(
+      { transfer_id: transfer.id, payin_id: data.transactionReference },
+      "[bvnk webhook] pay-in replay"
+    );
+    return;
+  }
+  getLogger().error(
+    {
+      transfer_id: transfer.id,
+      payin_id: data.transactionReference,
+      wallet_id: data.beneficiary.walletId,
+      customer_reference: data.customerReference,
+      amount: String(data.amount.value),
+      currency: data.amount.currencyCode,
+    },
+    "[bvnk webhook] conflicting pay-in observation"
+  );
+  throw new TerminalRampWebhookError("stray pay-in: conflicting pay-in observation");
+}
+
+/**
+ * Re-resolves the owner of a pay-in id after a lost apply and applies the
+ * replay rule; an id with no owner in this environment is terminal.
  *
  * @param env - Process environment used for repository access.
- * @param data - Parsed pay-in status-change event data.
- * @returns Resolves once the transition is applied or the event is acknowledged.
+ * @param environment - The project environment the webhook was delivered for.
+ * @param payinId - The pay-in id whose owner must be re-resolved.
+ * @param data - Parsed v1 pay-in status-change event data.
+ */
+async function resolveRacedPayinOwner(
+  env: Env,
+  environment: SdpEnvironment,
+  payinId: string,
+  data: BvnkV1PayinData
+): Promise<void> {
+  const racedOwner = await createPostgresBvnkOnrampTransfersRepository(getDb(env)).getByPayinId({
+    payinId,
+    environment,
+  });
+  if (racedOwner === null) {
+    throw new TerminalRampWebhookError("stray pay-in: conflicting pay-in has no owner");
+  }
+  return resolvePayinReplay(racedOwner, data);
+}
+
+/**
+ * Applies a COMPLETED v1 fiat pay-in status-change event: resolves the pay-in
+ * owner by its transaction reference, else attributes it by the transfer id
+ * parsed from the joined remittance fields, verifies the transfer and its
+ * funding-wallet binding, and settles the transfer via the single
+ * first-write-wins repository update. Ambiguity, unknown references, binding
+ * mismatches, and conflicting observations are terminal; identical replays
+ * are acknowledged whatever the transfer status.
+ *
+ * @param env - Process environment used for repository access.
+ * @param environment - The project environment the webhook was delivered for.
+ * @param data - Parsed v1 pay-in status-change event data.
  */
 async function handleBvnkPayinStatusChange(
   env: Env,
-  data: Extract<BvnkWebhook, { event: "payment:v2:payin:status-change" }>["data"]
+  environment: SdpEnvironment,
+  data: BvnkV1PayinData
 ): Promise<void> {
   if (!isBvnkPayinStatus(data.status)) {
     getLogger().info(
-      { payin_id: data.id, status: data.status },
+      { payin_id: data.transactionReference, status: data.status },
       "[bvnk webhook] pay-in status ignored"
     );
     return;
   }
+  const transfers = createPostgresBvnkOnrampTransfersRepository(getDb(env));
+  const transferOwner = await transfers.getByPayinId({
+    payinId: data.transactionReference,
+    environment,
+  });
+  if (transferOwner !== null) {
+    return resolvePayinReplay(transferOwner, data);
+  }
+  let parsedTransferId: string | null;
+  try {
+    parsedTransferId = parseBvnkTransferIdFromRemittance(
+      data.paymentReference,
+      data.metadata?.additionalRemittanceInformation
+    );
+  } catch (error) {
+    if (error instanceof SdpPaymentsError && error.code === "INTERNAL_ERROR") {
+      throw new TerminalRampWebhookError("stray pay-in: ambiguous remittance");
+    }
+    throw error;
+  }
+  if (parsedTransferId === null) {
+    throw new TerminalRampWebhookError("stray pay-in: no transfer reference");
+  }
+  const transfer = await transfers.getById({ transferId: parsedTransferId, environment });
+  if (transfer === null) {
+    throw new TerminalRampWebhookError("stray pay-in: unknown transfer or environment mismatch");
+  }
+  if (transfer.status !== "awaiting_payment") {
+    return resolveRacedPayinOwner(env, environment, data.transactionReference, data);
+  }
+  if (transfer.counterparty_id === null) {
+    throw new TerminalRampWebhookError("stray pay-in: transfer has no counterparty");
+  }
   const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
-  const row = await accounts.findActiveFundingWalletByReference({
+  const fundingRow = await accounts.findActiveFundingWalletByReference({
     provider: "bvnk",
     externalAccountReference: data.beneficiary.walletId,
+    environment,
   });
-  if (row === null) {
-    getLogger().error(
-      { wallet_id: data.beneficiary.walletId, payin_id: data.id },
-      "[bvnk webhook] stray pay-in: unknown wallet"
-    );
-    return;
+  if (fundingRow === null) {
+    throw new TerminalRampWebhookError("stray pay-in: unknown funding wallet");
   }
-  if (row.provider_customer_reference !== data.beneficiary.customerId) {
-    throw internalError(
-      `BVNK pay-in ${data.id} names customer ${data.beneficiary.customerId}, not the funding wallet's ${row.provider_customer_reference}`
-    );
+  const fundingWalletReference = fundingRow.external_account_reference;
+  if (
+    fundingWalletReference === null ||
+    fundingWalletReference !== data.beneficiary.walletId ||
+    fundingRow.counterparty_id !== transfer.counterparty_id ||
+    fundingRow.provider_customer_reference !== data.customerReference
+  ) {
+    throw new TerminalRampWebhookError("stray pay-in: funding wallet binding mismatch");
   }
-  if (row.provider_status !== BVNK_FUNDING_WALLET_STATUS.locked) {
-    getLogger().error(
-      {
-        counterparty_id: row.counterparty_id,
-        wallet_id: row.external_account_reference,
-        payin_id: data.id,
-        amount: data.beneficiary.amount,
+  const receivedAmount = String(data.amount.value);
+  if (compareDecimalAmounts(receivedAmount, "0") <= 0) {
+    throw new TerminalRampWebhookError("stray pay-in: received amount is not a positive decimal");
+  }
+  let applied: PaymentTransferRow | null;
+  try {
+    applied = await transfers.applyPayin({
+      transferId: transfer.id,
+      fundingWalletReference,
+      payin: {
+        id: data.transactionReference,
+        receivedAmount,
+        receivedCurrency: data.amount.currencyCode,
+        walletId: data.beneficiary.walletId,
+        customerId: data.customerReference,
       },
-      "[bvnk webhook] stray pay-in: wallet not locked"
-    );
-    return;
-  }
-  const lock = bvnkFundingWalletLockSchema.parse(row.metadata);
-  const recorded = await accounts.recordFundingWalletPayin({
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    counterpartyId: row.counterparty_id,
-    provider: "bvnk",
-    id: row.id,
-    transferId: lock.transferId,
-    payinId: data.id,
-  });
-  if (recorded === null) {
-    if (lock.payinId === data.id) {
-      getLogger().info(
-        { counterparty_id: row.counterparty_id, payin_id: data.id },
-        "[bvnk webhook] pay-in replay"
-      );
-      return;
+    });
+  } catch (error) {
+    if (isBvnkOnrampPayinUniqueViolation(error)) {
+      return resolveRacedPayinOwner(env, environment, data.transactionReference, data);
     }
-    getLogger().error(
-      {
-        counterparty_id: row.counterparty_id,
-        wallet_id: row.external_account_reference,
-        payin_id: data.id,
-      },
-      "[bvnk webhook] second pay-in while locked"
-    );
-    return;
+    throw error;
   }
-  await applyRampSettlementEvent(env, {
-    provider: "bvnk",
-    kind: "settling",
-    reference: lock.transferId,
-    providerCustomerId: data.beneficiary.customerId,
-    receivedAmount: data.beneficiary.amount,
-  });
+  if (applied === null) {
+    return resolveRacedPayinOwner(env, environment, data.transactionReference, data);
+  }
   getLogger().info(
     {
-      counterparty_id: row.counterparty_id,
-      transfer_id: lock.transferId,
-      payin_id: data.id,
+      counterparty_id: transfer.counterparty_id,
+      transfer_id: transfer.id,
+      payin_id: data.transactionReference,
+      received_amount: receivedAmount,
+      received_currency: data.amount.currencyCode,
     },
     "[bvnk webhook] pay-in settling transfer"
   );
 }
 
 /**
- * Applies a BVNK crypto payout status-change event for an on-ramp conversion:
- * verifies the payout's wallet and pay-in match the transfer's lock, then
- * either refreshes the transfer into settling (PROCESSING) or settles it
- * (COMPLETE) with the delivered crypto, the on-chain transaction, and the
- * full conversion economics. A COMPLETE that really settled the transfer also
- * deactivates the transfer's payment rule and releases the funding wallet;
- * deactivation or release failures propagate and heal on the next read. All
- * other inputs — non-`OUT` payouts, unknown wallets, unmatched pay-ins,
- * unknown statuses — are logged and write nothing.
+ * Applies a BVNK crypto payout status-change event (the reference IS the
+ * transfer id): PROCESSING verifies the recorded settlement and writes
+ * nothing; completed or failed statuses go through the shared terminal
+ * operation; unknown statuses are ignored.
  *
  * @param env - Process environment used for repository access.
- * @param environment - Sandbox or production ramp environment.
+ * @param environment - The project environment the webhook was delivered for.
  * @param data - Parsed crypto payout status-change event data.
- * @returns Resolves once the transition is applied or the event is acknowledged.
  */
 async function handleBvnkCryptoPayoutStatusChange(
   env: Env,
   environment: SdpEnvironment,
-  data: Extract<BvnkWebhook, { event: "bvnk:payment:crypto:status-change" }>["data"]
+  data: BvnkCryptoPayoutData
 ): Promise<void> {
-  if (data.type !== "OUT" || data.reference === null || !data.reference.startsWith("ON_RAMP_")) {
+  if (!isBvnkCryptoPayoutStatus(data.status)) {
     getLogger().info(
-      { payout_id: data.uuid, type: data.type },
-      "[bvnk webhook] crypto payout is not an on-ramp conversion"
-    );
-    return;
-  }
-  const payinId = data.reference.slice("ON_RAMP_".length);
-  const parsedStatus = bvnkCryptoPayoutStatusSchema.safeParse(data.status);
-  if (!parsedStatus.success) {
-    getLogger().warn(
       { payout_id: data.uuid, status: data.status },
       "[bvnk webhook] crypto payout status ignored"
     );
     return;
   }
-  const status = parsedStatus.data;
-  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
-  const row = await accounts.findActiveFundingWalletByReference({
-    provider: "bvnk",
-    externalAccountReference: data.walletId,
+  if (data.reference === null) {
+    throw new TerminalRampWebhookError("stray payout: no transfer reference");
+  }
+  const transfers = createPostgresBvnkOnrampTransfersRepository(getDb(env));
+  const transfer = await transfers.getById({ transferId: data.reference, environment });
+  if (transfer === null) {
+    throw new TerminalRampWebhookError("stray payout: unknown transfer or environment mismatch");
+  }
+  if (data.status === "PROCESSING") {
+    const stored = readStoredBvnkSettlement(transfer.provider_data);
+    if (stored.outcome === "malformed") {
+      throw internalError("BVNK on-ramp transfer has a malformed stored settlement.");
+    }
+    if (stored.outcome === "absent") {
+      throw internalError(
+        "BVNK payout PROCESSING webhook arrived before the settlement was recorded; the inbox replay will retry"
+      );
+    }
+    getLogger().info(
+      { payout_id: data.uuid, status: data.status },
+      "[bvnk webhook] crypto payout processing"
+    );
+    return;
+  }
+  const parsed = bvnkPayoutObservationFromSource(data);
+  if (!parsed.ok) {
+    throw internalError(
+      "BVNK payout observation lacks the transaction hash or destination address; the inbox replay will retry"
+    );
+  }
+  await applyTerminalBvnkPayoutObservation({
+    repo: transfers,
+    environment,
+    transfer,
+    observation: parsed.observation,
+    failError: data.status,
+    terminalError: (message) => new TerminalRampWebhookError(message),
   });
-  if (row === null) {
-    getLogger().error(
-      { wallet_id: data.walletId, payout_id: data.uuid },
-      "[bvnk webhook] stray payout: unknown wallet"
-    );
-    return;
-  }
-  if (row.provider_status !== BVNK_FUNDING_WALLET_STATUS.locked) {
-    getLogger().error(
-      {
-        counterparty_id: row.counterparty_id,
-        wallet_id: data.walletId,
-        payout_id: data.uuid,
-      },
-      "[bvnk webhook] stray payout: wallet not locked"
-    );
-    return;
-  }
-  const lock = bvnkFundingWalletLockSchema.parse(row.metadata);
-  if (lock.payinId !== payinId) {
-    getLogger().error(
-      {
-        counterparty_id: row.counterparty_id,
-        wallet_id: row.external_account_reference,
-        payout_payin_id: payinId,
-      },
-      "[bvnk webhook] payout for another pay-in"
-    );
-    return;
-  }
-  switch (status) {
-    case "PROCESSING":
-      await applyRampSettlementEvent(env, {
-        provider: "bvnk",
-        kind: "settling",
-        reference: lock.transferId,
-      });
-      return;
-    case "COMPLETE": {
-      if (data.transactions.length === 0) {
-        throw internalError("BVNK payout COMPLETE without a transaction hash");
-      }
-      if (data.address === null) {
-        throw internalError("BVNK payout COMPLETE without a destination address");
-      }
-      const applied = await applyRampSettlementEvent(env, {
-        provider: "bvnk",
-        kind: "settled",
-        reference: lock.transferId,
-        receivedAmount: data.paidCurrency.actual,
-        onchain: {
-          signature: data.transactions[0].hash,
-          destinationAddress: data.address.address,
-          amount: data.paidCurrency.actual,
-        },
-        settlement: {
-          provider: "bvnk",
-          status: "COMPLETE",
-          payinId,
-          payoutId: data.uuid,
-          fiatCurrency: data.walletCurrency.currency,
-          fiatAmount: data.walletCurrency.actual,
-          cryptoCurrency: data.paidCurrency.currency,
-          cryptoAmount: data.paidCurrency.actual,
-          feeCurrency: data.feeCurrency.currency,
-          feeAmount: data.feeCurrency.actual,
-          exchangeRate: data.exchangeRate.rate,
-          txHash: data.transactions[0].hash,
-        },
-      });
-      if (!applied) {
-        return;
-      }
-      if (row.external_account_reference === null) {
-        throw internalError("BVNK funding wallet reference is not assigned yet.");
-      }
-      await deactivateBvnkRules(webhookRampContext(env, environment), {
-        walletId: row.external_account_reference,
-        transferId: lock.transferId,
-      });
-      const released = await accounts.releaseFundingWallet({
-        organizationId: row.organization_id,
-        projectId: row.project_id,
-        counterpartyId: row.counterparty_id,
-        provider: "bvnk",
-        id: row.id,
-        transferId: lock.transferId,
-      });
-      if (released === null) {
-        getLogger().info(
-          { counterparty_id: row.counterparty_id, transfer_id: lock.transferId },
-          "[bvnk webhook] funding wallet already released"
-        );
-      }
-      return;
-    }
-    default: {
-      const exhaustive: never = status;
-      return exhaustive;
-    }
-  }
 }
 
 /**
  * Applies the shared tail of a BVNK customer-state webhook: resolves the
- * counterparty's customer-link row and records the event's state (a verified
- * status patch or a provider refresh). A verified status patch also advances
- * the funding-wallet claim so the requirements gate can open once BVNK
- * activates the wallet.
+ * customer-link row and records a verified status patch or a provider
+ * refresh; the counterparty was resolved environment-scoped, so every
+ * mutation stays inside that tenant scope.
  *
  * @param env - Process environment used for repository access.
  * @param environment - Sandbox or production ramp environment.
  * @param counterparty - Counterparty the event targets.
  * @param eventName - Parsed BVNK event name, used in the missing-link log.
  * @param options - Whether to refresh the provider account, or patch the verified status the event carries.
- * @returns Resolves once customer state is applied.
  */
 async function applyBvnkCustomerStateWebhook(
   env: Env,
@@ -361,14 +401,14 @@ async function applyBvnkCustomerStateWebhook(
 
 /**
  * Applies the v2 platform customer status-change event: resolves the
- * counterparty by the provider customer reference the event carries, then
- * either applies the verified status patch or refreshes the provider account
- * for any other status.
+ * counterparty by the provider customer reference the event carries within
+ * the webhook's environment, then applies the verified status patch or
+ * refreshes the provider account for any other status. A reference that does
+ * not resolve in this environment is terminal.
  *
  * @param env - Process environment used for repository access.
  * @param environment - Sandbox or production ramp environment.
  * @param event - Parsed v2 platform customer status-change event.
- * @returns Resolves once customer state and pending on-ramp provisioning are applied.
  */
 async function handleBvnkCustomerStatusChange(
   env: Env,
@@ -379,10 +419,11 @@ async function handleBvnkCustomerStatusChange(
   const counterparty = await repo.findActiveCounterpartyByProviderCustomerReference({
     provider: "bvnk",
     providerCustomerReference: event.data.reference,
+    environment,
   });
   if (!counterparty) {
-    throw internalError(
-      `BVNK webhook customer ${event.data.reference} was not found or is not active`
+    throw new TerminalRampWebhookError(
+      `BVNK webhook customer ${event.data.reference} was not found or is not active in this environment`
     );
   }
   if (isBvnkCustomerVerified(event.data.status)) {
@@ -404,15 +445,18 @@ async function handleBvnkPlatformCustomerUpdate(
 ): Promise<void> {
   const counterpartyId = parseBvnkCustomerExternalReference(event.data.reference);
   if (counterpartyId === null) {
-    throw internalError(
-      `BVNK webhook customer ${event.data.reference} was not found or is not active`
+    throw new TerminalRampWebhookError(
+      `BVNK webhook customer ${event.data.reference} was not found or is not active in this environment`
     );
   }
   const repo = createSystemCounterpartiesRepository(env);
-  const counterparty = await repo.findActiveCounterpartyById(counterpartyId);
+  const counterparty = await repo.findActiveCounterpartyById({
+    counterpartyId,
+    environment,
+  });
   if (!counterparty) {
-    throw internalError(
-      `BVNK webhook customer ${event.data.reference} was not found or is not active`
+    throw new TerminalRampWebhookError(
+      `BVNK webhook customer ${event.data.reference} was not found or is not active in this environment`
     );
   }
   await applyBvnkCustomerStateWebhook(env, environment, counterparty, event.event, {
@@ -421,14 +465,16 @@ async function handleBvnkPlatformCustomerUpdate(
 }
 
 /**
- * Records a provider-confirmed BVNK agreement-session signature.
+ * Records a provider-confirmed BVNK agreement-session signature for the
+ * customer link that owns the session in the webhook's environment.
  *
  * @param env - Process environment used for repository access.
+ * @param environment - Sandbox or production ramp environment.
  * @param event - Parsed BVNK agreement-session status-change event.
- * @returns Resolves once the signature transition is recorded or a replay is acknowledged.
  */
 async function handleBvnkPlatformCustomerAgreementSessionStatusChange(
   env: Env,
+  environment: SdpEnvironment,
   event: Extract<BvnkWebhook, { event: "bvnk:platform:customer:agreement-session-status-change" }>
 ): Promise<void> {
   const sessionReference = event.data.reference;
@@ -443,9 +489,12 @@ async function handleBvnkPlatformCustomerAgreementSessionStatusChange(
   const row = await accounts.findCustomerLinkBySessionReference({
     provider: "bvnk",
     sessionReference,
+    environment,
   });
   if (row === null) {
-    throw internalError(`BVNK agreement session ${sessionReference} has no customer link`);
+    throw new TerminalRampWebhookError(
+      `BVNK agreement session ${sessionReference} has no customer link in this environment`
+    );
   }
   const signedAt = new Date(event.timestamp).toISOString();
   const updated = await accounts.markCustomerLinkSessionTimestamp({
@@ -476,10 +525,9 @@ async function handleBvnkPlatformCustomerAgreementSessionStatusChange(
 }
 
 /**
- * Builds the system provisioning audit for webhook-driven BVNK provisioning.
- * Webhook-driven provisioning has no request actor; the system
- * intent/outcome pair still records what was created and why, and an
- * unresolved intent pages like any other.
+ * Builds the system provisioning audit for webhook-driven BVNK provisioning;
+ * there is no request actor, so the system intent/outcome pair still records
+ * what was created and why.
  *
  * @param env - Process environment used for audit-ledger access.
  * @param counterparty - Counterparty the provisioning step targets.
@@ -499,7 +547,9 @@ function webhookProvisioningAudit(env: Env, counterparty: CounterpartyRow): Bvnk
     async complete(intent, metadata) {
       await new AuditService(getDb(env), createKVStoreSet(env).cache).completeCriticalSystem(
         intent,
-        { metadata }
+        {
+          metadata,
+        }
       );
     },
     async fail(intent, error) {
@@ -519,17 +569,20 @@ function webhookProvisioningAudit(env: Env, counterparty: CounterpartyRow): Bvnk
 
 async function handleBvnkOfframpWalletWebhook(
   env: Env,
+  environment: SdpEnvironment,
   wallet: Extract<BVNKWallet, { kind: "merchant_offramp" }>,
   status: string
 ): Promise<void> {
   const repo = createSystemCounterpartiesRepository(env);
-  const counterparty = await repo.findActiveCounterpartyById(wallet.counterpartyId);
+  const counterparty = await repo.findActiveCounterpartyById({
+    counterpartyId: wallet.counterpartyId,
+    environment,
+  });
   if (!counterparty) {
     throw new TerminalRampWebhookError(
       `BVNK webhook counterparty ${wallet.counterpartyId} was not found or is not active`
     );
   }
-  // TODO(PRO-1824): Move BVNK merchant-wallet state to counterparty_provider_accounts.
   await repo.mutateProviderData({
     counterpartyId: counterparty.id,
     organizationId: counterparty.organization_id,
@@ -541,22 +594,21 @@ async function handleBvnkOfframpWalletWebhook(
 
 /**
  * Applies a funding-wallet status-change event: verifies the wallet belongs
- * to the claimed funding row, then CAS-advances the row from provisioning to
- * provisioned. Nothing else from the event is persisted; bank details stay
- * JIT. A non-ACTIVE status or a replay after provisioning is logged and
- * acknowledged. An event whose wallet id or customer diverges from the
- * claimed row is terminal — a duplicate or foreign wallet can never become
- * the row's reference, so the ingest row parks and is never retried. An
- * event arriving before the reference is assigned is transient: the assign
- * has not landed, so it fails loudly and replay heals it.
+ * to the claimed funding row in the webhook's environment and carries the
+ * FIAT instrument with the account number, then CAS-advances the row from
+ * provisioning to provisioned. A non-ACTIVE status, a replay after
+ * provisioning, or an ACTIVE event without a FIAT instrument is logged and
+ * acknowledged without the CAS; a diverging wallet or customer is terminal;
+ * an event before the reference is assigned fails loudly and replay heals it.
  *
  * @param env - Process environment used for repository access.
+ * @param environment - The project environment the event was delivered for.
  * @param wallet - Parsed funding-wallet name carrying the customer-link row id.
  * @param data - Parsed status-change event data.
- * @returns Resolves once the status transition is applied or the event is acknowledged.
  */
 async function handleBvnkFundingWalletStatusChange(
   env: Env,
+  environment: SdpEnvironment,
   wallet: Extract<BVNKWallet, { kind: "funding_wallet" }>,
   data: Extract<BvnkWebhook, { event: "ledger:v2:wallet:status-change" }>["data"]
 ): Promise<void> {
@@ -575,38 +627,28 @@ async function handleBvnkFundingWalletStatusChange(
     provider: "bvnk",
     customerLinkId: wallet.providerAccountId,
     fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
+    environment,
   });
   if (row === null) {
-    throw internalError(
-      `BVNK funding wallet event references no claimed funding row for customer link ${wallet.providerAccountId}`
+    throw new TerminalRampWebhookError(
+      `BVNK funding wallet event references no claimed funding row for customer link ${wallet.providerAccountId} in this environment`
     );
   }
   if (row.external_account_reference === null) {
     throw internalError("BVNK funding wallet reference is not assigned yet.");
   }
   if (row.external_account_reference !== data.id) {
-    getLogger().error(
-      {
-        provider_account_id: row.id,
-        stored_wallet_id: row.external_account_reference,
-        event_wallet_id: data.id,
-        customer_id: row.counterparty_id,
-      },
-      "[bvnk webhook] funding wallet event for an orphan duplicate wallet"
-    );
     throw new TerminalRampWebhookError("BVNK funding wallet event targets a different wallet.");
   }
   if (row.provider_customer_reference !== data.customer.id) {
-    getLogger().error(
-      {
-        provider_account_id: row.id,
-        stored_customer_reference: row.provider_customer_reference,
-        event_customer_id: data.customer.id,
-        customer_id: row.counterparty_id,
-      },
-      "[bvnk webhook] funding wallet event for a different customer"
-    );
     throw new TerminalRampWebhookError("BVNK funding wallet belongs to another customer.");
+  }
+  if (data.bankAccount === undefined || data.bankAccount.accountNumber === undefined) {
+    getLogger().info(
+      { provider_account_id: row.id, wallet_id: data.id },
+      "[bvnk webhook] funding wallet ACTIVE without a FIAT account number; not marking ready"
+    );
+    return;
   }
   const updated = await accounts.updateFundingWalletStatus({
     organizationId: row.organization_id,
@@ -631,19 +673,18 @@ async function handleBvnkFundingWalletStatusChange(
 }
 
 /**
- * Applies a wallet lifecycle event by its parsed name. Merchant off-ramp and
- * funding-wallet names route to their handlers; any other name — including the
- * legacy 6-part rule-keyed on-ramp wallets sandbox still holds — is
- * acknowledged as terminal: SDP no longer manages those wallets, so the event
- * is never retried.
+ * Applies a wallet lifecycle event by its parsed name; any other name is
+ * acknowledged as terminal: SDP no longer manages those wallets, so the
+ * event is never retried.
  *
  * @param env - Process environment used for repository access.
+ * @param environment - The project environment the event was delivered for.
  * @param wallet - Parsed wallet name, or the unrecognised name itself.
  * @param data - Parsed status-change event data.
- * @returns Resolves once the status transition is applied or the event is acknowledged.
  */
 async function applyBvnkWalletEvent(
   env: Env,
+  environment: SdpEnvironment,
   wallet: BVNKWallet | BvnkUnrecognisedWalletName,
   data: BvnkWalletWebhookData
 ): Promise<void> {
@@ -653,7 +694,7 @@ async function applyBvnkWalletEvent(
         getLogger().info("[bvnk webhook] merchant off-ramp wallet event is missing status");
         return;
       }
-      return handleBvnkOfframpWalletWebhook(env, wallet, data.status);
+      return handleBvnkOfframpWalletWebhook(env, environment, wallet, data.status);
     case "funding_wallet": {
       if (!("id" in data)) {
         getLogger().info(
@@ -662,7 +703,7 @@ async function applyBvnkWalletEvent(
         );
         return;
       }
-      return handleBvnkFundingWalletStatusChange(env, wallet, data);
+      return handleBvnkFundingWalletStatusChange(env, environment, wallet, data);
     }
     case "unrecognised":
       getLogger().warn(
@@ -676,40 +717,62 @@ async function applyBvnkWalletEvent(
 }
 
 /**
- * Applies an off-ramp channel settlement transition with its terminal amount.
- *
+ * Applies an off-ramp channel settlement transition scoped to the webhook's
+ * project environment; a sandbox-signed event naming a production off-ramp
+ * transfer is terminal.
  * @param env - Process environment used for database access.
+ * @param environment - The project environment the event was delivered for.
  * @param transferId - SDP off-ramp transfer identifier.
  * @param status - Settlement status to apply.
  * @param walletAmount - Confirmed wallet amount, when BVNK has supplied one.
- * @returns Resolves once the guarded transfer update completes.
  */
 async function settleBvnkOfframpChannel(
   env: Env,
+  environment: SdpEnvironment,
   transferId: string,
   status: "settling" | "completed",
   walletAmount: string | null
 ): Promise<void> {
+  const existing = await getDb(env)
+    .prepare(
+      `SELECT pt.id
+       FROM payment_transfers pt
+       JOIN projects prj ON prj.id = pt.project_id
+       WHERE pt.id = ?
+         AND pt.provider = 'bvnk'
+         AND pt.type = 'offramp'
+         AND prj.environment = ?`
+    )
+    .bind(transferId, environment)
+    .first<{ id: string }>();
+  if (existing === null) {
+    throw new TerminalRampWebhookError(
+      "stray off-ramp channel event: unknown transfer or environment mismatch"
+    );
+  }
   const placeholders = buildInClause(NON_TERMINAL_RAMP_TRANSFER_STATUSES.length);
-  const updatedAt = new Date().toISOString();
   await getDb(env)
     .prepare(
-      `UPDATE payment_transfers
+      `UPDATE payment_transfers pt
        SET status = ?,
            fiat_amount = CASE WHEN ?::boolean THEN ? ELSE fiat_amount END,
            updated_at = ?
-       WHERE id = ?
-         AND provider = 'bvnk'
-         AND type = 'offramp'
-         AND status IN (${placeholders})`
+       WHERE pt.id = ?
+         AND pt.provider = 'bvnk'
+         AND pt.type = 'offramp'
+         AND pt.status IN (${placeholders})
+         AND EXISTS (
+           SELECT 1 FROM projects prj WHERE prj.id = pt.project_id AND prj.environment = ?
+         )`
     )
     .bind(
       status,
       walletAmount !== null,
       walletAmount,
-      updatedAt,
+      new Date().toISOString(),
       transferId,
-      ...NON_TERMINAL_RAMP_TRANSFER_STATUSES
+      ...NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+      environment
     )
     .run();
 }
@@ -734,32 +797,39 @@ function bvnkChannelTransferId(
 
 async function handleBvnkPaymentChannelTransactionDetected(
   env: Env,
+  environment: SdpEnvironment,
   event: Extract<BvnkWebhook, { event: "bvnk:payment:channel:transaction-detected" }>
 ): Promise<void> {
   const transferId = bvnkChannelTransferId(event);
   if (transferId === undefined) {
     return;
   }
-  await settleBvnkOfframpChannel(env, transferId, "settling", null);
+  await settleBvnkOfframpChannel(env, environment, transferId, "settling", null);
 }
 
 async function handleBvnkPaymentChannelTransactionConfirmed(
   env: Env,
+  environment: SdpEnvironment,
   event: Extract<BvnkWebhook, { event: "bvnk:payment:channel:transaction-confirmed" }>
 ): Promise<void> {
   const transferId = bvnkChannelTransferId(event);
   if (transferId === undefined) {
     return;
   }
-  await settleBvnkOfframpChannel(env, transferId, "completed", event.data.walletAmount);
+  await settleBvnkOfframpChannel(
+    env,
+    environment,
+    transferId,
+    "completed",
+    event.data.walletAmount
+  );
 }
 
 export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParsedWebhook> {
   readonly provider = "bvnk";
 
   /**
-   * Verifies a BVNK webhook against the configured HMAC secret.
-   *
+   * Verifies the HMAC signature of a BVNK webhook body.
    * @param context - Webhook headers, raw body, environment, and runtime configuration.
    * @returns The signature-verified webhook body parsed as JSON.
    */
@@ -805,9 +875,8 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
 
   /**
    * Parses a verified BVNK webhook payload into a typed event.
-   *
    * @param payload - The signature-verified webhook JSON.
-   * @returns A parsed webhook event, or an ignore signal for events SDP does not handle.
+   * @returns A parsed event, or an ignore signal for events SDP does not handle.
    */
   parse(payload: unknown): BvnkParsedWebhook {
     const envelope = bvnkWebhookEnvelopeSchema.safeParse(payload);
@@ -835,34 +904,43 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
 
   /**
    * Applies a parsed BVNK webhook event.
-   *
    * @param env - Process environment used for repository access.
    * @param environment - Sandbox or production ramp environment.
    * @param webhook - The parsed webhook event.
-   * @returns Resolves once the event's effects are applied.
    */
   async process(env: Env, environment: SdpEnvironment, webhook: BvnkParsedWebhook): Promise<void> {
     switch (webhook.event) {
       case "ignore":
         getLogger().info(`[bvnk webhook] ignored event: ${webhook.reason}`);
         return;
+      case "bvnk:payment:payin:status-change":
+        return handleBvnkPayinStatusChange(env, environment, webhook.data);
       case "payment:v2:payin:status-change":
-        return handleBvnkPayinStatusChange(env, webhook.data);
+        getLogger().info(
+          { payin_id: webhook.data.id, status: webhook.data.status },
+          "[bvnk webhook] v2 pay-in acknowledged-ignored"
+        );
+        return;
       case "bvnk:payment:crypto:status-change":
         return handleBvnkCryptoPayoutStatusChange(env, environment, webhook.data);
       case "bvnk:payment:channel:transaction-detected":
-        return handleBvnkPaymentChannelTransactionDetected(env, webhook);
+        return handleBvnkPaymentChannelTransactionDetected(env, environment, webhook);
       case "bvnk:payment:channel:transaction-confirmed":
-        return handleBvnkPaymentChannelTransactionConfirmed(env, webhook);
+        return handleBvnkPaymentChannelTransactionConfirmed(env, environment, webhook);
       case "bvnk:platform:customer:status-change":
         return handleBvnkCustomerStatusChange(env, environment, webhook);
       case "bvnk:platform:customer:update":
         return handleBvnkPlatformCustomerUpdate(env, environment, webhook);
       case "bvnk:platform:customer:agreement-session-status-change":
-        return handleBvnkPlatformCustomerAgreementSessionStatusChange(env, webhook);
+        return handleBvnkPlatformCustomerAgreementSessionStatusChange(env, environment, webhook);
       case "ledger:v2:wallet:status-change":
       case "bvnk:ledger:wallet:create":
-        return applyBvnkWalletEvent(env, parseBvnkWalletName(webhook.data.name), webhook.data);
+        return applyBvnkWalletEvent(
+          env,
+          environment,
+          parseBvnkWalletName(webhook.data.name),
+          webhook.data
+        );
       default: {
         const exhaustive: never = webhook;
         return exhaustive;

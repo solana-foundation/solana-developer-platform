@@ -275,15 +275,18 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return row ? mapCounterpartyRow(row) : null;
     },
 
-    async findActiveCounterpartyById(counterpartyId: string) {
+    async findActiveCounterpartyById(params) {
       const row = await db
         .prepare(
-          `SELECT * FROM counterparties
-            WHERE id = ?
-              AND status = 'active'
+          `SELECT c.*
+             FROM counterparties c
+             JOIN projects prj ON prj.id = c.project_id
+            WHERE c.id = ?
+              AND c.status = 'active'
+              AND prj.environment = ?
             LIMIT 1`
         )
-        .bind(counterpartyId)
+        .bind(params.counterpartyId, params.environment)
         .first<Record<string, unknown>>();
       return row ? mapCounterpartyRow(row) : null;
     },
@@ -297,15 +300,17 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                ON cpa.counterparty_id = c.id
               AND cpa.organization_id = c.organization_id
               AND cpa.project_id = c.project_id
+             JOIN projects prj ON prj.id = c.project_id
             WHERE c.status = 'active'
               AND cpa.provider = ?
               AND cpa.provider_customer_reference = ?
               AND cpa.kind = 'customer_link'
               AND cpa.status = 'active'
+              AND prj.environment = ?
             ORDER BY c.id
             LIMIT 2`
         )
-        .bind(params.provider, params.providerCustomerReference)
+        .bind(params.provider, params.providerCustomerReference, params.environment)
         .all<Record<string, unknown>>();
       if (rows.results.length !== 1) {
         return null;

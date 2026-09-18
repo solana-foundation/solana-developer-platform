@@ -151,6 +151,11 @@ function onrampWizard(
     quoteSimulationLoading: false,
     quoteSimulationSucceeded: false,
     simulateCurrentQuote: asyncNoop,
+    showCompleteScreen:
+      transferStatus?.status === "completed" ||
+      (transferStatus?.status === "settling" &&
+        transferStatus.settlement !== undefined &&
+        transferStatus.settlement.provider === "bvnk"),
   };
 }
 

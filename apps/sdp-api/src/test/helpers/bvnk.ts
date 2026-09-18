@@ -1,4 +1,6 @@
 import { BVNK_FUNDING_WALLET_FIAT } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { buildProcessingSettlement } from "@sdp/payments/ramps/providers/bvnk/settlement";
+import type { BvnkRampSettlement } from "@sdp/types";
 import {
   BVNK_FUNDING_WALLET_STATUS,
   type BvnkFundingWalletStatus,
@@ -6,6 +8,7 @@ import {
 } from "@sdp/types";
 import type { z } from "zod";
 import type { AppDb } from "@/db";
+import { createPostgresBvnkOnrampTransfersRepository } from "@/db/repositories/bvnk-onramp-transfers.repository.postgres";
 import type {
   BvnkCustomerProviderAccountMetadata,
   CounterpartyProviderAccountRow,
@@ -127,33 +130,108 @@ export function bvnkWalletStatusChangeEvent(overrides?: Partial<BvnkWalletStatus
   };
 }
 
-type BvnkPayinStatusChangeData = Extract<
+type BvnkV1PayinStatusChangeEvent = Extract<
   BvnkWebhookInput,
-  { event: "payment:v2:payin:status-change" }
->["data"];
+  { event: "bvnk:payment:payin:status-change" }
+>;
+
+export interface BvnkV1PayinStatusChangeOverrides {
+  transactionReference?: string;
+  paymentReference?: string;
+  additionalRemittanceInformation?: string;
+  status?: string;
+  amount?: string | number;
+  currencyCode?: string;
+  walletId?: string;
+  customerReference?: string;
+  eventId?: string;
+}
 
 /**
- * Builds the observed BVNK v2 fiat pay-in status-change webhook payload.
+ * Builds the observed BVNK v1 fiat pay-in status-change webhook payload
+ * (Zach, Sep 18): the transaction reference is the pay-in id, the remittance
+ * fields carry the transfer reference for attribution, and the amount settles
+ * whatever the wallet received.
  *
  * @param overrides - Event data fields to replace.
- * @returns A fully shaped pay-in status-change event.
+ * @returns A fully shaped v1 pay-in status-change event.
  */
-export function bvnkPayinStatusChangeEvent(
-  overrides?: Partial<BvnkPayinStatusChangeData>
-): BvnkWebhookInput {
-  const dataOverrides = overrides === undefined ? {} : overrides;
+export function bvnkV1PayinEvent(
+  overrides?: BvnkV1PayinStatusChangeOverrides
+): BvnkV1PayinStatusChangeEvent {
+  const {
+    transactionReference = "payin_1",
+    paymentReference = "SDP-ONRAMP xfr_1",
+    additionalRemittanceInformation,
+    status = "COMPLETED",
+    amount = 100,
+    currencyCode = "USD",
+    walletId = "a:1:wallet:1",
+    customerReference = "customer_1",
+    eventId = "evt_payin_1",
+  } = overrides === undefined ? {} : overrides;
+  return {
+    event: "bvnk:payment:payin:status-change",
+    eventId,
+    timestamp: BVNK_WEBHOOK_TIMESTAMP,
+    data: {
+      amount: { value: amount, currencyCode },
+      status,
+      ...(additionalRemittanceInformation === undefined
+        ? {}
+        : { metadata: { additionalRemittanceInformation } }),
+      beneficiary: { walletId },
+      paymentReference,
+      customerReference,
+      transactionReference,
+    },
+  };
+}
+
+type BvnkV2PayinStatusChangeEvent = Extract<
+  BvnkWebhookInput,
+  { event: "payment:v2:payin:status-change" }
+>;
+
+export interface BvnkV2PayinStatusChangeOverrides {
+  id?: string;
+  status?: string;
+  amount?: string | number;
+  currency?: string;
+  walletId?: string;
+  customerId?: string;
+}
+
+/**
+ * Builds the legacy BVNK v2 fiat pay-in status-change webhook payload. The v2
+ * event is the acknowledged-ignore: it parses so the delivery never 400s, and
+ * applying it would double-apply a deposit the v1 event already settled.
+ *
+ * @param overrides - Event data fields to replace.
+ * @returns A fully shaped v2 pay-in status-change event.
+ */
+export function bvnkV2PayinStatusChangeEvent(
+  overrides?: BvnkV2PayinStatusChangeOverrides
+): BvnkV2PayinStatusChangeEvent {
+  const {
+    id = "payin_1",
+    status = "COMPLETED",
+    amount = 100,
+    currency = "USD",
+    walletId = "a:1:wallet:1",
+    customerId = "customer_1",
+  } = overrides === undefined ? {} : overrides;
   return {
     event: "payment:v2:payin:status-change",
     data: {
-      id: "payin_1",
-      status: "COMPLETED",
+      id,
+      status,
       beneficiary: {
-        amount: 100,
-        currency: "USD",
-        walletId: "a:1:wallet:1",
-        customerId: "customer_1",
+        amount,
+        currency,
+        walletId,
+        customerId,
       },
-      ...dataOverrides,
     },
   };
 }
@@ -171,8 +249,10 @@ const bvnkPayoutMoney = (amount: number, actual: number, currency: string) => ({
 
 /**
  * Builds a BVNK crypto payout status-change webhook payload for an on-ramp
- * conversion, carrying the full conversion economics so a COMPLETE event can
- * settle the transfer end to end.
+ * conversion. The reference IS the transfer id now; the delivered crypto and
+ * the full conversion economics let a COMPLETE event settle the transfer end
+ * to end. Transactions and the destination address stay optional on the wire
+ * and are only required by the schema once the status is COMPLETE/COMPLETED.
  *
  * @param overrides - Event data fields to replace.
  * @returns A fully shaped crypto payout status-change event.
@@ -187,11 +267,12 @@ export function bvnkCryptoPayoutStatusChangeEvent(
       uuid: "payout_1",
       status: "PROCESSING",
       walletId: "a:1:wallet:1",
-      reference: "ON_RAMP_payin_1",
+      reference: "xfr_bvnk_payout_1",
       address: { address: "dest", network: "SOLANA" },
       paidCurrency: bvnkPayoutMoney(9.8802, 0, "USDC"),
       walletCurrency: bvnkPayoutMoney(9.9, 0, "USD"),
       feeCurrency: bvnkPayoutMoney(0.1, 0, "USD"),
+      networkFeeCurrency: bvnkPayoutMoney(0, 0, "USD"),
       exchangeRate: { base: "USD", rate: 0.998, counter: "USDC" },
       transactions: [],
       ...overrides,
@@ -344,7 +425,7 @@ export async function seedBvnkFundingWallet(
   }
   let current = row;
   if (
-    input.providerStatus !== BVNK_FUNDING_WALLET_STATUS.provisioning &&
+    input.providerStatus === BVNK_FUNDING_WALLET_STATUS.provisioned &&
     current.external_account_reference === null
   ) {
     const assigned = await accounts.assignFundingWalletReference({
@@ -358,8 +439,7 @@ export async function seedBvnkFundingWallet(
     current = assigned;
   }
   if (
-    (input.providerStatus === BVNK_FUNDING_WALLET_STATUS.provisioned ||
-      input.providerStatus === BVNK_FUNDING_WALLET_STATUS.locked) &&
+    input.providerStatus === BVNK_FUNDING_WALLET_STATUS.provisioned &&
     current.provider_status !== BVNK_FUNDING_WALLET_STATUS.provisioned
   ) {
     const updated = await accounts.updateFundingWalletStatus({
@@ -372,21 +452,6 @@ export async function seedBvnkFundingWallet(
       throw new Error("BVNK funding wallet provision CAS lost its row.");
     }
     current = updated;
-  }
-  if (input.providerStatus === BVNK_FUNDING_WALLET_STATUS.locked) {
-    const transferId = input.metadata.transferId;
-    if (typeof transferId !== "string" || transferId.length === 0) {
-      throw new Error("seedBvnkFundingWallet requires a transferId in metadata for a locked row.");
-    }
-    const locked = await accounts.lockFundingWallet({
-      ...scope,
-      id: current.id,
-      transferId,
-    });
-    if (locked === null) {
-      throw new Error("BVNK funding wallet lock CAS lost its row.");
-    }
-    current = locked;
   }
   if (JSON.stringify(current.metadata) !== JSON.stringify(input.metadata)) {
     await db
@@ -407,12 +472,18 @@ export async function seedBvnkFundingWallet(
 }
 
 /**
- * Seeds a BVNK on-ramp transfer row for lock and cancel tests, shaped like the
- * prebooked row the quote path writes: the provider reference is the transfer
- * id and delivery mode is manual instructions.
+ * Seeds a BVNK on-ramp transfer row for webhook, cancel, and simulation
+ * tests, shaped like the prebooked row the quote path writes: the provider
+ * reference is the transfer id, delivery mode is manual instructions, and
+ * provider_data starts as `{ bvnk: {} }` (R1). The custody wallet id binding
+ * the transfer to an API-key-accessible wallet and the provider_data payload
+ * are caller-controlled so authz, pay-in replay, and payout webhook tests can
+ * seed exactly the state they exercise.
  *
  * @param db - Test database receiving the row.
- * @param input - Tenant scope, transfer id and status, and the fiat/destination values the quote locked.
+ * @param input - Tenant scope, transfer id and status, the fiat/destination
+ *   values the quote prebooked, the optional custody wallet id, and the
+ *   optional provider_data payload.
  * @returns Nothing once the transfer row exists.
  */
 export async function seedBvnkOnrampTransfer(
@@ -425,23 +496,28 @@ export async function seedBvnkOnrampTransfer(
     projectId: string;
     fiatAmount: string;
     destinationAddress: string;
+    custodyWalletId?: string;
+    providerData?: Record<string, unknown>;
   }
 ): Promise<void> {
   const now = new Date().toISOString();
+  const custodyWalletId = input.custodyWalletId === undefined ? null : input.custodyWalletId;
+  const providerData = input.providerData === undefined ? { bvnk: {} } : input.providerData;
   await db
     .prepare(
       `INSERT INTO payment_transfers (
-         id, organization_id, project_id, wallet_id, source_address, destination_address,
-         token, amount, memo, type, direction, status, provider, provider_reference,
-         delivery_mode, fiat_currency, fiat_amount, counterparty_id, provider_data,
-         created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+         id, organization_id, project_id, wallet_id, custody_wallet_id, source_address,
+         destination_address, token, amount, memo, type, direction, status, provider,
+         provider_reference, delivery_mode, fiat_currency, fiat_amount, counterparty_id,
+         provider_data, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
     )
     .bind(
       input.id,
       input.organizationId,
       input.projectId,
       "wallet_bvnk_onramp_seed",
+      custodyWalletId,
       null,
       input.destinationAddress,
       "USDC",
@@ -456,11 +532,252 @@ export async function seedBvnkOnrampTransfer(
       "USD",
       input.fiatAmount,
       input.counterpartyId,
-      {},
+      providerData,
       now,
       now
     )
     .run();
+}
+
+/**
+ * Seeds a counterparty, its BVNK customer link, and its provisioned USD
+ * funding wallet in one call — the tenant scope every BVNK on-ramp flow
+ * (webhook, cancel, simulate, reconciler) starts from. The funding wallet row
+ * is created through `seedBvnkFundingWallet` so the claim/assign transitions
+ * run exactly like production.
+ *
+ * @param db - Test database receiving the rows.
+ * @param input - Tenant scope, a name suffix for stable ids, the provider
+ *   customer reference, and the BVNK ledger wallet reference the funding
+ *   wallet adopts.
+ * @returns The counterparty id and the funding wallet reference.
+ */
+export async function seedBvnkOnrampCounterpartyAndFundingWallet(
+  db: AppDb,
+  input: {
+    organizationId: string;
+    projectId: string;
+    name: string;
+    customerReference: string;
+    fundingWalletReference: string;
+    createdBy: string;
+  }
+): Promise<{ counterpartyId: string; fundingReference: string }> {
+  const counterpartyId = `cpty_${input.name}`;
+  await db
+    .prepare(
+      `INSERT INTO counterparties (
+         id, organization_id, project_id, entity_type, display_name, provider_data, created_by
+       ) VALUES (?, ?, ?, 'individual', ?, '{}', ?)`
+    )
+    .bind(counterpartyId, input.organizationId, input.projectId, input.name, input.createdBy)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO counterparty_provider_accounts (
+         id, organization_id, project_id, counterparty_id, provider,
+         provider_customer_reference, kind, fiat_currency, external_account_reference,
+         provider_status, status, metadata
+       ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', NULL, NULL, NULL, 'active', '{}')`
+    )
+    .bind(
+      `cpa_link_${input.name}`,
+      input.organizationId,
+      input.projectId,
+      counterpartyId,
+      input.customerReference
+    )
+    .run();
+  await seedBvnkFundingWallet(db, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    counterpartyId,
+    providerCustomerReference: input.customerReference,
+    walletId: input.fundingWalletReference,
+    providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+    metadata: {},
+  });
+  return { counterpartyId, fundingReference: input.fundingWalletReference };
+}
+
+/** The pay-in facts a seeded on-ramp transfer owns; every field is written by the caller (no defaults). */
+export interface SeedBvnkOnrampPayin {
+  id: string;
+  receivedAmount: string;
+  receivedCurrency: string;
+  walletId: string;
+  customerId: string;
+}
+
+export interface SeedBvnkOnrampPayinAppliedInput {
+  organizationId: string;
+  projectId: string;
+  name: string;
+  createdBy: string;
+  customerReference: string;
+  fundingWalletReference: string;
+  transferId: string;
+  destinationAddress: string;
+  payin: SeedBvnkOnrampPayin;
+}
+
+/**
+ * Seeds a BVNK on-ramp transfer through the REAL transitions: the funding
+ * scope, an awaiting transfer, then `applyPayin` with the caller's pay-in
+ * facts. The transfer ends `settling` with the pay-in ownership blob exactly
+ * as the webhook writes it, so seeded rows always pass the strict codec and
+ * the unique pay-in index stays honest (callers supply distinct payin ids).
+ *
+ * @param db - Test database receiving the rows.
+ * @param input - Tenant scope, transfer identity, destination, and the pay-in facts.
+ * @returns The settling transfer row.
+ */
+export async function seedBvnkOnrampPayinApplied(
+  db: AppDb,
+  input: SeedBvnkOnrampPayinAppliedInput
+): Promise<import("@/db/repositories/payments.repository").PaymentTransferRow> {
+  const { counterpartyId } = await seedBvnkOnrampCounterpartyAndFundingWallet(db, input);
+  await seedBvnkOnrampTransfer(db, {
+    id: input.transferId,
+    status: "awaiting_payment",
+    counterpartyId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    fiatAmount: input.payin.receivedAmount,
+    destinationAddress: input.destinationAddress,
+  });
+  const repo = createPostgresBvnkOnrampTransfersRepository(db);
+  const applied = await repo.applyPayin({
+    transferId: input.transferId,
+    fundingWalletReference: input.fundingWalletReference,
+    payin: input.payin,
+  });
+  if (applied === null) {
+    throw new Error(`BVNK on-ramp pay-in apply failed for ${input.transferId}.`);
+  }
+  return applied;
+}
+
+export interface SeedBvnkOnrampPayoutClaimedInput extends SeedBvnkOnrampPayinAppliedInput {
+  claimedAt: string;
+  intent: {
+    amount: string;
+    currency: string;
+    cryptoCurrency: string;
+    network: string;
+    address: string;
+  };
+}
+
+/**
+ * Seeds a settling transfer that owns its pay-in AND its payout claim, via
+ * the real `applyPayin` + `claimPayout` transitions.
+ *
+ * @param db - Test database receiving the rows.
+ * @param input - The pay-in seed input plus the claim timestamp and spend intent.
+ * @returns The claimed transfer row.
+ */
+export async function seedBvnkOnrampPayoutClaimed(
+  db: AppDb,
+  input: SeedBvnkOnrampPayoutClaimedInput
+): Promise<import("@/db/repositories/payments.repository").PaymentTransferRow> {
+  await seedBvnkOnrampPayinApplied(db, input);
+  const repo = createPostgresBvnkOnrampTransfersRepository(db);
+  const claimed = await repo.claimPayout({
+    transferId: input.transferId,
+    claimedAt: input.claimedAt,
+    intent: input.intent,
+  });
+  if (claimed === null) {
+    throw new Error(`BVNK on-ramp payout claim failed for ${input.transferId}.`);
+  }
+  return claimed;
+}
+
+export interface SeedBvnkOnrampPayoutIssuedInput extends SeedBvnkOnrampPayoutClaimedInput {
+  environment: "sandbox" | "production";
+  payoutId: string;
+}
+
+/**
+ * Seeds a settling transfer whose payout is claimed AND issued, via the real
+ * `applyPayin` + `claimPayout` + `recordPayoutId` transitions (the latter
+ * lands the PROCESSING settlement alongside the payout id, exactly like the
+ * reconciler).
+ *
+ * @param db - Test database receiving the rows.
+ * @param input - The claim seed input plus the project environment and the provider payout id.
+ * @returns The issued transfer row.
+ */
+export async function seedBvnkOnrampPayoutIssued(
+  db: AppDb,
+  input: SeedBvnkOnrampPayoutIssuedInput
+): Promise<import("@/db/repositories/payments.repository").PaymentTransferRow> {
+  await seedBvnkOnrampPayoutClaimed(db, input);
+  const repo = createPostgresBvnkOnrampTransfersRepository(db);
+  const summary = bvnkPayoutSummary({ uuid: input.payoutId, reference: input.transferId });
+  if (summary.redirectUrl === undefined) {
+    throw new Error("seedBvnkOnrampPayoutIssued fixture summary lacks the receipt url.");
+  }
+  return repo.recordPayoutId({
+    transferId: input.transferId,
+    payoutId: input.payoutId,
+    claimedAt: input.claimedAt,
+    environment: input.environment,
+    settlement: buildProcessingSettlement(input.payin.id, summary, summary.redirectUrl),
+  });
+}
+
+/** Overridable parts of a payout summary fixture; every default matches the typed wire shape. */
+export type BvnkPayoutSummaryOverrides = Partial<
+  import("@sdp/payments/ramps/providers/bvnk/schemas").BvnkOnrampPayoutSummary
+>;
+
+/**
+ * Builds a BK estimator-free provider payout summary with the full typed
+ * shape (including `walletId` and `type`, which adoption and the poll path
+ * validate), so mocked provider responses can never drift from the schema
+ * that owns them.
+ *
+ * @param overrides - Summary fields to replace for a test case.
+ * @returns A fully shaped payout summary.
+ */
+export function bvnkPayoutSummary(
+  overrides: BvnkPayoutSummaryOverrides = {}
+): import("@sdp/payments/ramps/providers/bvnk/schemas").BvnkOnrampPayoutSummary {
+  return {
+    uuid: "payout_uuid_1",
+    type: "OUT",
+    walletId: "a:wallet:bvnk:1",
+    status: "PROCESSING",
+    quoteStatus: "ACCEPTED",
+    reference: "xfr_payout_1",
+    redirectUrl: "https://pay.sandbox.bvnk.com/payout/payout_uuid_1",
+    walletCurrency: { currency: "USD", amount: 100, actual: 0 },
+    paidCurrency: { currency: "USDC", amount: 99.8, actual: 0 },
+    feeCurrency: { currency: "USD", amount: 0.2, actual: 0 },
+    networkFeeCurrency: { currency: "USD", amount: 0, actual: 0 },
+    exchangeRate: { base: "USD", counter: "USDC", rate: 0.998 },
+    ...overrides,
+  };
+}
+
+/**
+ * The PROCESSING settlement blob the reconciler records at payout create,
+ * derived through the real builder from the fixture summary. Seeds that call
+ * `recordPayoutId` (directly or via `seedBvnkOnrampPayoutIssued`) must pass a
+ * blob built the same way the reconcile path builds it.
+ *
+ * @param transferId - The transfer id the settlement anchors.
+ * @param payoutId - The provider payout id the settlement records.
+ * @returns The PROCESSING settlement blob.
+ */
+export function bvnkProcessingSettlement(transferId: string, payoutId: string): BvnkRampSettlement {
+  const summary = bvnkPayoutSummary({ uuid: payoutId, reference: transferId });
+  if (summary.redirectUrl === undefined) {
+    throw new Error("bvnkProcessingSettlement fixture summary lacks the receipt url.");
+  }
+  return buildProcessingSettlement(`payin_${transferId}`, summary, summary.redirectUrl);
 }
 
 /**

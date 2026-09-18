@@ -29,10 +29,7 @@ import type { BvnkComplianceInput } from "./providers/bvnk/schemas";
 import type { LightsparkPurposeOfPayment } from "./providers/lightspark/provider-data";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
 
-export type {
-  BvnkCustomerResolution,
-  BvnkRuleEntity,
-} from "./providers/bvnk/provider-data";
+export type { BvnkCustomerResolution } from "./providers/bvnk/provider-data";
 export type { BvnkComplianceInput } from "./providers/bvnk/schemas";
 export type { LightsparkCustomerResolution } from "./providers/lightspark/client";
 export type {

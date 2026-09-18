@@ -2,7 +2,6 @@ import type { CountryCode } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { CRYPTO_RAIL_ASSET_LABELS } from "@sdp/types/payment-rails";
 import { z } from "zod";
-import type { BvnkRuleEntity } from "./provider-data";
 import {
   BVNK_EMPLOYMENT_STATUSES,
   BVNK_EXPECTED_VOLUME_CURRENCIES,
@@ -21,8 +20,19 @@ export const bvnkEstimateFeeCurrencySchema = z
   .toUpperCase()
   .pipe(z.union([bvnkEstimateFiatCurrencySchema, z.enum(Object.values(CRYPTO_RAIL_ASSET_LABELS))]));
 
+export const bvnkPartyDetailsSchema = z.object({
+  type: z.literal("BENEFICIARY"),
+  entityType: z.literal("INDIVIDUAL"),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  dateOfBirth: z.string().min(1),
+  relationshipType: z.literal("THIRD_PARTY"),
+  countryCode: z.string().min(2),
+});
+export type BvnkPartyDetails = z.infer<typeof bvnkPartyDetailsSchema>;
+
 export const bvnkComplianceDetailsSchema = z.object({
-  partyDetails: z.array(z.record(z.string(), z.unknown())).min(1),
+  partyDetails: z.array(bvnkPartyDetailsSchema).min(1),
 });
 export type BvnkComplianceInput = z.infer<typeof bvnkComplianceDetailsSchema>;
 
@@ -37,18 +47,6 @@ export const bvnkOfframpQuoteInputSchema = z.object({
   externalCustomerId: z.string().min(1),
   bvnkCompliance: bvnkComplianceDetailsSchema,
 });
-
-export const BVNK_RULE_STATUSES = ["ACTIVE", "INACTIVE"] as const;
-export type BvnkRuleStatus = (typeof BVNK_RULE_STATUSES)[number];
-export const bvnkRuleStatusSchema = z.enum(BVNK_RULE_STATUSES);
-
-/**
- * @param status - A BVNK payment-rule status.
- * @returns True when the rule is still live and can match a pay-in.
- */
-export function isBvnkRuleActive(status: BvnkRuleStatus): boolean {
-  return status === bvnkRuleStatusSchema.enum.ACTIVE;
-}
 
 export const bvnkErrorEnvelopeSchema = z.object({
   code: z.string().optional(),
@@ -104,15 +102,6 @@ export const bvnkQuoteEstimateResponseSchema = z.object({
     }),
   }),
 });
-
-export interface CreateBvnkOnrampRuleInput {
-  reference: string;
-  walletId: string;
-  currency: string;
-  network: string;
-  beneficiaryAddress: string;
-  entity: BvnkRuleEntity;
-}
 
 export const bvnkCustomerStatusSchema = z.enum([
   "INFO_REQUIRED",
@@ -224,10 +213,10 @@ export type BvnkCustomerCreated = z.infer<typeof bvnkCustomerCreatedSchema>;
 export const bvnkVerificationStatusSchema = z.string().min(1);
 
 /**
- * The v1 customer GET also drives quote-time rule entities, so its person
- * block carries the address keys BVNK's rule validation re-reads. The
- * `individual` field stays optional at the top level: BVNK may omit the block
- * while KYC is in flight, and the rule entity builder fails loudly then.
+ * The v1 customer GET drives the JIT payout partyDetails mapping, so its
+ * person block carries the payout beneficiary fields. The `individual` field
+ * stays optional at the top level: BVNK may omit the block while KYC is in
+ * flight, and the party-details builder fails loudly then.
  */
 export const bvnkCustomerSchema = z.object({
   reference: z.string().min(1),
@@ -308,10 +297,14 @@ const bvnkV2PaymentInstrumentSchema = z.object({
   bankDetails: bvnkV2BankDetailsSchema,
   remittanceInformationPrefix: z.string().optional(),
 });
+
+/** Ledger v2 wallet lifecycle statuses reported by BVNK on wallet read and list rows. */
+const bvnkV2WalletStatusSchema = z.enum(["ACTIVE", "INACTIVE", "TERMINATED"]);
+
 export const bvnkV2LedgerWalletSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  status: z.enum(["ACTIVE", "INACTIVE", "TERMINATED"]),
+  status: bvnkV2WalletStatusSchema,
   customer: z.object({ id: z.string().min(1), name: z.string().optional() }).optional(),
   balance: z.object({ amount: z.number(), currency: z.string().min(1) }).optional(),
   paymentInstruments: z.array(bvnkV2PaymentInstrumentSchema).optional(),
@@ -320,11 +313,136 @@ export const bvnkV2LedgerWalletSchema = z.object({
 });
 export type BvnkLedgerWalletV2 = z.infer<typeof bvnkV2LedgerWalletSchema>;
 
-export const bvnkRuleSchema = z.object({
-  id: z.string().min(1),
-  reference: z.string().min(1),
-  status: bvnkRuleStatusSchema,
+/**
+ * BVNK `/api/v1/pay/summary` currency blocks. BVNK reports amounts as JSON
+ * numbers on the wire; callers convert them with `decimalStringFromNumber`
+ * where a value is consumed as money.
+ */
+const bvnkPayoutCurrencyAmountBaseSchema = z.object({
+  currency: z.string().min(1),
+  amount: z.number().finite(),
 });
-export type BvnkRule = z.infer<typeof bvnkRuleSchema>;
-export const bvnkRuleResponseSchema = bvnkRuleSchema;
-export type BvnkRuleResponse = BvnkRule;
+
+/**
+ * Currency block of a created payment. `actual` is always numeric on create:
+ * the wallet debit lands at create time and unpaid legs report zero (probe step 3/6).
+ */
+export const bvnkPayoutCurrencyAmountSchema = bvnkPayoutCurrencyAmountBaseSchema.extend({
+  actual: z.number().finite(),
+});
+
+/**
+ * Currency block of a dry-run quote. Dry-run never reports settled amounts,
+ * so `actual` is null on every leg (probe step 2); the paid `amount` is the
+ * quote the reconciler deducts fees from.
+ */
+export const bvnkDryRunPayoutCurrencyAmountSchema = bvnkPayoutCurrencyAmountBaseSchema.extend({
+  actual: z.number().nullable(),
+});
+
+export const bvnkPayoutExchangeRateSchema = z.object({
+  base: z.string().min(1),
+  counter: z.string().min(1),
+  rate: z.number().finite(),
+});
+
+/**
+ * Response of `POST /api/v1/pay/summary/dry-run`. Distinct from the payment
+ * summary schema: a dry-run carries no uuid/status and its `actual` fields
+ * are null (R8) — the two wire shapes must not share one parse.
+ */
+export const bvnkDryRunPayoutResponseSchema = z.object({
+  walletCurrency: bvnkDryRunPayoutCurrencyAmountSchema,
+  paidCurrency: bvnkDryRunPayoutCurrencyAmountSchema,
+  feeCurrency: bvnkDryRunPayoutCurrencyAmountSchema,
+  networkFeeCurrency: bvnkDryRunPayoutCurrencyAmountSchema,
+  exchangeRate: bvnkPayoutExchangeRateSchema,
+});
+export type BvnkDryRunPayoutResponse = z.infer<typeof bvnkDryRunPayoutResponseSchema>;
+
+export const bvnkOnrampPayoutComplianceDetailsSchema = bvnkComplianceDetailsSchema.extend({
+  requesterIpAddress: z.string().min(1),
+});
+
+/**
+ * Request body of `POST /api/v1/pay/summary` and its dry-run sibling. The two
+ * endpoints differ only in the network code, which the client forces from
+ * `BVNK_PAYOUT_NETWORK` (create `SOLANA`, dry-run `SOL`); the input network is
+ * ignored.
+ */
+export const bvnkOnrampPayoutInputSchema = z.object({
+  walletId: z.string().min(1),
+  amount: z.number().positive(),
+  currency: z.string().min(1),
+  reference: z.string().min(1),
+  customerId: z.string().min(1),
+  payOutDetails: z.object({
+    code: z.literal("crypto"),
+    currency: z.string().min(1),
+    network: z.string().min(1),
+    address: z.string().min(1),
+  }),
+  complianceDetails: bvnkOnrampPayoutComplianceDetailsSchema,
+});
+export type BvnkOnrampPayoutInput = z.infer<typeof bvnkOnrampPayoutInputSchema>;
+
+const bvnkOnrampPayoutAddressSchema = z.object({
+  address: z.string().min(1),
+  network: z.string().min(1),
+});
+
+const bvnkOnrampPayoutTransactionSchema = z.object({
+  hash: z.string().min(1),
+});
+
+/**
+ * A created/read payout as returned by create, the uuid summary read, and the
+ * list-by-reference rows. `transactions` and `address` are absent from the
+ * wire until the crypto leg executes; every other field is present from
+ * create (probe step 3 and the `s5_list_doc` rows). `redirectUrl` rides the
+ * create response and the live PROCESSING webhook (the sandbox receipt page),
+ * but list rows may omit it, so callers that need it fail loudly at the point
+ * of use. `walletId` rides every row (probe) and adoption validates it
+ * against the persisted pay-in wallet.
+ */
+export const bvnkOnrampPayoutSummarySchema = z.object({
+  uuid: z.string().min(1),
+  type: z.string().min(1),
+  walletId: z.string().min(1),
+  status: z.string().min(1),
+  quoteStatus: z.string().min(1),
+  reference: z.string().min(1),
+  redirectUrl: z.string().min(1).optional(),
+  walletCurrency: bvnkPayoutCurrencyAmountSchema,
+  paidCurrency: bvnkPayoutCurrencyAmountSchema,
+  feeCurrency: bvnkPayoutCurrencyAmountSchema,
+  networkFeeCurrency: bvnkPayoutCurrencyAmountSchema,
+  exchangeRate: bvnkPayoutExchangeRateSchema,
+  transactions: z.array(bvnkOnrampPayoutTransactionSchema).optional(),
+  address: bvnkOnrampPayoutAddressSchema.optional(),
+});
+export type BvnkOnrampPayoutSummary = z.infer<typeof bvnkOnrampPayoutSummarySchema>;
+
+/** Rows of the ledger v2 wallet list. `currency` is absent on wallet rows (currency lives in `balance`); `customer.name` showed up on live list rows. */
+export const bvnkV2WalletListRowSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  status: bvnkV2WalletStatusSchema,
+  customer: z.object({ id: z.string().min(1), name: z.string().optional() }),
+  currency: z.string().min(1).optional(),
+  balance: z.object({ amount: z.number().finite(), currency: z.string().min(1) }).optional(),
+});
+export type BvnkV2WalletListRow = z.infer<typeof bvnkV2WalletListRowSchema>;
+
+/**
+ * Ledger v2 wallet list page. Live responses carry `content`, `pageable`,
+ * and `hasNext` but no `totalElements` (probe-idem §3), so `totalElements`
+ * stays optional.
+ */
+export const bvnkV2WalletListSchema = z.object({
+  totalElements: z.number().int().optional(),
+  content: z.array(bvnkV2WalletListRowSchema),
+  pageable: bvnkV2PageableSchema,
+  hasNext: z.boolean(),
+});
+export type BvnkV2WalletList = z.infer<typeof bvnkV2WalletListSchema>;

@@ -2,7 +2,12 @@ import {
   bvnkSessionAgreementSchema,
   bvnkVerificationStatusSchema,
 } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { type BvnkFundingWalletStatus, COUNTRY_CODES, type CountryCode } from "@sdp/types";
+import {
+  type BvnkFundingWalletStatus,
+  COUNTRY_CODES,
+  type CountryCode,
+  type SdpEnvironment,
+} from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
@@ -43,13 +48,6 @@ export type CounterpartyProviderAccountRow = z.infer<typeof counterpartyProvider
 export type CounterpartyProviderAccountKind = CounterpartyProviderAccountRow["kind"];
 
 export const bvnkFundingWalletMetadataSchema = z.object({}).strict();
-
-export const bvnkFundingWalletLockSchema = z
-  .object({
-    transferId: z.string().min(1),
-    payinId: z.string().min(1).optional(),
-  })
-  .strict();
 
 export const bvnkCustomerProviderAccountMetadataSchema = z.object({
   status: z.string().optional(),
@@ -122,19 +120,15 @@ export interface FindActiveFundingWalletByCustomerLinkIdInput {
   provider: RampProviderId;
   customerLinkId: string;
   fiatCurrency: RampFiatCurrency;
+  /** The project environment the wallet row must belong to (cross-tenant webhook isolation). */
+  environment: SdpEnvironment;
 }
 
 export interface FindActiveFundingWalletByReferenceInput {
   provider: RampProviderId;
   externalAccountReference: string;
-}
-
-export interface RecordFundingWalletPayinInput extends GetCounterpartyProviderAccountInput {
-  id: string;
-  /** The transfer id the lock must still be held for. */
-  transferId: string;
-  /** The provider pay-in id to record on the lock. */
-  payinId: string;
+  /** The project environment the wallet row must belong to (cross-tenant webhook isolation). */
+  environment: SdpEnvironment;
 }
 
 export interface UpdateFundingWalletStatusInput extends GetCounterpartyProviderAccountInput {
@@ -143,14 +137,10 @@ export interface UpdateFundingWalletStatusInput extends GetCounterpartyProviderA
   toStatus: BvnkFundingWalletStatus;
 }
 
-export interface LockFundingWalletInput extends GetCounterpartyProviderAccountInput {
+export interface LeaseStaleFundingWalletClaimInput extends GetCounterpartyProviderAccountInput {
   id: string;
-  transferId: string;
-}
-
-export interface ReleaseFundingWalletInput extends GetCounterpartyProviderAccountInput {
-  id: string;
-  transferId: string;
+  /** ISO-8601 cutoff; only rows last updated before it can be leased. */
+  cutoff: string;
 }
 
 interface InsertProviderResourceAccountBase extends GetCounterpartyProviderAccountInput {
@@ -206,6 +196,8 @@ export interface SetCustomerLinkSessionInput extends GetCounterpartyProviderAcco
 export interface FindCustomerLinkBySessionReferenceInput {
   provider: RampProviderId;
   sessionReference: string;
+  /** The project environment the customer link must belong to (cross-tenant webhook isolation). */
+  environment: SdpEnvironment;
 }
 
 export type BvnkSessionTimestampField = "signedAt" | "consentSubmittedAt";
@@ -318,26 +310,14 @@ export interface CounterpartyProviderAccountsRepository {
 
   /**
    * Finds the active funding-wallet row by its provider wallet reference. This
-   * is system-scoped because webhook payloads carry no tenant identity.
+   * is system-scoped because webhook payloads carry no tenant identity; the
+   * project join is the environment isolation for the cross-tenant lookup.
    *
-   * @param input - Ramp provider and the provider wallet reference.
-   * @returns The active funding-wallet row, or null when none carries the reference.
+   * @param input - Ramp provider, the provider wallet reference, and the project environment the wallet must belong to.
+   * @returns The active funding-wallet row, or null when none carries the reference in that environment.
    */
   findActiveFundingWalletByReference(
     input: FindActiveFundingWalletByReferenceInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
-   * Records the provider pay-in id on a locked funding-wallet row via a
-   * compare-and-swap: the metadata merge lands only while the row is still
-   * locked by the same transfer and carries no pay-in id yet. A replay or a
-   * lock that moved returns null and writes nothing.
-   *
-   * @param input - Tenant scope, row id, the holding transfer id, and the pay-in id.
-   * @returns The updated row, or null when the CAS lost (replay or lock moved).
-   */
-  recordFundingWalletPayin(
-    input: RecordFundingWalletPayinInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
@@ -352,26 +332,17 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Reserves a provisioned funding-wallet row for one on-ramp transfer via a
-   * compare-and-swap against `provisioned_funding_wallet`, stamping the lock
-   * metadata with the holding transfer id. The transfer id is the guard and
-   * the webhook-to-transfer pointer, never a lookup key.
+   * Leases a stale, unreferenced funding-wallet row for one provisioning
+   * retry via a compare-and-swap on `updated_at`. The CAS lease is the
+   * takeover decision: a concurrent claimer's write bumps `updated_at` and
+   * makes this update match zero rows, so a null result means creation is
+   * still in flight and the caller must back off instead of creating.
    *
-   * @param input - Tenant scope, row id, and the transfer id the lock is held for.
-   * @returns The locked row, or null when it is out of scope or not provisioned.
+   * @param input - Tenant scope, row id, and the ISO-8601 stale cutoff.
+   * @returns The leased row, or null when the row is fresh, referenced, inactive, or already taken over.
    */
-  lockFundingWallet(input: LockFundingWalletInput): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
-   * Returns a locked funding-wallet row to `provisioned_funding_wallet` via a
-   * compare-and-swap on both the locked status and the holding transfer id, so
-   * only the transfer that holds the lock can free it.
-   *
-   * @param input - Tenant scope, row id, and the transfer id the lock must still be held for.
-   * @returns The released row, or null when the lock is not held by that transfer.
-   */
-  releaseFundingWallet(
-    input: ReleaseFundingWalletInput
+  leaseStaleFundingWalletClaim(
+    input: LeaseStaleFundingWalletClaimInput
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**

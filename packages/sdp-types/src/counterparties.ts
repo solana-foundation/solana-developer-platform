@@ -133,13 +133,11 @@ export const BVNK_CUSTOMER_LINK_STAGE = {
 export const BVNK_FUNDING_WALLET_STATUSES = [
   "provisioning_funding_wallet",
   "provisioned_funding_wallet",
-  "funding_wallet_locked",
 ] as const;
 export type BvnkFundingWalletStatus = (typeof BVNK_FUNDING_WALLET_STATUSES)[number];
 export const BVNK_FUNDING_WALLET_STATUS = {
   provisioning: "provisioning_funding_wallet",
   provisioned: "provisioned_funding_wallet",
-  locked: "funding_wallet_locked",
 } as const satisfies Record<string, BvnkFundingWalletStatus>;
 
 export interface CounterpartyProviderCustomerLinkAgreement {

@@ -1,7 +1,10 @@
 import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { buildBvnkCustomerRequest } from "@sdp/payments/ramps/providers/bvnk/counterparty";
-import { buildBvnkCustomerExternalReference } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import {
+  BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS,
+  buildBvnkCustomerExternalReference,
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
   BVNK_RESIDENCE_FIELDS,
   BVNK_US_MTL_STATES,
@@ -10,8 +13,10 @@ import {
 import {
   bvnkAgreementSession,
   bvnkCustomer,
+  bvnkLedgerWallet,
+  bvnkWalletProfilesResponse,
 } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
-import { BVNK_FUNDING_WALLET_STATUS } from "@sdp/types";
+import { BVNK_FUNDING_WALLET_STATUS, type BvnkFundingWalletStatus } from "@sdp/types";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -34,7 +39,6 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import {
   restoreBvnkSandboxEnv,
   seedBvnkFundingWallet,
-  seedBvnkOnrampTransfer,
   stubBvnkSandboxEnv,
   TEST_BVNK_WALLET_ID,
 } from "@/test/helpers/bvnk";
@@ -1280,10 +1284,7 @@ describe("Counterparties Routes", () => {
     function seedFundingWallet(
       counterpartyId: string,
       input: {
-        providerStatus:
-          | "provisioning_funding_wallet"
-          | "provisioned_funding_wallet"
-          | "funding_wallet_locked";
+        providerStatus: BvnkFundingWalletStatus;
         metadata: Record<string, unknown>;
       }
     ) {
@@ -1298,12 +1299,27 @@ describe("Counterparties Routes", () => {
       });
     }
 
-    it("gates the verified BVNK on-ramp on customer_funding_account_provisioning before the funding row exists", async () => {
+    it("advance_recovers_missing_and_unassigned_funding_wallet: creates the missing funding wallet and still gates on customer_funding_account_provisioning", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_funding_missing" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
       await seedVerifiedBvnkCustomerLink(counterparty.id);
       const getCustomerSpy = mockVerifiedBvnkCustomer();
+      const listWalletsSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listLedgerWalletsV2")
+        .mockResolvedValue({ content: [], hasNext: false });
+      const walletProfileSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listLedgerWalletProfilesV2")
+        .mockResolvedValue(
+          bvnkWalletProfilesResponse({
+            content: [{ id: "profile_req_funding_1", currencies: ["USD"], methods: ["ACH"] }],
+          })
+        );
+      const createWalletSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createLedgerWalletV2")
+        .mockImplementation(async (_ctx, input) =>
+          bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID, name: input.name })
+        );
 
       const res = await bvnkOnrampRequirementsRequest(counterparty.id);
 
@@ -1313,11 +1329,62 @@ describe("Counterparties Routes", () => {
         direction: "onramp",
         status: "customer_funding_account_provisioning",
       });
+      expect(createWalletSpy).toHaveBeenCalledTimes(1);
+      const funding = await getDb(env)
+        .prepare(
+          "SELECT external_account_reference, provider_status FROM counterparty_provider_accounts WHERE counterparty_id = ? AND kind = 'funding_wallet'"
+        )
+        .bind(counterparty.id)
+        .first<{ external_account_reference: string | null; provider_status: string }>();
+      expect(funding).toEqual({
+        external_account_reference: TEST_BVNK_WALLET_ID,
+        provider_status: BVNK_FUNDING_WALLET_STATUS.provisioning,
+      });
+
+      getCustomerSpy.mockRestore();
+      listWalletsSpy.mockRestore();
+      walletProfileSpy.mockRestore();
+      createWalletSpy.mockRestore();
+    });
+
+    it("advance_for_a_verified_customer_never_asks_for_residence: a POST advance without collected data returns ready once the funding wallet is provisioned", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_verified_advance",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedFundingWallet(counterparty.id, {
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "bvnk",
+            direction: "onramp",
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            destinationCustodyWalletId: TEST_CP_CUSTODY_WALLET_ID,
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const data = (await res.json()).data;
+      expect(data.status).toBe("ready");
+      expect(getCustomerSpy).toHaveBeenCalledTimes(1);
 
       getCustomerSpy.mockRestore();
     });
 
-    it("keeps reporting customer_funding_account_provisioning while the funding wallet provisions", async () => {
+    it("keeps reporting customer_funding_account_provisioning while the funding wallet claim is fresh", async () => {
       const created = await createCounterparty({
         externalId: "requirements_bvnk_funding_provisioning",
       });
@@ -1329,6 +1396,12 @@ describe("Counterparties Routes", () => {
         metadata: {},
       });
       const getCustomerSpy = mockVerifiedBvnkCustomer();
+      const createWalletSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createLedgerWalletV2")
+        .mockResolvedValue(bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID }));
+      const readWalletSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2")
+        .mockResolvedValue(bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID }));
 
       const res = await bvnkOnrampRequirementsRequest(counterparty.id);
 
@@ -1338,8 +1411,12 @@ describe("Counterparties Routes", () => {
         direction: "onramp",
         status: "customer_funding_account_provisioning",
       });
+      expect(createWalletSpy).not.toHaveBeenCalled();
+      expect(readWalletSpy).not.toHaveBeenCalled();
 
       getCustomerSpy.mockRestore();
+      createWalletSpy.mockRestore();
+      readWalletSpy.mockRestore();
     });
 
     it("answers ready once the BVNK funding wallet is provisioned", async () => {
@@ -1365,111 +1442,50 @@ describe("Counterparties Routes", () => {
       getCustomerSpy.mockRestore();
     });
 
-    it("reports funding_wallet_reserved with the holding transfer while a quote awaits payment", async () => {
+    async function seedAssignedStaleProvisioningFundingWallet(
+      counterpartyId: string,
+      rowId: string,
+      stale: boolean
+    ): Promise<void> {
+      const staleAt = new Date(
+        Date.now() - BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS - 1000
+      ).toISOString();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO counterparty_provider_accounts (
+             id, organization_id, project_id, counterparty_id, provider,
+             provider_customer_reference, kind, fiat_currency,
+             external_account_reference, provider_status, metadata, updated_at
+           ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'funding_wallet', 'USD', ?, 'provisioning_funding_wallet', '{}'::jsonb, ?)`
+        )
+        .bind(
+          rowId,
+          TEST_ORG.id,
+          TEST_PROJECT_ID,
+          counterpartyId,
+          BVNK_CUSTOMER_REFERENCE,
+          TEST_BVNK_WALLET_ID,
+          stale ? staleAt : new Date().toISOString()
+        )
+        .run();
+    }
+
+    it("advance recovers a stale assigned provisioning funding wallet once BVNK reports it ACTIVE with a FIAT instrument", async () => {
       const created = await createCounterparty({
-        externalId: "requirements_bvnk_funding_reserved",
+        externalId: "requirements_bvnk_funding_recover",
       });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
       await seedVerifiedBvnkCustomerLink(counterparty.id);
-      await seedBvnkOnrampTransfer(getDb(env), {
-        id: "xfr_req_reserved",
-        status: "awaiting_payment",
-        counterpartyId: counterparty.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        fiatAmount: "42.00",
-        destinationAddress: TEST_CP_WALLET_PUBLIC_KEY,
-      });
-      await seedFundingWallet(counterparty.id, {
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.locked,
-        metadata: { transferId: "xfr_req_reserved" },
-      });
+      await seedAssignedStaleProvisioningFundingWallet(
+        counterparty.id,
+        "cpa_req_funding_recover",
+        true
+      );
       const getCustomerSpy = mockVerifiedBvnkCustomer();
-
-      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
-
-      expect(res.status).toBe(200);
-      expect((await res.json()).data).toEqual({
-        provider: "bvnk",
-        direction: "onramp",
-        status: "funding_wallet_reserved",
-        transfer: {
-          id: "xfr_req_reserved",
-          fiatAmount: "42.00",
-          createdAt: expect.any(String),
-        },
-      });
-
-      getCustomerSpy.mockRestore();
-    });
-
-    it("reports funding_wallet_settling while the pay-in is settling", async () => {
-      const created = await createCounterparty({
-        externalId: "requirements_bvnk_funding_settling",
-      });
-      expect(created.status).toBe(201);
-      const counterparty = (await created.json()).data.counterparty;
-      await seedVerifiedBvnkCustomerLink(counterparty.id);
-      await seedBvnkOnrampTransfer(getDb(env), {
-        id: "xfr_req_settling",
-        status: "settling",
-        counterpartyId: counterparty.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        fiatAmount: "88.00",
-        destinationAddress: TEST_CP_WALLET_PUBLIC_KEY,
-      });
-      await seedFundingWallet(counterparty.id, {
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.locked,
-        metadata: { transferId: "xfr_req_settling" },
-      });
-      const getCustomerSpy = mockVerifiedBvnkCustomer();
-
-      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
-
-      expect(res.status).toBe(200);
-      expect((await res.json()).data).toEqual({
-        provider: "bvnk",
-        direction: "onramp",
-        status: "funding_wallet_settling",
-        transfer: {
-          id: "xfr_req_settling",
-          fiatAmount: "88.00",
-          createdAt: expect.any(String),
-        },
-      });
-
-      getCustomerSpy.mockRestore();
-    });
-
-    it("releases a lock held by a completed transfer and answers ready", async () => {
-      const created = await createCounterparty({ externalId: "requirements_bvnk_funding_stale" });
-      expect(created.status).toBe(201);
-      const counterparty = (await created.json()).data.counterparty;
-      await seedVerifiedBvnkCustomerLink(counterparty.id);
-      await seedBvnkOnrampTransfer(getDb(env), {
-        id: "xfr_req_completed",
-        status: "completed",
-        counterpartyId: counterparty.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        fiatAmount: "33.00",
-        destinationAddress: TEST_CP_WALLET_PUBLIC_KEY,
-      });
-      await seedFundingWallet(counterparty.id, {
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.locked,
-        metadata: { transferId: "xfr_req_completed" },
-      });
-      const getCustomerSpy = mockVerifiedBvnkCustomer();
-      const listRulesSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listOnrampRules")
-        .mockResolvedValue([
-          { id: "rule_req_stale", reference: "xfr_req_completed", status: "ACTIVE" },
-        ]);
-      const deactivateSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "deactivateOnrampRule")
-        .mockResolvedValue(undefined);
+      const readWalletSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2")
+        .mockResolvedValue(bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID }));
 
       const res = await bvnkOnrampRequirementsRequest(counterparty.id);
 
@@ -1479,24 +1495,55 @@ describe("Counterparties Routes", () => {
         direction: "onramp",
         status: "ready",
       });
-      expect(deactivateSpy).toHaveBeenCalledTimes(1);
-      expect(deactivateSpy).toHaveBeenCalledWith(expect.anything(), {
-        ruleId: "rule_req_stale",
+      expect(readWalletSpy).toHaveBeenCalledWith(expect.anything(), {
+        walletId: TEST_BVNK_WALLET_ID,
       });
       const funding = await getDb(env)
         .prepare(
-          "SELECT provider_status, metadata FROM counterparty_provider_accounts WHERE counterparty_id = ? AND kind = 'funding_wallet'"
+          "SELECT provider_status FROM counterparty_provider_accounts WHERE id = 'cpa_req_funding_recover'"
         )
-        .bind(counterparty.id)
-        .first<{ provider_status: string; metadata: Record<string, unknown> }>();
-      expect(funding).toEqual({
-        provider_status: BVNK_FUNDING_WALLET_STATUS.provisioned,
-        metadata: {},
-      });
+        .first<{ provider_status: string }>();
+      expect(funding?.provider_status).toBe(BVNK_FUNDING_WALLET_STATUS.provisioned);
 
       getCustomerSpy.mockRestore();
-      listRulesSpy.mockRestore();
-      deactivateSpy.mockRestore();
+      readWalletSpy.mockRestore();
+    });
+
+    it("ACTIVE_without_instrument_does_not_mark_ready: an ACTIVE wallet without a FIAT instrument leaves the row provisioning", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_funding_no_instrument",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedAssignedStaleProvisioningFundingWallet(
+        counterparty.id,
+        "cpa_req_funding_no_instrument",
+        true
+      );
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+      const readWalletSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2")
+        .mockResolvedValue(bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID, paymentInstruments: [] }));
+
+      const res = await bvnkOnrampRequirementsRequest(counterparty.id);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "onramp",
+        status: "customer_funding_account_provisioning",
+      });
+      expect(readWalletSpy).toHaveBeenCalledTimes(1);
+      const funding = await getDb(env)
+        .prepare(
+          "SELECT provider_status FROM counterparty_provider_accounts WHERE id = 'cpa_req_funding_no_instrument'"
+        )
+        .first<{ provider_status: string }>();
+      expect(funding?.provider_status).toBe(BVNK_FUNDING_WALLET_STATUS.provisioning);
+
+      getCustomerSpy.mockRestore();
+      readWalletSpy.mockRestore();
     });
 
     it("advances a verified BVNK on-ramp submit to ready once the funding wallet is provisioned", async () => {

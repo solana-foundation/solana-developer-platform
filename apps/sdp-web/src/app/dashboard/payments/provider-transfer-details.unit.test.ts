@@ -1,6 +1,6 @@
 import type { PaymentTransferSummary } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import { providerTransferDetailRows } from "./provider-transfer-details";
+import { isValidBvnkReceiptUrl, providerTransferDetailRows } from "./provider-transfer-details";
 
 function transferFixture(overrides: Partial<PaymentTransferSummary>): PaymentTransferSummary {
   return {
@@ -137,7 +137,7 @@ describe("providerTransferDetailRows", () => {
     ).toEqual([]);
   });
 
-  it("builds BVNK on-ramp economics, the sandbox receipt, and the explorer link", () => {
+  it("builds BVNK on-ramp COMPLETE economics, the stored receipt, and the explorer link", () => {
     const hash =
       "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
     const rows = providerTransferDetailRows(
@@ -150,14 +150,24 @@ describe("providerTransferDetailRows", () => {
           status: "COMPLETE",
           payinId: "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9",
           payoutId: "01a0ab3c-4388-7e84-a501-3b02668d715b",
+          receiptUrl: "https://pay.sandbox.bvnk.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
           fiatCurrency: "USD",
           fiatAmount: "9.9",
           cryptoCurrency: "USDC",
           cryptoAmount: "9.8802",
           feeCurrency: "USD",
           feeAmount: "0.1",
-          exchangeRate: 0.998,
+          networkFeeCurrency: "USD",
+          networkFeeAmount: "0",
+          exchangeRate: "0.998",
           txHash: hash,
+          cryptoAmountActual: "9.8802",
+          fiatAmountActual: "9.9",
+          feeAmountActual: "0.1",
+          feeCurrencyActual: "USD",
+          networkFeeAmountActual: "0",
+          networkFeeCurrencyActual: "USD",
+          exchangeRateActual: "0.998",
         },
       }),
       { cluster: "devnet" },
@@ -165,52 +175,185 @@ describe("providerTransferDetailRows", () => {
     );
 
     expect(rows.map(({ key, value }) => [key, value])).toEqual([
+      ["DashboardPayments.transferDetails.status", "DashboardPayments.bvnk.settlementCompleted"],
       [
         "DashboardPayments.transferDetails.receipt",
         "DashboardPayments.transferDetails.viewReceipt",
       ],
+      ["DashboardPayments.transferDetails.fiatSent", "9.90 USD"],
+      ["DashboardPayments.transferDetails.cryptoToReceive", "9.8802 USDC"],
       ["DashboardPayments.transferDetails.providerFee", "0.10 USD"],
       ["DashboardPayments.transferDetails.exchangeRate", "1 USD = 0.998 USDC"],
-      ["DashboardPayments.transferDetails.delivered", "9.8802 USDC"],
+      ["DashboardPayments.transferDetails.payinId", "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9"],
       ["DashboardPayments.transferDetails.solanaSignature", "5XGAib…iwcM"],
     ]);
-    expect(rows[0]).toMatchObject({
+    expect(
+      rows.find((row) => row.key === "DashboardPayments.transferDetails.receipt")
+    ).toMatchObject({
       href: "https://pay.sandbox.bvnk.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
     });
-    expect(rows[4]).toMatchObject({
+    expect(
+      rows.find((row) => row.key === "DashboardPayments.transferDetails.payinId")
+    ).toMatchObject({ copyValue: "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9" });
+    expect(
+      rows.find((row) => row.key === "DashboardPayments.transferDetails.payinId")
+    ).not.toHaveProperty("mono");
+    expect(
+      rows.find((row) => row.key === "DashboardPayments.transferDetails.solanaSignature")
+    ).toMatchObject({
       href: `https://explorer.solana.com/tx/${hash}?cluster=devnet`,
       copyValue: hash,
-      mono: true,
     });
+    expect(
+      rows.find((row) => row.key === "DashboardPayments.transferDetails.solanaSignature")
+    ).not.toHaveProperty("mono");
   });
 
-  it("derives the production BVNK receipt URL for the mainnet cluster", () => {
+  it("builds BVNK PROCESSING rows without a tx hash and with the sandbox receipt url", () => {
     const rows = providerTransferDetailRows(
       transferFixture({
-        id: "xfr_bvnk_prod",
+        id: "xfr_bvnk_processing",
+        status: "settling",
         type: "onramp",
         provider: "bvnk",
+        providerReference: "01a0ab3c-4388-7e84-a501-3b02668d715b",
         settlement: {
           provider: "bvnk",
-          status: "COMPLETE",
-          payinId: "payin_1",
-          payoutId: "payout_prod_1",
+          status: "PROCESSING",
+          payinId: "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9",
+          payoutId: "01a0ab3c-4388-7e84-a501-3b02668d715b",
+          receiptUrl: "https://pay.sandbox.bvnk.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
           fiatCurrency: "USD",
-          fiatAmount: "100",
+          fiatAmount: "9.9",
           cryptoCurrency: "USDC",
-          cryptoAmount: "99.5",
+          cryptoAmount: "9.8802",
           feeCurrency: "USD",
-          feeAmount: "0.5",
-          exchangeRate: 0.995,
-          txHash: "tx_prod_1",
+          feeAmount: "0.1",
+          networkFeeCurrency: "USD",
+          networkFeeAmount: "0.12",
+          exchangeRate: "0.998",
         },
       }),
       { cluster: "mainnet-beta" },
       (key) => key
     );
 
-    expect(rows[0]).toMatchObject({
-      href: "https://pay.bvnk.com/payout/payout_prod_1",
+    expect(rows.map(({ key, value }) => [key, value])).toEqual([
+      ["DashboardPayments.transferDetails.status", "DashboardPayments.bvnk.settlementProcessing"],
+      [
+        "DashboardPayments.transferDetails.receipt",
+        "DashboardPayments.transferDetails.viewReceipt",
+      ],
+      ["DashboardPayments.transferDetails.fiatSent", "9.90 USD"],
+      ["DashboardPayments.transferDetails.cryptoToReceive", "9.8802 USDC"],
+      ["DashboardPayments.transferDetails.providerFee", "0.10 USD"],
+      ["DashboardPayments.transferDetails.networkFee", "0.12 USD"],
+      ["DashboardPayments.transferDetails.exchangeRate", "1 USD = 0.998 USDC"],
+      ["DashboardPayments.transferDetails.payinId", "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9"],
+    ]);
+    expect(rows[1]).toMatchObject({
+      href: "https://pay.sandbox.bvnk.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
+    });
+    expect(rows.map(({ key }) => key)).not.toContain(
+      "DashboardPayments.transferDetails.solanaSignature"
+    );
+    expect(rows.map(({ key }) => key)).not.toContain("DashboardPayments.ramps.completed");
+  });
+
+  it.each(["failed", "canceled", "expired"] as const)(
+    "never renders BVNK settlement rows for a %s transfer",
+    (status) => {
+      const rows = providerTransferDetailRows(
+        transferFixture({
+          id: `xfr_bvnk_${status}`,
+          status,
+          type: "onramp",
+          provider: "bvnk",
+          settlement: {
+            provider: "bvnk",
+            status: "PROCESSING",
+            payinId: "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9",
+            payoutId: "01a0ab3c-4388-7e84-a501-3b02668d715b",
+            receiptUrl: "https://pay.sandbox.bvnk.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
+            fiatCurrency: "USD",
+            fiatAmount: "9.9",
+            cryptoCurrency: "USDC",
+            cryptoAmount: "9.8802",
+            feeCurrency: "USD",
+            feeAmount: "0.1",
+            networkFeeCurrency: "USD",
+            networkFeeAmount: "0.12",
+            exchangeRate: "0.998",
+          },
+        }),
+        { cluster: "devnet" },
+        (key) => key
+      );
+
+      expect(rows).toEqual([]);
+    }
+  );
+
+  it("omits the receipt row when the stored BVNK receipt URL fails the trust guard", () => {
+    const rows = providerTransferDetailRows(
+      transferFixture({
+        id: "xfr_bvnk_untrusted_receipt",
+        type: "onramp",
+        provider: "bvnk",
+        settlement: {
+          provider: "bvnk",
+          status: "COMPLETE",
+          payinId: "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9",
+          payoutId: "01a0ab3c-4388-7e84-a501-3b02668d715b",
+          receiptUrl: "https://evil.example.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
+          fiatCurrency: "USD",
+          fiatAmount: "9.9",
+          cryptoCurrency: "USDC",
+          cryptoAmount: "9.8802",
+          feeCurrency: "USD",
+          feeAmount: "0.1",
+          networkFeeCurrency: "USD",
+          networkFeeAmount: "0",
+          exchangeRate: "0.998",
+          txHash:
+            "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM",
+          cryptoAmountActual: "9.8802",
+          fiatAmountActual: "9.9",
+          feeAmountActual: "0.1",
+          feeCurrencyActual: "USD",
+          networkFeeAmountActual: "0",
+          networkFeeCurrencyActual: "USD",
+          exchangeRateActual: "0.998",
+        },
+      }),
+      { cluster: "devnet" },
+      (key) => key
+    );
+
+    expect(rows.map(({ key }) => key)).not.toContain("DashboardPayments.transferDetails.receipt");
+  });
+
+  describe("isValidBvnkReceiptUrl", () => {
+    const payoutId = "01a0ab3c-4388-7e84-a501-3b02668d715b";
+
+    it("accepts an https payout url on either BVNK host", () => {
+      expect(isValidBvnkReceiptUrl(`https://pay.bvnk.com/payout/${payoutId}`, payoutId)).toBe(true);
+      expect(
+        isValidBvnkReceiptUrl(`https://pay.sandbox.bvnk.com/payout/${payoutId}`, payoutId)
+      ).toBe(true);
+    });
+
+    it.each([
+      `http://pay.bvnk.com/payout/${payoutId}`,
+      `https://pay.bvnk.com.evil.example/payout/${payoutId}`,
+      `https://evil.example.com/payout/${payoutId}`,
+      `https://user:pass@pay.bvnk.com/payout/${payoutId}`,
+      `https://pay.bvnk.com:8443/payout/${payoutId}`,
+      `https://pay.bvnk.com/payout/01a0ab3c-0000-0000-0000-000000000000`,
+      `https://pay.bvnk.com/payout/${payoutId}/extra`,
+      "not a url",
+    ])("rejects %s", (url) => {
+      expect(isValidBvnkReceiptUrl(url, payoutId)).toBe(false);
     });
   });
 

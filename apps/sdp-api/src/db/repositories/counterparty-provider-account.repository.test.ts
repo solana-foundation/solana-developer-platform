@@ -331,206 +331,6 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     });
   });
 
-  describe("BVNK funding wallet lock and release", () => {
-    const FUNDING_SCOPE = {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      provider: "bvnk" as const,
-    };
-
-    async function seedProvisionedFundingWallet(externalId: string) {
-      const counterparty = await seedCounterparty(externalId);
-      const claimed = await repository.claimFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        providerCustomerReference: `bvnk_customer_${externalId}`,
-        fiatCurrency: "USD",
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
-      });
-      assert(claimed);
-      const assigned = await repository.assignFundingWalletReference({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: claimed.id,
-        externalAccountReference: "a:funding:wallet:1",
-      });
-      assert(assigned);
-      const provisioned = await repository.updateFundingWalletStatus({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: claimed.id,
-        fromStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
-        toStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
-      });
-      assert(provisioned);
-      return { counterparty, provisioned };
-    }
-
-    it("locks a provisioned wallet once and loses the replay CAS with the row untouched", async () => {
-      const { counterparty, provisioned } =
-        await seedProvisionedFundingWallet("cpacc_funding_lock");
-
-      const locked = await repository.lockFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: provisioned.id,
-        transferId: "xfr_lock_1",
-      });
-      expect(locked).toMatchObject({
-        id: provisioned.id,
-        provider_status: BVNK_FUNDING_WALLET_STATUS.locked,
-        metadata: { transferId: "xfr_lock_1" },
-      });
-
-      const replay = await repository.lockFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: provisioned.id,
-        transferId: "xfr_lock_2",
-      });
-      expect(replay).toBeNull();
-      expect(
-        await repository.getAccountByKindAndCurrency({
-          ...FUNDING_SCOPE,
-          counterpartyId: counterparty.id,
-          kind: "funding_wallet",
-          fiatCurrency: "USD",
-        })
-      ).toEqual(locked);
-    });
-
-    it("releases the lock only for the transfer id that holds it", async () => {
-      const { counterparty, provisioned } =
-        await seedProvisionedFundingWallet("cpacc_funding_release");
-      const locked = await repository.lockFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: provisioned.id,
-        transferId: "xfr_release_1",
-      });
-      assert(locked);
-
-      const wrongId = await repository.releaseFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: provisioned.id,
-        transferId: "xfr_release_other",
-      });
-      expect(wrongId).toBeNull();
-      expect(
-        await repository.getAccountByKindAndCurrency({
-          ...FUNDING_SCOPE,
-          counterpartyId: counterparty.id,
-          kind: "funding_wallet",
-          fiatCurrency: "USD",
-        })
-      ).toEqual(locked);
-
-      const released = await repository.releaseFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: provisioned.id,
-        transferId: "xfr_release_1",
-      });
-      expect(released).toMatchObject({
-        id: provisioned.id,
-        provider_status: BVNK_FUNDING_WALLET_STATUS.provisioned,
-        metadata: {},
-      });
-    });
-
-    it("refuses to lock or release through a different counterparty scope", async () => {
-      const { counterparty, provisioned } = await seedProvisionedFundingWallet(
-        "cpacc_funding_lock_scope"
-      );
-      const other = await seedCounterparty("cpacc_funding_lock_scope_other");
-
-      expect(
-        await repository.lockFundingWallet({
-          ...FUNDING_SCOPE,
-          counterpartyId: other.id,
-          id: provisioned.id,
-          transferId: "xfr_scope_1",
-        })
-      ).toBeNull();
-      const locked = await repository.lockFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: provisioned.id,
-        transferId: "xfr_scope_1",
-      });
-      assert(locked);
-      expect(
-        await repository.releaseFundingWallet({
-          ...FUNDING_SCOPE,
-          counterpartyId: other.id,
-          id: provisioned.id,
-          transferId: "xfr_scope_1",
-        })
-      ).toBeNull();
-      expect(
-        await repository.getAccountByKindAndCurrency({
-          ...FUNDING_SCOPE,
-          counterpartyId: counterparty.id,
-          kind: "funding_wallet",
-          fiatCurrency: "USD",
-        })
-      ).toEqual(locked);
-    });
-
-    it("rejects funding metadata that does not match its provider status on the read path", async () => {
-      const { counterparty, provisioned } = await seedProvisionedFundingWallet(
-        "cpacc_funding_meta_mismatch_locked"
-      );
-      const locked = await repository.lockFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: provisioned.id,
-        transferId: "xfr_meta_1",
-      });
-      assert(locked);
-      await getDb(env)
-        .prepare("UPDATE counterparty_provider_accounts SET metadata = ? WHERE id = ?")
-        .bind({}, provisioned.id)
-        .run();
-      await expect(
-        repository.getAccountByKindAndCurrency({
-          ...FUNDING_SCOPE,
-          counterpartyId: counterparty.id,
-          kind: "funding_wallet",
-          fiatCurrency: "USD",
-        })
-      ).rejects.toThrow("transferId");
-
-      const other = await seedProvisionedFundingWallet("cpacc_funding_meta_mismatch_provisioned");
-      const otherLocked = await repository.lockFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: other.counterparty.id,
-        id: other.provisioned.id,
-        transferId: "xfr_meta_2",
-      });
-      assert(otherLocked);
-      await repository.releaseFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: other.counterparty.id,
-        id: other.provisioned.id,
-        transferId: "xfr_meta_2",
-      });
-      await getDb(env)
-        .prepare("UPDATE counterparty_provider_accounts SET metadata = ? WHERE id = ?")
-        .bind({ transferId: "xfr_meta_2" }, other.provisioned.id)
-        .run();
-      await expect(
-        repository.getAccountByKindAndCurrency({
-          ...FUNDING_SCOPE,
-          counterpartyId: other.counterparty.id,
-          kind: "funding_wallet",
-          fiatCurrency: "USD",
-        })
-      ).rejects.toThrow("transferId");
-    });
-  });
-
   describe("BVNK funding wallet finder and status transition", () => {
     const FUNDING_SCOPE = {
       organizationId: TEST_ORG.id,
@@ -564,6 +364,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
           provider: "bvnk",
           customerLinkId: link.id,
           fiatCurrency: "USD",
+          environment: "sandbox",
         })
       ).toMatchObject({ id: claimed.id, kind: "funding_wallet", fiat_currency: "USD" });
     });
@@ -576,6 +377,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
           provider: "bvnk",
           customerLinkId: "counterparty_provider_account_missing",
           fiatCurrency: "USD",
+          environment: "sandbox",
         })
       ).toBeNull();
     });
@@ -592,6 +394,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
           provider: "bvnk",
           customerLinkId: link.id,
           fiatCurrency: "USD",
+          environment: "sandbox",
         })
       ).toBeNull();
     });
@@ -604,6 +407,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
           provider: "bvnk",
           customerLinkId: link.id,
           fiatCurrency: "EUR",
+          environment: "sandbox",
         })
       ).toBeNull();
     });
@@ -659,7 +463,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       ).toBeNull();
     });
 
-    async function seedLockedFundingWallet(externalId: string, transferId: string) {
+    async function seedReferencedFundingWallet(externalId: string) {
       const { counterparty, claimed } = await seedLinkAndFundingWallet(externalId);
       const assigned = await repository.assignFundingWalletReference({
         ...FUNDING_SCOPE,
@@ -668,128 +472,178 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         externalAccountReference: `a:${externalId}:wallet:1`,
       });
       assert(assigned);
-      const provisioned = await repository.updateFundingWalletStatus({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: claimed.id,
-        fromStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
-        toStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
-      });
-      assert(provisioned);
-      const locked = await repository.lockFundingWallet({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: claimed.id,
-        transferId,
-      });
-      assert(locked);
-      return { counterparty, locked };
+      return { counterparty, assigned };
     }
 
     it("finds the active funding row by its provider wallet reference and misses on others", async () => {
-      const { counterparty, locked } = await seedLockedFundingWallet(
-        "cpacc_funding_find_ref",
-        "xfr_find_ref"
-      );
+      const { counterparty, assigned } =
+        await seedReferencedFundingWallet("cpacc_funding_find_ref");
 
       expect(
         await repository.findActiveFundingWalletByReference({
           provider: "bvnk",
           externalAccountReference: `a:cpacc_funding_find_ref:wallet:1`,
+          environment: "sandbox",
         })
-      ).toMatchObject({ id: locked.id, kind: "funding_wallet" });
+      ).toMatchObject({ id: assigned.id, kind: "funding_wallet" });
       expect(
         await repository.findActiveFundingWalletByReference({
           provider: "bvnk",
           externalAccountReference: "a:cpacc_funding_find_ref:wallet:2",
+          environment: "sandbox",
         })
       ).toBeNull();
       expect(
         await repository.findActiveFundingWalletByReference({
           provider: "bvnk",
           externalAccountReference: `a:cpacc_funding_find_ref:wallet:1`,
+          environment: "sandbox",
         })
       ).toMatchObject({ counterparty_id: counterparty.id });
     });
 
-    it("records the pay-in id once and loses the replay CAS with the row untouched", async () => {
-      const { counterparty, locked } = await seedLockedFundingWallet(
-        "cpacc_funding_payin",
-        "xfr_payin_cas"
-      );
-
-      const recorded = await repository.recordFundingWalletPayin({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: locked.id,
-        transferId: "xfr_payin_cas",
-        payinId: "payin_cas_1",
-      });
-      expect(recorded).toMatchObject({
-        id: locked.id,
-        provider_status: BVNK_FUNDING_WALLET_STATUS.locked,
-        metadata: { transferId: "xfr_payin_cas", payinId: "payin_cas_1" },
-      });
-
-      const replay = await repository.recordFundingWalletPayin({
-        ...FUNDING_SCOPE,
-        counterpartyId: counterparty.id,
-        id: locked.id,
-        transferId: "xfr_payin_cas",
-        payinId: "payin_cas_2",
-      });
-      expect(replay).toBeNull();
-      expect(
-        await repository.getAccountByKindAndCurrency({
-          ...FUNDING_SCOPE,
-          counterpartyId: counterparty.id,
-          kind: "funding_wallet",
-          fiatCurrency: "USD",
-        })
-      ).toEqual(recorded);
-    });
-
-    it("refuses the pay-in CAS when the lock is held by another transfer", async () => {
-      const { counterparty, locked } = await seedLockedFundingWallet(
-        "cpacc_funding_payin_other",
-        "xfr_payin_other_lock"
-      );
+    it("returns null when the wallet row's project environment differs", async () => {
+      await seedReferencedFundingWallet("cpacc_funding_find_ref_env");
 
       expect(
-        await repository.recordFundingWalletPayin({
-          ...FUNDING_SCOPE,
-          counterpartyId: counterparty.id,
-          id: locked.id,
-          transferId: "xfr_payin_other_transfer",
-          payinId: "payin_cas_other",
+        await repository.findActiveFundingWalletByReference({
+          provider: "bvnk",
+          externalAccountReference: "a:cpacc_funding_find_ref_env:wallet:1",
+          environment: "production",
         })
       ).toBeNull();
-      expect(
-        await repository.getAccountByKindAndCurrency({
-          ...FUNDING_SCOPE,
-          counterpartyId: counterparty.id,
-          kind: "funding_wallet",
-          fiatCurrency: "USD",
-        })
-      ).toEqual(locked);
     });
 
-    it("refuses the pay-in CAS through a different counterparty scope", async () => {
-      const { locked } = await seedLockedFundingWallet(
-        "cpacc_funding_payin_scope",
-        "xfr_payin_scope"
-      );
-      const other = await seedCounterparty("cpacc_funding_payin_scope_other");
+    it("returns the row when the wallet row's project environment matches", async () => {
+      const { assigned } = await seedReferencedFundingWallet("cpacc_funding_find_ref_env_match");
 
       expect(
-        await repository.recordFundingWalletPayin({
-          ...FUNDING_SCOPE,
-          counterpartyId: other.id,
-          id: locked.id,
-          transferId: "xfr_payin_scope",
-          payinId: "payin_cas_scope",
+        await repository.findActiveFundingWalletByReference({
+          provider: "bvnk",
+          externalAccountReference: "a:cpacc_funding_find_ref_env_match:wallet:1",
+          environment: "sandbox",
         })
-      ).toBeNull();
+      ).toMatchObject({ id: assigned.id });
+    });
+  });
+
+  describe("BVNK funding wallet stale-claim lease", () => {
+    const FUNDING_SCOPE = {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      provider: "bvnk" as const,
+    };
+
+    const STALE_TIMESTAMP = "1900-03-01T00:00:00.000Z";
+    const CUTOFF = "2026-08-19T12:00:00.000Z";
+
+    async function seedFundingWallet(externalId: string) {
+      const counterparty = await seedCounterparty(externalId);
+      const claimed = await repository.claimFundingWallet({
+        ...FUNDING_SCOPE,
+        counterpartyId: counterparty.id,
+        providerCustomerReference: `bvnk_customer_${externalId}`,
+        fiatCurrency: "USD",
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
+      });
+      assert(claimed);
+      return { counterparty, claimed };
+    }
+
+    async function ageRow(id: string) {
+      await getDb(env)
+        .prepare("UPDATE counterparty_provider_accounts SET updated_at = ? WHERE id = ?")
+        .bind(STALE_TIMESTAMP, id)
+        .run();
+    }
+
+    it("leases a stale unreferenced funding-wallet row", async () => {
+      const { counterparty, claimed } = await seedFundingWallet("cpacc_funding_lease_stale");
+      await ageRow(claimed.id);
+
+      const leased = await repository.leaseStaleFundingWalletClaim({
+        ...FUNDING_SCOPE,
+        counterpartyId: counterparty.id,
+        id: claimed.id,
+        cutoff: CUTOFF,
+      });
+
+      assert(leased);
+      expect(leased).toMatchObject({
+        id: claimed.id,
+        kind: "funding_wallet",
+        external_account_reference: null,
+        metadata: {},
+      });
+      expect(leased.updated_at).not.toBe(STALE_TIMESTAMP);
+    });
+
+    it("returns null for a fresh funding-wallet row", async () => {
+      const { counterparty, claimed } = await seedFundingWallet("cpacc_funding_lease_fresh");
+
+      const leased = await repository.leaseStaleFundingWalletClaim({
+        ...FUNDING_SCOPE,
+        counterpartyId: counterparty.id,
+        id: claimed.id,
+        cutoff: CUTOFF,
+      });
+
+      expect(leased).toBeNull();
+    });
+
+    it("returns null for a funding-wallet row that already carries a reference", async () => {
+      const { counterparty, claimed } = await seedFundingWallet("cpacc_funding_lease_ref");
+      await repository.assignFundingWalletReference({
+        ...FUNDING_SCOPE,
+        counterpartyId: counterparty.id,
+        id: claimed.id,
+        externalAccountReference: "a:funding:lease:1",
+      });
+      await ageRow(claimed.id);
+
+      const leased = await repository.leaseStaleFundingWalletClaim({
+        ...FUNDING_SCOPE,
+        counterpartyId: counterparty.id,
+        id: claimed.id,
+        cutoff: CUTOFF,
+      });
+
+      expect(leased).toBeNull();
+    });
+
+    it("returns null for a funding-wallet row that is not active", async () => {
+      const { counterparty, claimed } = await seedFundingWallet("cpacc_funding_lease_archived");
+      await getDb(env)
+        .prepare("UPDATE counterparty_provider_accounts SET status = 'archived' WHERE id = ?")
+        .bind(claimed.id)
+        .run();
+      await ageRow(claimed.id);
+
+      const leased = await repository.leaseStaleFundingWalletClaim({
+        ...FUNDING_SCOPE,
+        counterpartyId: counterparty.id,
+        id: claimed.id,
+        cutoff: CUTOFF,
+      });
+
+      expect(leased).toBeNull();
+    });
+
+    it("loses the CAS to a claimer whose lease bumped the row first", async () => {
+      const { counterparty, claimed } = await seedFundingWallet("cpacc_funding_lease_takeover");
+      await ageRow(claimed.id);
+      const leaseInput = {
+        ...FUNDING_SCOPE,
+        counterpartyId: counterparty.id,
+        id: claimed.id,
+        cutoff: CUTOFF,
+      } as const;
+
+      const first = await repository.leaseStaleFundingWalletClaim(leaseInput);
+      assert(first);
+      const second = await repository.leaseStaleFundingWalletClaim(leaseInput);
+
+      expect(second).toBeNull();
     });
   });
 
@@ -825,6 +679,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       await counterparties.findActiveCounterpartyByProviderCustomerReference({
         provider: "bvnk",
         providerCustomerReference: "bvnk_customer_kind_filter",
+        environment: "sandbox",
       })
     ).toMatchObject({ id: counterparty.id });
 
@@ -845,6 +700,7 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       await counterparties.findActiveCounterpartyByProviderCustomerReference({
         provider: "bvnk",
         providerCustomerReference: "bvnk_customer_kind_filter",
+        environment: "sandbox",
       })
     ).toMatchObject({ id: counterparty.id });
   });
@@ -1311,12 +1167,14 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
       await repository.findCustomerLinkBySessionReference({
         provider: "bvnk",
         sessionReference: "bvnk_session_reference",
+        environment: "sandbox",
       })
     ).toMatchObject({ id: seeded.id });
     expect(
       await repository.findCustomerLinkBySessionReference({
         provider: "bvnk",
         sessionReference: "missing_session_reference",
+        environment: "sandbox",
       })
     ).toBeNull();
   });

@@ -4,7 +4,6 @@ import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-re
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
-import { useCancelReservedTransfer } from "../hooks/use-cancel-reserved-transfer";
 import { isOnboardingPanelStatus, onboardingCopy, provisioningDetail } from "./providers";
 
 export function RampOnboardingPanel({
@@ -32,12 +31,6 @@ export function RampOnboardingPanel({
             url: onboarding.verificationUrl,
           }
         : null;
-  const reservedTransferId = status === "funding_wallet_reserved" ? onboarding.transfer.id : null;
-  const {
-    pending: cancelPending,
-    error: cancelError,
-    cancel: cancelReserved,
-  } = useCancelReservedTransfer({ transferId: reservedTransferId, onCancelled: onRetry });
   return (
     <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
       <Icon className={`size-10 ${copy.iconClassName}`} />
@@ -65,19 +58,6 @@ export function RampOnboardingPanel({
         <Button type="button" variant="secondary" onClick={onRetry}>
           {t("DashboardPayments.ramps.tryAgain")}
         </Button>
-      ) : null}
-      {status === "funding_wallet_reserved" ? (
-        <>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={cancelPending}
-            onClick={cancelReserved}
-          >
-            {t("DashboardPayments.bvnk.cancelReservedTransfer")}
-          </Button>
-          {cancelError === null ? null : <p className="text-sm text-error">{cancelError}</p>}
-        </>
       ) : null}
     </div>
   );

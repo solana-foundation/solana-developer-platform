@@ -1,12 +1,10 @@
-import {
-  type BvnkRampSettlement,
-  type CoinbaseRampSettlement,
-  type LightsparkRampSettlement,
-  type MoonpayRampSettlement,
-  type PaymentTransferSummary,
-  SDP_ENVIRONMENT_BY_CLUSTER,
-  type SdpEnvironment,
-  type SolanaCluster,
+import type {
+  BvnkRampSettlement,
+  CoinbaseRampSettlement,
+  LightsparkRampSettlement,
+  MoonpayRampSettlement,
+  PaymentTransferSummary,
+  SolanaCluster,
 } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -57,21 +55,38 @@ export interface ProviderTransferDetailRow {
   mono?: boolean;
 }
 
-function moonpayTrackerUrl(transactionId: string): string {
-  return `https://buy.moonpay.com/v2/transaction-tracker?transactionId=${encodeURIComponent(transactionId)}`;
+/**
+ * Local web-side trust guard for BVNK payout receipt links. The API stores
+ * only validated URLs, but the dashboard still refuses to turn a stored URL
+ * into a clickable row unless it is exactly an https payout link on BVNK's
+ * own hosts, with no credentials and no port, whose path is `/payout/` plus
+ * the settlement payout id. sdp-web cannot import the shared validator from
+ * @sdp/payments (not a dependency), so the guard lives here.
+ */
+export function isValidBvnkReceiptUrl(url: string, payoutId: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") {
+    return false;
+  }
+  if (parsed.username !== "" || parsed.password !== "") {
+    return false;
+  }
+  if (parsed.port !== "") {
+    return false;
+  }
+  if (parsed.hostname !== "pay.bvnk.com" && parsed.hostname !== "pay.sandbox.bvnk.com") {
+    return false;
+  }
+  return parsed.pathname === `/payout/${payoutId}`;
 }
 
-/**
- * The BVNK-hosted payout receipt for one payout, derived per environment and
- * never stored.
- *
- * @param payoutId - The BVNK payout id (the crypto payout webhook's `uuid`).
- * @param environment - Sandbox or production ramp environment.
- * @returns The hosted receipt URL.
- */
-export function bvnkPayoutReceiptUrl(payoutId: string, environment: SdpEnvironment): string {
-  const host = environment === "sandbox" ? "pay.sandbox.bvnk.com" : "pay.bvnk.com";
-  return `https://${host}/payout/${encodeURIComponent(payoutId)}`;
+function moonpayTrackerUrl(transactionId: string): string {
+  return `https://buy.moonpay.com/v2/transaction-tracker?transactionId=${encodeURIComponent(transactionId)}`;
 }
 
 const MOONPAY_FIELDS: readonly TransferDetailFieldSpec<MoonpayRampSettlement>[] = [
@@ -141,27 +156,35 @@ const COINBASE_FIELDS: readonly TransferDetailFieldSpec<CoinbaseRampSettlement>[
 const BVNK_FIELDS: readonly TransferDetailFieldSpec<BvnkRampSettlement>[] = [
   {
     kind: "text",
+    labelKey: "DashboardPayments.transferDetails.fiatSent",
+    text: (settlement) => formatDisplayAmount(settlement.fiatAmount, settlement.fiatCurrency),
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.cryptoToReceive",
+    text: (settlement) => formatDisplayAmount(settlement.cryptoAmount, settlement.cryptoCurrency),
+  },
+  {
+    kind: "text",
     labelKey: "DashboardPayments.transferDetails.providerFee",
     text: (settlement) => formatDisplayAmount(settlement.feeAmount, settlement.feeCurrency),
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.networkFee",
+    text: (settlement) =>
+      Number(settlement.networkFeeAmount) > 0
+        ? formatDisplayAmount(settlement.networkFeeAmount, settlement.networkFeeCurrency)
+        : null,
   },
   {
     kind: "text",
     labelKey: "DashboardPayments.transferDetails.exchangeRate",
     text: (settlement) =>
       `1 ${settlement.fiatCurrency} = ${formatDisplayAmount(
-        String(settlement.exchangeRate),
+        settlement.exchangeRate,
         settlement.cryptoCurrency
       )}`,
-  },
-  {
-    kind: "text",
-    labelKey: "DashboardPayments.transferDetails.delivered",
-    text: (settlement) => formatDisplayAmount(settlement.cryptoAmount, settlement.cryptoCurrency),
-  },
-  {
-    kind: "explorerTx",
-    labelKey: "DashboardPayments.transferDetails.solanaSignature",
-    signature: (settlement) => settlement.txHash,
   },
 ];
 
@@ -296,19 +319,63 @@ function bvnkBuilder(
   context: TransferDetailFieldContext,
   t: Translate
 ): ProviderTransferDetailRow[] {
+  if (
+    transfer.status === "failed" ||
+    transfer.status === "canceled" ||
+    transfer.status === "expired"
+  ) {
+    return [];
+  }
   const settlement = transfer.settlement;
   if (settlement === undefined || settlement.provider !== "bvnk") {
     return [];
   }
-  const receipt: ProviderTransferDetailRow[] = [
-    {
-      key: "DashboardPayments.transferDetails.receipt",
-      label: t("DashboardPayments.transferDetails.receipt"),
-      value: t("DashboardPayments.transferDetails.viewReceipt"),
-      href: bvnkPayoutReceiptUrl(settlement.payoutId, SDP_ENVIRONMENT_BY_CLUSTER[context.cluster]),
-    },
+  const statusRow: ProviderTransferDetailRow = {
+    key: "DashboardPayments.transferDetails.status",
+    label: t("DashboardPayments.transferDetails.status"),
+    value:
+      settlement.status === "PROCESSING"
+        ? t("DashboardPayments.bvnk.settlementProcessing")
+        : t("DashboardPayments.bvnk.settlementCompleted"),
+  };
+  const receipt: ProviderTransferDetailRow[] = isValidBvnkReceiptUrl(
+    settlement.receiptUrl,
+    settlement.payoutId
+  )
+    ? [
+        {
+          key: "DashboardPayments.transferDetails.receipt",
+          label: t("DashboardPayments.transferDetails.receipt"),
+          value: t("DashboardPayments.transferDetails.viewReceipt"),
+          href: settlement.receiptUrl,
+        },
+      ]
+    : [];
+  const payinRow: ProviderTransferDetailRow = {
+    key: "DashboardPayments.transferDetails.payinId",
+    label: t("DashboardPayments.transferDetails.payinId"),
+    value: settlement.payinId,
+    copyValue: settlement.payinId,
+  };
+  const txHashRow: ProviderTransferDetailRow[] =
+    settlement.status === "COMPLETE"
+      ? [
+          {
+            key: "DashboardPayments.transferDetails.solanaSignature",
+            label: t("DashboardPayments.transferDetails.solanaSignature"),
+            value: shortenAddress(settlement.txHash),
+            href: explorerTxUrl(settlement.txHash, context.cluster),
+            copyValue: settlement.txHash,
+          },
+        ]
+      : [];
+  return [
+    statusRow,
+    ...receipt,
+    ...rowsFromSpecs(BVNK_FIELDS, settlement, context, t),
+    payinRow,
+    ...txHashRow,
   ];
-  return [...receipt, ...rowsFromSpecs(BVNK_FIELDS, settlement, context, t)];
 }
 
 /**

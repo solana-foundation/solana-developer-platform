@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  BVNK_ONRAMP_REMITTANCE_PREFIX,
   buildBvnkCustomerExternalReference,
   buildBvnkFundingWalletName,
   buildBvnkOfframpWalletName,
   buildBvnkWalletIdempotencyKey,
   bvnkCustomerStatusRequirements,
-  bvnkRuleEntityFromCustomer,
+  bvnkOnrampRemittance,
+  bvnkPayoutPartyDetailsFromCustomer,
   parseBvnkFundingWalletName,
   parseBvnkOfframpWalletName,
+  parseBvnkTransferIdFromRemittance,
   parseBvnkWalletName,
+  readBvnkOnrampTransferData,
 } from "./provider-data";
 import { bvnkCustomer } from "./test-fixtures";
 
@@ -81,14 +85,129 @@ describe("bvnkCustomerStatusRequirements", () => {
   });
 });
 
-describe("bvnkRuleEntityFromCustomer", () => {
+describe("parseBvnkTransferIdFromRemittance", () => {
+  it("reassembles the live v1 sample when the overflow carries its leading space", () => {
+    assert.equal(
+      parseBvnkTransferIdFromRemittance("XFR_2AB355", " d7-088e-4f73-bcc6-7d60c7b3ae44"),
+      "xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
+    );
+  });
+
+  it("reassembles the second live v1 sample", () => {
+    assert.equal(
+      parseBvnkTransferIdFromRemittance("XFR_00889A", " 6d-a8f3-48fd-a9ac-040903652de3"),
+      "xfr_00889a6d-a8f3-48fd-a9ac-040903652de3"
+    );
+  });
+
+  it("reassembles the id when the overflow has no leading space", () => {
+    assert.equal(
+      parseBvnkTransferIdFromRemittance("XFR_2AB355", "d7-088e-4f73-bcc6-7d60c7b3ae44"),
+      "xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
+    );
+  });
+
+  it("returns null when no xfr_ id appears in the overflow or reference", () => {
+    assert.equal(parseBvnkTransferIdFromRemittance("REFERENCE01", "no-transfer-id-here"), null);
+    assert.equal(parseBvnkTransferIdFromRemittance("REFERENCE01", undefined), null);
+  });
+
+  it("matches mixed case and returns the lowercased id", () => {
+    assert.equal(
+      parseBvnkTransferIdFromRemittance("XFR_2AB355", "D7-088E-4F73-BCC6-7D60C7B3AE44"),
+      "xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
+    );
+  });
+
+  it("parses a non-splitting rail where the full id sits in the payment reference", () => {
+    assert.equal(
+      parseBvnkTransferIdFromRemittance("xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44", undefined),
+      "xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
+    );
+  });
+
+  it("throws when the joined remittance contains two distinct transfer ids", () => {
+    assert.throws(
+      () =>
+        parseBvnkTransferIdFromRemittance(
+          "XFR_2AB355",
+          "d7-088e-4f73-bcc6-7d60c7b3ae44 xfr_00889a6d-a8f3-48fd-a9ac-040903652de3"
+        ),
+      { message: /Ambiguous BVNK remittance/ }
+    );
+  });
+});
+
+describe("bvnkOnrampRemittance", () => {
+  it("formats the remittance as the 10-char prefix plus the transfer id", () => {
+    assert.equal(BVNK_ONRAMP_REMITTANCE_PREFIX.length, 10);
+    assert.equal(
+      bvnkOnrampRemittance("xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"),
+      "SDP-ONRAMP xfr_2ab355d7-088e-4f73-bcc6-7d60c7b3ae44"
+    );
+  });
+});
+
+describe("readBvnkOnrampTransferData", () => {
+  it("parses the empty initial state the prebook writes", () => {
+    assert.deepEqual(readBvnkOnrampTransferData({ bvnk: {} }), {});
+  });
+
+  it("throws when the bvnk key is missing", () => {
+    assert.throws(() => readBvnkOnrampTransferData({}), {
+      message: /provider_data has no bvnk object/,
+    });
+  });
+
+  it("throws on a malformed payout shape", () => {
+    assert.throws(() => readBvnkOnrampTransferData({ bvnk: { payout: { claimedAt: 123 } } }), {
+      message: /provider_data\.bvnk is malformed/,
+    });
+  });
+
+  it("parses a fully written payout payload", () => {
+    assert.deepEqual(
+      readBvnkOnrampTransferData({
+        bvnk: {
+          payout: {
+            claimedAt: "2026-09-18T10:00:00Z",
+            attempts: 1,
+            intent: {
+              amount: "1.20",
+              currency: "USD",
+              cryptoCurrency: "USDC",
+              network: "SOLANA",
+              address: "H1grN1mr3sEQ2NLdeC1fXwvgaj7YiQYp8YBW21gJDWNZ",
+            },
+            payoutId: "01a0b3f2-ad2d-7a55-95dc-98d85d4def2f",
+          },
+        },
+      }),
+      {
+        payout: {
+          claimedAt: "2026-09-18T10:00:00Z",
+          attempts: 1,
+          intent: {
+            amount: "1.20",
+            currency: "USD",
+            cryptoCurrency: "USDC",
+            network: "SOLANA",
+            address: "H1grN1mr3sEQ2NLdeC1fXwvgaj7YiQYp8YBW21gJDWNZ",
+          },
+          payoutId: "01a0b3f2-ad2d-7a55-95dc-98d85d4def2f",
+        },
+      }
+    );
+  });
+});
+
+describe("bvnkPayoutPartyDetailsFromCustomer", () => {
   const person = {
-    firstName: "Jane",
-    lastName: "Doe",
-    dateOfBirth: "1984-06-30",
+    firstName: "Zach",
+    lastName: "Khong",
+    dateOfBirth: "2001-04-01",
     address: {
       addressLine1: "1 Main Street",
-      addressLine2: "Apt 4",
       city: "Austin",
       postalCode: "78701",
       stateCode: "TX",
@@ -96,57 +215,21 @@ describe("bvnkRuleEntityFromCustomer", () => {
     },
   };
 
-  it("maps the person block onto BVNK's rule-entity address keys", () => {
+  it("maps the probe person block onto the accepted partyDetails shape", () => {
     const customer = bvnkCustomer({
       reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
       status: "VERIFIED",
       individual: { person },
     });
 
-    assert.deepEqual(bvnkRuleEntityFromCustomer(customer), {
-      type: "INDIVIDUAL",
-      relationshipType: "SELF_OWNED",
-      customerIdentifier: customer.reference,
-      firstName: "Jane",
-      lastName: "Doe",
-      dateOfBirth: "1984-06-30",
-      address: {
-        addressLine1: "1 Main Street",
-        addressLine2: "Apt 4",
-        city: "Austin",
-        region: "TX",
-        postCode: "78701",
-        country: "US",
-      },
-    });
-  });
-
-  it("omits optional address keys the person block does not carry", () => {
-    const customer = bvnkCustomer({
-      reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
-      status: "VERIFIED",
-      individual: {
-        person: {
-          firstName: "Jane",
-          lastName: "Doe",
-          dateOfBirth: "1984-06-30",
-          address: {
-            addressLine1: "1 Main Street",
-            city: "Austin",
-            countryCode: "US",
-          },
-        },
-      },
-    });
-
-    const entity = bvnkRuleEntityFromCustomer(customer);
-    if (entity.type !== "INDIVIDUAL") {
-      throw new Error(`expected an individual entity, got ${entity.type}`);
-    }
-    assert.deepEqual(entity.address, {
-      addressLine1: "1 Main Street",
-      city: "Austin",
-      country: "US",
+    assert.deepEqual(bvnkPayoutPartyDetailsFromCustomer(customer), {
+      type: "BENEFICIARY",
+      entityType: "INDIVIDUAL",
+      firstName: "Zach",
+      lastName: "Khong",
+      dateOfBirth: "2001-04-01",
+      relationshipType: "THIRD_PARTY",
+      countryCode: "US",
     });
   });
 
@@ -156,7 +239,7 @@ describe("bvnkRuleEntityFromCustomer", () => {
       status: "VERIFIED",
     });
 
-    assert.throws(() => bvnkRuleEntityFromCustomer(customer), {
+    assert.throws(() => bvnkPayoutPartyDetailsFromCustomer(customer), {
       message: /BVNK customer 2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3 has no individual details/,
     });
   });

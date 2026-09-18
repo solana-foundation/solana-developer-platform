@@ -1656,6 +1656,20 @@
               "deliveryMode": "session_widget",
               "fiatCurrency": "USD",
               "fiatAmount": "100.00",
+              "settlement": {
+                "provider": "moonpay",
+                "status": "completed",
+                "transactionId": "transaction_example",
+                "baseCurrencyCode": "example",
+                "baseCurrencyAmount": 1,
+                "quoteCurrencyCode": "example",
+                "quoteCurrencyAmount": 1,
+                "feeAmount": 1,
+                "extraFeeAmount": 1,
+                "networkFeeAmount": 1,
+                "areFeesIncluded": false,
+                "usdRate": 1
+              },
               "risk": {
                 "provider": "trm",
                 "score": "0.12",
@@ -1940,6 +1954,20 @@
               "deliveryMode": "session_widget",
               "fiatCurrency": "USD",
               "fiatAmount": "100.00",
+              "settlement": {
+                "provider": "moonpay",
+                "status": "completed",
+                "transactionId": "transaction_example",
+                "baseCurrencyCode": "example",
+                "baseCurrencyAmount": 1,
+                "quoteCurrencyCode": "example",
+                "quoteCurrencyAmount": 1,
+                "feeAmount": 1,
+                "extraFeeAmount": 1,
+                "networkFeeAmount": 1,
+                "areFeesIncluded": false,
+                "usdRate": 1
+              },
               "risk": {
                 "provider": "trm",
                 "score": "0.12",
@@ -2019,6 +2047,20 @@
               "deliveryMode": "session_widget",
               "fiatCurrency": "USD",
               "fiatAmount": "100.00",
+              "settlement": {
+                "provider": "moonpay",
+                "status": "completed",
+                "transactionId": "transaction_example",
+                "baseCurrencyCode": "example",
+                "baseCurrencyAmount": 1,
+                "quoteCurrencyCode": "example",
+                "quoteCurrencyAmount": 1,
+                "feeAmount": 1,
+                "extraFeeAmount": 1,
+                "networkFeeAmount": 1,
+                "areFeesIncluded": false,
+                "usdRate": 1
+              },
               "risk": {
                 "provider": "trm",
                 "score": "0.12",
@@ -2167,6 +2209,20 @@
                 "deliveryMode": "session_widget",
                 "fiatCurrency": "USD",
                 "fiatAmount": "100.00",
+                "settlement": {
+                  "provider": "moonpay",
+                  "status": "completed",
+                  "transactionId": "transaction_example",
+                  "baseCurrencyCode": "example",
+                  "baseCurrencyAmount": 1,
+                  "quoteCurrencyCode": "example",
+                  "quoteCurrencyAmount": 1,
+                  "feeAmount": 1,
+                  "extraFeeAmount": 1,
+                  "networkFeeAmount": 1,
+                  "areFeesIncluded": false,
+                  "usdRate": 1
+                },
                 "risk": {
                   "provider": "trm",
                   "score": "0.12",
@@ -2385,6 +2441,20 @@
                 "deliveryMode": "session_widget",
                 "fiatCurrency": "USD",
                 "fiatAmount": "100.00",
+                "settlement": {
+                  "provider": "moonpay",
+                  "status": "completed",
+                  "transactionId": "transaction_example",
+                  "baseCurrencyCode": "example",
+                  "baseCurrencyAmount": 1,
+                  "quoteCurrencyCode": "example",
+                  "quoteCurrencyAmount": 1,
+                  "feeAmount": 1,
+                  "extraFeeAmount": 1,
+                  "networkFeeAmount": 1,
+                  "areFeesIncluded": false,
+                  "usdRate": 1
+                },
                 "risk": {
                   "provider": "trm",
                   "score": "0.12",
@@ -2920,6 +2990,20 @@
               "deliveryMode": "session_widget",
               "fiatCurrency": "USD",
               "fiatAmount": "100.00",
+              "settlement": {
+                "provider": "moonpay",
+                "status": "completed",
+                "transactionId": "transaction_example",
+                "baseCurrencyCode": "example",
+                "baseCurrencyAmount": 1,
+                "quoteCurrencyCode": "example",
+                "quoteCurrencyAmount": 1,
+                "feeAmount": 1,
+                "extraFeeAmount": 1,
+                "networkFeeAmount": 1,
+                "areFeesIncluded": false,
+                "usdRate": 1
+              },
               "risk": {
                 "provider": "trm",
                 "score": "0.12",
@@ -3896,10 +3980,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -4370,10 +4450,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -4645,10 +4721,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -5119,10 +5191,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -5466,6 +5534,7 @@
           {
             "key": "search",
             "label": "search",
+            "description": "Prefix match against transaction id, module id, or signature — not a substring search.",
             "required": false
           },
           {
@@ -5866,10 +5935,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -6340,10 +6405,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",

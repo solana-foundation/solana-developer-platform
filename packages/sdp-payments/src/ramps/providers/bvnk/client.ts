@@ -21,6 +21,7 @@ import {
   internalError,
   providerNotConfigured,
   providerUnavailable,
+  SdpPaymentsError,
 } from "../../../errors";
 import { hmacSha256Base64 } from "../../../hash";
 import { type ProviderRequestInit, providerFetch } from "../../fetch";
@@ -40,6 +41,7 @@ import { validateBvnkCounterparty } from "./counterparty";
 import { discoverBvnkCurrencyAndRails } from "./currencies";
 import { bvnkRequestFailure, parseBvnkResponse } from "./errors";
 import {
+  BVNK_PAYOUT_NETWORK,
   type BvnkNetwork,
   buildBvnkOfframpReference,
   normalizeBvnkCurrencyAndNetwork,
@@ -50,27 +52,29 @@ import {
   type BvnkChannelResponse,
   type BvnkCustomer,
   type BvnkCustomerCreated,
+  type BvnkDryRunPayoutResponse,
   type BvnkLedgerWalletProfilesV2,
   type BvnkLedgerWalletV2,
-  type BvnkRule,
-  type BvnkRuleResponse,
+  type BvnkOnrampPayoutInput,
+  type BvnkOnrampPayoutSummary,
   type BvnkSandboxPayinCurrency,
+  type BvnkV2WalletList,
   bvnkAgreementSessionSchema,
   bvnkChannelResponseSchema,
   bvnkCustomerCreatedSchema,
   bvnkCustomerSchema,
+  bvnkDryRunPayoutResponseSchema,
   bvnkOfframpQuoteInputSchema,
+  bvnkOnrampPayoutSummarySchema,
   bvnkPayoutEstimateResponseSchema,
   bvnkQuoteEstimateResponseSchema,
-  bvnkRuleResponseSchema,
-  bvnkRuleSchema,
   bvnkSandboxPayinCurrencySchema,
   bvnkV2LedgerWalletSchema,
+  bvnkV2WalletListSchema,
   bvnkV2WalletProfilesSchema,
   type CreateBvnkAgreementSessionInput,
   type CreateBvnkCustomerInput,
   type CreateBvnkLedgerWalletV2Input,
-  type CreateBvnkOnrampRuleInput,
   type ListBvnkLedgerWalletProfilesV2Input,
   type SignBvnkAgreementSessionInput,
 } from "./schemas";
@@ -182,10 +186,148 @@ function assertPositiveDecimalAmount(value: string, fieldName: string): string {
   return value;
 }
 
+/** BVNK pay-family business error codes the reconciler branches on. */
+export type BvnkPayErrorCode = "MER-PAY-2010" | "MER-PAY-2012" | "MER-PAY-2001" | "MER-PAY-2009";
+
+/**
+ * A typed BVNK pay-family business error, carrying the provider code the
+ * reconciler branches on. `MER-PAY-2010` (duplicate reference, probe step 4)
+ * is ambiguous — BVNK dedupes on `reference` alone, so the reconciler adopts
+ * the existing payout. `MER-PAY-2012` (insufficient funds), `MER-PAY-2001`
+ * (below minimum), and `MER-PAY-2009` (invalid request) are definitive
+ * rejections on a first attempt. Unknown provider codes never map to this
+ * class — they surface as the generic `SdpPaymentsError` from
+ * {@link bvnkRequestFailure} and stay unresolved.
+ */
+export class BvnkPayRequestError extends SdpPaymentsError {
+  readonly bvnkCode: BvnkPayErrorCode;
+
+  constructor(bvnkCode: BvnkPayErrorCode, message: string) {
+    super("BAD_REQUEST", message);
+    this.name = this.constructor.name;
+    this.bvnkCode = bvnkCode;
+  }
+}
+
+/** The pay error fields read from either BVNK non-2xx envelope. */
+interface BvnkPayErrorFields {
+  code: string;
+  message?: string;
+}
+
+/**
+ * Parses the BVNK pay error from a non-2xx body in one pass. BVNK uses two
+ * envelopes: `errorList[].code` (create/duplicate/insufficient, probe steps
+ * 4/7) and a top-level `code` (validation, probe step 10); the first
+ * `errorList` entry wins when both are present, and its message is read from
+ * the same entry.
+ *
+ * @param parsed - Parsed response body, or undefined for non-JSON bodies.
+ * @returns The first error code and message, or undefined when neither envelope carries a code.
+ */
+function readBvnkPayError(parsed: unknown): BvnkPayErrorFields | undefined {
+  if (parsed === null || typeof parsed !== "object") {
+    return undefined;
+  }
+  const record = parsed as Record<string, unknown>;
+  const errorList = record.errorList;
+  if (Array.isArray(errorList)) {
+    const first = errorList[0];
+    if (first !== null && typeof first === "object") {
+      const listEntry = first as Record<string, unknown>;
+      if (typeof listEntry.code === "string") {
+        return {
+          code: listEntry.code,
+          ...(typeof listEntry.message === "string" ? { message: listEntry.message } : {}),
+        };
+      }
+    }
+  }
+  if (typeof record.code !== "string") {
+    return undefined;
+  }
+  return {
+    code: record.code,
+    ...(typeof record.message === "string" ? { message: record.message } : {}),
+  };
+}
+
+/**
+ * Normalizes a non-2xx BVNK pay-family response into an SdpPaymentsError.
+ * Known MER-PAY codes map to {@link BvnkPayRequestError} regardless of the
+ * HTTP status (business errors arrive as 400 or 404 JSON, probe step 2);
+ * unknown codes and non-pay shapes fall back to the generic
+ * {@link bvnkRequestFailure} mapping and are never coerced into a default
+ * typed class.
+ *
+ * @param status - HTTP status BVNK returned.
+ * @param raw - Raw response body text.
+ * @param parsed - Parsed response body, when the response was JSON.
+ * @returns The typed or generic failure error for the pay response.
+ */
+function bvnkPayRequestError(status: number, raw: string, parsed: unknown): SdpPaymentsError {
+  const fields = readBvnkPayError(parsed);
+  if (fields === undefined) {
+    return bvnkRequestFailure(status, raw, parsed);
+  }
+  const detail =
+    fields.message === undefined
+      ? `BVNK request failed with status ${status}: ${fields.code}`
+      : `BVNK request failed with status ${status}: ${fields.code} ${fields.message}`;
+  switch (fields.code) {
+    case "MER-PAY-2010":
+    case "MER-PAY-2012":
+    case "MER-PAY-2001":
+    case "MER-PAY-2009":
+      return new BvnkPayRequestError(fields.code, detail);
+    default:
+      return bvnkRequestFailure(status, raw, parsed);
+  }
+}
+
+/**
+ * Builds the shared on-ramp payout request body for create and dry-run, with
+ * the network code forced per endpoint (`BVNK_PAYOUT_NETWORK.create` vs
+ * `dryRun`): BVNK rejects `SOLANA` on dry-run and `SOL` on create.
+ *
+ * @param input - The intended payout request.
+ * @param network - The endpoint-specific network code.
+ * @returns The wire body for `POST /api/v1/pay/summary` (or its dry-run sibling).
+ */
+function bvnkOnrampPayoutBody(
+  input: BvnkOnrampPayoutInput,
+  network: string
+): Record<string, unknown> {
+  return {
+    walletId: input.walletId,
+    type: "OUT",
+    amount: input.amount,
+    currency: input.currency,
+    reference: input.reference,
+    customerId: input.customerId,
+    payOutDetails: { ...input.payOutDetails, network },
+    complianceDetails: input.complianceDetails,
+  };
+}
+
 export class BvnkRampClient implements RampProvider {
   readonly id = "bvnk";
   readonly declaredRailSupport = BVNK_DECLARED_RAIL_SUPPORT;
 
+  /**
+   * Executes a Hawk-signed BVNK request. Every request is fenced by
+   * `AbortSignal.timeout(30_000)` covering both the fetch and the response
+   * body read (R10), so a hung BVNK call can never outlive its fence. Non-2xx
+   * responses throw through the optional pay-family error parser when
+   * provided, else through the generic BVNK failure mapping.
+   *
+   * @param config - BVNK credentials and API base URL.
+   * @param path - API path, for example `/api/v1/pay/summary`.
+   * @param init - HTTP method, optional JSON body, and optional headers.
+   * @param parseError - Optional normalizer for non-2xx bodies; the pay family
+   *   passes one that maps MER-PAY codes onto typed errors.
+   * @returns The parsed JSON response body, or undefined for empty bodies.
+   */
   private async request(
     config: BvnkConfig,
     path: string,
@@ -193,7 +335,8 @@ export class BvnkRampClient implements RampProvider {
       method: ProviderRequestInit<unknown>["method"];
       body?: unknown;
       headers?: Record<string, string>;
-    }
+    },
+    parseError?: (status: number, raw: string, parsed: unknown) => SdpPaymentsError
   ): Promise<unknown> {
     const url = new URL(path, config.apiBaseUrl);
     const authorization = await buildBvnkHawkAuthorizationHeader(
@@ -209,10 +352,13 @@ export class BvnkRampClient implements RampProvider {
         Authorization: authorization,
         ...init.headers,
       },
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
-      throw bvnkRequestFailure(response.status, raw, parsed);
+      throw parseError === undefined
+        ? bvnkRequestFailure(response.status, raw, parsed)
+        : parseError(response.status, raw, parsed);
     }
 
     if (parsed === undefined) {
@@ -403,66 +549,145 @@ export class BvnkRampClient implements RampProvider {
     return parseBvnkResponse(bvnkV2WalletProfilesSchema, response);
   }
 
-  async createOnrampRule(
-    { env, mode }: RampRuntimeContext,
-    input: CreateBvnkOnrampRuleInput
-  ): Promise<BvnkRuleResponse> {
-    const config = readBvnkConfig(env, mode);
-    const response = await this.request(config, "/payment/v1/rules", {
-      method: "POST",
-      body: {
-        reference: input.reference,
-        trigger: "payment:payin:fiat",
-        walletId: input.walletId,
-        beneficiary: {
-          currency: input.currency,
-          entity: input.entity,
-          cryptoAddress: { network: input.network, address: input.beneficiaryAddress },
-        },
-      },
-    });
-    return parseBvnkResponse(bvnkRuleResponseSchema, response);
-  }
-
   /**
-   * Lists the payment rules registered on a wallet, including deactivated
-   * ones. The list response is the source of truth for which rules exist:
-   * SDP stores no rule id.
+   * Quotes an on-ramp payout with the dry-run endpoint before any money moves.
+   * The request mirrors the create body except the network code, forced to the
+   * dry-run protocol code (`BVNK_PAYOUT_NETWORK.dryRun`, `SOL`): BVNK rejects
+   * the create network code here with `MER-PAY-2029`. Amount fields in the
+   * response are wire numbers; convert them with `decimalStringFromNumber`
+   * where a value is consumed as money.
    *
    * @param ctx - Runtime provider credentials and environment.
-   * @param input - The wallet whose rules are listed.
-   * @returns Every rule on the wallet with its current status.
+   * @param input - The intended payout; `input.payOutDetails.network` is
+   *   ignored in favour of the dry-run protocol code.
+   * @returns The dry-run quote: no uuid/status, nullable `actual` amounts.
    */
-  async listOnrampRules(
+  async dryRunOnrampPayout(
     { env, mode }: RampRuntimeContext,
-    input: { walletId: string }
-  ): Promise<BvnkRule[]> {
+    input: BvnkOnrampPayoutInput
+  ): Promise<BvnkDryRunPayoutResponse> {
     const config = readBvnkConfig(env, mode);
     const response = await this.request(
       config,
-      `/payment/v1/rules?walletId=${encodeURIComponent(input.walletId)}`,
-      { method: "GET" }
+      "/api/v1/pay/summary/dry-run",
+      { method: "POST", body: bvnkOnrampPayoutBody(input, BVNK_PAYOUT_NETWORK.dryRun) },
+      bvnkPayRequestError
     );
-    return parseBvnkResponse(z.array(bvnkRuleSchema), response);
+    return parseBvnkResponse(bvnkDryRunPayoutResponseSchema, response);
   }
 
   /**
-   * Deactivates a payment rule so no further pay-in can match it. BVNK
-   * answers 204; deactivating an already-INACTIVE rule is a provider error.
+   * Creates an on-ramp payout from the customer's funding wallet. BVNK debits
+   * the wallet at create time and dedupes on `reference` alone, so a duplicate
+   * reference surfaces as {@link BvnkPayRequestError} rather than a
+   * second payout. The network code is forced to `BVNK_PAYOUT_NETWORK.create`
+   * (`SOLANA`).
    *
    * @param ctx - Runtime provider credentials and environment.
-   * @param input - The rule id to deactivate.
-   * @returns Nothing once BVNK acknowledges the deactivation.
+   * @param input - The payout request: `input.walletId` funding wallet,
+   *   `input.amount` fiat amount, `input.currency` fiat currency,
+   *   `input.reference` the SDP transfer id, `input.customerId` BVNK customer,
+   *   `input.payOutDetails` crypto destination (code `crypto`, currency,
+   *   network, address), `input.complianceDetails` requester IP and party
+   *   details (required; `MER-PAY-2009` without them).
+   * @returns The created payout summary, `status` PROCESSING at create.
    */
-  async deactivateOnrampRule(
+  async createOnrampPayout(
     { env, mode }: RampRuntimeContext,
-    input: { ruleId: string }
-  ): Promise<void> {
+    input: BvnkOnrampPayoutInput
+  ): Promise<BvnkOnrampPayoutSummary> {
     const config = readBvnkConfig(env, mode);
-    await this.request(config, `/payment/v1/rules/${encodeURIComponent(input.ruleId)}/actions`, {
-      method: "POST",
-      body: { type: "DEACTIVATE" },
-    });
+    const response = await this.request(
+      config,
+      "/api/v1/pay/summary",
+      { method: "POST", body: bvnkOnrampPayoutBody(input, BVNK_PAYOUT_NETWORK.create) },
+      bvnkPayRequestError
+    );
+    return parseBvnkResponse(bvnkOnrampPayoutSummarySchema, response);
+  }
+
+  /**
+   * Reads a payout by its uuid. The documented read path is
+   * `/api/v1/pay/{uuid}/summary`; the bare `/api/v1/pay/{uuid}` is a 404
+   * (probe step 5).
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - `input.payoutId`: the BVNK payout uuid.
+   * @returns The current payout summary for the uuid.
+   */
+  async getPayoutSummary(
+    { env, mode }: RampRuntimeContext,
+    input: { payoutId: string }
+  ): Promise<BvnkOnrampPayoutSummary> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(
+      config,
+      `/api/v1/pay/${encodeURIComponent(input.payoutId)}/summary`,
+      { method: "GET" },
+      bvnkPayRequestError
+    );
+    return parseBvnkResponse(bvnkOnrampPayoutSummarySchema, response);
+  }
+
+  /**
+   * Lists payouts by the SDP transfer-id reference on a wallet. BVNK requires
+   * both `walletId` and `reference` and caps the page at `max=200`; the list
+   * response is an array (empty when nothing matched, probe step 7).
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - `input.walletId` the funding wallet, `input.reference` the
+   *   transfer id used at create.
+   * @returns Every payout row matching the wallet and reference.
+   */
+  async listPayoutsByReference(
+    { env, mode }: RampRuntimeContext,
+    input: { walletId: string; reference: string }
+  ): Promise<BvnkOnrampPayoutSummary[]> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(
+      config,
+      `/api/v1/pay/summary?walletId=${encodeURIComponent(input.walletId)}&reference=${encodeURIComponent(input.reference)}&max=200`,
+      { method: "GET" },
+      bvnkPayRequestError
+    );
+    return parseBvnkResponse(z.array(bvnkOnrampPayoutSummarySchema), response);
+  }
+
+  /**
+   * Lists ledger v2 wallets for one BVNK customer and fiat currency
+   * (`q=customerId:<reference> AND currency:<fiat>`, the probe-proven filter
+   * pair) paginating every page until exhaustion. The caller matches the
+   * exact wallet name locally: SDP wallet names contain colons, which BVNK's
+   * `q` grammar splits, so names are never sent into the query.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - `input.customerId`: the provider customer reference the
+   *   wallet belongs to; `input.currency`: the wallet's fiat currency.
+   * @returns Every matching wallet row across all pages, with `hasNext: false`.
+   */
+  async listLedgerWalletsV2(
+    { env, mode }: RampRuntimeContext,
+    input: { customerId: string; currency: string }
+  ): Promise<BvnkV2WalletList> {
+    const config = readBvnkConfig(env, mode);
+    const query = encodeURIComponent(
+      `customerId:${input.customerId} AND currency:${input.currency}`
+    );
+    let pageNumber = 0;
+    let rows: BvnkV2WalletList["content"] = [];
+    let hasNext = true;
+    while (hasNext) {
+      const response = await this.request(
+        config,
+        `/ledger/v2/wallets?q=${query}&pageSize=100&pageNumber=${pageNumber}`,
+        { method: "GET" }
+      );
+      const page = parseBvnkResponse(bvnkV2WalletListSchema, response);
+      rows = rows.concat(page.content);
+      hasNext = page.hasNext;
+      pageNumber += 1;
+    }
+    return { content: rows, hasNext: false };
   }
 
   async simulatePayin(

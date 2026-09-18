@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
@@ -8,84 +9,233 @@ import { badRequest, internalError } from "../../../errors";
 import { hashString } from "../../../hash";
 import { readRecord } from "../../../json";
 import { readyCounterparty } from "../../requirements";
-import type { BvnkCustomer, BvnkCustomerStatus } from "./schemas";
+import type { BvnkCustomer, BvnkCustomerStatus, BvnkPartyDetails } from "./schemas";
 
-/** The address keys BVNK's rule validation accepts for a beneficiary entity. */
-export interface BvnkRuleEntityAddress {
-  addressLine1: string;
-  addressLine2?: string;
-  city: string;
-  /** ISO 3166-2 region/state code; BVNK requires it for US beneficiaries. */
-  region?: string;
-  postCode?: string;
-  /** ISO 3166-1 alpha-2 country; BVNK rule validation rejects a blank `country`. */
-  country: string;
+/** The ONE place BVNK payout network codes are encoded: create/list/read use the network code, dry-run uses the protocol code (probe: "SOLANA" vs "SOL"). */
+export const BVNK_PAYOUT_NETWORK = {
+  create: "SOLANA",
+  dryRun: "SOL",
+} as const satisfies Record<"create" | "dryRun", string>;
+
+/** On-ramp remittance prefix, exactly 10 chars so a truncating rail keeps it whole in the paymentReference slot. */
+export const BVNK_ONRAMP_REMITTANCE_PREFIX = "SDP-ONRAMP" as const;
+
+/**
+ * Builds the bank remittance line for a BVNK on-ramp transfer.
+ *
+ * The rail splits the joined value at 10 chars: `paymentReference` carries
+ * `BVNK_ONRAMP_REMITTANCE_PREFIX` and `metadata.additionalRemittanceInformation`
+ * carries the leading space plus the transfer id, preserving case and hyphens.
+ *
+ * @param transferId SDP payment transfer id, for example `xfr_<uuid>`.
+ * @returns Remittance in `SDP-ONRAMP <transferId>` format.
+ */
+export function bvnkOnrampRemittance(transferId: string): string {
+  return `${BVNK_ONRAMP_REMITTANCE_PREFIX} ${transferId}`;
 }
 
-export type BvnkEntityType = "INDIVIDUAL" | "COMPANY";
+const BVNK_TRANSFER_ID_REMITTANCE_PATTERN =
+  /xfr_[0-9a-f]{2}(?:\s*[0-9a-f]{2}){3}\s*-\s*[0-9a-f]{4}\s*-\s*[0-9a-f]{4}\s*-\s*[0-9a-f]{4}\s*-\s*[0-9a-f]{12}/gi;
 
 /**
- * Beneficiary entity accepted by a BVNK on-ramp payment rule. INDIVIDUAL
- * requires the person fields; COMPANY keeps legalName/registrationNumber.
- */
-export type BvnkRuleEntity =
-  | {
-      type: "INDIVIDUAL";
-      customerIdentifier: string;
-      relationshipType: "SELF_OWNED" | "THIRD_PARTY";
-      firstName: string;
-      lastName: string;
-      dateOfBirth: string;
-      address: BvnkRuleEntityAddress;
-    }
-  | {
-      type: "COMPANY";
-      customerIdentifier: string;
-      relationshipType: "SELF_OWNED" | "THIRD_PARTY";
-      legalName: string;
-      registrationNumber: string;
-    };
-
-/**
- * Builds the INDIVIDUAL beneficiary entity for a BVNK on-ramp payment rule from
- * the v1 customer GET's `individual.person` block. SDP persists no PII, so the
- * rule create reads it JIT from BVNK and the entity is never stored.
+ * Recovers the SDP transfer id from a BVNK pay-in webhook remittance.
  *
- * @param customer - Typed v1 customer response from the v1 customer GET.
- * @returns The rule entity mapped onto BVNK's accepted address keys.
- * @throws SdpPaymentsError with `INTERNAL_ERROR` when the customer has no
- * individual details to build the entity from.
+ * The rail delivers the id either whole (a non-splitting rail) or split across
+ * `paymentReference` (first 10 chars, uppercased) and the overflow
+ * (`metadata.additionalRemittanceInformation` carries the rest of the id with
+ * its leading space). Searching the joined fields lets the halves reassemble
+ * even though the overflow never carries the `xfr_` prefix.
+ *
+ * @param paymentReference - First remittance segment, truncated and uppercased by the rail.
+ * @param additionalRemittanceInformation - Overflow segment including its leading
+ *   space, or undefined when the rail did not split the remittance.
+ * @returns The lowercased transfer id when exactly one distinct id matches, or
+ * null when no transfer id appears in the remittance.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when more than one distinct id
+ * matches — an ambiguous remittance; the webhook layer converts this to its
+ * terminal error.
  */
-export function bvnkRuleEntityFromCustomer(customer: BvnkCustomer): BvnkRuleEntity {
+export function parseBvnkTransferIdFromRemittance(
+  paymentReference: string,
+  additionalRemittanceInformation: string | undefined
+): string | null {
+  const joined =
+    additionalRemittanceInformation === undefined
+      ? paymentReference
+      : `${paymentReference} ${additionalRemittanceInformation}`;
+  const distinctMatches = new Set(
+    [...joined.matchAll(BVNK_TRANSFER_ID_REMITTANCE_PATTERN)].map((match) =>
+      match[0].replace(/\s+/g, "").toLowerCase()
+    )
+  );
+  if (distinctMatches.size > 1) {
+    throw internalError(
+      `Ambiguous BVNK remittance: ${distinctMatches.size} distinct transfer ids match`
+    );
+  }
+  if (distinctMatches.size === 1) {
+    return distinctMatches.values().next().value as string;
+  }
+  return null;
+}
+
+/**
+ * Maps the v1 customer GET onto the payout `partyDetails` element BVNK accepts.
+ *
+ * The mapping is built JIT from the BVNK customer read and is never stored:
+ * SDP persists no PII on the transfer row.
+ *
+ * @param customer - Typed v1 customer response from the v1 customer GET; the
+ *   `individual.person` block's `firstName`, `lastName`, `dateOfBirth`, and
+ *   `address.countryCode` become the party details.
+ * @returns The party details element accepted by `POST /api/v1/pay/summary`.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the customer has no
+ * individual details to build the party details from.
+ */
+export function bvnkPayoutPartyDetailsFromCustomer(customer: BvnkCustomer): BvnkPartyDetails {
   const person = customer.individual?.person;
   if (person === undefined) {
     throw internalError(
-      `BVNK customer ${customer.reference} has no individual details for the payment rule`
+      `BVNK customer ${customer.reference} has no individual details for the payout party details`
     );
   }
   return {
-    type: "INDIVIDUAL",
-    relationshipType: "SELF_OWNED",
-    customerIdentifier: customer.reference,
+    type: "BENEFICIARY",
+    entityType: "INDIVIDUAL",
     firstName: person.firstName,
     lastName: person.lastName,
     dateOfBirth: person.dateOfBirth,
-    address: {
-      addressLine1: person.address.addressLine1,
-      city: person.address.city,
-      country: person.address.countryCode,
-      ...(person.address.addressLine2 === undefined
-        ? {}
-        : { addressLine2: person.address.addressLine2 }),
-      ...(person.address.stateCode === undefined ? {} : { region: person.address.stateCode }),
-      ...(person.address.postalCode === undefined ? {} : { postCode: person.address.postalCode }),
-    },
+    relationshipType: "THIRD_PARTY",
+    countryCode: person.address.countryCode,
   };
+}
+
+/**
+ * Typed `provider_data.bvnk` payload for BVNK on-ramp transfers. Every key is
+ * absent until its flow step writes it: the prebook initializes the payload to
+ * `{}`, the pay-in webhook writes `payin`, the reconciler writes `payout`, and
+ * the sandbox simulate writes `simulation`. Keys are never JSON null; unknown
+ * keys are rejected so a stray write can never be read as shaped state.
+ *
+ * `payout.intent` is absent on one legitimate state: the definitive pre-create
+ * rejection (unknown asset or dry-run refusal) writes `{claimedAt, attempts:
+ * 1, lastError}` with no intent because no validated spend amount ever
+ * existed. That row is `failed` and never enters recovery, so an absent
+ * intent is the "no automation" signal.
+ */
+export const bvnkOnrampTransferDataSchema = z
+  .object({
+    payin: z
+      .object({
+        id: z.string().min(1),
+        receivedAmount: z.string().min(1),
+        receivedCurrency: z.string().min(1),
+        walletId: z.string().min(1),
+        customerId: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+    payout: z
+      .object({
+        claimedAt: z.string().min(1),
+        attempts: z.number().int().nonnegative(),
+        intent: z
+          .object({
+            amount: z.string().min(1),
+            currency: z.string().min(1),
+            cryptoCurrency: z.string().min(1),
+            network: z.string().min(1),
+            address: z.string().min(1),
+          })
+          .strict()
+          .optional(),
+        payoutId: z.string().min(1).optional(),
+        lastError: z.string().min(1).optional(),
+        lastPolledAt: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+    simulation: z
+      .object({
+        requestedAt: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type BvnkOnrampTransferData = z.infer<typeof bvnkOnrampTransferDataSchema>;
+
+/**
+ * Reads a BVNK on-ramp transfer's `provider_data.bvnk` payload strictly.
+ *
+ * @param providerData - The transfer row's `provider_data` column; the `bvnk`
+ *   object must be present (the prebook initializes it to `{}`).
+ * @returns The parsed on-ramp transfer data.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the `bvnk` key is missing
+ * or the payload does not match {@link bvnkOnrampTransferDataSchema}.
+ */
+export function readBvnkOnrampTransferData(
+  providerData: CounterpartyRow["provider_data"]
+): BvnkOnrampTransferData {
+  const bvnk = providerData.bvnk;
+  if (bvnk === undefined) {
+    throw internalError("BVNK on-ramp transfer provider_data has no bvnk object");
+  }
+  const parsed = bvnkOnrampTransferDataSchema.safeParse(bvnk);
+  if (!parsed.success) {
+    throw internalError("BVNK on-ramp transfer provider_data.bvnk is malformed");
+  }
+  return parsed.data;
 }
 
 export const BVNK_NETWORKS = ["SOLANA"] as const;
 
 export type BvnkNetwork = (typeof BVNK_NETWORKS)[number];
+
+/** Provider-native crypto payout statuses that settle the transfer; their completions must carry the on-chain delivery facts. */
+export const BVNK_CRYPTO_PAYOUT_COMPLETED_STATUSES = ["COMPLETE", "COMPLETED"] as const;
+export type BvnkCryptoPayoutCompletedStatus =
+  (typeof BVNK_CRYPTO_PAYOUT_COMPLETED_STATUSES)[number];
+
+/** Provider-native crypto payout statuses that fail the transfer; the fiat funds stay in the funding wallet. */
+export const BVNK_CRYPTO_PAYOUT_FAILED_STATUSES = ["FAILED", "CANCELLED", "EXPIRED"] as const;
+export type BvnkCryptoPayoutFailedStatus = (typeof BVNK_CRYPTO_PAYOUT_FAILED_STATUSES)[number];
+
+/** Whether a parsed crypto payout status settles the transfer. */
+export function isBvnkPayoutCompleted(value: string): value is BvnkCryptoPayoutCompletedStatus {
+  return BVNK_CRYPTO_PAYOUT_COMPLETED_STATUSES.some((candidate) => candidate === value);
+}
+
+/** Whether a parsed crypto payout status fails the transfer. */
+export function isBvnkPayoutFailed(value: string): value is BvnkCryptoPayoutFailedStatus {
+  return BVNK_CRYPTO_PAYOUT_FAILED_STATUSES.some((candidate) => candidate === value);
+}
+
+/** The trusted BVNK receipt host per environment; receipts from any other host are never stored or rendered. */
+export function bvnkReceiptUrlHost(environment: SdpEnvironment): string {
+  return environment === "sandbox" ? "pay.sandbox.bvnk.com" : "pay.bvnk.com";
+}
+
+/** Whether a provider receipt url is a trusted BVNK receipt link for the payout: https, no credentials, the environment's exact receipt host, and the expected `/payout/<payoutId>` path. */
+export function isValidBvnkReceiptUrl(
+  url: string,
+  environment: SdpEnvironment,
+  payoutId: string
+): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return (
+    parsed.protocol === "https:" &&
+    parsed.username === "" &&
+    parsed.password === "" &&
+    parsed.host === bvnkReceiptUrlHost(environment) &&
+    parsed.pathname === `/payout/${payoutId}`
+  );
+}
 
 export const BVNK_CRYPTO_CURRENCIES = [
   "SOL",
@@ -422,7 +572,7 @@ export function parseBvnkFundingWalletName(
  * reports the name as unrecognised. The name's second segment is the
  * `direction` slot: `offramp` names the merchant off-ramp wallet and a 3-part
  * `onramp` name the customer funding wallet. Every other shape — including the
- * 6-part legacy rule-keyed on-ramp names sandbox still holds — is
+ * 6-part legacy on-ramp names sandbox still holds — is
  * `unrecognised`: webhooks must acknowledge those events terminal, never
  * retry them.
  *

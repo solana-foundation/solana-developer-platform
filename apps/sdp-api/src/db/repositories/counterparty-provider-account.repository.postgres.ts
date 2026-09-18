@@ -1,4 +1,3 @@
-import { BVNK_FUNDING_WALLET_STATUS } from "@sdp/types";
 import type { AppDb } from "@/db";
 import { internalError } from "@/lib/errors";
 import type {
@@ -17,14 +16,12 @@ import type {
   GetExternalAccountByIdInput,
   InsertPendingExternalAccountInput,
   InsertProviderResourceAccountInput,
+  LeaseStaleFundingWalletClaimInput,
   ListActiveExternalAccountsInput,
   ListExternalAccountsInput,
   ListProviderAccountsInput,
-  LockFundingWalletInput,
   MarkCustomerLinkSessionTimestampInput,
   PatchAccountMetadataInput,
-  RecordFundingWalletPayinInput,
-  ReleaseFundingWalletInput,
   SetCustomerLinkSessionInput,
   UpdateExternalAccountStatusInput,
   UpdateFundingWalletStatusInput,
@@ -32,7 +29,6 @@ import type {
 } from "./counterparty-provider-account.repository";
 import {
   type BvnkSessionTimestampField,
-  bvnkFundingWalletLockSchema,
   bvnkFundingWalletMetadataSchema,
   counterpartyProviderAccountRowSchema,
   generateCounterpartyProviderAccountId,
@@ -40,37 +36,26 @@ import {
 
 /**
  * Validates a provider-account metadata blob against the schema its row
- * kind requires. A locked BVNK funding row must carry the lock metadata; every
- * other BVNK funding row must carry none.
+ * kind requires. A BVNK funding row carries no metadata for the whole life
+ * of the row, so it always parses against the empty shape.
  *
  * @param kind - The row's kind discriminator.
  * @param provider - The row's ramp provider.
- * @param providerStatus - The row's current provider status.
  * @param metadata - The metadata blob to validate.
  */
 function assertProviderAccountMetadata(
   kind: CounterpartyProviderAccountRow["kind"],
   provider: CounterpartyProviderAccountRow["provider"],
-  providerStatus: string | null,
   metadata: Record<string, unknown>
 ): void {
   if (kind === "funding_wallet" && provider === "bvnk") {
-    if (providerStatus === BVNK_FUNDING_WALLET_STATUS.locked) {
-      bvnkFundingWalletLockSchema.parse(metadata);
-      return;
-    }
     bvnkFundingWalletMetadataSchema.parse(metadata);
   }
 }
 
 function parseProviderAccountRow(row: Record<string, unknown>): CounterpartyProviderAccountRow {
   const parsed = counterpartyProviderAccountRowSchema.parse(row);
-  assertProviderAccountMetadata(
-    parsed.kind,
-    parsed.provider,
-    parsed.provider_status,
-    parsed.metadata
-  );
+  assertProviderAccountMetadata(parsed.kind, parsed.provider, parsed.metadata);
   return parsed;
 }
 
@@ -278,15 +263,17 @@ export function createPostgresCounterpartyProviderAccountsRepository(
             AND l.project_id = f.project_id
             AND l.counterparty_id = f.counterparty_id
             AND l.provider = f.provider
+           JOIN projects prj ON prj.id = f.project_id
            WHERE l.id = ?
              AND l.kind = 'customer_link'
              AND l.status = 'active'
              AND f.kind = 'funding_wallet'
              AND f.fiat_currency = ?
              AND f.status = 'active'
-             AND f.provider = ?`
+             AND f.provider = ?
+             AND prj.environment = ?`
         )
-        .bind(input.customerLinkId, input.fiatCurrency, input.provider)
+        .bind(input.customerLinkId, input.fiatCurrency, input.provider, input.environment)
         .first<Record<string, unknown>>();
 
       return row === null ? null : parseProviderAccountRow(row);
@@ -295,46 +282,16 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     async findActiveFundingWalletByReference(input: FindActiveFundingWalletByReferenceInput) {
       const row = await db
         .prepare(
-          `SELECT * FROM counterparty_provider_accounts
-           WHERE provider = ?
-             AND kind = 'funding_wallet'
-             AND status = 'active'
-             AND external_account_reference = ?`
+          `SELECT f.*
+           FROM counterparty_provider_accounts f
+           JOIN projects prj ON prj.id = f.project_id
+           WHERE f.provider = ?
+             AND f.kind = 'funding_wallet'
+             AND f.status = 'active'
+             AND f.external_account_reference = ?
+             AND prj.environment = ?`
         )
-        .bind(input.provider, input.externalAccountReference)
-        .first<Record<string, unknown>>();
-
-      return row === null ? null : parseProviderAccountRow(row);
-    },
-
-    async recordFundingWalletPayin(input: RecordFundingWalletPayinInput) {
-      const row = await db
-        .prepare(
-          `UPDATE counterparty_provider_accounts
-           SET metadata = metadata || jsonb_build_object('payinId', ?::text),
-               updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND counterparty_id = ?
-             AND provider = ?
-             AND kind = 'funding_wallet'
-             AND status = 'active'
-             AND provider_status = ?
-             AND metadata->>'transferId' = ?
-             AND NOT jsonb_exists(metadata, 'payinId')
-           RETURNING *`
-        )
-        .bind(
-          input.payinId,
-          input.id,
-          input.organizationId,
-          input.projectId,
-          input.counterpartyId,
-          input.provider,
-          BVNK_FUNDING_WALLET_STATUS.locked,
-          input.transferId
-        )
+        .bind(input.provider, input.externalAccountReference, input.environment)
         .first<Record<string, unknown>>();
 
       return row === null ? null : parseProviderAccountRow(row);
@@ -370,13 +327,11 @@ export function createPostgresCounterpartyProviderAccountsRepository(
       return row === null ? null : parseProviderAccountRow(row);
     },
 
-    async lockFundingWallet(input: LockFundingWalletInput) {
+    async leaseStaleFundingWalletClaim(input: LeaseStaleFundingWalletClaimInput) {
       const row = await db
         .prepare(
           `UPDATE counterparty_provider_accounts
-           SET provider_status = ?,
-               metadata = jsonb_build_object('transferId', ?::text),
-               updated_at = sdp_iso_now()
+           SET updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
              AND project_id = ?
@@ -384,51 +339,17 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND provider = ?
              AND kind = 'funding_wallet'
              AND status = 'active'
-             AND provider_status = ?
+             AND external_account_reference IS NULL
+             AND updated_at < ?
            RETURNING *`
         )
         .bind(
-          BVNK_FUNDING_WALLET_STATUS.locked,
-          input.transferId,
           input.id,
           input.organizationId,
           input.projectId,
           input.counterpartyId,
           input.provider,
-          BVNK_FUNDING_WALLET_STATUS.provisioned
-        )
-        .first<Record<string, unknown>>();
-
-      return row === null ? null : parseProviderAccountRow(row);
-    },
-
-    async releaseFundingWallet(input: ReleaseFundingWalletInput) {
-      const row = await db
-        .prepare(
-          `UPDATE counterparty_provider_accounts
-           SET provider_status = ?,
-               metadata = '{}'::jsonb,
-               updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND counterparty_id = ?
-             AND provider = ?
-             AND kind = 'funding_wallet'
-             AND status = 'active'
-             AND provider_status = ?
-             AND metadata->>'transferId' = ?
-           RETURNING *`
-        )
-        .bind(
-          BVNK_FUNDING_WALLET_STATUS.provisioned,
-          input.id,
-          input.organizationId,
-          input.projectId,
-          input.counterpartyId,
-          input.provider,
-          BVNK_FUNDING_WALLET_STATUS.locked,
-          input.transferId
+          input.cutoff
         )
         .first<Record<string, unknown>>();
 
@@ -436,12 +357,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     },
 
     async insertProviderResourceAccount(input: InsertProviderResourceAccountInput) {
-      assertProviderAccountMetadata(
-        input.kind,
-        input.provider,
-        input.providerStatus === undefined ? null : input.providerStatus,
-        input.metadata
-      );
+      assertProviderAccountMetadata(input.kind, input.provider, input.metadata);
       const row = await db
         .prepare(
           `INSERT INTO counterparty_provider_accounts (
@@ -511,12 +427,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         for (const key of input.unset) {
           delete metadata[key];
         }
-        assertProviderAccountMetadata(
-          currentRow.kind,
-          currentRow.provider,
-          currentRow.provider_status,
-          metadata
-        );
+        assertProviderAccountMetadata(currentRow.kind, currentRow.provider, metadata);
 
         const row = await tx
           .prepare(
@@ -650,14 +561,17 @@ export function createPostgresCounterpartyProviderAccountsRepository(
     async findCustomerLinkBySessionReference(input: FindCustomerLinkBySessionReferenceInput) {
       const row = await db
         .prepare(
-          `SELECT * FROM counterparty_provider_accounts
-           WHERE provider = ?
-             AND kind = 'customer_link'
-             AND status = 'active'
-             AND metadata->'session'->>'reference' = ?
+          `SELECT cpa.*
+           FROM counterparty_provider_accounts cpa
+           JOIN projects prj ON prj.id = cpa.project_id
+           WHERE cpa.provider = ?
+             AND cpa.kind = 'customer_link'
+             AND cpa.status = 'active'
+             AND cpa.metadata->'session'->>'reference' = ?
+             AND prj.environment = ?
            LIMIT 1`
         )
-        .bind(input.provider, input.sessionReference)
+        .bind(input.provider, input.sessionReference, input.environment)
         .first<Record<string, unknown>>();
 
       return row === null ? null : parseProviderAccountRow(row);

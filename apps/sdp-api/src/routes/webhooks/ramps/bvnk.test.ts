@@ -5,9 +5,10 @@ import {
   bvnkAgreementSessionStatusChangeEvent,
   bvnkChannelTransactionEvent,
   bvnkCryptoPayoutStatusChangeEvent,
-  bvnkPayinStatusChangeEvent,
   bvnkPlatformCustomerStatusChangeEvent,
   bvnkPlatformCustomerUpdateEvent,
+  bvnkV1PayinEvent,
+  bvnkV2PayinStatusChangeEvent,
   bvnkWalletStatusChangeEvent,
 } from "@/test/helpers/bvnk";
 import { BvnkWebhookProcessor } from "./bvnk";
@@ -162,10 +163,28 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
 
-  it("parses a BVNK fiat pay-in status-change webhook under the v2 event name", () => {
+  it("parses the v1 fiat pay-in status-change webhook and stringifies its amount", () => {
     const processor = new BvnkWebhookProcessor();
 
-    expect(processor.parse(bvnkPayinStatusChangeEvent())).toEqual({
+    expect(processor.parse(bvnkV1PayinEvent())).toEqual({
+      event: "bvnk:payment:payin:status-change",
+      eventId: "evt_payin_1",
+      timestamp: BVNK_WEBHOOK_TIMESTAMP,
+      data: {
+        amount: { value: "100", currencyCode: "USD" },
+        status: "COMPLETED",
+        beneficiary: { walletId: "a:1:wallet:1" },
+        paymentReference: "SDP-ONRAMP xfr_1",
+        customerReference: "customer_1",
+        transactionReference: "payin_1",
+      },
+    });
+  });
+
+  it("parses the v2 fiat pay-in status-change webhook as the acknowledged-ignore", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(processor.parse(bvnkV2PayinStatusChangeEvent())).toEqual({
       event: "payment:v2:payin:status-change",
       data: {
         id: "payin_1",
@@ -180,38 +199,27 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
 
-  it("acknowledges the legacy bvnk:payment:payin:status-change name as unsupported", () => {
-    const processor = new BvnkWebhookProcessor();
-
-    expect(
-      processor.parse({
-        event: "bvnk:payment:payin:status-change",
-        data: { status: "COMPLETED", customerReference: "customer_1" },
-      })
-    ).toEqual({
-      event: "ignore",
-      reason: "unsupported_event:bvnk:payment:payin:status-change",
-    });
-  });
-
-  it("parses a pay-in whose status is not in the acted-on vocabulary as a plain string", () => {
+  it("parses a v1 pay-in whose status is not COMPLETED as a plain string", () => {
     const processor = new BvnkWebhookProcessor();
 
     const parsed = processor.parse(
-      bvnkPayinStatusChangeEvent({ id: "payin_unknown_status", status: "REFUNDED" })
+      bvnkV1PayinEvent({
+        transactionReference: "payin_unknown_status",
+        status: "REFUNDED",
+      })
     );
 
     expect(parsed).toEqual({
-      event: "payment:v2:payin:status-change",
+      event: "bvnk:payment:payin:status-change",
+      eventId: "evt_payin_1",
+      timestamp: BVNK_WEBHOOK_TIMESTAMP,
       data: {
-        id: "payin_unknown_status",
+        amount: { value: "100", currencyCode: "USD" },
         status: "REFUNDED",
-        beneficiary: {
-          amount: "100",
-          currency: "USD",
-          walletId: "a:1:wallet:1",
-          customerId: "customer_1",
-        },
+        beneficiary: { walletId: "a:1:wallet:1" },
+        paymentReference: "SDP-ONRAMP xfr_1",
+        customerReference: "customer_1",
+        transactionReference: "payin_unknown_status",
       },
     });
   });
@@ -229,11 +237,12 @@ describe("BvnkWebhookProcessor.parse", () => {
           uuid: "payout_1",
           status: "COMPLETE",
           walletId: "a:1:wallet:1",
-          reference: "ON_RAMP_payin_1",
+          reference: "xfr_123e4567-e89b-12d3-a456-426614174000",
           address: { address: "dest", network: "SOLANA", protocol: "SOL" },
           paidCurrency: { actual: 9.8802, amount: 9.8802, currency: "USDC" },
           walletCurrency: { actual: 9.9, amount: 9.9, currency: "USD" },
           feeCurrency: { actual: 0.1, amount: 0.1, currency: "USD" },
+          networkFeeCurrency: { actual: 0, amount: 0, currency: "USD" },
           exchangeRate: { base: "USD", rate: 0.998, counter: "USDC" },
           transactions: [{ hash: "tx_synthetic_1", amount: 9.8802, fee: 0 }],
           redirectUrl: "https://pay.sandbox.bvnk.com/payout/payout_1",
@@ -247,11 +256,12 @@ describe("BvnkWebhookProcessor.parse", () => {
         uuid: "payout_1",
         status: "COMPLETE",
         walletId: "a:1:wallet:1",
-        reference: "ON_RAMP_payin_1",
+        reference: "xfr_123e4567-e89b-12d3-a456-426614174000",
         address: { address: "dest", network: "SOLANA" },
         paidCurrency: { actual: "9.8802", amount: "9.8802", currency: "USDC" },
         walletCurrency: { actual: "9.9", amount: "9.9", currency: "USD" },
         feeCurrency: { actual: "0.1", amount: "0.1", currency: "USD" },
+        networkFeeCurrency: { actual: "0", amount: "0", currency: "USD" },
         exchangeRate: { base: "USD", rate: 0.998, counter: "USDC" },
         transactions: [{ hash: "tx_synthetic_1" }],
       },
@@ -259,6 +269,30 @@ describe("BvnkWebhookProcessor.parse", () => {
   });
 
   it("parses a crypto payout whose status is not in the acted-on vocabulary as a plain string", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    const parsed = processor.parse(bvnkCryptoPayoutStatusChangeEvent({ status: "REFUNDED" }));
+
+    expect(parsed).toEqual({
+      event: "bvnk:payment:crypto:status-change",
+      data: {
+        type: "OUT",
+        uuid: "payout_1",
+        status: "REFUNDED",
+        walletId: "a:1:wallet:1",
+        reference: "xfr_bvnk_payout_1",
+        address: { address: "dest", network: "SOLANA" },
+        paidCurrency: { actual: "0", amount: "9.8802", currency: "USDC" },
+        walletCurrency: { actual: "0", amount: "9.9", currency: "USD" },
+        feeCurrency: { actual: "0", amount: "0.1", currency: "USD" },
+        networkFeeCurrency: { actual: "0", amount: "0", currency: "USD" },
+        exchangeRate: { base: "USD", rate: 0.998, counter: "USDC" },
+        transactions: [],
+      },
+    });
+  });
+
+  it("parses a CANCELLED payout in the failed vocabulary as a plain string", () => {
     const processor = new BvnkWebhookProcessor();
 
     const parsed = processor.parse(bvnkCryptoPayoutStatusChangeEvent({ status: "CANCELLED" }));
@@ -270,15 +304,32 @@ describe("BvnkWebhookProcessor.parse", () => {
         uuid: "payout_1",
         status: "CANCELLED",
         walletId: "a:1:wallet:1",
-        reference: "ON_RAMP_payin_1",
+        reference: "xfr_bvnk_payout_1",
         address: { address: "dest", network: "SOLANA" },
         paidCurrency: { actual: "0", amount: "9.8802", currency: "USDC" },
         walletCurrency: { actual: "0", amount: "9.9", currency: "USD" },
         feeCurrency: { actual: "0", amount: "0.1", currency: "USD" },
+        networkFeeCurrency: { actual: "0", amount: "0", currency: "USD" },
         exchangeRate: { base: "USD", rate: 0.998, counter: "USDC" },
         transactions: [],
       },
     });
+  });
+
+  it("rejects a COMPLETE crypto payout without a transaction hash", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(() =>
+      processor.parse(bvnkCryptoPayoutStatusChangeEvent({ status: "COMPLETE", transactions: [] }))
+    ).toThrow(/failed validation/);
+  });
+
+  it("rejects a COMPLETE crypto payout without a destination address", () => {
+    const processor = new BvnkWebhookProcessor();
+
+    expect(() =>
+      processor.parse(bvnkCryptoPayoutStatusChangeEvent({ status: "COMPLETED", address: null }))
+    ).toThrow(/failed validation/);
   });
 
   it("parses a channel transaction-detected webhook", () => {

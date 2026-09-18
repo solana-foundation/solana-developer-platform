@@ -1,17 +1,37 @@
+import { isBvnkPayoutCompleted } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { bvnkCustomerStatusSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import type { BvnkBankFundingDetails } from "@sdp/types";
 import { z } from "zod";
+
+/**
+ * The completed/failed payout status vocabulary is declared once in the
+ * packages provider-data module (the observation builders that classify
+ * events live beside it) and surfaced here, the schema file every webhook
+ * consumer imports from.
+ */
+export {
+  BVNK_CRYPTO_PAYOUT_COMPLETED_STATUSES,
+  BVNK_CRYPTO_PAYOUT_FAILED_STATUSES,
+  type BvnkCryptoPayoutCompletedStatus,
+  type BvnkCryptoPayoutFailedStatus,
+  isBvnkPayoutCompleted,
+  isBvnkPayoutFailed,
+} from "@sdp/payments/ramps/providers/bvnk/provider-data";
 
 /** Provider-native pay-in statuses SDP acts on; any other string parses and is ignored. */
 export const BVNK_PAYIN_STATUSES = ["COMPLETED"] as const;
 export type BvnkPayinStatus = (typeof BVNK_PAYIN_STATUSES)[number];
 
 /** Provider-native crypto payout statuses SDP acts on; any other string parses and is ignored. */
-export const BVNK_CRYPTO_PAYOUT_STATUSES = ["PROCESSING", "COMPLETE"] as const;
+export const BVNK_CRYPTO_PAYOUT_STATUSES = [
+  "PROCESSING",
+  "COMPLETE",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+  "EXPIRED",
+] as const;
 export type BvnkCryptoPayoutStatus = (typeof BVNK_CRYPTO_PAYOUT_STATUSES)[number];
-
-export const bvnkPayinStatusSchema = z.enum(BVNK_PAYIN_STATUSES);
-export const bvnkCryptoPayoutStatusSchema = z.enum(BVNK_CRYPTO_PAYOUT_STATUSES);
 
 /** Whether a parsed pay-in status is one the handler acts on. */
 export function isBvnkPayinStatus(value: string): value is BvnkPayinStatus {
@@ -23,7 +43,25 @@ export function isBvnkCryptoPayoutStatus(value: string): value is BvnkCryptoPayo
   return BVNK_CRYPTO_PAYOUT_STATUSES.some((candidate) => candidate === value);
 }
 
-const bvnkAmountSchema = z.union([z.string().min(1), z.number().finite()]).transform(String);
+/**
+ * Decimal-safe amount codec for every money field on the BVNK wire. Strings
+ * must be decimal (no sign, no exponent); finite numbers pass only when their
+ * canonical string form is also a plain decimal, so `-1` and `1e-7` are
+ * rejected HERE, at the boundary, never later. Zero-valued legs (unpaid
+ * amounts at create, fees) are legitimate observations.
+ */
+const bvnkDecimalStringSchema = z
+  .string()
+  .regex(/^[0-9]+(\.[0-9]+)?$/, "amount must be a decimal string");
+const bvnkDecimalNumberSchema = z
+  .number()
+  .refine(
+    (value) => Number.isFinite(value) && value >= 0 && /^[0-9]+(\.[0-9]+)?$/.test(String(value)),
+    "amount must be a non-negative decimal number"
+  );
+const bvnkAmountSchema = z
+  .union([bvnkDecimalStringSchema, bvnkDecimalNumberSchema])
+  .transform(String);
 
 const bvnkMoneySchema = z.object({
   actual: bvnkAmountSchema,
@@ -31,6 +69,7 @@ const bvnkMoneySchema = z.object({
   currency: z.string().min(1),
 });
 
+/** The legacy v2 pay-in status-change data, retained verbatim so the event parses and is acknowledged-ignored. */
 const bvnkPayinDataSchema = z.object({
   id: z.string().min(1),
   status: z.string().min(1),
@@ -41,6 +80,68 @@ const bvnkPayinDataSchema = z.object({
     customerId: z.string().min(1),
   }),
 });
+
+/** The live v1 pay-in status-change data (Zach, Sep 18): only the fields SDP reads to attribute and apply a pay-in. */
+const bvnkV1PayinDataSchema = z.object({
+  amount: z.object({
+    value: bvnkAmountSchema,
+    currencyCode: z.string().min(1),
+  }),
+  status: z.string().min(1),
+  metadata: z
+    .object({
+      additionalRemittanceInformation: z.string().optional(),
+    })
+    .optional(),
+  beneficiary: z.object({
+    walletId: z.string().min(1),
+  }),
+  paymentReference: z.string().min(1),
+  customerReference: z.string().min(1),
+  transactionReference: z.string().min(1),
+});
+
+const bvnkCryptoPayoutDataSchema = z
+  .object({
+    type: z.string().min(1),
+    uuid: z.string().min(1),
+    status: z.string().min(1),
+    walletId: z.string().min(1),
+    reference: z.string().nullable(),
+    address: z
+      .object({ address: z.string().min(1), network: z.string().min(1) })
+      .nullable()
+      .optional(),
+    paidCurrency: bvnkMoneySchema,
+    walletCurrency: bvnkMoneySchema,
+    feeCurrency: bvnkMoneySchema,
+    networkFeeCurrency: bvnkMoneySchema,
+    exchangeRate: z.object({
+      base: z.string().min(1),
+      rate: z.number().finite(),
+      counter: z.string().min(1),
+    }),
+    transactions: z.array(z.object({ hash: z.string().min(1) })).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!isBvnkPayoutCompleted(data.status)) {
+      return;
+    }
+    if (data.transactions === undefined || data.transactions.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["transactions"],
+        message: "BVNK payout COMPLETE must carry at least one transaction with a hash",
+      });
+    }
+    if (data.address === null || data.address === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["address"],
+        message: "BVNK payout COMPLETE must carry the destination address",
+      });
+    }
+  });
 
 const bvnkFiatInstrumentsSchema = z
   .array(
@@ -53,7 +154,9 @@ const bvnkFiatInstrumentsSchema = z
   )
   .transform((instruments): BvnkBankFundingDetails | undefined => {
     const fiat = instruments.find((instrument) => instrument.type === "FIAT");
-    if (!fiat?.accountNumber) return undefined;
+    if (!fiat?.accountNumber) {
+      return undefined;
+    }
     return {
       accountNumber: fiat.accountNumber,
       code: fiat.bankDetails?.bic,
@@ -72,7 +175,9 @@ const bvnkLedgersSchema = z
   )
   .transform((ledgers): BvnkBankFundingDetails | undefined => {
     const ledger = ledgers.find((entry) => entry.accountNumber);
-    if (!ledger?.accountNumber) return undefined;
+    if (!ledger?.accountNumber) {
+      return undefined;
+    }
     return {
       accountNumber: ledger.accountNumber,
       code: ledger.code,
@@ -127,28 +232,18 @@ export const bvnkWebhookSchema = z.discriminatedUnion("event", [
       })),
   }),
   z.object({
+    event: z.literal("bvnk:payment:payin:status-change"),
+    eventId: z.string().min(1),
+    timestamp: z.string().datetime(),
+    data: bvnkV1PayinDataSchema,
+  }),
+  z.object({
     event: z.literal("payment:v2:payin:status-change"),
     data: bvnkPayinDataSchema,
   }),
   z.object({
     event: z.literal("bvnk:payment:crypto:status-change"),
-    data: z.object({
-      type: z.string().min(1),
-      uuid: z.string().min(1),
-      status: z.string().min(1),
-      walletId: z.string().min(1),
-      reference: z.string().nullable(),
-      address: z.object({ address: z.string().min(1), network: z.string().min(1) }).nullable(),
-      paidCurrency: bvnkMoneySchema,
-      walletCurrency: bvnkMoneySchema,
-      feeCurrency: bvnkMoneySchema,
-      exchangeRate: z.object({
-        base: z.string().min(1),
-        rate: z.number(),
-        counter: z.string().min(1),
-      }),
-      transactions: z.array(z.object({ hash: z.string().min(1) })),
-    }),
+    data: bvnkCryptoPayoutDataSchema,
   }),
   z.object({
     event: z.literal("bvnk:payment:channel:transaction-detected"),

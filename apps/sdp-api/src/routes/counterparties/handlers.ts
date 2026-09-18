@@ -500,7 +500,7 @@ export const submitCounterpartyRequirements = async (
     if (stored !== null) {
       requirements = stored;
     }
-    gateOnCollectedFields = stage === null || stage.kind !== "agreements_pending";
+    gateOnCollectedFields = stage !== null && stage.kind !== "agreements_pending";
   }
 
   if (requirements.status === "collect_account") {

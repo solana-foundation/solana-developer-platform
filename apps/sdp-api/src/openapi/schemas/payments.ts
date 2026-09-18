@@ -596,6 +596,146 @@ export const moneygramTransferDetailsSchema = z
   })
   .openapi({ description: "MoneyGram-specific transfer metadata." });
 
+/**
+ * Provider-reported ramp settlement economics, mirroring the
+ * `RampTransferSettlement` union in `@sdp/types`. BVNK on-ramp transfers
+ * carry the PROCESSING variant once the payout is created and the COMPLETE
+ * variant once the crypto payout settles.
+ */
+const moonpayRampSettlementSchema = z
+  .object({
+    provider: z.literal("moonpay"),
+    status: z.enum(["completed", "failed"]),
+    transactionId: z.string().openapi({ description: "MoonPay transaction id." }),
+    baseCurrencyCode: z.string().openapi({ description: "Fiat currency paid." }),
+    baseCurrencyAmount: z.number().openapi({ description: "Fiat amount paid." }),
+    quoteCurrencyCode: z.string().openapi({ description: "Crypto currency purchased." }),
+    quoteCurrencyAmount: z.number().openapi({ description: "Crypto amount purchased." }),
+    feeAmount: z.number().openapi({ description: "Provider fee." }),
+    extraFeeAmount: z.number().openapi({ description: "Extra provider fee." }),
+    networkFeeAmount: z.number().openapi({ description: "Network fee." }),
+    areFeesIncluded: z
+      .boolean()
+      .openapi({ description: "Whether the fees are included in the paid amount." }),
+    usdRate: z.number().openapi({ description: "USD exchange rate." }),
+    cryptoTransactionId: z.string().optional().openapi({ description: "On-chain transaction id." }),
+    failureReason: z.string().optional().openapi({ description: "Provider failure reason." }),
+  })
+  .openapi({ description: "MoonPay on-ramp settlement economics." });
+
+const lightsparkRampSettlementSchema = z
+  .object({
+    provider: z.literal("lightspark"),
+    status: z.enum(["COMPLETED", "FAILED", "EXPIRED", "REFUND_FAILED"]),
+    sentAmount: z
+      .object({
+        amount: z.number(),
+        currencyCode: z.string(),
+        decimals: z.number(),
+      })
+      .openapi({ description: "Amount sent from the payer." }),
+    receivedAmount: z
+      .object({
+        amount: z.number(),
+        currencyCode: z.string(),
+        decimals: z.number(),
+      })
+      .openapi({ description: "Amount received by the payee." }),
+    exchangeRate: z.number().openapi({ description: "Exchange rate." }),
+    fees: z.number().openapi({ description: "Total fees." }),
+    settledAt: z.string().optional().openapi({ description: "Settlement timestamp." }),
+    failureReason: z.string().optional().openapi({ description: "Provider failure reason." }),
+  })
+  .openapi({ description: "Lightspark off-ramp settlement economics." });
+
+const coinbaseRampSettlementSchema = z
+  .object({
+    provider: z.literal("coinbase"),
+    status: z.enum(["completed", "failed"]),
+    paymentCurrency: z.string().openapi({ description: "Fiat currency paid." }),
+    paymentSubtotal: z.string().openapi({ description: "Fiat subtotal." }),
+    paymentTotal: z.string().openapi({ description: "Fiat total paid." }),
+    purchaseCurrency: z.string().openapi({ description: "Crypto currency purchased." }),
+    purchaseAmount: z.string().openapi({ description: "Crypto amount purchased." }),
+    exchangeRate: z.string().openapi({ description: "Exchange rate." }),
+    fees: z
+      .array(
+        z.object({
+          feeAmount: z.string(),
+          feeCurrency: z.string(),
+          feeType: z.string(),
+        })
+      )
+      .openapi({ description: "Fee legs." }),
+    txHash: z.string().optional().openapi({ description: "On-chain transaction hash." }),
+    failureReason: z.string().optional().openapi({ description: "Provider failure reason." }),
+  })
+  .openapi({ description: "Coinbase on-ramp settlement economics." });
+
+const bvnkRampSettlementBaseSchema = z.object({
+  provider: z.literal("bvnk"),
+  payinId: z.string().openapi({ description: "BVNK pay-in id (fiat leg)." }),
+  payoutId: z.string().openapi({ description: "BVNK crypto payout uuid." }),
+  receiptUrl: z.string().openapi({
+    description: "BVNK receipt/redirect url for the payout (sandbox receipt tracking).",
+  }),
+  fiatCurrency: z.string().openapi({ description: "Fiat currency." }),
+  fiatAmount: z.string().openapi({ description: "Fiat amount, as a decimal string." }),
+  cryptoCurrency: z.string().openapi({ description: "Crypto asset." }),
+  cryptoAmount: z
+    .string()
+    .openapi({ description: "Crypto amount to receive, as a decimal string." }),
+  feeCurrency: z.string().openapi({ description: "Fee currency." }),
+  feeAmount: z.string().openapi({ description: "Fee amount, as a decimal string." }),
+  networkFeeCurrency: z.string().openapi({ description: "Network fee currency." }),
+  networkFeeAmount: z.string().openapi({ description: "Network fee amount, as a decimal string." }),
+  exchangeRate: z.string().openapi({
+    description: "Exchange rate (`exchangeRate.rate` from the provider), as a decimal string.",
+  }),
+});
+
+const bvnkRampProcessingSettlementSchema = bvnkRampSettlementBaseSchema
+  .extend({
+    status: z.literal("PROCESSING"),
+  })
+  .openapi({ description: "BVNK on-ramp settlement while the crypto payout is in flight." });
+
+const bvnkRampCompleteSettlementSchema = bvnkRampSettlementBaseSchema
+  .extend({
+    status: z.literal("COMPLETE"),
+    txHash: z.string().openapi({ description: "On-chain transaction hash." }),
+    cryptoAmountActual: z
+      .string()
+      .openapi({ description: "Actual crypto delivered, as a decimal string." }),
+    fiatAmountActual: z
+      .string()
+      .openapi({ description: "Actual fiat debited, as a decimal string." }),
+    feeAmountActual: z
+      .string()
+      .openapi({ description: "Actual fee charged, as a decimal string." }),
+    feeCurrencyActual: z.string().openapi({ description: "Actual fee currency." }),
+    networkFeeAmountActual: z
+      .string()
+      .openapi({ description: "Actual network fee charged, as a decimal string." }),
+    networkFeeCurrencyActual: z.string().openapi({ description: "Actual network fee currency." }),
+    exchangeRateActual: z
+      .string()
+      .openapi({ description: "Actual exchange rate, as a decimal string." }),
+  })
+  .openapi({ description: "BVNK on-ramp settlement once the crypto payout completed." });
+
+const bvnkRampSettlementSchema = z.discriminatedUnion("status", [
+  bvnkRampProcessingSettlementSchema,
+  bvnkRampCompleteSettlementSchema,
+]);
+
+const rampTransferSettlementSchema = z.discriminatedUnion("provider", [
+  moonpayRampSettlementSchema,
+  lightsparkRampSettlementSchema,
+  coinbaseRampSettlementSchema,
+  bvnkRampSettlementSchema,
+]);
+
 export const transferSchema = z
   .object({
     id: transferIdParamSchema,
@@ -679,7 +819,8 @@ export const transferSchema = z
       example: "Acme Studio",
     }),
     providerReference: z.string().optional().openapi({
-      description: "Provider quote or transaction reference used for ramp correlation.",
+      description:
+        "Provider quote or transaction reference used for ramp correlation. For BVNK on-ramp transfers this is the provider payout id (uuid) once the payout exists, and the field is omitted before a payout was created.",
       example: "ramp_quote_example",
     }),
     deliveryMode: z.enum(["hosted", "manual_instructions", "session_widget"]).optional().openapi({
@@ -694,6 +835,10 @@ export const transferSchema = z
     fiatAmount: tokenAmountSchema.optional().openapi({
       description: "Fiat amount for the ramp leg when known.",
       example: "100.00",
+    }),
+    settlement: rampTransferSettlementSchema.optional().openapi({
+      description:
+        "Provider-reported ramp settlement economics. BVNK on-ramp transfers carry the PROCESSING variant once the payout is created (create-time estimate plus the receipt url) and the COMPLETE variant once the crypto payout settles (delivery facts and actual amounts), so the dashboard can show the success screen and receipt tracking while the payout is still in flight.",
     }),
     risk: transferRiskSchema
       .optional()
@@ -1766,30 +1911,42 @@ const bvnkFiatFundingInstructionSchema = z.object({
   onboardingStatus: z
     .enum(["verification_required", "verifying", "verification_failed", "ready"])
     .openapi({
-      description: "Where the buyer is in BVNK onboarding; 'ready' means the funding rule is live.",
+      description:
+        "Where the buyer is in BVNK onboarding; 'ready' means the funding wallet is live.",
       example: "ready",
     }),
   verificationUrl: z.string().optional().openapi({
     description: "Identity-verification (KYC) URL the buyer must complete before funding.",
   }),
   fundingWalletId: z.string().optional().openapi({
-    description: "BVNK fiat wallet the buyer funds; BVNK auto-converts arriving fiat to crypto.",
+    description: "BVNK fiat wallet the buyer funds; the pay-in settles into this wallet.",
   }),
   fiatCurrency: z
     .string()
-    .openapi({ description: "Fiat currency to fund the rule with.", example: "USD" }),
+    .openapi({ description: "Fiat currency the buyer funds the wallet with.", example: "USD" }),
   beneficiaryAddress: z
     .string()
     .openapi({ description: "Destination crypto address the converted funds are sent to." }),
   network: z
     .string()
     .openapi({ description: "Destination blockchain network.", example: "SOLANA" }),
+  paymentReference: z.string().optional().openapi({
+    description:
+      "Remittance line the payer must include in the bank transfer reference so the pay-in webhook can attribute the deposit to this transfer.",
+    example: "SDP-ONRAMP xfr_9f3b1c2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b",
+  }),
+  remittanceInformationPrefix: z.string().optional().openapi({
+    description:
+      "Instrument-scoped remittance prefix BVNK prepends to inbound references; shown as its own instruction field, never concatenated into paymentReference.",
+    example: "LCA-ONRAMP",
+  }),
   bankAccount: z
     .object({
       accountNumber: z.string().optional(),
       code: z.string().optional(),
       accountNumberFormat: z.string().optional(),
       paymentReference: z.string().optional(),
+      routingNumber: z.string().optional().openapi({ example: "021000021" }),
       bankName: z.string().optional(),
     })
     .optional()
