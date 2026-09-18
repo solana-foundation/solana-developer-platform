@@ -10,19 +10,6 @@ const position = {
   ownerAddress: "7YfVedaQueueOwner111111111111111111111111111",
 };
 
-const quote = {
-  providerReference: position.vaultAddress,
-  assetMint: position.tokenMint,
-  shares: "10",
-  assets: "9.9",
-  shareDecimals: 6,
-  assetDecimals: 6,
-  discountBps: 25,
-  maturityTimestamp: "1700000060",
-  deadlineTimestamp: "1700000120",
-  blockingIssues: [],
-} as never;
-
 function plan(overrides: Record<string, unknown> = {}) {
   return {
     cluster: "devnet",
@@ -50,7 +37,7 @@ function plan(overrides: Record<string, unknown> = {}) {
 describe("queued withdrawal builder intent validation", () => {
   it("accepts dynamic quote and clock drift while preserving stable caller intent", () => {
     expect(() =>
-      assertQueuePlan(plan(), position, quote, {
+      assertQueuePlan(plan(), position, {
         shares: "10",
         discountBps: 25,
         deadlineSeconds: 60,
@@ -58,23 +45,39 @@ describe("queued withdrawal builder intent validation", () => {
     ).not.toThrow();
   });
 
+  it("compares shares numerically, not as decimal strings", () => {
+    expect(() =>
+      assertQueuePlan(plan({ shares: "10.000000" }), position, {
+        shares: "10",
+        discountBps: 25,
+        deadlineSeconds: 60,
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects plan shares that drift from the caller's requested quantity", () => {
+    // The provider's quote is not consulted at all: even if an adapter
+    // drifted the quote and plan together, the built quantity must still
+    // match what the caller asked for.
+    expect(() =>
+      assertQueuePlan(plan({ shares: "11" }), position, {
+        shares: "10",
+        discountBps: 25,
+        deadlineSeconds: 60,
+      })
+    ).toThrow(/stable queue intent/i);
+  });
+
   it("rejects changes to shares, discount, or deadline duration", () => {
     expect(() =>
-      assertQueuePlan(plan({ shares: "11" }), position, quote, {
+      assertQueuePlan(plan({ discountBps: 26 }), position, {
         shares: "10",
         discountBps: 25,
         deadlineSeconds: 60,
       })
     ).toThrow(/stable queue intent/i);
     expect(() =>
-      assertQueuePlan(plan({ discountBps: 26 }), position, quote, {
-        shares: "10",
-        discountBps: 25,
-        deadlineSeconds: 60,
-      })
-    ).toThrow(/stable queue intent/i);
-    expect(() =>
-      assertQueuePlan(plan({ deadlineTimestamp: "1700000122" }), position, quote, {
+      assertQueuePlan(plan({ deadlineTimestamp: "1700000122" }), position, {
         shares: "10",
         discountBps: 25,
         deadlineSeconds: 60,

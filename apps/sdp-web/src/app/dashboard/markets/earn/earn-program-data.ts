@@ -1463,12 +1463,18 @@ export function useEarnVaultWithdrawalRequestOutcome(
 
   useEffect(() => {
     if (!data) return;
+    // Poll results are server events, not render-derived state: the request
+    // only exists after the child submits, so the parent cannot fetch it
+    // earlier. Forwarding each polled record and its one-time settlement to
+    // the caller's callback is the notification itself, not a render bypass.
+    // react-doctor-disable-next-line no-pass-data-to-parent no-pass-live-state-to-parent -- server-poll lifecycle notifications
     onUpdatedEvent(data);
     if (
       !isEarnVaultWithdrawalRequestInFlight(data) &&
       reportedSettledId.current !== data.withdrawalRequestId
     ) {
       reportedSettledId.current = data.withdrawalRequestId;
+      // react-doctor-disable-next-line no-pass-data-to-parent no-pass-live-state-to-parent -- server-poll lifecycle notifications
       onSettledEvent(data);
     }
   }, [data]);

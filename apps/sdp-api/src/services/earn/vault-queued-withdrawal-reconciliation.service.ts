@@ -596,6 +596,22 @@ function assertLiveRequest(
   request: EarnVaultWithdrawalRequestRow,
   lookup: Exclude<EarnVaultQueuedWithdrawalRequestLookup, { status: "closedOrUnknown" }>
 ): void {
+  // Both addresses the adapter returns must name the request this sweep set
+  // out to read: a same-owner, same-vault neighbor returned here would
+  // otherwise have its nonce and timing projected onto this request, and the
+  // real close event would then fail the nonce check forever.
+  if (
+    lookup.requestAddress !== request.request_address ||
+    lookup.request.requestAddress !== request.request_address
+  ) {
+    throw new Error(`Queued withdrawal ${request.id} PDA read returned a foreign request address`);
+  }
+  // The top-level status is the adapter's read verdict; `request.status` is
+  // the account's own field. Projecting state only when they agree keeps a
+  // partially decoded read from persisting half of the provider's truth.
+  if (lookup.status !== lookup.request.status) {
+    throw new Error(`Queued withdrawal ${request.id} PDA read has incoherent status`);
+  }
   if (
     lookup.request.providerReference !== request.vault_address ||
     lookup.request.assetMint !== request.token_mint ||

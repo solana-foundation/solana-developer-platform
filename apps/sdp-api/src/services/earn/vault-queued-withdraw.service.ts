@@ -5,6 +5,7 @@ import type {
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
@@ -121,7 +122,6 @@ const QUEUED_REQUEST_RESERVATION_MS = 5 * 60 * 1_000;
 export function assertQueuePlan(
   plan: EarnVaultQueuedWithdrawalRequestPlan,
   position: QueuedWithdrawalPosition,
-  quote: EarnVaultQueuedWithdrawalQuote,
   terms: QueuedWithdrawalTermsInput
 ): void {
   if (
@@ -131,8 +131,13 @@ export function assertQueuePlan(
   ) {
     throw internalError("Queued withdrawal builder returned asset identity outside the position");
   }
+  // The caller's approved intent is `terms`, not the provider's own quote:
+  // an adapter that drifted the built quantity in both the quote and the plan
+  // would otherwise pass a provider-to-provider comparison. Shares are
+  // decimal strings, so the built quantity is compared to the caller's
+  // requested quantity numerically.
   if (
-    plan.expectedRequest.shares !== quote.shares ||
+    compareDecimalAmounts(plan.expectedRequest.shares, terms.shares) !== 0 ||
     plan.expectedRequest.discountBps !== terms.discountBps ||
     BigInt(plan.expectedRequest.deadlineTimestamp) -
       BigInt(plan.expectedRequest.maturityTimestamp) !==
@@ -184,7 +189,7 @@ async function quoteAndBuildRequest(
       `Queued withdrawal builder returned a ${built.cluster} plan for the configured ${earnClusterFor(input.actor.environment)} cluster`
     );
   }
-  assertQueuePlan(built, input.position, quote, input.terms);
+  assertQueuePlan(built, input.position, input.terms);
   return {
     quote,
     plan: {

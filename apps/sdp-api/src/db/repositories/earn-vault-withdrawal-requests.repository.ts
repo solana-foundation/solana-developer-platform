@@ -1,5 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types";
 import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
+import { queuedFulfillmentMovementId } from "@/db/repositories/earn-movements.repository";
 import { conflict } from "@/lib/errors";
 
 export type EarnVaultWithdrawalRequestStatus =
@@ -558,6 +559,86 @@ async function promoteRequestAddressLease(
       "This queued withdrawal build no longer owns its provider nonce. Build and sign a fresh transaction."
     );
   }
+}
+
+/**
+ * Persist a fulfilled queued withdrawal's payout as one idempotent
+ * earn_movements row, in the same transaction that moved the request to
+ * `fulfilled`. Mirrors the read-side projection field for field — including
+ * `created_at` = settlement time — so the ledger row and the synthetic
+ * fallback for pre-persistence history render identically. Replaying the same
+ * fulfillment (same request, same closing signature) resolves to the same
+ * primary key and inserts nothing.
+ *
+ * `token_amount_settled` guards zero payouts to NULL: the movement CHECK (and
+ * 0103's semantics) treat zero as "payout not observed", never a stated fact.
+ */
+async function recordFulfilledQueueMovement(
+  tx: DatabaseExecutor,
+  request: EarnVaultWithdrawalRequestRow
+): Promise<void> {
+  if (!request.closing_signature) return;
+  const settledAt = request.fulfilled_at ?? request.updated_at;
+  await tx
+    .prepare(
+      `INSERT INTO earn_movements (
+         id, organization_id, project_id, environment, provider,
+         execution_model, direction, position_id,
+         status, confirmed_at, settled_at,
+         denomination, amount_requested, amount_settled, token_amount_settled,
+         custody_wallet_id, vault_address, source_address, destination_address,
+         provider_reference, signature,
+         request_id, idempotency_fingerprint, provider_data,
+         created_by, initiated_by_key_id,
+         creates_share_account, share_ata_rent_funder, unknown_signature_observed_at,
+         created_at, updated_at
+       ) VALUES (
+         ?, ?, ?, ?, ?,
+         'vault_direct', 'withdrawal', ?,
+         'finalized', ?, ?,
+         ?, ?, ?, CASE WHEN ? ~ '[1-9]' THEN ? ELSE NULL END,
+         ?, ?, NULL, ?,
+         ?, ?,
+         ?, ?, ?::jsonb,
+         ?, ?,
+         FALSE, NULL, NULL,
+         ?, ?
+       )
+       ON CONFLICT (id) DO NOTHING`
+    )
+    .bind(
+      queuedFulfillmentMovementId(request.id),
+      request.organization_id,
+      request.project_id,
+      request.environment,
+      request.provider,
+      request.position_id,
+      settledAt,
+      settledAt,
+      request.share_mint,
+      request.shares,
+      request.shares,
+      request.assets_paid,
+      request.assets_paid,
+      request.custody_wallet_id,
+      request.vault_address,
+      request.owner_address,
+      request.request_address,
+      request.closing_signature,
+      request.client_request_id,
+      request.idempotency_fingerprint,
+      JSON.stringify({
+        observation: "provider_solver_fulfillment",
+        withdrawalRequestId: request.id,
+        requestAddress: request.request_address,
+        nonce: request.nonce,
+      }),
+      request.created_by,
+      request.initiated_by_key_id,
+      settledAt,
+      request.updated_at
+    )
+    .run();
 }
 
 export function createPostgresEarnVaultWithdrawalRequestsRepository(
@@ -1194,6 +1275,15 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .first<Record<string, unknown>>();
         if (!row) return null;
         const request = mapRequest(row);
+        if (input.toStatus === "fulfilled") {
+          // The payout belongs in the ONE authoritative ledger
+          // (earn_movements), not only in this table's projection: every
+          // consumer — /v1/transactions first — reads earn_movements directly.
+          // Keyed by the request id and carrying the closing signature, the
+          // insert replays as a no-op; the closing signature is unique per
+          // fulfillment via idx_earn_movements_signature.
+          await recordFulfilledQueueMovement(tx, request);
+        }
         if (input.toStatus === "cancelled") {
           // A cancellation can restore a full wallet balance after hydration
           // observed zero escrowed shares. Reopening/bumping the position in
@@ -1238,18 +1328,28 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
       }
       const result = await db
         .prepare(
+          // Recovery may legitimately leave an action submitted after its
+          // parent request already reached PDA/closing-event terminal truth
+          // (a cancel that lost the race to a solver fulfillment). Such an
+          // action is settled history, not open work: reclaiming it would
+          // push it into signature reconciliation on every sweep forever,
+          // eventually starving new recovery out of the bounded batch.
           `WITH candidates AS MATERIALIZED (
-             SELECT id FROM earn_vault_withdrawal_request_actions
-              WHERE status IN ('requested', 'submitted', 'confirmed')
-              ORDER BY COALESCE(last_checked_at, updated_at), id
+             SELECT action.id
+               FROM earn_vault_withdrawal_request_actions action
+              INNER JOIN earn_vault_withdrawal_requests request
+                 ON request.id = action.withdrawal_request_id
+              WHERE action.status IN ('requested', 'submitted', 'confirmed')
+                AND request.status NOT IN ('fulfilled', 'cancelled', 'failed')
+              ORDER BY COALESCE(action.last_checked_at, action.updated_at), action.id
               LIMIT ?
-              FOR UPDATE SKIP LOCKED
-           )
-           UPDATE earn_vault_withdrawal_request_actions action
-              SET last_checked_at = sdp_iso_now()
-             FROM candidates
-            WHERE action.id = candidates.id
-            RETURNING action.*`
+               FOR UPDATE OF action SKIP LOCKED
+            )
+            UPDATE earn_vault_withdrawal_request_actions action
+               SET last_checked_at = sdp_iso_now()
+              FROM candidates
+             WHERE action.id = candidates.id
+             RETURNING action.*`
         )
         .bind(limit)
         .all<Record<string, unknown>>();

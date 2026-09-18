@@ -976,7 +976,12 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
 
 const QUEUED_FULFILLMENT_MOVEMENT_PREFIX = "earn_queue_fulfillment_";
 
-function queuedFulfillmentMovementId(requestId: string): string {
+/**
+ * The ledger id for a fulfilled queued withdrawal's payout movement, shared by
+ * the writer (advanceRequest) and the read-side projection so a persisted row
+ * and its synthetic fallback can never both appear.
+ */
+export function queuedFulfillmentMovementId(requestId: string): string {
   return `${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}${requestId}`;
 }
 
@@ -1045,11 +1050,17 @@ function mergeMovementPage(
   queuedRows: readonly EarnMovementRow[],
   limit: number
 ): { rows: EarnMovementRow[]; hasMore: boolean } {
-  const combined = [...ledgerRows, ...queuedRows].sort((left, right) => {
-    if (left.created_at !== right.created_at)
-      return right.created_at.localeCompare(left.created_at);
-    return right.id.localeCompare(left.id);
-  });
+  // A fulfilled request whose payout was persisted into earn_movements is
+  // also matched by the queued-projection fallback; the ledger row is
+  // authoritative and the projection only fills rows that were not persisted.
+  const persistedIds = new Set(ledgerRows.map((row) => row.id));
+  const combined = [...ledgerRows, ...queuedRows.filter((row) => !persistedIds.has(row.id))].sort(
+    (left, right) => {
+      if (left.created_at !== right.created_at)
+        return right.created_at.localeCompare(left.created_at);
+      return right.id.localeCompare(left.id);
+    }
+  );
   return { rows: combined.slice(0, limit), hasMore: combined.length > limit };
 }
 

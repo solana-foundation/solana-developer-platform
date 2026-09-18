@@ -5,6 +5,7 @@ import {
   type EarnVaultPosition,
   type EarnVaultQueuedWithdrawalPreview,
   type EarnVaultQueuedWithdrawalTerms,
+  type EarnVaultQueuedWithdrawalTermsRequest,
   type EarnVaultWithdrawalRequestRecord,
   type SdpEnvironment,
 } from "@sdp/types";
@@ -29,6 +30,7 @@ import {
   fetchEarnVaultQueuedWithdrawalPreview,
   useEarnVaultWithdrawalRequestOutcome,
 } from "./earn-program-data";
+import { EarnVaultApprovalResult } from "./earn-vault-approval-result";
 import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
@@ -59,6 +61,221 @@ function epochDate(value: string, locale: string): string {
   return formatEpochSeconds(value, locale) ?? "—";
 }
 
+function queueSharesForAmount(
+  amountValidation: ReturnType<typeof validateVaultWithdrawalAmount>,
+  position: EarnVaultPosition
+): string | undefined {
+  return amountValidation.kind === "valid"
+    ? vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
+    : undefined;
+}
+
+function isQueueTermsValid(
+  discountBps: number,
+  deadlineSeconds: number,
+  terms: EarnVaultQueuedWithdrawalTerms
+): boolean {
+  return (
+    Number.isInteger(discountBps) &&
+    discountBps >= terms.minimumDiscountBps &&
+    discountBps <= terms.maximumDiscountBps &&
+    Number.isInteger(deadlineSeconds) &&
+    deadlineSeconds >= terms.minimumSecondsToDeadline
+  );
+}
+
+function queuePreviewInput(
+  position: EarnVaultPosition,
+  shares: string | undefined,
+  discountBps: number,
+  deadlineSeconds: number,
+  termsValid: boolean
+): EarnVaultQueuedWithdrawalTermsRequest | null {
+  if (!shares || !termsValid) return null;
+  return { positionId: position.id, shares, discountBps, deadlineSeconds };
+}
+
+function queueLockedUntil(position: EarnVaultPosition, locale: string): string | undefined {
+  return position.unlockTimestamp ? epochDate(position.unlockTimestamp, locale) : undefined;
+}
+
+function queuePositionName(position: EarnVaultPosition): string {
+  return position.label || shortenMarketAddress(position.providerReference);
+}
+
+function queueAmountError(
+  amount: string,
+  amountValidation: ReturnType<typeof validateVaultWithdrawalAmount>,
+  t: ReturnType<typeof useTranslations>
+): string | null {
+  return amount.trim() === "" || amountValidation.kind === "valid"
+    ? null
+    : t("DashboardEarn.vaultWithdraw.amountInvalid");
+}
+
+function queuedWithdrawalSteps(
+  outcome: EarnVaultQueuedWithdrawalOutcome | null,
+  t: ReturnType<typeof useTranslations>
+): string[] {
+  return [
+    t("DashboardEarn.vaultWithdraw.flowDetails"),
+    t("DashboardEarn.vaultWithdraw.flowReview"),
+    outcome?.kind === "approval_pending"
+      ? t("DashboardEarn.queuedWithdraw.flowApproval")
+      : t("DashboardEarn.queuedWithdraw.flowRequested"),
+  ];
+}
+
+function queuedWithdrawalStepIndex(
+  outcome: EarnVaultQueuedWithdrawalOutcome | null,
+  step: FormStep
+): number {
+  if (outcome) return 2;
+  return step === "review" ? 1 : 0;
+}
+
+function queuedWithdrawalStepKey(outcome: EarnVaultQueuedWithdrawalOutcome | null, step: FormStep) {
+  return outcome ? `result:${outcome.kind}` : step;
+}
+
+/**
+ * Owns the review-step preview lifecycle: every change to the queue intent
+ * refetches a preview while the modal shows the review step, and submit-time
+ * errors share this hook's error state so the review view renders one message.
+ */
+function useQueuedWithdrawalPreview(
+  previewInput: EarnVaultQueuedWithdrawalTermsRequest | null,
+  active: boolean
+) {
+  const t = useTranslations();
+  const [preview, setPreview] = useState<EarnVaultQueuedWithdrawalPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!active || !previewInput) return;
+    const controller = new AbortController();
+    setPreview(null);
+    setPreviewLoading(true);
+    setError(null);
+    void fetchEarnVaultQueuedWithdrawalPreview(previewInput, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        if (result.kind === "ready") setPreview(result.value);
+        else setError(t("DashboardEarn.queuedWithdraw.previewError"));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPreviewLoading(false);
+      });
+    return () => controller.abort();
+  }, [previewInput, active, t]);
+
+  return { preview, previewLoading, error, setError };
+}
+
+/**
+ * Owns the value-moving request submission. Bookkeeping happens before
+ * component-local state: the modal may have unmounted while the POST was in
+ * flight. An approval pins this exact intent; ambiguous failures preserve its
+ * retry key.
+ */
+function useQueuedWithdrawalSubmission(options: {
+  onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  projectId: string | null;
+  setError: (error: string | null) => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
+
+  async function submit(
+    previewInput: EarnVaultQueuedWithdrawalTermsRequest | null,
+    preview: EarnVaultQueuedWithdrawalPreview | null
+  ) {
+    if (!previewInput || !preview || preview.blockingIssues.length > 0) return;
+    setSubmitting(true);
+    options.setError(null);
+    try {
+      const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
+        projectId: options.projectId,
+        positionId: previewInput.positionId,
+        shares: previewInput.shares,
+        route: {
+          kind: "queue",
+          discountBps: previewInput.discountBps,
+          deadlineSeconds: previewInput.deadlineSeconds,
+        },
+      });
+      const result = await createEarnVaultWithdrawalRequest(
+        previewInput,
+        vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint)
+      );
+      applyIdempotencyKeyOutcome(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, result);
+      if (result.ok) {
+        setOutcome(result.data);
+        if (result.data.kind === "submitted") {
+          options.onRequested?.(result.data.withdrawalRequest);
+        }
+      } else {
+        options.setError(result.error);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return { submitting, outcome, submit };
+}
+
+/**
+ * Owns the settled-request view model: local cancellation state wins only
+ * until server polling reports a record at least as fresh, and the recovery
+ * cancel action reuses one idempotency key per ambiguous transport attempt.
+ */
+function useQueuedWithdrawalRequestView(
+  submitted: EarnVaultWithdrawalRequestRecord,
+  observed: EarnVaultWithdrawalRequestRecord | undefined
+) {
+  const [cancelResult, setCancelResult] = useState<EarnVaultWithdrawalRequestRecord | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancelKey = useRef<string | null>(null);
+  const request =
+    cancelResult && (!observed || cancelResult.updatedAt >= observed.updatedAt)
+      ? cancelResult
+      : (observed ?? submitted);
+
+  async function cancel() {
+    if (cancelling || request.status !== "expiredCancelable") return;
+    setCancelling(true);
+    setCancelError(null);
+    cancelKey.current ??= crypto.randomUUID();
+    try {
+      const result = await cancelEarnVaultWithdrawalRequest(
+        request.withdrawalRequestId,
+        cancelKey.current
+      );
+      if (result.ok) {
+        // A parsed 2xx definitively consumed this action key. Render its returned
+        // `cancelling` state until polling advances; if reconciliation later
+        // reopens recovery, the next attempt must use a fresh key and transaction.
+        cancelKey.current = null;
+        setCancelResult(result.data);
+      } else {
+        // A 4xx definitively wrote no new action under this key. Preserve keys
+        // only for transport/5xx ambiguity, where the API may have recorded it.
+        if (result.status !== null && result.status >= 400 && result.status < 500) {
+          cancelKey.current = null;
+        }
+        setCancelError(result.error);
+      }
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  return { cancel, cancelError, cancelling, request };
+}
+
 function QueuedWithdrawalResult({
   environment,
   onClose,
@@ -73,44 +290,12 @@ function QueuedWithdrawalResult({
   const t = useTranslations();
   const locale = useLocale();
   const observed = useEarnVaultWithdrawalRequestOutcome(submitted.withdrawalRequestId, onSettled);
-  const [cancelResult, setCancelResult] = useState<EarnVaultWithdrawalRequestRecord | null>(null);
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
-  const cancelKey = useRef<string | null>(null);
-  useEffect(() => {
-    if (cancelResult && observed && observed.updatedAt > cancelResult.updatedAt) {
-      setCancelResult(null);
-    }
-  }, [cancelResult, observed]);
-  const request = cancelResult ?? observed ?? submitted;
+  const { cancel, cancelError, cancelling, request } = useQueuedWithdrawalRequestView(
+    submitted,
+    observed
+  );
   const presentation = earnVaultQueuedWithdrawalStatusPresentation(request.status);
   const terminal = isEarnVaultQueuedWithdrawalTerminal(request.status);
-
-  async function cancel() {
-    if (cancelling || request.status !== "expiredCancelable") return;
-    setCancelling(true);
-    setCancelError(null);
-    cancelKey.current ??= crypto.randomUUID();
-    const result = await cancelEarnVaultWithdrawalRequest(
-      request.withdrawalRequestId,
-      cancelKey.current
-    );
-    if (result.ok) {
-      // A parsed 2xx definitively consumed this action key. Render its returned
-      // `cancelling` state until polling advances; if reconciliation later
-      // reopens recovery, the next attempt must use a fresh key and transaction.
-      cancelKey.current = null;
-      setCancelResult(result.data);
-    } else {
-      // A 4xx definitively wrote no new action under this key. Preserve keys
-      // only for transport/5xx ambiguity, where the API may have recorded it.
-      if (result.status !== null && result.status >= 400 && result.status < 500) {
-        cancelKey.current = null;
-      }
-      setCancelError(result.error);
-    }
-    setCancelling(false);
-  }
 
   return (
     <>
@@ -222,47 +407,12 @@ function QueuedWithdrawalApprovalResult({
   onClose: () => void;
   outcome: Extract<EarnVaultQueuedWithdrawalOutcome, { kind: "approval_pending" }>;
 }) {
-  const t = useTranslations();
   return (
-    <>
-      <EarnOutcomeMark tone="warning" />
-      <div className="flex items-center gap-2 pr-8">
-        <h2
-          className="text-base font-medium text-primary outline-none"
-          data-modal-focus-target
-          tabIndex={-1}
-        >
-          {t("DashboardEarn.vaultWithdraw.approvalTitle")}
-        </h2>
-        <Badge variant="warning">{t("DashboardEarn.vaultWithdraw.approvalStatus")}</Badge>
-      </div>
-      <p className="mt-2 text-sm leading-5 text-secondary">
-        {t("DashboardEarn.vaultWithdraw.approvalBody")}
-      </p>
-      {outcome.approvalRequestId || outcome.walletOperationId ? (
-        <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-          {outcome.approvalRequestId ? (
-            <div className="flex items-start justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultApprovalRequest")}</dt>
-              <dd className="max-w-64 break-all text-right text-primary">
-                {outcome.approvalRequestId}
-              </dd>
-            </div>
-          ) : null}
-          {outcome.walletOperationId ? (
-            <div className="flex items-start justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.withdraw.referenceLabel")}</dt>
-              <dd className="max-w-64 break-all text-right text-primary">
-                {outcome.walletOperationId}
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-      ) : null}
-      <div className="mt-5 flex justify-end">
-        <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
-      </div>
-    </>
+    <EarnVaultApprovalResult
+      approvalRequestId={outcome.approvalRequestId}
+      onClose={onClose}
+      walletOperationId={outcome.walletOperationId}
+    />
   );
 }
 
@@ -499,114 +649,40 @@ export function EarnVaultQueuedWithdrawModal({
   const [amount, setAmount] = useState("");
   const [discount, setDiscount] = useState(String(terms.minimumDiscountBps));
   const [deadline, setDeadline] = useState(String(terms.minimumSecondsToDeadline));
-  const [preview, setPreview] = useState<EarnVaultQueuedWithdrawalPreview | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
   const amountValidation = validateVaultWithdrawalAmount(amount);
   const availableAmount = vaultWithdrawalAvailableAmount(position);
-  const shares =
-    amountValidation.kind === "valid"
-      ? vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
-      : undefined;
+  const shares = queueSharesForAmount(amountValidation, position);
   const discountBps = Number(discount);
   const deadlineSeconds = Number(deadline);
-  const termsValid =
-    Number.isInteger(discountBps) &&
-    discountBps >= terms.minimumDiscountBps &&
-    discountBps <= terms.maximumDiscountBps &&
-    Number.isInteger(deadlineSeconds) &&
-    deadlineSeconds >= terms.minimumSecondsToDeadline;
+  const termsValid = isQueueTermsValid(discountBps, deadlineSeconds, terms);
   const detailsValid = shares !== undefined && termsValid;
-  const lockedUntil = position.unlockTimestamp
-    ? epochDate(position.unlockTimestamp, locale)
-    : undefined;
+  const lockedUntil = queueLockedUntil(position, locale);
   const previewInput = useMemo(
-    () =>
-      shares && termsValid
-        ? {
-            positionId: position.id,
-            shares,
-            discountBps,
-            deadlineSeconds,
-          }
-        : null,
-    [deadlineSeconds, discountBps, position.id, shares, termsValid]
+    () => queuePreviewInput(position, shares, discountBps, deadlineSeconds, termsValid),
+    [deadlineSeconds, discountBps, position, shares, termsValid]
   );
+  const { preview, previewLoading, error, setError } = useQueuedWithdrawalPreview(
+    previewInput,
+    step === "review"
+  );
+  const { submitting, outcome, submit } = useQueuedWithdrawalSubmission({
+    onRequested,
+    projectId,
+    setError,
+  });
 
-  useEffect(() => {
-    if (step !== "review" || !previewInput) return;
-    const controller = new AbortController();
-    setPreview(null);
-    setPreviewLoading(true);
-    setError(null);
-    void fetchEarnVaultQueuedWithdrawalPreview(previewInput, controller.signal)
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        if (result.kind === "ready") setPreview(result.value);
-        else setError(t("DashboardEarn.queuedWithdraw.previewError"));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setPreviewLoading(false);
-      });
-    return () => controller.abort();
-  }, [previewInput, step, t]);
-
-  async function submit() {
-    if (!previewInput || submitting || !preview || preview.blockingIssues.length > 0) return;
-    setSubmitting(true);
-    setError(null);
-    const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
-      projectId,
-      positionId: previewInput.positionId,
-      shares: previewInput.shares,
-      route: {
-        kind: "queue",
-        discountBps: previewInput.discountBps,
-        deadlineSeconds: previewInput.deadlineSeconds,
-      },
-    });
-    const result = await createEarnVaultWithdrawalRequest(
-      previewInput,
-      vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint)
-    );
-    // Bookkeeping must happen before component-local state: the modal may have
-    // unmounted while the value-moving POST was in flight. An approval pins
-    // this exact intent; ambiguous failures preserve its retry key.
-    applyIdempotencyKeyOutcome(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, result);
-    if (result.ok) {
-      setOutcome(result.data);
-      if (result.data.kind === "submitted") {
-        onRequested?.(result.data.withdrawalRequest);
-      }
-    } else {
-      setError(result.error);
-    }
-    setSubmitting(false);
-  }
-
-  const positionName = position.label || shortenMarketAddress(position.providerReference);
+  const positionName = queuePositionName(position);
   const modalLabel = t("DashboardEarn.queuedWithdraw.title", { position: positionName });
-  const amountError =
-    amount.trim() === "" || amountValidation.kind === "valid"
-      ? null
-      : t("DashboardEarn.vaultWithdraw.amountInvalid");
+  const amountError = queueAmountError(amount, amountValidation, t);
 
   return (
     <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
       <div className="p-6">
         <EarnFlowStepper
-          currentStep={outcome ? 2 : step === "review" ? 1 : 0}
-          steps={[
-            t("DashboardEarn.vaultWithdraw.flowDetails"),
-            t("DashboardEarn.vaultWithdraw.flowReview"),
-            outcome?.kind === "approval_pending"
-              ? t("DashboardEarn.queuedWithdraw.flowApproval")
-              : t("DashboardEarn.queuedWithdraw.flowRequested"),
-          ]}
+          currentStep={queuedWithdrawalStepIndex(outcome, step)}
+          steps={queuedWithdrawalSteps(outcome, t)}
         />
-        <EarnFlowTransition stepKey={outcome ? `result:${outcome.kind}` : step}>
+        <EarnFlowTransition stepKey={queuedWithdrawalStepKey(outcome, step)}>
           {outcome?.kind === "approval_pending" ? (
             <QueuedWithdrawalApprovalResult onClose={onClose} outcome={outcome} />
           ) : outcome?.kind === "submitted" ? (
@@ -649,7 +725,7 @@ export function EarnVaultQueuedWithdrawModal({
                   error={error}
                   loading={previewLoading}
                   onBack={() => setStep("details")}
-                  onSubmit={() => void submit()}
+                  onSubmit={() => void submit(previewInput, preview)}
                   position={position}
                   preview={preview}
                   submitting={submitting}
