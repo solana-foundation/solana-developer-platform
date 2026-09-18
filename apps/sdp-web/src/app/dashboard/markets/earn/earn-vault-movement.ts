@@ -72,9 +72,11 @@ export function mergeObservedVaultMovement<
 
 /**
  * The stepper position for an outcome: before anything is submitted the flow
- * sits on the reviewed step, an approval-pending or absorbed submission parks
- * on "processing" (its movement did not and will not report a status of its
- * own), and a real movement reports the step its status maps to.
+ * sits on the reviewed step, an approval-pending submission parks on
+ * "processing" (it carries no movement record to report a status of its own),
+ * and a real movement — including one absorbed as the approval's replay,
+ * whose record is the approval's own execution — reports the step its status
+ * maps to.
  */
 export function vaultMovementProgressStep<M extends VaultMovementRecord>(
   outcome: VaultMovementOutcomeView<M> | null,
@@ -82,7 +84,7 @@ export function vaultMovementProgressStep<M extends VaultMovementRecord>(
   uiState: (status: M["status"]) => { progressStep: number }
 ): number {
   if (!outcome) return step === "review" ? 1 : 0;
-  if (outcome.kind === "approval_pending" || outcome.absorbedByApproval) return 2;
+  if (outcome.kind === "approval_pending") return 2;
   return uiState(outcome.movement.status).progressStep;
 }
 

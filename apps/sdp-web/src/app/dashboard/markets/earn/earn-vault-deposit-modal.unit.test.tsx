@@ -624,7 +624,7 @@ describe("EarnVaultDepositModal", () => {
     mocks.createEarnVaultDeposit.mockResolvedValue({
       ok: true,
       status: 200,
-      data: { kind: "submitted", deposit: { ...vaultDeposit("submitted"), replayed: true } },
+      data: { kind: "submitted", deposit: { ...vaultDeposit("confirmed"), replayed: true } },
     });
     const onDeposited = vi.fn();
     render(
@@ -640,6 +640,10 @@ describe("EarnVaultDepositModal", () => {
     // The truthful headline, not the success screen.
     expect(await screen.findByText("Deposit already completed by your approval")).toBeTruthy();
     expect(screen.queryByText("Deposit submitted")).toBeNull();
+    // The absorbed record is the approval's own execution and it is already
+    // confirmed, so the stepper maps its status — Complete, not Processing.
+    const progress = screen.getByRole("navigation", { name: "Progress" });
+    expect(progress.querySelector('[aria-current="step"]')?.textContent).toBe("Complete");
     // The SAME held key was knowingly reused — no fresh key, no second approval.
     expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
       mocks.createEarnVaultDeposit.mock.calls[0][1]
