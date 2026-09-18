@@ -5,10 +5,12 @@ Northstar is a self-contained Next.js App Router example of a bank that offers
 The React UI and its server routes deploy together, while SDP builds the
 transactions and keeps the movement ledger.
 
-This is a real sandbox integration, not a fixture UI. Checking is the managed
-wallet's token balance read from Solana devnet. Savings is the customer's
-position in the featured strategy, valued by SDP. Moving money between the two
-builds, signs, and submits real devnet transactions.
+This is a real integration, not a fixture UI. It defaults to a sandbox project
+on devnet and can run a controlled production-project canary on mainnet.
+Checking is the managed wallet's token balance read from the configured Solana
+cluster. Savings is the customer's position in the featured strategy, valued
+by SDP. Moving money between the two builds, signs, and submits real
+transactions on that cluster.
 
 Only **Overview** is implemented. The other sidebar items are static navigation
 affordances for the example.
@@ -24,7 +26,7 @@ affordances for the example.
 | Northstar | SDP |
 | --- | --- |
 | Checking balance | The demo wallet's balance of the strategy's deposit token, read over RPC |
-| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first devnet strategy that is both instant-liquidity and USDC (with none qualifying, every page load fails until fixed) |
+| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first strategy on `SOLANA_CLUSTER` that is DeFi, instant-liquidity, and USDC (with none qualifying, every page load fails until fixed) |
 | Savings balance and earnings | The wallet's open position in that strategy; earnings use SDP's formula (value + finalized payouts - finalized deposits) over that strategy's movements only |
 | Move to savings | Deposit preview when the strategy requires a floor, then build, server-side sign, submit |
 | Move to checking | Token amount converted to shares at the live share price, then withdrawal preview, build, sign, submit |
@@ -147,9 +149,9 @@ development configuration described in
    cp examples/embedded-yield-bank/.env.example examples/embedded-yield-bank/.env.local
    ```
 
-7. Fund `PUBLIC_KEY` with devnet SOL and official devnet USDC using the
-   [Solana faucet](https://faucet.solana.com/) and
-   [Circle faucet](https://faucet.circle.com/). The USDC balance is the
+7. Fund `PUBLIC_KEY` with SOL and official USDC on `SOLANA_CLUSTER`. For the
+   default devnet configuration, use the [Solana faucet](https://faucet.solana.com/)
+   and [Circle faucet](https://faucet.circle.com/). The USDC balance is the
    customer's checking account.
 
 8. Start Northstar from the repository root:
@@ -181,13 +183,33 @@ that Vercel exposes as `VERCEL_PROJECT_PRODUCTION_URL`.
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `SDP_API_BASE_URL` | No | SDP API origin. Defaults to local port `8787`; Vercel needs a reachable origin. |
-| `SDP_API_KEY` | Yes | Sandbox project key with Embedded Yield read and write permissions. |
+| `SDP_API_KEY` | Yes | Project key with Embedded Yield read and write permissions. Use a sandbox key for devnet or production key for mainnet. |
 | `DEMO_ACCESS_USERNAME` | No | HTTP Basic username. Defaults to `northstar`. |
 | `DEMO_ACCESS_PASSWORD` | Yes | HTTP Basic password protecting the page and all API routes. |
 | `DEMO_WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array Solana keypair used only by the server. Its token balance is checking. |
-| `DEMO_FEE_PAYER_PRIVATE_KEY` | No | Different funded devnet keypair that co-signs and pays network fees and account rent. |
-| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Otherwise the first devnet strategy that is both instant-liquidity and USDC; with none qualifying, every page load fails until fixed. |
-| `SOLANA_RPC_URL` | No | Devnet RPC used for direct wallet balance reads. |
+| `DEMO_FEE_PAYER_PRIVATE_KEY` | No | Different funded keypair on `SOLANA_CLUSTER` that co-signs and pays network fees and account rent. This is the partner fee-payer path and does not use Kora. |
+| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Otherwise the first strategy on `SOLANA_CLUSTER` that is DeFi, instant-liquidity, and USDC; with none qualifying, every page load fails until fixed. |
+| `SOLANA_CLUSTER` | No | `devnet` by default, or `mainnet-beta` for a controlled production-project canary. |
+| `SOLANA_RPC_URL` | No | RPC used for direct wallet balance reads and transaction submission. Its genesis hash must match `SOLANA_CLUSTER`. |
+
+## Controlled mainnet canary
+
+Mainnet mode uses real assets and broadcasts real transactions. Use dedicated
+low-balance keys and the smallest provider-supported amount.
+
+1. Run SDP locally with a dedicated local Postgres database and Redis, a
+   mainnet RPC, a production project, and Earn enabled.
+2. Keep `EARN_VAULT_FEE_SPONSORSHIP_ENABLED=false` and Kora URLs unset. Treasury
+   deposits then use the custody wallet as fee payer. Northstar uses
+   `DEMO_FEE_PAYER_PRIVATE_KEY` as the explicit partner fee payer.
+3. Configure Northstar with `SOLANA_CLUSTER=mainnet-beta`, the same mainnet RPC,
+   and an `sk_live_` key from that local production project.
+4. Fund only the dedicated Treasury wallet and Northstar owner/fee-payer
+   addresses. Preview first, deposit a tiny USDC canary, verify the movement and
+   position, then withdraw it and verify final settlement.
+
+The app verifies the RPC genesis hash before reading balances or building a
+transaction. It also refuses to select a strategy from the wrong cluster.
 
 ## Local end-to-end notes
 
@@ -216,6 +238,6 @@ pnpm -C examples/embedded-yield-bank lint
 pnpm -C examples/embedded-yield-bank build
 ```
 
-This example is for devnet evaluation only. Basic auth protects the demo from
-casual public access, but the in-process private-key signer is not production
-custody infrastructure.
+Basic auth protects the demo from casual public access, but the in-process
+private-key signer is demonstration infrastructure, not production custody.
+Mainnet mode is intended only for a tightly controlled readiness canary.

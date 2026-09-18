@@ -147,8 +147,12 @@ and `quoteVaultWithdrawal` (`quoteKaminoDeposit` / `quoteKaminoWithdraw` in
 `sdk.ts`; the arithmetic and issue rules live in the firewall-free
 `quotes.ts`), so both quote guards answer true. Quotes are reads: they build
 nothing and return blocking conditions as `issues` (`DEPOSIT_CAP_EXCEEDED`,
-`ZERO_SHARES_OUT`, `INSUFFICIENT_WITHDRAWAL_LIQUIDITY`, `ZERO_ASSETS_OUT`,
-`BELOW_MINIMUM_WITHDRAWAL`) rather than throwing.
+`DEPOSIT_BELOW_MINIMUM`, `ZERO_SHARES_OUT`,
+`INSUFFICIENT_WITHDRAWAL_LIQUIDITY`, `ZERO_ASSETS_OUT`,
+`BELOW_MINIMUM_WITHDRAWAL`) rather than throwing. The deposit minimum compares
+the amount remaining after crank funds with the vault's live
+`minDepositAmount`; its message reports the minimum request inclusive of those
+crank funds.
 
 - The vault's published lookup table is loaded best-effort (`lookup-table.ts`,
   via kit's `fetchAddressesForLookupTables`). When used, its address travels on
@@ -182,10 +186,11 @@ nothing and return blocking conditions as `issues` (`DEPOSIT_CAP_EXCEEDED`,
   `detectDepositCapClamp` reports `DEPOSIT_CAP_EXCEEDED` only when the SDK's
   estimate matches the clamped prediction and differs from the uncapped one, so
   a replica that drifts can withhold the issue but never invent it.
-- **`minSharesOut` is optional and unset by default.** Computing a real floor needs
-  the live exchange rate. Passing `"0"` would be the appearance of slippage
-  protection without the substance, so the caller computes a floor or passes
-  nothing. The API requires one in PRODUCTION for exactly that reason.
+- **`minSharesOut` stays optional at the package boundary.** Computing a real
+  floor needs the live exchange rate. Passing `"0"` would be the appearance of
+  slippage protection without the substance, so the builder never invents it.
+  SDP's Kamino policy is an explicit 10 bps in every environment; the caller
+  derives the exact floor from the live quote and supplies it.
 - **Withdrawals do not unstake farm-staked shares.** The withdraw builder
   passes no farm state, matching the deposit builder (which never stakes), so
   an SDP-managed position has nothing staked and nothing to unstake. Shares

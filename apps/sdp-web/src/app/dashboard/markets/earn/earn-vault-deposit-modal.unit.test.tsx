@@ -166,11 +166,11 @@ vi.mock("./earn-program-data", () => ({
 
 const strategy: EarnStrategy = {
   id: "strategy_1",
-  provider: "kamino",
+  provider: "upshift",
   providerReference: "vault_1",
   name: "Institutional USDC Vault",
   sourceKind: "defi",
-  underlyingSource: "Kamino Lend",
+  underlyingSource: "Upshift",
   depositMints: [USDC_MINT],
   shareMint: "Share1111111111111111111111111111111111111",
   apyType: "variable",
@@ -232,8 +232,8 @@ beforeEach(() => {
   mocks.createEarnVaultDeposit.mockReset();
   mocks.fetchEarnVaultDepositByRequestId.mockReset();
   mocks.fetchEarnVaultDepositPreview.mockReset();
-  // Kamino declares no floor policy, so most tests never quote; the veda
-  // suites override this with a real quote.
+  // Upshift declares no floor policy, so most tests never quote; the
+  // floor-policy suite overrides this with truthful Kamino metadata.
   mocks.fetchEarnVaultDepositPreview.mockResolvedValue({ kind: "unavailable" });
   // Default: nothing recorded under the key yet, so a held key stays held.
   mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue({ kind: "absent" });
@@ -1120,20 +1120,21 @@ describe("slippage tolerance helpers", () => {
 describe("slippage-floored providers", () => {
   // The modal reads the floor policy off the catalogue row, which the API
   // answers per environment; the provider name alone decides nothing.
-  const vedaStrategy: EarnStrategy = {
+  const flooredStrategy: EarnStrategy = {
     ...strategy,
-    provider: "veda",
+    provider: "kamino",
+    underlyingSource: "Kamino Lend",
     depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
   };
 
   function primeQuote(sharesOut: string, blockingIssues: { code: string; message: string }[] = []) {
     mocks.fetchEarnVaultDepositPreview.mockResolvedValue({
       kind: "quoted",
-      preview: { strategyId: vedaStrategy.id, sharesOut, shareDecimals: 6, blockingIssues },
+      preview: { strategyId: flooredStrategy.id, sharesOut, shareDecimals: 6, blockingIssues },
     });
   }
 
-  async function enterVedaDepositAmount(amount = "1.000000") {
+  async function enterFlooredDepositAmount(amount = "1.000000") {
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
@@ -1167,7 +1168,7 @@ describe("slippage-floored providers", () => {
         onClose={vi.fn()}
       />
     );
-    await enterVedaDepositAmount("1.000000");
+    await enterFlooredDepositAmount("1.000000");
     await screen.findByText("Deposit submitted");
     expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
       strategyId: strategy.id,
@@ -1185,7 +1186,7 @@ describe("slippage-floored providers", () => {
     render(
       <EarnVaultDepositModal
         projectId={PROJECT_ID}
-        strategy={{ ...vedaStrategy, feeSponsored: true }}
+        strategy={{ ...flooredStrategy, feeSponsored: true }}
         onClose={vi.fn()}
       />
     );
@@ -1205,7 +1206,7 @@ describe("slippage-floored providers", () => {
   it("keeps the wallet-pays note while the strategy is not sponsored", async () => {
     primeQuote("0.99999");
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
@@ -1228,12 +1229,12 @@ describe("slippage-floored providers", () => {
       data: { kind: "submitted", deposit: vaultDeposit("submitted") },
     });
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
-    await enterVedaDepositAmount("1.000000");
+    await enterFlooredDepositAmount("1.000000");
     await screen.findByText("Deposit submitted");
     expect(mocks.fetchEarnVaultDepositPreview).toHaveBeenCalledWith(
-      { strategyId: vedaStrategy.id, amount: "1" },
+      { strategyId: flooredStrategy.id, amount: "1" },
       expect.anything()
     );
     expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
@@ -1266,7 +1267,7 @@ describe("slippage-floored providers", () => {
   it("disables the deposit while the quote is unavailable, never guessing a floor", async () => {
     mocks.fetchEarnVaultDepositPreview.mockResolvedValue({ kind: "unavailable" });
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
@@ -1286,7 +1287,7 @@ describe("slippage-floored providers", () => {
   it("surfaces a vault-reported blocking issue in its own words and refuses to arm", async () => {
     primeQuote("1", [{ code: "TELLER_PAUSED", message: "The teller is paused." }]);
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
@@ -1307,7 +1308,7 @@ describe("slippage-floored providers", () => {
       return {
         kind: "quoted" as const,
         preview: {
-          strategyId: vedaStrategy.id,
+          strategyId: flooredStrategy.id,
           sharesOut,
           shareDecimals: 6,
           blockingIssues: [] as { code: string; message: string }[],
@@ -1337,7 +1338,7 @@ describe("slippage-floored providers", () => {
     }
 
     /** Select the wallet, enter 1 USDC, and wait out the quote debounce. */
-    async function armVedaDeposit() {
+    async function armFlooredDeposit() {
       screen.getByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
       fireEvent.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
       fireEvent.change(screen.getByLabelText("Amount"), {
@@ -1358,9 +1359,13 @@ describe("slippage-floored providers", () => {
           })
       );
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       expect(screen.getByText("0.999")).toBeTruthy();
 
       // The TTL elapses: the refresh fires on its own and is IN FLIGHT here…
@@ -1395,9 +1400,13 @@ describe("slippage-floored providers", () => {
         data: { kind: "submitted", deposit: vaultDeposit("submitted") },
       });
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       // The clock passes the TTL without the auto-refresh timer firing — the
       // throttled-background-tab case the submit-time check exists for.
       vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
@@ -1427,9 +1436,13 @@ describe("slippage-floored providers", () => {
         .mockResolvedValueOnce(quoted("1"))
         .mockResolvedValue(quoted("0.99"));
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
 
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
@@ -1459,18 +1472,26 @@ describe("slippage-floored providers", () => {
       });
 
       const held = render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
       await flushSubmission();
       screen.getByText("Approval required");
       held.unmount();
 
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
       await flushSubmission();
@@ -1507,17 +1528,25 @@ describe("slippage-floored providers", () => {
         });
 
       const first = render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
       await flushSubmission();
       first.unmount();
 
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
       await flushSubmission();
@@ -1548,9 +1577,13 @@ describe("slippage-floored providers", () => {
       });
 
       const first = render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
       await flushSubmission();
       first.unmount();
@@ -1561,9 +1594,13 @@ describe("slippage-floored providers", () => {
       sessionStorage.removeItem("sdp:earn:vault-deposit:floor:v1");
 
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
       await flushSubmission();
@@ -1593,9 +1630,9 @@ describe("slippage-floored providers", () => {
       },
     });
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
-    await enterVedaDepositAmount("1.000000");
+    await enterFlooredDepositAmount("1.000000");
 
     // This surface's own words, not the relayed simulation log…
     expect(await screen.findByText(/Increase the tolerance below/)).toBeTruthy();
@@ -1613,10 +1650,9 @@ describe("slippage-floored providers", () => {
 });
 
 describe("fee sponsorship copy", () => {
-  it("names SDP as the fee payer for a sponsored Kamino deposit that never quotes", async () => {
-    // The regression: Kamino declares no deposit floor, so no quote is ever
-    // fetched, and a flag riding on the quote left the note on wallet-pays for
-    // every sponsored Kamino deposit.
+  it("names SDP as fee payer for a sponsored provider without a quote policy", async () => {
+    // Sponsorship copy must come from strategy metadata even when the provider
+    // has no quote path to carry it.
     render(
       <EarnVaultDepositModal
         projectId={PROJECT_ID}
@@ -1633,7 +1669,7 @@ describe("fee sponsorship copy", () => {
     expect(mocks.fetchEarnVaultDepositPreview).not.toHaveBeenCalled();
   });
 
-  it("keeps the wallet-pays note for an unsponsored Kamino deposit", async () => {
+  it("keeps the wallet-pays note for an unsponsored provider", async () => {
     render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     const user = userEvent.setup();

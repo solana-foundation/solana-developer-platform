@@ -24,6 +24,7 @@ import { createVaultDeadline } from "./vault-deadline";
 const USDC = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const PYUSD = WELL_KNOWN_TOKENS.PYUSD.mints["mainnet-beta"].address;
 const OWNER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+const PAYER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const JUPITER_PROGRAM = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
 const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
@@ -151,11 +152,16 @@ function swapInstruction(
   };
 }
 
-function ataCreateInstruction(mint: string, tokenAccount: string, tokenProgram: string) {
+function ataCreateInstruction(
+  mint: string,
+  tokenAccount: string,
+  tokenProgram: string,
+  payer = OWNER
+) {
   return {
     programId: ATA_PROGRAM,
     accounts: [
-      { pubkey: OWNER, isSigner: true, isWritable: true },
+      { pubkey: payer, isSigner: true, isWritable: true },
       { pubkey: tokenAccount, isSigner: false, isWritable: true },
       { pubkey: OWNER, isSigner: false, isWritable: false },
       { pubkey: mint, isSigner: false, isWritable: false },
@@ -248,6 +254,7 @@ describe("fetchJupiterSwapLeg", () => {
     // "25" at USDC's 6 decimals — scaled through the pinned catalogue, never a float.
     expect(parsed.searchParams.get("amount")).toBe("25000000");
     expect(parsed.searchParams.get("taker")).toBe(OWNER);
+    expect(parsed.searchParams.get("payer")).toBeNull();
     expect(parsed.searchParams.get("slippageBps")).toBe("50");
     expect(parsed.searchParams.get("wrapAndUnwrapSol")).toBe("false");
     expect(parsed.searchParams.get("maxAccounts")).toBe("40");
@@ -262,6 +269,35 @@ describe("fetchJupiterSwapLeg", () => {
 
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(new URL(url).searchParams.get("maxAccounts")).toBe("24");
+  });
+
+  it("forwards and admits an explicit fee and ATA-rent payer", async () => {
+    fetchMock.mockResolvedValue(
+      okResponse(
+        buildResponse({
+          setupInstructions: [
+            ataCreateInstruction(
+              PYUSD,
+              DESTINATION_TOKEN_ACCOUNT,
+              SPL_TOKEN_PROGRAMS["token-2022"],
+              PAYER
+            ),
+          ],
+        })
+      )
+    );
+
+    const leg = await fetchJupiterSwapLeg(
+      swapEnv(),
+      createVaultDeadline(),
+      request({ payer: PAYER })
+    );
+
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(new URL(url).searchParams.get("payer")).toBe(PAYER);
+    expect(leg.instructions[0]?.accounts[0]).toEqual({ address: PAYER, role: 3 });
+    expect(leg.instructions[0]?.accounts[2]).toEqual({ address: OWNER, role: 0 });
+    expect(leg.instructions[1]?.accounts[1]).toEqual({ address: OWNER, role: 2 });
   });
 
   it("normalizes the answer: ordered instructions, numeric roles, tables, scaled amounts", async () => {
@@ -331,7 +367,7 @@ describe("fetchJupiterSwapLeg", () => {
     ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
   });
 
-  it("refuses an instruction that requires a signer other than the owner", async () => {
+  it("refuses an instruction that requires a signer other than the owner or requested payer", async () => {
     const FOREIGN_SIGNER = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
     fetchMock.mockResolvedValue(
       okResponse(
@@ -347,6 +383,23 @@ describe("fetchJupiterSwapLeg", () => {
 
     await expect(
       fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
+    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+  });
+
+  it("never admits the requested payer as swap authority", async () => {
+    const accounts = sharedRouteAccounts();
+    accounts.push({ pubkey: PAYER, isSigner: true, isWritable: false });
+    fetchMock.mockResolvedValue(
+      okResponse(
+        buildResponse({
+          setupInstructions: [],
+          swapInstruction: swapInstruction({ accounts }),
+        })
+      )
+    );
+
+    await expect(
+      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request({ payer: PAYER }))
     ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
   });
 

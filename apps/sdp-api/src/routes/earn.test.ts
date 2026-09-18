@@ -502,9 +502,8 @@ describe("Earn routes — environment scoping", () => {
   });
 
   it("publishes depositSlippage for the caller's environment, the same answer the build gates on", async () => {
-    // Kamino declares no floor of its own, yet every production deposit
-    // carries one (`assertDepositFloorPresent`). The row must say so, or a
-    // caller who follows the catalogue builds without a floor and meets a 400.
+    // Kamino declares a floor in every environment. The row must say so, or a
+    // caller who follows the catalogue builds without one and meets a 400.
     await seedAuth();
     await seedSessionAuth();
     const sandbox = await seedStrategy();
@@ -518,7 +517,10 @@ describe("Earn routes — environment scoping", () => {
     const sandboxBody = (await sandboxRow.json()) as {
       data: { strategy: { provider: string; depositSlippage: unknown } };
     };
-    expect(sandboxBody.data.strategy).toMatchObject({ provider: "kamino", depositSlippage: null });
+    expect(sandboxBody.data.strategy).toMatchObject({
+      provider: "kamino",
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+    });
 
     const productionRow = await getEarnAsSession(
       `/v1/earn/strategies/${production.id}`,
@@ -997,6 +999,31 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     for (const strategy of hidden) {
       expect(await repository.getStrategyById(strategy.id)).not.toBeNull();
     }
+  });
+
+  it("publishes the Kamino deposit floor required by production builds", async () => {
+    curation.bypassCuratedVaults = true;
+    await seedAuth();
+    const kamino = await seedStrategy({ hostCluster: "mainnet-beta" });
+
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      data: {
+        strategies: Array<{
+          id: string;
+          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+        }>;
+      };
+    };
+    expect(body.data.strategies).toEqual([
+      expect.objectContaining({
+        id: kamino.id,
+        depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+        withdrawalSlippage: null,
+      }),
+    ]);
   });
 
   it("shows the supported Jupiter Lend provider independently of Kamino's allowlist", async () => {

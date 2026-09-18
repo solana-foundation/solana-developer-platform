@@ -151,12 +151,16 @@ export function OverviewDashboard({
         />
       </section>
 
-      <RecentActivity movements={data.movements} symbol={token.symbol} />
+      <RecentActivity
+        movements={data.movements}
+        symbol={token.symbol}
+        cluster={wallet.cluster}
+      />
 
       <footer className="flex flex-wrap items-center gap-x-2 border-t pt-5 text-xs text-muted-foreground">
         <span className="flex items-center gap-2">
           <span className="status-dot text-success" />
-          Solana devnet
+          Solana {wallet.cluster === "mainnet-beta" ? "mainnet" : "devnet"}
         </span>
         <Dot />
         Updated {formatTime(connection.checkedAt)}
@@ -228,9 +232,11 @@ function savingsFooter(strategy: DashboardData["savings"]["strategy"]): string {
 function RecentActivity({
   movements,
   symbol,
+  cluster,
 }: {
   movements: YieldMovement[];
   symbol: string;
+  cluster: DashboardData["wallet"]["cluster"];
 }) {
   return (
     <section className="flex flex-col gap-4">
@@ -244,6 +250,7 @@ function RecentActivity({
               key={movement.movementId}
               movement={movement}
               symbol={symbol}
+              cluster={cluster}
             />
           ))}
         </ul>
@@ -349,9 +356,11 @@ function AccountCard({
 function ActivityRow({
   movement,
   symbol,
+  cluster,
 }: {
   movement: YieldMovement;
   symbol: string;
+  cluster: DashboardData["wallet"]["cluster"];
 }) {
   const toSavings = movement.direction === "deposit";
   const Icon = toSavings ? PiggyBankIcon : LandmarkIcon;
@@ -376,7 +385,9 @@ function ActivityRow({
             : formatAmount(movement.tokenAmount, symbol)}
         </span>
         <a
-          href={`https://explorer.solana.com/tx/${movement.signature}?cluster=devnet`}
+          href={`https://explorer.solana.com/tx/${movement.signature}${
+            cluster === "devnet" ? "?cluster=devnet" : ""
+          }`}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"

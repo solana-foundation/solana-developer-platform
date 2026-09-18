@@ -69,7 +69,7 @@ export default function OpengraphImage() {
         </div>
       </div>
       <div style={{ display: "flex", fontSize: 24, color: "#9c978d" }}>
-        Solana devnet demo
+        Solana Embedded Yield demo
       </div>
     </div>,
     size

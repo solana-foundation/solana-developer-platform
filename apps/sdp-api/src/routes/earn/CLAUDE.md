@@ -501,8 +501,8 @@ organization's own custody wallets.
     provider whose builder refuses an implicit floor. `assertDepositFloorPresent`
     (handlers/admission.ts) is the ONE guard both deposit routes call, and the
     catalogue publishes the same answer as `depositSlippage`, so a row never
-    promises what the build refuses (a Kamino production row reads non-null
-    with the 10 bps default). Slippage-capable providers quote the live share
+    promises what the build refuses (every Kamino row reads non-null with the
+    10 bps default). Slippage-capable providers quote the live share
     rate, and their builders encode the caller's exact floor in the provider
     instruction. Jupiter Lend uses
     `depositWithMinAmountOut`; its withdrawal twin uses
@@ -664,10 +664,18 @@ organization's own custody wallets.
   with the swap stated in `context.swap`, its fingerprint gains
   `swapSourceTokenMint`/`swapSlippageBps` ONLY when swapping (legacy
   fingerprints stay byte-identical), and it forces `wallet-pays` — Jupiter's
-  programs are not paymaster-allowlisted. Oversize handling after lookup-table
-  compression (`VaultTransactionTooLargeError`): one re-quote at
-  `RETRY_SWAP_MAX_ACCOUNTS`, then the custody path refuses (400) while the
-  external-wallet build answers the SPLIT contract —
+  programs are not paymaster-allowlisted. Keyed external-wallet builds pass a
+  distinct `feePayer` to Jupiter as its `payer`; validation admits that signer
+  only on the exact idempotent ATA-create setup instruction while the swap
+  itself remains owner-only. Any other signer is a provider failure. Size is
+  checked locally before simulation so an oversized base64 transaction does
+  not collapse into an opaque RPC `-32602`. A keyed external build retries once
+  with a compact 132-bit SHA-256 request memo. If a non-swap plan still only
+  overflows because it has a distinct fee payer, the API returns a clean 400
+  telling the caller to rebuild owner-paid. Swap oversize handling after
+  lookup-table compression (`VaultTransactionTooLargeError`): one re-quote at
+  `RETRY_SWAP_MAX_ACCOUNTS` with the compact request memo, then the custody
+  path refuses (400) while the external-wallet build answers the SPLIT contract:
   `{ requiresSeparateSwap: true, swap: { transaction, … }, followUp }`, an
   unsigned swap-only transaction the owner signs and broadcasts itself
   (persisting no consumable build; only a keyed request writes the
@@ -1051,6 +1059,9 @@ after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
   payer), and the provider's `rentPayer`, so a first deposit's share-ATA rent
   is partner-funded and `share_ata_rent_funder` records the partner (build
   row → movement → position projection), making the exit refund the PARTNER.
+  For a swap-funded deposit, the same address is Jupiter's `payer`, but it is
+  accepted only as the idempotent ATA-create payer; the owner remains the sole
+  swap authority.
   `feePayer === ownerAddress` normalizes to absent (route and service both).
   Compile asserts the signer set ORDERED AND EXACT — `[feePayer, owner]`, or
   `[owner]` without one — which both refuses a plan smuggling an extra signer

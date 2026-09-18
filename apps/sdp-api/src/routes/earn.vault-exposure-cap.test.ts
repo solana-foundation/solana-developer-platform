@@ -260,6 +260,10 @@ async function recordOtherOrgDeposit(
 }
 
 function post(path: string, body: Record<string, unknown>, idempotencyKey?: string) {
+  const requestBody =
+    path === "vault-deposits" || path === "external-wallet/deposit-transactions"
+      ? { minSharesOut: "1", ...body }
+      : body;
   return app.request(
     `/v1/earn/${path}`,
     {
@@ -269,7 +273,7 @@ function post(path: string, body: Record<string, unknown>, idempotencyKey?: stri
         "Content-Type": "application/json",
         ...(idempotencyKey === undefined ? {} : { "Idempotency-Key": idempotencyKey }),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
     },
     env
   );

@@ -14,7 +14,7 @@ import type {
   YieldStrategy,
 } from "../src/types";
 import { ApiRequestError } from "./http";
-import { DEVNET_USDC_MINT } from "./solana";
+import { type SolanaCluster, USDC_MINTS } from "./solana";
 
 /** Every current stablecoin vault quotes in six-decimal tokens. */
 export const SAVINGS_AMOUNT_DECIMALS = 6;
@@ -22,13 +22,15 @@ const MAX_SHARE_DECIMALS = 9;
 
 /**
  * Northstar offers one savings product, backed by one Embedded Yield strategy.
- * `DEMO_STRATEGY_ID` pins it; otherwise the first active, fundable devnet
- * strategy that is BOTH instant-liquidity and USDC, in catalogue order. Nothing
- * else qualifies: a delayed exit or another token would silently change the
- * checking-and-savings model, so that is a configuration error instead.
+ * `DEMO_STRATEGY_ID` pins it; otherwise the first active, fundable strategy on
+ * the configured cluster that is DeFi, instant-liquidity, and USDC, in
+ * catalogue order. Nothing else qualifies: an RWA strategy, delayed exit,
+ * another token, or another cluster would silently change the
+ * checking-and-savings model.
  */
 export function pickSavingsStrategy(
   strategies: readonly YieldStrategy[],
+  cluster: SolanaCluster,
   preferredId?: string
 ): YieldStrategy {
   if (preferredId) {
@@ -38,9 +40,9 @@ export function pickSavingsStrategy(
         `DEMO_STRATEGY_ID ${preferredId} is not in the SDP strategy catalogue`
       );
     }
-    if (strategy.hostCluster !== "devnet") {
+    if (strategy.hostCluster !== cluster) {
       throw new Error(
-        `DEMO_STRATEGY_ID ${preferredId} is not a devnet strategy`
+        `DEMO_STRATEGY_ID ${preferredId} is not a ${cluster} strategy`
       );
     }
     return strategy;
@@ -50,13 +52,14 @@ export function pickSavingsStrategy(
     (item) =>
       item.fundable &&
       item.status === "active" &&
-      item.hostCluster === "devnet" &&
+      item.hostCluster === cluster &&
+      item.sourceKind === "defi" &&
       item.liquidityTerm === "instant" &&
-      item.depositMints[0] === DEVNET_USDC_MINT
+      item.depositMints[0] === USDC_MINTS[cluster]
   );
   if (!strategy) {
     throw new Error(
-      "The SDP catalogue has no fundable devnet strategy with instant liquidity and a USDC deposit mint. Set DEMO_STRATEGY_ID to choose one explicitly."
+      `The SDP catalogue has no fundable ${cluster} DeFi strategy with instant liquidity and a USDC deposit mint. Set DEMO_STRATEGY_ID to choose one explicitly.`
     );
   }
   return strategy;

@@ -55,6 +55,11 @@ export interface KaminoDepositEstimate {
   shareDecimals: number;
   /** Token base units the SDK prices once crank funds are deducted. May be <= 0. */
   tokensForSharesBaseUnits: bigint;
+  tokenDecimals: number;
+  /** Per-deposit crank funding removed before the user's vault deposit is priced. */
+  crankFundsBaseUnits: bigint;
+  /** Vault-enforced minimum after crank funding is removed. */
+  minimumDepositBaseUnits: bigint;
   /** Vault deposit cap in token base units; 0 means uncapped. */
   depositCapBaseUnits: bigint;
   /**
@@ -103,6 +108,22 @@ export function deriveKaminoDepositQuote(estimate: KaminoDepositEstimate): Kamin
       message:
         "This deposit exceeds the vault's remaining deposit cap. Kamino's program clamps a " +
         "deposit to the remaining capacity, so less than the requested amount would be accepted.",
+    });
+  }
+  if (
+    estimate.minimumDepositBaseUnits > 0n &&
+    estimate.tokensForSharesBaseUnits < estimate.minimumDepositBaseUnits
+  ) {
+    const minimum = formatDecimalAmount(estimate.minimumDepositBaseUnits, estimate.tokenDecimals);
+    const requestedMinimum = formatDecimalAmount(
+      estimate.minimumDepositBaseUnits + estimate.crankFundsBaseUnits,
+      estimate.tokenDecimals
+    );
+    issues.push({
+      code: "DEPOSIT_BELOW_MINIMUM",
+      message:
+        `Kamino requires at least ${minimum} vault tokens after its crank-fund charge. ` +
+        `Increase the requested deposit to at least ${requestedMinimum}.`,
     });
   }
   if (estimate.sharesOutBaseUnits <= 0n) {

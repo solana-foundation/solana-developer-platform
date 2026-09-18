@@ -6,6 +6,7 @@ const config: DemoConfig = {
   SDP_API_BASE_URL: "http://127.0.0.1:8787",
   SDP_API_KEY: "test-api-key",
   DEMO_WALLET_PRIVATE_KEY: "test-private-key",
+  SOLANA_CLUSTER: "devnet",
   SOLANA_RPC_URL: "https://api.devnet.solana.com",
 };
 

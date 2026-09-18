@@ -74,7 +74,7 @@ export type FeePayer = "customer" | "northstar";
 export interface DashboardData {
   wallet: {
     address: string;
-    cluster: "devnet";
+    cluster: "devnet" | "mainnet-beta";
     feesPaidBy: FeePayer;
   };
   token: {

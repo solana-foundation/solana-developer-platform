@@ -78,8 +78,9 @@ export const RETRY_SWAP_MAX_ACCOUNTS = 24;
  *   Jupiter aggregator program is the reviewed execution boundary. We bind
  *   its stable outer economic contract instead of reimplementing every DEX
  *   adapter's private account schema;
- * - the ONLY account that may carry the signer flag is the taker, so the
- *   composed transaction can never grow a second authority.
+ * - the only accounts that may carry the signer flag are the taker and the
+ *   explicitly requested payer. The payer is admitted only as the exact ATA
+ *   rent funder returned by `/build`; the swap authority remains the taker.
  *
  * A response outside the contract is refused as an upstream fault (503) and
  * nothing is composed or persisted. Pinned ids, deliberately not
@@ -165,8 +166,10 @@ export interface JupiterSwapRequest {
   outputMint: string;
   /** Swap input in source-token units, decimal string. */
   sourceAmount: string;
-  /** The wallet that signs, pays, and receives: custody or external. */
+  /** The wallet that authorizes the swap and receives its output. */
   owner: string;
+  /** Optional transaction-fee and ATA-rent payer for caller-paid flows. */
+  payer?: string;
   /** Swap slippage tolerance, basis points. */
   slippageBps: number;
   /** Route account ceiling; see COMPOSED_SWAP_MAX_ACCOUNTS. */
@@ -270,7 +273,7 @@ export function requireWellKnownMintDecimals(mint: string, role: string): number
  */
 function toEarnVaultInstruction(
   instruction: JupiterApiInstruction,
-  taker: string
+  allowedSigners: ReadonlySet<string>
 ): EarnVaultInstruction {
   if (!isAddress(instruction.programId)) {
     throw providerUnavailable("Jupiter returned an instruction with an invalid program address");
@@ -289,12 +292,12 @@ function toEarnVaultInstruction(
           "Jupiter returned an instruction with an invalid account address"
         );
       }
-      if (account.isSigner && account.pubkey !== taker) {
-        // The taker is the only authority this transaction may carry; a
-        // foreign signer slot would either brick the transaction or, worse,
-        // widen what the owner's wholesale signature authorizes.
+      if (account.isSigner && !allowedSigners.has(account.pubkey)) {
+        // The taker and an explicitly requested payer are the only authorities
+        // this transaction may carry. A foreign signer slot would either brick
+        // the transaction or widen what the owner's signature authorizes.
         throw providerUnavailable(
-          "Jupiter returned an instruction that requires a signer other than the owner",
+          "Jupiter returned an instruction that requires an unexpected signer",
           { signer: account.pubkey }
         );
       }
@@ -331,7 +334,8 @@ function sameAccount(
 
 function isExpectedAtaCreate(
   instruction: JupiterApiInstruction,
-  taker: string,
+  owner: string,
+  payer: string,
   mint: string,
   tokenAccount: string,
   tokenProgram: string
@@ -343,9 +347,9 @@ function isExpectedAtaCreate(
     data.length === 1 &&
     data[0] === 1 &&
     accounts.length === 6 &&
-    sameAccount(accounts[0], { pubkey: taker, isSigner: true, isWritable: true }) &&
+    sameAccount(accounts[0], { pubkey: payer, isSigner: true, isWritable: true }) &&
     sameAccount(accounts[1], { pubkey: tokenAccount, isSigner: false, isWritable: true }) &&
-    sameAccount(accounts[2], { pubkey: taker, isSigner: false, isWritable: false }) &&
+    sameAccount(accounts[2], { pubkey: owner, isSigner: false, isWritable: false }) &&
     sameAccount(accounts[3], { pubkey: mint, isSigner: false, isWritable: false }) &&
     sameAccount(accounts[4], {
       pubkey: SYSTEM_PROGRAM_ID,
@@ -580,11 +584,13 @@ function swapLegInstructions(
     throw providerUnavailable("Jupiter answered without a swap instruction");
   }
   const setupInstructions = body.setupInstructions ?? [];
+  const payer = request.payer ?? request.owner;
   const seenSetups = new Set<string>();
   for (const instruction of setupInstructions) {
     const source = isExpectedAtaCreate(
       instruction,
       request.owner,
+      payer,
       request.inputMint,
       expected.sourceTokenAccount,
       expected.sourceTokenProgram
@@ -592,6 +598,7 @@ function swapLegInstructions(
     const destination = isExpectedAtaCreate(
       instruction,
       request.owner,
+      payer,
       request.outputMint,
       expected.destinationTokenAccount,
       expected.destinationTokenProgram
@@ -614,8 +621,14 @@ function swapLegInstructions(
     );
   }
   validateSwapInstruction(body.swapInstruction, request, expected, inputAtoms, quotedOutAtoms);
-  const ordered: JupiterApiInstruction[] = [...setupInstructions, body.swapInstruction];
-  return ordered.map((instruction) => toEarnVaultInstruction(instruction, request.owner));
+  const setupSigners = new Set([request.owner, payer]);
+  const ownerOnly = new Set([request.owner]);
+  return [
+    ...setupInstructions.map((instruction) => toEarnVaultInstruction(instruction, setupSigners)),
+    // `payer` changes who funds ATA creation and the transaction fee. It never
+    // becomes swap authority, including in Jupiter's opaque route-account tail.
+    toEarnVaultInstruction(body.swapInstruction, ownerOnly),
+  ];
 }
 
 /**
@@ -683,6 +696,7 @@ export async function fetchJupiterSwapLeg(
     // gratuitous wSOL setup instructions in a transaction that is size-bound.
     wrapAndUnwrapSol: "false",
   });
+  if (request.payer !== undefined) query.set("payer", request.payer);
 
   const response = await deadline.run("Building the Jupiter swap leg", () =>
     fetch(`${url}/build?${query.toString()}`, {

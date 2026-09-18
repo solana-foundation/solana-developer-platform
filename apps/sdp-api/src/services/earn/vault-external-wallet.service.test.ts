@@ -77,6 +77,7 @@ const {
   submitExternalWalletDeposit,
   submitExternalWalletWithdrawal,
 } = await import("./vault-external-wallet.service");
+const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
 
 /**
  * The external-wallet (caller-signed) flows, end to end minus the chain
@@ -548,6 +549,37 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     expect(datas[2]).toMatch(/^sdp:earn:external-deposit:/);
   });
 
+  it("makes the caller-provided fee payer Jupiter's ATA-rent payer too", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({
+        accepted: { amount: "24.8" },
+        instructions: [
+          {
+            ...providerInstruction(),
+            accounts: [{ address: ownerAddress, role: AccountRole.READONLY_SIGNER }],
+          },
+        ],
+      })
+    );
+
+    const result = await buildExternalWalletDepositTransaction(env, {
+      ...swapDepositInput(),
+      feePayer: VAULT,
+    });
+
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({ owner: ownerAddress, payer: VAULT })
+    );
+    if (result.kind !== "built") throw new Error(`expected built, got ${result.kind}`);
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(result.built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([VAULT, ownerAddress]);
+  });
+
   it("splits into a standalone swap when the composed transaction cannot fit, persisting nothing", async () => {
     fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
     // A provider plan too bulky to share a packet with anything: the composed
@@ -570,6 +602,14 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     // One re-route for compactness before giving up on atomicity.
     expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
     expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
+    const usedCompactMemo = simulateVaultPlan.mock.calls.some(([, input]) =>
+      input.plan.instructions.some((instruction: { data: string }) =>
+        /^sdp:e:ed:[A-Za-z0-9_-]{22}$/.test(
+          Buffer.from(instruction.data, "base64").toString("utf8")
+        )
+      )
+    );
+    expect(usedCompactMemo).toBe(true);
 
     if (result.kind !== "swap_required")
       throw new Error(`expected swap_required, got ${result.kind}`);
@@ -603,6 +643,51 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       result.swapTransaction.lastValidBlockHeight
     );
     expect(readOwnerMintBalance).toHaveBeenCalledWith(env, "sandbox", ownerAddress, TOKEN_MINT);
+  });
+
+  it("splits when the composed probe is oversized before RPC simulation", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(
+      swapLeg({
+        instructions: [
+          {
+            programAddress: MEMO_PROGRAM_ADDRESS,
+            accounts: [{ address: ownerAddress, role: AccountRole.READONLY_SIGNER }],
+            data: Buffer.from("swap-leg", "utf8").toString("base64"),
+          },
+        ],
+      })
+    );
+    buildVaultDeposit.mockResolvedValue(depositPlan({ accepted: { amount: "24.8" } }));
+    simulateVaultPlan.mockImplementation(async (_env, input) => {
+      const hasProviderDeposit = input.plan.instructions.some(
+        (instruction: { data: string }) =>
+          Buffer.from(instruction.data, "base64").toString("utf8") === "provider-instruction"
+      );
+      if (hasProviderDeposit) {
+        throw new VaultTransactionTooLargeError(2_056, "caller-provided");
+      }
+      return {
+        ok: true,
+        prepared: {
+          plan: input.plan,
+          lookupTables: {},
+          blockhash: BLOCKHASH,
+          lastValidBlockHeight: 361n,
+        },
+        unitsConsumed: 200_000n,
+      };
+    });
+
+    const result = await buildExternalWalletDepositTransaction(env, {
+      ...swapDepositInput(),
+      feePayer: VAULT,
+    });
+
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
+    if (result.kind !== "swap_required")
+      throw new Error(`expected swap_required, got ${result.kind}`);
+    const decoded = getTransactionDecoder().decode(result.swapTransaction.bytes);
+    expect(Object.keys(decoded.signatures)).toEqual([VAULT, ownerAddress]);
   });
 
   it("refuses the split when the baseline balance cannot be read, recording nothing", async () => {
@@ -659,7 +744,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     expect(row?.advisories).toBe(0);
   });
 
-  it("keeps an unswapped oversized provider plan a loud failure, not a split", async () => {
+  it("returns an actionable refusal when a direct plan cannot fit even with a compact memo", async () => {
     buildVaultDeposit.mockResolvedValue(
       depositPlan({
         instructions: [
@@ -672,9 +757,12 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       })
     );
 
-    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toThrowError(
-      /Solana allows at most/
-    );
+    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message:
+        "This vault deposit cannot fit in one Solana transaction, even with a compact request binding.",
+    });
+    expect(buildVaultDeposit).toHaveBeenCalledTimes(2);
     expect(fetchJupiterSwapLeg).not.toHaveBeenCalled();
   });
 });
@@ -1042,6 +1130,36 @@ describe("partner fee payer (caller-provided)", () => {
       expect.anything(),
       expect.objectContaining({ rentPayer: partnerAddress })
     );
+  });
+
+  it("retries an oversized partner-paid plan with a compact request binding", async () => {
+    simulateVaultPlan.mockImplementation(async (_env, input) => {
+      const memo = Buffer.from(input.plan.instructions.at(-1)?.data ?? "", "base64").toString(
+        "utf8"
+      );
+      if (memo.startsWith("sdp:earn:external-deposit:")) {
+        throw new VaultTransactionTooLargeError(1_290, "caller-provided");
+      }
+      expect(memo).toMatch(/^sdp:e:ed:[A-Za-z0-9_-]{22}$/);
+      return {
+        ok: true,
+        prepared: {
+          plan: input.plan,
+          lookupTables: {},
+          blockhash: BLOCKHASH,
+          lastValidBlockHeight: 361n,
+        },
+      };
+    });
+
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+
+    expect(Object.keys(decoded.signatures)).toEqual([partnerAddress, ownerAddress]);
+    expect(buildVaultDeposit).toHaveBeenCalledTimes(2);
+    expect(simulateVaultPlan).toHaveBeenCalledTimes(2);
   });
 
   it("records no rent funder when the plan creates no account", async () => {
