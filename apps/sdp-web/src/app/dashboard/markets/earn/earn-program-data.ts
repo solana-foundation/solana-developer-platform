@@ -30,6 +30,8 @@ import {
   type EarnVaultWithdrawalRequest,
   type EarnVaultWithdrawalRequestRecord,
   type EarnVaultWithdrawalRequestStatus,
+  earnProviderDepositSettlement,
+  earnProviderWithdrawalSettlement,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
@@ -933,11 +935,17 @@ function useEarnVaultMovementOutcome<Movement extends WatchableVaultMovement>(in
  * the transaction reached the network, not that it failed.
  */
 export function isEarnVaultDepositInFlight(deposit: EarnVaultDepositRecord): boolean {
+  if (
+    deposit.status === "confirmed" &&
+    earnProviderDepositSettlement(deposit.provider) === "provider_order"
+  ) {
+    return true;
+  }
   return !SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
 }
 
 function isEarnVaultDepositSettled(deposit: EarnVaultDepositRecord): boolean {
-  return SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
+  return !isEarnVaultDepositInFlight(deposit);
 }
 
 /**
@@ -1155,11 +1163,17 @@ const SETTLED_VAULT_WITHDRAWAL_STATUSES: ReadonlySet<EarnVaultDirectMovementStat
 
 /** Shared by the recovery filter and the poll's stop condition — one rule. */
 export function isEarnVaultWithdrawalInFlight(withdrawal: EarnVaultWithdrawal): boolean {
+  if (
+    withdrawal.status === "finalized" &&
+    earnProviderWithdrawalSettlement(withdrawal.provider) === "provider_order"
+  ) {
+    return true;
+  }
   return !SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
 }
 
 function isEarnVaultWithdrawalSettled(withdrawal: EarnVaultWithdrawal): boolean {
-  return SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
+  return !isEarnVaultWithdrawalInFlight(withdrawal);
 }
 
 /**
@@ -1201,6 +1215,7 @@ const queuedWithdrawalTermsSchema = z.object({
 const earnVaultWithdrawalOptionsSchema: z.ZodType<EarnVaultWithdrawalOptions> = z.object({
   positionId: z.string(),
   instant: z.boolean(),
+  providerOrder: z.boolean(),
   queued: z.boolean(),
   withdrawAuthority: z.string().nullable(),
   queueState: z.string().nullable(),
@@ -1267,7 +1282,7 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
 
 type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
 
-/** Read both routes independently. No client-side provider list chooses one. */
+/** Read settlement routes independently. No client-side provider list chooses one. */
 export async function fetchEarnVaultWithdrawalOptions(
   positionId: string,
   signal?: AbortSignal

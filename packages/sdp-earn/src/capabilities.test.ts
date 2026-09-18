@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   supportsPortfolioWallets,
+  supportsVaultProviderOrderWithdraw,
   supportsVaultQueuedWithdraw,
   supportsWithdrawalApprovals,
 } from "./capabilities";
@@ -79,5 +80,37 @@ describe("supportsVaultQueuedWithdraw", () => {
       decodeQueuedWithdrawalLifecycleEvents: async () => [],
     });
     assert.equal(supportsVaultQueuedWithdraw(complete), true);
+  });
+});
+
+describe("supportsVaultProviderOrderWithdraw", () => {
+  const withdrawMethods = {
+    buildVaultDeposit: async () => ({}),
+    readVaultPositions: async () => [],
+    sponsoredPrograms: () => [],
+    buildVaultWithdrawal: async () => ({}),
+  };
+
+  it("keeps an ordinary withdrawal builder atomic by default", () => {
+    const atomic = Object.assign(Object.create(EARN_PROVIDER_CLIENTS.veda), withdrawMethods);
+    assert.equal(supportsVaultProviderOrderWithdraw(atomic), false);
+  });
+
+  it("recognizes the explicit provider-order settlement declaration", () => {
+    const providerOrder = Object.assign(
+      Object.create(EARN_PROVIDER_CLIENTS.veda),
+      withdrawMethods,
+      {
+        vaultWithdrawalSettlement: "provider_order" as const,
+      }
+    );
+    assert.equal(supportsVaultProviderOrderWithdraw(providerOrder), true);
+  });
+
+  it("does not advertise settlement without a withdrawal builder", () => {
+    const declarationOnly = Object.assign(Object.create(EARN_PROVIDER_CLIENTS.veda), {
+      vaultWithdrawalSettlement: "provider_order" as const,
+    });
+    assert.equal(supportsVaultProviderOrderWithdraw(declarationOnly), false);
   });
 });

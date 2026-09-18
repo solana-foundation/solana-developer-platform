@@ -1,5 +1,5 @@
 import { wellKnownMint } from "@sdp/types";
-import { wisdomTreeFundsForCluster } from "@sdp/types/wisdomtree-programs";
+import { wisdomTreeFundByMint, wisdomTreeFundsForCluster } from "@sdp/types/wisdomtree-programs";
 import type {
   EarnDeclaredStrategySupport,
   EarnDepositEligibility,
@@ -9,7 +9,11 @@ import type {
   ProviderStrategySnapshot,
 } from "../../types";
 import { StubEarnClient } from "../stub";
-import { checkWisdomTreeWalletEligibility, listWisdomTreeProducts } from "./connect";
+import {
+  checkWisdomTreeDepositEligibility,
+  listWisdomTreeProducts,
+  WISDOMTREE_DEPOSIT_INELIGIBLE_REASON,
+} from "./connect";
 
 /**
  * WisdomTree Connect vault-infra client — catalogue plus the deposit-eligibility
@@ -117,14 +121,28 @@ export class WisdomTreeEarnClient extends StubEarnClient implements EarnDepositE
   }
 
   /**
-   * WisdomTree's KYC gate, asked API-side before money moves — see
-   * `EarnDepositEligibilityProvider` for why. The `providerReference` is not
-   * consulted: registration is per-wallet, not per-fund, in Connect's model.
+   * WisdomTree's admission gate, asked API-side before money moves — see
+   * `EarnDepositEligibilityProvider` for why. The catalogue reference is first
+   * resolved through SDP's curated registry, then Connect must report both an
+   * approved wallet and a tradable matching exchange code in the authenticated
+   * direct/omnibus organization's context. Every valid negative result uses
+   * the same reason so the optional-auth build route cannot enumerate KYC or
+   * product-entitlement state.
    */
   async checkDepositEligibility(
     ctx: EarnRuntimeContext,
     input: EarnDepositEligibilityInput
   ): Promise<EarnDepositEligibility> {
-    return checkWisdomTreeWalletEligibility(ctx, input.owner);
+    const fund = wisdomTreeFundByMint(input.providerReference);
+    if (!fund) {
+      return {
+        eligible: false,
+        reason: WISDOMTREE_DEPOSIT_INELIGIBLE_REASON,
+      };
+    }
+    return checkWisdomTreeDepositEligibility(ctx, {
+      address: input.owner,
+      exchangeCode: fund.exchangeCode,
+    });
   }
 }

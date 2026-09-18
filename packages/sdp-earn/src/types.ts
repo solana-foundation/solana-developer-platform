@@ -560,7 +560,7 @@ export interface EarnVaultWithdrawQuote {
   blockingIssues: readonly EarnVaultDepositQuoteIssue[];
 }
 
-/** The vault whose independently available instant/queued exit routes are read. */
+/** The vault whose independently available exit routes are read. */
 export interface EarnVaultWithdrawalOptionsInput {
   providerReference: string;
 }
@@ -582,9 +582,21 @@ export interface EarnVaultQueuedWithdrawalTerms {
 
 /** Independently reported exit routes. The provider never chooses one for the caller. */
 export interface EarnVaultWithdrawalOptions {
+  /**
+   * The direct withdrawal builder pays assets atomically with the share
+   * redemption. Mutually exclusive with `providerOrder`: the latter only opens
+   * a provider order whose payout settles later.
+   */
   instant: boolean;
+  /**
+   * The direct withdrawal builder transfers shares into a provider-managed
+   * redemption order, and the provider pays assets later in a separate
+   * settlement. This is not the cancellable on-chain queue described by
+   * `queued`/`queueAsset`.
+   */
+  providerOrder: boolean;
   queued: boolean;
-  /** Queue authority when the provider exposes a queued exit; null for instant-only providers. */
+  /** Queue authority when the provider exposes a queued exit; null for direct-only providers. */
   withdrawAuthority: string | null;
   queueState: string | null;
   /** Null when the SDP-facing asset has no queue configuration. */
@@ -878,6 +890,19 @@ export interface EarnVaultWithdrawProvider extends EarnVaultDirectProvider {
     ctx: EarnRuntimeContext,
     input: EarnVaultWithdrawInput
   ): Promise<EarnVaultTransactionPlan>;
+}
+
+/**
+ * Optional declaration for a direct withdrawal whose landed transaction opens
+ * a provider-managed redemption order instead of paying assets atomically.
+ *
+ * The literal is intentionally a static property: route discovery can classify
+ * the already-resolved client without provider I/O, and a provider cannot be
+ * mistaken for instant merely because it shares the ordinary withdrawal
+ * builder shape.
+ */
+export interface EarnVaultProviderOrderWithdrawProvider extends EarnVaultWithdrawProvider {
+  readonly vaultWithdrawalSettlement: "provider_order";
 }
 
 export interface EarnDepositEligibilityInput {

@@ -577,9 +577,16 @@ export interface EarnVaultQueuedWithdrawalTerms {
 /** Independently available exit routes for one owned vault position. */
 export interface EarnVaultWithdrawalOptions {
   positionId: string;
+  /** Redeem shares and receive assets atomically in the same transaction. */
   instant: boolean;
+  /**
+   * Transfer shares into a provider-managed redemption order whose asset payout
+   * settles later. Mutually exclusive with `instant`; distinct from `queued`,
+   * which is an on-chain request with its own lifecycle and cancellation path.
+   */
+  providerOrder: boolean;
   queued: boolean;
-  /** Queue authority when the provider exposes a queued exit; null for instant-only providers. */
+  /** Queue authority when the provider exposes a queued exit; null for direct-only providers. */
   withdrawAuthority: string | null;
   queueState: string | null;
   queueAsset: EarnVaultQueuedWithdrawalTerms | null;

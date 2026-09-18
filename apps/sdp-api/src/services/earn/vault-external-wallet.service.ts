@@ -310,8 +310,9 @@ export async function buildExternalWalletDepositTransaction(
   // Provider-side KYC/eligibility for the END-USER wallet, before the build.
   // This is the B2B2C path's whole point of failure for regulated funds: the
   // partner's user signs, but only an issuer-verified wallet can RECEIVE the
-  // settlement, and the refusal must carry the provider's reason so the
-  // partner UI can send the user to complete verification.
+  // settlement. A refusal deliberately stays generic and non-enumerating;
+  // wallet registration, approval and product entitlement must not be
+  // distinguishable through this admission boundary.
   await assertVaultDepositEligible(client, runtime, {
     providerReference: input.providerReference,
     owner: input.ownerAddress,

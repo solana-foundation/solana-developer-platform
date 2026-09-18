@@ -48,6 +48,8 @@ describe("parseFundMint against the live WTGXX bytes", () => {
   it("reads the decimals and the transfer-hook program the chain states", () => {
     const parsed = parseFundMint(wtgxxMintAccountData());
     expect(parsed.decimals).toBe(9);
+    expect(parsed.initialized).toBe(true);
+    expect(parsed.paused).toBe(false);
     expect(parsed.transferHookProgram).toBe(WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS["mainnet-beta"]);
   });
 });
@@ -82,6 +84,43 @@ describe("verifyFundMint", () => {
 
     const reader = fakeReader({ [WTGXX.mint]: { owner: TOKEN_2022, data: drifted } });
     await expect(verifyFundMint(reader, runtime, WTGXX)).rejects.toThrowError(/transfer hook/);
+  });
+
+  it("refuses an uninitialized or paused fund before building a USDC transfer", async () => {
+    const uninitialized = wtgxxMintAccountData();
+    uninitialized[45] = 0;
+    await expect(
+      verifyFundMint(
+        fakeReader({ [WTGXX.mint]: { owner: TOKEN_2022, data: uninitialized } }),
+        runtime,
+        WTGXX
+      )
+    ).rejects.toThrowError(/not initialized/);
+
+    const paused = wtgxxMintAccountData();
+    const view = new DataView(paused.buffer, paused.byteOffset, paused.byteLength);
+    let offset = 166;
+    let found = false;
+    while (offset + 4 <= paused.length) {
+      const extensionType = view.getUint16(offset, true);
+      const length = view.getUint16(offset + 2, true);
+      const bodyStart = offset + 4;
+      if (extensionType === 26) {
+        paused[bodyStart + 32] = 1;
+        found = true;
+        break;
+      }
+      offset = bodyStart + length;
+    }
+    expect(found).toBe(true);
+    expect(parseFundMint(paused).paused).toBe(true);
+    await expect(
+      buildWisdomTreeDepositPlan(
+        fakeReader({ [WTGXX.mint]: { owner: TOKEN_2022, data: paused } }),
+        runtime,
+        depositInput()
+      )
+    ).rejects.toThrowError(/paused; refusing to move money/);
   });
 });
 

@@ -258,70 +258,136 @@ describe("listStrategies", () => {
 
 describe("checkDepositEligibility", () => {
   const owner = "OwnerWa11etAddre55555555555555555555555555555";
+  const nonEnumeratingReason =
+    "This WisdomTree deposit is unavailable for the selected wallet and fund.";
 
   const walletsReply = (records: unknown) => ({
     body: { data: { Solana: records } },
   });
+  const productsReply = (records: unknown) => ({
+    body: { products: records },
+  });
 
-  it("approves a registered, approved Solana wallet", async () => {
-    stubConnectFetch(
+  const assertGenericIneligible = (verdict: { eligible: boolean; reason?: string }) => {
+    assert.deepEqual(verdict, {
+      eligible: false,
+      reason: nonEnumeratingReason,
+    });
+  };
+
+  it("approves only an approved wallet and tradable registry fund in one Connect context", async () => {
+    const fetchMock = stubConnectFetch(
       { body: tokenReply },
       { body: { guid: "org-guid" } },
-      walletsReply([{ public_key: owner, status: "approved" }])
+      walletsReply([{ public_key: owner, status: "approved" }]),
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: true }])
     );
     const verdict = await client.checkDepositEligibility(productionCtx, {
       providerReference: WTGXX.mint,
       owner,
     });
     assert.deepEqual(verdict, { eligible: true });
+
+    // One grant and one `/me` lookup establish the direct/omnibus credential
+    // context. Both admission reads reuse its bearer token; there is no guessed
+    // moderator child organization.
+    assert.equal(fetchMock.mock.callCount(), 4);
+    assert.match(requestUrl(fetchMock, 0), /\/o\/token\/$/);
+    assert.match(requestUrl(fetchMock, 1), /\/api\/organizations\/me$/);
+    assert.match(requestUrl(fetchMock, 2), /\/api\/organizations\/org-guid\/wallets$/);
+    assert.match(requestUrl(fetchMock, 3), /\/api\/orders\/products$/);
+    for (const call of [1, 2, 3]) {
+      const init = fetchMock.mock.calls[call].arguments[1] as RequestInit;
+      assert.equal(new Headers(init.headers).get("authorization"), "Bearer bearer-token");
+    }
   });
 
-  it("refuses an unregistered wallet with a customer-renderable reason", async () => {
+  it("uses the generic reason for an unregistered wallet", async () => {
     stubConnectFetch(
       { body: tokenReply },
       { body: { guid: "org-guid" } },
-      walletsReply([{ public_key: "SomeOtherWallet", status: "approved" }])
+      walletsReply([{ public_key: "SomeOtherWallet", status: "approved" }]),
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: true }])
     );
     const verdict = await client.checkDepositEligibility(productionCtx, {
       providerReference: WTGXX.mint,
       owner,
     });
-    assert.equal(verdict.eligible, false);
-    assert.match(verdict.reason ?? "", /not registered with WisdomTree Connect/);
+    assertGenericIneligible(verdict);
   });
 
-  it("fails closed on a registered wallet that is not approved", async () => {
+  it("uses the same generic reason for a pending wallet", async () => {
     stubConnectFetch(
       { body: tokenReply },
       { body: { guid: "org-guid" } },
-      walletsReply([{ public_key: owner, status: "pending" }])
+      walletsReply([{ public_key: owner, status: "pending" }]),
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: true }])
     );
     const verdict = await client.checkDepositEligibility(productionCtx, {
       providerReference: WTGXX.mint,
       owner,
     });
-    assert.equal(verdict.eligible, false);
-    assert.match(verdict.reason ?? "", /status is "pending"/);
+    assertGenericIneligible(verdict);
   });
 
-  it("fails closed when the wallets response has no Solana lane", async () => {
+  it("uses the same generic reason when the product is present but unavailable", async () => {
     stubConnectFetch(
       { body: tokenReply },
       { body: { guid: "org-guid" } },
-      { body: { data: { Ethereum: [{ public_key: owner, status: "approved" }] } } }
+      walletsReply([{ public_key: owner, status: "approved" }]),
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: false }])
     );
     const verdict = await client.checkDepositEligibility(productionCtx, {
       providerReference: WTGXX.mint,
       owner,
     });
-    assert.equal(verdict.eligible, false);
+    assertGenericIneligible(verdict);
+  });
+
+  it("uses the same generic reason when the organization is not entitled to the product", async () => {
+    stubConnectFetch(
+      { body: tokenReply },
+      { body: { guid: "org-guid" } },
+      walletsReply([{ public_key: owner, status: "approved" }]),
+      productsReply([{ exchange_code: "SOME_OTHER_FUND", can_trade: true }])
+    );
+    const verdict = await client.checkDepositEligibility(productionCtx, {
+      providerReference: WTGXX.mint,
+      owner,
+    });
+    assertGenericIneligible(verdict);
+  });
+
+  it("rejects an unknown provider reference generically before any network call", async () => {
+    const fetchMock = stubConnectFetch({ body: {} });
+    const verdict = await client.checkDepositEligibility(productionCtx, {
+      providerReference: "UnknownWisdomTreeFund111111111111111111111111",
+      owner,
+    });
+    assertGenericIneligible(verdict);
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("fails closed generically when the wallets response has no Solana lane", async () => {
+    stubConnectFetch(
+      { body: tokenReply },
+      { body: { guid: "org-guid" } },
+      { body: { data: { Ethereum: [{ public_key: owner, status: "approved" }] } } },
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: true }])
+    );
+    const verdict = await client.checkDepositEligibility(productionCtx, {
+      providerReference: WTGXX.mint,
+      owner,
+    });
+    assertGenericIneligible(verdict);
   });
 
   it("accepts the organisation_guid spelling and throws when every guid field is absent", async () => {
     stubConnectFetch(
       { body: tokenReply },
       { body: { organisation_guid: "org-guid" } },
-      walletsReply([{ public_key: owner, status: "approved" }])
+      walletsReply([{ public_key: owner, status: "approved" }]),
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: true }])
     );
     const verdict = await client.checkDepositEligibility(productionCtx, {
       providerReference: WTGXX.mint,
@@ -346,6 +412,18 @@ describe("checkDepositEligibility", () => {
     );
   });
 
+  it("throws PROVIDER_UNAVAILABLE on a malformed Solana wallets lane", async () => {
+    stubConnectFetch(
+      { body: tokenReply },
+      { body: { guid: "org-guid" } },
+      { body: { data: { Solana: { public_key: owner, status: "approved" } } } }
+    );
+    await assert.rejects(
+      client.checkDepositEligibility(productionCtx, { providerReference: WTGXX.mint, owner }),
+      earnError("PROVIDER_UNAVAILABLE", /malformed Solana wallets lane/)
+    );
+  });
+
   it("classifies malformed wallet entries as PROVIDER_UNAVAILABLE", async () => {
     stubConnectFetch(
       { body: tokenReply },
@@ -355,6 +433,19 @@ describe("checkDepositEligibility", () => {
     await assert.rejects(
       client.checkDepositEligibility(productionCtx, { providerReference: WTGXX.mint, owner }),
       earnError("PROVIDER_UNAVAILABLE", /invalid public_key/)
+    );
+  });
+
+  it("throws PROVIDER_UNAVAILABLE on a malformed products response", async () => {
+    stubConnectFetch(
+      { body: tokenReply },
+      { body: { guid: "org-guid" } },
+      walletsReply([{ public_key: owner, status: "approved" }]),
+      { body: { products: "not-an-array" } }
+    );
+    await assert.rejects(
+      client.checkDepositEligibility(productionCtx, { providerReference: WTGXX.mint, owner }),
+      earnError("PROVIDER_UNAVAILABLE", /no products array/)
     );
   });
 });

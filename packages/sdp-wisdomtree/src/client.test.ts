@@ -1,6 +1,7 @@
 import {
   supportsDepositEligibility,
   supportsVaultDirect,
+  supportsVaultProviderOrderWithdraw,
   supportsVaultWithdraw,
 } from "@sdp/earn/capabilities";
 import { SdpEarnError } from "@sdp/earn/errors";
@@ -66,6 +67,7 @@ describe("capability shape", () => {
     const client = offlineClient(fakeReader({}));
     expect(supportsVaultDirect(client)).toBe(true);
     expect(supportsVaultWithdraw(client)).toBe(true);
+    expect(supportsVaultProviderOrderWithdraw(client)).toBe(true);
     expect(supportsDepositEligibility(client)).toBe(true);
     expect(() => assertWisdomTreeNotPortfolioProvider(client)).not.toThrow();
   });

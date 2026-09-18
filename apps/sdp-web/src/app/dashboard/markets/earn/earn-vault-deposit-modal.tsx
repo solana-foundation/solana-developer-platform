@@ -6,6 +6,7 @@ import {
   type EarnStrategy,
   type EarnStrategySlippagePolicy,
   type EarnSwapSourceToken,
+  earnProviderDepositSettlement,
   earnSwapSourceTokens,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
@@ -58,7 +59,6 @@ import {
   mergeObservedVaultMovement,
   observableVaultMovement,
   vaultApprovalPending,
-  vaultMovementHappened,
   vaultMovementPanelKey,
   vaultMovementProcessing,
   vaultMovementProgressStep,
@@ -211,6 +211,28 @@ type DepositOutcome =
 type DepositSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: DepositOutcome; deposited?: EarnVaultDeposit };
+
+function shouldProjectDepositBalance(outcome: DepositOutcome): boolean {
+  const deposit = observableVaultMovement(outcome);
+  return (
+    deposit !== undefined && earnProviderDepositSettlement(deposit.strategy.provider) === "atomic"
+  );
+}
+
+function shouldProjectDepositIntent(outcome: DepositOutcome, swapActive: boolean): boolean {
+  return !swapActive && shouldProjectDepositBalance(outcome);
+}
+
+function depositProgressStep(outcome: DepositOutcome | null, step: "details" | "review"): number {
+  if (
+    outcome?.kind === "deposit" &&
+    earnProviderDepositSettlement(outcome.movement.strategy.provider) === "provider_order" &&
+    outcome.movement.status === "confirmed"
+  ) {
+    return 3;
+  }
+  return vaultMovementProgressStep(outcome, step, earnVaultDepositUiState);
+}
 
 function depositAssetMetadata(strategy: EarnStrategy) {
   const depositMint = strategy.depositMints[0];
@@ -543,6 +565,29 @@ function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
     };
   }
 
+  if (outcome.movement.status === "failed") {
+    return {
+      title: t("DashboardEarn.deposit.vaultFailedTitle"),
+      body: t("DashboardEarn.deposit.vaultFailedBody"),
+      note: t("DashboardEarn.deposit.vaultFailedNote"),
+      status: t("DashboardEarn.deposit.vaultFailedStatus"),
+      statusVariant: "danger" as const,
+    };
+  }
+
+  if (
+    earnProviderDepositSettlement(outcome.movement.strategy.provider) === "provider_order" &&
+    outcome.movement.status === "confirmed"
+  ) {
+    return {
+      title: t("DashboardEarn.deposit.providerOrderConfirmedTitle"),
+      body: t("DashboardEarn.deposit.providerOrderConfirmedBody"),
+      note: t("DashboardEarn.deposit.providerOrderConfirmedNote"),
+      status: t("DashboardEarn.deposit.providerOrderConfirmedStatus"),
+      statusVariant: "info" as const,
+    };
+  }
+
   switch (outcome.movement.status) {
     case "confirmed":
       return {
@@ -589,11 +634,13 @@ function DepositMovementResult({
   const copy = depositMovementCopy(outcome, t);
   const sharedStatus = outcome.absorbedByApproval
     ? null
-    : earnVaultPositionStatusDisplay(
-        earnVaultDepositUiState(deposit.status).positionStatus,
-        t("DashboardMarkets.treasury.positionStatusPending"),
-        t("DashboardMarkets.treasury.positionStatusActive")
-      );
+    : earnProviderDepositSettlement(deposit.strategy.provider) === "provider_order"
+      ? null
+      : earnVaultPositionStatusDisplay(
+          earnVaultDepositUiState(deposit.status).positionStatus,
+          t("DashboardMarkets.treasury.positionStatusPending"),
+          t("DashboardMarkets.treasury.positionStatusActive")
+        );
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
   const processing =
@@ -1226,8 +1273,10 @@ export function EarnVaultDepositModal({
   // The catalogue row's own answer, published per environment by the API
   // (`earnDepositSlippagePolicy` in @sdp/types): non-null means the build
   // REQUIRES an explicit share floor, which the dashboard derives from a LIVE
-  // quote and never from the deposit amount. Every production row is non-null.
-  // Null renders no slippage control at all.
+  // quote and never from the deposit amount. Most production rows are non-null;
+  // a next-NAV provider order publishes null because its later settlement
+  // cannot be bounded by the Solana payment leg. Null renders no slippage
+  // control at all.
   const slippagePolicy = strategy.depositSlippage;
   const [slippageInput, setSlippageInput] = useState(() =>
     slippagePolicy ? String(slippagePolicy.defaultToleranceBps) : ""
@@ -1245,13 +1294,22 @@ export function EarnVaultDepositModal({
     onMovementUpdated
   );
   const visibleOutcome = mergeObservedVaultMovement(outcome, observedDeposit);
-  const progressStep = vaultMovementProgressStep(visibleOutcome, step, earnVaultDepositUiState);
-  const progressSteps = [
-    t("DashboardEarn.deposit.flowDetails"),
-    t("DashboardEarn.deposit.flowReview"),
-    t("DashboardEarn.deposit.flowProcessing"),
-    t("DashboardEarn.deposit.flowComplete"),
-  ];
+  const progressStep = depositProgressStep(visibleOutcome, step);
+  const providerOrder = earnProviderDepositSettlement(strategy.provider) === "provider_order";
+  const progressSteps = providerOrder
+    ? [
+        t("DashboardEarn.deposit.flowDetails"),
+        t("DashboardEarn.deposit.flowReview"),
+        t("DashboardEarn.deposit.flowProcessing"),
+        t("DashboardEarn.deposit.flowProviderSettlement"),
+        t("DashboardEarn.deposit.flowComplete"),
+      ]
+    : [
+        t("DashboardEarn.deposit.flowDetails"),
+        t("DashboardEarn.deposit.flowReview"),
+        t("DashboardEarn.deposit.flowProcessing"),
+        t("DashboardEarn.deposit.flowComplete"),
+      ];
   const movementProcessing = vaultMovementProcessing(visibleOutcome, ["pending", "submitted"]);
   const panelKey = vaultMovementPanelKey(visibleOutcome, step, "deposit");
   const contentRef = useModalFocus({
@@ -1492,7 +1550,7 @@ export function EarnVaultDepositModal({
         // A swap request is denominated in the funding token while the
         // position is denominated in the vault token. Wait for the provider
         // value instead of presenting those unlike amounts as one balance.
-        projectBalance: !swapActive && vaultMovementHappened(resolution.outcome),
+        projectBalance: shouldProjectDepositIntent(resolution.outcome, swapActive),
       });
     }
   }

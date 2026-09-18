@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   asyncModal: undefined as
     | {
         onSettled?: (event: { kind: "queue"; request: { withdrawalRequestId: string } }) => void;
+        route?: { kind: "queue" | "provider_order" };
       }
     | undefined,
 }));
@@ -24,6 +25,7 @@ vi.mock("./earn-vault-withdraw-modal", () => ({
 vi.mock("./earn-vault-async-withdraw-modal", () => ({
   EarnVaultAsyncWithdrawModal: (props: {
     onSettled?: (event: { kind: "queue"; request: { withdrawalRequestId: string } }) => void;
+    route: { kind: "queue" | "provider_order" };
   }) => {
     mocks.asyncModal = props;
     return <div>async flow</div>;
@@ -75,6 +77,7 @@ describe("EarnVaultExitModal", () => {
       value: {
         positionId: position.id,
         instant: true,
+        providerOrder: false,
         queued: true,
         withdrawAuthority: "11111111111111111111111111111111",
         queueState: "queue",
@@ -111,6 +114,7 @@ describe("EarnVaultExitModal", () => {
       value: {
         positionId: position.id,
         instant: false,
+        providerOrder: false,
         queued: true,
         withdrawAuthority: "11111111111111111111111111111111",
         queueState: "queue",
@@ -139,6 +143,7 @@ describe("EarnVaultExitModal", () => {
       value: {
         positionId: position.id,
         instant: true,
+        providerOrder: false,
         queued: false,
         withdrawAuthority: null,
         queueState: null,
@@ -150,6 +155,31 @@ describe("EarnVaultExitModal", () => {
 
     expect(await screen.findByText("instant flow")).toBeTruthy();
     await waitFor(() => expect(screen.queryByText("async flow")).toBeNull());
+  });
+
+  it("auto-selects a provider-settled redemption without advertising an instant payout", async () => {
+    mocks.fetchOptions.mockResolvedValue({
+      kind: "ready",
+      value: {
+        positionId: position.id,
+        instant: false,
+        providerOrder: true,
+        queued: false,
+        withdrawAuthority: null,
+        queueState: null,
+        queueAsset: null,
+      },
+    });
+
+    renderModal({
+      position: { ...position, provider: "wisdomtree", label: "WisdomTree WTGXX" },
+    });
+
+    expect(await screen.findByText("async flow")).toBeTruthy();
+    expect(mocks.asyncModal?.route?.kind).toBe("provider_order");
+    expect(screen.queryByText("instant flow")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Instant withdrawal/ })).toBeNull();
+    expect(screen.queryByText(/same transaction/i)).toBeNull();
   });
 
   it("fails closed when route discovery is unavailable", async () => {

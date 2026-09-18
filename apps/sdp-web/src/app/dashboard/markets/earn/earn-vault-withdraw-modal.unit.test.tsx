@@ -57,7 +57,11 @@ function withdrawal(status: EarnVaultWithdrawal["status"]): EarnVaultWithdrawal 
   };
 }
 
-function renderModal(onWithdrawn = vi.fn(), modalPosition: EarnVaultPosition = position) {
+function renderModal(
+  onWithdrawn = vi.fn(),
+  modalPosition: EarnVaultPosition = position,
+  settlement?: React.ComponentProps<typeof EarnVaultWithdrawModal>["settlement"]
+) {
   return {
     onWithdrawn,
     ...render(
@@ -68,6 +72,7 @@ function renderModal(onWithdrawn = vi.fn(), modalPosition: EarnVaultPosition = p
           onWithdrawn={onWithdrawn}
           position={modalPosition}
           projectId="prj_1"
+          settlement={settlement}
         />
       </I18nProvider>
     ),
@@ -103,6 +108,79 @@ describe("EarnVaultWithdrawModal", () => {
 
     expect(amountInput.value).toBe("6");
     expect(screen.getByText(/\$6.00 available of \$10.00 total/)).toBeTruthy();
+  });
+
+  it("submits exact provider-order shares without inventing a dollar value", async () => {
+    const user = userEvent.setup();
+    const exactShares = "10.123456789";
+    const submitted = {
+      ...withdrawal("requested"),
+      provider: "wisdomtree",
+      shares: exactShares,
+    };
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "withdrawal", withdrawal: submitted },
+    });
+    const { onWithdrawn } = renderModal(
+      vi.fn(),
+      {
+        ...position,
+        provider: "wisdomtree",
+        label: "WisdomTree WTGXX",
+        shares: exactShares,
+        withdrawableShares: exactShares,
+        tokenValue: undefined,
+      },
+      "provider_order"
+    );
+
+    const sharesInput = screen.getByLabelText("Shares") as HTMLInputElement;
+    expect(screen.queryByText("$")).toBeNull();
+    expect(screen.getByText(`${exactShares} withdrawable`)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Max" }));
+    expect(sharesInput.value).toBe(exactShares);
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText(exactShares)).toBeTruthy();
+    expect(screen.queryByText("Expected proceeds")).toBeNull();
+    expect(screen.queryByText("Minimum received")).toBeNull();
+    expect(screen.queryByText("Receive")).toBeNull();
+    expect(screen.getByText(/guarantees no cash amount/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledWith(
+      { positionId: position.id, shares: exactShares },
+      expect.any(String)
+    );
+    expect(mocks.fetchEarnVaultWithdrawalPreview).not.toHaveBeenCalled();
+    expect(onWithdrawn).toHaveBeenCalledWith(submitted, {
+      amount: exactShares,
+      projectBalance: false,
+    });
+  });
+
+  it("blocks provider-order shares above the live withdrawable balance", () => {
+    renderModal(
+      vi.fn(),
+      {
+        ...position,
+        provider: "wisdomtree",
+        label: "WisdomTree WTGXX",
+        tokenValue: undefined,
+      },
+      "provider_order"
+    );
+
+    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: "6.000000001" } });
+
+    expect(
+      screen.getByText(/exceeds this position's last observed withdrawable share balance/)
+    ).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
   });
 
   it("reviews the withdrawal before confirmation and preserves the amount on back", async () => {
@@ -204,6 +282,114 @@ describe("EarnVaultWithdrawModal", () => {
     expect(document.querySelector(".earn-processing-modal")).toBeNull();
     expect(document.querySelector('[data-earn-outcome="success"]')).toBeTruthy();
     expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeTruthy();
+  });
+
+  it("keeps a finalized provider order visibly pending its separate payout", async () => {
+    const finalized = {
+      ...withdrawal("finalized"),
+      provider: "wisdomtree",
+    };
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "withdrawal", withdrawal: finalized },
+    });
+    renderModal(
+      vi.fn(),
+      {
+        ...position,
+        provider: "wisdomtree",
+        label: "WisdomTree WTGXX",
+        tokenValue: undefined,
+      },
+      "provider_order"
+    );
+
+    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText(/guarantees no cash amount/)).toBeTruthy();
+    expect(screen.queryByText("$6.00")).toBeNull();
+    expect(screen.queryByText("Expected proceeds")).toBeNull();
+    expect(screen.queryByText("Minimum received")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+
+    expect(await screen.findByText("Redemption order in progress")).toBeTruthy();
+    expect(screen.getByText("Awaiting provider settlement")).toBeTruthy();
+    expect(screen.getByText(/not proof of a provider payout/)).toBeTruthy();
+    expect(screen.getByText(/neither delivers nor guarantees a cash amount/)).toBeTruthy();
+    expect(screen.getByText("Provider settlement")).toBeTruthy();
+    expect(screen.getByText("Provider settlement").getAttribute("aria-current")).toBe("step");
+    expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeNull();
+    expect(screen.queryByText(/proceeds are in the custody wallet/)).toBeNull();
+    expect(screen.queryByText(/same transaction/i)).toBeNull();
+  });
+
+  it("keeps a confirmed provider order visibly pending unverified provider settlement", async () => {
+    const confirmed = {
+      ...withdrawal("confirmed"),
+      provider: "wisdomtree",
+    };
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "withdrawal", withdrawal: confirmed },
+    });
+    renderModal(
+      vi.fn(),
+      {
+        ...position,
+        provider: "wisdomtree",
+        label: "WisdomTree WTGXX",
+        tokenValue: undefined,
+      },
+      "provider_order"
+    );
+
+    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+
+    expect(await screen.findByText("Awaiting provider settlement")).toBeTruthy();
+    expect(screen.getByText(/not proof of a provider payout/)).toBeTruthy();
+    expect(screen.queryByText("Sending shares")).toBeNull();
+    expect(screen.queryByText(/share transfer is final on Solana/)).toBeNull();
+    expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeNull();
+  });
+
+  it("renders an observed provider-order transfer failure as failed", async () => {
+    const requested = {
+      ...withdrawal("requested"),
+      provider: "wisdomtree",
+    };
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "withdrawal", withdrawal: requested },
+    });
+    mocks.useEarnVaultWithdrawalOutcome.mockReturnValue({
+      ...requested,
+      status: "failed",
+      failureReason: "Transaction rejected",
+    });
+    renderModal(
+      vi.fn(),
+      {
+        ...position,
+        provider: "wisdomtree",
+        label: "WisdomTree WTGXX",
+        tokenValue: undefined,
+      },
+      "provider_order"
+    );
+
+    fireEvent.change(screen.getByLabelText("Shares"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+
+    expect(await screen.findByText("Redemption transfer failed")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.getByText(/No provider payout was recorded/)).toBeTruthy();
+    expect(screen.queryByText("Awaiting provider settlement")).toBeNull();
   });
 });
 

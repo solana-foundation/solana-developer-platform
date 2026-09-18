@@ -176,10 +176,10 @@ export function isStrategyDepositable(
 /**
  * The share-floor gate both deposit routes call before building. It refuses a
  * request that omits `minSharesOut` when `earnDepositSlippagePolicy` says the
- * build enforces a floor for this provider in this environment: every
- * production deposit, plus any provider whose builder refuses an implicit
- * floor. The catalogue publishes that same policy as `depositSlippage`, so a
- * caller who follows the row they were shown never trips this.
+ * build can and does enforce a floor for this provider in this environment.
+ * Most production deposits do; a next-NAV subscription whose on-chain leg
+ * cannot encode a share floor deliberately publishes null instead. The
+ * catalogue publishes the same answer as `depositSlippage`.
  */
 export function assertDepositFloorPresent(
   provider: string,
@@ -190,7 +190,7 @@ export function assertDepositFloorPresent(
   if (earnDepositSlippagePolicy(provider, environment) === null) return;
   throw badRequest(
     environment === "production"
-      ? "minSharesOut is required: every production deposit carries a share floor. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut."
+      ? "minSharesOut is required for this production deposit. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut."
       : `minSharesOut is required: ${provider} deposits carry a share floor in every environment. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut.`
   );
 }

@@ -35,4 +35,3 @@ export * from "./veda-programs";
 export * from "./well-known-programs";
 export * from "./well-known-tokens";
 export * from "./wisdomtree-programs";
-export * from "./workflows";

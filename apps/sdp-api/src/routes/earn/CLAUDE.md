@@ -46,8 +46,11 @@ Things worth knowing before changing a movement path:
   applied to one that never made it on chain.
 - **The published vault-deposit DTO still speaks the older vocabulary**, through
   `LEGACY_VAULT_DEPOSIT_STATUS` in `handlers/vault.ts`: `requested` goes out as
-  `pending`, and `finalized` as `confirmed`. `?settled=` matches that same
-  client-visible notion. Delete both when the DTO adopts the ledger vocabulary.
+  `pending`, and `finalized` as `confirmed`. `?settled=` is additionally
+  provider-aware: atomic deposits retain the legacy confirmed boundary, while
+  provider-order and unknown-provider success rows remain discoverable until an
+  authenticated provider-completion fact exists; `failed` is terminal for all.
+  Delete the translation when the DTO adopts the ledger vocabulary.
   `GET /v1/earn/movements` is the one read that speaks the ledger's own words.
 - **Ids are heterogeneous by design.** New rows are `earn_movement_…`, while
   history keeps the `earn_vault_movement_…` / `earn_program_withdrawal_…` ids the
@@ -530,8 +533,10 @@ organization's own custody wallets.
     inside `assertVaultDepositAdmissible` and the preview. The dashboard reads
     the same predicate, so it never advertises an action the API will refuse.
   - `minSharesOut` is required exactly when `earnDepositSlippagePolicy(provider,
-    environment)` (@sdp/types) is non-null: every production deposit, plus any
-    provider whose builder refuses an implicit floor. `assertDepositFloorPresent`
+    environment)` (@sdp/types) is non-null: most production deposits, plus any
+    provider whose builder refuses an implicit floor. A next-NAV subscription
+    may explicitly answer null when no Solana instruction can enforce the later
+    transfer-agent share price. `assertDepositFloorPresent`
     (handlers/admission.ts) is the ONE guard both deposit routes call, and the
     catalogue publishes the same answer as `depositSlippage`, so a row never
     promises what the build refuses (every Kamino row reads non-null with the
@@ -1015,14 +1020,17 @@ movement" describe in the same test file.
     rejected. The row is durable before broadcast and uses the same reconciler
     as a deposit.
   - The wire exposes the movement signature directly for explorer links.
-    `confirmed` remains non-terminal; only `finalized` and `failed` stop polling.
+    `confirmed` remains non-terminal. `finalized` stops polling only for an
+    explicitly atomic provider; provider-order/unknown success stays open until
+    authenticated provider completion. `failed` stops every route.
 - `GET /vault-withdrawals` / `GET /vault-withdrawals/:movementId` — the deposit
   reads mirrored: the list is DB discovery and the scoped detail is a fail-soft
   signature read-through. Both have NO provider gate (ADR 0002), the same four
   404 scoping rules with `direction = 'withdrawal'`, and the same wallet-binding
   scope through `listReadableEarnVaultWallets`. `?requestId=` serves the one
-  logical withdrawal, and `?settled=` uses the ledger terminal set
-  (`finalized|failed`), not the deposits' legacy one.
+  logical withdrawal, and `?settled=` uses that provider-aware settlement
+  boundary rather than treating an uncorrelated provider-order share leg as a
+  completed payout.
 
 ### External-wallet (caller-signed) routes — the B2B2C money path (PRO-1722)
 

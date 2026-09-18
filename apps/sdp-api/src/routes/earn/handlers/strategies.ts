@@ -73,10 +73,10 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
  * execution, answered for the row's own cluster. A row that is not fundable is
  * never sponsored (there is no movement to sponsor), so the two agree.
  *
- * `depositSlippage` is derived per request too: every production deposit
- * carries a share floor, so the field answers for the caller's environment
- * exactly as the deposit routes gate (`earnDepositSlippagePolicy`). A row that
- * reads null never meets a build that demands `minSharesOut`.
+ * `depositSlippage` is derived per request too. Most production deposits carry
+ * a share floor; an asynchronous next-NAV provider may explicitly declare that
+ * its on-chain leg cannot enforce one. The field answers exactly as the deposit
+ * routes gate (`earnDepositSlippagePolicy`).
  */
 export function mapToEarnStrategy(
   row: EarnStrategyRow,
