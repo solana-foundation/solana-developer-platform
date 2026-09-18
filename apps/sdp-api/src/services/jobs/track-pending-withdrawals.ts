@@ -618,8 +618,8 @@ async function collectReleases(
   // Bounded: the scan window is capped at RELEASE_SCAN_LIMIT, but a bare
   // Promise.all would still open that many concurrent getTransaction calls
   // against the RPC in one tick — and a serial loop would pay the latency of
-  // one round trip per signature. A failed lookup just drops that candidate
-  // release; the next tick rescans the same window.
+  // one round trip per signature. A failed lookup drops that candidate release
+  // (logged below); the next tick rescans the same window.
   const settled = await mapSettledWithConcurrency(
     signatures,
     RELEASE_LOOKUP_CONCURRENCY,
@@ -646,7 +646,22 @@ async function collectReleases(
       return transfers;
     }
   );
-  return settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+  return settled.flatMap((result, index) => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+    // The lookup failure must not vanish silently: operators need to know the
+    // scan was incomplete, otherwise unresolved withdrawals and missing
+    // releases surface with no diagnostic explaining why.
+    getLogger().error(
+      {
+        signature: signatures[index]?.signature,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      },
+      "trackPendingWithdrawals: release getTransaction lookup failed; dropping candidate until next tick"
+    );
+    return [];
+  });
 }
 
 /** Pull (destinationTokenAccount, baseUnits) from a parsed spl-token transfer ix. */

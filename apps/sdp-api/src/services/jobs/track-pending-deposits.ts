@@ -97,7 +97,14 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
     const key = `${instance.organization_id}:${instance.project_id}`;
     let bucket = buckets.get(key);
     if (!bucket) {
-      bucket = { projectRpc: loadProjectRpc(instance), deposits: [] };
+      const projectRpc = loadProjectRpc(instance);
+      // The RPC client starts resolving during pass 1, but its rejection is
+      // only awaited — inside a try/catch — in pass 2. Attach a no-op handler
+      // now so a failed project lookup can't surface as an unhandled rejection
+      // in the window before pass 2 runs (the API shuts down on those); the
+      // same promise still re-raises when pass 2 awaits it.
+      projectRpc.catch(() => {});
+      bucket = { projectRpc, deposits: [] };
       buckets.set(key, bucket);
     }
     bucket.deposits.push(deposit);
