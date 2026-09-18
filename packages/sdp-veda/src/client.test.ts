@@ -406,7 +406,9 @@ describe("readVaultPositions", () => {
     for (const release of releases.splice(0)) release();
 
     await vi.waitFor(() =>
-      expect(mocks.readVedaPosition).toHaveBeenCalledTimes(VEDA_POSITION_READ_CONCURRENCY * 2)
+      expect(mocks.readVedaPosition).toHaveBeenCalledTimes(
+        Math.min(VEDA_POSITION_READ_CONCURRENCY * 2, VEDA_POSITION_READ_CONCURRENCY + 5)
+      )
     );
     for (const release of releases.splice(0)) release();
 
