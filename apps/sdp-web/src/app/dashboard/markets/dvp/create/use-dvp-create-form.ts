@@ -118,6 +118,8 @@ function canCreateTrade(input: {
   const legsResolved = Boolean(
     !asset.pendingLookup && !cash.pendingLookup && asset.mint && cash.mint
   );
+  // A mint create would refuse is answered at the field, not by a 400 on submit.
+  const legsAccepted = !(asset.ineligible || cash.ineligible);
   // No base units means no scale, so there is no quantity to send. Never a
   // rounded fallback.
   const amountsResolved = Boolean(asset.baseUnits && cash.baseUnits);
@@ -125,7 +127,13 @@ function canCreateTrade(input: {
   // a round trip that costs a custody-provider call.
   const partiesUsable = Boolean(input.partiesReady && !input.destinationLooksWrong);
 
-  return legsResolved && amountsResolved && partiesUsable && input.expiry.trim().length > 0;
+  return (
+    legsResolved &&
+    legsAccepted &&
+    amountsResolved &&
+    partiesUsable &&
+    input.expiry.trim().length > 0
+  );
 }
 
 /**
@@ -136,14 +144,15 @@ function canCreateTrade(input: {
  * and the over-balance guard with it, so switching to a wallet that cannot
  * deliver the leg would silently look fine. Zero is only knowable once the
  * wallet and the mint's scale are both settled; before that there is genuinely
- * nothing to claim, and this returns null.
+ * nothing to claim, and this returns null. So it does for a wallet whose
+ * balances were never loaded: not loaded is unknown, never zero.
  */
 function resolveWalletBalance(
   wallet: DvpCreateWallet | null,
   leg: DvpLeg
 ): DvpWalletBalance | null {
   const decimals = leg.token?.decimals ?? leg.pasted.mint?.decimals ?? null;
-  if (!(wallet && leg.mint) || decimals === null) {
+  if (!(wallet && leg.mint) || wallet.balances === null || decimals === null) {
     return null;
   }
   return (

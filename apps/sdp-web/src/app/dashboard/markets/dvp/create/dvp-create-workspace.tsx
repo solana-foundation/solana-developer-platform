@@ -42,7 +42,9 @@ function stageAnswered(form: DvpCreateForm): boolean[] {
     !form.asset.pendingLookup &&
     !form.cash.pendingLookup &&
     Boolean(form.asset.mint && form.cash.mint) &&
-    Boolean(form.asset.baseUnits && form.cash.baseUnits);
+    Boolean(form.asset.baseUnits && form.cash.baseUnits) &&
+    // A mint create would refuse holds the stage where the field says so.
+    !(form.asset.ineligible || form.cash.ineligible);
 
   return [form.partiesReady && legsResolved && !form.destinations.anyLooksWrong, form.ready];
 }

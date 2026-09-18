@@ -117,6 +117,7 @@ export function MintField({
   onChoiceChange,
   onCustomChange,
   options,
+  warning,
 }: {
   choice: string;
   custom: string;
@@ -125,6 +126,8 @@ export function MintField({
   onChoiceChange: (next: string) => void;
   onCustomChange: (next: string) => void;
   options: DvpCreateOption[];
+  /** Why this mint cannot be traded, or null when nothing rules it out. */
+  warning: string | null;
 }) {
   const t = useTranslations();
   const isCustom = choice === CUSTOM || options.length === 0;
@@ -165,6 +168,7 @@ export function MintField({
         searchPlaceholder={t("DashboardMarkets.dvp.mintSlotSearchPlaceholder")}
         value={isCustom ? (custom ? custom : null) : choice ? choice : null}
       />
+      {warning ? <p className="text-error text-xs leading-relaxed">{warning}</p> : null}
     </div>
   );
 }

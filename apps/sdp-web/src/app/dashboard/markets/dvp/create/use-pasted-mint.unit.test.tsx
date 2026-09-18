@@ -117,4 +117,41 @@ describe("usePastedMint", () => {
 
     expect(result.current).toMatchObject({ mint: null, loading: false, notFound: false });
   });
+
+  // The inspection body is read through its schema. A body that does not parse
+  // is no answer: no scale, and no claim about whether the mint is accepted.
+  it("reads an unparseable inspection as no mint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ data: { mint: { decimals: "6" } } }) })
+    );
+
+    const { result } = renderHook(() => usePastedMint(MINT_A));
+    await settle();
+
+    expect(result.current).toMatchObject({ mint: null, loading: false, notFound: true });
+  });
+
+  it("carries whether create would accept the mint", async () => {
+    const refused = mintBody(6);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => {
+          const body = await refused.json();
+          return {
+            data: { mint: { ...body.data.mint, eligible: false, blockedBy: "TransferHook" } },
+          };
+        },
+      })
+    );
+
+    const { result } = renderHook(() => usePastedMint(MINT_A));
+    await settle();
+
+    expect(result.current.mint).toMatchObject({ eligible: false, blockedBy: "TransferHook" });
+  });
 });

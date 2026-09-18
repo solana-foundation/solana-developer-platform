@@ -108,6 +108,22 @@ describe("validateDvpMints", () => {
     expect(problems[0]).toContain(name);
   });
 
+  // The program accepts a hook mint, but every transfer out of the escrow needs
+  // the hook's extra accounts, which SDP does not resolve. Settle, cancel and
+  // reclaim would all fail, so a funded leg would have no way out.
+  it("refuses a transfer-hook mint as one SDP cannot move yet", async () => {
+    const rpc = rpcReturning({
+      owner: TOKEN_2022_PROGRAM_ADDRESS,
+      data: encodeMint([extension("TransferHook", { authority: AUTHORITY, programId: AUTHORITY })]),
+    });
+
+    const problems = await validateDvpMints(rpc, leg());
+
+    expect(problems).toEqual([
+      `mintA ${MINT_A} carries the TransferHook extension, which SDP cannot settle, cancel or reclaim yet`,
+    ]);
+  });
+
   // The escrow ATA derives from (swapDvp, mint, tokenProgram). Believing the
   // caller's declared program over the account's actual owner would publish an
   // escrow address derived under the wrong program.
@@ -151,13 +167,17 @@ describe("validateDvpMints", () => {
     expect(problems[0]).toContain("is owned by");
   });
 
-  it("reports no extension problems when token-2022 bytes do not decode as a mint", async () => {
+  // The program would still refuse its own four on chain, but not a transfer
+  // hook, so a mint SDP cannot read is refused rather than let through.
+  it("refuses a token-2022 mint whose bytes do not decode", async () => {
     const rpc = rpcReturning({
       owner: TOKEN_2022_PROGRAM_ADDRESS,
       data: new Uint8Array([1, 2, 3]),
     });
 
-    await expect(validateDvpMints(rpc, leg())).resolves.toEqual([]);
+    await expect(validateDvpMints(rpc, leg())).resolves.toEqual([
+      `mintA ${MINT_A} has extension data SDP cannot read, so it cannot confirm the mint is settleable`,
+    ]);
   });
 
   // A legacy mint carries no extensions by construction, so there is nothing to

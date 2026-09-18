@@ -85,7 +85,7 @@ describe("fetchDvpCreateContext", () => {
     { custodyConnectionId: "conn_conflict" },
   ])("reports invalid wallet fields instead of offering a signing choice: %j", async (fields) => {
     const load = vi.fn(async (path: string) => {
-      if (path === "/v1/wallets?includeBalances=true&includeAllProviders=true") {
+      if (path === "/v1/wallets?includeAllProviders=true") {
         return Response.json({
           data: [
             { ...WALLET, custodyConfigId: "cc_config", isRuntimeExecutionAllowed: true, ...fields },
@@ -119,7 +119,7 @@ describe("fetchDvpCreateContext", () => {
 
     const context = await fetchDvpCreateContext(load);
 
-    expect(load).toHaveBeenCalledWith("/v1/wallets?includeBalances=true&includeAllProviders=true");
+    expect(load).toHaveBeenCalledWith("/v1/wallets?includeAllProviders=true");
     expect(context.wallets).toEqual([
       expect.objectContaining({
         id: WALLET.id,
@@ -142,7 +142,8 @@ describe("fetchDvpCreateContext", () => {
         label: "Treasury",
         custodyConfigId: "cc_config",
         isRuntimeExecutionAllowed: true,
-        balances: [],
+        // Not loaded, which the form reads as unknown rather than "holds nothing".
+        balances: null,
       },
     ]);
     expect(context.tokens[0]).toMatchObject({
@@ -269,7 +270,26 @@ describe("fetchDvpCreateContext", () => {
     expect(context.tokens[0].decimals).toBeNull();
   });
 
-  it("carries wallet balances, so a leg can show what it spends from", async () => {
+  // PRO-1851. Balances cost a chain read per wallet and held the form back by
+  // seconds; nothing on it renders one, so the page does not ask.
+  it("lists wallets without waiting on their balances", async () => {
+    const fetchContext = request({
+      wallets: ok({ data: [WALLET] }),
+      tokens: ok({ data: [TOKEN] }),
+    });
+
+    const context = await fetchDvpCreateContext(fetchContext);
+
+    const paths = vi
+      .mocked(fetchContext as (path: string) => unknown)
+      .mock.calls.map(([path]) => path);
+    expect(paths.filter((path) => path.startsWith("/v1/wallets"))).toEqual([
+      "/v1/wallets?includeAllProviders=true",
+    ]);
+    expect(context.wallets[0].balances).toBeNull();
+  });
+
+  it("maps balances when a wallet row carries them", async () => {
     const context = await fetchDvpCreateContext(
       request({
         wallets: ok({ data: [WALLET_WITH_BALANCES] }),
