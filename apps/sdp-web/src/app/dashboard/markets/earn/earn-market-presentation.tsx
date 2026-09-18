@@ -6,6 +6,7 @@ import { ExternalLinkIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
+import { truncateMiddle } from "../truncate-middle";
 import { type EarnDepositAvailabilityLabels, earnDepositAvailabilityLabel } from "./earn-format";
 import type { EarnVaultDepositAvailability } from "./earn-surfacing";
 
@@ -20,7 +21,7 @@ export function earnMintAsset(mint: string): EarnStrategyAsset {
   const token = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   return token
     ? { decimals: token.decimals, mint, symbol: token.symbol }
-    : { mint, symbol: mint.length <= 12 ? mint : `${mint.slice(0, 4)}…${mint.slice(-4)}` };
+    : { mint, symbol: mint.length <= 12 ? mint : truncateMiddle(mint, 4, 4) };
 }
 
 /** The first provider-declared deposit asset, resolved without assuming a cluster or stablecoin. */
@@ -63,7 +64,7 @@ export function formatProviderApy(value: string | undefined, locale: string): st
 }
 
 export function shortenMarketAddress(value: string): string {
-  return value.length <= 16 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;
+  return value.length <= 16 ? value : truncateMiddle(value, 6, 6);
 }
 
 /**

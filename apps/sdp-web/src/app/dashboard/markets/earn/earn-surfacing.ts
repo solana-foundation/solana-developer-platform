@@ -33,8 +33,8 @@ export type EarnVaultDepositAvailability =
  * and unit tests pass (they mock the module), so only a browser catches it.
  *
  * Keep server-readable gates here. Anything that needs a hook, SWR, or
- * `window` belongs in `earn-program-data.ts`, which re-exports these values so
- * existing client imports are unchanged.
+ * `window` belongs in `earn-program-data.ts`; client callers import the gates
+ * from this file directly, never through that client module.
  */
 /**
  * Providers SDP offers that hold money through a PROGRAM — a provider-managed

@@ -38,6 +38,7 @@ import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "../../activity-format-utils";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
+import { truncateMiddle } from "../truncate-middle";
 import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
@@ -112,7 +113,7 @@ function CopyableAddress({
 }
 
 function shortenSignature(signature: string): string {
-  return `${signature.slice(0, 8)}…${signature.slice(-8)}`;
+  return truncateMiddle(signature, 8, 8);
 }
 
 /**
