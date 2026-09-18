@@ -669,12 +669,12 @@ organization's own custody wallets.
   itself remains owner-only. Any other signer is a provider failure. Size is
   checked locally before simulation so an oversized base64 transaction does
   not collapse into an opaque RPC `-32602`. A keyed external build retries once
-  with a compact 128-bit SHA-256 request memo. If a non-swap plan still only
+  with a compact 132-bit SHA-256 request memo. If a non-swap plan still only
   overflows because it has a distinct fee payer, the API returns a clean 400
   telling the caller to rebuild owner-paid. Swap oversize handling after
   lookup-table compression (`VaultTransactionTooLargeError`): one re-quote at
-  `RETRY_SWAP_MAX_ACCOUNTS`, then the custody path refuses (400) while the
-  external-wallet build answers the SPLIT contract —
+  `RETRY_SWAP_MAX_ACCOUNTS` with the compact request memo, then the custody
+  path refuses (400) while the external-wallet build answers the SPLIT contract:
   `{ requiresSeparateSwap: true, swap: { transaction, … }, followUp }`, an
   unsigned swap-only transaction the owner signs and broadcasts itself
   (persisting no consumable build; only a keyed request writes the

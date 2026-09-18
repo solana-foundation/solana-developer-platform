@@ -343,6 +343,7 @@ function post(
   body: Record<string, unknown>,
   options: { idempotencyKey?: string | null; apiKey?: string | null; ip?: string } = {}
 ) {
+  const requestBody = path === "deposit-transactions" ? { minSharesOut: "1", ...body } : body;
   return app.request(
     `/v1/earn/external-wallet/${path}`,
     {
@@ -355,7 +356,7 @@ function post(
         ...(options.idempotencyKey == null ? {} : { "Idempotency-Key": options.idempotencyKey }),
         ...(options.ip === undefined ? {} : { "X-Forwarded-For": options.ip }),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
     },
     env
   );
@@ -403,7 +404,11 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
     const res = await post(
       "deposit-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+      },
       { apiKey: null }
     );
 
@@ -736,7 +741,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       expect(body.data.followUp.feePayer).toBe(feePayer);
     });
 
-    it("omits the follow-up floor only when the original request carried none", async () => {
+    it("requires a floor for a sandbox Kamino split build", async () => {
       await seedAuth();
       const strategy = await seedStrategy();
       buildExternalWalletDepositTransaction.mockResolvedValue({
@@ -753,13 +758,11 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         ownerAddress: OWNER,
         amount: "25",
         sourceTokenMint: SOURCE_MINT,
+        minSharesOut: undefined,
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: { followUp: Record<string, unknown> };
-      };
-      expect(body.data.followUp).toEqual({ strategyId: strategy.id, amount: "24.8" });
+      expect(res.status).toBe(400);
+      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
     });
   });
 
@@ -843,7 +846,12 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
     const missingFloor = await post(
       "deposit-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+        minSharesOut: undefined,
+      },
       { apiKey: PROD_API_KEY.raw }
     );
     expect(missingFloor.status).toBe(400);
@@ -900,7 +908,12 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     });
     const missingFloor = await post(
       "deposit-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+        minSharesOut: undefined,
+      },
       { apiKey: PROD_API_KEY.raw }
     );
     expect(missingFloor.status).toBe(400);

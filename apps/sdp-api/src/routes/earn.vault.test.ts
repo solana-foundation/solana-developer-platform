@@ -265,7 +265,7 @@ function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
       providerReference: strategy.provider_reference,
       custodyWalletId: "cwlt_earn_vault_connection",
       amount: "10",
-      minSharesOut: null,
+      minSharesOut: "1",
     }),
     createdBy: TEST_USER.id,
   });
@@ -403,7 +403,10 @@ function postVaultDeposit(
   idempotencyKey?: string,
   apiKey = TEST_API_KEY.raw
 ) {
-  const request = { ...body };
+  // Kamino requires a live-quote-derived floor in every environment. Most
+  // route tests exercise another gate, so their shared valid request carries
+  // one unless a missing-floor case explicitly overrides it with `undefined`.
+  const request: Record<string, unknown> = { minSharesOut: "1", ...body };
   const key =
     idempotencyKey ?? (typeof request.requestId === "string" ? request.requestId : undefined);
   delete request.requestId;
@@ -955,7 +958,12 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta", environment: "production" });
 
     const missingFloor = await postVaultDeposit(
-      { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_kamino_prod", amount: "10" },
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_kamino_prod",
+        amount: "10",
+        minSharesOut: undefined,
+      },
       crypto.randomUUID(),
       PROD_API_KEY.raw
     );
@@ -1044,6 +1052,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
         strategyId: strategy.id,
         custodyWalletId: "cwlt_earn_vault_jupiter",
         amount: "10",
+        minSharesOut: undefined,
       },
       crypto.randomUUID(),
       PROD_API_KEY.raw
@@ -1127,6 +1136,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
         strategyId: strategy.id,
         custodyWalletId: "cwlt_earn_vault_ondo",
         amount: "10",
+        minSharesOut: undefined,
       },
       crypto.randomUUID(),
       PROD_API_KEY.raw
@@ -1230,6 +1240,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
           strategyId: strategy.id,
           custodyWalletId: "cwlt_earn_vault_connection",
           amount: "10",
+          minSharesOut: "1",
         }),
       },
       env
@@ -1308,6 +1319,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
             strategyId: strategy.id,
             custodyWalletId: "cwlt_earn_vault_connection",
             amount,
+            minSharesOut: "1",
           }),
         },
         env
@@ -1545,7 +1557,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       providerReference: strategy.provider_reference,
       custodyWalletId: "cwlt_earn_vault_pending",
       amount: "10",
-      minSharesOut: null,
+      minSharesOut: "1",
     });
     const policyRepo = createPostgresPolicyRepository(
       getDb(env),

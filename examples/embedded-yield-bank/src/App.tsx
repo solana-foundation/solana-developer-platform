@@ -294,11 +294,12 @@ export function App() {
         movementToastIds.current.set(movement.movementId, toastId);
         toast.info(copy.pending, {
           id: toastId,
-          description: `Confirming on Solana ${
+          description:
             latestData.current?.wallet.cluster === "mainnet-beta"
-              ? "mainnet"
-              : "devnet"
-          }`,
+              ? "Confirming on Solana mainnet"
+              : latestData.current?.wallet.cluster === "devnet"
+                ? "Confirming on Solana devnet"
+                : "Confirming on Solana",
         });
       } else {
         toast.success(copy.done, { id: toastId });

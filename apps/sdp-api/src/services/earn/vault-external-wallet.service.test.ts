@@ -602,6 +602,14 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     // One re-route for compactness before giving up on atomicity.
     expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
     expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
+    const usedCompactMemo = simulateVaultPlan.mock.calls.some(([, input]) =>
+      input.plan.instructions.some((instruction: { data: string }) =>
+        /^sdp:e:ed:[A-Za-z0-9_-]{22}$/.test(
+          Buffer.from(instruction.data, "base64").toString("utf8")
+        )
+      )
+    );
+    expect(usedCompactMemo).toBe(true);
 
     if (result.kind !== "swap_required")
       throw new Error(`expected swap_required, got ${result.kind}`);

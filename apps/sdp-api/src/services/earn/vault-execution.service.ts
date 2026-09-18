@@ -78,7 +78,7 @@ export function appendVaultRequestMemo(
   // provider plans fit with the owner paying but cross Solana's 1232-byte
   // limit with that extra signer. Preserve the idempotency binding in a short
   // cryptographic form when a caller explicitly asks for the compact retry:
-  // 128 bits remains far beyond the collision budget for transaction intents.
+  // 132 bits remains far beyond the collision budget for transaction intents.
   const payload = options.compact
     ? `sdp:e:${
         {

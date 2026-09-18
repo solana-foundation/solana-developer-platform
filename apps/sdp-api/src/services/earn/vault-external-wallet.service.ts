@@ -445,7 +445,7 @@ export async function buildExternalWalletDepositTransaction(
     fee
   );
   if (!attempt.fit) {
-    attempt = await attemptBuild(RETRY_SWAP_MAX_ACCOUNTS);
+    attempt = await attemptBuild(RETRY_SWAP_MAX_ACCOUNTS, true);
   }
   if (!attempt.fit) {
     // Split flow: the swap alone, compiled through the same simulate-and-size

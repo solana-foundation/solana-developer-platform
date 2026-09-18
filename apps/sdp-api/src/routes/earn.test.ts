@@ -471,9 +471,8 @@ describe("Earn routes — environment scoping", () => {
   });
 
   it("publishes depositSlippage for the caller's environment, the same answer the build gates on", async () => {
-    // Kamino declares no floor of its own, yet every production deposit
-    // carries one (`assertDepositFloorPresent`). The row must say so, or a
-    // caller who follows the catalogue builds without a floor and meets a 400.
+    // Kamino declares a floor in every environment. The row must say so, or a
+    // caller who follows the catalogue builds without one and meets a 400.
     await seedAuth();
     await seedSessionAuth();
     const sandbox = await seedStrategy();
@@ -487,7 +486,10 @@ describe("Earn routes — environment scoping", () => {
     const sandboxBody = (await sandboxRow.json()) as {
       data: { strategy: { provider: string; depositSlippage: unknown } };
     };
-    expect(sandboxBody.data.strategy).toMatchObject({ provider: "kamino", depositSlippage: null });
+    expect(sandboxBody.data.strategy).toMatchObject({
+      provider: "kamino",
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+    });
 
     const productionRow = await getEarnAsSession(
       `/v1/earn/strategies/${production.id}`,
