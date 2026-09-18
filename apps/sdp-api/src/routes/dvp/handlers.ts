@@ -14,7 +14,7 @@ import {
   type DvpLegFundingClaim,
 } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, forbidden, notFound } from "@/lib/errors";
+import { badRequest, forbidden, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
@@ -25,12 +25,16 @@ import {
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
-import { custodyWalletForParty, walletIdIfHoldsAddress } from "@/services/dvp/custody-party";
+import { custodyWalletForParty } from "@/services/dvp/custody-party";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
 import type { DvpCallerWallet } from "@/services/dvp/inbound";
 import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
-import { runDvpLegActionOnce } from "@/services/dvp/leg-action-idempotency";
+import {
+  type DvpLegActionResult,
+  runDvpCloseOnce,
+  runDvpLegActionOnce,
+} from "@/services/dvp/leg-action-idempotency";
 import { deriveDvpLegOutcome, observedAfterClose } from "@/services/dvp/leg-outcome";
 import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import {
@@ -40,16 +44,27 @@ import {
 } from "@/services/dvp/observe-now";
 import { reclaimDvpTradeLeg } from "@/services/dvp/reclaim";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
-import { readDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
+import {
+  assertApprovedWalletOperationCustodyWallet,
+  beginApprovedWalletOperationEffect,
+} from "@/services/policy/approved-operation-replay";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import { resolveCloseAction, resolveLegAction } from "./action-context";
 import { type DvpActionWallet, readDvpActionWallets } from "./action-wallets";
 import { toDvpInboundResponse } from "./inbound-response";
+import { assertJudgedDvpCustodyWallet } from "./policy";
 import {
   type createDvpTradeSchema,
   type fundDvpTradeSchema,
   listDvpTradesQuerySchema,
 } from "./schemas";
+import {
+  beginDvpFundAudit,
+  completeDvpFundAudit,
+  concludeDvpFundAuditOnError,
+  recordDvpExitAudit,
+} from "./trade-audit";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -477,42 +492,49 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
  * @returns A route handler for that close action.
  */
 const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const tradeId = c.req.param("tradeId");
-  if (tradeId === undefined) {
-    throw notFound("DvP trade not found");
+  const { trade, actor, settlement, projectId } = await resolveCloseAction(c, action);
+
+  // Settle is policy-gated, cancel is not (routes/dvp/policy.ts explains why
+  // the recovery paths stay ungoverned). So only settle has a judgement to
+  // check, and only settle can be executing an approved operation. PRO-1975.
+  if (action === "settle") {
+    assertJudgedDvpCustodyWallet(c, settlement.custodyWalletId);
+    await assertApprovedWalletOperationCustodyWallet(c, settlement.custodyWalletId);
   }
-  const trade = await createDvpTradeRepository(c.env).getById(
+
+  const { result, replayed } = await runDvpCloseOnce(
+    c.env,
+    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
     {
-      organizationId: auth.organizationId,
+      action,
+      tradeId: trade.id,
+      organizationId: actor.organizationId,
       projectId,
-      sdpWalletIds: getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"]),
+      custodyWalletId: settlement.custodyWalletId,
     },
-    tradeId
+    (recordAttempt) =>
+      closeDvpTrade(c, trade, action, settlement, async (attempt) => {
+        // Record first, fence second. Both happen before the submission, and
+        // in this order a failed record aborts while the approval's lease is
+        // still unspent, so the operation can be executed again. Fencing first
+        // would strand an approved settle that never reached the network.
+        await recordAttempt(attempt);
+        if (action === "settle") {
+          await beginApprovedWalletOperationEffect(c);
+        }
+      })
   );
-  if (trade === null) {
-    throw notFound("DvP trade not found");
-  }
-  const settlement = await readDvpSettlementWallet(c.env, {
-    organizationId: trade.organizationId,
-    projectId: trade.projectId,
+
+  // An exit, so the record is written after the effect and cannot refuse it.
+  // `confirmed: false` is a broadcast whose outcome the request could not read,
+  // which is what the reconciler resolves; the signature is what ties the
+  // ledger entry to whatever landed. PRO-1992.
+  await recordDvpExitAudit(c, actor, action, trade.id, {
+    settlementCustodyWalletId: settlement.custodyWalletId,
+    signature: result.signature,
+    confirmed: result.landed,
+    replayed,
   });
-  if (settlement === null) {
-    throw notFound("DvP settlement wallet not found for this trade's project");
-  }
-
-  // Re-read the binding before anything irreversible: the auth context can be
-  // an hour stale, and settling with a revoked key is an irreversible
-  // two-leg spend, not a read slip. The wallet asserted is the SETTLEMENT
-  // wallet — the one that signs; the liveness assert covers keys the
-  // wallet-scoped check skips.
-  await assertFreshApiKeyActive(getDb(c.env), auth);
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, settlement.custodyWalletId, [
-    "payments:write",
-  ]);
-
-  const result = await closeDvpTrade(c, trade, action, settlement);
 
   // Recorded only once the close is confirmed: a second close can be accepted by
   // the RPC and still be the one that fails. An unconfirmed close is left to the
@@ -542,78 +564,60 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
 };
 
 /**
- * Resolves the trade, the side and the custody wallet for an action on one leg.
- *
- * The right to act on side X, funding or reclaiming, is holding an active
- * custody wallet whose public key equals `user_x`. The auth context can be an
- * hour stale, so the wallet is derived and the key's binding asserted from the
- * database before anything is broadcast. Omitted `walletId`, that is the custody
- * lookup on the party address; explicit, it is that the named wallet still
- * holds the address (naming narrows).
- *
- * @param c - Validated request context naming the side.
- * @returns The trade and the re-read wallet to sign with.
- */
-async function resolveLegAction(c: ValidatedBodyContext<typeof fundDvpTradeSchema>) {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const body = c.req.valid("json");
-  const tradeId = c.req.param("tradeId");
-  if (tradeId === undefined) {
-    throw notFound("DvP trade not found");
-  }
-  const trade = await createDvpTradeRepository(c.env).getByIdAsParty(tradeId);
-  if (trade === null) {
-    throw notFound("DvP trade not found");
-  }
-  const side = body.side;
-  const partyAddress = side === "a" ? trade.userA : trade.userB;
-
-  const custodyWalletId =
-    body.walletId !== null && body.walletId !== undefined
-      ? await walletIdIfHoldsAddress(
-          getDb(c.env),
-          c.env,
-          { organizationId: auth.organizationId, projectId },
-          body.walletId,
-          partyAddress
-        )
-      : await custodyWalletForParty(
-          c.env,
-          { organizationId: auth.organizationId, projectId },
-          partyAddress,
-          getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"])
-        );
-  if (custodyWalletId === null) {
-    throw forbidden(
-      `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
-    );
-  }
-  await assertFreshApiKeyActive(getDb(c.env), auth);
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, custodyWalletId, [
-    "payments:write",
-  ]);
-
-  return {
-    trade,
-    params: { side, custodyWalletId, organizationId: auth.organizationId, projectId },
-  };
-}
-
-/**
  * Funds one side of a trade from the custody wallet holding its party address.
  *
  * @param c - Validated request context for the funding action.
  * @returns The funded-leg response envelope.
  */
 export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
-  const { trade, params } = await resolveLegAction(c);
-  const { result, replayed } = await runDvpLegActionOnce(
-    c.env,
-    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
-    { action: "fund", tradeId: trade.id, ...params },
-    (recordAttempt) => fundDvpTradeLeg(c, trade, { ...params, recordAttempt })
-  );
+  const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"));
+
+  // The gate judged a wallet; refuse if the second resolution landed on another
+  // one, and refuse an approved operation recorded against a different wallet.
+  // PRO-1975.
+  assertJudgedDvpCustodyWallet(c, params.custodyWalletId);
+  await assertApprovedWalletOperationCustodyWallet(c, params.custodyWalletId);
+
+  // Money IN to the escrow, so the intent is fail-closed and admitted after
+  // the refusals resolveLegAction makes (which move nothing and are not worth
+  // an event) and before anything is signed. PRO-1992.
+  const intent = await beginDvpFundAudit(c, actor, trade.id, {
+    side: params.side,
+    custodyWalletId: params.custodyWalletId,
+    mint: params.side === "a" ? trade.mintA : trade.mintB,
+    targetAmount: params.side === "a" ? trade.amountA : trade.amountB,
+  });
+
+  let result: DvpLegActionResult;
+  let replayed: boolean;
+  try {
+    ({ result, replayed } = await runDvpLegActionOnce(
+      c.env,
+      c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+      { action: "fund", tradeId: trade.id, ...params },
+      (recordAttempt) =>
+        fundDvpTradeLeg(c, trade, {
+          ...params,
+          recordAttempt: async (attempt) => {
+            // Record first, fence second: see the close above. The fence is a
+            // no-op on an ordinary request and is the last thing before the
+            // transfer goes out.
+            await recordAttempt(attempt);
+            await beginApprovedWalletOperationEffect(c);
+          },
+        })
+    ));
+  } catch (error) {
+    await concludeDvpFundAuditOnError(c, intent, error);
+    throw error;
+  }
+
+  await completeDvpFundAudit(c, intent, {
+    leg: result.leg,
+    amount: result.amount,
+    signature: result.signature,
+    replayed,
+  });
 
   // A replay moved nothing now, so there is no new effect to wait for.
   if (!replayed) {
@@ -636,13 +640,24 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
  * @returns The reclaimed-leg response envelope.
  */
 export const reclaimTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
-  const { trade, params } = await resolveLegAction(c);
+  const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"));
   const { result, replayed } = await runDvpLegActionOnce(
     c.env,
     c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
     { action: "reclaim", tradeId: trade.id, ...params },
     (recordAttempt) => reclaimDvpTradeLeg(c, trade, { ...params, recordAttempt })
   );
+
+  // An exit, so the record is written after the effect and cannot refuse it.
+  // PRO-1992.
+  await recordDvpExitAudit(c, actor, "reclaim", trade.id, {
+    side: params.side,
+    custodyWalletId: params.custodyWalletId,
+    mint: params.side === "a" ? trade.mintA : trade.mintB,
+    amount: result.amount,
+    signature: result.signature,
+    replayed,
+  });
 
   if (!replayed) {
     await observeDvpTradeNow(c.env, trade, result.signature);
@@ -940,7 +955,13 @@ export const inspectMint = async (c: AppContext) => {
     throw notFound("Mint not found");
   }
 
-  const inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
+  let inspection: Awaited<ReturnType<typeof inspectDvpMint>>;
+  try {
+    inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
+  } catch {
+    // The read failed, so nothing is known about the mint: retryable, never "not found".
+    throw solanaRpcError("Could not read the mint from Solana. Try again.");
+  }
   if (!inspection) {
     throw notFound("Mint not found");
   }

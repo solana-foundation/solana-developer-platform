@@ -32,6 +32,24 @@ import type { DvpPartySlot } from "./use-dvp-parties";
 /** Mirrors MAX_REF_STRING_BYTES in `services/dvp/validate.ts`. */
 const MAX_REF_BYTES = 64;
 
+/**
+ * A pasted base58 address as a selectable option of its own — the address
+ * shortened for the label, and the copy that says a raw address is welcome.
+ * Shared by the mint and payout pickers so "paste, then pick" reads the same
+ * in every slot that accepts it.
+ */
+function pastedAddressOption(
+  address: string,
+  t: ReturnType<typeof useTranslations>,
+  useAddressKey: MessageKey
+): ComboboxOption {
+  return {
+    value: address,
+    label: shortenAddress(address),
+    description: t(useAddressKey),
+  };
+}
+
 export function Field({
   children,
   hint,
@@ -99,6 +117,7 @@ export function MintField({
   onChoiceChange,
   onCustomChange,
   options,
+  warning,
 }: {
   choice: string;
   custom: string;
@@ -107,6 +126,8 @@ export function MintField({
   onChoiceChange: (next: string) => void;
   onCustomChange: (next: string) => void;
   options: DvpCreateOption[];
+  /** Why this mint cannot be traded, or null when nothing rules it out. */
+  warning: string | null;
 }) {
   const t = useTranslations();
   const isCustom = choice === CUSTOM || options.length === 0;
@@ -121,13 +142,7 @@ export function MintField({
     // The pasted mint stays in the list so the trigger can name it; it is
     // otherwise synthesized from the search text below.
     ...(isCustom && custom
-      ? [
-          {
-            value: custom,
-            label: shortenAddress(custom),
-            description: t("DashboardMarkets.dvp.mintUseAddress"),
-          },
-        ]
+      ? [pastedAddressOption(custom, t, "DashboardMarkets.dvp.mintUseAddress")]
       : []),
   ];
 
@@ -147,16 +162,13 @@ export function MintField({
         placeholder={t("DashboardMarkets.dvp.mintSlotPlaceholder")}
         queryOption={(query) =>
           BASE58_ADDRESS_PATTERN.test(query)
-            ? {
-                value: query,
-                label: shortenAddress(query),
-                description: t("DashboardMarkets.dvp.mintUseAddress"),
-              }
+            ? pastedAddressOption(query, t, "DashboardMarkets.dvp.mintUseAddress")
             : null
         }
         searchPlaceholder={t("DashboardMarkets.dvp.mintSlotSearchPlaceholder")}
         value={isCustom ? (custom ? custom : null) : choice ? choice : null}
       />
+      {warning ? <p className="text-error text-xs leading-relaxed">{warning}</p> : null}
     </div>
   );
 }
@@ -398,13 +410,7 @@ export function PayoutAddressPicker({
       description: shortenAddress(account.address),
     })),
     ...(payout.address && !counterpartyAccounts.some((a) => a.address === payout.address)
-      ? [
-          {
-            value: payout.address,
-            label: shortenAddress(payout.address),
-            description: t("DashboardMarkets.dvp.partyUseAddress"),
-          },
-        ]
+      ? [pastedAddressOption(payout.address, t, "DashboardMarkets.dvp.partyUseAddress")]
       : []),
   ];
 
@@ -416,11 +422,7 @@ export function PayoutAddressPicker({
         options={options}
         queryOption={(query) =>
           BASE58_ADDRESS_PATTERN.test(query)
-            ? {
-                value: query,
-                label: shortenAddress(query),
-                description: t("DashboardMarkets.dvp.partyUseAddress"),
-              }
+            ? pastedAddressOption(query, t, "DashboardMarkets.dvp.partyUseAddress")
             : null
         }
         searchPlaceholder={t("DashboardMarkets.dvp.partySlotSearchPlaceholder")}

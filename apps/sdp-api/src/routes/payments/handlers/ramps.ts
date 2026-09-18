@@ -139,6 +139,7 @@ import {
   ensureBvnkPaymentRule,
   readBvnkCustomerLink,
   refreshBvnkCustomerAccount,
+  requestProvisioningAudit,
 } from "./ramps/bvnk";
 import {
   ensureLightsparkCustomer,
@@ -832,7 +833,8 @@ export async function advanceCounterpartyRequirements(
         input.counterparty,
         input.projectId,
         customer,
-        { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency }
+        { currency, network, destinationWalletAddress, fiatCurrency: input.fiatCurrency },
+        requestProvisioningAudit(c, input.counterparty)
       );
       if (resolution.onboardingStatus === "verification_required") {
         return bvnkCustomerVerificationRequirements(

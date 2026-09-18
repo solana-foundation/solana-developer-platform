@@ -14,10 +14,8 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import type { CreateTransferInput } from "@/app/dashboard/payments/payments-workspace.data";
-import {
-  createTransfer,
-  fetchCounterpartyAccounts,
-} from "@/app/dashboard/payments/payments-workspace.data";
+import { fetchCounterpartyAccounts } from "@/app/dashboard/payments/payments-workspace.data";
+import { sendTransferUnderKey } from "@/app/dashboard/payments/transfer-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -145,6 +143,93 @@ export interface UseOnchainSendWizardProps {
   onExit: () => void;
 }
 
+function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
+  const [submitting, setSubmitting] = useState(false);
+  const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
+  // The approval request a policy parked this payment behind. Like a result,
+  // it ends the wizard: sending again would only open another approval.
+  const [heldApprovalRequestId, setHeldApprovalRequestId] = useState<string | null>(null);
+  const finished = transferResult !== null || heldApprovalRequestId !== null;
+
+  const submitTransfer = async (submission: CreateTransferInput) => {
+    if (signingUnavailable) return;
+    setSubmitting(true);
+    const toastId = toast.loading(t("DashboardPayments.onchainSend.submittingTransfer"), {
+      position: "bottom-right",
+    });
+    try {
+      const { outcome } = await sendTransferUnderKey(submission, t);
+      if (outcome.kind === "approval_pending") {
+        setHeldApprovalRequestId(outcome.approvalRequestId);
+        toast.info(t("DashboardPayments.onchainSend.approvalPendingTitle"), {
+          id: toastId,
+          description: t("DashboardPayments.onchainSend.approvalPendingDescription"),
+          position: "bottom-right",
+        });
+        return;
+      }
+      const transfer = outcome.transfer;
+      setTransferResult(transfer);
+      toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
+        id: toastId,
+        description: transfer.signature
+          ? t("DashboardPayments.onchainSend.transactionSent")
+          : t("DashboardPayments.onchainSend.transferStatus", { status: transfer.status }),
+        position: "bottom-right",
+      });
+    } catch (error) {
+      toast.error(t("DashboardPayments.onchainSend.transferFailed"), {
+        id: toastId,
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.onchainSend.transferFailed"),
+        position: "bottom-right",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return { submitting, transferResult, heldApprovalRequestId, finished, submitTransfer };
+}
+
+function useOnchainAssetSelection(
+  selectedWallet: PaymentsDashboardWallet | null,
+  fields: OnchainSendFields,
+  issuedTokenSymbolsByMint: Record<string, string>,
+  t: Translate
+) {
+  const assetOptions = useMemo(
+    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
+    [issuedTokenSymbolsByMint, selectedWallet, t]
+  );
+  const selectedAsset = useMemo(() => {
+    const asset = assetOptions.find((candidate) => candidate.value === fields.asset);
+    return asset === undefined ? null : asset;
+  }, [assetOptions, fields.asset]);
+
+  const selectedAssetBalance = useMemo(() => {
+    if (selectedWallet === null || selectedWallet.balances === undefined) {
+      return null;
+    }
+    const balance = selectedWallet.balances.find((candidate) => candidate.mint === fields.asset);
+    return balance === undefined ? null : balance;
+  }, [selectedWallet, fields.asset]);
+
+  let availableAmount: string | null;
+  if (selectedWallet === null) {
+    availableAmount = null;
+  } else if (selectedAssetBalance === null) {
+    availableAmount = "0";
+  } else {
+    availableAmount = selectedAssetBalance.uiAmount;
+  }
+  const exceedsBalance = onchainAmountExceedsBalance(fields.amount, availableAmount);
+
+  return { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance };
+}
+
 export function useOnchainSendWizard({
   wallets,
   walletsError,
@@ -165,8 +250,6 @@ export function useOnchainSendWizard({
     memo: "",
   });
   const [addAccountOpen, setAddAccountOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
     wallets,
@@ -202,15 +285,10 @@ export function useOnchainSendWizard({
     return account === undefined ? null : account;
   }, [cryptoAccounts, fields.accountId]);
   const destinationAddress = selectedAccount === null ? null : cryptoWalletAddress(selectedAccount);
-
-  const assetOptions = useMemo(
-    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
-    [issuedTokenSymbolsByMint, selectedWallet, t]
-  );
-  const selectedAsset = useMemo(() => {
-    const asset = assetOptions.find((candidate) => candidate.value === fields.asset);
-    return asset === undefined ? null : asset;
-  }, [assetOptions, fields.asset]);
+  const { submitting, transferResult, heldApprovalRequestId, finished, submitTransfer } =
+    useOnchainSubmission(signingUnavailable, t);
+  const { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance } =
+    useOnchainAssetSelection(selectedWallet, fields, issuedTokenSymbolsByMint, t);
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
@@ -223,24 +301,6 @@ export function useOnchainSendWizard({
     }
   };
 
-  const selectedAssetBalance = useMemo(() => {
-    if (selectedWallet === null || selectedWallet.balances === undefined) {
-      return null;
-    }
-    const balance = selectedWallet.balances.find((candidate) => candidate.mint === fields.asset);
-    return balance === undefined ? null : balance;
-  }, [selectedWallet, fields.asset]);
-
-  let availableAmount: string | null;
-  if (selectedWallet === null) {
-    availableAmount = null;
-  } else if (selectedAssetBalance === null) {
-    availableAmount = "0";
-  } else {
-    availableAmount = selectedAssetBalance.uiAmount;
-  }
-  const exceedsBalance = onchainAmountExceedsBalance(fields.amount, availableAmount);
-
   const currentStepId = steps[stepIndex].id;
   const isLastStep = stepIndex === steps.length - 1;
   const readySubmission = resolveReadySubmission(
@@ -249,7 +309,7 @@ export function useOnchainSendWizard({
     selectedAssetBalance === null ? null : selectedAssetBalance.mint
   );
   const canProceed =
-    transferResult !== null ||
+    finished ||
     ((currentStepId === "DESTINATION" || !signingUnavailable) &&
       canProceedOnchainSend({
         stepId: currentStepId,
@@ -272,42 +332,12 @@ export function useOnchainSendWizard({
     setAddAccountOpen(false);
   };
 
-  const submitTransfer = async (submission: CreateTransferInput) => {
-    if (signingUnavailable) return;
-    setSubmitting(true);
-    const toastId = toast.loading(t("DashboardPayments.onchainSend.submittingTransfer"), {
-      position: "bottom-right",
-    });
-    try {
-      const transfer = await createTransfer(submission, t);
-      setTransferResult(transfer);
-      toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
-        id: toastId,
-        description: transfer.signature
-          ? t("DashboardPayments.onchainSend.transactionSent")
-          : t("DashboardPayments.onchainSend.transferStatus", { status: transfer.status }),
-        position: "bottom-right",
-      });
-    } catch (error) {
-      toast.error(t("DashboardPayments.onchainSend.transferFailed"), {
-        id: toastId,
-        description:
-          error instanceof Error
-            ? error.message
-            : t("DashboardPayments.onchainSend.transferFailed"),
-        position: "bottom-right",
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handlePrimary = async () => {
     if (!canProceed) {
       return;
     }
     if (isLastStep) {
-      if (transferResult) {
+      if (finished) {
         router.push("/dashboard/payments");
         return;
       }
@@ -320,7 +350,7 @@ export function useOnchainSendWizard({
   };
 
   const handleSecondary = () => {
-    if (submitting || transferResult) {
+    if (submitting || finished) {
       return;
     }
     if (stepIndex === 0) {
@@ -379,6 +409,8 @@ export function useOnchainSendWizard({
     handleAccountAdded,
     submitting,
     transferResult,
+    heldApprovalRequestId,
+    finished,
     handlePrimary,
     handleSecondary,
   };

@@ -20,7 +20,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { BASE58_ADDRESS_PATTERN } from "../base58-address";
-import { compareUnsignedDecimals, parseUnsignedDecimal } from "./earn-decimal";
+import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import {
   createEarnWithdrawal,
@@ -37,11 +37,7 @@ export const compareUsdDecimals = compareUnsignedDecimals;
 
 export function isPositiveUsdAmount(value: string): boolean {
   const amount = parseUnsignedDecimal(value, { trim: false });
-  return (
-    amount !== undefined &&
-    decimalScale(value) <= 6 &&
-    compareUnsignedDecimals(amount.canonical, "0") === 1
-  );
+  return amount !== undefined && decimalScale(value) <= 6 && isPositiveDecimal(amount.canonical);
 }
 
 export function withdrawalRequestSignature(
@@ -51,17 +47,28 @@ export function withdrawalRequestSignature(
   token: EarnPortfolioToken | undefined,
   destinationAddress: string
 ): string {
-  return JSON.stringify([programId, amountUsd, token, destinationAddress]);
+  // "1.50", "1.5" and "01.50" are ONE intended withdrawal at three spellings.
+  // Keying on the raw text would let a cosmetic edit after an ambiguous failure
+  // — a 5xx that may already be recorded, the exact case
+  // `answerRetiresIdempotencyKey` refuses to release a key on — mint a fresh
+  // key and resubmit the same intent as a SECOND withdrawal. Canonicalizing
+  // keeps every spelling of a value on one key while a real correction
+  // ("12.50" → "13.00") still mints a new one. The fallback only ever sees
+  // mid-typing input no submit accepts.
+  const canonicalAmount = parseUnsignedDecimal(amountUsd)?.canonical ?? amountUsd;
+  return JSON.stringify([programId, canonicalAmount, token, destinationAddress]);
 }
 
 /**
  * The idempotency key identifies ONE intended withdrawal, so it is bound to
  * the parameters that define it. Retrying an unchanged confirm reuses the key
- * (the provider collapses the duplicate instead of paying twice); editing the
+ * (the provider collapses the duplicate instead of paying twice); changing the
  * amount, token, or destination after a failed attempt mints a new key, so a
  * corrected withdrawal can never be answered with the cached result of the
  * one the user just fixed — which would settle funds to the old address while
- * reporting success.
+ * reporting success. "Changing the amount" means its VALUE: the signature is
+ * canonical (see `withdrawalRequestSignature`), so re-spelling the same value
+ * after an ambiguous failure replays the original key instead of paying twice.
  *
  * A ref, not `useMemo`: React may discard a memo cache and recompute, which
  * would hand the same parameters a fresh key and reintroduce the
@@ -596,6 +603,10 @@ export function EarnWithdrawModal({
   const [preview, setPreview] = useState<PreviewState>({ phase: "idle" });
   const [laneLiquidity, setLaneLiquidity] = useState<LaneLiquidity>({ phase: "loading" });
   const [submitting, setSubmitting] = useState(false);
+  // Same lock the vault modals use: a ref read BEFORE the first await, so a
+  // second click that lands before the re-render commits cannot re-enter with
+  // the stale `submitting === false` closure and send a second POST.
+  const submittingRef = useRef(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [created, setCreated] = useState<{
     withdrawal: EarnPortfolioWithdrawal;
@@ -754,7 +765,8 @@ export function EarnWithdrawModal({
   }, [amount, amountValid, token, created, programId, commitLaneLiquidity]);
 
   const submit = async () => {
-    if (token === undefined || !amountValid || !destinationValid || submitting) return;
+    if (submittingRef.current || token === undefined || !amountValid || !destinationValid) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
     const result = await createEarnWithdrawal(programId, {
@@ -763,6 +775,7 @@ export function EarnWithdrawModal({
       token,
       destinationAddress: destination,
     });
+    submittingRef.current = false;
     setSubmitting(false);
     if (!result.ok) {
       // A create can still lose a race with a rebalance between preview and

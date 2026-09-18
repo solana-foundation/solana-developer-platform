@@ -635,6 +635,9 @@ importers:
 
   packages/sdp-earn:
     dependencies:
+      '@sdp/redaction':
+        specifier: workspace:*
+        version: link:../sdp-redaction
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types

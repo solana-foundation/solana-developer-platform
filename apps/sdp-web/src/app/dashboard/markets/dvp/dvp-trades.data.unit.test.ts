@@ -10,13 +10,20 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DVP_TRADES_PAGE_SIZE,
+  type DvpTradesFilters,
   fetchDvpInboundTrades,
   fetchDvpTrade,
   fetchDvpTrades,
   isNotFound,
-  UNFILTERED_DVP_TRADES,
 } from "./dvp-trades.data";
 import { parseDvpTradesFilters } from "./dvp-trades-query";
+
+/** The explicit no-filter filters: unfiltered is a choice, never a default. */
+const UNFILTERED_DVP_TRADES: DvpTradesFilters = {
+  statuses: null,
+  settlementAvailability: null,
+  q: null,
+};
 
 /**
  * The minimum a trade must carry to be renderable, which is what these

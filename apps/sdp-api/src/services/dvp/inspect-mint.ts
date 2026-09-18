@@ -15,20 +15,25 @@
  */
 
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import type { Address } from "@solana/kit";
+import type { Account, Address } from "@solana/kit";
+import { fetchEncodedAccount } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { fetchMaybeMint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { BLOCKED_MINT_EXTENSIONS } from "./mints";
+import { decodeMint, type Mint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import { BLOCKED_MINT_EXTENSIONS, UNSUPPORTED_MINT_EXTENSIONS } from "./mints";
 
 export interface DvpMintInspection {
   mint: string;
   /** The program that actually owns the mint, never the caller's claim. */
   tokenProgram: string;
-  decimals: number;
+  /** Null when the mint exists but its data could not be decoded. */
+  decimals: number | null;
   /** From the Token-2022 metadata extension, when the mint carries one inline. */
   name: string | null;
   symbol: string | null;
-  /** False when DvP settlement would refuse this mint outright. */
+  /**
+   * False when a trade on this mint would be refused: by the program, or by SDP
+   * because it could not settle, cancel or reclaim it. Create refuses the same.
+   */
   eligible: boolean;
   /**
    * The extension that rules it out, when it is not eligible. Named rather than
@@ -37,28 +42,29 @@ export interface DvpMintInspection {
   blockedBy: string | null;
 }
 
+/** The reason a mint SDP cannot decode is refused, as the form renders it. */
+export const UNREADABLE_MINT_REASON = "unreadable extension data";
+
 /**
  * Reads a mint and reports what the create form needs.
  *
- * Returns null rather than throwing for anything that is not a readable mint —
- * a wrong paste is the common case here, and it should render as "we could not
- * read that" rather than a 500.
+ * Returns null for an address that holds no mint — a wrong paste is the common
+ * case here, and it should render as "we could not read that" rather than a
+ * 500. A failed RPC read throws instead: it is not an answer about the mint.
  *
  * @param rpc - Solana RPC for the trade's cluster.
  * @param mint - The mint address to inspect.
- * @returns The inspection, or null when nothing readable is at that address.
+ * @returns The inspection, or null when no mint is at that address.
+ * @throws When the account read itself fails.
  */
 export async function inspectDvpMint(
   rpc: SolanaRpc,
   mint: Address
 ): Promise<DvpMintInspection | null> {
-  let account: Awaited<ReturnType<typeof fetchMaybeMint>>;
-  try {
-    account = await fetchMaybeMint(rpc, mint);
-  } catch {
-    return null;
-  }
-
+  // One read, and a failed one throws. An RPC error says nothing about the mint,
+  // so it is neither "nothing at that address" nor "unreadable": either answer
+  // would turn a transient outage into a verdict on a valid token.
+  const account = await fetchEncodedAccount(rpc, mint);
   if (!account.exists) {
     return null;
   }
@@ -70,17 +76,38 @@ export async function inspectDvpMint(
     return null;
   }
 
+  let decoded: Account<Mint>;
+  try {
+    decoded = decodeMint(account);
+  } catch {
+    // Owned by a token program but undecodable: the account is there, so this
+    // is not "nothing at that address". SDP cannot rule a transfer hook out of
+    // a mint it cannot read, and create refuses it for that reason, so the
+    // form is told the same thing rather than being told the token is missing.
+    return {
+      mint,
+      tokenProgram: owner,
+      // Unknown, not zero: without a scale the form refuses to convert an amount.
+      decimals: null,
+      name: null,
+      symbol: null,
+      eligible: false,
+      blockedBy: UNREADABLE_MINT_REASON,
+    };
+  }
+
   // A legacy mint carries no extensions by construction, so there is neither
   // metadata to read nor a blocked extension to find.
   const extensions =
-    owner === TOKEN_2022_PROGRAM_ADDRESS && account.data.extensions.__option === "Some"
-      ? account.data.extensions.value
+    owner === TOKEN_2022_PROGRAM_ADDRESS && decoded.data.extensions.__option === "Some"
+      ? decoded.data.extensions.value
       : [];
 
   const blockedBy =
     extensions
       .map((extension) => extension.__kind)
-      .find((kind) => BLOCKED_MINT_EXTENSIONS.has(kind)) ?? null;
+      .find((kind) => BLOCKED_MINT_EXTENSIONS.has(kind) || UNSUPPORTED_MINT_EXTENSIONS.has(kind)) ??
+    null;
 
   const metadata = extensions.find((extension) => extension.__kind === "TokenMetadata");
   const name =
@@ -91,7 +118,7 @@ export async function inspectDvpMint(
   return {
     mint,
     tokenProgram: owner,
-    decimals: account.data.decimals,
+    decimals: decoded.data.decimals,
     name,
     symbol,
     eligible: blockedBy === null,

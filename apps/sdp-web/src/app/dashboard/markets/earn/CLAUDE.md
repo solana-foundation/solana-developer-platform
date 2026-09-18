@@ -30,8 +30,11 @@ api/dashboard/markets/earn/
                                      Kamino's allocations source is
                                      mainnet-only, so the handler refuses any
                                      other cluster with a 400 before reading
-                                     anything else. Everything else about the
-                                     request is policed by the store module —
+                                     anything else, and a vault that is not
+                                     even a public key is a client bug —
+                                     400 before anything downstream. The
+                                     rest of the request is policed by the
+                                     store module —
                                      the server boundary: Kamino would answer
                                      any well-formed mainnet vault, so the
                                      store admits a vault only if it is a
@@ -266,12 +269,12 @@ program create still sends the body `requestId` form.
     request for one intent. The controller gates state updates and the outcome
     screen; key bookkeeping (`applyVaultDepositIdempotencyKeyOutcome`) runs
     unconditionally, before the abort check.
-  - `claimVaultDepositIdempotencyKey` mints once per fingerprint; `releaseVaultDepositIdempotencyKey` retires it. **Retire only on
+  - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint; `vaultDepositIdempotencyKeyStore.release` retires it. **Retire only on
     a 4xx or a recorded deposit.** A 5xx is the dangerous one — a gateway timing
     out downstream of an API that already recorded and broadcast looks exactly
     like a provider being unavailable before it did. A key released too early is
     a double deposit; a key held too long is a replay the API reports honestly.
-  - `holdVaultDepositIdempotencyKey` SUSPENDS expiry while a policy approval is
+  - `vaultDepositIdempotencyKeyStore.hold` SUSPENDS expiry while a policy approval is
     pending. The default TTL is calibrated to a blockhash (~90s to terminal);
     an approval answers to a human and can take hours, and a lapsed key there
     resubmits into a SECOND approval request for one intent.
@@ -279,7 +282,7 @@ program create still sends the body `requestId` form.
     a later legitimate deposit of the same amount from the same wallet silently
     replays the approved one. So before reusing a HELD key the modal asks the
     server whether a movement exists for it
-    (`isVaultDepositIdempotencyKeyHeld` -> `fetchEarnVaultDepositByRequestId`): a
+    (`vaultDepositIdempotencyKeyStore.isHeld` -> `fetchEarnVaultDepositByRequestId`): a
     movement means the write happened and the key is spent. That lookup returns
     THREE outcomes — `found` / `absent` / `unavailable` — and an unavailable read
     REFUSES the submit rather than picking a key, because both guesses are wrong
@@ -529,8 +532,9 @@ is a plain parameter), beside `use-escape-key`. `Modal` still owns Escape.
 ## The client/server boundary bug — why `earn-surfacing.ts` exists
 
 The surfacing constants live in **`earn-surfacing.ts`, which carries NO
-`"use client"` directive**, and `earn-program-data.ts` merely re-exports them so
-client callers keep one import site. Do not move them back.
+`"use client"` directive**; client callers import them from that file directly
+(never through `earn-program-data.ts`, whose former re-export hop is retired).
+Do not move them back.
 
 They started in `earn-program-data.ts` (a client module). A Server Component
 importing a *value* from a client module receives a **client-reference proxy,

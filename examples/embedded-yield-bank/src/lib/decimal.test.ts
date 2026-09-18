@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { addDecimals, floorForTolerance, formatAtoms } from "./decimal";
+import {
+  addDecimals,
+  compareDecimals,
+  floorForTolerance,
+  formatAtoms,
+  multiplyDivideDecimals,
+} from "./decimal";
 
 describe("Embedded Yield decimal helpers", () => {
   it("derives a quote floor without a number round-trip", () => {
@@ -13,6 +19,13 @@ describe("Embedded Yield decimal helpers", () => {
   it("formats token atoms and sums unequal decimal scales", () => {
     expect(formatAtoms(12_345_600n, 6)).toBe("12.3456");
     expect(addDecimals(["12.34", "0.006", "-2"])).toBe("10.346");
+  });
+
+  it("compares and scales decimals without floating point", () => {
+    expect(compareDecimals("1.10", "1.1")).toBe(0);
+    expect(compareDecimals("0.000001", "0.0000009")).toBe(1);
+    expect(multiplyDivideDecimals("11", "100", "110", 6)).toBe("10");
+    expect(multiplyDivideDecimals("1", "3", "7", 6)).toBe("0.428571");
   });
 
   it("rejects a quote that exceeds the provider scale", () => {

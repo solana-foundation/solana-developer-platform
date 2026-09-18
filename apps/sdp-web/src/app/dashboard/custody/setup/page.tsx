@@ -7,6 +7,7 @@ import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
+import { fetchConnectionPickerOptions } from "../connections/connections.data";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
@@ -90,13 +91,21 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
     throw new Error("Selected project required");
   }
 
-  const [configsResult, providerAccessResult] = await Promise.all([
+  // Connections only exist for Privy under BYOK, so the extra request is worth
+  // making only when the flag is on; `fetchConnectionPickerOptions` already
+  // degrades to an empty list, which renders the wizard exactly as before.
+  const [configsResult, providerAccessResult, connections] = await Promise.all([
     trace.step("fetch_custody_configs", () =>
       settle(getConnectedCustodyProviders(projectClient.request))
     ),
     trace.step("fetch_provider_access", () =>
       settle(fetchProviderAvailability(projectClient.request, organizationId))
     ),
+    privyByokEnabled
+      ? trace.step("fetch_connection_picker_options", () =>
+          fetchConnectionPickerOptions(projectClient.request, "privy")
+        )
+      : Promise.resolve([]),
   ]);
 
   const connectedProviders = configsResult.ok ? configsResult.value : [];
@@ -108,6 +117,7 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
     ok: true,
     connectedProviderCount: connectedProviders.length,
     enabledProviderCount: enabledProviders.length,
+    connectionCount: connections.length,
   });
 
   return (
@@ -116,6 +126,7 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
       enabledProviders={enabledProviders}
       initialProvider={initialProvider}
       privyByokEnabled={privyByokEnabled}
+      connections={connections}
     />
   );
 }

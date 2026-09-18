@@ -7,6 +7,7 @@ import {
   recheckPrivyCredentialAction,
   submitPrivyCredentialAction,
 } from "@/app/dashboard/custody/byok-actions";
+import { SecretField } from "@/app/dashboard/custody/connections/secret-field";
 import { getCustodyProviderEntry } from "@/app/dashboard/custody/provider-catalog";
 import { useWalletInventoryRefresh } from "@/app/dashboard/custody/use-wallet-inventory-refresh";
 import { Button } from "@/components/ui/button";
@@ -39,26 +40,153 @@ const FIELD_INPUT_CLASS =
   "h-12 rounded-2xl border-border-default bg-surface-raised px-4 shadow-none";
 
 /**
- * The Privy install step: credential in, connection checked, wallet provisioned.
+ * The four inputs, in the order the Privy dashboard presents them.
  *
- * Three rules this form owns:
- * - The app secret lives only in the DOM until submit and is never rehydrated
- *   from the API; after a terminal failure the field starts empty again.
- * - One idempotency key per submission attempt, held in state and reused if the
- *   same submission is retried, so a retry replays instead of duplicating.
- * - A `retry_unknown` outcome re-runs the same connection's completion rather
- *   than resubmitting; the credential and secret are already stored
- *   server-side.
+ * Only the secret is controlled, and only so it can be cleared on a terminal
+ * failure — it is never read back from the API, so a stale value left in a
+ * mounted input is the one way it could reappear.
  */
-export function PrivyCredentialForm({
-  formId,
-  onRecoveryLockChange,
+function CredentialFields({
+  appSecret,
+  defaultLabel,
+  onAppSecretChange,
+  t,
 }: {
-  formId: string;
-  /** True while leaving this form would strand a stored credential or key. */
-  onRecoveryLockChange?: (locked: boolean) => void;
+  appSecret: string;
+  defaultLabel: string;
+  onAppSecretChange: (value: string) => void;
+  t: ReturnType<typeof useTranslations>;
 }) {
-  const t = useTranslations();
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="byok-credential-label">
+          {t("DashboardCustody.providerCredentialLabel")}
+        </Label>
+        <Input
+          id="byok-credential-label"
+          name="credentialLabel"
+          defaultValue={defaultLabel}
+          required
+          className={FIELD_INPUT_CLASS}
+        />
+        <p className="text-sm leading-5 text-tertiary">
+          {t("DashboardCustody.providerCredentialLabelDescription")}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="byok-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
+        <Input id="byok-app-id" name="appId" required className={FIELD_INPUT_CLASS} />
+        <p className="text-sm leading-5 text-tertiary">
+          {t("DashboardCustody.providerPrivyAppIdDescription")}
+        </p>
+      </div>
+
+      <SecretField
+        name="appSecret"
+        label={t("DashboardCustody.providerPrivyAppSecret")}
+        hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
+        value={appSecret}
+        onChange={onAppSecretChange}
+      />
+
+      <div className="space-y-2">
+        <Label htmlFor="byok-wallet-label">
+          {t("DashboardCustody.providerInitialWalletLabel")}
+        </Label>
+        <Input id="byok-wallet-label" name="walletLabel" className={FIELD_INPUT_CLASS} />
+        <p className="text-sm leading-5 text-tertiary">
+          {t("DashboardCustody.providerInitialWalletLabelDescription")}
+        </p>
+      </div>
+    </>
+  );
+}
+
+/**
+ * A recovery state: what happened, and at most one way forward.
+ *
+ * The four of them differ only in tone and in which action they offer, so they
+ * share one shape. Tone is load-bearing, not decorative: an *unknown* outcome
+ * is neutral, never red, because nothing has been established to have gone
+ * wrong — the result is simply not known yet, and colouring it as a failure
+ * would tell the user something untrue.
+ *
+ * `marker` carries the per-state `data-` attribute the wizard and the tests
+ * key off.
+ */
+function RecoveryPanel({
+  marker,
+  message,
+  tone,
+  action,
+}: {
+  marker: string;
+  message: string;
+  tone: "neutral" | "error";
+  action?: { label: string; onClick: () => void; disabled: boolean };
+}) {
+  const isError = tone === "error";
+  return (
+    <div className="grid gap-4" {...{ [marker]: "true" }}>
+      <p
+        {...(isError ? { role: "alert" as const } : {})}
+        className={
+          isError
+            ? "rounded-2xl border border-error-border bg-error-bg px-5 py-4 text-sm leading-6 text-error"
+            : "rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
+        }
+      >
+        {message}
+      </p>
+      {action ? (
+        <div>
+          <Button type="button" onClick={action.onClick} disabled={action.disabled}>
+            {action.label}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The recovery states, which render a panel in place of the form. */
+type RecoveryCheckState = Extract<
+  CheckState,
+  { kind: "submit_unknown" | "unrecoverable" | "refused" | "retry_unknown" }
+>;
+
+function isRecoveryState(check: CheckState): check is RecoveryCheckState {
+  return (
+    check.kind === "submit_unknown" ||
+    check.kind === "unrecoverable" ||
+    check.kind === "refused" ||
+    check.kind === "retry_unknown"
+  );
+}
+
+/**
+ * The install's state machine: what was submitted, how it ended, and what is
+ * still safe to do about it.
+ *
+ * Lives in a hook rather than in the component because none of it is rendering.
+ * Every transition is reported outward from here — the in-flight edges, the
+ * recovery lock, and whether a panel has replaced the form — so a host that
+ * owns a footer button learns about them from the handler that settles the
+ * attempt rather than from an effect a render later.
+ */
+function usePrivyCredentialSubmission({
+  onPendingChange,
+  onRecoveryChange,
+  onRecoveryLockChange,
+  onSuccess,
+}: {
+  onPendingChange?: (pending: boolean) => void;
+  onRecoveryChange?: (inRecovery: boolean) => void;
+  onRecoveryLockChange?: (locked: boolean) => void;
+  onSuccess?: (connectionId: string) => void;
+}) {
   const router = useRouter();
   const refreshWalletInventory = useWalletInventoryRefresh();
   const [isPending, startTransition] = useTransition();
@@ -67,20 +195,25 @@ export function PrivyCredentialForm({
   const [appSecret, setAppSecret] = useState("");
   const lastPayloadRef = useRef(new FormData());
 
-  const privyFields = getCustodyProviderEntry("privy").storedCredentialSetup;
-  if (privyFields.mode !== "self_service") {
-    return null;
-  }
-  const labelField = privyFields.fields.find((field) => field.key === "credentialLabel");
-  const defaultLabel =
-    labelField && "defaultValue" in labelField ? (labelField.defaultValue ?? "") : "";
+  const settleSuccess = (connectionId: string) => {
+    onRecoveryLockChange?.(false);
+    refreshWalletInventory();
+    router.refresh();
+    if (onSuccess) {
+      onSuccess(connectionId);
+    } else {
+      router.push("/dashboard/wallets");
+    }
+  };
 
   const applyResult = (result: PrivyByokSubmitResult) => {
+    // Reported up front, from the handler that settles the attempt: these four
+    // statuses are exactly the ones whose render replaces the form with a
+    // recovery panel, and a host's own primary has to go with it.
+    onRecoveryChange?.(isRecoveryStatus(result.status));
+
     if (result.status === "success") {
-      onRecoveryLockChange?.(false);
-      refreshWalletInventory();
-      router.refresh();
-      router.push("/dashboard/wallets");
+      settleSuccess(result.connectionId);
       return;
     }
     if (result.status === "retry_unknown") {
@@ -94,11 +227,7 @@ export function PrivyCredentialForm({
       // deterministic refusal may need an external fix first, and the pending
       // connection survives leaving this step.
       onRecoveryLockChange?.(false);
-      setCheck({
-        kind: "refused",
-        message: result.message,
-        connectionId: result.connectionId,
-      });
+      setCheck({ kind: "refused", message: result.message, connectionId: result.connectionId });
       return;
     }
     if (result.status === "unrecoverable") {
@@ -156,29 +285,28 @@ export function PrivyCredentialForm({
     // Locked from the moment the POST leaves: if it commits while the response
     // is in flight, unmounting here would discard the only replay state.
     onRecoveryLockChange?.(true);
+    // Reported from the handler that owns both edges rather than mirrored out
+    // of an effect on `isPending`: an effect made the host re-render once more
+    // for a value this component already knew, and did it a render late.
+    onPendingChange?.(true);
     startTransition(async () => {
-      applyResult(await submitSafely(formData));
+      const result = await submitSafely(formData);
+      // Cleared before the result is applied, so a host that refuses to close
+      // while a request is in flight is free by the time success closes it.
+      onPendingChange?.(false);
+      applyResult(result);
     });
-  };
-
-  // A rejected action call is the same uncertainty as a transport error inside
-  // it: the POST may have committed with the response lost. Left unguarded, the
-  // rejection would skip every branch that settles the recovery lock; mapped to
-  // `error`, the frozen payload and retained key stay the recovery path.
-  const submitSafely = async (payload: FormData): Promise<PrivyByokSubmitResult> => {
-    try {
-      return await submitPrivyCredentialAction(payload);
-    } catch {
-      return { status: "error", message: "" };
-    }
   };
 
   const handleReplay = (payload: FormData) => {
     if (isPending) {
       return;
     }
+    onPendingChange?.(true);
     startTransition(async () => {
-      applyResult(await submitSafely(payload));
+      const result = await submitSafely(payload);
+      onPendingChange?.(false);
+      applyResult(result);
     });
   };
 
@@ -186,6 +314,7 @@ export function PrivyCredentialForm({
     if (isPending) {
       return;
     }
+    onPendingChange?.(true);
     startTransition(async () => {
       try {
         applyResult(await recheckPrivyCredentialAction(connectionId));
@@ -193,136 +322,201 @@ export function PrivyCredentialForm({
         // The completion is replay-safe and the connection survives
         // server-side, so a lost action response leaves the current recovery
         // state valid; stay on it with the same re-check still offered.
+      } finally {
+        onPendingChange?.(false);
       }
     });
   };
 
-  if (check.kind === "submit_unknown") {
-    return (
-      <div className="grid gap-4" data-privy-byok-submit-retry="true">
-        <p className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary">
-          {t("DashboardCustody.byokRetryUnknown")}
-        </p>
-        {/* Replay is the only safe exit: the submission may have committed as a
-            pending connection, which the server will not let a fresh
-            submission replace, so abandoning the key here would strand the
-            install. The idempotent replay always converges on the real
-            outcome. */}
-        <div>
-          <Button type="button" onClick={() => handleReplay(check.payload)} disabled={isPending}>
-            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokRetrySubmit")}
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  return { appSecret, check, handleRecheck, handleReplay, handleSubmit, isPending, setAppSecret };
+}
 
+/** The four statuses whose render replaces the form with a recovery panel. */
+function isRecoveryStatus(status: PrivyByokSubmitResult["status"]): boolean {
+  return (
+    status === "retry_unknown" ||
+    status === "refused" ||
+    status === "unrecoverable" ||
+    status === "error"
+  );
+}
+
+/**
+ * A rejected action call is the same uncertainty as a transport error inside
+ * it: the POST may have committed with the response lost. Left unguarded, the
+ * rejection would skip every branch that settles the recovery lock; mapped to
+ * `error`, the frozen payload and retained key stay the recovery path.
+ */
+async function submitSafely(payload: FormData): Promise<PrivyByokSubmitResult> {
+  try {
+    return await submitPrivyCredentialAction(payload);
+  } catch {
+    return { status: "error", message: "" };
+  }
+}
+
+/**
+ * The install's dead ends and its ways back, one panel per state.
+ *
+ * `submit_unknown` replays the frozen payload rather than re-submitting the
+ * form: the POST may have committed as a pending connection the server will not
+ * let a fresh submission replace, so abandoning that key would strand the
+ * install. The idempotent replay always converges on the real outcome. The
+ * other two re-run the same connection's completion, whose credential and
+ * secret are already stored server-side.
+ */
+function CredentialRecoveryPanel({
+  check,
+  isPending,
+  onRecheck,
+  onReplay,
+  t,
+}: {
+  check: RecoveryCheckState;
+  isPending: boolean;
+  onRecheck: (connectionId: string) => void;
+  onReplay: (payload: FormData) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
   if (check.kind === "unrecoverable") {
     return (
-      <div className="grid gap-4" data-privy-byok-unrecoverable="true">
-        <p
-          role="alert"
-          className="rounded-2xl border border-error-border bg-error-bg px-5 py-4 text-sm leading-6 text-error"
-        >
-          {check.message}
-        </p>
-      </div>
+      <RecoveryPanel marker="data-privy-byok-unrecoverable" message={check.message} tone="error" />
     );
   }
 
-  if (check.kind === "refused") {
+  if (check.kind === "submit_unknown") {
     return (
-      <div className="grid gap-4" data-privy-byok-refused="true">
-        <p
-          role="alert"
-          className="rounded-2xl border border-error-border bg-error-bg px-5 py-4 text-sm leading-6 text-error"
-        >
-          {check.message}
-        </p>
-        <div>
-          <Button
-            type="button"
-            onClick={() => handleRecheck(check.connectionId)}
-            disabled={isPending}
-          >
-            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokCheckAgain")}
-          </Button>
-        </div>
-      </div>
+      <RecoveryPanel
+        marker="data-privy-byok-submit-retry"
+        message={t("DashboardCustody.byokRetryUnknown")}
+        tone="neutral"
+        action={{
+          label: isPending
+            ? t("DashboardCustody.byokChecking")
+            : t("DashboardCustody.byokRetrySubmit"),
+          onClick: () => onReplay(check.payload),
+          disabled: isPending,
+        }}
+      />
     );
   }
 
-  if (check.kind === "retry_unknown") {
+  const isRefusal = check.kind === "refused";
+  return (
+    <RecoveryPanel
+      marker={isRefusal ? "data-privy-byok-refused" : "data-privy-byok-retry"}
+      message={isRefusal ? check.message : t("DashboardCustody.byokRetryUnknown")}
+      tone={isRefusal ? "error" : "neutral"}
+      action={{
+        label: isPending
+          ? t("DashboardCustody.byokChecking")
+          : t("DashboardCustody.byokCheckAgain"),
+        onClick: () => onRecheck(check.connectionId),
+        disabled: isPending,
+      }}
+    />
+  );
+}
+
+/**
+ * The credential label's prefilled value, or `null` when Privy is not a
+ * self-service install in this catalog — in which case this form has no fields
+ * to offer and does not render.
+ */
+function resolvePrivyDefaultLabel(): string | null {
+  const setup = getCustodyProviderEntry("privy").storedCredentialSetup;
+  if (setup.mode !== "self_service") {
+    return null;
+  }
+  const labelField = setup.fields.find((field) => field.key === "credentialLabel");
+  return labelField && "defaultValue" in labelField ? (labelField.defaultValue ?? "") : "";
+}
+
+/**
+ * The Privy install step: credential in, connection checked, wallet provisioned.
+ *
+ * Three rules this form owns:
+ * - The app secret lives only in the DOM until submit and is never rehydrated
+ *   from the API; after a terminal failure the field starts empty again.
+ * - One idempotency key per submission attempt, held in state and reused if the
+ *   same submission is retried, so a retry replays instead of duplicating.
+ * - A `retry_unknown` outcome re-runs the same connection's completion rather
+ *   than resubmitting; the credential and secret are already stored
+ *   server-side.
+ */
+export function PrivyCredentialForm({
+  formId,
+  onRecoveryLockChange,
+  onRecoveryChange,
+  onSuccess,
+  showSubmitButton = true,
+  onPendingChange,
+}: {
+  formId: string;
+  /** True while leaving this form would strand a stored credential or key. */
+  onRecoveryLockChange?: (locked: boolean) => void;
+  /**
+   * True once a recovery panel has replaced the fields, which also removes the
+   * `<form>` a host's footer submits through.
+   *
+   * A host that renders its own primary has to know: left alone, the modal's
+   * "Connect and verify" stayed enabled next to the panel's own button and did
+   * nothing at all on click, because the form it targeted no longer existed.
+   */
+  onRecoveryChange?: (inRecovery: boolean) => void;
+  /**
+   * Where a completed install goes. Defaults to the wallets list, which is
+   * where the setup wizard belongs afterwards; the provider page's Add
+   * connection modal passes its own handler to land on the new connection.
+   */
+  onSuccess?: (connectionId: string) => void;
+  /**
+   * The form renders its own primary by default. Hosts that own a footer — the
+   * wizard, and the modal — turn it off and submit via `form={formId}` instead,
+   * so the action sits where every other primary on that surface sits.
+   */
+  showSubmitButton?: boolean;
+  /**
+   * Mirrors the in-flight state outward, so a host that owns the primary can
+   * disable it — and, in the modal's case, refuse to close while a submission
+   * that may still commit is in the air.
+   */
+  onPendingChange?: (pending: boolean) => void;
+}) {
+  const t = useTranslations();
+  const { appSecret, check, handleRecheck, handleReplay, handleSubmit, isPending, setAppSecret } =
+    usePrivyCredentialSubmission({
+      onPendingChange,
+      onRecoveryChange,
+      onRecoveryLockChange,
+      onSuccess,
+    });
+
+  const defaultLabel = resolvePrivyDefaultLabel();
+  if (defaultLabel === null) {
+    return null;
+  }
+
+  if (isRecoveryState(check)) {
     return (
-      <div className="grid gap-4" data-privy-byok-retry="true">
-        <p className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary">
-          {t("DashboardCustody.byokRetryUnknown")}
-        </p>
-        <div>
-          <Button
-            type="button"
-            onClick={() => handleRecheck(check.connectionId)}
-            disabled={isPending}
-          >
-            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokCheckAgain")}
-          </Button>
-        </div>
-      </div>
+      <CredentialRecoveryPanel
+        check={check}
+        isPending={isPending}
+        onRecheck={handleRecheck}
+        onReplay={handleReplay}
+        t={t}
+      />
     );
   }
 
   return (
     <form id={formId} onSubmit={handleSubmit} className="grid gap-4" data-privy-byok-form="true">
-      <div className="space-y-2">
-        <Label htmlFor="byok-credential-label">
-          {t("DashboardCustody.providerCredentialLabel")}
-        </Label>
-        <Input
-          id="byok-credential-label"
-          name="credentialLabel"
-          defaultValue={defaultLabel}
-          required
-          className={FIELD_INPUT_CLASS}
-        />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerCredentialLabelDescription")}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="byok-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
-        <Input id="byok-app-id" name="appId" required className={FIELD_INPUT_CLASS} />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerPrivyAppIdDescription")}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="byok-app-secret">{t("DashboardCustody.providerPrivyAppSecret")}</Label>
-        <Input
-          id="byok-app-secret"
-          name="appSecret"
-          type="password"
-          autoComplete="off"
-          required
-          value={appSecret}
-          onChange={(event) => setAppSecret(event.currentTarget.value)}
-          className={FIELD_INPUT_CLASS}
-        />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerPrivyAppSecretDescription")}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="byok-wallet-label">
-          {t("DashboardCustody.providerInitialWalletLabel")}
-        </Label>
-        <Input id="byok-wallet-label" name="walletLabel" className={FIELD_INPUT_CLASS} />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerInitialWalletLabelDescription")}
-        </p>
-      </div>
+      <CredentialFields
+        appSecret={appSecret}
+        defaultLabel={defaultLabel}
+        onAppSecretChange={setAppSecret}
+        t={t}
+      />
 
       {check.kind === "failed" ? (
         <div
@@ -333,11 +527,13 @@ export function PrivyCredentialForm({
         </div>
       ) : null}
 
-      <div>
-        <Button type="submit" disabled={isPending}>
-          {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
-        </Button>
-      </div>
+      {showSubmitButton ? (
+        <div>
+          <Button type="submit" disabled={isPending}>
+            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
+          </Button>
+        </div>
+      ) : null}
     </form>
   );
 }

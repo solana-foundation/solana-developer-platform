@@ -21,9 +21,13 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
-const { runDvpLegActionOnce } = await import("./leg-action-idempotency");
+const { runDvpCloseOnce, runDvpLegActionOnce } = await import("./leg-action-idempotency");
 
-import type { DvpLegActionRequestScope, RecordDvpLegActionAttempt } from "./leg-action-idempotency";
+import type {
+  DvpCloseRequestScope,
+  DvpLegActionRequestScope,
+  RecordDvpLegActionAttempt,
+} from "./leg-action-idempotency";
 
 const ORG = "org_leg_action";
 const PROJECT = `prj_${ORG}`;
@@ -243,5 +247,234 @@ describe("runDvpLegActionOnce", () => {
     await expect(once("key-8", run)).resolves.toMatchObject({ replayed: false });
     expect(run).toHaveBeenCalledTimes(1);
     expect(readDvpFundingReceipt).not.toHaveBeenCalled();
+  });
+});
+
+const CLOSE_SCOPE: DvpCloseRequestScope = {
+  action: "settle",
+  tradeId: TRADE_ID,
+  organizationId: ORG,
+  projectId: PROJECT,
+  custodyWalletId: "cwlt_settlement",
+};
+
+/** Runs one keyed close as the caller's tenant, the way the handler does. */
+function closeOnce(
+  key: string | null,
+  run: (
+    recordAttempt: RecordDvpLegActionAttempt
+  ) => Promise<{ signature: typeof SIG; landed: boolean }>,
+  scope: DvpCloseRequestScope = CLOSE_SCOPE
+) {
+  return runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
+    runDvpCloseOnce(env, key, scope, run)
+  );
+}
+
+/** What a close does: record the sponsored transaction, then send it. */
+async function closes(recordAttempt: RecordDvpLegActionAttempt) {
+  await recordAttempt({ signature: SIG, amount: null, expiryHeight: "500" });
+  return { signature: SIG, landed: true };
+}
+
+describe("runDvpCloseOnce", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seed();
+  });
+
+  // Without a key this was the whole exposure: the close lock refuses a retry
+  // while it is live and tells the caller nothing about the settle that landed.
+  it("answers a retry with the signature the first close sent, without closing again", async () => {
+    const run = vi.fn(closes);
+
+    const first = await closeOnce("close-1", run);
+    const retry = await closeOnce("close-1", run);
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(first).toEqual({ result: { signature: SIG, landed: true }, replayed: false });
+    expect(retry).toEqual({ result: { signature: SIG, landed: true }, replayed: true });
+  });
+
+  // A settle and a cancel are different requests, and answering one with the
+  // other's signature would report the wrong outcome for the trade.
+  it("refuses a key reused for the other close action", async () => {
+    await closeOnce("close-2", closes);
+
+    await expect(
+      closeOnce("close-2", closes, { ...CLOSE_SCOPE, action: "cancel" })
+    ).rejects.toThrow(/different request payload/);
+  });
+
+  it("refuses a key reused for another trade", async () => {
+    await closeOnce("close-3", closes);
+
+    await expect(
+      closeOnce("close-3", closes, { ...CLOSE_SCOPE, tradeId: "dvp_other_trade" })
+    ).rejects.toThrow(/different request payload/);
+  });
+
+  it("replays a recorded close that landed, without signing a second one", async () => {
+    const lostAfterSending = async (recordAttempt: RecordDvpLegActionAttempt) => {
+      await recordAttempt({ signature: SIG, amount: null, expiryHeight: "500" });
+      throw new Error("socket hang up");
+    };
+    await expect(closeOnce("close-4", lostAfterSending)).rejects.toThrow("socket hang up");
+    readDvpFundingReceipt.mockResolvedValue("landed");
+
+    const run = vi.fn(closes);
+    await expect(closeOnce("close-4", run)).resolves.toEqual({
+      result: { signature: SIG, landed: true },
+      replayed: true,
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  // The close that failed on chain: the escrow is untouched, so a fresh close
+  // is legitimate, and the chain is what says so.
+  it("closes again when the recorded close provably moved nothing", async () => {
+    const failedOnChain = async (recordAttempt: RecordDvpLegActionAttempt) => {
+      await recordAttempt({ signature: SIG, amount: null, expiryHeight: "500" });
+      throw conflict("the settle was refused on chain; nothing moved");
+    };
+    await expect(closeOnce("close-5", failedOnChain)).rejects.toThrow(/refused on chain/);
+    readDvpFundingReceipt.mockResolvedValue("moved_nothing");
+
+    const run = vi.fn(closes);
+    await expect(closeOnce("close-5", run)).resolves.toMatchObject({ replayed: false });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  // The difference from a leg action. A close throws 400
+  // `dvp_close_failed_on_chain` AFTER broadcasting, so freeing the key on a 4xx
+  // would let the retry sign a second close with no evidence about the first.
+  // The key is kept, and a transaction that can still land holds the retry off.
+  it("keeps the key when a recorded close fails with a 4xx, and refuses the retry while it can land", async () => {
+    const recordedThen4xx = async (recordAttempt: RecordDvpLegActionAttempt) => {
+      await recordAttempt({ signature: SIG, amount: null, expiryHeight: "500" });
+      throw conflict("the close was refused on chain; nothing moved");
+    };
+    await expect(closeOnce("close-6", recordedThen4xx)).rejects.toThrow(/refused on chain/);
+    readDvpFundingReceipt.mockResolvedValue("pending");
+
+    const run = vi.fn(closes);
+    await expect(closeOnce("close-6", run)).rejects.toThrow(/still being processed/);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  // The close went out but this request could not confirm it. Recording that as
+  // the answer would let the retry read it back as landed, and the handler
+  // records a landed close as a settled trade: an unconfirmed broadcast would
+  // become a terminal state nothing verified.
+  it("does not answer a retry with an unconfirmed close", async () => {
+    const unconfirmed = async (recordAttempt: RecordDvpLegActionAttempt) => {
+      await recordAttempt({ signature: SIG, amount: null, expiryHeight: "500" });
+      return { signature: SIG, landed: false };
+    };
+    await expect(closeOnce("close-8", unconfirmed)).resolves.toEqual({
+      result: { signature: SIG, landed: false },
+      replayed: false,
+    });
+
+    // Still able to land, so the retry waits rather than inventing an outcome.
+    readDvpFundingReceipt.mockResolvedValue("pending");
+    await expect(closeOnce("close-8", unconfirmed)).rejects.toThrow(/still being processed/);
+
+    // Once the chain says it landed, the retry may be told so.
+    readDvpFundingReceipt.mockResolvedValue("landed");
+    await expect(closeOnce("close-8", unconfirmed)).resolves.toEqual({
+      result: { signature: SIG, landed: true },
+      replayed: true,
+    });
+  });
+
+  // Nothing recorded means nothing was signed and nothing was sent, which is
+  // the one case where the same key may be tried again immediately.
+  it("frees the key when the close is refused before it signs anything", async () => {
+    const refusedEarly = async () => {
+      throw conflict("another settle or cancel is already in flight");
+    };
+    await expect(closeOnce("close-7", refusedEarly)).rejects.toThrow(/already in flight/);
+
+    const run = vi.fn(closes);
+    await expect(closeOnce("close-7", run)).resolves.toMatchObject({ replayed: false });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(readDvpFundingReceipt).not.toHaveBeenCalled();
+  });
+});
+
+// Migration 0112 makes the two absences exact rather than optional, so a row
+// that would make a close look like a leg action cannot be stored at all.
+describe("dvp_leg_action_requests constraints (0112)", () => {
+  beforeEach(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seed();
+  });
+
+  let rowCount = 0;
+
+  function insert(row: {
+    action: string;
+    side: string | null;
+    amount: string | null;
+    signed: boolean;
+  }) {
+    rowCount += 1;
+    return runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
+      getDb(env)
+        .prepare(
+          `INSERT INTO dvp_leg_action_requests
+             (id, organization_id, project_id, idempotency_key, fingerprint, action, trade_id, side, status, signature, amount, expiry_height)
+           VALUES (?, ?, ?, ?, 'fp', ?, ?, ?, 'pending', ?, ?, ?)`
+        )
+        .bind(
+          `dvpla_constraint_${rowCount}`,
+          ORG,
+          PROJECT,
+          `constraint-key-${rowCount}`,
+          row.action,
+          TRADE_ID,
+          row.side,
+          row.signed ? SIG : null,
+          row.amount,
+          row.signed ? "500" : null
+        )
+        .run()
+    );
+  }
+
+  it("stores a close with no side and no amount", async () => {
+    await expect(
+      insert({ action: "settle", side: null, amount: null, signed: true })
+    ).resolves.toBeDefined();
+  });
+
+  // Each refusal names the constraint that produced it: a bare `rejects` would
+  // pass just as well on a typo in the insert and prove nothing.
+  it("refuses a close that names a side", async () => {
+    await expect(
+      insert({ action: "cancel", side: "a", amount: null, signed: true })
+    ).rejects.toThrow(/dvp_leg_action_requests_side_presence_check/);
+  });
+
+  it("refuses a leg action with no side", async () => {
+    await expect(
+      insert({ action: "fund", side: null, amount: "1000", signed: true })
+    ).rejects.toThrow(/dvp_leg_action_requests_side_presence_check/);
+  });
+
+  it("refuses a close that records an amount", async () => {
+    await expect(
+      insert({ action: "settle", side: null, amount: "1000", signed: true })
+    ).rejects.toThrow(/dvp_leg_action_requests_attempt_complete_check/);
+  });
+
+  // The pairing 0101 relied on, kept for leg actions alone: a recorded fund
+  // without its amount would replay a signature and no answer.
+  it("refuses a signed leg action with no amount", async () => {
+    await expect(insert({ action: "fund", side: "a", amount: null, signed: true })).rejects.toThrow(
+      /dvp_leg_action_requests_attempt_complete_check/
+    );
   });
 });

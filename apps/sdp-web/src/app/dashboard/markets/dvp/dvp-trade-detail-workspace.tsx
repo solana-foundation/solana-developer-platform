@@ -38,6 +38,7 @@ import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "../../activity-format-utils";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
+import { truncateMiddle } from "../truncate-middle";
 import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
@@ -51,6 +52,7 @@ import {
   frozenLegs,
   isDvpPartyView,
   isDvpTradeClosed,
+  isDvpTradeOpen,
   legFundingRatio,
   overFundedLegs,
 } from "./dvp-trade";
@@ -111,7 +113,7 @@ function CopyableAddress({
 }
 
 function shortenSignature(signature: string): string {
-  return `${signature.slice(0, 8)}…${signature.slice(-8)}`;
+  return truncateMiddle(signature, 8, 8);
 }
 
 /**
@@ -867,14 +869,9 @@ function TradeWarnings({ trade }: { trade: DvpTrade }) {
  * matters most.
  */
 function canReclaimLeg(leg: DvpTradeLeg, status: DvpTrade["status"]): boolean {
-  const open =
-    status === "created" ||
-    status === "partially_funded" ||
-    status === "funded" ||
-    status === "expired";
   return (
     leg.party.wallet !== null &&
-    open &&
+    isDvpTradeOpen({ status }) &&
     leg.funding !== null &&
     BigInt(leg.funding.observedAmount) > 0n
   );

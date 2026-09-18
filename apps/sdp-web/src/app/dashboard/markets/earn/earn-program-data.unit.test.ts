@@ -14,13 +14,10 @@ import {
   earnVaultMovementRefreshInterval,
   fetchEarnExternalWalletPositionSummary,
   fetchEarnExternalWalletPositions,
-  fetchEarnProgramDeposits,
   fetchEarnProgramsState,
   fetchEarnProgramWithdrawals,
   fetchEarnStrategies,
   fetchEarnVaultPositions,
-  hasPrograms,
-  isEarnVaultDepositAvailable,
 } from "./earn-program-data";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -396,34 +393,6 @@ describe("external-wallet position reads", () => {
   });
 });
 
-describe("vault deposit availability", () => {
-  const kamino = { ...strategy("kamino-vault"), provider: "kamino" };
-  const providerAccess = {
-    kamino: { entitled: true, configured: true, enabled: true },
-  };
-
-  it("opens only an active, fundable, surfaced vault-direct strategy in an enabled environment", () => {
-    expect(isEarnVaultDepositAvailable(kamino, "sandbox", providerAccess)).toBe(true);
-    // Kamino is deployed on both clusters, so production opens too (PRO-1986);
-    // the environment gate now bites a provider deployed on devnet only.
-    expect(isEarnVaultDepositAvailable(kamino, "production", providerAccess)).toBe(true);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, provider: "veda" }, "production", {
-        veda: { entitled: true, configured: true, enabled: true },
-      })
-    ).toBe(false);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, fundable: false }, "sandbox", providerAccess)
-    ).toBe(false);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, status: "paused" }, "sandbox", providerAccess)
-    ).toBe(false);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, provider: "upshift" }, "sandbox", providerAccess)
-    ).toBe(false);
-  });
-});
-
 describe("createEarnVaultDeposit", () => {
   it("sends idempotency only as a header and allowlists the JSON body", async () => {
     const deposit = {
@@ -614,7 +583,6 @@ describe("fetchEarnProgramsState", () => {
     stubProgramsResponse(200, { data: { programs: [], total: 0 } });
     const state = await fetchEarnProgramsState();
     expect(state).toEqual({ kind: "ready", programs: [] });
-    expect(hasPrograms(state)).toBe(false);
   });
 
   it("keeps every program, in the order the API returned them", async () => {
@@ -623,7 +591,6 @@ describe("fetchEarnProgramsState", () => {
     });
     const state = await fetchEarnProgramsState();
     if (state.kind !== "ready") throw new Error("expected ready");
-    expect(hasPrograms(state)).toBe(true);
     // Order is load-bearing: consumers that track one program across polls rely
     // on the head of this list being stable.
     expect(state.programs.map((program) => program.id)).toEqual(["p1", "p2"]);
@@ -692,19 +659,6 @@ describe("fetchEarnProgramsState pagination", () => {
       "Earn programs pagination exceeded its safety limit"
     );
     expect(fetchMock).toHaveBeenCalledTimes(20);
-  });
-});
-
-describe("fetchEarnProgramDeposits (via useEarnProgramDeposits fetcher)", () => {
-  /**
-   * No 404→empty mapping: the program id always comes from a program resolved
-   * through the live list in this org+environment, so a 404 can only be a
-   * broken proxy path or a scoping regression — and rendering that as "no
-   * deposits yet" on a funded program would mask the bug as calm.
-   */
-  it("throws on 404 rather than reporting an empty feed", async () => {
-    stubProgramsResponse(404, { error: { message: "not found" } });
-    await expect(fetchEarnProgramDeposits("prog_1")).rejects.toThrow("not found");
   });
 });
 

@@ -100,6 +100,42 @@ export function derivedMinOut<Preview extends { blockingIssues: readonly unknown
 }
 
 /**
+ * What a submission's floor must be, decided from the idempotency-key
+ * resolution and the flow's floor memo:
+ *
+ * - `fresh`: the resolution carries a brand-new key — the floor is the one
+ *   derived from the live quote, remembered for exactly that key's future
+ *   replays.
+ * - `replay`: the key is a REUSE — a held approval's replay or a kept key's
+ *   retry after an ambiguous failure — and the memo still holds the floor it
+ *   was MINTED with, which must go out verbatim. A freshly derived floor would
+ *   pair the reused key with a changed request, which the API refuses (its
+ *   idempotency fingerprint includes the floor) and the refusal retires the
+ *   key.
+ * - `unavailable`: the key is a reuse but the memo has LOST its floor —
+ *   evicted, another tab, storage refused. Sending a freshly derived floor
+ *   would risk exactly the changed-request refusal above, and the refusal
+ *   retires the key and lets a later submit move funds a second time while
+ *   the first attempt may already have executed. The caller must stop the
+ *   submission instead of silently re-flooring.
+ */
+export type VaultFloorReplay =
+  | { kind: "fresh"; floor: string | null }
+  | { kind: "replay"; floor: string | null }
+  | { kind: "unavailable" };
+
+export function floorToReplay(
+  resolution: { wasHeld: boolean; wasReused: boolean },
+  recallFloor: (fingerprint: string) => string | null | undefined,
+  fingerprint: string,
+  freshFloor: string | null
+): VaultFloorReplay {
+  if (!resolution.wasHeld && !resolution.wasReused) return { kind: "fresh", floor: freshFloor };
+  const floor = recallFloor(fingerprint);
+  return floor === undefined ? { kind: "unavailable" } : { kind: "replay", floor };
+}
+
+/**
  * True when the quote expects ZERO atoms out — nothing any floor could protect.
  * An over-scale (malformed) quote is not PROVABLY zero, so it answers `false`;
  * the floor it derives is `null` and blocks the submission instead.

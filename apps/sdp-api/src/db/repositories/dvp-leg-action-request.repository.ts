@@ -1,18 +1,27 @@
 /**
- * The Idempotency-Key record for funding or reclaiming one DvP leg.
+ * The Idempotency-Key record for one DvP action: funding or reclaiming a leg,
+ * or the settle/cancel that closes a trade (PRO-1993).
  *
  * Owned by the caller's organization, so it stays inside ordinary tenant
  * isolation even when the trade belongs to somebody else.
+ *
+ * A leg action names its side and records the amount it moved; a close names no
+ * side and has no single amount, because it moves both legs. Migration 0112
+ * enforces both absences, so the nullability here is the table's shape rather
+ * than a field that might happen to be missing.
  */
 
 import { type Signature, signature } from "@solana/kit";
 import { z } from "zod";
 import type { RepositoryDbClient } from "./base";
 
+/** Acting on one leg names a side; closing the trade does not. */
+export type DvpActionRequestKind = "fund" | "reclaim" | "settle" | "cancel";
+
 const dvpLegActionRequestRowSchema = z.object({
   id: z.string(),
   fingerprint: z.string(),
-  side: z.enum(["a", "b"]),
+  side: z.enum(["a", "b"]).nullable(),
   status: z.enum(["pending", "sent"]),
   signature: z.string().nullable(),
   amount: z.string().nullable(),
@@ -23,8 +32,8 @@ const dvpLegActionRequestRowSchema = z.object({
 /** The transaction a request is about to broadcast, written before it goes out. */
 export interface DvpLegActionAttempt {
   signature: Signature;
-  /** Base units, as the response reports them. */
-  amount: string;
+  /** Base units, as a leg action's response reports them. Null for a close. */
+  amount: string | null;
   /** Past this block height the transaction can no longer land. */
   expiryHeight: string;
 }
@@ -34,7 +43,7 @@ export type DvpLegActionRequest =
       id: string;
       fingerprint: string;
       status: "pending";
-      side: "a" | "b";
+      side: "a" | "b" | null;
       /** Null until the request signed a transaction; nothing was broadcast before that. */
       attempt: DvpLegActionAttempt | null;
       updatedAt: string;
@@ -43,7 +52,7 @@ export type DvpLegActionRequest =
       id: string;
       fingerprint: string;
       status: "sent";
-      side: "a" | "b";
+      side: "a" | "b" | null;
       attempt: DvpLegActionAttempt;
       updatedAt: string;
     };
@@ -54,9 +63,10 @@ export interface DvpLegActionRequestInsert {
   projectId: string;
   idempotencyKey: string;
   fingerprint: string;
-  action: "fund" | "reclaim";
+  action: DvpActionRequestKind;
   tradeId: string;
-  side: "a" | "b";
+  /** The leg for a fund or reclaim; null for a close. */
+  side: "a" | "b" | null;
 }
 
 export interface DvpLegActionRequestRepository {
@@ -97,8 +107,12 @@ export interface DvpLegActionRequestRepository {
 
 function toDvpLegActionRequest(row: Record<string, unknown>): DvpLegActionRequest {
   const parsed = dvpLegActionRequestRowSchema.parse(row);
+  // The signature and its expiry height are written together, so either both
+  // are present or nothing was signed. The amount is not part of that test: a
+  // close records a signature and no amount, and 0112's CHECK is what keeps a
+  // leg action's amount from going missing alongside its signature.
   const attempt =
-    parsed.signature === null || parsed.amount === null || parsed.expiry_height === null
+    parsed.signature === null || parsed.expiry_height === null
       ? null
       : {
           signature: signature(parsed.signature),

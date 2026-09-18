@@ -334,7 +334,11 @@
       "agreementRequiredTitle": "Examinez et acceptez les accords",
       "agreementRequiredDescription": "BVNK exige que la contrepartie accepte l'accord de plateforme applicable à sa résidence fiscale avant que ses informations ne soient recueillies.",
       "viewAgreement": "Voir l'accord",
-      "acceptAgreements": "J'accepte et je continue"
+      "acceptAgreements": "J'accepte et je continue",
+      "agreementSigningTitle": "Confirmation de l'accord",
+      "agreementSigningDescription": "En attente de la confirmation de l'accord signé par le fournisseur. Cela prend généralement quelques secondes.",
+      "agreementConsentPrefix": "J'ai lu et j'accepte la",
+      "privacyPolicy": "politique de confidentialité"
     },
     "lightspark": {
       "verificationRequiredTitle": "Vérifiez votre identité",
@@ -667,7 +671,12 @@
       "providerAccountStatus": "Statut",
       "copyCustomerId": "Copier l'ID client",
       "customerIdCopied": "ID client copié",
-      "noPayoutAccounts": "Aucun compte de paiement pour le moment."
+      "noPayoutAccounts": "Aucun compte de paiement pour le moment.",
+      "taxResidence": "Résidence fiscale",
+      "agreementSigned": "Signé",
+      "agreementAwaitingSignature": "En attente de signature",
+      "viewAgreement": "Accord",
+      "viewPrivacyPolicy": "Politique de confidentialité"
     },
     "playground": {
       "moonPay": "MoonPay",

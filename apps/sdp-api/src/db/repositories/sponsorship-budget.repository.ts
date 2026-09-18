@@ -4,6 +4,13 @@ import type { AppDb, DatabaseExecutor } from "@/db";
 export const SPONSORSHIP_BREAKER_OPERATOR = "system:sponsorship-breaker";
 
 export type SponsorshipNetwork = "devnet" | "mainnet";
+
+/** The budget network a Solana cluster draws from. The ONE mapping; do not re-derive it. */
+export function sponsorshipNetworkForCluster(
+  cluster: "devnet" | "mainnet-beta"
+): SponsorshipNetwork {
+  return cluster === "mainnet-beta" ? "mainnet" : "devnet";
+}
 export type SponsorshipBudgetScopeType = "global" | "organization" | "project";
 export type SponsorshipReservationStatus =
   | "reserved"

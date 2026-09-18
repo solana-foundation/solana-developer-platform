@@ -76,6 +76,7 @@
     "lint": "biome check src/"
   },
   "dependencies": {
+    "@sdp/redaction": "workspace:*",
     "@sdp/types": "workspace:*"
   },
   "devDependencies": {

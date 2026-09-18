@@ -122,3 +122,18 @@ export function getCustodyProvidersByCategory(
 ): CustodyProviderCatalogEntry[] {
   return CUSTODY_PROVIDER_CATALOG.filter((provider) => provider.category === category);
 }
+
+/**
+ * Whether a tenant can install its own credentials for this provider from the
+ * Dashboard — the thing a Connection *is*.
+ *
+ * Read off `storedCredentialSetup.mode` rather than named providers: the
+ * connections surface exists exactly where that setup form exists, and a
+ * provider whose route is `request_access` or `none` has no connections to
+ * list, no credentials to rotate, and nowhere to send an App Secret. Privy is
+ * the only `self_service` entry today, and the next one inherits the surface by
+ * appearing in the catalog rather than by editing a condition.
+ */
+export function providerSupportsStoredCredentialSetup(provider: KnownCustodyProvider): boolean {
+  return getCustodyProviderEntry(provider).storedCredentialSetup.mode === "self_service";
+}

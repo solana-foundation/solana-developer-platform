@@ -27,9 +27,10 @@ import { toast } from "sonner";
 import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { dvpToastAction } from "./dvp-action-toast";
 import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
+import { dvpErrorEnvelopeSchema } from "./dvp-trade";
 
 export type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
 
@@ -122,6 +123,19 @@ const CLOSE_REFUSAL_MESSAGE: Record<DvpCloseRefusalReason, MessageKey> = {
 };
 
 /**
+ * A wallet policy held the action for approval, keyed by the action so the
+ * toast uses the verb the button did. Same shape Pay uses for a held batch
+ * (`use-batch-send-wizard.ts`), because it is the same situation.
+ *
+ * Only fund and settle can be held; reclaim and cancel are not policy-gated, so
+ * a 202 on either would be a contract change rather than a state to render.
+ */
+const HELD_MESSAGE: Partial<Record<DvpTradeActionName, MessageKey>> = {
+  fund: "DashboardMarkets.dvp.toastFundPendingApproval",
+  settle: "DashboardMarkets.dvp.toastSettlePendingApproval",
+};
+
+/**
  * A settle or cancel sent but not confirmed within the request, keyed by action.
  * The trade updates once the reconciler reads it, so the toast says sent, not done.
  */
@@ -136,14 +150,6 @@ function sameCopy(key: MessageKey): { withSymbol: MessageKey; withoutSymbol: Mes
 
 const legRefusalReasonSchema = z.enum(DVP_LEG_REFUSAL);
 const closeRefusalReasonSchema = z.enum(DVP_CLOSE_REFUSAL);
-
-/** A failed call's envelope. Only what the toast reads is required. */
-const errorEnvelopeSchema = z.object({
-  error: z.object({
-    message: z.string(),
-    details: z.object({ reason: z.string() }).partial().optional(),
-  }),
-});
 
 /** Fund and reclaim answer with the transaction they broadcast. */
 const broadcastEnvelopeSchema = z.object({ data: z.object({ signature: z.string().min(1) }) });
@@ -212,7 +218,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
 
   /** Plain copy for a refusal the dashboard can name, else the API's own message. */
   function refusalMessage(body: unknown, status: number, symbol: string | null): string {
-    const envelope = errorEnvelopeSchema.safeParse(body);
+    const envelope = dvpErrorEnvelopeSchema.safeParse(body);
     if (!envelope.success) {
       return t("DashboardMarkets.dvp.actionFailed", { status: String(status) });
     }
@@ -247,6 +253,18 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
         `/api/dashboard/markets/dvp/trades/${encodeURIComponent(tradeId)}/${action}`,
         requestInit(action, leg)
       );
+      // Held by policy. 202 is an ok status, so this has to come before the
+      // success read: nothing moved, and the trade page shows the action as
+      // still available until an approver decides.
+      const heldMessage = HELD_MESSAGE[action];
+      if (response.status === 202 && heldMessage !== undefined) {
+        toast.info(t(heldMessage), {
+          description: t("DashboardMarkets.dvp.approvalPendingDescription"),
+          position: "bottom-right",
+        });
+        router.refresh();
+        return;
+      }
       // Either way the body can fail to be JSON at all, such as a proxy's error
       // page. It reads as null, and each schema below treats null as not matching.
       if (!response.ok) {
@@ -273,13 +291,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       // out but has not confirmed says sent, not done.
       toast.success(t(success.message), {
         position: "bottom-right",
-        // Whatever SDP just sent can be checked on chain from the toast that
-        // reports it, without hunting for it on the page.
-        action: {
-          label: t("DashboardMarkets.dvp.viewTransaction"),
-          onClick: () =>
-            window.open(explorerTxUrl(success.signature, cluster), "_blank", "noopener,noreferrer"),
-        },
+        action: dvpToastAction(t, success.signature, cluster),
       });
       router.refresh();
     } catch (caught) {

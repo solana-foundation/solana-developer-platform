@@ -1,7 +1,12 @@
-import type { OrganizationRpcProvider, SafeRpcConnection } from "@sdp/types";
+import type { CustodyWalletSummary, OrganizationRpcProvider, SafeRpcConnection } from "@sdp/types";
 import { VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import type {
+  ConnectionsFilters,
+  ConnectionsPageResult,
+  ConnectionsProjectSummary,
+} from "@/app/dashboard/custody/connections/connections.data";
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { RpcProviderMark } from "@/app/dashboard/integrations/rpc-provider-mark";
@@ -10,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import { CustodyConnectionCount, CustodyConnectionsSection } from "../custody-connections-section";
 import type { IntegrationDetail } from "../integration-detail";
 import { RpcByokSection } from "../rpc-byok-section";
 import { RpcConnectionPanel } from "../rpc-connection-panel";
@@ -156,73 +162,148 @@ function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
   return null;
 }
 
-export async function IntegrationDetailView({
+/**
+ * The project's custody connections, or the reason there are none to show.
+ * `null` means the section does not apply here; `"restricted"` means the
+ * viewer cannot read them.
+ */
+export type CustodyConnectionsContext =
+  | {
+      result: ConnectionsPageResult;
+      filters: ConnectionsFilters;
+      summary: ConnectionsProjectSummary;
+      walletsByConnection: Record<string, CustodyWalletSummary[]>;
+      walletsUnavailable: boolean;
+    }
+  | "restricted"
+  | null;
+
+function DetailHeader({
+  detail,
+  connectionCount,
+  t,
+}: {
+  detail: IntegrationDetail;
+  /** `null` on every family but custody, and on custody when unreadable. */
+  connectionCount: number | null;
+  t: Translate;
+}) {
+  const entry = detail.custodyEntry;
+  return (
+    <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised p-6">
+      <div className="flex min-w-0 items-center gap-4">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-fill-strong">
+          <DetailMark detail={detail} />
+        </span>
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="truncate text-xl font-medium tracking-tight text-primary">
+              {detail.label}
+            </h1>
+            <span className="shrink-0 whitespace-nowrap rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
+              {t(statusKey(detail.status))}
+            </span>
+          </div>
+          <p className="text-sm text-tertiary">
+            {t(familyKey(detail.family))}
+            {entry
+              ? ` · ${t(
+                  entry.category === "server"
+                    ? "DashboardCustody.providerCategoryApi"
+                    : "DashboardCustody.providerCategoryInstitutional"
+                )}`
+              : ""}
+            {connectionCount !== null ? (
+              <>
+                {" · "}
+                <CustodyConnectionCount count={connectionCount} />
+              </>
+            ) : null}
+          </p>
+        </div>
+      </div>
+      {resolvePrimaryAction(detail, t)}
+    </header>
+  );
+}
+
+/**
+ * The project's connections, or the reason there are none on screen.
+ *
+ * Placed above everything but the header for the same reason as the RPC panel:
+ * on an integration you can act on, what this project has connected outranks
+ * what the provider is.
+ */
+function CustodyConnectionsBlock({
+  detail,
+  custodyConnections,
+  canManageCustody,
+  t,
+}: {
+  detail: IntegrationDetail;
+  custodyConnections: CustodyConnectionsContext;
+  canManageCustody: boolean;
+  t: Translate;
+}) {
+  if (custodyConnections === "restricted") {
+    return (
+      <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
+        <h2 className="text-base font-medium text-primary">
+          {t("DashboardCustody.connectionsTitle")}
+        </h2>
+        <p className="mt-3 text-sm text-tertiary">{t("DashboardCustody.readOnlyViewer")}</p>
+      </section>
+    );
+  }
+  if (!custodyConnections || !detail.custodyEntry) {
+    return null;
+  }
+  return (
+    <CustodyConnectionsSection
+      result={custodyConnections.result}
+      filters={custodyConnections.filters}
+      summary={custodyConnections.summary}
+      walletsByConnection={custodyConnections.walletsByConnection}
+      walletsUnavailable={custodyConnections.walletsUnavailable}
+      canManageCustody={canManageCustody}
+      provider={detail.custodyEntry.id}
+    />
+  );
+}
+
+function RpcSections({
   detail,
   rpc,
+  t,
 }: {
   detail: IntegrationDetail;
   rpc?: RpcConnectionContext;
+  t: Translate;
 }) {
-  const t = await getTranslations();
-  const entry = detail.custodyEntry;
-
-  const primaryAction = resolvePrimaryAction(detail, t);
-
+  if (detail.family !== "rpc" || !rpc) {
+    return null;
+  }
   return (
-    <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>
-      <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised p-6">
-        <div className="flex min-w-0 items-center gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-fill-strong">
-            <DetailMark detail={detail} />
-          </span>
-          <div className="min-w-0 space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-xl font-medium tracking-tight text-primary">
-                {detail.label}
-              </h1>
-              <span className="shrink-0 whitespace-nowrap rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
-                {t(statusKey(detail.status))}
-              </span>
-            </div>
-            <p className="text-sm text-tertiary">
-              {t(familyKey(detail.family))}
-              {entry
-                ? ` · ${t(
-                    entry.category === "server"
-                      ? "DashboardCustody.providerCategoryApi"
-                      : "DashboardCustody.providerCategoryInstitutional"
-                  )}`
-                : ""}
-            </p>
-          </div>
-        </div>
-        {primaryAction}
-      </header>
+    <>
+      <Section title={t("Shared.integrations.rpcConnectionTitle")}>
+        <RpcConnectionPanel
+          activeProvider={rpc.activeProvider}
+          canManage={rpc.canManage}
+          isEnabledInDeployment={rpc.isEnabledInDeployment}
+          organizationId={rpc.organizationId}
+          hasOwnKey={
+            Array.isArray(rpc.byokConnections) &&
+            rpc.byokConnections.some(
+              (connection) => connection.scope === "project" && connection.status !== "deactivated"
+            )
+          }
+          provider={detail.provider as OrganizationRpcProvider}
+          servingProvider={rpc.servingProvider ?? null}
+          status={detail.status}
+        />
+      </Section>
 
-      {/* Leads the page: on an integration you can actually act on, what the
-          organization runs right now outranks what the provider is. */}
-      {detail.family === "rpc" && rpc ? (
-        <Section title={t("Shared.integrations.rpcConnectionTitle")}>
-          <RpcConnectionPanel
-            activeProvider={rpc.activeProvider}
-            canManage={rpc.canManage}
-            isEnabledInDeployment={rpc.isEnabledInDeployment}
-            organizationId={rpc.organizationId}
-            hasOwnKey={
-              Array.isArray(rpc.byokConnections) &&
-              rpc.byokConnections.some(
-                (connection) =>
-                  connection.scope === "project" && connection.status !== "deactivated"
-              )
-            }
-            provider={detail.provider as OrganizationRpcProvider}
-            servingProvider={rpc.servingProvider ?? null}
-            status={detail.status}
-          />
-        </Section>
-      ) : null}
-
-      {detail.family === "rpc" && rpc?.byokConnections !== undefined ? (
+      {rpc.byokConnections !== undefined ? (
         <Section title={t("Shared.integrations.rpcByokTitle")}>
           <RpcByokSection
             canManage={rpc.canManage}
@@ -235,6 +316,124 @@ export async function IntegrationDetailView({
           />
         </Section>
       ) : null}
+    </>
+  );
+}
+
+function CapabilitiesSection({
+  entry,
+  t,
+}: {
+  entry: NonNullable<IntegrationDetail["custodyEntry"]>;
+  t: Translate;
+}) {
+  return (
+    <Section title={t("Shared.integrations.detailCapabilities")}>
+      <ul className="flex flex-wrap gap-2">
+        {entry.useCases.map((useCase) => (
+          <li
+            key={useCase}
+            className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
+          >
+            {t(CUSTODY_CAPABILITY_LABEL_KEYS[useCase])}
+          </li>
+        ))}
+        {entry.technicalCapabilities.supportsSigning ? (
+          <li className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary">
+            {t("Shared.integrations.capabilitySigning")}
+          </li>
+        ) : null}
+        {entry.technicalCapabilities.supportsAdditionalWalletCreation ? (
+          <li className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary">
+            {t("Shared.integrations.capabilityAdditionalWallets")}
+          </li>
+        ) : null}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * How access to this provider is obtained.
+ *
+ * Renders for every status, including Connected: a provider must never say
+ * "request access" without saying anywhere how the request is made.
+ */
+function HowItConnectsBody({ detail, t }: { detail: IntegrationDetail; t: Translate }) {
+  const entry = detail.custodyEntry;
+
+  if (entry?.storedCredentialSetup.mode === "self_service") {
+    return (
+      <div className="space-y-3">
+        <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
+          {t("Shared.integrations.connectSelfServe")}
+        </p>
+        <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
+          {t("Shared.integrations.connectYouWillNeed")}
+        </p>
+        <ul className="flex flex-wrap gap-2">
+          {entry.storedCredentialSetup.fields
+            .filter((field) => field.key !== "credentialLabel" && field.key !== "scope")
+            .map((field) => (
+              <li
+                key={field.key}
+                className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
+              >
+                {t(field.labelKey)}
+              </li>
+            ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // Manual providers, whether or not a request route is wired yet (HOO-775):
+  // access is granted by the SDP team, and the page must say so even when the
+  // header has no request button to offer. Everything else — generally
+  // available providers riding deployment credentials, and the deployment-wide
+  // rails — is turned on by the SDP operator.
+  const isByArrangement = entry?.availability === "manual" || detail.status === "request_access";
+  return (
+    <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
+      {t(
+        isByArrangement
+          ? "Shared.integrations.connectByArrangement"
+          : "Shared.integrations.connectManaged"
+      )}
+    </p>
+  );
+}
+
+export async function IntegrationDetailView({
+  detail,
+  rpc,
+  custodyConnections = null,
+  canManageCustody = false,
+}: {
+  detail: IntegrationDetail;
+  rpc?: RpcConnectionContext;
+  custodyConnections?: CustodyConnectionsContext;
+  canManageCustody?: boolean;
+}) {
+  const t = await getTranslations();
+  const entry = detail.custodyEntry;
+  const connectionCount =
+    custodyConnections && custodyConnections !== "restricted"
+      ? custodyConnections.result.pagination.total
+      : null;
+
+  return (
+    <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>
+      <DetailHeader detail={detail} connectionCount={connectionCount} t={t} />
+
+      <CustodyConnectionsBlock
+        detail={detail}
+        custodyConnections={custodyConnections}
+        canManageCustody={canManageCustody}
+        t={t}
+      />
+
+      <RpcSections detail={detail} rpc={rpc} t={t} />
 
       {detail.descriptionKey ? (
         <Section title={t("Shared.integrations.detailAbout")}>
@@ -244,70 +443,10 @@ export async function IntegrationDetailView({
         </Section>
       ) : null}
 
-      {entry ? (
-        <Section title={t("Shared.integrations.detailCapabilities")}>
-          <ul className="flex flex-wrap gap-2">
-            {entry.useCases.map((useCase) => (
-              <li
-                key={useCase}
-                className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
-              >
-                {t(CUSTODY_CAPABILITY_LABEL_KEYS[useCase])}
-              </li>
-            ))}
-            {entry.technicalCapabilities.supportsSigning ? (
-              <li className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary">
-                {t("Shared.integrations.capabilitySigning")}
-              </li>
-            ) : null}
-            {entry.technicalCapabilities.supportsAdditionalWalletCreation ? (
-              <li className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary">
-                {t("Shared.integrations.capabilityAdditionalWallets")}
-              </li>
-            ) : null}
-          </ul>
-        </Section>
-      ) : null}
+      {entry ? <CapabilitiesSection entry={entry} t={t} /> : null}
 
-      {/* Every status that is not "Connected" asks the reader to do something,
-          so this section always renders: a provider must never say "request
-          access" without saying anywhere how the request is made. */}
       <Section title={t("Shared.integrations.detailHowItConnects")}>
-        {entry?.storedCredentialSetup.mode === "self_service" ? (
-          <div className="space-y-3">
-            <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
-              {t("Shared.integrations.connectSelfServe")}
-            </p>
-            <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
-              {t("Shared.integrations.connectYouWillNeed")}
-            </p>
-            <ul className="flex flex-wrap gap-2">
-              {entry.storedCredentialSetup.fields
-                .filter((field) => field.key !== "credentialLabel" && field.key !== "scope")
-                .map((field) => (
-                  <li
-                    key={field.key}
-                    className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
-                  >
-                    {t(field.labelKey)}
-                  </li>
-                ))}
-            </ul>
-          </div>
-        ) : entry?.availability === "manual" || detail.status === "request_access" ? (
-          // Manual providers, whether or not a request route is wired yet
-          // (HOO-775): access is granted by the SDP team, and the page must say
-          // so even when the header has no request button to offer.
-          <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
-            {t("Shared.integrations.connectByArrangement")}
-          </p>
-        ) : (
-          // Generally available providers riding deployment credentials, and
-          // the deployment-wide rails: the SDP operator turns these on.
-          <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
-            {t("Shared.integrations.connectManaged")}
-          </p>
-        )}
+        <HowItConnectsBody detail={detail} t={t} />
       </Section>
 
       <Section title={t("Shared.integrations.detailResources")}>

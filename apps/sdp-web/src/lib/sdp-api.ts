@@ -173,6 +173,33 @@ export function extractSdpApiErrorMessage(error: unknown): string {
   }
 }
 
+/**
+ * The same unwrapping as {@link extractSdpApiErrorMessage}, but keeping the
+ * status alongside the message.
+ *
+ * Callers that must tell a conclusive refusal from an outcome that may still
+ * have committed need the code, not just the text: under 500 (and not 408 or
+ * 429) the server answered and nothing was written; anything else leaves the
+ * question open. A `null` status means no response was attributable at all,
+ * which belongs on the open side of that line.
+ */
+export function extractSdpApiError(error: unknown): { status: number | null; message: string } {
+  if (error instanceof SdpApiResponseError) {
+    return { status: error.status, message: extractSdpApiErrorMessage(error) };
+  }
+  if (!(error instanceof Error)) {
+    return { status: null, message: "Unknown error." };
+  }
+  // Errors that crossed a server-action boundary arrive as plain Errors with
+  // the constructor's message text but no prototype, so the status has to come
+  // back out of the string.
+  const match = /^SDP API request failed \((\d+)\):/.exec(error.message);
+  return {
+    status: match ? Number.parseInt(match[1] ?? "", 10) : null,
+    message: extractSdpApiErrorMessage(error),
+  };
+}
+
 export interface SdpApiClient {
   request: SdpApiRequestFn;
   fetch: <T>(path: string, options?: RequestInit) => Promise<T>;

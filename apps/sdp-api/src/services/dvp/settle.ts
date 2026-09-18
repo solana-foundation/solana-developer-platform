@@ -34,6 +34,7 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 import { isPastDvpExpiry } from "./observe";
 import { readDvpAccounts } from "./read-chain";
 import { deriveDvpSettleAtas } from "./settle-atas";
@@ -98,12 +99,23 @@ function assertInsideSettlementWindow(
   }
 }
 
-/** Settles or cancels a trade using the wallet already authorized by the handler. */
+/**
+ * Settles or cancels a trade using the wallet already authorized by the handler.
+ *
+ * @param c - Request context.
+ * @param trade - The trade to close.
+ * @param action - Settle or cancel.
+ * @param settlement - The settlement wallet the handler authorized.
+ * @param recordAttempt - Called with the sponsored transaction before it is
+ *   broadcast, so a retry on the same Idempotency-Key can resolve it from the
+ *   chain instead of signing a second close.
+ */
 export async function closeDvpTrade(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
   action: DvpCloseAction,
-  settlement: DvpSettlementWallet
+  settlement: DvpSettlementWallet,
+  recordAttempt: RecordDvpLegActionAttempt
 ): Promise<DvpCloseResult> {
   const env = c.env;
 
@@ -228,6 +240,15 @@ export async function closeDvpTrade(
         throw new Error("close lock was released before the sponsored signature could be attached");
       }
       heldSignature = sponsored;
+      // The sponsored signature is the one that lands, and this runs before the
+      // send, so a retry on the same Idempotency-Key asks the chain about the
+      // transaction that actually went out (PRO-1993). No amount: a close moves
+      // both legs.
+      await recordAttempt({
+        signature: sponsored,
+        amount: null,
+        expiryHeight: lastValidBlockHeight.toString(),
+      });
       getLogger().info({ tradeId: trade.id, action, signature: sponsored }, "DvP close signed");
     },
     markStarted: async () => {},

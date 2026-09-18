@@ -9,6 +9,48 @@ import { useTranslations } from "@/i18n/provider";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { AmountField, MintField, PartySlotPicker, PayoutAddressPicker } from "./dvp-create-fields";
 import type { DvpCreateForm, DvpPartySlot } from "./use-dvp-create-form";
+import { CUSTOM } from "./use-dvp-leg";
+
+/** The Token-2022 extension kind the API names when SDP cannot move a mint (`UNSUPPORTED_MINT_EXTENSIONS`). */
+const TRANSFER_HOOK_EXTENSION = "TransferHook";
+/** What the API calls a mint it could not decode. */
+const UNREADABLE_MINT_REASON = "unreadable extension data";
+
+/**
+ * Why this mint cannot be traded, in the terms the reader can act on: a hook is
+ * named for what it costs, an extension the program refuses is named as it is,
+ * and a mint SDP could not read says so rather than naming an extension.
+ */
+type Translate = ReturnType<typeof useTranslations>;
+
+function refusedMintWarning(blockedBy: string | null, t: Translate): string {
+  if (blockedBy === null) {
+    return t("DashboardMarkets.dvp.mintRefusedUnnamed");
+  }
+  if (blockedBy === TRANSFER_HOOK_EXTENSION) {
+    return t("DashboardMarkets.dvp.mintRefusedTransferHook");
+  }
+  if (blockedBy === UNREADABLE_MINT_REASON) {
+    return t("DashboardMarkets.dvp.mintRefusedUnreadable");
+  }
+  return t("DashboardMarkets.dvp.mintRefusedExtension", { extension: blockedBy });
+}
+
+/**
+ * The warning under a leg's mint field, or null when there is nothing to say.
+ *
+ * @param leg - The leg's chosen mint state.
+ * @param t - Translator.
+ * @returns The warning, or null.
+ */
+function legMintWarning(leg: DvpCreateForm["asset"], t: Translate): string | null {
+  if (leg.ineligible) {
+    return refusedMintWarning(leg.blockedBy, t);
+  }
+  return leg.pasted.notFound && leg.choice === CUSTOM
+    ? t("DashboardMarkets.dvp.mintNotFound")
+    : null;
+}
 
 /**
  * One side's fields: the party picker on its own row, then the amount and mint.
@@ -36,6 +78,10 @@ function LegRow({
   const t = useTranslations();
   const a = side === "a";
   const leg = a ? form.asset : form.cash;
+  // Said at the field, before an amount is typed, rather than as a 400 on
+  // submit. A transfer hook is named for what it costs; the extensions the
+  // program itself refuses are named as they are.
+  const mintWarning = legMintWarning(leg, t);
   return (
     <div className="grid gap-4">
       <PartySlotPicker
@@ -73,6 +119,7 @@ function LegRow({
           onChoiceChange={leg.setChoice}
           onCustomChange={leg.setCustom}
           options={a ? context.tokens : form.cashOptions}
+          warning={mintWarning}
         />
       </div>
     </div>

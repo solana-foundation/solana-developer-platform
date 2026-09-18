@@ -8,6 +8,8 @@
  * exist to avoid.
  */
 
+import { type Address, none, some } from "@solana/kit";
+import { extension, getMintEncoder } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 
 /** An RPC whose `getAccountInfo` returns the given wire-format account. */
@@ -65,6 +67,29 @@ describe("inspectDvpMint", () => {
     });
   });
 
+  // Create refuses a hook mint, so the form must hear the same answer before
+  // anyone types an amount.
+  it("marks a transfer-hook mint ineligible and names the extension", async () => {
+    const authority = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC" as Address;
+    const data = getMintEncoder().encode({
+      mintAuthority: some(authority),
+      supply: 0n,
+      decimals: 6,
+      isInitialized: true,
+      freezeAuthority: none(),
+      extensions: some([extension("TransferHook", { authority, programId: authority })]),
+    });
+    const rpc = rpcReturning({
+      owner: TOKEN_2022,
+      data: Buffer.from(data).toString("base64"),
+    });
+
+    await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toMatchObject({
+      eligible: false,
+      blockedBy: "TransferHook",
+    });
+  });
+
   // The whole point: a pasted mint can now offer a human amount, because its
   // decimals are one account read away rather than unknowable client-side.
   it("reads decimals from a legacy mint that carries no extensions", async () => {
@@ -103,10 +128,35 @@ describe("inspectDvpMint", () => {
       await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toBeNull();
     });
 
-    it("returns null when the data does not decode as a mint", async () => {
+    // An outage is not an answer about the mint: calling it missing or
+    // unreadable would refuse a valid token until someone retried.
+    it("throws when the account read fails, rather than judging the mint", async () => {
+      const rpc = {
+        getAccountInfo: () => ({
+          send: async () => {
+            throw new Error("rpc down");
+          },
+        }),
+      } as never;
+
+      await expect(inspectDvpMint(rpc, ATD_MINT as never)).rejects.toThrow("rpc down");
+    });
+
+    // Not "nothing is there": SDP cannot rule a transfer hook out of a mint it
+    // cannot read, so create refuses it and the form is told the same reason.
+    it("reports an undecodable token-2022 mint as ineligible, not missing", async () => {
       const rpc = rpcReturning({ owner: TOKEN_2022, data: "AAAA" });
 
-      await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toBeNull();
+      await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toEqual({
+        mint: ATD_MINT,
+        tokenProgram: TOKEN_2022,
+        // Unknown, never zero: without a scale the form converts no amount.
+        decimals: null,
+        name: null,
+        symbol: null,
+        eligible: false,
+        blockedBy: "unreadable extension data",
+      });
     });
   });
 });

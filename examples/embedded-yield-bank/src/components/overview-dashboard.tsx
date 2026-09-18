@@ -1,50 +1,33 @@
 import {
-  ArrowDownLeftIcon,
-  ArrowUpRightIcon,
-  CheckCircle2Icon,
   CopyIcon,
   ExternalLinkIcon,
-  LoaderCircleIcon,
+  LandmarkIcon,
+  PiggyBankIcon,
   RefreshCwIcon,
-  ShieldCheckIcon,
-  WalletCardsIcon,
 } from "lucide-react";
+import type { ComponentType, SVGProps } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  formatAccountToken,
+  formatAmount,
   formatApy,
   formatDate,
-  formatToken,
+  formatTime,
   shortAddress,
-  titleCase,
 } from "@/lib/format";
-import type { DashboardData, YieldPosition } from "@/types";
-import { DepositDialog, WithdrawDialog } from "./money-movement-dialog";
+import { isPendingMovement } from "@/lib/movements";
+import { cn } from "@/lib/utils";
+import type { DashboardData, YieldMovement } from "@/types";
+import { arrivalCopy, TransferDialog } from "./transfer-dialog";
 
 interface OverviewDashboardProps {
   data: DashboardData;
   refreshing: boolean;
   busy: boolean;
   onRefresh: () => void;
-  onDeposit: (strategyId: string, amount: string) => Promise<void>;
-  onWithdraw: (positionId: string, shares: string) => Promise<void>;
+  onDeposit: (amount: string) => Promise<void>;
+  onWithdraw: (amount: string) => Promise<void>;
 }
 
 export function OverviewDashboard({
@@ -55,14 +38,14 @@ export function OverviewDashboard({
   onDeposit,
   onWithdraw,
 }: OverviewDashboardProps) {
-  const pendingMovement = data.movements.some(
-    (movement) =>
-      movement.status !== "finalized" && movement.status !== "failed"
-  );
+  const { token, checking, savings, wallet, connection } = data;
+  const { strategy } = savings;
+  const settling = data.movements.filter(isPendingMovement);
+  const depositsOpen = strategy.fundable && strategy.status === "active";
 
   async function copyWalletAddress() {
     try {
-      await navigator.clipboard.writeText(data.wallet.address);
+      await navigator.clipboard.writeText(wallet.address);
       toast.success("Wallet address copied");
     } catch {
       toast.error("Could not copy the wallet address");
@@ -70,468 +53,313 @@ export function OverviewDashboard({
   }
 
   return (
-    <div className="flex flex-col gap-7 p-5 sm:p-8 xl:p-10">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-5 py-8 sm:px-8 sm:py-10 xl:py-12">
+      <header className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-[28px]">
             Good morning, Alex
           </h1>
           <p className="text-sm text-muted-foreground">
-            Here is what is happening with your money today.
+            Here is where your money stands today.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="px-1.5 text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground"
-            aria-label={`Copy wallet address ${data.wallet.address}`}
-            title={data.wallet.address}
-            onClick={() => void copyWalletAddress()}
-          >
-            {shortAddress(data.wallet.address)}
-            <CopyIcon data-icon="inline-end" />
-          </Button>
-          <Badge variant="outline" className="status-success">
-            <span className="status-dot" />
-            Solana devnet
-          </Badge>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onRefresh}
-            disabled={refreshing}
-          >
-            <RefreshCwIcon
-              className={refreshing ? "animate-spin" : undefined}
-              data-icon="inline-start"
-            />
-            Refresh
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground"
+          aria-label="Refresh balances"
+          onClick={onRefresh}
+          disabled={refreshing}
+        >
+          <RefreshCwIcon className={refreshing ? "animate-spin" : undefined} />
+        </Button>
       </header>
 
-      {pendingMovement ? (
-        <div className="flex items-center gap-3 rounded-xl border bg-muted/50 px-4 py-3 text-sm">
-          <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
-          <span>
-            A devnet movement is settling. Balances will refresh automatically.
+      <section className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <span>Total balance</span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground/60 tabular-nums transition-colors hover:text-foreground"
+              aria-label={`Copy wallet address ${wallet.address}`}
+              title={wallet.address}
+              onClick={() => void copyWalletAddress()}
+            >
+              {shortAddress(wallet.address)}
+              <CopyIcon className="size-3" />
+            </button>
+          </div>
+          <span className="text-5xl font-semibold tracking-[-0.045em] tabular-nums sm:text-6xl">
+            {formatAmount(data.total ?? checking.balance, token.symbol)}
+          </span>
+          {/* Fixed height so the buttons below never jump when this toggles. */}
+          <span className="flex min-h-5 items-center text-sm text-muted-foreground">
+            {settling.length ? (
+              <Badge variant="outline" className="status-warning">
+                <span className="status-dot status-dot-live" />
+                {settlingCopy(settling, token.symbol)}
+              </Badge>
+            ) : data.total === undefined ? (
+              "Savings is being valued. Checking is shown for now."
+            ) : null}
           </span>
         </div>
-      ) : null}
-
-      <Card className="overflow-hidden border-foreground/10 shadow-[0_1px_2px_rgba(28,28,29,0.04)]">
-        <CardHeader className="border-b bg-muted/30">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>Total balance</span>
-                <Badge variant="secondary">Live</Badge>
-              </div>
-              <CardTitle className="text-4xl font-semibold tracking-[-0.045em] sm:text-5xl">
-                {formatAccountToken(
-                  data.totals.portfolio,
-                  data.totals.tokenSymbol
-                )}
-              </CardTitle>
-              <CardDescription>
-                One account token, combining its on-chain balance and live
-                Embedded Yield positions.
-              </CardDescription>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <DepositDialog
-                strategies={data.strategies}
-                balances={data.balances}
-                feesPaidBy={data.wallet.feesPaidBy}
-                busy={busy}
-                onSubmit={onDeposit}
-              />
-              <WithdrawDialog
-                positions={data.positions}
-                feesPaidBy={data.wallet.feesPaidBy}
-                busy={busy}
-                onSubmit={onWithdraw}
-              />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-0 p-0 sm:grid-cols-3">
-          <BalanceMetric
-            label="Available"
-            value={formatAccountToken(
-              data.totals.available,
-              data.totals.tokenSymbol
-            )}
+        <div className="flex flex-wrap gap-2">
+          <TransferDialog
+            direction="to-savings"
+            symbol={token.symbol}
+            available={checking.balance}
+            strategy={strategy}
+            feesPaidBy={wallet.feesPaidBy}
+            busy={busy}
+            disabledReason={
+              !depositsOpen
+                ? "Savings is not accepting deposits right now"
+                : checking.balance === "0"
+                  ? "Add funds to checking first"
+                  : undefined
+            }
+            onSubmit={onDeposit}
           />
-          <BalanceMetric
-            label="In yield"
-            value={formatAccountToken(
-              data.totals.inYield,
-              data.totals.tokenSymbol
-            )}
-            unavailable={data.totals.unavailableYieldPositions > 0}
+          <TransferDialog
+            direction="to-checking"
+            variant="outline"
+            symbol={token.symbol}
+            available={savings.withdrawable}
+            strategy={strategy}
+            feesPaidBy={wallet.feesPaidBy}
+            busy={busy}
+            disabledReason={
+              savings.position === null
+                ? "Nothing in savings yet"
+                : savings.withdrawable === undefined
+                  ? "Savings balance is still updating"
+                  : savings.withdrawable === "0"
+                    ? "Nothing available to move right now"
+                    : undefined
+            }
+            onSubmit={onWithdraw}
           />
-          <BalanceMetric
-            label="Total earned"
-            value={formatAccountToken(
-              data.totals.earned,
-              data.totals.tokenSymbol,
-              { signed: true }
-            )}
-            positive
-          />
-        </CardContent>
-      </Card>
-
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-        <Card>
-          <CardHeader className="flex-row items-start justify-between gap-4">
-            <div className="flex flex-col gap-1.5">
-              <CardTitle>Your yield</CardTitle>
-              <CardDescription>
-                Live positions owned by your Northstar wallet.
-              </CardDescription>
-            </div>
-            <Badge variant="secondary">Embedded Yield</Badge>
-          </CardHeader>
-          <CardContent>
-            {data.positions.length ? (
-              <div className="flex flex-col gap-3">
-                {data.positions.map((position) => (
-                  <PositionRow
-                    key={position.id}
-                    position={position}
-                    tokenSymbol={
-                      data.balances.find(
-                        (balance) => balance.mint === position.tokenMint
-                      )?.symbol ?? "tokens"
-                    }
-                    feesPaidBy={data.wallet.feesPaidBy}
-                    busy={busy}
-                    onWithdraw={onWithdraw}
-                  />
-                ))}
-              </div>
-            ) : (
-              <EmptyYield />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Northstar balance</CardTitle>
-            <CardDescription>
-              Assets read directly from the managed wallet.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {data.balances.map((balance) => (
-              <div
-                key={balance.mint}
-                className="flex items-center justify-between gap-4"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="flex size-9 items-center justify-center rounded-full bg-muted text-xs font-semibold">
-                    {balance.symbol.slice(0, 2)}
-                  </span>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium">
-                      {balance.symbol}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      Solana devnet
-                    </span>
-                  </div>
-                </div>
-                <span className="text-sm">
-                  {formatToken(balance.amount, balance.symbol)}
-                </span>
-              </div>
-            ))}
-            {!data.balances.length ? (
-              <p className="text-sm text-muted-foreground">
-                No fundable strategy tokens are available.
-              </p>
-            ) : null}
-            <div className="rounded-lg border bg-muted/40 p-3">
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="text-muted-foreground">Network fees</span>
-                <span>{formatToken(data.wallet.solBalance, "SOL", 5)}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        </div>
       </section>
 
-      <Card>
-        <CardHeader className="flex-row items-start justify-between gap-4">
-          <div className="flex flex-col gap-1.5">
-            <CardTitle>Available strategies</CardTitle>
-            <CardDescription>
-              Fundable devnet strategies returned by the SDP catalogue.
-            </CardDescription>
-          </div>
-          <ShieldCheckIcon className="size-5 text-muted-foreground" />
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {data.strategies.map((strategy) => (
-            <div
-              key={strategy.id}
-              className="flex flex-col justify-between gap-6 rounded-xl border p-4"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-xs font-semibold uppercase">
-                    {strategy.provider.slice(0, 2)}
-                  </span>
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span className="truncate text-sm font-medium">
-                      {strategy.name}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {titleCase(strategy.provider)}
-                    </span>
-                  </div>
-                </div>
-                <Badge variant="outline">{strategy.liquidityTerm}</Badge>
-              </div>
-              <div className="flex items-end justify-between gap-4">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-muted-foreground">
-                    Current APY
-                  </span>
-                  <span className="text-xl font-semibold tracking-[-0.02em]">
-                    {formatApy(strategy.currentApy)}
-                  </span>
-                </div>
-                <DepositDialog
-                  strategies={[strategy]}
-                  balances={data.balances}
-                  feesPaidBy={data.wallet.feesPaidBy}
-                  busy={busy}
-                  onSubmit={onDeposit}
-                />
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      <section className="grid gap-4 sm:grid-cols-2">
+        <AccountCard
+          icon={LandmarkIcon}
+          name="Checking"
+          amount={formatAmount(checking.balance, token.symbol)}
+          detail="Available now"
+          footer={`${token.symbol} on Solana`}
+        />
+        <AccountCard
+          icon={PiggyBankIcon}
+          name="Savings"
+          badge={formatApy(strategy.currentApy)}
+          amount={
+            savings.balance === undefined
+              ? "—"
+              : formatAmount(savings.balance, token.symbol)
+          }
+          {...savingsDetail(savings, token.symbol, settling.length > 0)}
+          footer={`${strategy.name} · ${
+            strategy.liquidityTerm === "instant"
+              ? "Withdraw anytime"
+              : `Withdrawals arrive ${arrivalCopy(strategy).toLowerCase()}`
+          }`}
+        />
+      </section>
 
-      <Card>
-        <CardHeader className="flex-row items-start justify-between gap-4">
-          <div className="flex flex-col gap-1.5">
-            <CardTitle>Recent activity</CardTitle>
-            <CardDescription>
-              Movements recorded by Embedded Yield for this wallet.
-            </CardDescription>
+      <section className="flex flex-col gap-4">
+        <h2 className="text-base font-semibold tracking-[-0.01em]">
+          Recent activity
+        </h2>
+        {data.movements.length ? (
+          <ul className="divide-y rounded-2xl border">
+            {data.movements.map((movement) => (
+              <ActivityRow
+                key={movement.movementId}
+                movement={movement}
+                symbol={token.symbol}
+              />
+            ))}
+          </ul>
+        ) : (
+          <div className="flex min-h-28 items-center justify-center rounded-2xl border border-dashed text-sm text-muted-foreground">
+            Your transfers will show up here.
           </div>
-          <Badge variant="outline">{data.movements.length} movements</Badge>
-        </CardHeader>
-        <CardContent>
-          {data.movements.length ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Movement</TableHead>
-                  <TableHead>Provider</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.movements.map((movement) => (
-                  <TableRow key={movement.movementId}>
-                    <TableCell>
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex size-8 items-center justify-center rounded-full bg-muted">
-                          {movement.direction === "deposit" ? (
-                            <ArrowDownLeftIcon className="size-4" />
-                          ) : (
-                            <ArrowUpRightIcon className="size-4" />
-                          )}
-                        </span>
-                        <span>
-                          {movement.direction === "deposit"
-                            ? "Yield deposit"
-                            : "Yield withdrawal"}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>{titleCase(movement.provider)}</TableCell>
-                    <TableCell>
-                      <MovementStatus status={movement.status} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(movement.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <a
-                        href={`https://explorer.solana.com/tx/${movement.signature}?cluster=devnet`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 underline-offset-4 hover:underline"
-                      >
-                        {movement.direction === "deposit" ? "-" : "+"}
-                        {movement.amount}
-                        <ExternalLinkIcon className="size-3.5 text-muted-foreground" />
-                      </a>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="flex min-h-32 items-center justify-center text-sm text-muted-foreground">
-              Your first deposit will appear here.
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        )}
+      </section>
 
-      <footer className="flex flex-col gap-2 border-t pt-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-        <span>
-          {data.connection.apiLabel} ·{" "}
-          {data.connection.projectScoped
-            ? "Explicit project"
-            : "API key project"}
+      <footer className="flex flex-wrap items-center gap-x-2 border-t pt-5 text-xs text-muted-foreground">
+        <span className="flex items-center gap-2">
+          <span className="status-dot text-success" />
+          Solana devnet
         </span>
-        <span title={data.wallet.address}>
-          Managed wallet {shortAddress(data.wallet.address)} · Updated{" "}
-          {formatDate(data.connection.checkedAt)}
-        </span>
+        <Dot />
+        Updated {formatTime(connection.checkedAt)}
       </footer>
     </div>
   );
 }
 
-function BalanceMetric({
-  label,
-  value,
+function settlingCopy(pending: YieldMovement[], symbol: string): string {
+  const [movement] = pending;
+  if (pending.length > 1 || !movement)
+    return `${pending.length} transfers in progress`;
+  const amount =
+    movement.tokenAmount === null
+      ? "money"
+      : formatAmount(movement.tokenAmount, symbol);
+  return `Moving ${amount} ${
+    movement.direction === "deposit" ? "to savings" : "to checking"
+  }`;
+}
+
+function Dot() {
+  return <span aria-hidden="true">·</span>;
+}
+
+function savingsDetail(
+  savings: DashboardData["savings"],
+  symbol: string,
+  settling: boolean
+): { detail: string; positive?: boolean } {
+  if (savings.position === null && savings.earned === "0")
+    return { detail: "Start earning with your first transfer" };
+  if (savings.earned === undefined) {
+    return {
+      detail: settling ? "Earnings update shortly" : "Earnings unavailable",
+    };
+  }
+  if (savings.earned === "0") return { detail: "Nothing earned yet" };
+  return {
+    detail: `${formatAmount(savings.earned, symbol, { signed: true })} earned`,
+    positive: !savings.earned.startsWith("-"),
+  };
+}
+
+function AccountCard({
+  icon: Icon,
+  name,
+  badge,
+  amount,
+  detail,
   positive = false,
-  unavailable = false,
+  footer,
 }: {
-  label: string;
-  value: string;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  name: string;
+  badge?: string;
+  amount: string;
+  detail: string;
   positive?: boolean;
-  unavailable?: boolean;
+  footer: string;
 }) {
   return (
-    <div className="flex flex-col gap-1 border-b px-6 py-5 last:border-b-0 sm:border-r sm:border-b-0 sm:last:border-r-0">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span
-        className={
-          positive && value.startsWith("+")
-            ? "text-sm font-medium text-success"
-            : "text-sm font-medium"
-        }
-      >
-        {value}
-      </span>
-      {unavailable ? (
-        <span className="text-xs text-muted-foreground">
-          Waiting for live position data
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function PositionRow({
-  position,
-  tokenSymbol,
-  feesPaidBy,
-  busy,
-  onWithdraw,
-}: {
-  position: YieldPosition;
-  tokenSymbol: string;
-  feesPaidBy: "customer" | "northstar";
-  busy: boolean;
-  onWithdraw: (positionId: string, shares: string) => Promise<void>;
-}) {
-  return (
-    <div className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-3">
-        <span className="flex size-10 items-center justify-center rounded-lg bg-muted">
-          <WalletCardsIcon className="size-4" />
-        </span>
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate text-sm font-medium">{position.label}</span>
-          <span className="text-xs text-muted-foreground">
-            {titleCase(position.provider)}
+    <div className="flex flex-col gap-6 rounded-2xl border p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-8 items-center justify-center rounded-full bg-muted">
+            <Icon className="size-4" />
           </span>
+          <span className="text-sm font-medium">{name}</span>
         </div>
+        {badge ? (
+          <Badge variant="outline" className="status-success">
+            {badge}
+          </Badge>
+        ) : null}
       </div>
-      <div className="flex items-center justify-between gap-5 sm:justify-end">
-        <div className="flex flex-col items-end gap-0.5">
-          <span className="text-sm font-medium">
-            {position.tokenValue === undefined
-              ? "Not available"
-              : formatToken(position.tokenValue, tokenSymbol)}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {position.shares === undefined
-              ? "Shares unavailable"
-              : `${position.shares} shares`}
-          </span>
-        </div>
-        <WithdrawDialog
-          positions={[position]}
-          feesPaidBy={feesPaidBy}
-          initialPositionId={position.id}
-          busy={busy}
-          onSubmit={onWithdraw}
-          trigger={
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={position.withdrawableShares === undefined}
-            >
-              Withdraw
-            </Button>
-          }
-        />
-      </div>
-    </div>
-  );
-}
-
-function EmptyYield() {
-  return (
-    <div className="flex min-h-44 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-6 text-center">
-      <span className="flex size-10 items-center justify-center rounded-full bg-muted">
-        <WalletCardsIcon className="size-4" />
-      </span>
       <div className="flex flex-col gap-1">
-        <p className="text-sm font-medium">Your cash can do more</p>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          Choose a devnet strategy to put part of your balance to work.
-        </p>
+        <span className="text-[28px] font-semibold tracking-[-0.03em] tabular-nums">
+          {amount}
+        </span>
+        <span
+          className={cn(
+            "text-sm",
+            positive ? "text-success" : "text-muted-foreground"
+          )}
+        >
+          {detail}
+        </span>
       </div>
+      <span className="truncate text-xs text-muted-foreground" title={footer}>
+        {footer}
+      </span>
     </div>
   );
 }
 
-function MovementStatus({ status }: { status: string }) {
-  if (status === "finalized") {
+function ActivityRow({
+  movement,
+  symbol,
+}: {
+  movement: YieldMovement;
+  symbol: string;
+}) {
+  const toSavings = movement.direction === "deposit";
+  const Icon = toSavings ? PiggyBankIcon : LandmarkIcon;
+  return (
+    <li className="flex items-center gap-4 px-4 py-3.5">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+        <Icon className="size-4" />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="text-sm font-medium">
+          {toSavings ? "To savings" : "To checking"}
+        </span>
+        <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {formatDate(movement.createdAt)}
+          <MovementStatus movement={movement} />
+        </span>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-0.5">
+        <span className="text-sm font-medium tabular-nums">
+          {movement.tokenAmount === null
+            ? "—"
+            : formatAmount(movement.tokenAmount, symbol)}
+        </span>
+        <a
+          href={`https://explorer.solana.com/tx/${movement.signature}?cluster=devnet`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          Receipt
+          <ExternalLinkIcon className="size-3" />
+        </a>
+      </div>
+    </li>
+  );
+}
+
+function MovementStatus({ movement }: { movement: YieldMovement }) {
+  if (movement.status === "finalized") {
     return (
       <Badge variant="outline" className="status-success">
-        <CheckCircle2Icon />
-        Finalized
+        <span className="status-dot" />
+        Settled
       </Badge>
     );
   }
-  if (status === "failed") return <Badge variant="destructive">Failed</Badge>;
+  if (movement.status === "failed") {
+    return (
+      <Badge
+        variant="outline"
+        className="status-destructive"
+        title={movement.failureReason ?? undefined}
+      >
+        <span className="status-dot" />
+        Failed
+      </Badge>
+    );
+  }
   return (
-    <Badge variant="secondary">
-      <LoaderCircleIcon className="animate-spin" />
-      {titleCase(status)}
+    <Badge variant="outline" className="status-warning">
+      <span className="status-dot status-dot-live" />
+      Settling
     </Badge>
   );
 }

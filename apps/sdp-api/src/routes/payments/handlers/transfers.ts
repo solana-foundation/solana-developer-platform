@@ -376,8 +376,12 @@ async function updateOnchainTransferForRamp(
   ) {
     throw badRequest("Transfer does not match the off-ramp deposit instruction");
   }
-  if (existing.status !== "awaiting_payment" || rampTransferHasOnchainValues(existing)) {
+  if (rampTransferHasOnchainValues(existing)) {
     throw conflict("Ramp transfer already has an on-chain transaction");
+  }
+  // A provider that failed or expired the sale no longer takes this deposit.
+  if (existing.status !== "awaiting_payment") {
+    throw conflict(`Ramp transfer is no longer awaiting payment (status: ${existing.status})`);
   }
   if (isRampQuoteBindingExpired(existing)) {
     throw conflict("Ramp quote has expired; create a new quote before sending funds.");

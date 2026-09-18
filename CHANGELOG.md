@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.79.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.78.0...v0.79.0) (2026-09-17)
+
+### ⚠ BREAKING CHANGES
+
+* **transactions:** meter the unified ledger and bound its search to prefixes ([#1873](https://github.com/solana-foundation/solana-developer-platform/pull/1873)) ([3106ef4](https://github.com/solana-foundation/solana-developer-platform/commit/3106ef43bf7d342669b617dadbc7d6f72ddd75c9))
+
+### Features
+
+* **earn:** sponsor Earn vault movements on the movement's cluster (PRO-1738) ([#1877](https://github.com/solana-foundation/solana-developer-platform/pull/1877)) ([0d3ce29](https://github.com/solana-foundation/solana-developer-platform/commit/0d3ce29b8de176790da7707ba603834426d0c22d))
+* **audit:** attribute wallet-policy rewrites and BVNK provisioning in the tamper-evident ledger ([#1866](https://github.com/solana-foundation/solana-developer-platform/pull/1866)) ([2e8b00a](https://github.com/solana-foundation/solana-developer-platform/commit/2e8b00ac6dfeae32c0ad0941a89f0cedfd36346a))
+* **issuance:** gate on-chain token metadata updates behind wallet-operation policy ([#1868](https://github.com/solana-foundation/solana-developer-platform/pull/1868)) ([86e8662](https://github.com/solana-foundation/solana-developer-platform/commit/86e8662b26120203ddee9634f4e7c0e357d7eaa7))
+* **payments:** confirm BVNK agreement signatures via webhook and advance to collection ([#1894](https://github.com/solana-foundation/solana-developer-platform/pull/1894)) ([8805762](https://github.com/solana-foundation/solana-developer-platform/commit/88057620a330306078c64ff3e22efd1f1e87393a))
+* **web:** identify the playground key from the pasted secret, drop the picker ([#1889](https://github.com/solana-foundation/solana-developer-platform/pull/1889)) ([aac7dc7](https://github.com/solana-foundation/solana-developer-platform/commit/aac7dc776ed88f059a81c5a0ca0eea090580e63c))
+* **custody:** audit BYOK credential lifecycle attempts ([#1891](https://github.com/solana-foundation/solana-developer-platform/pull/1891)) ([01860e7](https://github.com/solana-foundation/solana-developer-platform/commit/01860e7d5a3f6f42c8a1e87f1749269744a4980a))
+* **custody:** audit Connection wallet creation and default selection ([#1890](https://github.com/solana-foundation/solana-developer-platform/pull/1890)) ([c45aefe](https://github.com/solana-foundation/solana-developer-platform/commit/c45aefe49eb7947c5cb98d2fe2baf73b92f3eeb1))
+* **issuance:** gate deploy and allowlist mutations behind wallet-operation policy ([#1859](https://github.com/solana-foundation/solana-developer-platform/pull/1859)) ([fb071ed](https://github.com/solana-foundation/solana-developer-platform/commit/fb071ed13d1608fda65a781a4bd5dcecb3e29e03))
+* **payments:** move BVNK agreements to v1 sessions with checklist consent ([#1886](https://github.com/solana-foundation/solana-developer-platform/pull/1886)) ([7123fcd](https://github.com/solana-foundation/solana-developer-platform/commit/7123fcdebaf583ab22ddbba698e397d52e9721a9))
+
+### Bug Fixes
+
+* **release:** render reverts, and stop announcing what they undo ([#1906](https://github.com/solana-foundation/solana-developer-platform/pull/1906)) ([827d52e](https://github.com/solana-foundation/solana-developer-platform/commit/827d52e875968f8104118dc4dff608066e2a2b36))
+* **embedded-yield-bank:** serve page shell dynamically to avoid shared caching ([#1907](https://github.com/solana-foundation/solana-developer-platform/pull/1907)) ([8290fdd](https://github.com/solana-foundation/solana-developer-platform/commit/8290fdd96481b85e44e5d1865a702af7c8e62703))
+* **security:** render issuer token logos only from credential-free ht… ([#1904](https://github.com/solana-foundation/solana-developer-platform/pull/1904)) ([891a344](https://github.com/solana-foundation/solana-developer-platform/commit/891a344874c95a288aef193c59b787088dff01ef))
+* **ramps:** pin BVNK rail support to the sandbox fiat set (USD, EUR) ([#1903](https://github.com/solana-foundation/solana-developer-platform/pull/1903)) ([2cf9d77](https://github.com/solana-foundation/solana-developer-platform/commit/2cf9d775fe7e9d6a8f71e255952e6d24b3ed3dce))
+* **rpc:** mask credential-shaped path segments and pin the rebinding guarantee (HOO-1009) ([#1893](https://github.com/solana-foundation/solana-developer-platform/pull/1893)) ([de440ea](https://github.com/solana-foundation/solana-developer-platform/commit/de440ea993eac3ebd8d45db257bcd8a054b0c416))
+* **transactions:** meter the unified ledger and bound its search to prefixes ([#1873](https://github.com/solana-foundation/solana-developer-platform/pull/1873)) ([3106ef4](https://github.com/solana-foundation/solana-developer-platform/commit/3106ef43bf7d342669b617dadbc7d6f72ddd75c9))
+* **release:** read a breaking change from a footer, not from prose ([#1900](https://github.com/solana-foundation/solana-developer-platform/pull/1900)) ([fe37f59](https://github.com/solana-foundation/solana-developer-platform/commit/fe37f595ea122a10132a004e3b5aa89b074738b8))
+* **ramps:** stop retrying webhook events that can never apply ([#1897](https://github.com/solana-foundation/solana-developer-platform/pull/1897)) ([43307d8](https://github.com/solana-foundation/solana-developer-platform/commit/43307d8877ca3f44cba3e2e44be2b1875dccdc38))
+* **release:** surface breaking changes in the changelog (HOO-1662) ([#1888](https://github.com/solana-foundation/solana-developer-platform/pull/1888)) ([f87bb92](https://github.com/solana-foundation/solana-developer-platform/commit/f87bb92d2d7cc5fccabae6ec836cbd0c9b39006c))
+* **api-keys:** close the per-key policy control-plane escalation axes ([#1862](https://github.com/solana-foundation/solana-developer-platform/pull/1862)) ([68a34f5](https://github.com/solana-foundation/solana-developer-platform/commit/68a34f596d04c05d476e46f99d268ff48faa1aa3))
+* **issuance:** issuance hardening ([#1887](https://github.com/solana-foundation/solana-developer-platform/pull/1887)) ([e6ffea2](https://github.com/solana-foundation/solana-developer-platform/commit/e6ffea2dfa1bc3a0181f7f88ade3c205095e1726))
+* **dvp:** one close at a time per trade, and a fair, cheaper reconciler sweep ([#1845](https://github.com/solana-foundation/solana-developer-platform/pull/1845)) ([339e811](https://github.com/solana-foundation/solana-developer-platform/commit/339e8117724375ab8bb95d808f2c5b45e44e97f4))
+* **transactions:** omit the payment detail self-link ([#1875](https://github.com/solana-foundation/solana-developer-platform/pull/1875)) ([ea2db58](https://github.com/solana-foundation/solana-developer-platform/commit/ea2db588b4d10bc0c01709982fc63f2bbca08236))
+* **dashboard:** keep cached reads, progress and estimates responsive ([#1874](https://github.com/solana-foundation/solana-developer-platform/pull/1874)) ([802077d](https://github.com/solana-foundation/solana-developer-platform/commit/802077d5bed09a85c13a322c9bf1f24397252da2))
+* **web:** require playground API key secret ([#1884](https://github.com/solana-foundation/solana-developer-platform/pull/1884)) ([8eee4d7](https://github.com/solana-foundation/solana-developer-platform/commit/8eee4d7bed7c0a74047408df3e1eb9b1113df571))
+
+### Refactors
+
+* **markets:** delete dead earn/dvp code and name shared rules once ([#1902](https://github.com/solana-foundation/solana-developer-platform/pull/1902)) ([8fce883](https://github.com/solana-foundation/solana-developer-platform/commit/8fce883785cce1220179dff785a19ac682df2e54))
+* **example:** move Embedded Yield demo to Next.js ([#1898](https://github.com/solana-foundation/solana-developer-platform/pull/1898)) ([2f5e03a](https://github.com/solana-foundation/solana-developer-platform/commit/2f5e03aa37165b4cc0786f54880d54e6f5ee5bd7))
+
 ## [0.78.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.77.0...v0.78.0) (2026-09-17)
 
 ### Features

@@ -64,6 +64,7 @@ describe("recheckPrivyCredentialAction", () => {
 
     await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
       status: "success",
+      connectionId: "conn_test",
     });
     expect(client.fetch).toHaveBeenCalledWith(
       "/internal/dashboard/custody/connections/conn_test/complete",
@@ -177,6 +178,7 @@ describe("submitPrivyCredentialAction outcome classification", () => {
 
     await expect(submitPrivyCredentialAction(submitForm())).resolves.toEqual({
       status: "success",
+      connectionId: "conn_test",
     });
     expect(client.fetch).toHaveBeenCalledTimes(2);
     expect(client.fetch).toHaveBeenNthCalledWith(
@@ -211,7 +213,10 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     const form = submitForm();
     form.set("connectionId", "conn_test");
 
-    await expect(submitPrivyCredentialAction(form)).resolves.toEqual({ status: "success" });
+    await expect(submitPrivyCredentialAction(form)).resolves.toEqual({
+      status: "success",
+      connectionId: "conn_test",
+    });
     expect(client.fetch).toHaveBeenNthCalledWith(
       1,
       "/internal/dashboard/custody/connections/conn_test/provider-credentials",

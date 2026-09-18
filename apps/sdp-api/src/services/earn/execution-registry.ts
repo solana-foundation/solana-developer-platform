@@ -15,7 +15,7 @@ import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
 } from "@sdp/ondo";
-import { resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
+import { resolveClusterRpcUrl } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
@@ -45,31 +45,14 @@ import type { VaultDeadline } from "./vault-deadline";
  */
 
 /**
- * The RPC endpoint used to build instructions for `cluster`.
- *
- * Per-cluster by construction, because one API process serves BOTH — a sandbox
- * project is devnet and a production project is mainnet-beta, and the same
- * deployment answers requests for each. Reading one process-level
- * `SOLANA_RPC_URL` for both meant whichever chain that endpoint served, the
- * other environment silently built and read against the wrong one.
- *
- * `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL` are optional overrides.
- * The configured cluster may fall back through the canonical default resolver,
- * preserving managed-provider selection and API-key expansion; the other
- * cluster requires an explicit override. `assertClusterEndpoint` still makes
+ * The RPC endpoint used to build instructions for `cluster`: per-cluster by
+ * construction, because one API process serves BOTH (a sandbox project is
+ * devnet, a production project is mainnet-beta). The rule lives in @sdp/rpc so
+ * the sponsorship budget's network-fee read resolves the SAME endpoint without
+ * importing this module's chain SDKs; `assertClusterEndpoint` below still makes
  * every selected URL prove which chain it serves before work begins.
  */
-export function resolveClusterRpcUrl(env: Env, cluster: SolanaCluster): string {
-  const perCluster = cluster === "devnet" ? env.SOLANA_DEVNET_RPC_URL : env.SOLANA_MAINNET_RPC_URL;
-  if (typeof perCluster === "string" && perCluster.trim() !== "") return perCluster.trim();
-
-  // The canonical default may be a managed provider with URL/API-key template
-  // expansion. It is safe only for the cluster the process config names; the
-  // other cluster needs an explicit override and must fail closed without one.
-  const defaultCluster = env.SOLANA_NETWORK ?? "devnet";
-  if (defaultCluster !== cluster) return "";
-  return resolveDefaultSolanaRpcUrl(env)?.trim() ?? "";
-}
+export { resolveClusterRpcUrl };
 
 /**
  * Briefly memoised genesis observations, keyed by `cluster\nurl`.

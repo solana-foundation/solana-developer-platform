@@ -11,6 +11,7 @@ import {
 } from "@sdp/types";
 import {
   applyApiKeyTemplate,
+  resolveDefaultCluster,
   withAlchemyApiKey,
   withHeliusApiKey,
   withOptionalApiKeyTemplate,
@@ -278,12 +279,37 @@ function collectRpcApiKeys(env: RpcEnv): string[] {
   return secrets.sort((a, b) => b.length - a.length);
 }
 
+/**
+ * A path segment shaped like an API credential: long token charset mixing
+ * letters and digits. The digit requirement is what separates keys from real
+ * path vocabulary — network names like `solana-mainnet-beta` clear the length
+ * bar but carry no digit, while Alchemy/QuickNode/Triton-style keys always
+ * mix both. Applied to every endpoint because a CUSTOMER-supplied custom
+ * endpoint carries a secret we cannot know by value — the known-key pass
+ * below only covers the platform's own keys.
+ */
+export function isCredentialPathSegment(segment: string): boolean {
+  // Percent-encoded segments decode first, so a Base64-style credential
+  // carrying +, / or = (spelled %2B/%2F/%3D in the URL) is classified by its
+  // real content instead of slipping past on the % characters.
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    // Malformed escapes classify as written.
+  }
+  return (
+    /^[A-Za-z0-9_\-+/=]{16,}$/.test(decoded) && /[0-9]/.test(decoded) && /[A-Za-z]/.test(decoded)
+  );
+}
+
 // Redact provider API keys before an endpoint is exposed to callers. The
 // query-param heuristic covers keys passed as query values (Helius) and
 // customer-supplied custom endpoints whose secret we don't know. The known-key
 // redaction covers path-segment keys (Alchemy, QuickNode, Triton, Validation
-// Cloud, Nodit), which the query heuristic alone would leave in the path.
-function maskEndpoint(url: string, env: RpcEnv): string {
+// Cloud, Nodit); the path heuristic covers the same shape on endpoints whose
+// key the platform does not hold.
+export function maskEndpoint(url: string, env: RpcEnv): string {
   let masked = url;
   for (const secret of collectRpcApiKeys(env)) {
     masked = masked.replaceAll(secret, "***");
@@ -293,16 +319,30 @@ function maskEndpoint(url: string, env: RpcEnv): string {
     }
   }
 
+  return maskCredentialShapes(masked);
+}
+
+/**
+ * The value-blind half of endpoint masking: credential-looking query values
+ * (`key`/`token` names) and credential-shaped path segments. Shared by the
+ * platform masker above and the tenant masker in `byok.ts`, so the two cannot
+ * drift on what counts as a credential shape.
+ */
+export function maskCredentialShapes(url: string): string {
   try {
-    const parsed = new URL(masked);
+    const parsed = new URL(url);
     for (const key of parsed.searchParams.keys()) {
       if (key.toLowerCase().includes("key") || key.toLowerCase().includes("token")) {
         parsed.searchParams.set(key, "***");
       }
     }
+    parsed.pathname = parsed.pathname
+      .split("/")
+      .map((segment) => (isCredentialPathSegment(segment) ? "***" : segment))
+      .join("/");
     return parsed.toString();
   } catch {
-    return masked;
+    return url;
   }
 }
 
@@ -631,7 +671,7 @@ async function resolveTenantConnection(
     return null;
   }
 
-  const network = input.env.SOLANA_NETWORK ?? "devnet";
+  const network = resolveDefaultCluster(input.env);
 
   if (projectId) {
     const resolution = await input.connections.resolve({

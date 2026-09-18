@@ -28,7 +28,12 @@ import {
   walletDisplayName,
 } from "./deposit/earn-funding-wallets";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals, MAX_AMOUNT_LENGTH, parseUnsignedDecimal } from "./earn-decimal";
+import {
+  compareUnsignedDecimals,
+  isPositiveDecimal,
+  MAX_AMOUNT_LENGTH,
+  parseUnsignedDecimal,
+} from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, tokenSymbol } from "./earn-format";
 import {
@@ -56,11 +61,13 @@ import {
 import {
   atomsToDecimalString,
   derivedMinOut,
+  floorToReplay,
   isExpiredQuote,
   isSlippageExceededRefusal,
   parseSlippageToleranceBps,
   quoteForKey,
   useDebouncedVaultQuote,
+  type VaultFloorReplay,
   type VaultQuoteState,
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
@@ -86,7 +93,7 @@ export function validateVaultDepositAmount(
   decimals: number | undefined
 ): VaultDepositAmountValidation {
   const amount = parseUnsignedDecimal(value, { maxLength: MAX_AMOUNT_LENGTH });
-  if (!amount || compareUnsignedDecimals(amount.canonical, "0") !== 1) {
+  if (!amount || !isPositiveDecimal(amount.canonical)) {
     return { kind: "invalid" };
   }
   if (decimals === undefined) return { kind: "unknown_scale" };
@@ -1080,7 +1087,7 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
                 submitting ||
                 !selectedWallet ||
                 selectedWalletBalance === undefined ||
-                compareUnsignedDecimals(selectedWalletBalance, "0") !== 1
+                !isPositiveDecimal(selectedWalletBalance)
               }
               label={t("DashboardEarn.vaultWithdraw.max")}
               onClick={onMax}
@@ -1379,19 +1386,20 @@ export function EarnVaultDepositModal({
   /**
    * EXPIRY BACKSTOP (PRO-1691), the state half. The quote hook re-quotes on
    * its own, but timers throttle in background tabs, so the floor on screen
-   * can be older than the TTL at submit. A fresh floor, or a HELD floor (a
-   * replay must carry it verbatim), passes straight through. An expired one is
-   * revalidated first; a rate that moved beyond it stops the submission on
-   * THIS side of the API, through the same copy and control as a blown floor,
-   * and either way the displayed quote re-syncs. Returns whether to proceed.
+   * can be older than the TTL at submit. A replayed floor — a held or kept
+   * key's minted floor, which must go out verbatim — or a fresh one passes
+   * straight through. An expired one is revalidated first; a rate that moved
+   * beyond it stops the submission on THIS side of the API, through the same
+   * copy and control as a blown floor, and either way the displayed quote
+   * re-syncs. Returns whether to proceed.
    */
   async function floorSafeToSubmit(
     controller: AbortController,
     amount: string,
-    heldFloor: string | null | undefined,
+    replay: VaultFloorReplay,
     floor: string | null
   ): Promise<boolean> {
-    if (heldFloor !== undefined || floor === null || !isExpiredQuote(quote)) return true;
+    if (replay.kind !== "fresh" || floor === null || !isExpiredQuote(quote)) return true;
     const verdict = await revalidateExpiredFloor(strategy.id, amount, floor, controller.signal);
     if (verdict === "still_satisfiable") return true;
     if (verdict === "aborted") return false;
@@ -1438,13 +1446,28 @@ export function EarnVaultDepositModal({
     // A HELD key must replay the floor it was MINTED with, verbatim: the API's
     // idempotency fingerprint includes `minSharesOut`, so pairing the held key
     // with a freshly quoted floor would be refused as a changed request —
-    // stranding the approval the hold exists to wait on. A fresh key takes the
-    // freshly derived floor, and records it for exactly that future replay.
-    const heldFloor = resolvedKey.wasHeld ? recallVaultDepositFloor(fingerprint) : undefined;
-    const floorForRequest = heldFloor !== undefined ? heldFloor : (minSharesOut ?? null);
+    // stranding the approval the hold exists to wait on. A KEPT key — one a
+    // prior ambiguous attempt (a 5xx, a lost answer) left live — must replay
+    // its minted floor too, and worse: the changed-request refusal is a 409,
+    // which retires the key and lets the next submit mint a fresh one while
+    // the first attempt may already have executed. The floor memo answers for
+    // both; a fresh key takes the freshly derived floor, and records it for
+    // exactly that future replay. A reuse whose memo LOST the floor cannot
+    // re-floor safely at all — it stops here, submitting nothing, rather than
+    // pair the live key with a changed request.
+    const replay = floorToReplay(
+      resolvedKey,
+      recallVaultDepositFloor,
+      fingerprint,
+      minSharesOut ?? null
+    );
+    if (replay.kind === "unavailable") {
+      setSubmitError(t("DashboardEarn.deposit.vaultFloorUnavailable"));
+      return;
+    }
 
-    if (!(await floorSafeToSubmit(controller, amount, heldFloor, floorForRequest))) return;
-    rememberVaultDepositFloor(fingerprint, floorForRequest);
+    if (!(await floorSafeToSubmit(controller, amount, replay, replay.floor))) return;
+    rememberVaultDepositFloor(fingerprint, replay.floor);
 
     // The value-moving POST deliberately takes NO abort signal. The server
     // processes the request whether or not this component survives it, so
@@ -1459,7 +1482,7 @@ export function EarnVaultDepositModal({
         strategyId: strategy.id,
         custodyWalletId: wallet.id,
         amount,
-        ...(floorForRequest === null ? {} : { minSharesOut: floorForRequest }),
+        ...(replay.floor === null ? {} : { minSharesOut: replay.floor }),
         ...(swapActive
           ? {
               sourceTokenMint: fundingToken.mint,

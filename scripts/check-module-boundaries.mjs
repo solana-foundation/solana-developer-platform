@@ -98,7 +98,13 @@ const MODULE_METADATA = [
     name: "@sdp/earn",
     directory: "packages/sdp-earn",
     purpose: "Earn domain services, yield strategies, and vault-infra providers.",
-    allowedDependencies: ["@sdp/payments", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: [
+      "@sdp/payments",
+      "@sdp/redaction",
+      "@sdp/rpc",
+      "@sdp/solana",
+      "@sdp/types",
+    ],
   },
   {
     name: "@sdp/env-config",

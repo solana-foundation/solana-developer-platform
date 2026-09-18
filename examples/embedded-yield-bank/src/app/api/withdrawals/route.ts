@@ -6,17 +6,15 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const inputSchema = z.object({
-  positionId: z.string().min(1),
-  shares: z.string().min(1).max(128),
+  amount: z.string().min(1).max(128),
 });
 
+/** Savings to checking. */
 export async function POST(request: Request) {
   try {
     assertTrustedJsonRequest(request);
     const input = inputSchema.parse(await request.json());
-    return apiSuccessResponse({
-      movement: await withdraw(input.positionId, input.shares),
-    });
+    return apiSuccessResponse({ movement: await withdraw(input.amount) });
   } catch (error) {
     return apiErrorResponse(error);
   }

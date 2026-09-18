@@ -3,6 +3,7 @@
 import { WELL_KNOWN_TOKEN_BY_MINT, type WellKnownTokenSymbol } from "@sdp/types";
 import Image from "next/image";
 import { useState } from "react";
+import { isRenderableLogoUrl } from "@/lib/token-logo-url";
 import { cn } from "@/lib/utils";
 
 /**
@@ -107,7 +108,7 @@ export function TokenMark({ mint, symbol, logoUrl, size = "sm", className }: Tok
     );
   }
 
-  if (logoUrl && failedLogoUrl !== logoUrl) {
+  if (logoUrl && isRenderableLogoUrl(logoUrl) && failedLogoUrl !== logoUrl) {
     return (
       <span
         className={cn(

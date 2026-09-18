@@ -27,16 +27,19 @@ export interface DvpTradesFilters {
   q: string | null;
 }
 
-/** The explicit no-filter filters: unfiltered is a choice, never a default. */
-export const UNFILTERED_DVP_TRADES: DvpTradesFilters = {
-  statuses: null,
-  settlementAvailability: null,
-  q: null,
-};
-
 export interface DvpTradesResult {
   trades: DvpTrade[];
   error: string | null;
+}
+
+/** Whether both legs decode far enough for the views to read an action wallet. */
+function legsRenderable(legs: unknown): boolean {
+  return (
+    typeof legs === "object" &&
+    legs !== null &&
+    legActionWalletSchema.safeParse((legs as DvpTrade["legs"]).a).success &&
+    legActionWalletSchema.safeParse((legs as DvpTrade["legs"]).b).success
+  );
 }
 
 /** Never throws: a list page that renders an error beats one that 500s. */
@@ -60,12 +63,7 @@ function isRenderableTrade(value: unknown): value is DvpTrade {
   }
   const trade = value as Partial<DvpTrade>;
   return (
-    typeof trade.id === "string" &&
-    typeof trade.status === "string" &&
-    typeof trade.legs === "object" &&
-    trade.legs !== null &&
-    legActionWalletSchema.safeParse(trade.legs.a).success &&
-    legActionWalletSchema.safeParse(trade.legs.b).success
+    typeof trade.id === "string" && typeof trade.status === "string" && legsRenderable(trade.legs)
   );
 }
 
@@ -170,10 +168,7 @@ function isRenderableInbound(value: unknown): value is DvpInboundTrade {
   return (
     typeof trade.id === "string" &&
     (trade.yourSide === "a" || trade.yourSide === "b") &&
-    typeof trade.legs === "object" &&
-    trade.legs !== null &&
-    legActionWalletSchema.safeParse(trade.legs.a).success &&
-    legActionWalletSchema.safeParse(trade.legs.b).success
+    legsRenderable(trade.legs)
   );
 }
 

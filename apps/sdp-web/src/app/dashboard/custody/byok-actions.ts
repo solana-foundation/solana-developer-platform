@@ -43,7 +43,9 @@ interface ProviderCredentialCompletionResult {
  * connection; the safe move is re-running the completion against the same id.
  */
 export type PrivyByokSubmitResult =
-  | { status: "success" }
+  // Carries the connection it settled so a caller can navigate straight to it;
+  // the wizard ignores this and returns to the wallets list.
+  | { status: "success"; connectionId: string }
   | { status: "failed"; message: string; connectionId?: string }
   | { status: "refused"; message: string; connectionId: string }
   // No self-service action converges: the connection's provider-account
@@ -123,7 +125,10 @@ async function runCompletion(connectionId: string): Promise<PrivyByokSubmitResul
   if (result.completion.status === "success") {
     revalidatePath("/dashboard/custody");
     revalidatePath("/dashboard/wallets");
-    return { status: "success" };
+    // The provider page now owns the connections list, so it has to see the
+    // new row too.
+    revalidatePath("/dashboard/integrations/privy");
+    return { status: "success", connectionId };
   }
   if (result.completion.status === "failed") {
     if (result.completion.code === "wallet_conflict") {

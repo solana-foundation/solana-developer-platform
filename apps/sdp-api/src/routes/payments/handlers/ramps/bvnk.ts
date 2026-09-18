@@ -87,6 +87,7 @@ import {
 } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { getLogger } from "@/runtime/logger";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 import {
@@ -289,6 +290,61 @@ async function persistBvnkOfframpWallet(
  * still inactive its status is refreshed from BVNK so the requirements flow can
  * keep returning `customer_funding_account_provisioning` until BVNK activates it.
  */
+/**
+ * Admits and resolves a BVNK provisioning step in the tamper-evident ledger.
+ * Provider-side objects created here (customers, wallets, payout
+ * beneficiaries, payment rules, agreement working sets) decide where future
+ * settlements land, so their creation must be attributable; the route path
+ * binds the request actor, the webhook path a system actor.
+ *
+ * Intent/outcome, not a single entry: `begin` writes a durable intent BEFORE
+ * the effect — a refused ledger write aborts the step while it is still
+ * retryable — and `complete` resolves it with the provider-assigned ids after
+ * the local state is persisted. An effect that dies between the two leaves an
+ * unresolved intent, which is exactly what the unresolved-intent verification
+ * gate pages on; the ledger never claims a creation that did not happen.
+ */
+export interface BvnkProvisioningAudit {
+  begin(event: { action: string; metadata: Record<string, unknown> }): Promise<AuditIntent>;
+  complete(intent: AuditIntent, metadata?: Record<string, unknown>): Promise<void>;
+  /** Resolves the intent with a failure outcome, so a routine provider error
+   * does not strand an unresolved intent that pollutes ledger verification.
+   * The outcome records that the ATTEMPT failed, never that the provider-side
+   * object does not exist: an ambiguous error (a timeout after the provider
+   * accepted the call) may have created it, so the entry carries
+   * providerOutcome: "unverified" instead of asserting a definite state. */
+  fail(intent: AuditIntent, error: unknown): Promise<void>;
+}
+
+export function requestProvisioningAudit(
+  c: AppContext,
+  counterparty: CounterpartyRow
+): BvnkProvisioningAudit {
+  const service = new AuditService(getDb(c.env));
+  return {
+    async begin({ action, metadata }) {
+      return service.beginCritical(c, {
+        action: "update",
+        resourceType: "counterparty",
+        resourceId: counterparty.id,
+        metadata: { action, provider: "bvnk", ...metadata },
+      });
+    },
+    async complete(intent, metadata = {}) {
+      await service.completeCritical(c, intent, { metadata });
+    },
+    async fail(intent, error) {
+      await service.completeCritical(c, intent, {
+        status: "failure",
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+          providerOutcome: "unverified",
+        },
+      });
+    },
+  };
+}
+
 export async function ensureBvnkOfframpWallet(
   c: AppContext,
   ctx: RampRuntimeContext,
@@ -313,14 +369,25 @@ export async function ensureBvnkOfframpWallet(
     fiatCurrency
   );
   const walletName = buildBvnkOfframpWalletName(fiatCurrency, counterparty.id);
-  const wallet = await client.createLedgerWalletV2(ctx, {
-    name: walletName,
-    currency: fiatCurrency,
-    profileId: walletProfile.id,
-    idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
+  const audit = requestProvisioningAudit(c, counterparty);
+  const intent = await audit.begin({
+    action: "bvnk_offramp_wallet_created",
+    metadata: { walletName, fiatCurrency },
   });
-  await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, wallet);
-  return { id: wallet.id, status: wallet.status };
+  try {
+    const wallet = await client.createLedgerWalletV2(ctx, {
+      name: walletName,
+      currency: fiatCurrency,
+      profileId: walletProfile.id,
+      idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
+    });
+    await persistBvnkOfframpWallet(c, counterparty, projectId, fiatCurrency, wallet);
+    await audit.complete(intent, { walletId: wallet.id });
+    return { id: wallet.id, status: wallet.status };
+  } catch (error) {
+    await audit.fail(intent, error);
+    throw error;
+  }
 }
 
 /** Persists an off-ramp payout beneficiary marker to provider_data.bvnk.offramp.beneficiaries. */
@@ -419,7 +486,20 @@ export async function ensureBvnkOfframpBeneficiary(
     accountType: bvnkOfframpAccountType(fiatCurrency),
     createdAt: new Date().toISOString(),
   };
-  await persistBvnkOfframpBeneficiary(c, input.counterparty, input.projectId, beneficiary);
+  // The beneficiary marker binds this counterparty to a real-world payout
+  // destination; who registered it is the fact disputes turn on.
+  const audit = requestProvisioningAudit(c, input.counterparty);
+  const intent = await audit.begin({
+    action: "bvnk_offramp_beneficiary_registered",
+    metadata: { key, fiatCurrency, accountType: beneficiary.accountType },
+  });
+  try {
+    await persistBvnkOfframpBeneficiary(c, input.counterparty, input.projectId, beneficiary);
+    await audit.complete(intent);
+  } catch (error) {
+    await audit.fail(intent, error);
+    throw error;
+  }
   return beneficiary;
 }
 
@@ -665,18 +745,36 @@ async function mintBvnkAgreementSession(
   if (claimed.session !== undefined) {
     return present(claimed, "converged");
   }
-  const session = await input.client.createAgreementSession(input.ctx, {
-    countryCode: residenceCountry,
-    idempotencyKey: counterpartyProviderAccountUuid(row.id),
+  // The agreement session is the provider-side consent artifact this
+  // counterparty will sign; its creation is admitted intent/outcome like the
+  // other BVNK provisioning steps.
+  const audit = requestProvisioningAudit(c, input.counterparty);
+  const intent = await audit.begin({
+    action: "bvnk_agreement_session_created",
+    metadata: { countryCode: residenceCountry },
   });
-  const assigned = await accounts.setCustomerLinkSession({
-    ...scope,
-    id: row.id,
-    session: {
-      reference: session.reference,
-      agreements: toStoredSessionAgreements(session.agreements),
-    },
-  });
+  // The catch covers only the effect and its durable write: everything after
+  // `complete` runs outside it, so one intent can never collect a success
+  // outcome and then a contradicting failure outcome from the read-back path.
+  let assigned: Awaited<ReturnType<typeof accounts.setCustomerLinkSession>>;
+  try {
+    const session = await input.client.createAgreementSession(input.ctx, {
+      countryCode: residenceCountry,
+      idempotencyKey: counterpartyProviderAccountUuid(row.id),
+    });
+    assigned = await accounts.setCustomerLinkSession({
+      ...scope,
+      id: row.id,
+      session: {
+        reference: session.reference,
+        agreements: toStoredSessionAgreements(session.agreements),
+      },
+    });
+    await audit.complete(intent, { sessionReference: session.reference });
+  } catch (error) {
+    await audit.fail(intent, error);
+    throw error;
+  }
   if (assigned !== null) {
     return present(bvnkCustomerProviderAccountMetadataSchema.parse(assigned.metadata), "assigned");
   }
@@ -784,21 +882,38 @@ async function createBvnkCustomer(
     metadata: BvnkCustomerProviderAccountMetadata;
   }
 ): Promise<{ customer: BvnkCustomerResolution }> {
-  const created = await input.client.createCustomer(input.ctx, {
-    idempotencyKey: (await hashString(`bvnk-customer:${input.counterparty.id}`)).slice(0, 36),
-    externalReference: input.reference,
-    signedAgreementSessionReference: input.sessionReference,
-    individual: input.individual,
+  // Creating the provider customer binds this counterparty's KYC identity at
+  // BVNK; the intent precedes the call, the outcome carries the assigned
+  // reference.
+  const audit = requestProvisioningAudit(c, input.counterparty);
+  const intent = await audit.begin({
+    action: "bvnk_customer_created",
+    metadata: { reference: input.reference },
   });
-  const customer = await assignBvnkCustomerLink(c, {
-    counterparty: input.counterparty,
-    projectId: input.projectId,
-    providerAccountId: input.providerAccountId,
-    fromProviderCustomerReference: input.reference,
-    metadata: input.metadata,
-    customer: { customerReference: created.reference, status: created.status },
-  });
-  return { customer };
+  try {
+    const created = await input.client.createCustomer(input.ctx, {
+      idempotencyKey: (await hashString(`bvnk-customer:${input.counterparty.id}`)).slice(0, 36),
+      externalReference: input.reference,
+      signedAgreementSessionReference: input.sessionReference,
+      individual: input.individual,
+    });
+    const customer = await assignBvnkCustomerLink(c, {
+      counterparty: input.counterparty,
+      projectId: input.projectId,
+      providerAccountId: input.providerAccountId,
+      fromProviderCustomerReference: input.reference,
+      metadata: input.metadata,
+      customer: { customerReference: created.reference, status: created.status },
+    });
+    await audit.complete(intent, {
+      customerReference: created.reference ?? null,
+      status: created.status ?? null,
+    });
+    return { customer };
+  } catch (error) {
+    await audit.fail(intent, error);
+    throw error;
+  }
 }
 
 /**
@@ -941,18 +1056,34 @@ async function recordBvnkAgreementConsent(
     provider: "bvnk" as const,
   };
   const ipAddress = getClientIp(c);
-  await input.client.signAgreementSession(input.ctx, {
-    reference: input.sessionReference,
-    ipAddress: ipAddress === null ? BVNK_UNRESOLVED_CONSENT_IP : ipAddress,
+  const consentIp = ipAddress === null ? BVNK_UNRESOLVED_CONSENT_IP : ipAddress;
+  // Signing registers the consent (and its IP) with the provider — a legal
+  // state change admitted intent/outcome like the other provisioning steps.
+  const audit = requestProvisioningAudit(c, input.counterparty);
+  const intent = await audit.begin({
+    action: "bvnk_agreement_session_signed",
+    metadata: { sessionReference: input.sessionReference, consentIp },
   });
-  const consentSubmittedAt = new Date().toISOString();
-  const updated = await accounts.markCustomerLinkSessionTimestamp({
-    ...scope,
-    id: input.providerAccountId,
-    sessionReference: input.sessionReference,
-    field: "consentSubmittedAt",
-    timestamp: consentSubmittedAt,
-  });
+  let consentSubmittedAt: string;
+  let updated: Awaited<ReturnType<typeof accounts.markCustomerLinkSessionTimestamp>>;
+  try {
+    await input.client.signAgreementSession(input.ctx, {
+      reference: input.sessionReference,
+      ipAddress: consentIp,
+    });
+    consentSubmittedAt = new Date().toISOString();
+    updated = await accounts.markCustomerLinkSessionTimestamp({
+      ...scope,
+      id: input.providerAccountId,
+      sessionReference: input.sessionReference,
+      field: "consentSubmittedAt",
+      timestamp: consentSubmittedAt,
+    });
+    await audit.complete(intent, { consentSubmittedAt });
+  } catch (error) {
+    await audit.fail(intent, error);
+    throw error;
+  }
   if (updated !== null) {
     getLogger().info(
       {
@@ -1085,7 +1216,8 @@ export async function ensureBvnkPaymentRule(
   counterparty: CounterpartyRow,
   projectId: string,
   customer: BvnkCustomerResolution,
-  params: BvnkOnrampRequestSpec
+  params: BvnkOnrampRequestSpec,
+  audit: BvnkProvisioningAudit
 ): Promise<BvnkPaymentRuleResolution> {
   const client = RAMP_PROVIDER_CLIENTS.bvnk;
   const paymentRuleKey = buildBvnkOnrampPaymentRuleKey(
@@ -1130,26 +1262,36 @@ export async function ensureBvnkPaymentRule(
       }),
       params.fiatCurrency
     );
-    const wallet = await client.createLedgerWalletV2(ctx, {
-      customerId: customer.customerReference,
-      name: walletName,
-      currency: params.fiatCurrency,
-      profileId: walletProfile.id,
-      idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
+    const walletIntent = await audit.begin({
+      action: "bvnk_onramp_wallet_created",
+      metadata: { walletName, fiatCurrency: params.fiatCurrency },
     });
-    if (wallet.name !== walletName) {
-      throw internalError(
-        `BVNK returned unexpected on-ramp wallet name: ${wallet.name ?? "<missing>"}`
-      );
+    try {
+      const wallet = await client.createLedgerWalletV2(ctx, {
+        customerId: customer.customerReference,
+        name: walletName,
+        currency: params.fiatCurrency,
+        profileId: walletProfile.id,
+        idempotencyKey: await buildBvnkWalletIdempotencyKey(walletName),
+      });
+      if (wallet.name !== walletName) {
+        throw internalError(
+          `BVNK returned unexpected on-ramp wallet name: ${wallet.name ?? "<missing>"}`
+        );
+      }
+      entry = {
+        ...entry,
+        walletId: wallet.id,
+        walletName: wallet.name,
+        walletStatus: wallet.status,
+        bankAccount: bvnkWalletBankAccount(wallet),
+      };
+      await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
+      await audit.complete(walletIntent, { walletId: wallet.id });
+    } catch (error) {
+      await audit.fail(walletIntent, error);
+      throw error;
     }
-    entry = {
-      ...entry,
-      walletId: wallet.id,
-      walletName: wallet.name,
-      walletStatus: wallet.status,
-      bankAccount: bvnkWalletBankAccount(wallet),
-    };
-    await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
   }
 
   if (entry.walletId && !isBvnkWalletActive(entry.walletStatus)) {
@@ -1173,20 +1315,34 @@ export async function ensureBvnkPaymentRule(
   }
 
   if (!entry.ruleId && entry.walletId && isBvnkWalletActive(entry.walletStatus)) {
-    const rule = await client.createOnrampRule(ctx, {
-      reference: await bvnkRuleReference(counterparty.id, paymentRuleKey),
-      walletId: entry.walletId,
-      currency: params.currency,
-      network: params.network,
-      beneficiaryAddress: params.destinationWalletAddress,
-      entity: {
-        type: "INDIVIDUAL",
-        relationshipType: "SELF_OWNED",
-        customerIdentifier: customer.customerReference,
+    const ruleIntent = await audit.begin({
+      action: "bvnk_onramp_payment_rule_created",
+      metadata: {
+        currency: params.currency,
+        network: params.network,
+        destination: params.destinationWalletAddress,
       },
     });
-    entry = { ...entry, ruleId: rule.id, ruleStatus: rule.status };
-    await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
+    try {
+      const rule = await client.createOnrampRule(ctx, {
+        reference: await bvnkRuleReference(counterparty.id, paymentRuleKey),
+        walletId: entry.walletId,
+        currency: params.currency,
+        network: params.network,
+        beneficiaryAddress: params.destinationWalletAddress,
+        entity: {
+          type: "INDIVIDUAL",
+          relationshipType: "SELF_OWNED",
+          customerIdentifier: customer.customerReference,
+        },
+      });
+      entry = { ...entry, ruleId: rule.id, ruleStatus: rule.status };
+      await persistBvnkOnrampState(repository, counterparty, projectId, paymentRuleKey, entry);
+      await audit.complete(ruleIntent, { ruleId: rule.id });
+    } catch (error) {
+      await audit.fail(ruleIntent, error);
+      throw error;
+    }
   }
 
   return {

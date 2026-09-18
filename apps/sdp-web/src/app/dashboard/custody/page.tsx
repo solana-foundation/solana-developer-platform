@@ -11,7 +11,6 @@ import {
   resolvePlaygroundApiBaseUrl,
 } from "@/app/dashboard/playground-api-data";
 import { WalletsOverviewSkeleton } from "@/app/dashboard/wallets/wallet-route-skeletons";
-import { privyByok } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -71,7 +70,6 @@ export default async function CustodyPage() {
   }
 
   const trace = createTimedTrace("dashboard.custody.page");
-  const privyByokEnabled = await privyByok();
 
   try {
     const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
@@ -149,7 +147,6 @@ export default async function CustodyPage() {
           connectedProviders={connectedProviders}
           enabledProviders={enabledProviders}
           configsError={configsError}
-          showConnectionsLink={privyByokEnabled}
           wallets={walletsResult.ok ? walletsResult.value : []}
           walletsError={walletsError}
         />

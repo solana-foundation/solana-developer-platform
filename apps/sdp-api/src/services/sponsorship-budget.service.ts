@@ -4,7 +4,8 @@ import {
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
-import { createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
+import { resolveDefaultCluster } from "@sdp/rpc";
+import { createClusterRpc, createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
 import {
   type Address,
   assertIsFullySignedTransaction,
@@ -27,6 +28,7 @@ import {
   type SponsorshipNetwork,
   type SponsorshipReservation,
   type SponsorshipReservationStatus,
+  sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
@@ -112,8 +114,29 @@ type AdmissionContext = {
   dayBucket: string;
 };
 
-function resolveNetwork(env: Pick<Env, "SOLANA_NETWORK">): SponsorshipNetwork {
-  return env.SOLANA_NETWORK === "mainnet-beta" ? "mainnet" : "devnet";
+/**
+ * The budget network a scope draws from: the scope's cluster when the caller
+ * named one (Earn movements execute per cluster), else the process default.
+ * A mainnet movement on a devnet-default process must reserve against the
+ * mainnet policies and trip the mainnet breaker, not devnet's.
+ */
+function resolveNetwork(
+  env: Pick<Env, "SOLANA_NETWORK">,
+  scope: Pick<SponsorshipScope, "cluster">
+): SponsorshipNetwork {
+  return sponsorshipNetworkForCluster(scope.cluster ?? resolveDefaultCluster(env));
+}
+
+/**
+ * The RPC that prices the network fee for a scope: the process RPC by default,
+ * the cluster's own endpoint when the scope names one. A fee quoted on the
+ * wrong chain is not a fee, and `getFeeForMessage` for a foreign blockhash
+ * answers null anyway. An unconfigured cluster throws here and surfaces as
+ * "Sponsorship preflight is unavailable", the same fail-closed answer as a
+ * dead RPC.
+ */
+function createNetworkFeeRpc(env: Env, scope: Pick<SponsorshipScope, "cluster">) {
+  return scope.cluster ? createClusterRpc(env, scope.cluster) : createRpc(env);
 }
 
 function encodeBase64(value: Uint8Array): string {
@@ -180,6 +203,7 @@ export function sponsorshipProviderConfigFingerprint(
 
 export class BudgetedFeePayment implements SponsorshipFeePayment {
   readonly providerId: string;
+  private readonly network: SponsorshipNetwork;
   private readonly repository: BudgetRepository;
   private readonly budgetRedis: BudgetRedis;
   private readonly getNetworkFee: (transaction: Uint8Array) => Promise<bigint>;
@@ -192,11 +216,13 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     dependencies: BudgetedFeePaymentDependencies = {}
   ) {
     this.providerId = provider.providerId;
+    this.network = resolveNetwork(env, scope);
     this.repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
     this.getNetworkFee =
       dependencies.getNetworkFee ??
-      ((transaction) => getTransactionNetworkFee(createRpc(this.env), transaction));
+      ((transaction) =>
+        getTransactionNetworkFee(createNetworkFeeRpc(this.env, this.scope), transaction));
     this.now = dependencies.now ?? (() => new Date());
   }
 
@@ -217,7 +243,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     } catch (error) {
       if (error instanceof SponsorResponseUndecodableError) {
         return this.accountingUnavailable(
-          resolveNetwork(this.env),
+          this.network,
           "Signed sponsorship result could not be reconstructed",
           "Sponsor response bytes were undecodable",
           error
@@ -306,7 +332,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       );
     } catch (error) {
       return this.accountingUnavailable(
-        resolveNetwork(this.env),
+        this.network,
         "Signed sponsorship outcome could not be persisted",
         "Signed sponsorship persistence failed",
         error
@@ -326,7 +352,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       ]))
     ) {
       return this.accountingUnavailable(
-        resolveNetwork(this.env),
+        this.network,
         "Signed sponsorship outcome could not be persisted",
         "Signed sponsorship outcome lost its durable state transition"
       );
@@ -373,7 +399,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         );
       }
       await lifecycle.persistSigned(submission);
-      const policies = await this.resolveEnabledPolicies(resolveNetwork(this.env));
+      const policies = await this.resolveEnabledPolicies(this.network);
       if (policies.some((policy) => !policy.enabled)) {
         throw new FeePaymentError(
           "Sponsorship is disabled for this scope",
@@ -409,7 +435,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       );
     } catch (error) {
       return this.accountingUnavailable(
-        resolveNetwork(this.env),
+        this.network,
         "Owned submission accounting could not be persisted",
         "Owned submission accounting persistence failed",
         error,
@@ -421,7 +447,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
     ) {
       return this.accountingUnavailable(
-        resolveNetwork(this.env),
+        this.network,
         "Owned submission accounting could not be persisted",
         "Owned submission accounting lost its durable state transition",
         undefined,
@@ -453,7 +479,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       result = await this.repository.markSubmitted(reservation.id, reservation.attempt, signature);
     } catch (error) {
       return this.accountingUnavailable(
-        resolveNetwork(this.env),
+        this.network,
         "Submitted sponsorship outcome could not be persisted",
         "Submitted sponsorship persistence failed",
         error
@@ -468,7 +494,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
     ) {
       return this.accountingUnavailable(
-        resolveNetwork(this.env),
+        this.network,
         "Submitted sponsorship outcome could not be persisted",
         "Submitted sponsorship outcome lost its durable state transition"
       );
@@ -498,7 +524,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         "PROVIDER_NOT_AVAILABLE"
       );
     }
-    const network = resolveNetwork(this.env);
+    const network = this.network;
     let providerConfig: Awaited<
       ReturnType<NonNullable<FeePaymentPort["getSponsorshipConfiguration"]>>
     >;
@@ -939,14 +965,14 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       if (persisted) return;
     } catch (persistenceError) {
       return this.accountingUnavailable(
-        resolveNetwork(this.env),
+        this.network,
         "Ambiguous sponsorship outcome could not be persisted",
         "Failed to persist ambiguous Kora outcome",
         persistenceError
       );
     }
     return this.accountingUnavailable(
-      resolveNetwork(this.env),
+      this.network,
       "Ambiguous sponsorship outcome could not be persisted",
       "Ambiguous sponsorship state transition was lost"
     );
@@ -981,7 +1007,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
           : await this.repository.markReleased(reservation.id, reservation.attempt, reason);
     } catch (releaseError) {
       return this.accountingUnavailable(
-        resolveNetwork(this.env),
+        this.network,
         "Sponsorship release state is unavailable",
         "Deterministic release persistence failed",
         releaseError
@@ -989,7 +1015,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     if (!released || !reservation.settlement) {
       await this.tripBreaker(
-        resolveNetwork(this.env),
+        this.network,
         "Deterministic release lost its durable ownership transition"
       );
       throw new FeePaymentError(
@@ -1007,7 +1033,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       if (!persisted) throw new Error("Released reservation lost its Redis settlement ownership");
     } catch (compensationError) {
       return this.accountingUnavailable(
-        resolveNetwork(this.env),
+        this.network,
         "Sponsorship release accounting is unavailable",
         "Redis release invariant failed",
         compensationError

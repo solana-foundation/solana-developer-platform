@@ -3,13 +3,13 @@
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import {
-  CheckCircle2Icon,
   ExternalLinkIcon,
   PlusIcon,
   StickyNoteIcon,
   UserRoundIcon,
   WalletIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/payments/counterparty/add-external-account-dialog";
 import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
@@ -270,33 +270,41 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
 function ReviewStep({ wizard, counterpartyName }: StepProps) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
-  const { transferResult } = wizard;
-  if (transferResult === null) {
+  const { transferResult, heldApprovalRequestId } = wizard;
+  const summary = (
+    <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
+      <ReviewSummary wizard={wizard} counterpartyName={counterpartyName} />
+    </section>
+  );
+  // A finished transfer's outcome is the frame heading (the rail's
+  // completionTitle); the step body adds only what that heading does not say.
+  if (heldApprovalRequestId !== null) {
     return (
-      <section className="space-y-4 rounded-2xl bg-fill-subtle p-5">
-        <ReviewSummary wizard={wizard} counterpartyName={counterpartyName} />
-      </section>
+      <div className="flex flex-col gap-6">
+        <p className="text-sm text-tertiary">
+          {t("DashboardPayments.onchainSend.approvalPendingDescription")}
+        </p>
+        {summary}
+        <Button asChild type="button" variant="secondary" className="w-full">
+          <Link href={`/dashboard/approvals/${encodeURIComponent(heldApprovalRequestId)}`}>
+            {t("DashboardPayments.onchainSend.viewApprovalRequest")}
+          </Link>
+        </Button>
+      </div>
     );
+  }
+  if (transferResult === null) {
+    return summary;
   }
   const signature = transferResult.signature;
   return (
-    <div className="flex flex-col items-center gap-6">
-      <div className="flex size-16 items-center justify-center rounded-full bg-success-bg text-success">
-        <CheckCircle2Icon className="size-8" />
-      </div>
-      <div className="space-y-1 text-center">
-        <p className="text-2xl font-medium tracking-tight text-primary">
-          {t("DashboardPayments.onchainSend.transferSubmitted")}
-        </p>
-        <p className="text-sm text-tertiary">
-          {signature === null
-            ? t("DashboardPayments.onchainSend.transferStatus", { status: transferResult.status })
-            : t("DashboardPayments.onchainSend.transferSuccess")}
-        </p>
-      </div>
-      <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
-        <ReviewSummary wizard={wizard} counterpartyName={counterpartyName} />
-      </section>
+    <div className="flex flex-col gap-6">
+      <p className="text-sm text-tertiary">
+        {signature === null
+          ? t("DashboardPayments.onchainSend.transferStatus", { status: transferResult.status })
+          : t("DashboardPayments.onchainSend.transferSuccess")}
+      </p>
+      {summary}
       {signature === null ? null : (
         <Button
           type="button"
