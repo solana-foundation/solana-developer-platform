@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { formatEpochSeconds, shortenMarketAddress } from "./earn-format";
+import { formatEpochSeconds, formatProviderAmount, shortenMarketAddress } from "./earn-format";
 import { earnMintAsset } from "./earn-market-presentation";
 import {
   cancelEarnVaultWithdrawalRequest,
@@ -117,7 +117,9 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
                     </div>
                     <p className="mt-1 text-xs leading-5 text-secondary">
                       {t("DashboardEarn.queuedWithdraw.activeSummary", {
-                        shares: request.shares,
+                        // The symbol is its own interpolation, so format the
+                        // quantity alone — same trunc rules as the result modal.
+                        shares: formatProviderAmount(request.shares, locale),
                         symbol: earnMintAsset(request.shareMint).symbol,
                         maturity: formatEpoch(request.maturityTimestamp, locale),
                         deadline: formatEpoch(request.deadlineTimestamp, locale),

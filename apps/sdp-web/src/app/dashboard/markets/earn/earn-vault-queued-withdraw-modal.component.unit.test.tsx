@@ -183,6 +183,32 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     );
   });
 
+  it("explains an over-available amount instead of silently disabling Continue", () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "11" } });
+
+    expect(
+      screen.getByText("That exceeds the amount currently available to withdraw.")
+    ).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+  });
+
+  it("caps typed amounts at the withdrawal decimal scale like the instant modal", () => {
+    renderModal();
+    const input = screen.getByLabelText("Amount") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "0.123456" } });
+    expect(input.value).toBe("0.123456");
+
+    // A seventh decimal never reaches the state — the change is discarded at
+    // the source instead of being rejected after the fact.
+    fireEvent.change(input, { target: { value: "0.1234567" } });
+    expect(input.value).toBe("0.123456");
+  });
+
   it("uses live queue terms and keeps one idempotency key until the intent changes", async () => {
     mocks.createRequest.mockResolvedValue({
       ok: false,
@@ -279,6 +305,31 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     await waitFor(() =>
       expect(mocks.cancelRequest).toHaveBeenCalledWith(submitted.withdrawalRequestId, SECOND_KEY)
     );
+  });
+
+  it("keeps a confirmed cancel ahead of a stale poll whose timestamps sort differently", async () => {
+    const submitted = request("pending");
+    const recoverable = request("expiredCancelable");
+    const cancelling = request("cancelling");
+    // Half a second AFTER the poll's observation, yet lexicographically
+    // BEFORE it: mixed fractional-seconds formatting inverts string order.
+    cancelling.updatedAt = "2026-09-18T00:00:00.500000Z";
+    recoverable.updatedAt = "2026-09-18T00:00:00Z";
+    mocks.createRequest.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", withdrawalRequest: submitted },
+    });
+    mocks.cancelRequest.mockResolvedValue({ ok: true, status: 200, data: cancelling });
+    mocks.useRequestOutcome.mockReturnValue(recoverable);
+    renderModal();
+
+    await openReview();
+    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    await screen.findByText("Recovery available");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel and recover shares" }));
+    expect(await screen.findByText("Recovering shares")).toBeTruthy();
   });
 
   it("forwards server-observed solver fulfillment to the settlement callback", async () => {

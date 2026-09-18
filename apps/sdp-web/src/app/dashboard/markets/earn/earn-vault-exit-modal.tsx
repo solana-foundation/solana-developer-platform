@@ -49,10 +49,19 @@ function autoRouteChoice(
   return null;
 }
 
-/** Reads provider withdrawal capabilities once per position, with manual retry. */
+/**
+ * Reads provider withdrawal capabilities once per position, with manual retry.
+ * A retry reruns this same effect instead of issuing its own unguarded fetch,
+ * so every attempt — initial or retried — owns one AbortController: the
+ * cleanup aborts the attempt a retry or unmount supersedes, and the abort
+ * guard discards its late answer rather than letting it win by outliving
+ * newer state.
+ */
 function useEarnVaultExitOptions(positionId: string) {
   const [options, setOptions] = useState<ExitOptions>(undefined);
+  const [attempt, setAttempt] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt is a trigger-only dep — a retry bumps it to re-run this effect, whose cleanup aborts the attempt it supersedes.
   useEffect(() => {
     const controller = new AbortController();
     void fetchEarnVaultWithdrawalOptions(positionId, controller.signal).then((result) => {
@@ -60,11 +69,11 @@ function useEarnVaultExitOptions(positionId: string) {
       setOptions(result);
     });
     return () => controller.abort();
-  }, [positionId]);
+  }, [positionId, attempt]);
 
   const retry = () => {
     setOptions(undefined);
-    void fetchEarnVaultWithdrawalOptions(positionId).then(setOptions);
+    setAttempt((current) => current + 1);
   };
 
   return { options, retry };
