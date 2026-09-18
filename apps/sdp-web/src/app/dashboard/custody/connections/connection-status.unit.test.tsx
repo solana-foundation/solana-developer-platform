@@ -22,11 +22,11 @@ function render(
 }
 
 describe("connection status cell", () => {
-  it("says signing is allowed on a healthy active connection", () => {
+  it("shows only the lifecycle status on a healthy active connection", () => {
     const html = render("active", true);
     expect(html).toContain("Active");
-    expect(html).toContain('data-signing-state="allowed"');
-    expect(html).toContain("Signing allowed");
+    expect(html).not.toContain("data-signing-state");
+    expect(html).not.toContain("Signing");
   });
 
   it("keeps the connection Active while reporting that signing is paused", () => {
