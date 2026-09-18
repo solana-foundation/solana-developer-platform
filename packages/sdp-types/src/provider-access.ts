@@ -242,9 +242,9 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   veda: { defaultToleranceBps: 10 },
   upshift: null,
   perena: null,
-  // Production Kamino deposits require a caller-chosen minSharesOut. Kamino
-  // exposes a live deposit quote, so every consumer can derive the floor from
-  // quoted shares instead of guessing from the token amount.
+  // Kamino deposits require a caller-chosen minSharesOut in every environment.
+  // Kamino exposes a live deposit quote, so every consumer can derive the floor
+  // from quoted shares instead of guessing from the token amount.
   kamino: { defaultToleranceBps: 10 },
   jupiter_lend: { defaultToleranceBps: 10 },
   // The deposit is a market swap, so its builder REQUIRES an explicit floor

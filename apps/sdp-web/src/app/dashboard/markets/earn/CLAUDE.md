@@ -378,14 +378,14 @@ program create still sends the body `requestId` form.
   carry the floor its key was minted with, verbatim. The floor POLICY (whether
   the control renders at all, and its default tolerance) is the catalogue row's
   `depositSlippage`, which the API answers per environment
-  (`earnDepositSlippagePolicy` in @sdp/types: every production row is
-  non-null), never the provider map, so a production Kamino deposit is floored
-  like any other.
-- `earn-vault-movement.ts` — the submit-outcome rules BOTH vault modals share:
+  (`earnDepositSlippagePolicy` in @sdp/types: Kamino declares 10 bps in every
+  environment and every production row is non-null), never the provider map,
+  so a Kamino deposit is always floored.
+- `earn-vault-movement.ts`: the submit-outcome rules BOTH vault modals share:
   when a submission counts as money moved (`observableVaultMovement`), how a
   watcher's fresher record folds into it, the stepper position and focus-panel
   key per state, and the 202 approval-pending shape. One copy on purpose, same
-  reasoning as the slippage machinery — the deposit and withdrawal modals
+  reasoning as the slippage machinery; the deposit and withdrawal modals
   resolving "did my submission move anything" differently is how a double-count
   ships.
 - `@/lib/idempotency-key-store.ts` — the shared machinery behind BOTH tracking

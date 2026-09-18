@@ -35,6 +35,14 @@ possible via curl even while the dashboard's switcher stays locked — drives th
 provider's production API. Locally, only ever use sandbox projects and never
 set a production `*_API_KEY`.
 
+A mainnet vault-direct readiness run is the narrow exception to the provider
+API half of that rule, not the infrastructure half. Keep Postgres and Redis
+local, use disposable funded wallets, and limit the run to public on-chain and
+market-data surfaces. Do not load custodial provider production credentials.
+Use an isolated local production project/key with `ENVIRONMENT=production` and
+a genesis-verified mainnet RPC. Keep Kora off unless Kora itself is the test;
+an external caller-provided fee payer is not Kora sponsorship.
+
 ### 1. Infrastructure
 
 Postgres and Redis both run in Docker. Other projects commonly squat 5432/6379,
