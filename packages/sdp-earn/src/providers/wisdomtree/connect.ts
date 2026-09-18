@@ -145,7 +145,12 @@ async function getWisdomTreeAccessToken(
 ): Promise<{ token: string; baseUrl: string; cacheKey: string }> {
   const config = readWisdomTreeConfig(ctx);
   // A digest, not the raw tuple: the map outlives any single call, and a dump
-  // or log of it must never carry the plaintext credentials.
+  // or log of it must never carry the plaintext credentials. This is a
+  // cache-KEY equivalence digest, not password storage or verification — the
+  // credential itself is re-sent over TLS to the token endpoint on every
+  // grant — so a fast hash is the point; a slow KDF here would only tax the
+  // request path without hardening anything the map already protects.
+  // codeql[js/password-hashing]
   const cacheKey = createHash("sha256")
     .update(
       JSON.stringify([
