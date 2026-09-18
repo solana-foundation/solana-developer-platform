@@ -8,7 +8,9 @@
  *  2. `submitted` with a burn signature → getSignatureStatuses on the CURRENT
  *     instance gateway → `confirmed` / `failed`; signature not found + stale →
  *     failed. This is the ONLY window where a withdrawal can auto-`failed`
- *     (pre-burn-confirmation — no balance moved yet).
+ *     (pre-burn-confirmation — no balance moved yet). Status reads are batched
+ *     per tick: every submitted burn targeting the same gateway rides a single
+ *     getSignatureStatuses call instead of one RPC round trip per row.
  *  3. `confirmed` → `settled` via the polling oracle: scan the CURRENT
  *     instance's escrow ATA on devnet for outgoing SPL transfers matching a
  *     withdrawal's (destinationAta, mint, baseUnits), CLAIM the match by
@@ -43,6 +45,7 @@ import {
   type PrivateChannelWithdrawalRepository,
   type PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { knownMintToken } from "@/services/private-channels/mint";
 import {
@@ -61,6 +64,8 @@ const STUCK_WARNING_INTERVAL_MS = 60 * 60 * 1000;
 const MAX_PER_RUN = 100;
 /** How many recent instance-ATA signatures to scan for releases per group. */
 const RELEASE_SCAN_LIMIT = 100;
+/** Bound concurrent getTransaction lookups while parsing release candidates. */
+const RELEASE_LOOKUP_CONCURRENCY = 5;
 
 export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const repo = createPrivateChannelWithdrawalRepository(env);
@@ -96,13 +101,57 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
 
   const now = Date.now();
 
-  // Phase 1 — pending/submitted per withdrawal.
+  // One RPC client per gateway URL per tick, shared by every withdrawal that
+  // burns on the same gateway.
+  const gatewayRpcs = new Map<string, solanaRpc.SolanaRpc>();
+  const gatewayRpcFor = (instance: PrivateChannelInstanceRow): solanaRpc.SolanaRpc => {
+    let rpc = gatewayRpcs.get(instance.gateway_url);
+    if (!rpc) {
+      rpc = solanaRpc.createRpc(env, { rpcUrl: instance.gateway_url });
+      gatewayRpcs.set(instance.gateway_url, rpc);
+    }
+    return rpc;
+  };
+
+  // Submitted withdrawals bucketed by gateway: every burn signature on the same
+  // gateway shares one batched getSignatureStatuses call per tick instead of
+  // paying one RPC round trip per row. Buckets stay well under the RPC's
+  // 256-signature cap because MAX_PER_RUN bounds the whole tick.
+  const buckets = new Map<
+    string,
+    { rpc: solanaRpc.SolanaRpc; withdrawals: PrivateChannelWithdrawalRow[] }
+  >();
+
+  const reconcileSubmitted = (
+    withdrawal: PrivateChannelWithdrawalRow,
+    instance: PrivateChannelInstanceRow
+  ): Promise<void> => {
+    if (!withdrawal.signature) {
+      return failIfStale(
+        env,
+        repo,
+        withdrawal,
+        now,
+        "Withdrawal was submitted without a signature."
+      );
+    }
+    let bucket = buckets.get(instance.gateway_url);
+    if (!bucket) {
+      bucket = { rpc: gatewayRpcFor(instance), withdrawals: [] };
+      buckets.set(instance.gateway_url, bucket);
+    }
+    bucket.withdrawals.push(withdrawal);
+    return Promise.resolve();
+  };
+
+  // Phase 1 — local transitions (stale fails, CAS promotions) and bucketing; no
+  // per-row RPC.
   for (const withdrawal of pending) {
     try {
       if (withdrawal.status === "pending" && !withdrawal.signature) {
         await failIfStale(env, repo, withdrawal, now, "Withdrawal burn was never broadcast.");
       } else if (withdrawal.status === "pending") {
-        await promoteSignedPending(env, repo, withdrawal, loadInstance, now);
+        await promoteSignedPending(repo, withdrawal, loadInstance, reconcileSubmitted, now);
       } else if (withdrawal.status === "submitted") {
         const instance = await loadInstance(withdrawal.instance_id);
         if (!instance) {
@@ -111,13 +160,59 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
           await failStale(env, repo, withdrawal, now, "Withdrawal instance no longer connected.");
           continue;
         }
-        await reconcileSubmitted(env, repo, withdrawal, instance, now);
+        await reconcileSubmitted(withdrawal, instance);
       }
       // `confirmed` handled by the release-observation pass below.
     } catch (err) {
       logReconcileError(withdrawal.id, withdrawal.status, err);
     }
   }
+
+  // Phase 1b — one batched burn-status read per gateway, then per-row verdicts.
+  await Promise.all(
+    [...buckets.values()].map(async (bucket) => {
+      let statuses: Array<solanaRpc.SignatureStatusInfo | null>;
+      try {
+        // Burn is on the gateway (channel chain). No auth here — auth-enabled
+        // instances will need to be wired through this call the way
+        // withdraw-confirm.ts does.
+        // TODO(auth): plumb resolveMemberGatewayAuth into the cron path once we need it.
+        // searchTransactionHistory for the same reason as the deposit reconciler:
+        // every path into here is already past the node's short recent-status cache,
+        // and promoteSignedPending reaches it strictly AFTER STUCK_AFTER_MS. Without
+        // it an executed burn reads null and is failed, which invites the caller to
+        // burn the same balance twice.
+        statuses = await solanaRpc.getSignatureStatuses(
+          bucket.rpc,
+          bucket.withdrawals.map((withdrawal) => withdrawal.signature as Signature),
+          { searchTransactionHistory: true }
+        );
+      } catch (err) {
+        getLogger().error(
+          {
+            withdrawals: bucket.withdrawals.length,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "trackPendingWithdrawals: batched getSignatureStatuses failed"
+        );
+        return;
+      }
+      if (statuses.length !== bucket.withdrawals.length) {
+        getLogger().error(
+          { withdrawals: bucket.withdrawals.length, statuses: statuses.length },
+          "trackPendingWithdrawals: getSignatureStatuses returned a mismatched batch"
+        );
+        return;
+      }
+      for (const [index, withdrawal] of bucket.withdrawals.entries()) {
+        try {
+          await applySubmittedVerdict(env, repo, withdrawal, statuses[index] ?? null, now);
+        } catch (err) {
+          logReconcileError(withdrawal.id, "submitted", err);
+        }
+      }
+    })
+  );
 
   // Phase 2 — `confirmed` → `settled` via release-observation scan. Grouped by
   // (instance, mint) so the escrow ATA's signatures are fetched once per bucket.
@@ -198,10 +293,13 @@ function logReconcileError(withdrawalId: string, status: string, err: unknown): 
  * failing a burn that may have executed.
  */
 async function promoteSignedPending(
-  env: Env,
   repo: PrivateChannelWithdrawalRepository,
   withdrawal: PrivateChannelWithdrawalRow,
   loadInstance: (id: string) => Promise<PrivateChannelInstanceRow | null>,
+  reconcileSubmitted: (
+    withdrawal: PrivateChannelWithdrawalRow,
+    instance: PrivateChannelInstanceRow
+  ) => Promise<void>,
   now: number
 ): Promise<void> {
   if (now - Date.parse(withdrawal.updated_at) <= STUCK_AFTER_MS) {
@@ -217,7 +315,7 @@ async function promoteSignedPending(
   }
   const instance = await loadInstance(promoted.instance_id);
   if (instance) {
-    await reconcileSubmitted(env, repo, promoted, instance, now);
+    await reconcileSubmitted(promoted, instance);
   }
 }
 
@@ -264,32 +362,14 @@ async function failStale(
   }
 }
 
-/** submitted → confirmed/failed via the burn's gateway signature status. */
-async function reconcileSubmitted(
+/** submitted → confirmed/failed by applying an already-fetched burn status. */
+async function applySubmittedVerdict(
   env: Env,
   repo: PrivateChannelWithdrawalRepository,
   withdrawal: PrivateChannelWithdrawalRow,
-  instance: PrivateChannelInstanceRow,
+  status: solanaRpc.SignatureStatusInfo | null,
   now: number
 ): Promise<void> {
-  if (!withdrawal.signature) {
-    await failIfStale(env, repo, withdrawal, now, "Withdrawal was submitted without a signature.");
-    return;
-  }
-
-  // Burn is on the gateway (channel chain). No auth here — auth-enabled instances
-  // will need to be wired through this call the way withdraw-confirm.ts does.
-  // TODO(auth): plumb resolveMemberGatewayAuth into the cron path once we need it.
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: instance.gateway_url });
-  // searchTransactionHistory for the same reason as the deposit reconciler:
-  // every path into here is already past the node's short recent-status cache,
-  // and promoteSignedPending reaches it strictly AFTER STUCK_AFTER_MS. Without
-  // it an executed burn reads null and is failed, which invites the caller to
-  // burn the same balance twice.
-  const [status] = await solanaRpc.getSignatureStatuses(rpc, [withdrawal.signature as Signature], {
-    searchTransactionHistory: true,
-  });
-
   if (!status) {
     if (now - Date.parse(withdrawal.updated_at) > STUCK_AFTER_MS) {
       const reason = "Withdrawal burn not found on chain.";
@@ -535,26 +615,53 @@ async function collectReleases(
   rpc: solanaRpc.SolanaRpc,
   signatures: { signature: Signature; blockTime: bigint | null }[]
 ): Promise<ReleaseTransfer[]> {
-  const releases: ReleaseTransfer[] = [];
-  for (const { signature, blockTime } of signatures) {
-    const tx = await solanaRpc.getTransaction(rpc, signature);
-    if (!tx || tx.err) {
-      continue;
-    }
-    tx.instructions.forEach((ix, index) => {
-      const parsed = parseTokenTransfer(ix);
-      if (parsed) {
-        releases.push({
-          signature,
-          destination: parsed.destination,
-          baseUnits: parsed.baseUnits,
-          instructionIndex: index,
-          blockTime: blockTime === null ? null : Number(blockTime),
-        });
+  // Bounded: the scan window is capped at RELEASE_SCAN_LIMIT, but a bare
+  // Promise.all would still open that many concurrent getTransaction calls
+  // against the RPC in one tick — and a serial loop would pay the latency of
+  // one round trip per signature. A failed lookup drops that candidate release
+  // (logged below); the next tick rescans the same window.
+  const settled = await mapSettledWithConcurrency(
+    signatures,
+    RELEASE_LOOKUP_CONCURRENCY,
+    async ({ signature, blockTime }) => {
+      const tx = await solanaRpc.getTransaction(rpc, signature);
+      if (!tx || tx.err) {
+        return [];
       }
-    });
-  }
-  return releases;
+      const transfers: ReleaseTransfer[] = [];
+      // Same-tx multiple transfers keep their index so batched releases don't
+      // collide on the settlement_observations PK.
+      tx.instructions.forEach((ix, index) => {
+        const parsed = parseTokenTransfer(ix);
+        if (parsed) {
+          transfers.push({
+            signature,
+            destination: parsed.destination,
+            baseUnits: parsed.baseUnits,
+            instructionIndex: index,
+            blockTime: blockTime === null ? null : Number(blockTime),
+          });
+        }
+      });
+      return transfers;
+    }
+  );
+  return settled.flatMap((result, index) => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+    // The lookup failure must not vanish silently: operators need to know the
+    // scan was incomplete, otherwise unresolved withdrawals and missing
+    // releases surface with no diagnostic explaining why.
+    getLogger().error(
+      {
+        signature: signatures[index]?.signature,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      },
+      "trackPendingWithdrawals: release getTransaction lookup failed; dropping candidate until next tick"
+    );
+    return [];
+  });
 }
 
 /** Pull (destinationTokenAccount, baseUnits) from a parsed spl-token transfer ix. */
