@@ -382,17 +382,17 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /** DvP settle and cancel resolve tenant-scoped signing authority in the handler. */
+    /** DvP settle: wallet policy decides before the settlement authority signs. */
     family: "dvp",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/dvp/handlers.ts",
+      file: "apps/sdp-api/src/routes/dvp/action-context.ts",
       evidence: "const settlement = await readDvpSettlementWallet(c.env, {",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/dvp/handlers.ts",
-      section: "const closeTrade =",
-      before: "await assertFreshApiKeyCustodyWalletAccess(",
-      after: "const result = await closeDvpTrade(",
+      file: "apps/sdp-api/src/routes/dvp/index.ts",
+      section: '"/trades/:tradeId/settle",',
+      before: "policyGate({ extract: extractDvpSettlePolicyCandidate })",
+      after: "settleTrade",
     },
     replay: [
       {
@@ -404,6 +404,37 @@ const contracts: ValueMovingContract[] = [
         mode: "fresh_blockhash_per_attempt",
         file: "apps/sdp-api/src/services/dvp/settle.test.ts",
         evidence: "fetches a fresh blockhash for every attempt",
+      },
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/dvp/leg-action-idempotency.test.ts",
+        evidence: "answers a retry with the signature the first close sent, without closing again",
+      },
+    ],
+  },
+  {
+    /** DvP fund: wallet policy decides before a custody wallet's tokens leave. */
+    family: "dvp",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/dvp/action-context.ts",
+      evidence: "const auth = getAuth(c);",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/dvp/index.ts",
+      section: '"/trades/:tradeId/fund",',
+      before: "policyGate({ extract: extractDvpFundPolicyCandidate })",
+      after: "fundTrade",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/services/dvp/leg-action-idempotency.test.ts",
+        evidence: "answers a retry with the same key from the first result, without running again",
+      },
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/services/dvp/fund.test.ts",
+        evidence: "tops a partly funded leg up by the shortfall, not the full target",
       },
     ],
   },
@@ -600,10 +631,13 @@ describe("value-moving authorization and replay conformance", () => {
     // authorization boundary and replay evidence. `issuance` repeats for the
     // same reason: authority updates, seize, force-burn, burn, freeze,
     // unfreeze, pause, unpause, deploy, allowlist add and allowlist remove
-    // are separately gated execute routes.
+    // are separately gated execute routes. `dvp` appears twice for fund and
+    // settle, the two actions that commit value; reclaim and cancel are the
+    // recovery paths and are deliberately ungoverned (routes/dvp/policy.ts).
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
+      "dvp",
       "dvp",
       "earn",
       "earn",
