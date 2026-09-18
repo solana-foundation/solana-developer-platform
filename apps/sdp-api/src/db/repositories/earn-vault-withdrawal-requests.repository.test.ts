@@ -835,6 +835,71 @@ describe("Earn queued withdrawal repository", () => {
     }
   );
 
+  it("persists the fulfilled payout movement for custody and external wallets", async () => {
+    const custody = await createRequest();
+    await repository.advanceRequest({
+      withdrawalRequestId: custody.request.id,
+      organizationId: ORG,
+      toStatus: "fulfilled",
+      nonce: "8",
+      closingSignature: "queued-fulfilled-custody-signature",
+      assetsPaid: "9.9",
+      fulfilledAt: "2026-09-18T01:00:00.000Z",
+    });
+
+    const external = await createRequest({
+      positionId: EXTERNAL_POSITION,
+      custodyWalletId: null,
+      ownerAddress: EXTERNAL_OWNER,
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: external.request.id,
+      organizationId: ORG,
+      toStatus: "fulfilled",
+      nonce: "9",
+      closingSignature: "queued-fulfilled-external-signature",
+      assetsPaid: "9.8",
+      fulfilledAt: "2026-09-18T01:00:00.000Z",
+    });
+
+    // A custody fulfillment claims the custody wallet and keeps owner_address
+    // NULL: binding both would activate the external-wallet claim foreign key
+    // against a custody position that has no owner address.
+    const custodyMovement = await getDb(env)
+      .prepare(
+        `SELECT custody_wallet_id, owner_address, vault_address, destination_address,
+                signature, status
+           FROM earn_movements WHERE id = ?`
+      )
+      .bind(`earn_queue_fulfillment_${custody.request.id}`)
+      .first<Record<string, unknown>>();
+    expect(custodyMovement).toMatchObject({
+      custody_wallet_id: WALLET,
+      owner_address: null,
+      vault_address: VAULT,
+      destination_address: OWNER,
+      signature: "queued-fulfilled-custody-signature",
+      status: "finalized",
+    });
+
+    const externalMovement = await getDb(env)
+      .prepare(
+        `SELECT custody_wallet_id, owner_address, vault_address, destination_address,
+                signature, status
+           FROM earn_movements WHERE id = ?`
+      )
+      .bind(`earn_queue_fulfillment_${external.request.id}`)
+      .first<Record<string, unknown>>();
+    expect(externalMovement).toMatchObject({
+      custody_wallet_id: null,
+      owner_address: EXTERNAL_OWNER,
+      vault_address: VAULT,
+      destination_address: EXTERNAL_OWNER,
+      signature: "queued-fulfilled-external-signature",
+      status: "finalized",
+    });
+  });
+
   it("returns the winner to concurrent identical cancellation submissions", async () => {
     const created = await createRequest();
     await repository.advanceRequest({

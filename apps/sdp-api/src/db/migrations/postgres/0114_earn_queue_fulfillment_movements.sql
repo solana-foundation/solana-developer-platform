@@ -39,6 +39,10 @@ ALTER TABLE earn_movements
                 -- the provider's solver executed. The signature is the closing
                 -- transaction (unique per fulfillment via
                 -- idx_earn_movements_signature); no outbox exists to rebroadcast.
+                -- The signer pair stays exactly-one-of (0070): a custody
+                -- fulfillment must not claim an owner, and an external one must
+                -- not claim a custody wallet, or the external-wallet claim FK
+                -- would resolve against a position row that cannot match.
                 execution_model = 'vault_direct'
                 AND vault_address IS NOT NULL
                 AND signature IS NOT NULL
@@ -48,6 +52,7 @@ ALTER TABLE earn_movements
                 AND fee_amount IS NULL
                 AND min_shares_out IS NULL
                 AND shares_out IS NULL
+                AND ((custody_wallet_id IS NOT NULL) <> (owner_address IS NOT NULL))
             )
             OR (
                 execution_model = 'custodial'

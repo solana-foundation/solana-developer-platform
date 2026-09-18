@@ -572,6 +572,13 @@ async function promoteRequestAddressLease(
  *
  * `token_amount_settled` guards zero payouts to NULL: the movement CHECK (and
  * 0103's semantics) treat zero as "payout not observed", never a stated fact.
+ *
+ * `owner_address` follows the ledger's exactly-one-of signer rule (0070): it
+ * is bound only for external-wallet fulfillments, whose owner-scoped ledger
+ * reads and earned aggregates filter on it. A custody fulfillment keeps it
+ * NULL — setting both would activate the external-wallet claim foreign key
+ * against a custody position row that has no owner address. Either way the
+ * payout's destination is recorded in destination_address.
  */
 async function recordFulfilledQueueMovement(
   tx: DatabaseExecutor,
@@ -579,6 +586,7 @@ async function recordFulfilledQueueMovement(
 ): Promise<void> {
   if (!request.closing_signature) return;
   const settledAt = request.fulfilled_at ?? request.updated_at;
+  const ownerAddress = request.custody_wallet_id ? null : request.owner_address;
   await tx
     .prepare(
       `INSERT INTO earn_movements (
@@ -586,7 +594,7 @@ async function recordFulfilledQueueMovement(
          execution_model, direction, position_id,
          status, confirmed_at, settled_at,
          denomination, amount_requested, amount_settled, token_amount_settled,
-         custody_wallet_id, vault_address, source_address, destination_address,
+         custody_wallet_id, owner_address, vault_address, source_address, destination_address,
          provider_reference, signature,
          request_id, idempotency_fingerprint, provider_data,
          created_by, initiated_by_key_id,
@@ -597,7 +605,7 @@ async function recordFulfilledQueueMovement(
          'vault_direct', 'withdrawal', ?,
          'finalized', ?, ?,
          ?, ?, ?, CASE WHEN ? ~ '[1-9]' THEN ? ELSE NULL END,
-         ?, ?, NULL, ?,
+         ?, ?, ?, NULL, ?,
          ?, ?,
          ?, ?, ?::jsonb,
          ?, ?,
@@ -621,6 +629,7 @@ async function recordFulfilledQueueMovement(
       request.assets_paid,
       request.assets_paid,
       request.custody_wallet_id,
+      ownerAddress,
       request.vault_address,
       request.owner_address,
       request.request_address,
