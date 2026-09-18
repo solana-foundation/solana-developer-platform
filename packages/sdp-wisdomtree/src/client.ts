@@ -100,7 +100,7 @@ export class WisdomTreeVaultDirectClient
     const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
     if (!rpcUrl.trim()) {
       throw new SdpWisdomTreeError(
-        "CHAIN_UNREADABLE",
+        "VAULT_UNREADABLE",
         `No Solana RPC endpoint configured for ${cluster}; WisdomTree cannot build a transaction.`
       );
     }
@@ -291,7 +291,15 @@ export class WisdomTreeVaultDirectClient
         : input.providerReferences.map((reference) => this.fundFor(reference, runtime.cluster));
       if (funds.length === 0) return [];
 
-      const depositMint = wellKnownMint("USDC", runtime.cluster) ?? "";
+      // Same refusal as the build paths: an uncatalogued USDC mint must never
+      // become a snapshot claiming tokenMint "".
+      const depositMint = wellKnownMint("USDC", runtime.cluster);
+      if (!depositMint) {
+        throw new SdpWisdomTreeError(
+          "CLUSTER_UNSUPPORTED",
+          `USDC is not catalogued for ${runtime.cluster}.`
+        );
+      }
       const reader = this.createReader(runtime.rpcUrl);
       const owner = address(input.owner);
 

@@ -74,7 +74,7 @@ export function parseExtraAccountMetaList(data: Uint8Array): ExtraAccountMetaEnt
     const valueStart = offset + 12;
     if (valueStart + length > data.length) {
       throw new SdpWisdomTreeError(
-        "HOOK_UNRESOLVED",
+        "WITHDRAW_REFUSED",
         "ExtraAccountMetaList TLV overruns the validation account data."
       );
     }
@@ -85,7 +85,7 @@ export function parseExtraAccountMetaList(data: Uint8Array): ExtraAccountMetaEnt
       for (let index = 0; index < count; index += 1) {
         if (entryOffset + EXTRA_ACCOUNT_META_SIZE > valueStart + length) {
           throw new SdpWisdomTreeError(
-            "HOOK_UNRESOLVED",
+            "WITHDRAW_REFUSED",
             "ExtraAccountMetaList declares more entries than its TLV holds."
           );
         }
@@ -102,7 +102,7 @@ export function parseExtraAccountMetaList(data: Uint8Array): ExtraAccountMetaEnt
     offset = valueStart + length;
   }
   throw new SdpWisdomTreeError(
-    "HOOK_UNRESOLVED",
+    "WITHDRAW_REFUSED",
     "The validation account carries no execute-instruction ExtraAccountMetaList."
   );
 }
@@ -134,7 +134,7 @@ async function unpackSeeds(
       const length = addressConfig[offset + 2] as number;
       if (index + length > instructionData.length) {
         throw new SdpWisdomTreeError(
-          "HOOK_UNRESOLVED",
+          "WITHDRAW_REFUSED",
           "A hook seed references execute-instruction data beyond its length."
         );
       }
@@ -147,7 +147,7 @@ async function unpackSeeds(
       const key = executeKeys[index];
       if (!key) {
         throw new SdpWisdomTreeError(
-          "HOOK_UNRESOLVED",
+          "WITHDRAW_REFUSED",
           `A hook seed references execute account index ${index}, which is not present yet.`
         );
       }
@@ -162,14 +162,14 @@ async function unpackSeeds(
       const key = executeKeys[accountIndex];
       if (!key) {
         throw new SdpWisdomTreeError(
-          "HOOK_UNRESOLVED",
+          "WITHDRAW_REFUSED",
           `A hook seed references execute account index ${accountIndex}, which is not present yet.`
         );
       }
       const account = await reader.getAccount(key.address);
       if (!account || dataIndex + length > account.data.length) {
         throw new SdpWisdomTreeError(
-          "HOOK_UNRESOLVED",
+          "WITHDRAW_REFUSED",
           `A hook seed needs ${length} bytes of ${key.address}'s data, which is missing or short. ` +
             "For WisdomTree this usually means a compliance account for one of the wallets does " +
             "not exist — the wallet has not been verified by the issuer."
@@ -179,7 +179,7 @@ async function unpackSeeds(
       offset += 4;
       continue;
     }
-    throw new SdpWisdomTreeError("HOOK_UNRESOLVED", `Unknown hook seed tag ${tag}.`);
+    throw new SdpWisdomTreeError("WITHDRAW_REFUSED", `Unknown hook seed tag ${tag}.`);
   }
   return seeds;
 }
@@ -208,13 +208,13 @@ export async function resolveTransferHookAccounts(
   const validationAccount = await reader.getAccount(validationAddress);
   if (validationAccount === null) {
     throw new SdpWisdomTreeError(
-      "HOOK_UNRESOLVED",
+      "WITHDRAW_REFUSED",
       `The hook program publishes no ExtraAccountMetaList for mint ${input.mint} at ${validationAddress}.`
     );
   }
   if (validationAccount.owner !== String(input.hookProgram)) {
     throw new SdpWisdomTreeError(
-      "HOOK_UNRESOLVED",
+      "WITHDRAW_REFUSED",
       `Validation account ${validationAddress} is owned by ${validationAccount.owner}, not the hook program.`
     );
   }
@@ -250,7 +250,7 @@ export async function resolveTransferHookAccounts(
         const programKey = executeKeys[programIndex];
         if (!programKey) {
           throw new SdpWisdomTreeError(
-            "HOOK_UNRESOLVED",
+            "WITHDRAW_REFUSED",
             `A hook meta derives from execute account index ${programIndex}, which is not present.`
           );
         }

@@ -1,5 +1,7 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { address, getAddressEncoder } from "@solana/kit";
 import type { WisdomTreeChainReader } from "./chain";
+import { TRANSFER_HOOK_EXECUTE_DISCRIMINATOR } from "./transfer-hook";
 
 /**
  * The LIVE WTGXX mint account, captured verbatim from mainnet-beta on
@@ -20,6 +22,33 @@ export function tokenAccountData(baseUnits: bigint): Uint8Array {
   const data = new Uint8Array(165);
   new DataView(data.buffer).setBigUint64(64, baseUnits, true);
   return data;
+}
+
+/** Serialize an ExtraAccountMetaList validation-account image: TLV header + count + entries. */
+export function extraAccountMetaListAccount(entries: Uint8Array[]): Uint8Array {
+  const body = new Uint8Array(4 + entries.length * 35);
+  new DataView(body.buffer).setUint32(0, entries.length, true);
+  entries.forEach((entry, index) => {
+    body.set(entry, 4 + index * 35);
+  });
+  const data = new Uint8Array(12 + body.length);
+  data.set(TRANSFER_HOOK_EXECUTE_DISCRIMINATOR, 0);
+  new DataView(data.buffer).setUint32(8, body.length, true);
+  data.set(body, 12);
+  return data;
+}
+
+/** A literal (fixed pubkey) ExtraAccountMeta entry. */
+export function literalHookEntry(
+  pubkey: string,
+  flags: { isSigner?: boolean; isWritable?: boolean } = {}
+): Uint8Array {
+  const entry = new Uint8Array(35);
+  entry[0] = 0;
+  entry.set(getAddressEncoder().encode(address(pubkey)), 1);
+  entry[33] = flags.isSigner ? 1 : 0;
+  entry[34] = flags.isWritable ? 1 : 0;
+  return entry;
 }
 
 /**

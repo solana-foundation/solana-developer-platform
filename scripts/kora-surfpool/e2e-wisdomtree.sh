@@ -63,7 +63,15 @@ cleanup() {
   fi
   if [ "${status}" -ne 0 ] && [ -f "${SURFPOOL_LOG}" ]; then
     echo "Embedded Surfpool log:" >&2
-    tail -200 "${SURFPOOL_LOG}" >&2 || true
+    # Surfpool was handed the remote RPC URL, and for most providers the API
+    # key rides in that URL's query string; the 1.5.0 binary logs "connecting
+    # to" / datasource-error lines verbatim. Redact before printing anything.
+    if [ -n "${WISDOMTREE_SURFPOOL_MAINNET_RPC_URL}" ]; then
+      tail -200 "${SURFPOOL_LOG}" |
+        sed "s|${WISDOMTREE_SURFPOOL_MAINNET_RPC_URL}|<redacted rpc url>|g" >&2 || true
+    else
+      tail -200 "${SURFPOOL_LOG}" >&2 || true
+    fi
   fi
   rm -rf "${STATE_DIR}"
   exit "${status}"

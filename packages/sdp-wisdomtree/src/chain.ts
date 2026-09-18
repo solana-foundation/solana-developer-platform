@@ -55,7 +55,7 @@ export function createWisdomTreeChainReader(
         value = response.value;
       } catch (cause) {
         throw new SdpWisdomTreeError(
-          "CHAIN_UNREADABLE",
+          "VAULT_UNREADABLE",
           `Failed to read account ${accountAddress}: ${
             cause instanceof Error ? cause.message : String(cause)
           }`,
@@ -68,7 +68,7 @@ export function createWisdomTreeChainReader(
       const encoded = Array.isArray(value.data) ? value.data[0] : undefined;
       if (typeof encoded !== "string" || typeof value.owner !== "string") {
         throw new SdpWisdomTreeError(
-          "CHAIN_UNREADABLE",
+          "VAULT_UNREADABLE",
           `Account ${accountAddress} came back in an unrecognized RPC shape.`
         );
       }
@@ -81,7 +81,7 @@ export function createWisdomTreeChainReader(
 export function tokenAccountBaseUnits(data: Uint8Array): bigint {
   if (data.length < 72) {
     throw new SdpWisdomTreeError(
-      "CHAIN_UNREADABLE",
+      "VAULT_UNREADABLE",
       `Token account data is ${data.length} bytes — shorter than the token-account layout.`
     );
   }

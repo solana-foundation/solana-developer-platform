@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { SdpWisdomTreeError } from "./errors";
 import { fakeReader, tokenAccountData, wtgxxMintAccountData } from "./fixtures.test-helper";
 import { parseFundMint } from "./mint";
-import { buildWisdomTreeDepositPlan, verifyFundMint } from "./plan";
+import { buildWisdomTreeDepositPlan, buildWisdomTreeRedemptionPlan, verifyFundMint } from "./plan";
 import type { WisdomTreeRuntime } from "./types";
 
 const WTGXX = WISDOMTREE_FUNDS[0];
@@ -59,7 +59,7 @@ describe("verifyFundMint", () => {
     const reader = fakeReader({
       [WTGXX.mint]: { owner: TOKEN_2022, data: wtgxxMintAccountData() },
     });
-    await expect(verifyFundMint(reader, runtime, WTGXX)).resolves.toBeUndefined();
+    await expect(verifyFundMint(reader, runtime, WTGXX, "deposit")).resolves.toBeUndefined();
   });
 
   it.each([
@@ -70,7 +70,9 @@ describe("verifyFundMint", () => {
     ],
   ])("refuses %s", async (_label, accounts) => {
     const reader = fakeReader(accounts as Parameters<typeof fakeReader>[0]);
-    await expect(verifyFundMint(reader, runtime, WTGXX)).rejects.toThrowError(SdpWisdomTreeError);
+    await expect(verifyFundMint(reader, runtime, WTGXX, "deposit")).rejects.toThrowError(
+      SdpWisdomTreeError
+    );
   });
 
   it("refuses a mint whose hook program drifted from the registry", async () => {
@@ -83,7 +85,9 @@ describe("verifyFundMint", () => {
     expect(parsedHook).not.toBe(WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS["mainnet-beta"]);
 
     const reader = fakeReader({ [WTGXX.mint]: { owner: TOKEN_2022, data: drifted } });
-    await expect(verifyFundMint(reader, runtime, WTGXX)).rejects.toThrowError(/transfer hook/);
+    await expect(verifyFundMint(reader, runtime, WTGXX, "deposit")).rejects.toThrowError(
+      /transfer hook/
+    );
   });
 
   it("refuses an uninitialized or paused fund before building a USDC transfer", async () => {
@@ -93,7 +97,8 @@ describe("verifyFundMint", () => {
       verifyFundMint(
         fakeReader({ [WTGXX.mint]: { owner: TOKEN_2022, data: uninitialized } }),
         runtime,
-        WTGXX
+        WTGXX,
+        "deposit"
       )
     ).rejects.toThrowError(/not initialized/);
 
@@ -114,13 +119,31 @@ describe("verifyFundMint", () => {
     }
     expect(found).toBe(true);
     expect(parseFundMint(paused).paused).toBe(true);
+    // A pause is a caller-fixable refusal, not registry drift: the deposit
+    // build answers DEPOSIT_REFUSED and the redemption build WITHDRAW_REFUSED.
     await expect(
       buildWisdomTreeDepositPlan(
         fakeReader({ [WTGXX.mint]: { owner: TOKEN_2022, data: paused } }),
         runtime,
         depositInput()
       )
-    ).rejects.toThrowError(/paused; refusing to move money/);
+    ).rejects.toMatchObject({
+      code: "DEPOSIT_REFUSED",
+      message: expect.stringContaining("paused; refusing to move money"),
+    });
+    await expect(
+      buildWisdomTreeRedemptionPlan(
+        fakeReader({ [WTGXX.mint]: { owner: TOKEN_2022, data: paused } }),
+        runtime,
+        {
+          fund: WTGXX,
+          owner: createNoopSigner(address(OWNER)),
+          onReceiptWallet: address(ON_RECEIPT),
+          depositMint: address(USDC),
+          shares: "1",
+        }
+      )
+    ).rejects.toMatchObject({ code: "WITHDRAW_REFUSED" });
   });
 });
 

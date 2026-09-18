@@ -247,6 +247,44 @@ describe("resolveVaultDirectClient", () => {
     expect(createRpc).not.toHaveBeenCalled();
   });
 
+  it("keeps the client capability and the withdrawal settlement table in agreement", async () => {
+    // The reconciler parks withdrawals by CLIENT capability while ?settled=
+    // and the dashboard decide by the settlement TABLE. If the two disagree,
+    // the API parks rows the list calls settled and detail reads never stop —
+    // so one loop over the registry pins the invariant for every provider.
+    mockGenesisSend().mockResolvedValue(GENESIS_HASH_BY_CLUSTER.devnet);
+    const { supportsVaultProviderOrderWithdraw } = await import("@sdp/earn/capabilities");
+    const { EARN_PROVIDERS, EARN_PROVIDER_WITHDRAWAL_SETTLEMENT } = await import("@sdp/types");
+
+    for (const provider of EARN_PROVIDERS) {
+      const client = resolveVaultDirectClient(executionEnv, provider, createVaultDeadline());
+      const reconcilesAsProviderOrder =
+        client !== null && supportsVaultProviderOrderWithdraw(client);
+      expect(reconcilesAsProviderOrder, provider).toBe(
+        EARN_PROVIDER_WITHDRAWAL_SETTLEMENT[provider] === "provider_order"
+      );
+    }
+  });
+
+  it("keeps every provider's withdrawal capability and settlement table in agreement", async () => {
+    const { supportsVaultProviderOrderWithdraw } = await import("@sdp/earn/capabilities");
+    const { EARN_PROVIDERS, EARN_PROVIDER_WITHDRAWAL_SETTLEMENT } = await import("@sdp/types");
+
+    for (const provider of EARN_PROVIDERS) {
+      const client = resolveVaultDirectClient(executionEnv, provider, createVaultDeadline());
+      // The reconciler decides by CLIENT CAPABILITY while ?settled= and the
+      // dashboard decide by the SETTLEMENT TABLE. If the two disagree, the API
+      // parks rows the list calls settled (or the reverse) — so pin them to
+      // each other for the whole registry, null clients included.
+      const capability = client !== null && supportsVaultProviderOrderWithdraw(client);
+      expect(capability, provider).toBe(
+        EARN_PROVIDER_WITHDRAWAL_SETTLEMENT[provider] === "provider_order"
+      );
+    }
+    // The loop is not vacuous: exactly one provider-order provider exists today.
+    expect(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT.wisdomtree).toBe("provider_order");
+  });
+
   it("does not start provider work after endpoint proof exhausts the shared deadline", async () => {
     vi.useFakeTimers();
     mockGenesisSend().mockReturnValue(new Promise<never>(() => undefined));
