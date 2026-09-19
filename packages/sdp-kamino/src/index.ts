@@ -29,8 +29,10 @@ export {
 } from "./client";
 export { SdpKaminoError, type SdpKaminoErrorCode } from "./errors";
 export {
+  assertPlanInstructionsSupported,
   assertPlanTargetsCluster,
   KaminoProgramMismatchError,
+  KaminoUnsupportedInstructionError,
   permittedPlanPrograms,
   planInstructionCount,
   planProgramAddresses,

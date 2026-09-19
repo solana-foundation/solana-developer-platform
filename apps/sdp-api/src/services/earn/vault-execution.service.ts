@@ -515,10 +515,16 @@ export async function simulateVaultPlan(
     }
   | {
       ok: false;
+      /** The customer-facing sentence (`VaultSimulationVerdict.message`). */
       error: string;
       fault: "caller" | "sponsor";
       /** See `VaultSimulationVerdict.sponsorCause`; present on sponsor faults. */
       sponsorCause?: "balance" | "prefund";
+      /**
+       * The chain's own `TransactionError` variant, for operators and logs.
+       * Absent when the plan was refused before the chain was asked.
+       */
+      raw?: string;
       logs: readonly string[];
     }
 > {
@@ -611,6 +617,7 @@ export async function simulateVaultPlan(
       error: verdict.message,
       fault: verdict.fault,
       ...(verdict.sponsorCause === undefined ? {} : { sponsorCause: verdict.sponsorCause }),
+      raw: verdict.raw,
       logs: result.value.logs ?? [],
     };
   }

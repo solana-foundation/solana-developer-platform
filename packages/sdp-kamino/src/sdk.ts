@@ -12,7 +12,7 @@ import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/t
 import Decimal from "decimal.js";
 import { acceptAtMintScale, isZeroAmount, mintDecimals } from "./amounts";
 import { vaultAssetIdentityFromState } from "./asset-identity";
-import { invalidAmount, SdpKaminoError, vaultUnreadable } from "./errors";
+import { depositFloorUnsupported, invalidAmount, SdpKaminoError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { loadVaultLookupTableAddresses } from "./lookup-table";
 import { kaminoClusterConfig } from "./programs";
@@ -343,6 +343,18 @@ export async function buildKaminoDepositPlan(
   input: KaminoDepositInput,
   assertActive: AssertActive = alwaysActive
 ): Promise<KaminoInstructionPlan> {
+  // A floor the cluster's program cannot enforce is refused BEFORE any read:
+  // klend-sdk turns every `minSharesOut` into `deposit_with_min_shares_out`,
+  // which Kamino's devnet build does not implement, and the chain's answer
+  // (Anchor 101, InstructionFallbackNotFound) arrives only after the caller has
+  // been shown a floor. `assertPlanInstructionsSupported` re-checks the OUTPUT.
+  if (
+    input.minSharesOut !== undefined &&
+    !kaminoClusterConfig(runtime.cluster).depositFloorSupported
+  ) {
+    throw depositFloorUnsupported(runtime.cluster);
+  }
+
   const { client, vault, state, config, rpc, assetIdentity } = await bindVault(
     runtime,
     input.vault,

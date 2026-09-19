@@ -7,7 +7,11 @@ import type { Address } from "@solana/kit";
  * Deliberately NOT re-using `@sdp/earn`'s constructors — that would put an
  * `@sdp/kamino → @sdp/earn` edge in place for three error shapes.
  */
-export type SdpKaminoErrorCode = "INVALID_AMOUNT" | "VAULT_UNREADABLE" | "PROGRAM_MISMATCH";
+export type SdpKaminoErrorCode =
+  | "INVALID_AMOUNT"
+  | "VAULT_UNREADABLE"
+  | "PROGRAM_MISMATCH"
+  | "DEPOSIT_REFUSED";
 
 export class SdpKaminoError extends Error {
   constructor(
@@ -78,5 +82,25 @@ export function vaultUnreadable(
     `Kamino vault ${vault} could not be read on ${cluster}. ` +
       "Check that the RPC endpoint serves that cluster — a mismatched RPC reports a missing vault, not a connection error.",
     { cause }
+  );
+}
+
+/**
+ * A share floor requested on a cluster whose kvault build cannot enforce one.
+ *
+ * klend-sdk turns any `minSharesOut` into `deposit_with_min_shares_out`, which
+ * Kamino's devnet program does not implement (`KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`
+ * in @sdp/types): the chain would answer Anchor 101 "InstructionFallbackNotFound"
+ * after the caller has already been shown a floor. Refusing here, before any
+ * RPC, keeps the recorded floor and the enforced floor equal — the same rule as
+ * `amountTooPrecise`. `DEPOSIT_REFUSED` so the API returns it as the caller's 400
+ * with this sentence, matching the catalogue's `depositSlippage: null` for the row.
+ */
+export function depositFloorUnsupported(cluster: SolanaCluster): SdpKaminoError {
+  return new SdpKaminoError(
+    "DEPOSIT_REFUSED",
+    `Kamino's ${cluster} vault program cannot enforce a share floor: it implements only the ` +
+      "legacy deposit instruction. Omit minSharesOut for this deposit; the catalogue row " +
+      "publishes depositSlippage: null for the same reason."
   );
 }

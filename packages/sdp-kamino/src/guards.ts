@@ -1,6 +1,6 @@
 import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
-import type { Address } from "@solana/kit";
-import { kaminoProgramAllowlist } from "./programs";
+import type { Address, Instruction } from "@solana/kit";
+import { kaminoClusterConfig, kaminoProgramAllowlist } from "./programs";
 import type { KaminoInstructionPlan } from "./types";
 
 /**
@@ -35,6 +35,63 @@ export class KaminoProgramMismatchError extends Error {
 }
 
 /**
+ * Anchor instruction discriminator: the first 8 bytes of
+ * `sha256("global:<snake_case_instruction_name>")`. Pinned as bytes rather than
+ * hashed at runtime so this module stays free of klend-sdk AND of node builtins;
+ * `guards.test.ts` recomputes it from the name so a typo cannot survive.
+ */
+const KVAULT_DEPOSIT_WITH_MIN_SHARES_OUT_DISCRIMINATOR: readonly number[] = [
+  74, 127, 128, 80, 4, 221, 193, 91,
+];
+
+export class KaminoUnsupportedInstructionError extends Error {
+  constructor(
+    readonly cluster: SolanaCluster,
+    readonly instruction: string
+  ) {
+    super(
+      `Kamino plan encodes ${instruction}, which the ${cluster} kvault program does not implement. ` +
+        "The build should have refused the share floor before reaching the SDK — see " +
+        "@sdp/kamino/sdk.ts and KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT in @sdp/types."
+    );
+    this.name = "KaminoUnsupportedInstructionError";
+  }
+}
+
+function startsWithDiscriminator(data: Instruction["data"], discriminator: readonly number[]) {
+  if (!data || data.length < discriminator.length) return false;
+  return discriminator.every((byte, index) => data[index] === byte);
+}
+
+/**
+ * Refuse a plan that asks a cluster's kvault program for an instruction that
+ * program does not implement. Today that is one case: `deposit_with_min_shares_out`
+ * on devnet, whose kvault build predates the floor variant (measured 2026-09-18;
+ * `KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`). On chain the answer is Anchor 101
+ * `InstructionFallbackNotFound`, AFTER the caller has been shown a floor.
+ *
+ * `sdk.ts` refuses a floor for such a cluster before building, so this is the
+ * output-side twin of that input check — the same belt-and-braces split as
+ * `assertPlanTargetsCluster`: an SDK upgrade that started emitting the floor
+ * variant unasked would fail here, not in simulation.
+ */
+export function assertPlanInstructionsSupported(
+  plan: KaminoInstructionPlan
+): KaminoInstructionPlan {
+  const config = kaminoClusterConfig(plan.cluster);
+  if (config.depositFloorSupported) return plan;
+  for (const instruction of plan.instructions) {
+    if (instruction.programAddress !== config.kvaultProgramId) continue;
+    if (
+      startsWithDiscriminator(instruction.data, KVAULT_DEPOSIT_WITH_MIN_SHARES_OUT_DISCRIMINATOR)
+    ) {
+      throw new KaminoUnsupportedInstructionError(plan.cluster, "deposit_with_min_shares_out");
+    }
+  }
+  return plan;
+}
+
+/**
  * Refuse a plan whose instructions name a program that does not belong to this
  * cluster. **The single most important check in this package.**
  *
@@ -59,7 +116,8 @@ export function assertPlanTargetsCluster(plan: KaminoInstructionPlan): KaminoIns
     if (permitted.has(program)) continue;
     throw new KaminoProgramMismatchError(plan.cluster, program);
   }
-  return plan;
+  // Right program, but does that program's BUILD implement what we ask of it?
+  return assertPlanInstructionsSupported(plan);
 }
 
 /**

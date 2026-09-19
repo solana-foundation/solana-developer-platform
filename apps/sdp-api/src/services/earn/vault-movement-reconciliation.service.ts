@@ -332,7 +332,14 @@ async function reconcileMovement(
   chain: ChainObservation
 ): Promise<MovementOutcome> {
   if (status?.err) {
-    await failMovement(ledger, movement, describeVaultSimulationError(status.err).message);
+    // The ledger keeps the readable sentence (it reaches the dashboard); the
+    // chain's own variant goes to the log, where operators grep for it.
+    const verdict = describeVaultSimulationError(status.err);
+    getLogger().warn(
+      { movementId: movement.id, signature: movement.signature, raw: verdict.raw },
+      "earn movement failed on chain"
+    );
+    await failMovement(ledger, movement, verdict.message);
     return "failed";
   }
   if (status?.confirmationStatus === "finalized") {

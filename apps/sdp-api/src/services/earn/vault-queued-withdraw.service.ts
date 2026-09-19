@@ -51,6 +51,7 @@ import {
 import { verifySignedExternalWalletTransaction } from "./vault-external-wallet.service";
 import { readConfirmedBlockHeight } from "./vault-intent-execution.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
+import { rawSimulationDetails } from "./vault-simulation-error";
 import { resolveVaultSponsorship, type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 
 export interface QueuedWithdrawalPosition {
@@ -233,7 +234,10 @@ async function prepareCustodyTransaction(
     fee,
   });
   if (!simulation.ok) {
-    throw badRequest(`Queued withdrawal simulation failed: ${simulation.error}`);
+    throw badRequest(
+      `Queued withdrawal simulation failed: ${simulation.error}`,
+      rawSimulationDetails(simulation.raw)
+    );
   }
   const signer = await deadline.run("Resolving the queued withdrawal signer", () =>
     solanaServices.createOrgSignerForCustodyWallet(
@@ -378,7 +382,10 @@ export async function createCustodyQueuedWithdrawal(
       fee,
     });
     if (!simulation.ok) {
-      throw badRequest(`Queued withdrawal simulation failed: ${simulation.error}`);
+      throw badRequest(
+        `Queued withdrawal simulation failed: ${simulation.error}`,
+        rawSimulationDetails(simulation.raw)
+      );
     }
     const signer = await executionDeadline.run("Resolving the queued withdrawal signer", () =>
       solanaServices.createOrgSignerForCustodyWallet(
@@ -597,7 +604,11 @@ async function compileExternalPlan(
     rpcUrl,
     fee,
   });
-  if (!simulation.ok) throw badRequest(`Queued withdrawal simulation failed: ${simulation.error}`);
+  if (!simulation.ok)
+    throw badRequest(
+      `Queued withdrawal simulation failed: ${simulation.error}`,
+      rawSimulationDetails(simulation.raw)
+    );
   return compileUnsignedVaultTransaction({
     cluster,
     deadline,

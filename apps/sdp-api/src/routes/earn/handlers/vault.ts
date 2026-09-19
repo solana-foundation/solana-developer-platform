@@ -407,7 +407,12 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // build enforces: every production deposit carries one, derived by the
   // dashboard from a live quote and rejected when stale (PRO-1691); the
   // provider builder enforces the exact value on-chain.
-  assertDepositFloorPresent(strategy.provider, environment, body.minSharesOut);
+  assertDepositFloorPresent(
+    strategy.provider,
+    environment,
+    body.minSharesOut,
+    strategy.host_cluster
+  );
 
   const tokenMint = strategy.deposit_mints[0];
   if (!tokenMint) {

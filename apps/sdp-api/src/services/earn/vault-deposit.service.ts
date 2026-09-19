@@ -37,6 +37,7 @@ import {
 import { ledgerVaultExposureGate } from "./vault-exposure";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
+import { rawSimulationDetails } from "./vault-simulation-error";
 import { resolveVaultSponsorship, type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 
 /**
@@ -314,10 +315,13 @@ export async function depositIntoVault(
       });
       if (!probe.ok) {
         getLogger().error(
-          { error: probe.error, logs: probe.logs.slice(-5) },
+          { error: probe.error, raw: probe.raw, logs: probe.logs.slice(-5) },
           "vault deposit: compute-unit probe simulation failed"
         );
-        throw badRequest(`Vault deposit simulation failed: ${probe.error}`);
+        throw badRequest(
+          `Vault deposit simulation failed: ${probe.error}`,
+          rawSimulationDetails(probe.raw)
+        );
       }
       plan = withComputeUnitLimit(plan, bufferedComputeUnitLimit(probe.unitsConsumed));
     }
