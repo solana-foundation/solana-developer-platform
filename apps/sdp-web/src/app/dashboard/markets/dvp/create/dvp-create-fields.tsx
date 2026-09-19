@@ -165,6 +165,7 @@ export function MintField({
             ? pastedAddressOption(query, t, "DashboardMarkets.dvp.mintUseAddress")
             : null
         }
+        emptyLabel={t("DashboardMarkets.dvp.mintSlotEmpty")}
         searchPlaceholder={t("DashboardMarkets.dvp.mintSlotSearchPlaceholder")}
         value={isCustom ? (custom ? custom : null) : choice ? choice : null}
       />
@@ -418,6 +419,7 @@ export function PayoutAddressPicker({
     <div className="flex min-w-0 flex-col gap-1.5" id={id}>
       <Combobox
         label={label}
+        emptyLabel={t("DashboardMarkets.dvp.payoutSlotEmpty")}
         onChange={payout.setAddress}
         options={options}
         queryOption={(query) =>
@@ -425,6 +427,7 @@ export function PayoutAddressPicker({
             ? pastedAddressOption(query, t, "DashboardMarkets.dvp.partyUseAddress")
             : null
         }
+        placeholder={t("DashboardMarkets.dvp.payoutSlotPlaceholder")}
         searchPlaceholder={t("DashboardMarkets.dvp.partySlotSearchPlaceholder")}
         value={payout.address === "" ? null : payout.address}
       />

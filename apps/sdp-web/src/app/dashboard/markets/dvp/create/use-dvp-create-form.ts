@@ -14,13 +14,13 @@ import type { SolanaCluster } from "@sdp/types";
 import { useMemo } from "react";
 import { z } from "zod";
 import { useZodForm } from "@/lib/use-zod-form";
-import { cashOptionsFor } from "./dvp-cash-options";
 import type {
   DvpCreateContext,
   DvpCreateOption,
   DvpCreateWallet,
   DvpWalletBalance,
 } from "./dvp-create.data";
+import { assetOptionsFor, cashOptionsFor } from "./dvp-leg-options";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 import { type DvpDestinations, useDvpDestinations } from "./use-dvp-destinations";
 import { type DvpLeg, useDvpLeg } from "./use-dvp-leg";
@@ -69,6 +69,8 @@ export interface DvpCreateForm {
   cash: DvpLeg;
   /** The cash slot's wallet balance of the cash mint, when it names one. */
   cashBalance: DvpWalletBalance | null;
+  /** What the asset leg can pick: the org's issued tokens, then the cluster catalogue. */
+  assetOptions: DvpCreateOption[];
   cashOptions: DvpCreateOption[];
   error: string | null;
   expiry: string;
@@ -161,8 +163,12 @@ function resolveWalletBalance(
 
 export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateContext): DvpCreateForm {
   const cashOptions = useMemo(() => cashOptionsFor(cluster), [cluster]);
+  const assetOptions = useMemo(
+    () => assetOptionsFor(cluster, context.tokens),
+    [cluster, context.tokens]
+  );
   // Both legs start unselected — the trade's whole point is choosing them.
-  const asset = useDvpLeg(context.tokens, false);
+  const asset = useDvpLeg(assetOptions, false);
   const cash = useDvpLeg(cashOptions, false);
   const { error, submit: send, submitting } = useDvpCreateSubmit(cluster);
 
@@ -222,6 +228,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     assetBalance: resolveWalletBalance(assetWallet, asset),
     cash,
     cashBalance: resolveWalletBalance(cashWallet, cash),
+    assetOptions,
     cashOptions,
     error,
     expiry,

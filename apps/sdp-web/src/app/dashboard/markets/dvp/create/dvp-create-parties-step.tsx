@@ -119,7 +119,7 @@ function LegRow({
           )}
           onChoiceChange={leg.setChoice}
           onCustomChange={leg.setCustom}
-          options={a ? context.tokens : form.cashOptions}
+          options={a ? form.assetOptions : form.cashOptions}
           warning={mintWarning}
         />
       </div>

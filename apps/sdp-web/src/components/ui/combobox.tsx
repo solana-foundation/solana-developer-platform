@@ -99,6 +99,14 @@ interface ComboboxProps {
    * caller cannot turn into an option.
    */
   queryOption?: (query: string) => ComboboxOption | null;
+  /**
+   * What an empty list says, for a picker where an empty list is not a dead
+   * end. The default reads "No options available.", which is the truth for a
+   * closed list and a lie for one paired with `queryOption` — there the value
+   * is typed, and the panel is the only place that can say so. Pass the
+   * instruction, not a restatement of the emptiness.
+   */
+  emptyLabel?: string;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Accessible combobox behavior is clearer when keyboard, filtering, and selection state remain co-located.
@@ -124,6 +132,7 @@ export function Combobox({
   onEnterSelect,
   footer,
   queryOption,
+  emptyLabel,
 }: ComboboxProps) {
   const t = useTranslations();
   const resolvedPlaceholder = placeholder ?? t("Shared.SharedComponents.selectAnOption");
@@ -296,7 +305,7 @@ export function Combobox({
         ) : filtered.length === 0 ? (
           <p className="px-3 py-6 text-center text-sm text-tertiary">
             {options.length === 0
-              ? t("Shared.SharedComponents.noOptionsAvailable")
+              ? (emptyLabel ?? t("Shared.SharedComponents.noOptionsAvailable"))
               : t("Shared.SharedComponents.noSearchMatches")}
           </p>
         ) : (
