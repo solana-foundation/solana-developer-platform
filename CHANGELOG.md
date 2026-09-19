@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.80.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.79.0...v0.80.0) (2026-09-19)
+
+### Features
+
+* **payments:** BVNK on-ramp via reference-matched pay-ins and a reconciler payout ([#1929](https://github.com/solana-foundation/solana-developer-platform/pull/1929)) ([fa92c9c](https://github.com/solana-foundation/solana-developer-platform/commit/fa92c9c69a29d72d33c26e60d813079162399aaa))
+* **earn:** support Veda queued withdrawals end to end ([#1942](https://github.com/solana-foundation/solana-developer-platform/pull/1942)) ([ac632aa](https://github.com/solana-foundation/solana-developer-platform/commit/ac632aaaa89a4ba9ae5a67a43a08f925f7012c8b))
+* **earn:** harden mainnet embedded yield execution ([#1939](https://github.com/solana-foundation/solana-developer-platform/pull/1939)) ([e6c6f89](https://github.com/solana-foundation/solana-developer-platform/commit/e6c6f897a3b20af30c97433f47a65bb10942089a))
+* **earn:** let a keyless caller pick the shelf ([#1937](https://github.com/solana-foundation/solana-developer-platform/pull/1937)) ([2ea320d](https://github.com/solana-foundation/solana-developer-platform/commit/2ea320dc0298ea1f440182bc050a46171b795dc4))
+* **earn:** finish movements at Solana confirmation ([#1930](https://github.com/solana-foundation/solana-developer-platform/pull/1930)) ([a3fb4b6](https://github.com/solana-foundation/solana-developer-platform/commit/a3fb4b6d35e38ef65e1d9704860955ecead4b890))
+* **dvp:** record every escrow transfer per leg, and read leg state from it ([#1865](https://github.com/solana-foundation/solana-developer-platform/pull/1865)) ([2a27df6](https://github.com/solana-foundation/solana-developer-platform/commit/2a27df661a00c178e379c69341a5613da7885306))
+* **dvp:** gate funding and settlement on wallet policy ([#1927](https://github.com/solana-foundation/solana-developer-platform/pull/1927)) ([72806ec](https://github.com/solana-foundation/solana-developer-platform/commit/72806ecc55714ef12793c2cd50ff478450239fab))
+* **web:** HOO-776 BYOK Custody Dashboard ([#1895](https://github.com/solana-foundation/solana-developer-platform/pull/1895)) ([7b174d0](https://github.com/solana-foundation/solana-developer-platform/commit/7b174d0000eaca024180c7f75b4c8e5fe24379c1))
+* **dvp:** record fund, reclaim, settle and cancel in the audit ledger ([#1921](https://github.com/solana-foundation/solana-developer-platform/pull/1921)) ([57e7a43](https://github.com/solana-foundation/solana-developer-platform/commit/57e7a437f07197215d493c4714925091b823e232))
+* **embedded-yield-bank:** rework Northstar into a one-strategy checking and savings demo ([#1915](https://github.com/solana-foundation/solana-developer-platform/pull/1915)) ([be980f7](https://github.com/solana-foundation/solana-developer-platform/commit/be980f7f168cda71cb0c0718e6757b083db0301d))
+* **payments:** re-arm parked ramp webhook events after a release ([#1892](https://github.com/solana-foundation/solana-developer-platform/pull/1892)) ([16329a1](https://github.com/solana-foundation/solana-developer-platform/commit/16329a1080be08e608a0d80e87ca1219b3c1abd1))
+
+### Bug Fixes
+
+* **dvp:** catalogue assets in the create wizard, and payouts named like parties ([#1948](https://github.com/solana-foundation/solana-developer-platform/pull/1948)) ([9afd520](https://github.com/solana-foundation/solana-developer-platform/commit/9afd52052f33956a244213a75a455f9005f932c7))
+* **web:** tell the DvP mint pickers that a pasted mint address works ([#1945](https://github.com/solana-foundation/solana-developer-platform/pull/1945)) ([91075be](https://github.com/solana-foundation/solana-developer-platform/commit/91075be20026708368e8363be74bcb3ef5a2f657))
+* improve Embedded Yield transfer feedback ([#1943](https://github.com/solana-foundation/solana-developer-platform/pull/1943)) ([8ad37a4](https://github.com/solana-foundation/solana-developer-platform/commit/8ad37a4d357b4ee6942c7cfad37e8c479b32dc1d))
+* **earn:** gate the Markets earn alias routes on the earn flag ([#1938](https://github.com/solana-foundation/solana-developer-platform/pull/1938)) ([74e955f](https://github.com/solana-foundation/solana-developer-platform/commit/74e955f547fe15e2d7402f677cbd884e6b12e21d))
+* **earn:** publish the deposit floor rule the build enforces ([#1935](https://github.com/solana-foundation/solana-developer-platform/pull/1935)) ([bd9c54e](https://github.com/solana-foundation/solana-developer-platform/commit/bd9c54e80d6e88da4f8d2cd043148f5412ab286d))
+* **approvals:** hide decisions from the requester, and show what execution did ([#1841](https://github.com/solana-foundation/solana-developer-platform/pull/1841)) ([04c6436](https://github.com/solana-foundation/solana-developer-platform/commit/04c6436c6f7939f35ffe8916711fd7ed9b3dc2a2))
+* **earn:** meter keyed external-wallet deposit builds against paid RPC ([#1934](https://github.com/solana-foundation/solana-developer-platform/pull/1934)) ([8cd9afb](https://github.com/solana-foundation/solana-developer-platform/commit/8cd9afbb1bf2d051e528599bdcd5d2670c27bb5d))
+* **earn:** scrub provider error prose at the sdp-earn fetch seam ([#1932](https://github.com/solana-foundation/solana-developer-platform/pull/1932)) ([3c17c59](https://github.com/solana-foundation/solana-developer-platform/commit/3c17c594f3157ddeffda1b2a5f0783b3f6fe3c74))
+* **dvp:** refuse mints SDP can't settle, and stop the create page waiting on balances ([#1864](https://github.com/solana-foundation/solana-developer-platform/pull/1864)) ([f7ce7d4](https://github.com/solana-foundation/solana-developer-platform/commit/f7ce7d462f9b763660a5dff6ff81d7e477d82e4b))
+* **payments:** show a payment held for approval as waiting, and send it under one key ([#1870](https://github.com/solana-foundation/solana-developer-platform/pull/1870)) ([dd92ea6](https://github.com/solana-foundation/solana-developer-platform/commit/dd92ea65bad0d0e80ae443db9642a770d78c744d))
+* **embedded-yield-bank:** address review findings from #1915 ([#1916](https://github.com/solana-foundation/solana-developer-platform/pull/1916)) ([7699347](https://github.com/solana-foundation/solana-developer-platform/commit/76993474bc5518d3db63c46860e1bc2fa416262a))
+* **earn:** replay a kept idempotency key's floor on ambiguous-failure retries ([#1912](https://github.com/solana-foundation/solana-developer-platform/pull/1912)) ([a45de1c](https://github.com/solana-foundation/solana-developer-platform/commit/a45de1c9e77ba9c13219c7824f01524db020fd49))
+* **earn:** gate Kamino allocations BFF on the strategy catalogue allowlist ([#1834](https://github.com/solana-foundation/solana-developer-platform/pull/1834)) ([0170ef4](https://github.com/solana-foundation/solana-developer-platform/commit/0170ef459a776c227627904a266fe8932bb14319))
+* **earn:** canonicalize withdraw idempotency signature and lock submit ([#1911](https://github.com/solana-foundation/solana-developer-platform/pull/1911)) ([761da54](https://github.com/solana-foundation/solana-developer-platform/commit/761da5453d05c7a4a96912b82879a263fa82f789))
+* **custody:** verify empty Privy applications without limit=1 ([#1908](https://github.com/solana-foundation/solana-developer-platform/pull/1908)) ([f6d115f](https://github.com/solana-foundation/solana-developer-platform/commit/f6d115f87f41d543664c8c31b9e440b4f28d3c71))
+* **policy:** compare the replay capability path with the query string included ([#1905](https://github.com/solana-foundation/solana-developer-platform/pull/1905)) ([b4d0d3a](https://github.com/solana-foundation/solana-developer-platform/commit/b4d0d3ac77e121066d1f52247adb043196cae81e))
+
+### Performance Improvements
+
+* **api:** batch private-channel deposit/withdrawal status polls ([#1941](https://github.com/solana-foundation/solana-developer-platform/pull/1941)) ([ac38590](https://github.com/solana-foundation/solana-developer-platform/commit/ac385900d618c0f4738b5d4ae745d3e168109a6e))
+* **payments:** cache immutable observed-transfer transaction bodies ([#1931](https://github.com/solana-foundation/solana-developer-platform/pull/1931)) ([335d864](https://github.com/solana-foundation/solana-developer-platform/commit/335d86440123c70dc143d632981bd160315734ed))
+* **dashboard:** faster wallet balances, cached token prices, and Home activity that doesn't wait on one wallet ([#1839](https://github.com/solana-foundation/solana-developer-platform/pull/1839)) ([6cbbd4a](https://github.com/solana-foundation/solana-developer-platform/commit/6cbbd4a63f3115d78d1e6e155f75c17006826274))
+* **payments:** batch recurring-payment collection rows with bounded concurrency ([#1914](https://github.com/solana-foundation/solana-developer-platform/pull/1914)) ([b3d972c](https://github.com/solana-foundation/solana-developer-platform/commit/b3d972c29d904ee764b49baf05353a26d30f6a32))
+* **payments:** parallelize independent balance fetches in getWalletBalances ([#1910](https://github.com/solana-foundation/solana-developer-platform/pull/1910)) ([3e6e05b](https://github.com/solana-foundation/solana-developer-platform/commit/3e6e05bc03743e26fbae40a62319c05821fd88de))
+
+### Refactors
+
+* **markets:** name the vault-outcome, position-name and dvp-gate… ([#1940](https://github.com/solana-foundation/solana-developer-platform/pull/1940)) ([ce99dd8](https://github.com/solana-foundation/solana-developer-platform/commit/ce99dd8ef6ad2684d2b8bcee9d0bf18621581da6))
+* **markets:** name shared paging, truncation and key-store rules once ([#1933](https://github.com/solana-foundation/solana-developer-platform/pull/1933)) ([de827ff](https://github.com/solana-foundation/solana-developer-platform/commit/de827ffeabf0e95bb85d7d1680860ff4d4a5c8a0))
+* **markets:** retire dead surfaces and name shared rules once ([#1913](https://github.com/solana-foundation/solana-developer-platform/pull/1913)) ([213aba9](https://github.com/solana-foundation/solana-developer-platform/commit/213aba900ec02450fe18a33a2c3b9c401ad3f704))
+
+### Maintenance
+
+* make green-for-the-wrong-reason tests actually test behavior ([#1936](https://github.com/solana-foundation/solana-developer-platform/pull/1936)) ([f37fd04](https://github.com/solana-foundation/solana-developer-platform/commit/f37fd04cc924b773c219e356709b75c87e32e8bb))
+
 ## [0.79.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.78.0...v0.79.0) (2026-09-17)
 
 ### ⚠ BREAKING CHANGES
