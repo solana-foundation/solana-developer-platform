@@ -109,6 +109,34 @@ interface ComboboxProps {
   emptyLabel?: string;
 }
 
+/**
+ * What the panel says when nothing is listed.
+ *
+ * Outside the component on purpose. `Combobox` already carries a complexity
+ * suppression, and every branch added inline pushes it further; this one reads
+ * better named anyway.
+ *
+ * @param input - The empty-state inputs.
+ * @param input.emptyLabel - Caller's wording for a list that is empty but not a dead end.
+ * @param input.hasOptions - Whether the unfiltered list has anything in it.
+ * @param input.t - Translator.
+ * @returns The message to render.
+ */
+function emptyStateLabel({
+  emptyLabel,
+  hasOptions,
+  t,
+}: {
+  emptyLabel: string | undefined;
+  hasOptions: boolean;
+  t: ReturnType<typeof useTranslations>;
+}): string {
+  if (hasOptions) {
+    return t("Shared.SharedComponents.noSearchMatches");
+  }
+  return emptyLabel ?? t("Shared.SharedComponents.noOptionsAvailable");
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Accessible combobox behavior is clearer when keyboard, filtering, and selection state remain co-located.
 export function Combobox({
   value,
@@ -304,9 +332,7 @@ export function Combobox({
           <p className="px-3 py-6 text-center text-sm text-error">{error}</p>
         ) : filtered.length === 0 ? (
           <p className="px-3 py-6 text-center text-sm text-tertiary">
-            {options.length === 0
-              ? (emptyLabel ?? t("Shared.SharedComponents.noOptionsAvailable"))
-              : t("Shared.SharedComponents.noSearchMatches")}
+            {emptyStateLabel({ emptyLabel, hasOptions: options.length > 0, t })}
           </p>
         ) : (
           filtered.map((option, index) => {
