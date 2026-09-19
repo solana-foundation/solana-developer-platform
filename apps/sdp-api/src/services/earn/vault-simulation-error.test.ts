@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeVaultSimulationError } from "./vault-simulation-error";
+import { describeVaultSimulationError, rawSimulationDetails } from "./vault-simulation-error";
 
 const walletPays = { kind: "wallet-pays" } as const;
 const sponsored = { kind: "sponsored" } as const;
@@ -79,6 +79,19 @@ describe("describeVaultSimulationError", () => {
       expect(message).toContain("Anchor InstructionFallbackNotFound, code 101");
       expect(message).not.toContain("{");
       expect(fault).toBe("caller");
+    });
+
+    it("keeps the older-build diagnosis to 101; other instruction codes get their own message", () => {
+      // 102 is the instruction DATA failing to deserialize, not a missing
+      // instruction: sending a customer to "the program is too old" would be wrong.
+      const { message } = describeVaultSimulationError(
+        { InstructionError: [0, { Custom: 102 }] },
+        walletPays
+      );
+      expect(message).toContain("could not read this instruction");
+      expect(message).toContain("could not deserialize the given instruction");
+      expect(message).toContain("Anchor InstructionDidNotDeserialize, code 102");
+      expect(message).not.toContain("older build");
     });
 
     it("phrases an Anchor constraint failure as the program's constraints", () => {
@@ -374,5 +387,12 @@ describe("log-refined instruction failures", () => {
       "Transfer: insufficient lamports 5, need 5",
     ]);
     expect(message).toContain("instruction at index 0 was rejected");
+  });
+});
+
+describe("rawSimulationDetails", () => {
+  it("carries the raw variant under `simulation`, and nothing when the chain was never asked", () => {
+    expect(rawSimulationDetails('"AccountNotFound"')).toEqual({ simulation: '"AccountNotFound"' });
+    expect(rawSimulationDetails(undefined)).toBeUndefined();
   });
 });

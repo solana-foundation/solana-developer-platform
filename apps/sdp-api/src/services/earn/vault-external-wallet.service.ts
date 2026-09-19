@@ -68,6 +68,7 @@ import {
   readConfirmedBlockHeight,
 } from "./vault-intent-execution.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
+import { rawSimulationDetails } from "./vault-simulation-error";
 import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
 
@@ -217,10 +218,7 @@ function throwSimulationRefusal(
   }
   // The message is what a customer reads in the modal; the variant the chain
   // answered with rides in `details` so an operator can still grep for it.
-  throw badRequest(
-    message,
-    simulation.raw === undefined ? undefined : { simulation: simulation.raw }
-  );
+  throw badRequest(message, rawSimulationDetails(simulation.raw));
 }
 
 export type ExternalWalletDepositBuildResult =
@@ -622,7 +620,10 @@ async function pinProbedComputeUnitLimit(
     fee: input.fee,
   });
   if (!probe.ok) {
-    getLogger().error({ error: probe.error, logs: probe.logs.slice(-5) }, input.probeLabel);
+    getLogger().error(
+      { error: probe.error, raw: probe.raw, logs: probe.logs.slice(-5) },
+      input.probeLabel
+    );
     throwSimulationRefusal(`${input.refusalNoun} simulation failed`, probe);
   }
   return withComputeUnitLimit(input.plan, bufferedComputeUnitLimit(probe.unitsConsumed));
@@ -683,7 +684,7 @@ async function compileStandaloneSwapTransaction(
   });
   if (!simulation.ok) {
     getLogger().error(
-      { error: simulation.error, logs: simulation.logs.slice(-5) },
+      { error: simulation.error, raw: simulation.raw, logs: simulation.logs.slice(-5) },
       "external-wallet deposit: standalone swap simulation failed"
     );
     throwSimulationRefusal("Swap simulation failed", simulation);
@@ -811,7 +812,7 @@ export async function buildExternalWalletWithdrawalTransaction(
     });
     if (!simulation.ok) {
       getLogger().error(
-        { error: simulation.error, logs: simulation.logs.slice(-5) },
+        { error: simulation.error, raw: simulation.raw, logs: simulation.logs.slice(-5) },
         "external-wallet withdrawal: simulation failed"
       );
       throwSimulationRefusal("Vault withdrawal simulation failed", simulation);

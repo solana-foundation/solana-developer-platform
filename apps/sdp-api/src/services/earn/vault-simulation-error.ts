@@ -108,6 +108,16 @@ export interface VaultSimulationVerdict {
   sponsorCause?: "balance" | "prefund";
 }
 
+/**
+ * The `details` a simulation refusal carries: the chain's raw variant under
+ * `simulation`, so an operator can grep the API response for it while the
+ * customer reads only the sentence. Absent when the plan never reached the
+ * chain (`raw` undefined), so no caller has to special-case that.
+ */
+export function rawSimulationDetails(raw: string | undefined): Record<string, unknown> | undefined {
+  return raw === undefined ? undefined : { simulation: raw };
+}
+
 /** A verdict before `raw` is attached; what the internal describers return. */
 type VaultSimulationVerdictBody = Omit<VaultSimulationVerdict, "raw">;
 
@@ -350,11 +360,17 @@ function describeCustomProgramError(code: number | bigint, logs: readonly string
   const framework = ANCHOR_FRAMEWORK_ERRORS.get(numeric);
   if (framework) {
     const tag = `Anchor ${framework.name}, code ${code}`;
-    if (numeric < 1000) {
+    // Only 101 means "no such instruction on this build": 100 is a missing
+    // discriminator and 102/103 are (de)serialization failures, which point at
+    // the instruction DATA, not at the deployed program's age.
+    if (numeric === 101) {
       return (
         `the program on this cluster does not recognize this instruction (${tag}). ` +
         "The deployed program is an older build than this integration expects"
       );
+    }
+    if (numeric < 1000) {
+      return `the program could not read this instruction: ${framework.message} (${tag})`;
     }
     if (numeric >= 2000 && numeric < 3000) {
       return `the program's account constraints rejected the transaction: ${framework.message} (${tag})`;
