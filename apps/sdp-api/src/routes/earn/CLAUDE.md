@@ -619,8 +619,13 @@ organization's own custody wallets.
     a later side effect. The verdict surfaces through
     `describeVaultSimulationError` (services/earn/vault-simulation-error.ts),
     which turns recognized `TransactionError` variants into fee-mode-aware prose
-    ("the wallet holds no SOL...") with the raw variant kept in parentheses for
-    log searches; unrecognized shapes fall back to the capped raw JSON. Callers
+    ("the wallet holds no SOL...") and returns the raw variant BESIDE it
+    (`raw`), which callers put in API `details` and structured logs, never in
+    the customer's message; unrecognized shapes fall back to the capped raw JSON
+    as the message. A `Custom` code renders through the pinned Anchor framework
+    table (anchor-framework-errors.ts: 101 is "the program does not recognize
+    this instruction", not a vault refusal), then the program's own
+    `AnchorError occurred … Error Message` log line, then the bare code. Callers
     holding simulation LOGS pass them too: a bare `Custom: 1` is refined from
     the failing program's own log line into rent-shortfall prose naming the
     missing SOL or token-balance prose, because the variant alone is the
