@@ -338,14 +338,19 @@ describe("DvpCreateWorkspace", () => {
     expect(screen.getByText("USDC")).toBeTruthy();
   });
 
-  // The paste escape hatch is real but was invisible: the search box said
-  // "Search for assets" and the empty panel said the list was unavailable.
-  it("says a mint address can be pasted", () => {
-    renderForm({ tokens: [] });
+  // An org with no registered counterparties opens this picker on an empty
+  // list, which used to read "No options available." and end there. The value
+  // is typed, so the panel is the only place that can say so.
+  it("tells you to paste an address when no counterparties are registered", () => {
+    renderForm({ counterpartyAccounts: [] });
 
-    fireEvent.click(screen.getByRole("button", { name: /^asset/i }));
+    // Revealed before either party resolves, so neither side seeds an address
+    // and the list is genuinely empty.
+    revealPayouts();
+    fireEvent.click(sellerPayoutTrigger());
 
-    expect(screen.getByPlaceholderText(/search, or paste a mint address/i)).toBeTruthy();
+    expect(screen.queryByText(/no options available/i)).toBeNull();
+    expect(screen.getByText(/paste an address to use one/i)).toBeTruthy();
   });
 
   it("surfaces a context error rather than showing an empty picker silently", () => {
