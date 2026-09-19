@@ -23,6 +23,8 @@ const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const PARTY_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 /** Somewhere neither party funds from, so re-seeding cannot produce it by accident. */
 const REDIRECT = "8kQmPzRw2Fy6Tn4VdHsXbLcJgAeUq3MvNrZtYwSfDh5B";
+/** The registered counterparty's address, which the seller party also resolves to. */
+const ACME = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
 
 const context: DvpCreateContext = {
   error: null,
@@ -41,7 +43,7 @@ const context: DvpCreateContext = {
       counterpartyAccountId: "cpa_1",
       name: "Acme OTC",
       label: "Settlement wallet",
-      address: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
+      address: ACME,
     },
   ],
   tokens: [
@@ -420,6 +422,21 @@ describe("DvpCreateWorkspace", () => {
     searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
 
     expect(sellerPayoutInput().value).toBe(REDIRECT);
+  });
+
+  // The case an address comparison cannot see. Answering the picker with the
+  // very address it was seeded with is still an answer, and the earlier guard
+  // read it as the untouched default and redirected it on the next party edit.
+  it("keeps a payout deliberately set to the party's own address", () => {
+    renderForm();
+    fillPartyA();
+    fillPartyB(PARTY_B);
+    revealPayouts();
+    redirectSellerPayout(ACME);
+
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
+
+    expect(sellerPayoutInput().value).toBe(ACME);
   });
 
   // The other half of the same rule: a payout still sitting on the party's own

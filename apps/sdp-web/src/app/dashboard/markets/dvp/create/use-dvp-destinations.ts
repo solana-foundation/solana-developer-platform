@@ -40,7 +40,22 @@ export interface DvpPayout {
   setMode: (next: PayoutMode) => void;
   /** Which reference kind names this destination, and its value. */
   slot: DvpPartySlot;
+  /** A person chose this destination. Marks it `touched`. */
   setSlot: (next: DvpPartySlot) => void;
+  /**
+   * The FORM chose this destination, mirroring the party. Leaves it untouched,
+   * so it keeps following the party until a person overrides it.
+   */
+  seedSlot: (next: DvpPartySlot) => void;
+  /**
+   * Somebody has answered this picker themselves.
+   *
+   * The one thing that decides whether re-seeding may overwrite it. Comparing
+   * the destination to the party's address cannot: picking the party's own
+   * address on purpose is a real answer, and an address check reads it as the
+   * default and silently redirects it on the next party edit.
+   */
+  touched: boolean;
   /** What the slot resolves to. As typed when the slot is a pasted address. */
   address: string;
   /** Something is typed and it is not a base58 address. Blank is not wrong. */
@@ -62,7 +77,8 @@ export interface DvpDestinations {
 
 function usePayout(context: DvpCreateContext): DvpPayout {
   const [mode, setMode] = useState<PayoutMode>("party");
-  const [slot, setSlot] = useState<DvpPartySlot>(EMPTY_SLOT);
+  const [slot, setSlotState] = useState<DvpPartySlot>(EMPTY_SLOT);
+  const [touched, setTouched] = useState(false);
 
   // One resolver for parties and payouts alike, so a wallet means the same
   // address in both places and neither can drift.
@@ -81,7 +97,15 @@ function usePayout(context: DvpCreateContext): DvpPayout {
     mode,
     setMode,
     slot,
-    setSlot,
+    setSlot: (next: DvpPartySlot) => {
+      setSlotState(next);
+      setTouched(true);
+    },
+    seedSlot: (next: DvpPartySlot) => {
+      setSlotState(next);
+      setTouched(false);
+    },
+    touched,
     address,
     looksWrong,
     incomplete,

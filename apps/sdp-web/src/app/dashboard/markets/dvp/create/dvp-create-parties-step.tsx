@@ -228,23 +228,19 @@ export function PartiesStep({ context, form }: { context: DvpCreateContext; form
 
   const changeParty = (side: "a" | "b", next: DvpPartySlot) => {
     const payout = side === "a" ? form.destinations.a : form.destinations.b;
-    // Read before the change lands: for the rest of this handler `form.resolved`
-    // still describes the party being replaced.
-    const previousPartyAddress = form.resolved[side].address;
     form.setParty(side, next);
     if (!customPayouts) {
       return;
     }
-    // Only the DEFAULT follows its party. A payout still sitting on the party's
-    // own address is the value this form seeded, so it must not outlive the
-    // party that seeded it; clearing it to "" blocks submit, which is the safe
-    // direction. A payout pointed somewhere else was chosen deliberately, and
-    // rewriting that would send the proceeds to an address the form has stopped
-    // showing — the redirect is not stale, it is the point.
-    if (payout.address !== "" && payout.address !== previousPartyAddress) {
+    // Only a destination nobody has answered follows its party. One somebody
+    // chose is deliberate, and rewriting it would send the proceeds to an
+    // address the form has stopped showing — the redirect is not stale, it is
+    // the point. `touched`, not an address comparison: picking the party's own
+    // address on purpose is an answer too.
+    if (payout.touched) {
       return;
     }
-    payout.setSlot(next);
+    payout.seedSlot(next);
   };
 
   return (
@@ -283,15 +279,15 @@ export function PartiesStep({ context, form }: { context: DvpCreateContext; form
               if (next) {
                 // Toggling back on restores the original state: no chosen
                 // destination survives in form state to ride along later.
-                form.destinations.a.setSlot(EMPTY_PAYOUT_SLOT);
-                form.destinations.b.setSlot(EMPTY_PAYOUT_SLOT);
+                form.destinations.a.seedSlot(EMPTY_PAYOUT_SLOT);
+                form.destinations.b.seedSlot(EMPTY_PAYOUT_SLOT);
               } else {
                 // Revealing the pickers seeds each side with the party it
                 // already names, so the default is visible and edited from,
                 // never a blank to re-derive. Seeding the SLOT, not a bare
                 // address, also puts the picker on the mode that names it.
-                form.destinations.a.setSlot(form.partyA);
-                form.destinations.b.setSlot(form.partyB);
+                form.destinations.a.seedSlot(form.partyA);
+                form.destinations.b.seedSlot(form.partyB);
               }
             }}
           />
