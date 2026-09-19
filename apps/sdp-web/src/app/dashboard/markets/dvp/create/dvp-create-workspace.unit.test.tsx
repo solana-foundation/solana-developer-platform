@@ -299,6 +299,28 @@ describe("DvpCreateWorkspace", () => {
 
   // A failed token load must not read as "you have no tokens", and the form
   // still has to be usable with a pasted mint.
+  // PRO-2016. An org that has issued nothing still has an asset leg to fill.
+  // The list used to be the issued tokens alone, so this picker came up empty
+  // and the wizard could not be completed at all.
+  it("offers catalogue assets when the org has issued no tokens", () => {
+    renderForm({ tokens: [] });
+
+    fireEvent.click(screen.getByRole("button", { name: /^asset/i }));
+
+    expect(screen.queryByText(/no options available/i)).toBeNull();
+    expect(screen.getByText("USDC")).toBeTruthy();
+  });
+
+  // The paste escape hatch is real but was invisible: the search box said
+  // "Search for assets" and the empty panel said the list was unavailable.
+  it("says a mint address can be pasted", () => {
+    renderForm({ tokens: [] });
+
+    fireEvent.click(screen.getByRole("button", { name: /^asset/i }));
+
+    expect(screen.getByPlaceholderText(/search, or paste a mint address/i)).toBeTruthy();
+  });
+
   it("surfaces a context error rather than showing an empty picker silently", () => {
     renderForm({ error: "Token list failed (500).", tokens: [] });
 
