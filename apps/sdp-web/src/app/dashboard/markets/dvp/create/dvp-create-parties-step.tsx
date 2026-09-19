@@ -9,6 +9,7 @@ import { useTranslations } from "@/i18n/provider";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { AmountField, MintField, PartySlotPicker, PayoutAddressPicker } from "./dvp-create-fields";
 import type { DvpCreateForm } from "./use-dvp-create-form";
+import { EMPTY_PAYOUT_SLOT } from "./use-dvp-destinations";
 import { CUSTOM } from "./use-dvp-leg";
 import type { DvpPartySlot } from "./use-dvp-parties";
 
@@ -184,54 +185,35 @@ function ExchangeStrip({ form }: { form: DvpCreateForm }) {
   );
 }
 
-/** Where each side is paid: two destination pickers on one row, shown only when the default is toggled off. */
+/**
+ * Where each side is paid, shown only when the default is toggled off.
+ *
+ * Stacked, not two to a row. Each picker carries a three-option mode control
+ * opposite its label, and at half width that control runs into the next
+ * column — the label wraps to two lines and the segments overflow the card.
+ * The party pickers above are full width for the same reason, so this also
+ * keeps the two identical.
+ */
 function PayoutChoices({ context, form }: { context: DvpCreateContext; form: DvpCreateForm }) {
   const t = useTranslations();
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <div className="grid gap-4">
       <PayoutAddressPicker
         counterpartyAccounts={context.counterpartyAccounts}
         id="dvp-payout-a"
         label={t("DashboardMarkets.dvp.payoutAddressA")}
         payout={form.destinations.a}
+        wallets={context.wallets}
       />
       <PayoutAddressPicker
         counterpartyAccounts={context.counterpartyAccounts}
         id="dvp-payout-b"
         label={t("DashboardMarkets.dvp.payoutAddressB")}
         payout={form.destinations.b}
+        wallets={context.wallets}
       />
     </div>
   );
-}
-
-/**
- * The address a filled party slot resolves to, or "" while it resolves none.
- *
- * "" is not a fallback: it leaves the payout unusable and blocks submit, which
- * beats carrying the previous party's address into a trade it no longer names.
- *
- * @param slot - The party slot to resolve.
- * @param context - The wallets and counterparty accounts a slot can reference.
- * @returns The party's address, or "".
- */
-function partyAddress(slot: DvpPartySlot, context: DvpCreateContext): string {
-  switch (slot.mode) {
-    case "wallet":
-      return context.wallets.find((candidate) => candidate.id === slot.walletId)?.address ?? "";
-    case "counterparty":
-      return (
-        context.counterpartyAccounts.find(
-          (candidate) => candidate.counterpartyAccountId === slot.counterpartyAccountId
-        )?.address ?? ""
-      );
-    case "address":
-      return slot.address;
-    default: {
-      const exhausted: never = slot;
-      return exhausted;
-    }
-  }
 }
 
 /** The one configuring step: each side names its party and its leg, then where each is paid. */
@@ -262,7 +244,7 @@ export function PartiesStep({ context, form }: { context: DvpCreateContext; form
     if (payout.address !== "" && payout.address !== previousPartyAddress) {
       return;
     }
-    payout.setAddress(partyAddress(next, context));
+    payout.setSlot(next);
   };
 
   return (
@@ -299,22 +281,17 @@ export function PartiesStep({ context, form }: { context: DvpCreateContext; form
               form.destinations.a.setMode(next ? "party" : "elsewhere");
               form.destinations.b.setMode(next ? "party" : "elsewhere");
               if (next) {
-                // Toggling back on restores the original state: no custom
-                // address survives in form state to ride along later.
-                form.destinations.a.setAddress("");
-                form.destinations.b.setAddress("");
+                // Toggling back on restores the original state: no chosen
+                // destination survives in form state to ride along later.
+                form.destinations.a.setSlot(EMPTY_PAYOUT_SLOT);
+                form.destinations.b.setSlot(EMPTY_PAYOUT_SLOT);
               } else {
                 // Revealing the pickers seeds each side with the party it
                 // already names, so the default is visible and edited from,
-                // never a blank to re-derive.
-                const partyA = form.resolved.a.address;
-                const partyB = form.resolved.b.address;
-                if (partyA !== null) {
-                  form.destinations.a.setAddress(partyA);
-                }
-                if (partyB !== null) {
-                  form.destinations.b.setAddress(partyB);
-                }
+                // never a blank to re-derive. Seeding the SLOT, not a bare
+                // address, also puts the picker on the mode that names it.
+                form.destinations.a.setSlot(form.partyA);
+                form.destinations.b.setSlot(form.partyB);
               }
             }}
           />

@@ -14,7 +14,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { shortenAddress } from "../../../payments/payments-overview.utils";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { DvpCreateWorkspace } from "./dvp-create-workspace";
 
@@ -131,9 +130,12 @@ function fillAmounts() {
   fireEvent.change(screen.getByLabelText(/cash amount/i), { target: { value: "25" } });
 }
 
-/** The seller payout picker's trigger, which names whatever that side resolves to. */
-function sellerPayoutTrigger(): HTMLElement {
-  return screen.getByRole("button", { name: /seller payout address/i });
+/** Payout rows render after both party rows, seller first. */
+const SELLER_PAYOUT_ROW = 2;
+
+/** The seller payout's address input, which only exists in "Paste an Address" mode. */
+function sellerPayoutInput(): HTMLInputElement {
+  return screen.getByLabelText(/seller payout address/i) as HTMLInputElement;
 }
 
 /** Turns the default off, which reveals both payout pickers seeded from their parties. */
@@ -148,11 +150,8 @@ function revealPayouts(): void {
  * @returns Nothing.
  */
 function redirectSellerPayout(address: string): void {
-  fireEvent.click(sellerPayoutTrigger());
-  fireEvent.change(screen.getByPlaceholderText(/search, or paste a solana address/i), {
-    target: { value: address },
-  });
-  fireEvent.click(screen.getByText(shortenAddress(address)));
+  pickMode(SELLER_PAYOUT_ROW, /paste an address/i);
+  fireEvent.change(sellerPayoutInput(), { target: { value: address } });
 }
 
 /**
@@ -338,19 +337,16 @@ describe("DvpCreateWorkspace", () => {
     expect(screen.getByText("USDC")).toBeTruthy();
   });
 
-  // An org with no registered counterparties opens this picker on an empty
-  // list, which used to read "No options available." and end there. The value
-  // is typed, so the panel is the only place that can say so.
-  it("tells you to paste an address when no counterparties are registered", () => {
+  // Ilan's second point. The payout was one combobox of registered
+  // counterparties, so an org with none opened it on an empty list, while the
+  // question directly above offered three visible ways to answer. Same
+  // question, same control now: two party rows and two payout rows.
+  it("offers the same three ways to name a payout as a party", () => {
     renderForm({ counterpartyAccounts: [] });
 
-    // Revealed before either party resolves, so neither side seeds an address
-    // and the list is genuinely empty.
     revealPayouts();
-    fireEvent.click(sellerPayoutTrigger());
 
-    expect(screen.queryByText(/no options available/i)).toBeNull();
-    expect(screen.getByText(/paste an address to use one/i)).toBeTruthy();
+    expect(screen.getAllByRole("radio", { name: /paste an address/i })).toHaveLength(4);
   });
 
   it("surfaces a context error rather than showing an empty picker silently", () => {
@@ -423,7 +419,7 @@ describe("DvpCreateWorkspace", () => {
     // fixing a typo would use.
     searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
 
-    expect(sellerPayoutTrigger().textContent).toContain(shortenAddress(REDIRECT));
+    expect(sellerPayoutInput().value).toBe(REDIRECT);
   });
 
   // The other half of the same rule: a payout still sitting on the party's own
@@ -434,10 +430,17 @@ describe("DvpCreateWorkspace", () => {
     fillPartyB(PARTY_B);
     revealPayouts();
 
-    expect(sellerPayoutTrigger().textContent).toContain("Acme OTC");
+    // Seeded from the party, so it opens on the mode that party used.
+    expect(
+      (
+        screen.getAllByRole("radio", { name: /^counterparty$/i })[
+          SELLER_PAYOUT_ROW
+        ] as HTMLInputElement
+      ).checked
+    ).toBe(true);
 
     searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
 
-    expect(sellerPayoutTrigger().textContent).toContain(shortenAddress(PARTY_A));
+    expect(sellerPayoutInput().value).toBe(PARTY_A);
   });
 });

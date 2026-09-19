@@ -179,7 +179,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     refString: "",
   });
 
-  const destinations = useDvpDestinations();
+  const destinations = useDvpDestinations(context);
   const parties = deriveDvpParties({ partyA: values.partyA, partyB: values.partyB }, context);
   const { expiry, refString } = values;
 
