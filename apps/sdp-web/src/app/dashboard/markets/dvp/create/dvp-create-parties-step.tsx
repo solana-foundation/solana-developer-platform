@@ -205,6 +205,35 @@ function PayoutChoices({ context, form }: { context: DvpCreateContext; form: Dvp
   );
 }
 
+/**
+ * The address a filled party slot resolves to, or "" while it resolves none.
+ *
+ * "" is not a fallback: it leaves the payout unusable and blocks submit, which
+ * beats carrying the previous party's address into a trade it no longer names.
+ *
+ * @param slot - The party slot to resolve.
+ * @param context - The wallets and counterparty accounts a slot can reference.
+ * @returns The party's address, or "".
+ */
+function partyAddress(slot: DvpPartySlot, context: DvpCreateContext): string {
+  switch (slot.mode) {
+    case "wallet":
+      return context.wallets.find((candidate) => candidate.id === slot.walletId)?.address ?? "";
+    case "counterparty":
+      return (
+        context.counterpartyAccounts.find(
+          (candidate) => candidate.counterpartyAccountId === slot.counterpartyAccountId
+        )?.address ?? ""
+      );
+    case "address":
+      return slot.address;
+    default: {
+      const exhausted: never = slot;
+      return exhausted;
+    }
+  }
+}
+
 /** The one configuring step: each side names its party and its leg, then where each is paid. */
 export function PartiesStep({ context, form }: { context: DvpCreateContext; form: DvpCreateForm }) {
   const t = useTranslations();
@@ -216,37 +245,24 @@ export function PartiesStep({ context, form }: { context: DvpCreateContext; form
   );
 
   const changeParty = (side: "a" | "b", next: DvpPartySlot) => {
+    const payout = side === "a" ? form.destinations.a : form.destinations.b;
+    // Read before the change lands: for the rest of this handler `form.resolved`
+    // still describes the party being replaced.
+    const previousPartyAddress = form.resolved[side].address;
     form.setParty(side, next);
-    if (customPayouts) {
-      // The payout pickers were seeded from the parties when the toggle came
-      // off, so a party changed while they are visible must re-seed THAT
-      // side's destination — a stale address must never outlive the party
-      // that seeded it. Clearing to "" leaves the payout unusable until it is
-      // re-picked, which blocks submit: the safe direction.
-      let address: string;
-      switch (next.mode) {
-        case "wallet": {
-          const wallet = context.wallets.find((candidate) => candidate.id === next.walletId);
-          address = wallet === undefined ? "" : wallet.address;
-          break;
-        }
-        case "counterparty": {
-          const account = context.counterpartyAccounts.find(
-            (candidate) => candidate.counterpartyAccountId === next.counterpartyAccountId
-          );
-          address = account === undefined ? "" : account.address;
-          break;
-        }
-        case "address":
-          address = next.address;
-          break;
-        default: {
-          const exhausted: never = next;
-          return exhausted;
-        }
-      }
-      (side === "a" ? form.destinations.a : form.destinations.b).setAddress(address);
+    if (!customPayouts) {
+      return;
     }
+    // Only the DEFAULT follows its party. A payout still sitting on the party's
+    // own address is the value this form seeded, so it must not outlive the
+    // party that seeded it; clearing it to "" blocks submit, which is the safe
+    // direction. A payout pointed somewhere else was chosen deliberately, and
+    // rewriting that would send the proceeds to an address the form has stopped
+    // showing — the redirect is not stale, it is the point.
+    if (payout.address !== "" && payout.address !== previousPartyAddress) {
+      return;
+    }
+    payout.setAddress(partyAddress(next, context));
   };
 
   return (
