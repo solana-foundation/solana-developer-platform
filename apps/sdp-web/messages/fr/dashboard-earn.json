@@ -307,7 +307,11 @@
       "unavailableEnvironmentProductionDescription": "Ce fournisseur n'accepte les nouveaux dépôts dans les vaults que pour les projets Production. Passez à un projet Production pour l'intégrer.",
       "apiKeyCalloutBefore": "Vous avez besoin d'une",
       "apiKeyCalloutLink": "Clé API développeur",
-      "apiKeyCalloutAfter": "pour ce projet (elle inclut earn:read et earn:write). Conservez-la sur votre serveur, jamais dans le client."
+      "apiKeyCalloutAfter": "pour ce projet (elle inclut earn:read et earn:write). Conservez-la sur votre serveur, jamais dans le client.",
+      "sharesUnlockAt": "Les parts verrouillées se débloquent à {time}",
+      "guideAsyncWithdrawNavigation": "Sorties asynchrones",
+      "guideAsyncWithdrawTitle": "Gérer les retraits asynchrones",
+      "guideAsyncWithdrawDescription": "Découvrez la route asynchrone du fournisseur, construisez sa requête de file d'attente, observez l'exécution et récupérez les parts en séquestre après une échéance non honorée."
     },
     "landing": {
       "eyebrow": "Choisissez une option",
@@ -572,7 +576,25 @@
       "closeRefusedInProgress": "Cette opération est déjà en cours de règlement ou d'annulation. Revenez dans un instant.",
       "closeRefusedLegMoving": "Une jambe est encore en cours de financement ou de retour. Réessayez une fois qu'elle est confirmée.",
       "toastCancelSent": "Annulation envoyée. L'opération se met à jour une fois la transaction confirmée.",
-      "toastSettleSent": "Règlement envoyé. L'opération se met à jour une fois la transaction confirmée."
+      "toastSettleSent": "Règlement envoyé. L'opération se met à jour une fois la transaction confirmée.",
+      "mintNotFound": "Aucun Token trouvé à cette adresse.",
+      "mintRefusedExtension": "Ce Token utilise {extension}, que les transactions ne peuvent pas garder en séquestre. Choisissez un autre Token.",
+      "mintRefusedUnreadable": "SDP ne peut pas lire les paramètres de ce Token, donc il ne peut pas déterminer si une transaction sur celui-ci pourrait être réglée. Choisissez un autre Token.",
+      "mintRefusedTransferHook": "Ce Token exécute un transfer hook, que SDP ne peut pas encore régler, annuler ou récupérer. Choisissez un autre Token.",
+      "mintRefusedUnnamed": "Les transactions ne peuvent pas garder ce Token en séquestre. Choisissez un autre Token.",
+      "mintSlotEmpty": "Aucun Token à choisir. Collez une adresse de mint pour en utiliser un.",
+      "payoutModeLabel": "Comment nommer cette destination de paiement",
+      "toastFundPendingApproval": "Financement en attente d'approbation",
+      "toastSettlePendingApproval": "Règlement en attente d'approbation",
+      "approvalPendingDescription": "La politique de ce Wallet exige une approbation avant d'envoyer. Rien n'a encore été déplacé.",
+      "transferDelivery": "Livré",
+      "transferDeposit": "Dépôt",
+      "transferReclaim": "Récupéré",
+      "transferRecovery": "Retrouvé",
+      "transferRefund": "Remboursé",
+      "transferWithdrawal": "Retiré",
+      "transfersLabel": "Transferts",
+      "showEarlierTransfers": "Afficher les transferts antérieurs ({count})"
     }
   },
   "DashboardEarn": {
@@ -876,7 +898,8 @@
       "flowComplete": "Terminé",
       "progressLabel": "Progression",
       "vaultSwapReviewTitle": "Échange requis avant le dépôt",
-      "vaultSwapReviewBody": "Votre {source} sera échangé contre l'actif sous-jacent {target} du vault via Jupiter, puis déposé dans la même transaction."
+      "vaultSwapReviewBody": "Votre {source} sera échangé contre l'actif sous-jacent {target} du vault via Jupiter, puis déposé dans la même transaction.",
+      "vaultFloorUnavailable": "SDP n'a pas pu confirmer les conditions exactes avec lesquelles la tentative précédente de ce dépôt avait été soumise, donc rien n'a été envoyé. Vérifiez votre position, puis réessayez dans un instant."
     },
     "vaultWithdraw": {
       "title": "Retirer de {position}",
@@ -942,7 +965,67 @@
       "amountAvailableOfTotal": "{available} disponibles sur {total} au total. Désengagez (unstake) d'abord le reste dans Kamino.",
       "amountUnavailable": "La valeur en dollars actuelle est indisponible, ce retrait ne peut donc pas être dimensionné en toute sécurité. Réessayez dans un instant.",
       "amountInvalid": "Saisissez un montant en dollars supérieur à zéro.",
-      "overAmount": "Cela dépasse le montant actuellement disponible au retrait."
+      "overAmount": "Cela dépasse le montant actuellement disponible au retrait.",
+      "floorUnavailable": "SDP n'a pas pu confirmer les conditions exactes avec lesquelles la tentative précédente de ce retrait avait été soumise, donc rien n'a été envoyé. Vérifiez votre position, puis réessayez dans un instant.",
+      "balanceRefreshNote": "Le solde de la position et du Wallet se met à jour automatiquement."
+    },
+    "exitRoute": {
+      "title": "Retirer de {position}",
+      "loading": "Vérification des routes de retrait disponibles…",
+      "unavailable": "Les routes de retrait n'ont pas pu être lues en toute sécurité. Aucune route n'a été sélectionnée. Réessayez.",
+      "retry": "Réessayer",
+      "none": "Ce fournisseur ne propose actuellement aucune voie de retrait disponible pour cette position.",
+      "description": "Choisissez comment cette position doit être retirée. Les voies diffèrent par leur délai et leur tarification, SDP ne choisira donc pas pour vous.",
+      "instantTitle": "Retrait instantané",
+      "instantDescription": "Rachetez les parts et recevez l'actif du vault dans la même transaction.",
+      "asyncTitle": "Retrait asynchrone",
+      "asyncDescription": "Mettez les parts en séquestre dans une demande fournisseur. Le fournisseur peut y donner suite après environ {seconds} secondes ; les demandes non honorées deviennent récupérables après leur échéance."
+    },
+    "queuedWithdraw": {
+      "title": "Demander un retrait depuis {position}",
+      "flowRequested": "Demandé",
+      "flowApproval": "Approbation",
+      "detailsBody": "Choisissez la remise visible par le fournisseur et la fenêtre solver. Les limites de file d'attente en direct ci-dessous proviennent de l'état on-chain.",
+      "discountBps": "Remise (points de base)",
+      "deadlineSeconds": "Fenêtre solver (secondes)",
+      "deadlineMinimum": "Minimum {seconds} secondes après l'échéance",
+      "lockedUntil": "Ces parts sont verrouillées jusqu'à {time}. La demande est désactivée jusqu'à ce qu'une lecture en direct de la position les signale comme retirables.",
+      "reviewBody": "Vérifiez le devis en direct du fournisseur avant que les parts passent en séquestre.",
+      "previewLoading": "Récupération du devis de la file d'attente en direct…",
+      "previewError": "Le devis de la file d'attente en direct n'est pas disponible : la demande ne peut donc pas être soumise en toute sécurité.",
+      "previewBlocked": "Le fournisseur ne peut pas accepter cette demande :",
+      "expectedAmount": "Produit attendu",
+      "quotedAmount": "Produit devisé",
+      "discount": "Remise",
+      "maturity": "Éligible solver",
+      "deadline": "Échéance de récupération",
+      "requestAccount": "Compte de demande",
+      "solverNotice": "Le solver du fournisseur, et non SDP, contrôle l'exécution. S'il n'exécute pas avant l'échéance, les parts restent récupérables via Annuler et récupérer les parts.",
+      "submit": "Mettre les parts en séquestre et demander",
+      "submitting": "Soumission de la demande…",
+      "resultTitle": "Demande de retrait en file d'attente",
+      "creatingBody": "La soumission est encore en cours de confirmation. SDP n'a pas encore confirmé que la demande est on-chain.",
+      "pendingBody": "La demande est on-chain. SDP continuera de la surveiller après la fermeture de cette fenêtre.",
+      "closedOrUnknownBody": "Le compte de demande est fermé. SDP vérifie son événement de fermeture pour déterminer le résultat final.",
+      "fulfilledBody": "Le fournisseur a exécuté la demande et payé l'actif du vault.",
+      "cancelledBody": "La demande a été annulée après son échéance et les parts en séquestre ont été restituées.",
+      "failedBody": "Le retrait en file d'attente n'a pas abouti. Vérifiez la raison enregistrée avant de réessayer.",
+      "failureReason": "Raison de l'échec",
+      "statusCreating": "Confirmation de la demande",
+      "statusPending": "En attente du solver",
+      "statusRecoverable": "Récupération disponible",
+      "statusChecking": "Vérification de l'événement de fermeture",
+      "statusCancelling": "Récupération des parts",
+      "statusFulfilled": "Exécuté",
+      "statusCancelled": "Parts récupérées",
+      "statusFailed": "Échec",
+      "recoveryReady": "La fenêtre solver est terminée. Annuler maintenant restitue les parts en séquestre ; cela ne retire pas d'actifs.",
+      "cancelAction": "Annuler et récupérer les parts",
+      "cancelling": "Récupération des parts…",
+      "activeTitle": "Retraits en file d'attente",
+      "activeLoading": "Chargement des retraits en file d'attente…",
+      "activeError": "Le statut des retraits en file d'attente est temporairement indisponible. Les demandes on-chain sont inchangées.",
+      "activeSummary": "{shares} {symbol} parts · éligible au solver {maturity} · récupérables après {deadline}"
     }
   }
 }

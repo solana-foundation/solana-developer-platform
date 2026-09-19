@@ -271,7 +271,10 @@
       "addressAutocompleteFailed": "Impossible de rechercher des adresses. Réessayez.",
       "addressDetailsFailed": "Impossible de charger cette adresse. Essayez une autre recherche.",
       "payoutAccountsTitle": "Comptes de paiement enregistrés",
-      "payoutAccountsDescription": "Choisissez le compte de destination de ce paiement, ou renseignez les informations ci-dessous pour effectuer un paiement vers un nouveau compte."
+      "payoutAccountsDescription": "Choisissez le compte de destination de ce paiement, ou renseignez les informations ci-dessous pour effectuer un paiement vers un nouveau compte.",
+      "transferHeldForApproval": "La politique de ce wallet exige que ce transfert soit approuvé avant son envoi, MoneyGram ne peut donc pas continuer. Rien n'a encore été déplacé. Si vous ne voulez pas qu'il parte plus tard, annulez la demande dans Approbations.",
+      "transferApprovalPending": "En attente d'approbation",
+      "offrampHeldDescription": "Rien n'a encore été déplacé. Une fois approuvée, {amount} {token} sera envoyé à l'adresse de dépôt ci-dessous. Si le devis expire avant, l'envoi ne sera pas effectué et vous devrez obtenir un nouveau devis."
     },
     "onchainSend": {
       "noAssets": "Ce Wallet n'a aucun élément disponible à envoyer.",
@@ -303,7 +306,10 @@
       "transferFailed": "Échec de transfert.",
       "transferSuccess": "Votre transfert a été envoyé avec succès.",
       "transferStatus": "Statut : {status}",
-      "viewOnExplorer": "Afficher sur l'explorateur"
+      "viewOnExplorer": "Afficher sur l'explorateur",
+      "approvalPendingTitle": "En attente d'approbation",
+      "approvalPendingDescription": "La politique de ce wallet exige qu'une personne approuve le transfert avant son envoi. Rien n'a encore été déplacé.",
+      "viewApprovalRequest": "Afficher la demande d'approbation"
     },
     "onchainReceive": {
       "wallet": "Wallet",
@@ -338,7 +344,9 @@
       "agreementSigningTitle": "Confirmation de l'accord",
       "agreementSigningDescription": "En attente de la confirmation de l'accord signé par le fournisseur. Cela prend généralement quelques secondes.",
       "agreementConsentPrefix": "J'ai lu et j'accepte la",
-      "privacyPolicy": "politique de confidentialité"
+      "privacyPolicy": "politique de confidentialité",
+      "settlementProcessing": "Traitement en cours chez BVNK",
+      "settlementCompleted": "Terminé"
     },
     "lightspark": {
       "verificationRequiredTitle": "Vérifiez votre identité",
@@ -490,7 +498,9 @@
       "quotedAmount": "le montant indiqué",
       "cryptoDeposit": "Dépôt {currency}",
       "virtualAccount": "Compte virtuel {currency}",
-      "payin": "{currency} payer"
+      "payin": "{currency} payer",
+      "paymentReferenceRequired": "Référence de paiement (requise)",
+      "remittancePrefix": "Préfixe de remise"
     },
     "providerRisk": {
       "close": "Fermer {title}",
@@ -749,7 +759,11 @@
       "copy": "Copier {label}",
       "viewReceipt": "Afficher le reçu",
       "receipt": "Reçu",
-      "failureReason": "Raison de l'échec"
+      "failureReason": "Raison de l'échec",
+      "status": "Statut",
+      "payinId": "ID du pay-in",
+      "fiatSent": "Montant converti",
+      "cryptoToReceive": "Crypto à recevoir"
     },
     "requestFailed": "La demande a échoué.",
     "submitting": "Envoi...",

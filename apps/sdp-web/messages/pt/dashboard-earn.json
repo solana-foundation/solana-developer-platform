@@ -310,7 +310,11 @@
       "unavailableEnvironmentProductionDescription": "Este provedor aceita novos depósitos em vault somente de projetos de Produção. Mude para um projeto de Produção para integrá-lo.",
       "apiKeyCalloutBefore": "Você precisa de uma",
       "apiKeyCalloutLink": "Developer API key",
-      "apiKeyCalloutAfter": "para este projeto (inclui earn:read e earn:write). Mantenha-a no seu servidor, nunca no cliente."
+      "apiKeyCalloutAfter": "para este projeto (inclui earn:read e earn:write). Mantenha-a no seu servidor, nunca no cliente.",
+      "sharesUnlockAt": "As cotas bloqueadas são liberadas {time}",
+      "guideAsyncWithdrawNavigation": "Saídas assíncronas",
+      "guideAsyncWithdrawTitle": "Gerenciar saques assíncronos",
+      "guideAsyncWithdrawDescription": "Descubra a rota assíncrona do provedor, monte a solicitação da fila, acompanhe a conclusão e recupere as cotas em escrow após um prazo não cumprido."
     },
     "liquidity": {
       "instant": "Instantânea",
@@ -565,7 +569,25 @@
       "closeRefusedInProgress": "Este trade já está sendo liquidado ou cancelado. Verifique novamente em instantes.",
       "closeRefusedLegMoving": "Uma perna ainda está sendo financiada ou recuperada. Tente novamente assim que ela concluir.",
       "toastCancelSent": "Cancelamento enviado. O trade é atualizado assim que for confirmado.",
-      "toastSettleSent": "Liquidação enviada. O trade é atualizado assim que for confirmado."
+      "toastSettleSent": "Liquidação enviada. O trade é atualizado assim que for confirmado.",
+      "mintNotFound": "Nenhum Token encontrado neste endereço.",
+      "mintRefusedExtension": "Este Token usa {extension}, que os trades não podem manter em escrow. Escolha outro Token.",
+      "mintRefusedUnreadable": "A SDP não consegue ler as configurações deste Token, então não pode saber se um trade nele poderia ser liquidado. Escolha outro Token.",
+      "mintRefusedTransferHook": "Este Token executa um transfer hook, que a SDP ainda não consegue liquidar, cancelar ou reaver. Escolha outro Token.",
+      "mintRefusedUnnamed": "Os trades não podem manter este Token em escrow. Escolha outro Token.",
+      "mintSlotEmpty": "Não há Tokens para escolher. Cole um endereço de mint para usar um.",
+      "payoutModeLabel": "Como nomear este destino de pagamento",
+      "toastFundPendingApproval": "Funding aguardando aprovação",
+      "toastSettlePendingApproval": "Liquidação aguardando aprovação",
+      "approvalPendingDescription": "A política desta Wallet exige aprovação antes de enviar. Nada foi movido ainda.",
+      "transferDelivery": "Entregue",
+      "transferDeposit": "Depósito",
+      "transferReclaim": "Reavido",
+      "transferRecovery": "Recuperado",
+      "transferRefund": "Reembolsado",
+      "transferWithdrawal": "Retirado",
+      "transfersLabel": "Transferências",
+      "showEarlierTransfers": "Mostrar transferências anteriores ({count})"
     }
   },
   "DashboardEarn": {
@@ -869,7 +891,8 @@
       "flowComplete": "Concluído",
       "progressLabel": "Progresso",
       "vaultSwapReviewTitle": "Swap necessário antes do depósito",
-      "vaultSwapReviewBody": "Seu {source} será trocado pelo {target} de suporte do vault via Jupiter e, em seguida, depositado na mesma transação."
+      "vaultSwapReviewBody": "Seu {source} será trocado pelo {target} de suporte do vault via Jupiter e, em seguida, depositado na mesma transação.",
+      "vaultFloorUnavailable": "A SDP não conseguiu confirmar os termos exatos com os quais a tentativa anterior deste depósito foi enviada, então nada foi enviado. Verifique sua posição e tente novamente em instantes."
     },
     "vaultWithdraw": {
       "title": "Retirar de {position}",
@@ -935,7 +958,67 @@
       "amountAvailableOfTotal": "{available} disponíveis de {total} no total. Faça unstake do restante no Kamino primeiro.",
       "amountUnavailable": "O valor em dólar atual está indisponível, então esta retirada não pode ser dimensionada com segurança. Tente novamente em instantes.",
       "amountInvalid": "Informe um valor em dólar maior que zero.",
-      "overAmount": "Isso excede o valor atualmente disponível para retirada."
+      "overAmount": "Isso excede o valor atualmente disponível para retirada.",
+      "floorUnavailable": "A SDP não conseguiu confirmar os termos exatos com os quais a tentativa anterior desta retirada foi enviada, então nada foi enviado. Verifique sua posição e tente novamente em instantes.",
+      "balanceRefreshNote": "Os saldos da posição e da Wallet são atualizados automaticamente."
+    },
+    "exitRoute": {
+      "title": "Retirar de {position}",
+      "loading": "Verificando rotas de retirada disponíveis…",
+      "unavailable": "Não foi possível ler as rotas de retirada com segurança. Nenhuma rota foi selecionada. Tente novamente.",
+      "retry": "Tentar novamente",
+      "none": "Este provedor não está oferecendo uma rota de retirada disponível para esta posição no momento.",
+      "description": "Escolha como esta posição deve sair. As rotas têm prazos e preços diferentes, então a SDP não escolherá uma por você.",
+      "instantTitle": "Retirada instantânea",
+      "instantDescription": "Resgate as shares e receba o ativo do vault na mesma transação.",
+      "asyncTitle": "Retirada assíncrona",
+      "asyncDescription": "Coloque as shares em escrow em uma solicitação do provedor. O provedor pode concluí-la após aproximadamente {seconds} segundos; solicitações não concluídas tornam-se recuperáveis após o prazo."
+    },
+    "queuedWithdraw": {
+      "title": "Solicitar retirada de {position}",
+      "flowRequested": "Solicitado",
+      "flowApproval": "Aprovação",
+      "detailsBody": "Escolha o desconto visível ao provedor e a janela do solver. Os limites da fila ao vivo abaixo vêm do estado da chain.",
+      "discountBps": "Desconto (pontos-base)",
+      "deadlineSeconds": "Janela do solver (segundos)",
+      "deadlineMinimum": "Mínimo de {seconds} segundos após o vencimento",
+      "lockedUntil": "Estas shares estão bloqueadas até {time}. A solicitação fica desativada até uma leitura ao vivo da posição indicar que elas estão disponíveis para retirada.",
+      "reviewBody": "Revise a cotação ao vivo do provedor antes que as shares entrem em escrow.",
+      "previewLoading": "Buscando a cotação da fila ao vivo…",
+      "previewError": "A cotação da fila ao vivo está indisponível, portanto a solicitação não pode ser enviada com segurança.",
+      "previewBlocked": "O provedor não pode aceitar esta solicitação:",
+      "expectedAmount": "Rendimentos esperados",
+      "quotedAmount": "Rendimentos cotados",
+      "discount": "Desconto",
+      "maturity": "Elegível para o solver",
+      "deadline": "Prazo de recuperação",
+      "requestAccount": "Conta de solicitação",
+      "solverNotice": "O solver do provedor, não a SDP, controla a conclusão. Se ele não concluir antes do prazo, as shares permanecem recuperáveis por meio de Cancelar e recuperar shares.",
+      "submit": "Colocar shares em escrow e solicitar",
+      "submitting": "Enviando solicitação…",
+      "resultTitle": "Solicitação de retirada na fila",
+      "creatingBody": "O envio ainda está sendo confirmado. A SDP ainda não confirmou que a solicitação está on-chain.",
+      "pendingBody": "A solicitação está on-chain. A SDP continuará observando-a depois que esta janela fechar.",
+      "closedOrUnknownBody": "A conta de solicitação está fechada. A SDP está verificando o evento de fechamento para determinar o resultado final.",
+      "fulfilledBody": "O provedor concluiu a solicitação e pagou o ativo do vault.",
+      "cancelledBody": "A solicitação foi cancelada após o prazo e as shares em escrow foram devolvidas.",
+      "failedBody": "A retirada na fila não foi concluída. Revise o motivo registrado antes de tentar novamente.",
+      "failureReason": "Motivo da falha",
+      "statusCreating": "Confirmando solicitação",
+      "statusPending": "Aguardando o solver",
+      "statusRecoverable": "Recuperação disponível",
+      "statusChecking": "Verificando evento de fechamento",
+      "statusCancelling": "Recuperando shares",
+      "statusFulfilled": "Concluído",
+      "statusCancelled": "Shares recuperadas",
+      "statusFailed": "Falhou",
+      "recoveryReady": "A janela do solver terminou. Cancelar agora devolve as shares em escrow; não retira ativos.",
+      "cancelAction": "Cancelar e recuperar shares",
+      "cancelling": "Recuperando shares…",
+      "activeTitle": "Retiradas na fila",
+      "activeLoading": "Carregando retiradas na fila…",
+      "activeError": "O status da retirada na fila está temporariamente indisponível. As solicitações on-chain não foram alteradas.",
+      "activeSummary": "{shares} {symbol} em shares · elegível ao solver em {maturity} · recuperável após {deadline}"
     }
   }
 }
