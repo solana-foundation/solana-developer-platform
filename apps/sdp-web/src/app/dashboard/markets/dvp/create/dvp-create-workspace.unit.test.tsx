@@ -14,6 +14,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { shortenAddress } from "../../../payments/payments-overview.utils";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { DvpCreateWorkspace } from "./dvp-create-workspace";
 
@@ -21,6 +22,8 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const PARTY_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
+/** Somewhere neither party funds from, so re-seeding cannot produce it by accident. */
+const REDIRECT = "8kQmPzRw2Fy6Tn4VdHsXbLcJgAeUq3MvNrZtYwSfDh5B";
 
 const context: DvpCreateContext = {
   error: null,
@@ -126,6 +129,30 @@ function fillCashMint() {
 function fillAmounts() {
   fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "10" } });
   fireEvent.change(screen.getByLabelText(/cash amount/i), { target: { value: "25" } });
+}
+
+/** The seller payout picker's trigger, which names whatever that side resolves to. */
+function sellerPayoutTrigger(): HTMLElement {
+  return screen.getByRole("button", { name: /seller payout address/i });
+}
+
+/** Turns the default off, which reveals both payout pickers seeded from their parties. */
+function revealPayouts(): void {
+  fireEvent.click(screen.getByRole("switch", { name: /pay proceeds/i }));
+}
+
+/**
+ * Sends the seller's proceeds to an address that is not its party.
+ *
+ * @param address - The address to redirect to.
+ * @returns Nothing.
+ */
+function redirectSellerPayout(address: string): void {
+  fireEvent.click(sellerPayoutTrigger());
+  fireEvent.change(screen.getByPlaceholderText(/search, or paste a solana address/i), {
+    target: { value: address },
+  });
+  fireEvent.click(screen.getByText(shortenAddress(address)));
 }
 
 /**
@@ -375,5 +402,37 @@ describe("DvpCreateWorkspace", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /continue/i }).hasAttribute("disabled")).toBe(true)
     );
+  });
+
+  // PRO-2015. Re-seeding a payout from its party keeps the DEFAULT honest; it
+  // must not reach a redirect somebody chose. Losing that silently sends the
+  // proceeds to an address the form no longer shows.
+  it("keeps a chosen payout address when that side's party is edited", () => {
+    renderForm();
+    fillPartyA();
+    fillPartyB(PARTY_B);
+    revealPayouts();
+    redirectSellerPayout(REDIRECT);
+
+    // Correct the seller after choosing the redirect, the order somebody
+    // fixing a typo would use.
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
+
+    expect(sellerPayoutTrigger().textContent).toContain(shortenAddress(REDIRECT));
+  });
+
+  // The other half of the same rule: a payout still sitting on the party's own
+  // address is a default, so it has to follow the party it mirrors.
+  it("re-seeds a payout that was never changed away from its party", () => {
+    renderForm();
+    fillPartyA();
+    fillPartyB(PARTY_B);
+    revealPayouts();
+
+    expect(sellerPayoutTrigger().textContent).toContain("Acme OTC");
+
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
+
+    expect(sellerPayoutTrigger().textContent).toContain(shortenAddress(PARTY_A));
   });
 });
