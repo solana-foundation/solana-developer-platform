@@ -198,7 +198,13 @@ function rethrowProviderBuildFailure(error: unknown, operation: string): never {
  */
 function throwSimulationRefusal(
   prefix: string,
-  simulation: { error: string; fault: "caller" | "sponsor"; logs: readonly string[] }
+  simulation: {
+    error: string;
+    fault: "caller" | "sponsor";
+    logs: readonly string[];
+    /** The chain's raw `TransactionError` variant; travels in `details`, never in prose. */
+    raw?: string;
+  }
 ): never {
   const message = `${prefix}: ${simulation.error}`;
   if (simulation.fault === "sponsor") throw internalError(message);
@@ -209,7 +215,12 @@ function throwSimulationRefusal(
       { reason: "slippage_exceeded" }
     );
   }
-  throw badRequest(message);
+  // The message is what a customer reads in the modal; the variant the chain
+  // answered with rides in `details` so an operator can still grep for it.
+  throw badRequest(
+    message,
+    simulation.raw === undefined ? undefined : { simulation: simulation.raw }
+  );
 }
 
 export type ExternalWalletDepositBuildResult =
@@ -404,7 +415,7 @@ export async function buildExternalWalletDepositTransaction(
       });
       if (!simulation.ok) {
         getLogger().error(
-          { error: simulation.error, logs: simulation.logs.slice(-5) },
+          { error: simulation.error, raw: simulation.raw, logs: simulation.logs.slice(-5) },
           "external-wallet deposit: simulation failed"
         );
         throwSimulationRefusal("Vault deposit simulation failed", simulation);

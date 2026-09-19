@@ -1,6 +1,6 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
-import { isVaultDirectDepositEnabled, type SdpEnvironment } from "@sdp/types";
+import { isVaultDirectDepositEnabled, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
 import {
   type EarnProviderId,
   earnDepositSlippagePolicy,
@@ -176,21 +176,25 @@ export function isStrategyDepositable(
 /**
  * The share-floor gate both deposit routes call before building. It refuses a
  * request that omits `minSharesOut` when `earnDepositSlippagePolicy` says the
- * build enforces a floor for this provider in this environment: every
- * production deposit, plus any provider whose builder refuses an implicit
- * floor. The catalogue publishes that same policy as `depositSlippage`, so a
- * caller who follows the row they were shown never trips this.
+ * build enforces a floor for this provider on this row's cluster in this
+ * environment: every production deposit, plus any provider whose builder
+ * refuses an implicit floor — minus a Kamino row hosted on a cluster whose
+ * kvault build lacks the floor instruction (devnet), where no floor can be
+ * enforced and none is asked for. The catalogue publishes that same policy as
+ * `depositSlippage` (from the same `host_cluster`), so a caller who follows the
+ * row they were shown never trips this.
  */
 export function assertDepositFloorPresent(
   provider: string,
   environment: SdpEnvironment,
-  minSharesOut: string | undefined
+  minSharesOut: string | undefined,
+  hostCluster?: SolanaCluster
 ): void {
   if (minSharesOut !== undefined) return;
-  if (earnDepositSlippagePolicy(provider, environment) === null) return;
+  if (earnDepositSlippagePolicy(provider, environment, hostCluster) === null) return;
   throw badRequest(
     environment === "production"
       ? "minSharesOut is required: every production deposit carries a share floor. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut."
-      : `minSharesOut is required: ${provider} deposits carry a share floor in every environment. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut.`
+      : `minSharesOut is required: ${provider} deposits carry a share floor wherever the vault program can enforce one. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut.`
   );
 }

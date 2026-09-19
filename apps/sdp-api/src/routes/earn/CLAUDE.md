@@ -530,12 +530,16 @@ organization's own custody wallets.
     inside `assertVaultDepositAdmissible` and the preview. The dashboard reads
     the same predicate, so it never advertises an action the API will refuse.
   - `minSharesOut` is required exactly when `earnDepositSlippagePolicy(provider,
-    environment)` (@sdp/types) is non-null: every production deposit, plus any
-    provider whose builder refuses an implicit floor. `assertDepositFloorPresent`
+    environment, host_cluster)` (@sdp/types) is non-null: every production
+    deposit, plus any provider whose builder refuses an implicit floor, minus a
+    Kamino row hosted on a cluster whose kvault build lacks the floor
+    instruction (devnet, `KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`: the chain would
+    answer Anchor 101 to a floored deposit). `assertDepositFloorPresent`
     (handlers/admission.ts) is the ONE guard both deposit routes call, and the
-    catalogue publishes the same answer as `depositSlippage`, so a row never
-    promises what the build refuses (every Kamino row reads non-null with the
-    10 bps default). Slippage-capable providers quote the live share
+    catalogue publishes the same answer as `depositSlippage` from the same row
+    cluster, so a row never promises what the build refuses (a mainnet Kamino
+    row reads the 10 bps default, a devnet one reads null; @sdp/kamino refuses a
+    floor on devnet as `DEPOSIT_REFUSED`). Slippage-capable providers quote the live share
     rate, and their builders encode the caller's exact floor in the provider
     instruction. Jupiter Lend uses
     `depositWithMinAmountOut`; its withdrawal twin uses

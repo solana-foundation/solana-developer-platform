@@ -1,5 +1,6 @@
 import {
   KAMINO_DEVNET_KVAULT_PROGRAM_ID,
+  KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT,
   KAMINO_KVAULT_PROGRAM_IDS,
   KAMINO_SLOT_DURATION_MS,
 } from "@sdp/types";
@@ -67,5 +68,27 @@ describe("@sdp/types re-export", () => {
     // @sdp/earn imports the named constant; @sdp/kamino reads the table. They
     // must never drift, which is why one is derived from the other.
     expect(KAMINO_DEVNET_KVAULT_PROGRAM_ID).toBe(KAMINO_KVAULT_PROGRAM_IDS.devnet);
+  });
+});
+
+describe("depositFloorSupported", () => {
+  it("mirrors the measured per-cluster table", () => {
+    expect(kaminoClusterConfig("mainnet-beta").depositFloorSupported).toBe(
+      KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT["mainnet-beta"]
+    );
+    expect(kaminoClusterConfig("devnet").depositFloorSupported).toBe(
+      KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT.devnet
+    );
+  });
+
+  /**
+   * Measured 2026-09-18 from the on-chain IDLs: mainnet (2.2.2) implements
+   * `deposit_with_min_shares_out`, devnet (2.0.1) does not. A floored deposit
+   * sent to devnet fails with Anchor 101. If Kamino upgrades devnet, flip the
+   * table in @sdp/types and this test together — the assertion is the premise.
+   */
+  it("records that only mainnet can enforce a share floor today", () => {
+    expect(kaminoClusterConfig("mainnet-beta").depositFloorSupported).toBe(true);
+    expect(kaminoClusterConfig("devnet").depositFloorSupported).toBe(false);
   });
 });

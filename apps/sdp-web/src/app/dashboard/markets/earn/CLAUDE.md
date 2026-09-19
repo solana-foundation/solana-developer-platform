@@ -394,10 +394,12 @@ nothing else; the program create still sends the body `requestId` form.
   blown-floor copy and control. Held floors bypass the check — a replay must
   carry the floor its key was minted with, verbatim. The floor POLICY (whether
   the control renders at all, and its default tolerance) is the catalogue row's
-  `depositSlippage`, which the API answers per environment
-  (`earnDepositSlippagePolicy` in @sdp/types: Kamino declares 10 bps in every
-  environment and every production row is non-null), never the provider map,
-  so a Kamino deposit is always floored.
+  `depositSlippage`, which the API answers per environment and per row cluster
+  (`earnDepositSlippagePolicy` in @sdp/types: Kamino declares 10 bps wherever
+  its program can enforce one, every production row is non-null, and a DEVNET
+  Kamino row is null because that program lacks the floor instruction), never
+  the provider map, so a mainnet Kamino deposit is always floored and a devnet
+  one never asks for a floor the chain would reject.
 - `earn-vault-movement.ts`: the submit-outcome rules BOTH vault modals share:
   when a submission counts as money moved (`observableVaultMovement`), how a
   watcher's fresher record folds into it, the stepper position and focus-panel

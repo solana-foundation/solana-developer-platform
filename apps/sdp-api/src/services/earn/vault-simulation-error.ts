@@ -5,15 +5,23 @@
  * The chain answers with bare variants (`"AccountNotFound"`,
  * `{ InstructionError: [1, { Custom: 6001 }] }`) that surface verbatim in the
  * deposit/withdraw modal, where "AccountNotFound" reads as a mystery rather
- * than "your wallet has no SOL". The raw variant is kept in parentheses so
- * operators and log searches still see the real value, in the same quoted-JSON
- * form the old messages used.
+ * than "your wallet has no SOL". The raw variant is returned BESIDE the prose
+ * (`raw`), in the same quoted-JSON form the old messages carried inline, so
+ * callers put it where operators look (API `details`, structured logs) and a
+ * customer never reads `({"InstructionError":[1,{"Custom":101}]})` in a modal.
  *
  * This is a deliberate divergence from private-channels'
  * `describeTransactionErr` (services/private-channels/tx-error.ts), which keeps
  * the variant verbatim because its `failure_reason` audience is operators. The
  * earn audience is a dashboard customer, so prose wins here; the raw payload is
  * capped at the same 2000 chars that helper uses.
+ *
+ * A `Custom` code is translated three ways, most specific first: Anchor's
+ * framework codes (100–5000) from a pinned table, because "code 101" is a
+ * program that does not recognise the instruction, not a vault refusal; the
+ * failing program's own `AnchorError occurred. Error Code: … Error Message: …`
+ * log line, which names a provider-defined code (6000+) in the provider's own
+ * words; and, with neither, the bare code.
  *
  * Wording depends on who pays the fee when the caller knows: the fee-payer
  * failures name the customer's wallet under `wallet-pays`, SDP's sponsor
@@ -38,6 +46,7 @@ import {
   SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND,
   unwrapSimulationError,
 } from "@solana/kit";
+import { ANCHOR_FRAMEWORK_ERRORS } from "./anchor-framework-errors";
 
 /** The cluster's own variant name for a blockhash it does not know. */
 const BLOCKHASH_NOT_FOUND_VARIANT = "BlockhashNotFound";
@@ -73,7 +82,14 @@ export type VaultFeeAttribution =
   | { kind: "caller-provided"; feePayer: string };
 
 export interface VaultSimulationVerdict {
+  /** The sentence a customer reads. Never carries the raw variant. */
   message: string;
+  /**
+   * The chain's own `TransactionError`, quoted-JSON, capped at 2000 chars: the
+   * value an operator greps saved logs for. Callers place it in API `details`
+   * or a structured log, never in prose.
+   */
+  raw: string;
   /**
    * "sponsor" when the failure is SDP's operational problem rather than the
    * caller's, so callers surface it as a 5xx instead of a caller-fault 400 a
@@ -91,6 +107,9 @@ export interface VaultSimulationVerdict {
    */
   sponsorCause?: "balance" | "prefund";
 }
+
+/** A verdict before `raw` is attached; what the internal describers return. */
+type VaultSimulationVerdictBody = Omit<VaultSimulationVerdict, "raw">;
 
 function stringifyRaw(err: unknown): string {
   let out: string | undefined;
@@ -190,9 +209,8 @@ function formatSol(lamports: bigint): string {
  */
 function describeInstructionFailureFromLogs(
   logs: readonly string[],
-  raw: string,
   fee?: VaultFeeAttribution
-): VaultSimulationVerdict | undefined {
+): VaultSimulationVerdictBody | undefined {
   const shortfall = rentShortfall(logs);
   if (shortfall !== undefined) {
     const sol = formatSol(shortfall.lamports);
@@ -234,7 +252,7 @@ function describeInstructionFailureFromLogs(
           message:
             `SDP's fee sponsor could not fund the rent for ${created} ` +
             `(${sol} SOL short). This is a problem on SDP's side, ` +
-            `not with the wallet. (${raw})`,
+            `not with the wallet.`,
           fault: "sponsor",
           sponsorCause: "balance",
         };
@@ -243,7 +261,7 @@ function describeInstructionFailureFromLogs(
         message:
           `the vault program charges the wallet rent for an account it creates on first use, ` +
           `and this movement did not pre-fund the wallet for it (${sol} SOL short). This is ` +
-          `an SDP-side plan defect, not the sponsor's balance and not the wallet. (${raw})`,
+          `an SDP-side plan defect, not the sponsor's balance and not the wallet.`,
         fault: "sponsor",
         sponsorCause: "prefund",
       };
@@ -262,7 +280,7 @@ function describeInstructionFailureFromLogs(
           message:
             `the provided fee payer (${fee.feePayer}) does not hold enough SOL ` +
             `${callerPhrase}: rent requires ${sol} more SOL. ` +
-            `Fund the fee payer and retry. (${raw})`,
+            `Fund the fee payer and retry.`,
           fault: "caller",
         };
       }
@@ -270,7 +288,7 @@ function describeInstructionFailureFromLogs(
         message:
           `the vault program charges the wallet rent for an account it creates on first use, ` +
           `and this movement did not pre-fund the wallet for it (${sol} SOL short). This is ` +
-          `an SDP-side plan defect, not the provided fee payer's balance and not the wallet. (${raw})`,
+          `an SDP-side plan defect, not the provided fee payer's balance and not the wallet.`,
         fault: "sponsor",
         sponsorCause: "prefund",
       };
@@ -283,7 +301,7 @@ function describeInstructionFailureFromLogs(
     return {
       message:
         `${noun} does not hold enough SOL ${callerPhrase}: ` +
-        `rent requires ${sol} more SOL. ${remedy} (${raw})`,
+        `rent requires ${sol} more SOL. ${remedy}`,
       fault: "caller",
     };
   }
@@ -291,21 +309,80 @@ function describeInstructionFailureFromLogs(
     return {
       message:
         "a token account does not hold enough tokens for this transaction. " +
-        `Check the wallet's token balance and retry. (${raw})`,
+        `Check the wallet's token balance and retry.`,
       fault: "caller",
     };
   }
   return undefined;
 }
 
-function describeInstructionErrorDetail(detail: unknown): string {
+/**
+ * `Program log: AnchorError occurred. Error Code: SlippageExceeded. Error
+ * Number: 6000. Error Message: Slippage tolerance exceeded.` — also the
+ * `AnchorError thrown in …` and `AnchorError caused by account: …` prefixes
+ * Anchor uses for the same line. The program's own words for its own code.
+ */
+const ANCHOR_ERROR_LOG =
+  /AnchorError .*?Error Code: (\w+)\. Error Number: (\d+)\. Error Message: (.+?)\.?\s*$/;
+
+function anchorErrorFromLogs(
+  logs: readonly string[],
+  code: number | bigint
+): { name: string; message: string } | undefined {
+  for (const line of logs) {
+    const match = ANCHOR_ERROR_LOG.exec(line);
+    if (!match) continue;
+    if (BigInt(match[2] as string) !== BigInt(code)) continue;
+    return { name: match[1] as string, message: match[3] as string };
+  }
+  return undefined;
+}
+
+/**
+ * One sentence for a `Custom` program error code, most specific source first:
+ * the pinned Anchor framework table, then the program's own AnchorError log
+ * line, then the bare code. The Anchor name and number stay in parentheses so
+ * an operator can still search for them; the sentence in front is for the
+ * customer.
+ */
+function describeCustomProgramError(code: number | bigint, logs: readonly string[]): string {
+  const numeric = Number(code);
+  const framework = ANCHOR_FRAMEWORK_ERRORS.get(numeric);
+  if (framework) {
+    const tag = `Anchor ${framework.name}, code ${code}`;
+    if (numeric < 1000) {
+      return (
+        `the program on this cluster does not recognize this instruction (${tag}). ` +
+        "The deployed program is an older build than this integration expects"
+      );
+    }
+    if (numeric >= 2000 && numeric < 3000) {
+      return `the program's account constraints rejected the transaction: ${framework.message} (${tag})`;
+    }
+    if (numeric >= 3000 && numeric < 4000) {
+      return `the program rejected an account it was given: ${framework.message} (${tag})`;
+    }
+    return `the program failed inside its framework: ${framework.message} (${tag})`;
+  }
+  const own = anchorErrorFromLogs(logs, code);
+  if (own) return `the program refused it: ${own.message} (${own.name}, code ${code})`;
+  return `the program rejected it with error code ${code}`;
+}
+
+function describeInstructionErrorDetail(detail: unknown, logs: readonly string[]): string {
   if (typeof detail === "string") {
     return INSTRUCTION_ERROR_DETAILS.get(detail) ?? `it failed with ${humanizeVariantName(detail)}`;
   }
   if (detail !== null && typeof detail === "object") {
+    // The RPC delivers the code as a number, a bigint, or — through kit's
+    // big-integer-safe JSON — a decimal STRING (`{"Custom":"101"}` is what the
+    // dashboard actually showed). All three are the same code.
     const custom = (detail as Record<string, unknown>).Custom;
     if (typeof custom === "number" || typeof custom === "bigint") {
-      return `the program rejected it with error code ${custom}`;
+      return describeCustomProgramError(custom, logs);
+    }
+    if (typeof custom === "string" && /^\d+$/.test(custom)) {
+      return describeCustomProgramError(BigInt(custom), logs);
     }
     const borsh = (detail as Record<string, unknown>).BorshIoError;
     if (typeof borsh === "string") {
@@ -370,40 +447,49 @@ export function describeVaultSimulationError(
   logs: readonly string[] = []
 ): VaultSimulationVerdict {
   const raw = stringifyRaw(err);
+  return { ...describeVerdictBody(err, raw, fee, logs), raw };
+}
+
+function describeVerdictBody(
+  err: unknown,
+  raw: string,
+  fee: VaultFeeAttribution | undefined,
+  logs: readonly string[]
+): VaultSimulationVerdictBody {
   const { feePayerNoun, feeRemedy, feeFault, feeCause } = feePayerWording(fee);
 
   if (typeof err === "string") {
     switch (err) {
       case "AccountNotFound":
         return {
-          message: `${feePayerNoun} holds no SOL, so it cannot pay the network fee. ${feeRemedy} (${raw})`,
+          message: `${feePayerNoun} holds no SOL, so it cannot pay the network fee. ${feeRemedy}`,
           fault: feeFault,
           ...feeCause,
         };
       case "InsufficientFundsForFee":
         return {
-          message: `${feePayerNoun} does not hold enough SOL to pay the network fee. ${feeRemedy} (${raw})`,
+          message: `${feePayerNoun} does not hold enough SOL to pay the network fee. ${feeRemedy}`,
           fault: feeFault,
           ...feeCause,
         };
       case "ProgramAccountNotFound":
         return {
-          message: `a program this transaction calls does not exist on this cluster (${raw})`,
+          message: `a program this transaction calls does not exist on this cluster`,
           fault: "caller",
         };
       case BLOCKHASH_NOT_FOUND_VARIANT:
         return {
-          message: `the network no longer recognizes this transaction's blockhash. Retry the request (${raw})`,
+          message: `the network no longer recognizes this transaction's blockhash. Retry the request`,
           fault: "caller",
         };
       case "AlreadyProcessed":
         return {
-          message: `an identical transaction was already processed. Retry the request to build a fresh one (${raw})`,
+          message: `an identical transaction was already processed. Retry the request to build a fresh one`,
           fault: "caller",
         };
       default:
         return {
-          message: `the transaction failed with "${humanizeVariantName(err)}" (${raw})`,
+          message: `the transaction failed with "${humanizeVariantName(err)}"`,
           fault: "caller",
         };
     }
@@ -414,11 +500,11 @@ export function describeVaultSimulationError(
 
     const instruction = record.InstructionError;
     if (Array.isArray(instruction) && instruction.length === 2) {
-      const refined = describeInstructionFailureFromLogs(logs, raw, fee);
+      const refined = describeInstructionFailureFromLogs(logs, fee);
       if (refined) return refined;
       const [index, detail] = instruction;
       return {
-        message: `instruction at index ${String(index)} was rejected: ${describeInstructionErrorDetail(detail)} (${raw})`,
+        message: `instruction at index ${String(index)} was rejected: ${describeInstructionErrorDetail(detail, logs)}`,
         fault: "caller",
       };
     }
@@ -428,7 +514,7 @@ export function describeVaultSimulationError(
       const accountIndex = (rent as Record<string, unknown>).account_index;
       if (typeof accountIndex === "number" || typeof accountIndex === "bigint") {
         return {
-          message: `the account at index ${accountIndex} would be left below the rent-exempt minimum; the transaction needs more SOL for rent (${raw})`,
+          message: `the account at index ${accountIndex} would be left below the rent-exempt minimum; the transaction needs more SOL for rent`,
           fault: "caller",
         };
       }

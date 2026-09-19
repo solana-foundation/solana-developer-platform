@@ -8,11 +8,13 @@ const callerProvided = { kind: "caller-provided", feePayer: partnerFeePayer } as
 
 describe("describeVaultSimulationError", () => {
   it("tells a wallet-pays customer their wallet has no SOL on AccountNotFound", () => {
-    const { message, fault } = describeVaultSimulationError("AccountNotFound", walletPays);
+    const { message, fault, raw } = describeVaultSimulationError("AccountNotFound", walletPays);
     expect(message).toContain("the wallet holds no SOL");
     expect(message).toContain("network fee");
-    // Raw variant keeps the old quoted-JSON form so saved log greps still hit.
-    expect(message).toContain('("AccountNotFound")');
+    // The raw variant rides BESIDE the prose in the old quoted-JSON form, so
+    // saved log greps still hit and a customer never reads it in a modal.
+    expect(message).not.toContain("AccountNotFound");
+    expect(raw).toBe('"AccountNotFound"');
     expect(fault).toBe("caller");
   });
 
@@ -50,14 +52,105 @@ describe("describeVaultSimulationError", () => {
   });
 
   it("describes an InstructionError with a custom program code", () => {
-    const { message, fault } = describeVaultSimulationError(
+    const { message, fault, raw } = describeVaultSimulationError(
       { InstructionError: [1, { Custom: 6001 }] },
       walletPays
     );
     expect(message).toContain("instruction at index 1 was rejected");
     expect(message).toContain("error code 6001");
-    expect(message).toContain('{"InstructionError":[1,{"Custom":6001}]}');
+    expect(message).not.toContain("InstructionError");
+    expect(raw).toBe('{"InstructionError":[1,{"Custom":6001}]}');
     expect(fault).toBe("caller");
+  });
+
+  describe("custom program codes", () => {
+    it("names Anchor 101 as an instruction the deployed program does not have", () => {
+      // The smoky Kamino deposit of 2026-09-18: klend-sdk emitted
+      // `deposit_with_min_shares_out` to the devnet kvault build, which predates
+      // it. "Error code 101" told the customer nothing; this does.
+      const { message, fault } = describeVaultSimulationError(
+        { InstructionError: ["1", { Custom: "101" }] } as unknown,
+        walletPays
+      );
+      // Stringified index and code, as the RPC actually delivered them.
+      expect(message).toContain("instruction at index 1 was rejected");
+      expect(message).toContain("does not recognize this instruction");
+      expect(message).toContain("older build than this integration expects");
+      expect(message).toContain("Anchor InstructionFallbackNotFound, code 101");
+      expect(message).not.toContain("{");
+      expect(fault).toBe("caller");
+    });
+
+    it("phrases an Anchor constraint failure as the program's constraints", () => {
+      const { message } = describeVaultSimulationError(
+        { InstructionError: [0, { Custom: 2006 }] },
+        walletPays
+      );
+      expect(message).toContain("account constraints rejected the transaction");
+      expect(message).toContain("A seeds constraint was violated");
+      expect(message).toContain("Anchor ConstraintSeeds, code 2006");
+    });
+
+    it("phrases an Anchor account failure as a rejected account", () => {
+      const { message } = describeVaultSimulationError(
+        { InstructionError: [0, { Custom: 3012 }] },
+        walletPays
+      );
+      expect(message).toContain("rejected an account it was given");
+      expect(message).toContain("expected this account to be already initialized");
+      expect(message).toContain("Anchor AccountNotInitialized, code 3012");
+    });
+
+    it("reads a provider-defined code from the program's own AnchorError log line", () => {
+      const { message } = describeVaultSimulationError(
+        { InstructionError: [1, { Custom: 6000 }] },
+        walletPays,
+        [
+          "Program devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY invoke [1]",
+          "Program log: AnchorError occurred. Error Code: SlippageExceeded. " +
+            "Error Number: 6000. Error Message: Slippage tolerance exceeded.",
+          "Program devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY failed: custom program error: 0x1770",
+        ]
+      );
+      expect(message).toContain("the program refused it: Slippage tolerance exceeded");
+      expect(message).toContain("SlippageExceeded, code 6000");
+    });
+
+    it("accepts the other AnchorError line prefixes", () => {
+      const thrown = describeVaultSimulationError(
+        { InstructionError: [0, { Custom: 6005 }] },
+        walletPays,
+        [
+          "Program log: AnchorError thrown in programs/kvault/src/lib.rs:412. Error Code: DepositAmountsZero. " +
+            "Error Number: 6005. Error Message: Deposit amount is zero.",
+        ]
+      );
+      expect(thrown.message).toContain("the program refused it: Deposit amount is zero");
+      const caused = describeVaultSimulationError(
+        { InstructionError: [0, { Custom: 6010 }] },
+        walletPays,
+        [
+          "Program log: AnchorError caused by account: user_shares_ata. Error Code: SharesAtaMissing. " +
+            "Error Number: 6010. Error Message: Shares ATA missing.",
+        ]
+      );
+      expect(caused.message).toContain(
+        "the program refused it: Shares ATA missing (SharesAtaMissing, code 6010)"
+      );
+    });
+
+    it("ignores an AnchorError log for a DIFFERENT code than the one that failed", () => {
+      const { message } = describeVaultSimulationError(
+        { InstructionError: [1, { Custom: 6001 }] },
+        walletPays,
+        [
+          "Program log: AnchorError occurred. Error Code: SlippageExceeded. " +
+            "Error Number: 6000. Error Message: Slippage tolerance exceeded.",
+        ]
+      );
+      expect(message).toContain("error code 6001");
+      expect(message).not.toContain("Slippage");
+    });
   });
 
   it("describes known InstructionError string variants in plain words", () => {
@@ -79,7 +172,8 @@ describe("describeVaultSimulationError", () => {
   it("phrases unknown string variants as a failure, noun or verb alike", () => {
     const noun = describeVaultSimulationError("AccountInUse", walletPays);
     expect(noun.message).toContain('the transaction failed with "account in use"');
-    expect(noun.message).toContain('("AccountInUse")');
+    expect(noun.message).not.toContain('("AccountInUse")');
+    expect(noun.raw).toBe('"AccountInUse"');
     const verb = describeVaultSimulationError("WouldExceedMaxAccountCostLimit", walletPays);
     expect(verb.message).toContain(
       'the transaction failed with "would exceed max account cost limit"'
@@ -139,12 +233,13 @@ describe("log-refined instruction failures", () => {
   ];
 
   it("names the rent shortfall and the fix for a wallet-pays caller", () => {
-    const { message, fault } = describeVaultSimulationError(custom1, walletPays, rentLogs);
+    const { message, fault, raw } = describeVaultSimulationError(custom1, walletPays, rentLogs);
     expect(message).toContain("does not hold enough SOL to create a token account");
     expect(message).toContain("0.001918899 more SOL");
     expect(message).toContain("Send SOL to the wallet and retry.");
-    // Raw variant retained so saved log greps still hit.
-    expect(message).toContain('{"InstructionError":[0,{"Custom":1}]}');
+    // Raw variant retained beside the prose so saved log greps still hit.
+    expect(message).not.toContain("InstructionError");
+    expect(raw).toBe('{"InstructionError":[0,{"Custom":1}]}');
     expect(fault).toBe("caller");
   });
 
