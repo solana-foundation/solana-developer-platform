@@ -141,6 +141,15 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     }
   );
 
+  const bvnkSettlementReached =
+    transferStatus !== undefined &&
+    transferStatus.status === "settling" &&
+    transferStatus.settlement !== undefined &&
+    transferStatus.settlement.provider === "bvnk";
+  const showCompleteScreen =
+    bvnkSettlementReached ||
+    (transferStatus !== undefined && transferStatus.status === "completed");
+
   const simulateCurrentQuote = async () => {
     const quote = wizard.quote;
     if (
@@ -224,6 +233,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     quoteSimulationLoading,
     quoteSimulationSucceeded,
     simulateCurrentQuote,
+    showCompleteScreen,
   };
 }
 

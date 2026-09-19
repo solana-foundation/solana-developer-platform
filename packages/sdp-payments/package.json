@@ -109,6 +109,11 @@
       "import": "./src/ramps/providers/bvnk/schemas.ts",
       "default": "./src/ramps/providers/bvnk/schemas.ts"
     },
+    "./ramps/providers/bvnk/settlement": {
+      "types": "./src/ramps/providers/bvnk/settlement.ts",
+      "import": "./src/ramps/providers/bvnk/settlement.ts",
+      "default": "./src/ramps/providers/bvnk/settlement.ts"
+    },
     "./ramps/providers/bvnk/test-fixtures": {
       "types": "./src/ramps/providers/bvnk/test-fixtures.ts",
       "import": "./src/ramps/providers/bvnk/test-fixtures.ts",

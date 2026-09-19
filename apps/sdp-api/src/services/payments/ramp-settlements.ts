@@ -36,7 +36,15 @@ function isSettlementFinalStatus(status: PaymentTransferStatus): boolean {
 // re-confirmation), and the refreshed cryptoDeposit must land.
 const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
   awaiting_payment: ["pending", "awaiting_payment", "expired"],
-  settling: ["pending", "awaiting_payment", "processing", "confirmed", "finalized", "expired"],
+  settling: [
+    "pending",
+    "awaiting_payment",
+    "processing",
+    "confirmed",
+    "finalized",
+    "settling",
+    "expired",
+  ],
   settled: [
     "pending",
     "awaiting_payment",
@@ -90,13 +98,16 @@ function buildRampSettlementUpdate(
     update.destinationAddress = event.onchain.destinationAddress;
     update.amount = event.onchain.amount;
   }
-  // Record the actual settled amount the provider reports: the fiat payout for
-  // off-ramp, the delivered crypto for on-ramp.
-  if (event.kind === "settled" && event.receivedAmount) {
-    if (transfer.type === "offramp") {
-      update.fiatAmount = event.receivedAmount;
-    } else {
-      update.amount = event.receivedAmount;
+  // Record the actual amount the provider reports: for `settled` the fiat
+  // payout (off-ramp) or delivered crypto (on-ramp); for `settling` an on-ramp
+  // pay-in observed on the funding wallet writes the fiat the bank delivered.
+  if (event.kind === "settling" || event.kind === "settled") {
+    if (event.receivedAmount !== undefined) {
+      if (event.kind === "settled" ? transfer.type === "offramp" : transfer.type === "onramp") {
+        update.fiatAmount = event.receivedAmount;
+      } else {
+        update.amount = event.receivedAmount;
+      }
     }
   }
   if ((event.kind === "failed" || event.kind === "expired") && event.error) {
@@ -119,9 +130,22 @@ function buildRampSettlementUpdate(
   return update;
 }
 
-export async function applyRampSettlementEvent(env: Env, event: RampSettlementEvent) {
+/**
+ * Applies a provider settlement event to the transfer it references. The
+ * transition is a compare-and-swap, so concurrent or redelivered events lose
+ * the CAS instead of overwriting state.
+ *
+ * @param env - Process environment used for repository access.
+ * @param event - The provider settlement event to apply.
+ * @returns Whether the event produced a real transition; callers release
+ * provider reservations only on a real one.
+ */
+export async function applyRampSettlementEvent(
+  env: Env,
+  event: RampSettlementEvent
+): Promise<{ applied: boolean }> {
   if (event.kind === "ignore") {
-    return;
+    return { applied: false };
   }
 
   // Reconciliation key: the provider-issued quote/session reference the row
@@ -140,18 +164,18 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
       provider: event.provider,
       provider_reference: event.reference,
     });
-    return;
+    return { applied: false };
   }
   if (transfer.provider !== event.provider) {
-    return;
+    return { applied: false };
   }
   if (!isRampTransferType(transfer.type)) {
-    return;
+    return { applied: false };
   }
   // Out-of-order or redelivered events must not regress a settled transfer
   // (e.g. a retried PENDING arriving after COMPLETED).
   if (isSettlementFinalStatus(transfer.status)) {
-    return;
+    return { applied: false };
   }
 
   const update = buildRampSettlementUpdate(transfer, event);
@@ -218,4 +242,5 @@ export async function applyRampSettlementEvent(env: Env, event: RampSettlementEv
       to_status: RAMP_SETTLEMENT_STATUS[event.kind],
     });
   }
+  return { applied };
 }

@@ -12,6 +12,8 @@ import {
   shortenAddress,
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { providerTransferDetailRows } from "@/app/dashboard/payments/provider-transfer-details";
+import { walletHref } from "@/app/dashboard/payments/transactions/transaction-module-hrefs";
+import { EntityLink } from "@/components/entity-link";
 import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -26,9 +28,59 @@ interface CompletionDetailRow {
   label: string;
   value: string;
   href?: string;
+  /** Internal entity page link (e.g. the destination custody wallet) rendered as an EntityLink. */
+  entityHref?: string;
   copyValue?: string;
   /** Logo rendered before the value (e.g. the provider mark). */
   iconSrc?: string;
+}
+
+/** True while a BVNK payout is still PROCESSING; completion artifacts are withheld until COMPLETE. */
+function isBvnkProcessingSettlement(
+  provider: PaymentRampQuote["provider"],
+  transfer: PaymentTransferSummary
+): boolean {
+  return (
+    provider === "bvnk" &&
+    transfer.settlement?.provider === "bvnk" &&
+    transfer.settlement.status === "PROCESSING"
+  );
+}
+
+/**
+ * Derives the "Exchange rate" row from the transfer's own fiat/crypto amounts.
+ * BVNK never uses this arithmetic rate: its displayed rate is the create-time
+ * estimate stored in the settlement blob (settlement.exchangeRate), rendered
+ * by the provider detail rows.
+ */
+function derivedExchangeRateRow(
+  provider: PaymentRampQuote["provider"],
+  transfer: PaymentTransferSummary,
+  tokenLabel: string | null | undefined,
+  t: Translate
+): CompletionDetailRow | undefined {
+  if (provider === "bvnk") {
+    return undefined;
+  }
+  const fiatValue = Number(transfer.fiatAmount);
+  const cryptoValue = Number(transfer.amount);
+  const fiatCurrency = transfer.fiatCurrency;
+  if (
+    !tokenLabel ||
+    !fiatCurrency ||
+    !Number.isFinite(fiatValue) ||
+    !Number.isFinite(cryptoValue) ||
+    cryptoValue <= 0
+  ) {
+    return undefined;
+  }
+  return {
+    label: t("DashboardPayments.transferDetails.exchangeRate"),
+    value: `1 ${tokenLabel} = ${formatDisplayAmount(
+      String(fiatValue / cryptoValue),
+      fiatCurrency.toUpperCase()
+    )}`,
+  };
 }
 
 function completionDetailRows(
@@ -60,25 +112,10 @@ function completionDetailRows(
     copyValue: transfer.id,
   });
 
-  const cryptoValue = Number(transfer.amount);
-  const fiatValue = Number(transfer.fiatAmount);
-  const fiatCurrency = transfer.fiatCurrency;
-  let exchangeRate: string | undefined;
-  if (
-    tokenLabel &&
-    fiatCurrency &&
-    Number.isFinite(cryptoValue) &&
-    cryptoValue > 0 &&
-    Number.isFinite(fiatValue)
-  ) {
-    exchangeRate = `1 ${tokenLabel} = ${formatDisplayAmount(
-      String(fiatValue / cryptoValue),
-      fiatCurrency.toUpperCase()
-    )}`;
-    rows.push({
-      label: t("DashboardPayments.transferDetails.exchangeRate"),
-      value: exchangeRate,
-    });
+  const exchangeRateRow = derivedExchangeRateRow(quote.provider, transfer, tokenLabel, t);
+  const exchangeRate = exchangeRateRow?.value;
+  if (exchangeRateRow) {
+    rows.push(exchangeRateRow);
   }
 
   let receiptRow: CompletionDetailRow | undefined;
@@ -97,6 +134,13 @@ function completionDetailRows(
       value: shortenAddress(transfer.signature),
       href: explorerTxUrl(transfer.signature, cluster),
       copyValue: transfer.signature,
+    });
+  }
+  if (onramp && quote.provider === "bvnk" && transfer.custodyWalletId) {
+    rows.push({
+      label: t("DashboardPayments.transactions.destination"),
+      value: transfer.custodyWalletId,
+      entityHref: walletHref(transfer.custodyWalletId),
     });
   }
   if (!onramp && transfer.destination) {
@@ -140,7 +184,7 @@ function completionDetailRows(
       value: formatTimestamp(transfer.createdAt, t),
     });
   }
-  if (transfer.updatedAt) {
+  if (transfer.updatedAt && !isBvnkProcessingSettlement(quote.provider, transfer)) {
     rows.push({
       label: t("DashboardPayments.ramps.completed"),
       value: formatTimestamp(transfer.updatedAt, t),
@@ -156,12 +200,14 @@ function TransferDetailRow({
   label,
   value,
   href,
+  entityHref,
   copyValue,
   iconSrc,
 }: {
   label: string;
   value: string;
   href?: string;
+  entityHref?: string;
   copyValue?: string;
   iconSrc?: string;
 }) {
@@ -180,7 +226,9 @@ function TransferDetailRow({
             className="size-4 shrink-0 rounded object-contain"
           />
         ) : null}
-        {href ? (
+        {entityHref ? (
+          <EntityLink href={entityHref}>{value}</EntityLink>
+        ) : href ? (
           <a
             href={href}
             target="_blank"
@@ -254,6 +302,7 @@ export function RampCompleteScreen({
             label={detail.label}
             value={detail.value}
             href={detail.href}
+            entityHref={detail.entityHref}
             copyValue={detail.copyValue}
             iconSrc={detail.iconSrc}
           />

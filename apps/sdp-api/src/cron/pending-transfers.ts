@@ -9,6 +9,7 @@
 
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
+import { reconcileBvnkOnrampPayouts } from "@/services/jobs/reconcile-bvnk-onramp-payouts";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { replayRampWebhookEvents } from "@/services/jobs/replay-ramp-webhook-events";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
@@ -29,6 +30,7 @@ export function runPendingTransfersReconciliation(deps: PendingTransfersReconcil
       trackPendingTransfers(deps.env),
       reconcileSponsorshipBudgets(deps.env),
       replayRampWebhookEvents(deps.env),
+      reconcileBvnkOnrampPayouts(deps.env),
     ]);
   };
 

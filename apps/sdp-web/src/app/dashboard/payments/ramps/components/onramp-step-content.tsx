@@ -159,7 +159,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  if (currentStepId === "PROVIDER" && quote && transferStatus?.status === "completed") {
+  if (currentStepId === "PROVIDER" && quote && wizard.showCompleteScreen) {
+    if (transferStatus === undefined) {
+      return <RampQuoteSkeleton />;
+    }
     return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
   }
 

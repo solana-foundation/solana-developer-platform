@@ -329,13 +329,15 @@
       "provisioningFailedDescription": "Something went wrong provisioning your funding account. Please try again.",
       "readyTitle": "Preparing your instructions",
       "readyDescription": "Your funding account is ready — fetching your details now.",
-      "onrampProvisioningDetail": "Provisioning a BVNK wallet and fiat→crypto payment rule for this quote.",
+      "onrampProvisioningDetail": "Provisioning a BVNK wallet and fiat conversion account for this quote.",
       "offrampProvisioningDetail": "Provisioning a dedicated BVNK payout wallet for this currency.",
       "simulateDeposit": "Simulate Deposit",
       "simulating": "Simulating...",
       "depositSimulated": "Deposit Simulated",
       "agreementConsentPrefix": "I have read and agree to the",
-      "privacyPolicy": "privacy policy"
+      "privacyPolicy": "privacy policy",
+      "settlementProcessing": "Processing at BVNK",
+      "settlementCompleted": "Completed"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verify your identity",
@@ -474,7 +476,6 @@
       "notes": "Notes",
       "depositAddress": "Deposit address",
       "bankCode": "Bank code",
-      "paymentReference": "Payment reference",
       "identityVerificationRequired": "Identity verification required",
       "completeVerification": "Complete verification",
       "provisioningAccount": "BVNK is provisioning your virtual bank account",
@@ -486,7 +487,9 @@
       "quotedAmount": "the quoted amount",
       "cryptoDeposit": "{currency} deposit",
       "virtualAccount": "{currency} virtual account",
-      "payin": "{currency} payin"
+      "payin": "{currency} payin",
+      "paymentReferenceRequired": "Payment reference (required)",
+      "remittancePrefix": "Remittance prefix"
     },
     "providerRisk": {
       "close": "Close {title}",
@@ -721,7 +724,11 @@
       "lastUpdated": "Last updated",
       "copy": "Copy {label}",
       "viewReceipt": "View receipt",
-      "receipt": "Receipt"
+      "receipt": "Receipt",
+      "status": "Status",
+      "payinId": "Pay-in ID",
+      "fiatSent": "Amount converted",
+      "cryptoToReceive": "Crypto to receive"
     },
     "requestFailed": "Request failed.",
     "submitting": "Submitting...",
@@ -1046,8 +1053,14 @@
           "onramp": "Onramp",
           "offramp": "Offramp"
         },
-        "earn": { "deposit": "Deposit", "withdraw": "Withdraw" },
-        "dvp": { "fund": "Fund leg", "close": "Close leg" },
+        "earn": {
+          "deposit": "Deposit",
+          "withdraw": "Withdraw"
+        },
+        "dvp": {
+          "fund": "Fund leg",
+          "close": "Close leg"
+        },
         "private_channels": {
           "transfer": "Transfer",
           "deposit": "Deposit",

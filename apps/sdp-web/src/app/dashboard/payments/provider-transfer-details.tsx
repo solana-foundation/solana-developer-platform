@@ -1,4 +1,5 @@
 import type {
+  BvnkRampSettlement,
   CoinbaseRampSettlement,
   LightsparkRampSettlement,
   MoonpayRampSettlement,
@@ -52,6 +53,36 @@ export interface ProviderTransferDetailRow {
   href?: string;
   copyValue?: string;
   mono?: boolean;
+}
+
+/**
+ * Local web-side trust guard for BVNK payout receipt links. The API stores
+ * only validated URLs, but the dashboard still refuses to turn a stored URL
+ * into a clickable row unless it is exactly an https payout link on BVNK's
+ * own hosts, with no credentials and no port, whose path is `/payout/` plus
+ * the settlement payout id. sdp-web cannot import the shared validator from
+ * @sdp/payments (not a dependency), so the guard lives here.
+ */
+export function isValidBvnkReceiptUrl(url: string, payoutId: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") {
+    return false;
+  }
+  if (parsed.username !== "" || parsed.password !== "") {
+    return false;
+  }
+  if (parsed.port !== "") {
+    return false;
+  }
+  if (parsed.hostname !== "pay.bvnk.com" && parsed.hostname !== "pay.sandbox.bvnk.com") {
+    return false;
+  }
+  return parsed.pathname === `/payout/${payoutId}`;
 }
 
 function moonpayTrackerUrl(transactionId: string): string {
@@ -118,6 +149,41 @@ const COINBASE_FIELDS: readonly TransferDetailFieldSpec<CoinbaseRampSettlement>[
       `1 ${settlement.purchaseCurrency} = ${formatDisplayAmount(
         settlement.exchangeRate,
         settlement.paymentCurrency
+      )}`,
+  },
+];
+
+const BVNK_FIELDS: readonly TransferDetailFieldSpec<BvnkRampSettlement>[] = [
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.fiatSent",
+    text: (settlement) => formatDisplayAmount(settlement.fiatAmount, settlement.fiatCurrency),
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.cryptoToReceive",
+    text: (settlement) => formatDisplayAmount(settlement.cryptoAmount, settlement.cryptoCurrency),
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.providerFee",
+    text: (settlement) => formatDisplayAmount(settlement.feeAmount, settlement.feeCurrency),
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.networkFee",
+    text: (settlement) =>
+      Number(settlement.networkFeeAmount) > 0
+        ? formatDisplayAmount(settlement.networkFeeAmount, settlement.networkFeeCurrency)
+        : null,
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.exchangeRate",
+    text: (settlement) =>
+      `1 ${settlement.fiatCurrency} = ${formatDisplayAmount(
+        settlement.exchangeRate,
+        settlement.cryptoCurrency
       )}`,
   },
 ];
@@ -248,6 +314,70 @@ function lightsparkBuilder(
     : [];
 }
 
+function bvnkBuilder(
+  transfer: PaymentTransferSummary,
+  context: TransferDetailFieldContext,
+  t: Translate
+): ProviderTransferDetailRow[] {
+  if (
+    transfer.status === "failed" ||
+    transfer.status === "canceled" ||
+    transfer.status === "expired"
+  ) {
+    return [];
+  }
+  const settlement = transfer.settlement;
+  if (settlement === undefined || settlement.provider !== "bvnk") {
+    return [];
+  }
+  const statusRow: ProviderTransferDetailRow = {
+    key: "DashboardPayments.transferDetails.status",
+    label: t("DashboardPayments.transferDetails.status"),
+    value:
+      settlement.status === "PROCESSING"
+        ? t("DashboardPayments.bvnk.settlementProcessing")
+        : t("DashboardPayments.bvnk.settlementCompleted"),
+  };
+  const receipt: ProviderTransferDetailRow[] = isValidBvnkReceiptUrl(
+    settlement.receiptUrl,
+    settlement.payoutId
+  )
+    ? [
+        {
+          key: "DashboardPayments.transferDetails.receipt",
+          label: t("DashboardPayments.transferDetails.receipt"),
+          value: t("DashboardPayments.transferDetails.viewReceipt"),
+          href: settlement.receiptUrl,
+        },
+      ]
+    : [];
+  const payinRow: ProviderTransferDetailRow = {
+    key: "DashboardPayments.transferDetails.payinId",
+    label: t("DashboardPayments.transferDetails.payinId"),
+    value: settlement.payinId,
+    copyValue: settlement.payinId,
+  };
+  const txHashRow: ProviderTransferDetailRow[] =
+    settlement.status === "COMPLETE"
+      ? [
+          {
+            key: "DashboardPayments.transferDetails.solanaSignature",
+            label: t("DashboardPayments.transferDetails.solanaSignature"),
+            value: shortenAddress(settlement.txHash),
+            href: explorerTxUrl(settlement.txHash, context.cluster),
+            copyValue: settlement.txHash,
+          },
+        ]
+      : [];
+  return [
+    statusRow,
+    ...receipt,
+    ...rowsFromSpecs(BVNK_FIELDS, settlement, context, t),
+    payinRow,
+    ...txHashRow,
+  ];
+}
+
 /**
  * Detail rows each provider contributes to the transfer modal, keyed by
  * provider and ramp direction. Providers absent here (or directions a
@@ -259,6 +389,7 @@ const PROVIDER_TRANSFER_DETAIL_FIELDS: Partial<
   moonpay: { onramp: moonpayBuilder, offramp: moonpayBuilder },
   coinbase: { onramp: coinbaseBuilder },
   lightspark: { onramp: lightsparkBuilder, offramp: lightsparkBuilder },
+  bvnk: { onramp: bvnkBuilder },
 };
 
 /**

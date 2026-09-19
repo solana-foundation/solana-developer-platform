@@ -9,7 +9,39 @@ import {
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
+import { bvnkProviderReference } from "./handlers/ramps/bvnk";
 import { mapMoneygramTransferDetails } from "./mappers/moneygram";
+
+/**
+ * The provider-side payout reference mapped for a ramp transfer row. BVNK
+ * routes through {@link bvnkProviderReference} (the payout uuid once the
+ * on-ramp settlement exists, omitted before); every other provider keeps the
+ * stored `provider_reference` as-is. The switch is exhaustive over the ramp
+ * provider union.
+ *
+ * @param row - The payment transfer row being mapped.
+ * @returns The provider reference to present, or undefined when omitted.
+ */
+function rampProviderReference(row: TransferRow): string | undefined {
+  switch (row.provider) {
+    case "bvnk":
+      return bvnkProviderReference(row);
+    case "moonpay":
+    case "lightspark":
+    case "moneygram":
+    case "coinbase":
+    case "mural":
+    case "stripe":
+      return row.provider_reference === null ? undefined : row.provider_reference;
+    default: {
+      if (row.provider === null) {
+        throw new AppError("INTERNAL_ERROR", "Ramp transfer is missing provider.");
+      }
+      const exhaustive: never = row.provider;
+      return exhaustive;
+    }
+  }
+}
 
 export function mapTransferRow(row: TransferRow) {
   const base = {
@@ -61,10 +93,11 @@ export function mapTransferRow(row: TransferRow) {
   const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;
   const cryptoDeposit = row.provider_data.cryptoDeposit as RampCryptoDeposit | null | undefined;
   const moneygram = mapMoneygramTransferDetails(row);
+  const providerReference = rampProviderReference(row);
   return {
     ...base,
     provider: row.provider,
-    ...(row.provider_reference ? { providerReference: row.provider_reference } : {}),
+    ...(providerReference ? { providerReference } : {}),
     ...(row.delivery_mode ? { deliveryMode: row.delivery_mode } : {}),
     ...(row.fiat_currency ? { fiatCurrency: row.fiat_currency } : {}),
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),

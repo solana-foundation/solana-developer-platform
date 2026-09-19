@@ -129,6 +129,17 @@ export const BVNK_CUSTOMER_LINK_STAGE = {
   agreementSigned: "AGREEMENT_SIGNED",
 } as const satisfies Record<string, BvnkCustomerLinkStageStatus>;
 
+/** SDP-owned lifecycle of a BVNK customer funding wallet, written to the row's `provider_status`. */
+export const BVNK_FUNDING_WALLET_STATUSES = [
+  "provisioning_funding_wallet",
+  "provisioned_funding_wallet",
+] as const;
+export type BvnkFundingWalletStatus = (typeof BVNK_FUNDING_WALLET_STATUSES)[number];
+export const BVNK_FUNDING_WALLET_STATUS = {
+  provisioning: "provisioning_funding_wallet",
+  provisioned: "provisioned_funding_wallet",
+} as const satisfies Record<string, BvnkFundingWalletStatus>;
+
 export interface CounterpartyProviderCustomerLinkAgreement {
   name: string;
   displayName: string;

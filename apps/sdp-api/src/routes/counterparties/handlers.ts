@@ -1,12 +1,12 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
-  bvnkOnboardingRequirements,
-  bvnkOnrampPaymentRuleResolutionFromProviderData,
-  bvnkUnverifiedOnboardingStatus,
+  bvnkCustomerStatusRequirements,
   isBvnkCustomerVerified,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { bvnkCustomerStatusSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
+import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampDirection } from "@sdp/types";
 import {
   COUNTERPARTY_ENTITY_TYPES,
@@ -50,6 +50,7 @@ import {
 import {
   type BvnkStoredStage,
   bvnkCustomerRequirementsFromMetadata,
+  bvnkFundingWalletRequirements,
   bvnkStoredStage,
   presentBvnkStoredStage,
   refreshBvnkCustomerAccount,
@@ -309,17 +310,10 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       customerReference: providerAccount.provider_customer_reference,
     });
     if (!isBvnkCustomerVerified(refreshedBvnkCustomer.customer.status)) {
-      const onboardingStatus = bvnkUnverifiedOnboardingStatus(
-        refreshedBvnkCustomer.customer.status
-      );
       return success(
         c,
-        bvnkOnboardingRequirements(
-          {
-            customer: refreshedBvnkCustomer.customer,
-            entry: {},
-            onboardingStatus,
-          },
+        bvnkCustomerStatusRequirements(
+          bvnkCustomerStatusSchema.parse(refreshedBvnkCustomer.customer.status),
           query.data.direction,
           refreshedBvnkCustomer.verificationUrl
         )
@@ -351,23 +345,15 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     assertPaymentWalletExactAccess(c, destinationWallet.id, []);
     const destinationWalletAddress = destinationWallet.publicKey;
     if (query.data.provider === "bvnk" && refreshedBvnkCustomer !== undefined) {
-      const resolution = bvnkOnrampPaymentRuleResolutionFromProviderData(
-        counterparty.provider_data,
-        {
-          cryptoToken: getCryptoRailAssetLabel(query.data.assetRail),
-          fiatCurrency: query.data.fiatCurrency,
-          destinationWalletAddress,
-        },
-        refreshedBvnkCustomer.customer
-      );
-      return success(
-        c,
-        bvnkOnboardingRequirements(
-          resolution,
-          query.data.direction,
-          refreshedBvnkCustomer.verificationUrl
-        )
-      );
+      const funding = await bvnkFundingWalletRequirements(c, {
+        counterparty,
+        projectId,
+        direction: query.data.direction,
+      });
+      if (funding !== null) {
+        return success(c, funding);
+      }
+      return success(c, readyCounterparty("bvnk", query.data.direction));
     }
     const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
       mapToCounterparty(counterparty),
@@ -514,7 +500,7 @@ export const submitCounterpartyRequirements = async (
     if (stored !== null) {
       requirements = stored;
     }
-    gateOnCollectedFields = stage === null || stage.kind !== "agreements_pending";
+    gateOnCollectedFields = stage !== null && stage.kind !== "agreements_pending";
   }
 
   if (requirements.status === "collect_account") {
