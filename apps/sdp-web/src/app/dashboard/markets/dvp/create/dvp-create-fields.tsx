@@ -165,6 +165,7 @@ export function MintField({
             ? pastedAddressOption(query, t, "DashboardMarkets.dvp.mintUseAddress")
             : null
         }
+        emptyLabel={t("DashboardMarkets.dvp.mintSlotEmpty")}
         searchPlaceholder={t("DashboardMarkets.dvp.mintSlotSearchPlaceholder")}
         value={isCustom ? (custom ? custom : null) : choice ? choice : null}
       />
@@ -264,6 +265,7 @@ export function PartySlotPicker({
   error,
   id,
   label,
+  modeLabel,
   onChange,
   slot,
   wallets,
@@ -273,6 +275,8 @@ export function PartySlotPicker({
   error: string | null;
   id: string;
   label: string;
+  /** Accessible name for the mode control. Defaults to the party wording. */
+  modeLabel?: string;
   onChange: (next: DvpPartySlot) => void;
   slot: DvpPartySlot;
   wallets: DvpCreateWallet[];
@@ -345,7 +349,7 @@ export function PartySlotPicker({
       label={label}
       labelTrailing={
         <SegmentedControl
-          ariaLabel={t("DashboardMarkets.dvp.partyModeLabel")}
+          ariaLabel={modeLabel ?? t("DashboardMarkets.dvp.partyModeLabel")}
           className="border-border-subtle"
           optionClassName="whitespace-nowrap"
           options={[
@@ -377,17 +381,26 @@ export function PartySlotPicker({
 }
 
 /**
- * One payout destination, as a single searchable combobox.
+ * One payout destination, named the same three ways a party is.
  *
- * The value is a plain address either way: picking a registered counterparty
- * fills its address, and a pasted base58 address surfaces as an option of its
- * own — an invalid paste never becomes selectable.
+ * It was a single combobox: registered counterparties, plus a pasted address
+ * surfaced from the search text. Two problems. An org with no counterparties
+ * opened it on an empty list, and the paste only existed if you thought to type
+ * into a box labelled as a search. Meanwhile the question directly above it —
+ * name a party — offered SDP Wallet, Counterparty and Paste an Address as
+ * visible choices. Same question, two different controls, one of them hiding
+ * its only usable answer.
+ *
+ * So this IS the party picker, given the payout's slot. Not a copy of it: the
+ * modes, the validation and the resolver are the ones parties already use, so
+ * neither control can drift from the other.
  *
  * @param props - The picker's wiring.
  * @param props.counterpartyAccounts - The registered accounts offered as destinations.
  * @param props.id - The DOM id for the picker.
  * @param props.label - The picker's label.
- * @param props.payout - The side's payout state; its address is the value.
+ * @param props.payout - The side's payout state; its slot is the value.
+ * @param props.wallets - The org's custody wallets, offered as destinations.
  * @returns The payout picker.
  */
 export function PayoutAddressPicker({
@@ -395,40 +408,26 @@ export function PayoutAddressPicker({
   id,
   label,
   payout,
+  wallets,
 }: {
   counterpartyAccounts: DvpCreateCounterpartyAccount[];
   id: string;
   label: string;
   payout: DvpPayout;
+  wallets: DvpCreateWallet[];
 }) {
   const t = useTranslations();
-
-  const options: ComboboxOption[] = [
-    ...counterpartyAccounts.map((account) => ({
-      value: account.address,
-      label: account.name,
-      description: shortenAddress(account.address),
-    })),
-    ...(payout.address && !counterpartyAccounts.some((a) => a.address === payout.address)
-      ? [pastedAddressOption(payout.address, t, "DashboardMarkets.dvp.partyUseAddress")]
-      : []),
-  ];
-
   return (
-    <div className="flex min-w-0 flex-col gap-1.5" id={id}>
-      <Combobox
-        label={label}
-        onChange={payout.setAddress}
-        options={options}
-        queryOption={(query) =>
-          BASE58_ADDRESS_PATTERN.test(query)
-            ? pastedAddressOption(query, t, "DashboardMarkets.dvp.partyUseAddress")
-            : null
-        }
-        searchPlaceholder={t("DashboardMarkets.dvp.partySlotSearchPlaceholder")}
-        value={payout.address === "" ? null : payout.address}
-      />
-    </div>
+    <PartySlotPicker
+      counterpartyAccounts={counterpartyAccounts}
+      error={null}
+      id={id}
+      label={label}
+      modeLabel={t("DashboardMarkets.dvp.payoutModeLabel")}
+      onChange={payout.setSlot}
+      slot={payout.slot}
+      wallets={wallets}
+    />
   );
 }
 

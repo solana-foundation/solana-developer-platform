@@ -21,6 +21,10 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const PARTY_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
+/** Somewhere neither party funds from, so re-seeding cannot produce it by accident. */
+const REDIRECT = "8kQmPzRw2Fy6Tn4VdHsXbLcJgAeUq3MvNrZtYwSfDh5B";
+/** The registered counterparty's address, which the seller party also resolves to. */
+const ACME = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
 
 const context: DvpCreateContext = {
   error: null,
@@ -39,7 +43,7 @@ const context: DvpCreateContext = {
       counterpartyAccountId: "cpa_1",
       name: "Acme OTC",
       label: "Settlement wallet",
-      address: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
+      address: ACME,
     },
   ],
   tokens: [
@@ -126,6 +130,30 @@ function fillCashMint() {
 function fillAmounts() {
   fireEvent.change(screen.getByLabelText(/asset amount/i), { target: { value: "10" } });
   fireEvent.change(screen.getByLabelText(/cash amount/i), { target: { value: "25" } });
+}
+
+/** Payout rows render after both party rows, seller first. */
+const SELLER_PAYOUT_ROW = 2;
+
+/** The seller payout's address input, which only exists in "Paste an Address" mode. */
+function sellerPayoutInput(): HTMLInputElement {
+  return screen.getByLabelText(/seller payout address/i) as HTMLInputElement;
+}
+
+/** Turns the default off, which reveals both payout pickers seeded from their parties. */
+function revealPayouts(): void {
+  fireEvent.click(screen.getByRole("switch", { name: /pay proceeds/i }));
+}
+
+/**
+ * Sends the seller's proceeds to an address that is not its party.
+ *
+ * @param address - The address to redirect to.
+ * @returns Nothing.
+ */
+function redirectSellerPayout(address: string): void {
+  pickMode(SELLER_PAYOUT_ROW, /paste an address/i);
+  fireEvent.change(sellerPayoutInput(), { target: { value: address } });
 }
 
 /**
@@ -299,6 +327,30 @@ describe("DvpCreateWorkspace", () => {
 
   // A failed token load must not read as "you have no tokens", and the form
   // still has to be usable with a pasted mint.
+  // PRO-2016. An org that has issued nothing still has an asset leg to fill.
+  // The list used to be the issued tokens alone, so this picker came up empty
+  // and the wizard could not be completed at all.
+  it("offers catalogue assets when the org has issued no tokens", () => {
+    renderForm({ tokens: [] });
+
+    fireEvent.click(screen.getByRole("button", { name: /^asset/i }));
+
+    expect(screen.queryByText(/no options available/i)).toBeNull();
+    expect(screen.getByText("USDC")).toBeTruthy();
+  });
+
+  // Ilan's second point. The payout was one combobox of registered
+  // counterparties, so an org with none opened it on an empty list, while the
+  // question directly above offered three visible ways to answer. Same
+  // question, same control now: two party rows and two payout rows.
+  it("offers the same three ways to name a payout as a party", () => {
+    renderForm({ counterpartyAccounts: [] });
+
+    revealPayouts();
+
+    expect(screen.getAllByRole("radio", { name: /paste an address/i })).toHaveLength(4);
+  });
+
   it("surfaces a context error rather than showing an empty picker silently", () => {
     renderForm({ error: "Token list failed (500).", tokens: [] });
 
@@ -353,5 +405,59 @@ describe("DvpCreateWorkspace", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /continue/i }).hasAttribute("disabled")).toBe(true)
     );
+  });
+
+  // PRO-2015. Re-seeding a payout from its party keeps the DEFAULT honest; it
+  // must not reach a redirect somebody chose. Losing that silently sends the
+  // proceeds to an address the form no longer shows.
+  it("keeps a chosen payout address when that side's party is edited", () => {
+    renderForm();
+    fillPartyA();
+    fillPartyB(PARTY_B);
+    revealPayouts();
+    redirectSellerPayout(REDIRECT);
+
+    // Correct the seller after choosing the redirect, the order somebody
+    // fixing a typo would use.
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
+
+    expect(sellerPayoutInput().value).toBe(REDIRECT);
+  });
+
+  // The case an address comparison cannot see. Answering the picker with the
+  // very address it was seeded with is still an answer, and the earlier guard
+  // read it as the untouched default and redirected it on the next party edit.
+  it("keeps a payout deliberately set to the party's own address", () => {
+    renderForm();
+    fillPartyA();
+    fillPartyB(PARTY_B);
+    revealPayouts();
+    redirectSellerPayout(ACME);
+
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
+
+    expect(sellerPayoutInput().value).toBe(ACME);
+  });
+
+  // The other half of the same rule: a payout still sitting on the party's own
+  // address is a default, so it has to follow the party it mirrors.
+  it("re-seeds a payout that was never changed away from its party", () => {
+    renderForm();
+    fillPartyA();
+    fillPartyB(PARTY_B);
+    revealPayouts();
+
+    // Seeded from the party, so it opens on the mode that party used.
+    expect(
+      (
+        screen.getAllByRole("radio", { name: /^counterparty$/i })[
+          SELLER_PAYOUT_ROW
+        ] as HTMLInputElement
+      ).checked
+    ).toBe(true);
+
+    searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
+
+    expect(sellerPayoutInput().value).toBe(PARTY_A);
   });
 });

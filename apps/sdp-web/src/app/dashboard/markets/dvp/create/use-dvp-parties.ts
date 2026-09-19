@@ -17,7 +17,11 @@
 
 import { z } from "zod";
 import { BASE58_ADDRESS_PATTERN } from "../../base58-address";
-import type { DvpCreateCounterpartyAccount, DvpCreateWallet } from "./dvp-create.data";
+import type {
+  DvpCreateContext,
+  DvpCreateCounterpartyAccount,
+  DvpCreateWallet,
+} from "./dvp-create.data";
 
 /**
  * One party slot: exactly one reference variant, chosen and filled.
@@ -172,4 +176,33 @@ export function deriveDvpParties(
     wire: ready ? wire : null,
     resolved,
   };
+}
+
+/**
+ * The address a filled slot resolves to, or "" while it resolves none.
+ *
+ * "" is not a fallback: it leaves the payout unusable and blocks submit, which
+ * beats carrying the previous party's address into a trade it no longer names.
+ *
+ * @param slot - The party slot to resolve.
+ * @param context - The wallets and counterparty accounts a slot can reference.
+ * @returns The party's address, or "".
+ */
+export function resolvePartySlotAddress(slot: DvpPartySlot, context: DvpCreateContext): string {
+  switch (slot.mode) {
+    case "wallet":
+      return context.wallets.find((candidate) => candidate.id === slot.walletId)?.address ?? "";
+    case "counterparty":
+      return (
+        context.counterpartyAccounts.find(
+          (candidate) => candidate.counterpartyAccountId === slot.counterpartyAccountId
+        )?.address ?? ""
+      );
+    case "address":
+      return slot.address;
+    default: {
+      const exhausted: never = slot;
+      return exhausted;
+    }
+  }
 }
