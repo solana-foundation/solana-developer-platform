@@ -295,7 +295,8 @@
       "flowComplete": "Hoàn tất",
       "progressLabel": "Tiến trình",
       "vaultSwapReviewTitle": "Cần Swap trước khi gửi",
-      "vaultSwapReviewBody": "Token {source} của bạn sẽ được swap sang {target} cơ bản của vault qua Jupiter, rồi gửi vào trong cùng một giao dịch."
+      "vaultSwapReviewBody": "Token {source} của bạn sẽ được swap sang {target} cơ bản của vault qua Jupiter, rồi gửi vào trong cùng một giao dịch.",
+      "vaultFloorUnavailable": "SDP không xác nhận được đúng điều khoản mà lần thử nạp trước đã gửi, nên không có gì được gửi. Hãy kiểm tra vị thế của bạn rồi thử lại sau giây lát."
     },
     "tabs": {
       "opportunities": "Cơ hội",
@@ -388,7 +389,67 @@
       "amountAvailableOfTotal": "Có {available} trong tổng {total}. Hãy unstake phần còn lại trong Kamino trước.",
       "amountUnavailable": "Không lấy được giá trị USD hiện tại, nên không thể định cỡ giao dịch rút này một cách an toàn. Hãy thử lại sau.",
       "amountInvalid": "Nhập số tiền USD lớn hơn 0.",
-      "overAmount": "Số tiền này vượt quá số tiền hiện có thể rút."
+      "overAmount": "Số tiền này vượt quá số tiền hiện có thể rút.",
+      "floorUnavailable": "SDP không xác nhận được đúng điều khoản mà lần thử rút trước đã gửi, nên không có gì được gửi. Hãy kiểm tra vị thế của bạn rồi thử lại sau giây lát.",
+      "balanceRefreshNote": "Số dư vị thế và Wallet tự động làm mới."
+    },
+    "exitRoute": {
+      "title": "Rút từ {position}",
+      "loading": "Đang kiểm tra các tuyến rút khả dụng…",
+      "unavailable": "Không thể đọc các tuyến rút một cách an toàn. Không có tuyến nào được chọn. Hãy thử lại.",
+      "retry": "Thử lại",
+      "none": "Nhà cung cấp này hiện không cung cấp tuyến rút vốn nào cho vị thế này.",
+      "description": "Chọn cách thức rút vị thế này. Các tuyến có thời gian và giá khác nhau, nên SDP sẽ không chọn thay bạn.",
+      "instantTitle": "Rút ngay",
+      "instantDescription": "Quy đổi shares và nhận vault asset trong cùng một giao dịch.",
+      "asyncTitle": "Rút không đồng bộ",
+      "asyncDescription": "Đặt shares vào escrow trong yêu cầu của nhà cung cấp. Nhà cung cấp có thể hoàn tất sau khoảng {seconds} giây; yêu cầu chưa hoàn tất có thể khôi phục sau hạn chót của chúng."
+    },
+    "queuedWithdraw": {
+      "title": "Yêu cầu rút vốn từ {position}",
+      "flowRequested": "Đã yêu cầu",
+      "flowApproval": "Phê duyệt",
+      "detailsBody": "Chọn mức chiết khấu nhà cung cấp thấy và cửa sổ solver. Các giới hạn hàng đợi trực tiếp bên dưới lấy từ trạng thái chain.",
+      "discountBps": "Chiết khấu (basis points)",
+      "deadlineSeconds": "Cửa sổ solver (giây)",
+      "deadlineMinimum": "Tối thiểu {seconds} giây sau khi đáo hạn",
+      "lockedUntil": "Các shares này bị khóa đến {time}. Yêu cầu bị vô hiệu hóa cho đến khi đọc vị thế trực tiếp báo chúng có thể rút.",
+      "reviewBody": "Xem báo giá trực tiếp của nhà cung cấp trước khi shares chuyển vào escrow.",
+      "previewLoading": "Đang tải báo giá hàng đợi trực tiếp…",
+      "previewError": "Báo giá hàng đợi trực tiếp không khả dụng, nên không thể gửi yêu cầu an toàn.",
+      "previewBlocked": "Nhà cung cấp không thể chấp nhận yêu cầu này:",
+      "expectedAmount": "Số tiền dự kiến",
+      "quotedAmount": "Số tiền được báo giá",
+      "discount": "Chiết khấu",
+      "maturity": "Solver đủ điều kiện",
+      "deadline": "Hạn khôi phục",
+      "requestAccount": "Tài khoản yêu cầu",
+      "solverNotice": "Solver của nhà cung cấp, không phải SDP, kiểm soát việc hoàn tất. Nếu không hoàn tất trước hạn, các shares vẫn có thể khôi phục qua Hủy và khôi phục shares.",
+      "submit": "Đặt shares vào escrow và yêu cầu",
+      "submitting": "Đang gửi yêu cầu…",
+      "resultTitle": "Yêu cầu rút vốn đã xếp hàng",
+      "creatingBody": "Việc gửi vẫn đang được xác nhận. SDP chưa xác nhận yêu cầu đã lên chain.",
+      "pendingBody": "Yêu cầu đã lên chain. SDP sẽ tiếp tục theo dõi sau khi cửa sổ này đóng.",
+      "closedOrUnknownBody": "Tài khoản yêu cầu đã đóng. SDP đang kiểm tra sự kiện đóng để xác định kết quả cuối.",
+      "fulfilledBody": "Nhà cung cấp đã hoàn tất yêu cầu và trả vault asset.",
+      "cancelledBody": "Yêu cầu đã bị hủy sau hạn chót và các shares trong escrow đã được hoàn trả.",
+      "failedBody": "Rút vốn xếp hàng chưa hoàn tất. Xem lại lý do đã ghi trước khi thử lại.",
+      "failureReason": "Lý do thất bại",
+      "statusCreating": "Đang xác nhận yêu cầu",
+      "statusPending": "Đang chờ solver",
+      "statusRecoverable": "Có thể khôi phục",
+      "statusChecking": "Đang kiểm tra sự kiện đóng",
+      "statusCancelling": "Đang khôi phục shares",
+      "statusFulfilled": "Đã hoàn tất",
+      "statusCancelled": "Shares đã khôi phục",
+      "statusFailed": "Thất bại",
+      "recoveryReady": "Cửa sổ solver đã kết thúc. Hủy bây giờ sẽ trả lại các shares trong escrow; không rút assets.",
+      "cancelAction": "Hủy và khôi phục shares",
+      "cancelling": "Đang khôi phục shares…",
+      "activeTitle": "Các khoản rút vốn xếp hàng",
+      "activeLoading": "Đang tải các khoản rút vốn xếp hàng…",
+      "activeError": "Trạng thái rút vốn xếp hàng tạm thời không khả dụng. Các yêu cầu on-chain không thay đổi.",
+      "activeSummary": "{shares} {symbol} shares · solver khả dụng {maturity} · có thể thu hồi sau {deadline}"
     }
   },
   "DashboardMarkets": {
@@ -709,7 +770,11 @@
       "unavailableEnvironmentProductionDescription": "Provider này chỉ nhận khoản nạp vault mới từ dự án Production. Hãy chuyển sang dự án Production để tích hợp.",
       "apiKeyCalloutBefore": "Bạn cần",
       "apiKeyCalloutLink": "Developer API key",
-      "apiKeyCalloutAfter": "cho dự án này (bao gồm earn:read và earn:write). Hãy giữ nó trên máy chủ của bạn, không để trong client."
+      "apiKeyCalloutAfter": "cho dự án này (bao gồm earn:read và earn:write). Hãy giữ nó trên máy chủ của bạn, không để trong client.",
+      "sharesUnlockAt": "Shares bị khóa sẽ được mở khóa {time}",
+      "guideAsyncWithdrawNavigation": "Rút không đồng bộ",
+      "guideAsyncWithdrawTitle": "Xử lý giao dịch rút không đồng bộ",
+      "guideAsyncWithdrawDescription": "Tìm hiểu tuyến không đồng bộ của nhà cung cấp, tạo yêu cầu queue, theo dõi quá trình hoàn thành và thu hồi shares bị escrow khi quá hạn chưa hoàn thành."
     },
     "liquidity": {
       "instant": "Tức thì",
@@ -964,7 +1029,25 @@
       "closeRefusedInProgress": "Giao dịch này đang được thanh toán hoặc hủy. Hãy quay lại sau một chút.",
       "closeRefusedLegMoving": "Một leg vẫn đang được cấp vốn hoặc hoàn trả. Hãy thử lại khi nó hoàn tất.",
       "toastCancelSent": "Đã gửi lệnh hủy. Giao dịch sẽ cập nhật khi được xác nhận.",
-      "toastSettleSent": "Đã gửi lệnh thanh toán. Giao dịch sẽ cập nhật khi được xác nhận."
+      "toastSettleSent": "Đã gửi lệnh thanh toán. Giao dịch sẽ cập nhật khi được xác nhận.",
+      "mintNotFound": "Không tìm thấy Token tại địa chỉ này.",
+      "mintRefusedExtension": "Token này dùng {extension}, giao dịch không thể giữ trong escrow. Hãy chọn Token khác.",
+      "mintRefusedUnreadable": "SDP không đọc được cấu hình của Token này nên không thể xác định giao dịch trên đó có thể thanh toán hay không. Hãy chọn Token khác.",
+      "mintRefusedTransferHook": "Token này chạy transfer hook, mà SDP chưa thể thanh toán, hủy hoặc thu hồi. Hãy chọn Token khác.",
+      "mintRefusedUnnamed": "Giao dịch không thể giữ Token này trong escrow. Hãy chọn Token khác.",
+      "mintSlotEmpty": "Không có Token nào để chọn. Dán địa chỉ mint để dùng.",
+      "payoutModeLabel": "Cách đặt tên cho điểm đến thanh toán này",
+      "toastFundPendingApproval": "Cấp vốn đang chờ phê duyệt",
+      "toastSettlePendingApproval": "Thanh toán đang chờ phê duyệt",
+      "approvalPendingDescription": "Chính sách Wallet này yêu cầu phê duyệt trước khi gửi. Chưa có gì được chuyển.",
+      "transferDelivery": "Đã giao",
+      "transferDeposit": "Nạp",
+      "transferReclaim": "Đã thu hồi",
+      "transferRecovery": "Đã khôi phục",
+      "transferRefund": "Đã hoàn trả",
+      "transferWithdrawal": "Đã rút",
+      "transfersLabel": "Hoạt động chuyển",
+      "showEarlierTransfers": "Hiển thị các lệnh chuyển trước ({count})"
     }
   }
 }

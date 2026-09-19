@@ -111,6 +111,15 @@
     "loading": "Chargement des approbations...",
     "runtimePaused": "L'exécution du Wallet est en pause. Cette demande est toujours en attente. Approuvez-la à nouveau lorsque l'exécution sera disponible.",
     "runtimeUnavailable": "Le Wallet est indisponible. Cette demande est toujours en attente. Vérifiez le Wallet avant d'approuver à nouveau.",
-    "providerAccessDenied": "Votre organisation n'a pas accès à ce fournisseur de Wallet. Cette demande est toujours en attente. Approuvez-la à nouveau une fois l'accès rétabli."
+    "providerAccessDenied": "Votre organisation n'a pas accès à ce fournisseur de Wallet. Cette demande est toujours en attente. Approuvez-la à nouveau une fois l'accès rétabli.",
+    "requesterCannotDecide": "Vous êtes à l'origine de cette demande, quelqu'un d'autre doit donc la trancher.",
+    "approvalGroupOnly": "Seuls les approbateurs du groupe d'approbation de cette demande peuvent la trancher.",
+    "adminOnly": "Seul un administrateur de l'organisation peut trancher cette demande.",
+    "approvedExecutionFailedToast": "Demande approuvée, mais l'exécution a échoué",
+    "executionFailedStatus": "Échec de l'exécution",
+    "executionSucceeded": "Exécutée",
+    "executionRunning": "L'exécution n'est pas terminée",
+    "executionNotRun": "Non exécutée",
+    "executionErrorMissing": "Aucun message d'erreur n'a été enregistré"
   }
 }

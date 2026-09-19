@@ -271,7 +271,10 @@
       "addressDetailsFailed": "Não foi possível carregar esse endereço. Faça outra busca.",
       "untrustedProviderUrl": "O provedor retornou uma URL não confiável, então ela não foi carregada. Crie uma nova cotação ou entre em contato com o suporte.",
       "payoutAccountsTitle": "Contas de pagamento salvas",
-      "payoutAccountsDescription": "Escolha onde este pagamento será depositado ou preencha os dados abaixo para pagar em uma nova conta."
+      "payoutAccountsDescription": "Escolha onde este pagamento será depositado ou preencha os dados abaixo para pagar em uma nova conta.",
+      "transferHeldForApproval": "A política desta Wallet exige aprovação desta transferência antes do envio, então a MoneyGram não pode continuar. Nada foi movido ainda. Se ela não deve ser enviada depois, cancele a solicitação em Approvals.",
+      "transferApprovalPending": "Aguardando aprovação",
+      "offrampHeldDescription": "Nada foi movido ainda. Após a aprovação, {amount} {token} é enviado para o endereço de depósito abaixo. Se a cotação expirar primeiro, o envio não será concluído e você precisará de uma nova cotação."
     },
     "onchainSend": {
       "noAssets": "Esta Wallet não tem ativos disponíveis para enviar.",
@@ -303,7 +306,10 @@
       "transferFailed": "Falha na transferência.",
       "transferSuccess": "Sua transferência foi enviada com sucesso.",
       "transferStatus": "Status: {status}",
-      "viewOnExplorer": "Ver no explorer"
+      "viewOnExplorer": "Ver no explorer",
+      "approvalPendingTitle": "Aguardando aprovação",
+      "approvalPendingDescription": "A política desta Wallet exige que alguém aprove a transferência antes do envio. Nada foi movido ainda.",
+      "viewApprovalRequest": "Ver solicitação de aprovação"
     },
     "onchainReceive": {
       "wallet": "Wallet",
@@ -338,7 +344,9 @@
       "agreementSigningTitle": "Confirmando acordo",
       "agreementSigningDescription": "Aguardando o provedor confirmar o acordo assinado. Isso costuma levar alguns segundos.",
       "agreementConsentPrefix": "Li e concordo com a",
-      "privacyPolicy": "política de privacidade"
+      "privacyPolicy": "política de privacidade",
+      "settlementProcessing": "Processando na BVNK",
+      "settlementCompleted": "Concluído"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verifique sua identidade",
@@ -490,7 +498,9 @@
       "quotedAmount": "o valor cotado",
       "cryptoDeposit": "Depósito em {currency}",
       "virtualAccount": "Conta virtual em {currency}",
-      "payin": "Payin em {currency}"
+      "payin": "Payin em {currency}",
+      "paymentReferenceRequired": "Referência de pagamento (obrigatória)",
+      "remittancePrefix": "Prefixo de remessa"
     },
     "providerRisk": {
       "close": "Fechar {title}",
@@ -784,7 +794,11 @@
       "copy": "Copiar {label}",
       "failureReason": "Motivo da falha",
       "viewReceipt": "Ver recibo",
-      "receipt": "Recibo"
+      "receipt": "Recibo",
+      "status": "Status",
+      "payinId": "ID do pay-in",
+      "fiatSent": "Valor convertido",
+      "cryptoToReceive": "Cripto a receber"
     },
     "requestFailed": "Falha na solicitação.",
     "submitting": "Enviando...",
