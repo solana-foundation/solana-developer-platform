@@ -155,6 +155,50 @@ describe("generated Embedded Yield integration", () => {
     ]);
   });
 
+  it("floors a trailing-zero-padded quote like the canonical rule and still refuses over-scale precision", async () => {
+    process.env.SDP_API_KEY = "sk_test_example";
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        requests.push({ path, body });
+        if (path.endsWith("vault-deposit-previews")) {
+          return Response.json({
+            // Padded past the mint's own scale — providers do not canonicalize.
+            data: { sharesOut: "1.2000000", shareDecimals: 6, blockingIssues: [] },
+          });
+        }
+        if (path.endsWith("withdrawal-previews")) {
+          return Response.json({
+            // One more SIGNIFICANT digit than the mint has atoms: malformed.
+            data: { assetsOut: "1.2345671", assetDecimals: 6, blockingIssues: [] },
+          });
+        }
+        return Response.json({
+          data: { transaction: { transactionId: "build", transaction: "base64-transaction" } },
+        });
+      })
+    );
+
+    const generated = await loadGeneratedIntegration(strategy);
+
+    // 1.2 at scale 6 floored by 10 bps is 1.1988 — the padded quote must read
+    // as the same 1200000 atoms the canonical dashboard rule derives.
+    await expect(
+      generated.buildEarnDepositTransaction({ ownerAddress: "customer", amount: "1" })
+    ).resolves.toMatchObject({ transactionId: "build" });
+    const depositFloor = requests.find(({ path }) => path.endsWith("deposit-transactions"))?.body
+      .minSharesOut;
+    expect(depositFloor).toBe("1.1988");
+
+    // A genuinely finer quote is still a thrown error, never a miscount.
+    await expect(
+      generated.buildEarnWithdrawalTransaction({ positionId: "position", shares: "1" })
+    ).rejects.toThrow("provider quote is not a valid decimal at the reported mint scale");
+  });
+
   it("executes the wallet-paid Kamino build without quote calls or a fee payer", async () => {
     process.env.SDP_API_KEY = "sk_test_example";
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
