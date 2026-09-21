@@ -104,8 +104,8 @@ export function formatTokenQuantity(
 }
 
 /** Turn a provider duration into one short, human unit for product copy. */
-export function formatDurationSeconds(seconds: number, locale: string): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "Unavailable";
+export function formatDurationSeconds(seconds: number, locale: string): string | undefined {
+  if (!Number.isFinite(seconds) || seconds < 0) return undefined;
 
   const units =
     seconds < 60

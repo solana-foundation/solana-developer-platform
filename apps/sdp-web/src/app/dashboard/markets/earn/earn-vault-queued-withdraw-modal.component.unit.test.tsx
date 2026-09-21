@@ -285,6 +285,27 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     );
   });
 
+  it("converts fractional hours without floating-point validation failures", async () => {
+    renderModal({
+      terms: {
+        ...terms,
+        minimumSecondsToDeadline: 3_600,
+      },
+    });
+
+    fireEvent.click(screen.getByText("Payout and timing"));
+    fireEvent.change(screen.getByLabelText("Time allowed (hours)"), {
+      target: { value: "1.1" },
+    });
+
+    await openReview();
+
+    expect(mocks.fetchPreview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deadlineSeconds: 3_960 }),
+      expect.any(AbortSignal)
+    );
+  });
+
   it("explains provider preview blockers instead of silently disabling submission", async () => {
     mocks.fetchPreview.mockResolvedValue({
       kind: "ready",

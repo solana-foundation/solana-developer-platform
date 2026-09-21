@@ -15,8 +15,8 @@ import {
 } from "./earn-program-data";
 import { earnVaultQueuedWithdrawalStatusPresentation } from "./earn-vault-queued-withdrawal-presentation";
 
-function formatEpoch(value: string, locale: string): string {
-  return formatEpochSeconds(value, locale) ?? "Unavailable";
+function formatEpoch(value: string, locale: string, unavailable: string): string {
+  return formatEpochSeconds(value, locale) ?? unavailable;
 }
 
 /** Durable recovery surface for queued requests that outlive their create modal. */
@@ -122,8 +122,16 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
                           locale,
                           earnMintAsset(request.assetMint).symbol
                         ),
-                        maturity: formatEpoch(request.maturityTimestamp, locale),
-                        deadline: formatEpoch(request.deadlineTimestamp, locale),
+                        maturity: formatEpoch(
+                          request.maturityTimestamp,
+                          locale,
+                          t("DashboardEarn.unavailable")
+                        ),
+                        deadline: formatEpoch(
+                          request.deadlineTimestamp,
+                          locale,
+                          t("DashboardEarn.unavailable")
+                        ),
                       })}
                     </p>
                     {cancelError[request.withdrawalRequestId] ? (

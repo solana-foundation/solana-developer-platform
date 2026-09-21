@@ -143,7 +143,11 @@ function ExitRouteOptions({
             description={t(
               asyncRoute.summary.messageKey,
               asyncRoute.kind === "queue"
-                ? { duration: formatDurationSeconds(asyncRoute.waitSeconds, locale) }
+                ? {
+                    duration:
+                      formatDurationSeconds(asyncRoute.waitSeconds, locale) ??
+                      t("DashboardEarn.unavailable"),
+                  }
                 : asyncRoute.summary.values
             )}
             icon={Clock3Icon}

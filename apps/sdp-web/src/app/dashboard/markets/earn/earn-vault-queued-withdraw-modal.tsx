@@ -20,7 +20,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
+import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import {
   formatDurationSeconds,
@@ -98,13 +98,21 @@ function durationValue(seconds: number, unit: QueueDurationUnit): string {
 }
 
 function durationToSeconds(value: string, unit: QueueDurationUnit): number {
-  const amount = Number(value.trim());
-  const seconds = amount * unit.divisor;
-  return Number.isFinite(amount) && amount > 0 && Number.isInteger(seconds) ? seconds : Number.NaN;
+  const amount = parseUnsignedDecimal(value, { maxLength: 128 });
+  if (!amount) return Number.NaN;
+
+  const scale = amount.fraction.length;
+  const denominator = 10n ** BigInt(scale);
+  const scaledAmount = BigInt(`${amount.whole}${amount.fraction}`);
+  const scaledSeconds = scaledAmount * BigInt(unit.divisor);
+  if (scaledSeconds % denominator !== 0n) return Number.NaN;
+
+  const seconds = scaledSeconds / denominator;
+  return seconds > 0n && seconds <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(seconds) : Number.NaN;
 }
 
-function epochDate(value: string, locale: string): string {
-  return formatEpochSeconds(value, locale) ?? "Unavailable";
+function epochDate(value: string, locale: string, unavailable: string): string {
+  return formatEpochSeconds(value, locale) ?? unavailable;
 }
 
 function queueSharesForAmount(
@@ -141,8 +149,14 @@ function queuePreviewInput(
   return { positionId: position.id, shares, discountBps, deadlineSeconds };
 }
 
-function queueLockedUntil(position: EarnVaultPosition, locale: string): string | undefined {
-  return position.unlockTimestamp ? epochDate(position.unlockTimestamp, locale) : undefined;
+function queueLockedUntil(
+  position: EarnVaultPosition,
+  locale: string,
+  unavailable: string
+): string | undefined {
+  return position.unlockTimestamp
+    ? epochDate(position.unlockTimestamp, locale, unavailable)
+    : undefined;
 }
 
 function queuePositionName(position: EarnVaultPosition): string {
@@ -377,13 +391,13 @@ function QueuedWithdrawalResult({
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.maturity")}</dt>
           <dd className="text-right text-primary">
-            {epochDate(request.maturityTimestamp, locale)}
+            {epochDate(request.maturityTimestamp, locale, t("DashboardEarn.unavailable"))}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.deadline")}</dt>
           <dd className="text-right text-primary">
-            {epochDate(request.deadlineTimestamp, locale)}
+            {epochDate(request.deadlineTimestamp, locale, t("DashboardEarn.unavailable"))}
           </dd>
         </div>
       </dl>
@@ -522,13 +536,13 @@ function QueueReview({
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.maturity")}</dt>
             <dd className="text-right text-primary">
-              {epochDate(preview.maturityTimestamp, locale)}
+              {epochDate(preview.maturityTimestamp, locale, t("DashboardEarn.unavailable"))}
             </dd>
           </div>
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.deadline")}</dt>
             <dd className="text-right text-primary">
-              {epochDate(preview.deadlineTimestamp, locale)}
+              {epochDate(preview.deadlineTimestamp, locale, t("DashboardEarn.unavailable"))}
             </dd>
           </div>
         </dl>
@@ -677,7 +691,9 @@ function QueueDetails({
                 {termsValid
                   ? t("DashboardEarn.queuedWithdraw.settingsSummary", {
                       discount: bpsToPercent(discountBps),
-                      duration: formatDurationSeconds(deadlineSeconds, locale),
+                      duration:
+                        formatDurationSeconds(deadlineSeconds, locale) ??
+                        t("DashboardEarn.unavailable"),
                     })
                   : t("DashboardEarn.queuedWithdraw.settingsNeedsAttention")}
               </span>
@@ -727,7 +743,9 @@ function QueueDetails({
               />
               <p className="text-xs text-tertiary">
                 {t("DashboardEarn.queuedWithdraw.deadlineMinimum", {
-                  duration: formatDurationSeconds(terms.minimumSecondsToDeadline, locale),
+                  duration:
+                    formatDurationSeconds(terms.minimumSecondsToDeadline, locale) ??
+                    t("DashboardEarn.unavailable"),
                 })}
               </p>
               <p className="text-xs leading-5 text-tertiary">
@@ -783,7 +801,7 @@ export function EarnVaultQueuedWithdrawModal({
   const deadlineSeconds = durationToSeconds(deadline, durationUnit);
   const termsValid = isQueueTermsValid(discountBps, deadlineSeconds, terms);
   const detailsValid = shares !== undefined && termsValid;
-  const lockedUntil = queueLockedUntil(position, locale);
+  const lockedUntil = queueLockedUntil(position, locale, t("DashboardEarn.unavailable"));
   const previewInput = useMemo(
     () => queuePreviewInput(position, shares, discountBps, deadlineSeconds, termsValid),
     [deadlineSeconds, discountBps, position, shares, termsValid]

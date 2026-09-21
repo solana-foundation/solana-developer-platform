@@ -56,5 +56,6 @@ describe("Earn display formatting", () => {
     expect(formatDurationSeconds(90, "en-US")).toBe("1.5 minutes");
     expect(formatDurationSeconds(7_200, "en-US")).toBe("2 hours");
     expect(formatDurationSeconds(172_800, "en-US")).toBe("2 days");
+    expect(formatDurationSeconds(Number.NaN, "en-US")).toBeUndefined();
   });
 });
