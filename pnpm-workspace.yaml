@@ -28,9 +28,9 @@ catalog:
   # yet. solana-foundation/mosaic#85 (Kit v8, token-2022 0.18, wallet-only key
   # derivation, transaction-v1 planning, confidential mint/burn) carries `major`
   # changesets, so it will publish as 1.0.0 — 0.2.0 below is only what the pin check
-  # reads. The `@solana/mosaic-sdk` override in the root package.json points at a
-  # local build of that branch and is what actually resolves. Drop the override and
-  # set this to 1.0.0 the moment the release lands.
+  # reads. What actually resolves is the `@solana/mosaic-sdk` override in the root
+  # package.json, pointing at the packed branch build in vendor/. See
+  # vendor/README.md; removing it is a four-line change once the release lands.
   '@solana/mosaic-sdk': 0.2.0
   '@solana/programs': 8.3.0
   '@solana/rpc': 8.3.0

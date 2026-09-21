@@ -39,6 +39,10 @@ COPY packages/bigint-buffer/package.json ./packages/bigint-buffer/
 COPY packages/sdp-veda/package.json ./packages/sdp-veda/
 COPY packages/sdp-ondo/package.json ./packages/sdp-ondo/
 COPY patches ./patches
+# The @solana/mosaic-sdk override resolves to a tarball in vendor/ until the
+# confidential mint/burn release publishes; the install below cannot see it
+# otherwise. See vendor/README.md for how it goes away.
+COPY vendor ./vendor
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter @sdp/api...

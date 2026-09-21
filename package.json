@@ -25,7 +25,7 @@
     },
     "overrides": {
       "@token-acl/abl-sdk": "npm:@solana/token-acl-gate-sdk@0.2.0",
-      "@solana/mosaic-sdk": "link:../../mosaic/mosaic-worktrees/HOO-628-confidential-transfers/packages/sdk",
+      "@solana/mosaic-sdk": "file:./vendor/solana-mosaic-sdk-0.2.1-003f3aa.tgz",
       "@solana/zk-sdk": "0.5.2",
       "@babel/core": "7.29.7",
       "axios": "1.18.1",

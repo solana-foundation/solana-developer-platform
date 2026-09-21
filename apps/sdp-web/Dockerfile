@@ -47,6 +47,10 @@ COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY patches ./patches
+# The @solana/mosaic-sdk override resolves to a tarball in vendor/ until the
+# confidential mint/burn release publishes; the install below cannot see it
+# otherwise. See vendor/README.md for how it goes away.
+COPY vendor ./vendor
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter sdp-web...
