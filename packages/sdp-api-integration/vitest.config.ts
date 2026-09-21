@@ -50,6 +50,12 @@ export default defineConfig({
       // ElGamalKeypair". `apps/sdp-api/scripts/build-node.mjs` already collapses
       // the two for the Docker bundle; tests need the same redirect or every
       // confidential-transfer operation fails at runtime.
+      //
+      // `@solana/zk-sdk` 0.5.2 puts a `node` condition on `./bundler` pointing at
+      // the same build, so under Node this alias now resolves to where the
+      // specifier would land anyway — Vite picks conditions per environment, so
+      // it is kept until a green confidential integration run without it says
+      // otherwise.
       "@solana/zk-sdk/bundler": "@solana/zk-sdk/node",
       "@": path.resolve(__dirname, "../../apps/sdp-api/src"),
       "@sdp/api/test-support": path.resolve(

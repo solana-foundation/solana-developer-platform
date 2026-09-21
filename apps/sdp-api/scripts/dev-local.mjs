@@ -3,20 +3,11 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import net from "node:net";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
 const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
-// Collapses @solana/zk-sdk's /bundler and /node entry points onto one wasm
-// instance, without which every confidential-transfer operation fails with
-// "expected instance of ElGamalKeypair". The bundled build does the same thing
-// through esbuild (see zkSdkNodeWasmPlugin in build-node.mjs); keep them in step.
-//
-// This has to travel as NODE_OPTIONS rather than a node argv flag: `tsx watch`
-// runs the server in a child process, and a `--import` on the parent registers
-// the hook in a process that never loads the application.
-const zkSdkHookUrl = pathToFileURL(path.join(scriptDir, "register-zk-sdk-hooks.mjs")).href;
 
 function loadLocalEnvFile(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -224,10 +215,7 @@ try {
   });
   await run(process.execPath, [tsxCli, "watch", "--clear-screen=false", "src/server.ts"], {
     env: {
-      // Appended rather than assigned, so an existing NODE_OPTIONS survives.
-      NODE_OPTIONS: [localEnv.NODE_OPTIONS ?? process.env.NODE_OPTIONS, `--import ${zkSdkHookUrl}`]
-        .filter(Boolean)
-        .join(" "),
+      NODE_OPTIONS: localEnv.NODE_OPTIONS ?? process.env.NODE_OPTIONS,
       ENVIRONMENT: localEnv.ENVIRONMENT ?? process.env.ENVIRONMENT ?? "development",
       API_VERSION: localEnv.API_VERSION ?? process.env.API_VERSION ?? "local",
       SDP_DEPLOYMENT_MODE:

@@ -705,7 +705,10 @@ export async function getTransaction(
       .getTransaction(signature, {
         commitment,
         encoding: "jsonParsed",
-        maxSupportedTransactionVersion: 0,
+        // 1, not 0: confidential-transfer operations are planned as SIMD-0385
+        // transaction-v1 messages, and an RPC asked for a version it was not told
+        // to support answers with an error instead of the transaction.
+        maxSupportedTransactionVersion: 1,
       })
       .send()
   )) as RawGetTransactionResponse | null;
