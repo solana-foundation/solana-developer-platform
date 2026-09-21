@@ -18,12 +18,13 @@ import {
 } from "@sdp/redaction";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError, badRequest, payloadTooLarge } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { dryRunMiddleware } from "@/middleware/dry-run";
@@ -97,6 +98,11 @@ const KV_FREE_PATHS = [
   "/webhooks",
   "/v1/issuance/tokens/*/metadata.json",
 ];
+
+// Backstop bound for any /v1 request body. Handler-side schemas are far
+// smaller; the webhooks and rpc routers already enforce this same ceiling on
+// their subsets, and no public /v1 route accepts file uploads.
+const MAX_API_BODY_BYTES = 1024 * 1024;
 
 function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
   switch (statusCode) {
@@ -316,6 +322,20 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Idempotency-Key validation + response echo (public API only)
   app.use("/v1/*", idempotencyKeyMiddleware());
   app.use("/v1/*", dryRunMiddleware());
+
+  // Backstop body bound for the whole public API: request handlers buffer the
+  // body whole before zod validation runs, so without a ceiling a single
+  // authenticated request could make the instance buffer unbounded bytes.
+  // Route-level limits (webhooks, rpc) are equal or stricter.
+  app.use(
+    "/v1/*",
+    bodyLimit({
+      maxSize: MAX_API_BODY_BYTES,
+      onError: () => {
+        throw payloadTooLarge();
+      },
+    })
+  );
 
   // Request trace + duration logging
   app.use("*", requestTracingMiddleware());
