@@ -1118,72 +1118,20 @@ export async function listTransfers(c: AppContext) {
       walletIdsByAddress,
     } = observedTarget;
 
-    // 1. Fetch on-chain signature history via Helius (or fallback RPC)
+    // 1. Fetch on-chain signature history via Helius (or fallback RPC).
+    // The owner-address history, the wallet's token accounts, and the persisted
+    // ledger query are independent reads, so they start together instead of
+    // paying each round-trip serially; only the token-account signature sweeps
+    // below need to wait for the token accounts.
     const heliusRpc = createSignatureHistoryRpc(c.env);
     const ownerAddress = address(sourceAddress);
     const historyLimit = Math.min(pageSize * 5, 200);
     const signatureSearchAddresses: Address[] = [ownerAddress];
 
-    {
-      const tokenAccountAddresses = await resolveWalletTokenAccountAddresses(
-        c,
-        heliusRpc,
-        ownerAddress,
-        resolvedWalletId
-      );
-
-      for (const tokenAccountAddress of tokenAccountAddresses) {
-        walletIdsByAddress.set(tokenAccountAddress, resolvedWalletId);
-
-        if (
-          signatureSearchAddresses.length <= MAX_TOKEN_ACCOUNT_SIGNATURE_LOOKUPS &&
-          !signatureSearchAddresses.some(
-            (searchAddress) => String(searchAddress) === String(tokenAccountAddress)
-          )
-        ) {
-          signatureSearchAddresses.push(tokenAccountAddress);
-        }
-      }
-
-      if (tokenAccountAddresses.length > MAX_TOKEN_ACCOUNT_SIGNATURE_LOOKUPS) {
-        getLogger().info(
-          {
-            event: "sdp_api_signature_search_truncated",
-            wallet_id: resolvedWalletId,
-            token_accounts: tokenAccountAddresses.length,
-            searched: signatureSearchAddresses.length - 1,
-          },
-          "Token-account signature search truncated to cap"
-        );
-      }
-    }
-
-    const ownerSignatures = await solanaRpc.getSignaturesForAddress(heliusRpc, ownerAddress, {
-      limit: historyLimit,
-      commitment: "confirmed",
-    });
-    const tokenAccountSignatureResults = await mapSettledWithConcurrency(
-      signatureSearchAddresses.slice(1),
-      SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
-      (searchAddress) =>
-        solanaRpc.getSignaturesForAddress(heliusRpc, searchAddress, {
-          limit: historyLimit,
-          commitment: "confirmed",
-        })
-    );
-    const tokenAccountSignatures = tokenAccountSignatureResults.flatMap((result) =>
-      result.status === "fulfilled" ? result.value : []
-    );
-    const onChainSigs = dedupeSignatureHistory(
-      [...ownerSignatures, ...tokenAccountSignatures],
-      historyLimit
-    );
-    const sigStrings = onChainSigs.map((s) => String(s.signature));
-
-    // 2. Load the exact persisted ledger first. Fetching the first N persisted
-    // rows is sufficient for page N after observed rows are merged: observations
+    // 2. Load the exact persisted ledger. Fetching the first N persisted rows
+    // is sufficient for page N after observed rows are merged: observations
     // can only push persisted rows later in the combined ordering.
-    const persistedResult = await repo.listTransfers({
+    const persistedResultPromise = repo.listTransfers({
       organizationId: auth.organizationId,
       projectId: auth.projectId,
       custodyWalletId: observedCustodyWalletId,
@@ -1201,6 +1149,58 @@ export async function listTransfers(c: AppContext) {
       limit: offset + pageSize,
       offset: 0,
     });
+
+    const [ownerSignatures, tokenAccountAddresses, persistedResult] = await Promise.all([
+      solanaRpc.getSignaturesForAddress(heliusRpc, ownerAddress, {
+        limit: historyLimit,
+        commitment: "confirmed",
+      }),
+      resolveWalletTokenAccountAddresses(c, heliusRpc, ownerAddress, resolvedWalletId),
+      persistedResultPromise,
+    ]);
+
+    for (const tokenAccountAddress of tokenAccountAddresses) {
+      walletIdsByAddress.set(tokenAccountAddress, resolvedWalletId);
+
+      if (
+        signatureSearchAddresses.length <= MAX_TOKEN_ACCOUNT_SIGNATURE_LOOKUPS &&
+        !signatureSearchAddresses.some(
+          (searchAddress) => String(searchAddress) === String(tokenAccountAddress)
+        )
+      ) {
+        signatureSearchAddresses.push(tokenAccountAddress);
+      }
+    }
+
+    if (tokenAccountAddresses.length > MAX_TOKEN_ACCOUNT_SIGNATURE_LOOKUPS) {
+      getLogger().info(
+        {
+          event: "sdp_api_signature_search_truncated",
+          wallet_id: resolvedWalletId,
+          token_accounts: tokenAccountAddresses.length,
+          searched: signatureSearchAddresses.length - 1,
+        },
+        "Token-account signature search truncated to cap"
+      );
+    }
+
+    const tokenAccountSignatureResults = await mapSettledWithConcurrency(
+      signatureSearchAddresses.slice(1),
+      SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
+      (searchAddress) =>
+        solanaRpc.getSignaturesForAddress(heliusRpc, searchAddress, {
+          limit: historyLimit,
+          commitment: "confirmed",
+        })
+    );
+    const tokenAccountSignatures = tokenAccountSignatureResults.flatMap((result) =>
+      result.status === "fulfilled" ? result.value : []
+    );
+    const onChainSigs = dedupeSignatureHistory(
+      [...ownerSignatures, ...tokenAccountSignatures],
+      historyLimit
+    );
+    const sigStrings = onChainSigs.map((s) => String(s.signature));
 
     // 3. Look up every observed signature in our DB before synthesizing rows.
     // A persisted exact row remains authoritative even when it falls outside
