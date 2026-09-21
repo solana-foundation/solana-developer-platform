@@ -363,6 +363,44 @@ describe("advanced settings capability registry", () => {
     assert.equal(noPolicy.extensions?.confidentialTransfers?.policy, "whitelist");
   });
 
+  it("resolves confidentialMintBurn into a deployable extension config", () => {
+    const resolved = resolveSettingsToExtensions("generic", "generic", {
+      confidentialTransfers: { params: { policy: "opt-in" } },
+      confidentialMintBurn: {
+        params: { supplyAuthority: "So11111111111111111111111111111111111111112" },
+      },
+    });
+    assert.deepEqual(resolved.errors, []);
+    assert.deepEqual(resolved.extensions?.confidentialMintBurn, {
+      supplyAuthority: "So11111111111111111111111111111111111111112",
+    });
+  });
+
+  // There is no sane default for the supply authority: falling back to the mint
+  // authority would make that wallet's own confidential balances readable by
+  // anyone holding the supply keys, since derivation is wallet-only.
+  it("omits confidentialMintBurn when no supply authority was named", () => {
+    const resolved = resolveSettingsToExtensions("generic", "generic", {
+      confidentialTransfers: { params: { policy: "opt-in" } },
+      confidentialMintBurn: {},
+    });
+    assert.equal(resolved.extensions?.confidentialMintBurn, undefined);
+  });
+
+  // Token-2022 refuses to initialize ConfidentialMintBurn without
+  // ConfidentialTransferMint, and mosaic's builder throws before it reaches the
+  // chain — so this has to fail at selection, not at deploy.
+  it("rejects confidentialMintBurn selected without confidentialTransfers", () => {
+    const resolved = resolveSettingsToExtensions("generic", "generic", {
+      confidentialMintBurn: {
+        params: { supplyAuthority: "So11111111111111111111111111111111111111112" },
+      },
+    });
+    assert.equal(resolved.errors.length, 1);
+    assert.equal(resolved.errors[0]?.code, "EXTENSION_NOT_ALLOWED");
+    assert.equal(resolved.errors[0]?.extension, "confidentialMintBurn");
+  });
+
   it("resolves freezeAccounts to isFreezable rather than an extension", () => {
     // The base mint's freeze authority is not a Token-2022 extension, so this
     // setting must surface as a token column (like requiresAllowlist) and add
@@ -478,15 +516,17 @@ describe("advanced settings capability registry", () => {
 
   it("rejects two extensions that cannot coexist on one mint", () => {
     // Both define raw→UI amount conversion; conflict despite being individually valid.
-    // Both also conflict with confidentialTransfers — the visible amount they depend
-    // on doesn't exist for confidential balances.
+    // Both also conflict with the confidential settings — the visible amount they
+    // depend on doesn't exist for confidential balances.
     assert.deepEqual(getConflictingSettingKeys("interestBearing"), [
       "scaledUiAmount",
       "confidentialTransfers",
+      "confidentialMintBurn",
     ]);
     assert.deepEqual(getConflictingSettingKeys("scaledUiAmount"), [
       "interestBearing",
       "confidentialTransfers",
+      "confidentialMintBurn",
     ]);
     // confidentialTransfers conflicts with every visible-amount-dependent setting.
     assert.deepEqual(getConflictingSettingKeys("confidentialTransfers").sort(), [
@@ -494,8 +534,18 @@ describe("advanced settings capability registry", () => {
       "scaledUiAmount",
       "transferFee",
     ]);
+    // confidentialMintBurn inherits those three and adds nonTransferable: a supply
+    // issuable only into confidential balances, on accounts that can never
+    // transfer, is a supply nobody can move or redeem.
+    assert.deepEqual(getConflictingSettingKeys("confidentialMintBurn").sort(), [
+      "interestBearing",
+      "nonTransferable",
+      "scaledUiAmount",
+      "transferFee",
+    ]);
     // nonTransferable can't pair with a fee or a hook (no transfers to act on).
     assert.deepEqual(getConflictingSettingKeys("nonTransferable").sort(), [
+      "confidentialMintBurn",
       "transferFee",
       "transferHook",
     ]);

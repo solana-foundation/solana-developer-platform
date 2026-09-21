@@ -44,6 +44,16 @@ const transferHookConfigSchema = z.object({
   authority: z.string().min(32).max(44).optional(),
 });
 
+/**
+ * The supply authority is required and has no default: derivation is wallet-only,
+ * so a mint's supply keys are that wallet's own account keys for every mint it
+ * holds. Defaulting to the mint authority would hand its confidential balances to
+ * anyone the supply keys are shared with.
+ */
+export const confidentialMintBurnConfigSchema = z.object({
+  supplyAuthority: z.string().min(32).max(44),
+});
+
 export const confidentialTransfersConfigSchema = z.object({
   policy: z.enum(["opt-in", "whitelist"]).default("whitelist"),
   authority: z.string().min(32).max(44).optional(),
@@ -64,6 +74,7 @@ const extensionOverridesSchema = z
     confidentialTransfers: z
       .union([z.literal(false), confidentialTransfersConfigSchema])
       .optional(),
+    confidentialMintBurn: z.union([z.literal(false), confidentialMintBurnConfigSchema]).optional(),
   })
   .strict();
 
@@ -370,6 +381,29 @@ export const confidentialApproveSchema = z.object({
 
 export const confidentialTransferSchema = confidentialAmountSchema.extend({
   destination: solanaAddress,
+});
+
+// ── Confidential mint/burn ──────────────────────────────────────────────────
+//
+// Mint is authority-signed against someone else's account, so it names the
+// destination directly (like approve). Burn is holder-signed, so it is addressed
+// by the owner wallet (like withdraw). Both also need the supply-authority
+// wallet, which is a different wallet from the one that signs.
+
+export const confidentialMintSchema = z.object({
+  destination: solanaAddress,
+  amount: decimalAmount,
+  /** Custody wallet for the mint authority that signs. */
+  signingCustodyWalletId: z.string().min(1).optional(),
+  /** Custody wallet for the supply authority whose keys the proofs are built from. */
+  supplyCustodyWalletId: z.string().min(1).optional(),
+});
+
+export const confidentialBurnSchema = confidentialAmountSchema;
+
+export const confidentialApplyBurnSchema = z.object({
+  signingCustodyWalletId: z.string().min(1).optional(),
+  supplyCustodyWalletId: z.string().min(1).optional(),
 });
 
 export const confidentialBalanceQuerySchema = z.object({

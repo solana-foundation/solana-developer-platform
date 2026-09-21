@@ -45,6 +45,11 @@ export const AUDIT_ACTIONS = [
   "confidential_transfer",
   "confidential_withdraw",
   "confidential_empty_account",
+  // Confidential mint/burn (ConfidentialMintBurn: an encrypted total supply)
+  "confidential_mint",
+  "confidential_burn",
+  "confidential_apply_pending_burn",
+  "confidential_update_supply",
   // Money movement actions
   "transfer",
   // Transaction actions

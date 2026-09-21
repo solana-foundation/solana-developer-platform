@@ -5,18 +5,23 @@
  * keypair + AES key. They are never stored: they are re-derived per request from
  * a signature the owner's custody wallet produces, used, and freed.
  *
- * HOO-1507 gate: mosaic-sdk 0.2.0 ships the legacy owner+mint scheme
- * (`deriveConfidentialKeysForOwnerMint`). Upstream has since agreed on a
- * sign-once/HKDF scheme (token-2022#1432) that 0.2.0 does not ship yet, and
- * changing the seed changes the keys of every already-configured account. Every
- * caller goes through `deriveConfidentialKeysForWallet` so that migration is a
- * one-function change.
+ * Derivation is wallet-only (`solana-conf-bal/v1`): one signature over a fixed
+ * message yields both keys, with no owner, mint or token-account seed. A wallet
+ * therefore has exactly one confidential key pair, shared across every mint and
+ * every token account it holds — the same scheme token-2022 ships, so the keys
+ * are byte-identical to any other client's.
+ *
+ * What used to be enforced by the seed is now enforced on-chain instead: the
+ * mosaic builders compare the derived ElGamal pubkey against the one registered
+ * on the account (`assertConfidentialKeysMatchAccount`) and refuse to build a
+ * plan that could not verify. Accounts configured under the older owner+mint
+ * scheme derive different keys and are caught there.
  */
 
 import type { Address } from "@solana/kit";
 import {
   type ConfidentialKeys,
-  deriveConfidentialKeysForOwnerMint,
+  deriveConfidentialKeys,
   freeConfidentialKeys,
 } from "@solana/mosaic-sdk/confidential";
 import { isMessagePartialSigner } from "@solana/signers";
@@ -27,11 +32,17 @@ import type { Env } from "@/types/env";
 export type { ConfidentialKeys };
 
 /**
- * Derive the confidential keys for one custody wallet's token account.
+ * Derive the confidential keys held by one custody wallet.
  *
  * The wallet must be able to sign arbitrary messages — the derivation signs a
- * canonical message bound to `(owner, mint)`. Not every custody provider
- * supports that, so the capability is checked before any work is done.
+ * canonical message. Not every custody provider supports that, so the capability
+ * is checked before any work is done.
+ *
+ * `owner` does not seed the derivation any more, but the caller still passes the
+ * address it expects and the check below still runs: deriving the wrong wallet's
+ * keys no longer produces garbage, it produces another holder's perfectly valid
+ * keys, and the mistake would only surface as a proof rejection deep inside
+ * token-2022. Catching it here keeps it a 4xx with a legible message.
  */
 export async function deriveConfidentialKeysForWallet(params: {
   env: Env;
@@ -39,7 +50,6 @@ export async function deriveConfidentialKeysForWallet(params: {
   projectId: string | null | undefined;
   walletId: string | null | undefined;
   owner: Address;
-  mint: Address;
 }): Promise<ConfidentialKeys> {
   const signer = await createOrgSigner(
     params.env,
@@ -58,17 +68,13 @@ export async function deriveConfidentialKeysForWallet(params: {
   if (signer.address !== params.owner) {
     throw new AppError(
       "SIGNING_FAILED",
-      "Confidential balances can only be derived by the account owner's own wallet.",
+      "Confidential keys are derived from the holder's own wallet signature.",
       { hint: `Expected ${params.owner}, resolved ${signer.address}.` }
     );
   }
 
   try {
-    return await deriveConfidentialKeysForOwnerMint({
-      signer,
-      owner: params.owner,
-      mint: params.mint,
-    });
+    return await deriveConfidentialKeys({ signer });
   } catch (error) {
     throw new AppError(
       "SIGNING_FAILED",

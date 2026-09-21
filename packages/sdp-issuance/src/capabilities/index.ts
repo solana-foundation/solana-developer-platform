@@ -36,8 +36,10 @@ export {
   dvpBlockReason,
   expandLegacySettingKeys,
   findIncompatibleExtensionPair,
+  findMissingRequiredExtension,
   INCOMPATIBLE_EXTENSION_PAIRS,
   LEGACY_SETTING_ALIASES,
+  REQUIRED_EXTENSION_PAIRS,
 } from "./settings";
 export {
   buildSupportMatrix,

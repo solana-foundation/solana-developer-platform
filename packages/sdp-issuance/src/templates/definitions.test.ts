@@ -51,3 +51,46 @@ describe("resolveTemplateConfig — confidentialTransfers", () => {
     assert.equal(resolved.extensions?.confidentialTransfers, undefined);
   });
 });
+
+// ConfidentialMintBurn is likewise creation-only, and it is the extension that
+// takes the plaintext supply away — so the templates whose whole shape is a
+// plaintext supply must refuse it rather than deploy a mint they cannot mint.
+describe("resolveTemplateConfig — confidentialMintBurn", () => {
+  const SUPPLY_AUTHORITY = "So11111111111111111111111111111111111111112";
+
+  it("carries the override into the resolved extensions on custom", () => {
+    const resolved = resolveTemplateConfig("custom", {
+      extensions: {
+        confidentialTransfers: { policy: "opt-in" },
+        confidentialMintBurn: { supplyAuthority: SUPPLY_AUTHORITY },
+      },
+    });
+
+    assert.deepEqual(resolved.errors, []);
+    assert.deepEqual(resolved.extensions?.confidentialMintBurn, {
+      supplyAuthority: SUPPLY_AUTHORITY,
+    });
+  });
+
+  it("rejects the override on the stablecoin and tokenized-security templates", () => {
+    for (const template of ["stablecoin", "tokenized-security"] as const) {
+      const resolved = resolveTemplateConfig(template, {
+        extensions: {
+          confidentialTransfers: { policy: "whitelist" },
+          confidentialMintBurn: { supplyAuthority: SUPPLY_AUTHORITY },
+        },
+      });
+
+      assert.equal(resolved.errors.length, 1, template);
+      assert.equal(resolved.errors[0]?.code, "EXTENSION_NOT_ALLOWED", template);
+      assert.equal(resolved.errors[0]?.extension, "confidentialMintBurn", template);
+    }
+  });
+
+  it("leaves the extension off when it was never requested", () => {
+    const resolved = resolveTemplateConfig("custom", {
+      extensions: { confidentialTransfers: { policy: "opt-in" } },
+    });
+    assert.equal(resolved.extensions?.confidentialMintBurn, undefined);
+  });
+});

@@ -79,19 +79,14 @@ export interface MosaicTransactionResult {
 }
 
 /**
- * Prepare-mode result for an operation that may span multiple transactions
- * (confidential-transfer configure/withdraw/transfer: proof context-state setup
- * → the operation itself → context-state cleanup). Ordered — the client must
- * sign and submit each transaction in sequence, since later ones reference
- * on-chain state the earlier ones create.
- */
-export interface MosaicTransactionPlan {
-  transactions: MosaicTransaction[];
-}
-
-/**
- * Execute-mode result for a {@link MosaicTransactionPlan} — one result per
- * transaction actually submitted, in the same order.
+ * Result of an operation executed as a plan — one result per transaction
+ * actually submitted, in submission order.
+ *
+ * Every confidential operation returns this, however few transactions it took.
+ * A proof-bearing operation spans setup → the operation → cleanup at transaction
+ * version 0, and usually folds into one at version 1; the plural shape means a
+ * builder that changes which side of that line it falls on cannot silently lose
+ * the signatures the caller needs to journal.
  */
 export interface MosaicTransactionPlanResult {
   transactions: MosaicTransactionResult[];
@@ -171,6 +166,20 @@ export interface CreateTokenOptions {
   aclMode?: AclMode;
   /** Enable sRFC-37 Token ACL */
   enableTokenAcl?: boolean;
+  /**
+   * `ConfidentialMintBurn` init values, when `extensions.confidentialMintBurn`
+   * asked for the extension.
+   *
+   * Passed in rather than derived here because both values come from a signature
+   * by the supply-authority wallet, and this package has no custody access. The
+   * caller resolves that wallet, runs `getConfidentialMintBurnInit`, and frees the
+   * keys; see `withConfidentialKeys` in the API app.
+   */
+  confidentialMintBurnInit?: {
+    supplyElgamalPubkey: Address;
+    /** 36-byte AES ciphertext of a zero supply. */
+    decryptableSupply: Uint8Array;
+  };
 }
 
 /**
@@ -369,6 +378,71 @@ export interface EmptyConfidentialAccountOptions {
   tokenAccount: Address;
   owner: Address;
   keys: ConfidentialKeys;
+  feePayer: Address;
+}
+
+/**
+ * Options for confidentially minting new supply straight into a holder's
+ * confidential balance. Only on a mint carrying `ConfidentialMintBurn`.
+ */
+export interface ConfidentialMintOptions {
+  mint: Address;
+  /** Confidential token account the new supply lands in. */
+  destinationToken: Address;
+  amount: string;
+  /**
+   * The mint's supply keys — the dedicated supply-authority wallet's own
+   * confidential keys. Proof material, not a signer: the service's own signer is
+   * the mint authority that signs.
+   */
+  supplyKeys: ConfidentialKeys;
+  /** Override the auditor pubkey; defaults to the mint's configured auditor. */
+  auditorElgamalPubkey?: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for confidentially burning from a holder's confidential balance,
+ * reducing the mint's encrypted supply. Only on a mint carrying
+ * `ConfidentialMintBurn`.
+ */
+export interface ConfidentialBurnOptions {
+  mint: Address;
+  tokenAccount: Address;
+  amount: string;
+  /** The holder's own ElGamal keypair + AES key. */
+  keys: ConfidentialKeys;
+  /** Override the auditor pubkey; defaults to the mint's configured auditor. */
+  auditorElgamalPubkey?: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for applying a mint's pending burns to its encrypted supply.
+ *
+ * `resyncSupply` is required rather than optional: `ApplyPendingBurn` leaves the
+ * AES "decryptable supply" describing the old total, and every later confidential
+ * mint proves against that value — so skipping the resync does not degrade
+ * gracefully, it makes the mint unmintable until someone repairs it.
+ */
+export interface ApplyConfidentialPendingBurnOptions {
+  mint: Address;
+  resyncSupply: {
+    supplyKeys: ConfidentialKeys;
+    /** True total supply after this apply, in raw base units. Asserted, not verified. */
+    rawSupply: bigint;
+  };
+  feePayer: Address;
+}
+
+/**
+ * Options for re-asserting a mint's decryptable supply on its own — the repair
+ * path for a resync that was missed or written wrong.
+ */
+export interface UpdateConfidentialSupplyOptions {
+  mint: Address;
+  supplyKeys: ConfidentialKeys;
+  rawSupply: bigint;
   feePayer: Address;
 }
 

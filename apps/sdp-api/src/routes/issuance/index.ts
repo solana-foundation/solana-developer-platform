@@ -24,14 +24,18 @@ import {
 } from "./handlers/authority";
 import { executeBurn, extractBurnPolicyCandidate, prepareBurn } from "./handlers/burn";
 import {
+  applyConfidentialPendingBurn,
   applyPendingConfidentialBalance,
   approveConfidentialAccount,
+  confidentialBurn,
+  confidentialMint,
   confidentialTransfer,
   configureConfidentialAccount,
   depositConfidential,
   emptyConfidentialAccount,
   getConfidentialBalance,
   requireConfidentialTransfersDevnet,
+  updateConfidentialSupply,
   withdrawConfidential,
 } from "./handlers/confidential";
 import {
@@ -78,7 +82,10 @@ import {
   burnSchema,
   confidentialAccountSchema,
   confidentialAmountSchema,
+  confidentialApplyBurnSchema,
   confidentialApproveSchema,
+  confidentialBurnSchema,
+  confidentialMintSchema,
   confidentialTransferSchema,
   confirmDeploySchema,
   createTokenSchema,
@@ -358,6 +365,34 @@ issuance.post(
   requirePermissions("tokens:write"),
   validateBody(confidentialAccountSchema),
   emptyConfidentialAccount
+);
+// Supply operations on a ConfidentialMintBurn mint. Admin everywhere except
+// burn, which is a holder spending their own balance: mint, apply-pending-burn
+// and the supply repair all change the total supply under encryption, so there
+// is nothing for a reviewer to check afterwards.
+issuance.post(
+  "/tokens/:tokenId/confidential/mint",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialMintSchema),
+  confidentialMint
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/burn",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialBurnSchema),
+  confidentialBurn
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/apply-pending-burn",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialApplyBurnSchema),
+  applyConfidentialPendingBurn
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/supply",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialApplyBurnSchema),
+  updateConfidentialSupply
 );
 
 // Allowlist

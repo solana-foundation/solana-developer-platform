@@ -1,12 +1,18 @@
 /**
  * Settlement shape for confidential operations.
  *
- * Configure, transfer and withdraw are executed as an ordered plan: proof
- * context-state setup → the operation itself → context-state cleanup. The
- * operation's effect lands in the LAST transaction, so that is the one whose
- * signature settles the ledger row; the rest are journaled alongside it so the
- * intermediate accounts stay traceable. The other four operations are a single
- * transaction and collapse to the same shape with one signature.
+ * An operation is executed as an ordered plan — proof context-state setup → the
+ * operation itself → context-state cleanup — and settles on the LAST transaction
+ * that confirmed. That is the right ledger evidence whatever the plan's shape:
+ * the row's signature means "this is the last thing that landed for this
+ * operation", and the rest are journaled alongside it so the intermediate
+ * context-state accounts stay traceable.
+ *
+ * How many transactions there are is not fixed. At transaction version 0 an
+ * operation needing proofs spans three or more, and the last one is the cleanup
+ * rather than the operation itself. At version 1 the 4096-byte budget usually
+ * folds the whole sequence into one or two, so `planSignatures` is frequently a
+ * single entry — and then omitted entirely, per `planSignatureFields`.
  */
 
 import type {

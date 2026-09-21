@@ -171,6 +171,36 @@ export const ADVANCED_SETTINGS = {
       },
     ],
   },
+  // Requires confidentialTransfers (see REQUIRED_EXTENSION_PAIRS): a mint-burn
+  // mint's supply only ever exists inside confidential balances, so it needs the
+  // ConfidentialTransferMint extension to hold it. Choosing this also gives up
+  // the plaintext supply entirely — mint, burn and force-burn stop working on the
+  // mint, as do confidential deposit and withdraw, because there is no plaintext
+  // side left to convert to or from.
+  confidentialMintBurn: {
+    group: "controls",
+    labelKey: config("confidentialMintBurn"),
+    descriptionKey: desc("confidentialMintBurn"),
+    extensions: ["confidentialMintBurn"],
+    actions: [
+      "confidential_mint",
+      "confidential_burn",
+      "confidential_apply_pending_burn",
+      "confidential_update_supply",
+    ],
+    params: [
+      {
+        key: "supplyAuthority",
+        kind: "string",
+        format: "base58-pubkey",
+        // biome-ignore lint/security/noSecrets: i18n message key, not a secret.
+        labelKey: config("confidentialMintBurnSupplyAuthority"),
+        // biome-ignore lint/security/noSecrets: i18n message key, not a secret.
+        hintKey: config("confidentialMintBurnSupplyAuthorityHint"),
+        required: true,
+      },
+    ],
+  },
   // nonTransferable is a terminal "opt out of transfers" choice — kept last so the
   // list ends on it (it conflicts with the transfer-related settings above).
   nonTransferable: {
@@ -241,7 +271,48 @@ export const INCOMPATIBLE_EXTENSION_PAIRS: readonly (readonly [
   ["confidentialTransfers", "transferFee"],
   ["confidentialTransfers", "interestBearing"],
   ["confidentialTransfers", "scaledUiAmount"],
+  // Inherited from confidentialTransfers, which confidentialMintBurn always
+  // implies — listed in their own right so a check that sees only the mint-burn
+  // extension still catches them.
+  ["confidentialMintBurn", "transferFee"],
+  ["confidentialMintBurn", "interestBearing"],
+  ["confidentialMintBurn", "scaledUiAmount"],
+  // A supply that can only be issued into confidential balances, on a mint whose
+  // accounts can never transfer, is a supply nobody can move or redeem.
+  ["confidentialMintBurn", "nonTransferable"],
 ];
+
+/**
+ * Extensions that cannot stand alone: `[extension, prerequisite]`.
+ *
+ * Distinct from {@link INCOMPATIBLE_EXTENSION_PAIRS}, which rules combinations
+ * out. This rules one in — Token-2022 refuses to initialize `ConfidentialMintBurn`
+ * on a mint without `ConfidentialTransferMint`, and mosaic's `Token` builder
+ * throws before it ever reaches the chain. Catching it here keeps that a
+ * validation error at selection time rather than a failure at deploy.
+ */
+export const REQUIRED_EXTENSION_PAIRS: readonly (readonly [
+  TokenExtensionName,
+  TokenExtensionName,
+])[] = [["confidentialMintBurn", "confidentialTransfers"]];
+
+/**
+ * The first extension whose prerequisite is missing, or null.
+ *
+ * @returns `[extension, prerequisite]` — the same order as
+ *   {@link REQUIRED_EXTENSION_PAIRS}, so the caller can name both in the error.
+ */
+export function findMissingRequiredExtension(
+  extensions: Iterable<TokenExtensionName>
+): readonly [TokenExtensionName, TokenExtensionName] | null {
+  const present = new Set(extensions);
+  for (const pair of REQUIRED_EXTENSION_PAIRS) {
+    if (present.has(pair[0]) && !present.has(pair[1])) {
+      return pair;
+    }
+  }
+  return null;
+}
 
 export function findIncompatibleExtensionPair(
   extensions: Iterable<TokenExtensionName>

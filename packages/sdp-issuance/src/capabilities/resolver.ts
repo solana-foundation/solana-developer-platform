@@ -16,6 +16,7 @@ import {
   ADVANCED_SETTINGS,
   expandLegacySettingKeys,
   findIncompatibleExtensionPair,
+  findMissingRequiredExtension,
   type SettingKey,
 } from "./settings";
 
@@ -110,6 +111,13 @@ function toOverride(
         confidentialTransfers: auditorElgamalPubkey ? { policy, auditorElgamalPubkey } : { policy },
       };
     }
+    case "confidentialMintBurn": {
+      // No default: the supply authority must be a dedicated wallet the caller
+      // names, and falling back to the mint authority would hand that wallet's
+      // own confidential balances to anyone holding the supply keys.
+      const supplyAuthority = toStringValue(params.supplyAuthority, "");
+      return supplyAuthority ? { confidentialMintBurn: { supplyAuthority } } : {};
+    }
     default:
       return {};
   }
@@ -177,6 +185,18 @@ export function resolveSettingsToExtensions(
       code: "EXTENSION_NOT_ALLOWED",
       message: `${conflict[0]} and ${conflict[1]} cannot be combined on the same token.`,
       extension: conflict[1],
+    });
+  }
+
+  // The other direction: an extension whose prerequisite was not selected. The
+  // chain refuses these outright, so catching it here turns a deploy failure into
+  // a validation error the caller can still act on.
+  const missing = findMissingRequiredExtension(Object.keys(extensions) as TokenExtensionName[]);
+  if (missing) {
+    errors.push({
+      code: "EXTENSION_NOT_ALLOWED",
+      message: `${missing[0]} requires ${missing[1]} on the same token.`,
+      extension: missing[0],
     });
   }
 

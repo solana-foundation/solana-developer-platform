@@ -8,7 +8,9 @@ import {
   burnRequestSchema,
   confidentialAccountRequestSchema,
   confidentialAmountRequestSchema,
+  confidentialApplyBurnRequestSchema,
   confidentialApproveRequestSchema,
+  confidentialMintRequestSchema,
   confidentialTransferRequestSchema,
   confirmDeployRequestSchema,
   createTokenRequestSchema,
@@ -1063,6 +1065,119 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         content: jsonContent(confidentialOperationResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  // Confidential mint/burn: only on a mint created with an encrypted supply.
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/mint",
+    tags: ["Issuance"],
+    summary: "Confidential mint",
+    operationId: "confidentialMint",
+    description:
+      "Mints new supply straight into a holder's confidential balance, with the amount encrypted — not a plaintext mint followed by a deposit. The minted amount lands in the holder's pending balance; they apply it before it is spendable. Signed by the mint authority; the proofs are built from the supply authority's keys. Devnet only. Requires the ConfidentialMintBurn extension, which can only be set when the mint is created.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialMintRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Confidential mint completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/burn",
+    tags: ["Issuance"],
+    summary: "Confidential burn",
+    operationId: "confidentialBurn",
+    description:
+      "Burns from a holder's confidential balance, reducing the mint's encrypted supply. Signed by the holder. The burned amount lands in the mint's pending burn; the mint authority then applies it, which is what actually reduces the supply.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialAmountRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Confidential burn completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/apply-pending-burn",
+    tags: ["Issuance"],
+    summary: "Apply confidential pending burn",
+    operationId: "applyConfidentialPendingBurn",
+    description:
+      "Rolls the mint's pending burns into its encrypted supply and re-asserts the decryptable supply in the same operation. The re-assertion is not optional: applying a pending burn otherwise leaves the cheap-to-decrypt supply describing the old total, and every later confidential mint proves against that value. Run this after confidential burns, before the next confidential mint.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialApplyBurnRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Apply confidential pending burn completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/supply",
+    tags: ["Issuance"],
+    summary: "Repair confidential supply",
+    operationId: "updateConfidentialSupply",
+    description:
+      "Re-encrypts the mint's decryptable supply to the total its ciphertext actually holds — the repair path for an apply-pending-burn whose re-assertion was missed, which otherwise leaves the mint unable to accept a confidential mint.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialApplyBurnRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Confidential supply repair completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 

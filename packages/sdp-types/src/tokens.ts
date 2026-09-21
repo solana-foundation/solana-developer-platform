@@ -37,6 +37,12 @@ export const TOKEN_TRANSACTION_TYPES = [
   "confidential_transfer",
   "confidential_withdraw",
   "confidential_empty_account",
+  // ConfidentialMintBurn: supply operations, only on a mint that carries the
+  // extension. Plaintext mint and burn are refused on such a mint entirely.
+  "confidential_mint",
+  "confidential_burn",
+  "confidential_apply_pending_burn",
+  "confidential_update_supply",
 ] as const;
 export type TokenTransactionType = (typeof TOKEN_TRANSACTION_TYPES)[number];
 
@@ -77,7 +83,8 @@ export type TokenExtensionName =
   | "defaultAccountState"
   | "scaledUiAmount"
   | "transferHook"
-  | "confidentialTransfers";
+  | "confidentialTransfers"
+  | "confidentialMintBurn";
 
 /**
  * Extension info for template definitions
@@ -209,6 +216,30 @@ export interface TokenExtensionsConfig {
     authority?: string;
     /** Auditor ElGamal public key allowed to decode every confidential transfer amount */
     auditorElgamalPubkey?: string;
+  };
+  /**
+   * Confidential mint/burn (Token-2022 `ConfidentialMintBurn`) configuration.
+   *
+   * Requires `confidentialTransfers`, and takes the plaintext supply away: the
+   * total supply exists only as an ElGamal ciphertext, so plaintext mint, burn
+   * and force-burn — and confidential deposit and withdraw — are all refused on
+   * such a mint.
+   */
+  confidentialMintBurn?: {
+    /**
+     * Wallet whose own confidential keys protect the encrypted supply.
+     *
+     * Key derivation is wallet-only and carries no role seed, so these keys are
+     * also that wallet's account keys for every mint it holds — it must be a
+     * dedicated wallet that holds no confidential balances of its own.
+     */
+    supplyAuthority: string;
+    /**
+     * The supply ElGamal public key baked into the mint at creation. Recorded so
+     * a later operation can tell "the wrong wallet signed" from "this mint was
+     * created elsewhere" before asking that wallet for a signature.
+     */
+    supplyElgamalPubkey?: string;
   };
 }
 
@@ -411,6 +442,11 @@ export interface ExtensionOverrides {
         authority?: string;
         auditorElgamalPubkey?: string;
       };
+  /**
+   * Enable confidential mint/burn, or false to disable. Only meaningful
+   * alongside `confidentialTransfers` — the mint needs both extensions.
+   */
+  confidentialMintBurn?: false | { supplyAuthority: string };
 }
 
 /**

@@ -12,6 +12,7 @@ import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/po
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
+import { assertTokenNotConfidentialMintBurn } from "@/services/issuance/confidential-support";
 import {
   approvedWalletOperationId,
   assertApprovedWalletOperationCustodyWallet,
@@ -432,6 +433,10 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     throw notFound("Token");
   }
 
+  // A mint whose supply exists only as an ElGamal ciphertext has no plaintext
+  // side: Token-2022 refuses this outright, so say so before any RPC work.
+  assertTokenNotConfidentialMintBurn(token, "minting");
+
   const {
     mintAddress: mintAddressRaw,
     mosaicAmount,
@@ -616,6 +621,10 @@ export async function extractMintPolicyCandidate(
   if (!token) {
     throw notFound("Token");
   }
+
+  // A mint whose supply exists only as an ElGamal ciphertext has no plaintext
+  // side: Token-2022 refuses this outright, so say so before any RPC work.
+  assertTokenNotConfidentialMintBurn(token, "minting");
 
   const replay = await resolveMintReplayBeforeLiveChecks(c, input, {
     tokenId,

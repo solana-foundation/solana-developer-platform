@@ -26,9 +26,10 @@ describe("toSubmittedList", () => {
 });
 
 describe("summarizeConfidentialSettlement", () => {
-  // The operation's effect lands in the last transaction; the ones around it only
-  // create and tear down proof context state, so settling on the first would
-  // record evidence for a transaction that did not do the thing.
+  // The row settles on the last transaction that confirmed — at transaction
+  // version 0 that is the context-state cleanup rather than the operation itself,
+  // and it is still the right evidence: it says how far the plan got. Settling on
+  // the first would claim the operation landed when only its proof setup had.
   it("settles a plan on its last transaction", () => {
     const settlement = summarizeConfidentialSettlement({
       transactions: [result("setup", 10n), result("op", 11n), result("cleanup", 12n)],
@@ -38,6 +39,15 @@ describe("summarizeConfidentialSettlement", () => {
       slot: 12n,
       planSignatures: ["setup", "op", "cleanup"],
     });
+  });
+
+  // At transaction version 1 the 4096-byte budget usually folds proof setup, the
+  // operation and cleanup into one transaction, so this is the common shape there
+  // — and `planSignatureFields` then drops the redundant single-entry list.
+  it("settles a collapsed plan on its only transaction", () => {
+    const settlement = summarizeConfidentialSettlement({ transactions: [result("op", 5n)] });
+    expect(settlement).toEqual({ signature: "op", slot: 5n, planSignatures: ["op"] });
+    expect(settlement && planSignatureFields(settlement)).toEqual({});
   });
 
   it("settles a single transaction on itself", () => {

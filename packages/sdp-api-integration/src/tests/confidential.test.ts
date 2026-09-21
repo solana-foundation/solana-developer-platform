@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TokenApiResponse, TransactionRecord } from "../helpers/api-types";
 import {
+  CONFIDENTIAL_MINT_BURN_SUPPORTED,
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
   INTEGRATION_CUSTODY_PROVIDER,
@@ -183,11 +184,17 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Confidential Tran
       });
       expect(transfer.res.status).toBe(200);
       expect(transfer.json.data.transaction.status).toBe("confirmed");
-      // Transfer is a multi-transaction plan: the settled signature is the last
-      // one, and every signature is journaled for the context-state accounts.
-      expect(transfer.json.data.transaction.params).toMatchObject({
-        planSignatures: expect.any(Array),
-      });
+      // How many transactions a transfer takes depends on the transaction
+      // version — three or more at version 0, often one at version 1 — so assert
+      // the contract rather than the count: when there was more than one, every
+      // signature is journaled for the context-state accounts they created.
+      const planSignatures = (
+        transfer.json.data.transaction.params as { planSignatures?: string[] } | null
+      )?.planSignatures;
+      if (planSignatures) {
+        expect(planSignatures.length).toBeGreaterThan(1);
+        expect(planSignatures.at(-1)).toBe(transfer.json.data.transaction.signature);
+      }
 
       await post("/confidential/apply-pending", { walletAddress: recipient.publicKey });
 
@@ -205,3 +212,159 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Confidential Tran
     }
   );
 });
+
+/**
+ * Confidential mint/burn: a mint whose total supply exists only as a ciphertext.
+ *
+ * Skipped wherever transaction v1 and the mint/burn proofs are not served —
+ * Surfpool is a simnet on an older Agave than SIMD-0385 needs, so the shard that
+ * runs there covers the seven balance operations at transaction version 0 and
+ * this block is devnet-only.
+ */
+describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS || !CONFIDENTIAL_MINT_BURN_SUPPORTED)(
+  "Confidential mint/burn",
+  () => {
+    const request = requestWithApiKey();
+    let custodyAddress = "";
+    let custodyWalletId = "";
+    let supplyWalletAddress = "";
+    let supplyWalletId = "";
+    let tokenId = "";
+
+    const post = async (path: string, body: unknown) => {
+      const res = await request(`/v1/issuance/tokens/${tokenId}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { res, json: (await res.json()) as ConfidentialOperationResponse };
+    };
+
+    beforeAll(async () => {
+      const init = await initIntegrationSuite();
+      const state = await resetIntegrationState(init.apiKeyHash);
+      custodyAddress = state.custodyAddress;
+      custodyWalletId = state.custodyWallet.id;
+
+      // A dedicated wallet, holding no confidential balances of its own: its keys
+      // protect the mint's whole supply, and derivation is wallet-only, so those
+      // are the same keys that would guard its own balances.
+      const supplyWallet = await createFundedIntegrationWallet({ label: "confidential-supply" });
+      supplyWalletAddress = supplyWallet.publicKey;
+      supplyWalletId = supplyWallet.id;
+
+      const createRes = await request("/v1/issuance/tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Encrypted Supply Token",
+          symbol: "ESUP",
+          decimals: 6,
+          isMintable: true,
+          template: "custom",
+          overrides: {
+            extensions: {
+              confidentialTransfers: { policy: "opt-in" },
+              confidentialMintBurn: { supplyAuthority: supplyWalletAddress },
+            },
+          },
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      tokenId = ((await createRes.json()) as TokenApiResponse).data.token.id;
+
+      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
+      });
+      expect(deployRes.status).toBe(200);
+    }, 180000);
+
+    afterAll(async () => {
+      await cleanupIntegrationSuite();
+    });
+
+    it("issues and redeems supply without revealing an amount", { timeout: 300000 }, async () => {
+      const configure = await post("/confidential/configure", { walletAddress: custodyAddress });
+      expect(configure.res.status).toBe(200);
+
+      const minted = await post("/confidential/mint", {
+        destination: custodyAddress,
+        amount: "500",
+        signingCustodyWalletId: custodyWalletId,
+        supplyCustodyWalletId: supplyWalletId,
+      });
+      expect(minted.res.status).toBe(200);
+      expect(minted.json.data.transaction.status).toBe("confirmed");
+
+      // The minted amount lands in the pending balance, exactly like a deposit.
+      await post("/confidential/apply-pending", { walletAddress: custodyAddress });
+
+      const afterMintRes = await request(
+        `/v1/issuance/tokens/${tokenId}/confidential/balance?walletAddress=${custodyAddress}`
+      );
+      const afterMint = (await afterMintRes.json()) as ConfidentialBalanceResponse;
+      expect(afterMint.data.confidentialBalance.availableBalance).toBe("500000000");
+
+      const burned = await post("/confidential/burn", {
+        walletAddress: custodyAddress,
+        amount: "200",
+        signingCustodyWalletId: custodyWalletId,
+      });
+      expect(burned.res.status).toBe(200);
+      expect(burned.json.data.transaction.status).toBe("confirmed");
+
+      const applyBurn = await post("/confidential/apply-pending-burn", {
+        signingCustodyWalletId: custodyWalletId,
+        supplyCustodyWalletId: supplyWalletId,
+      });
+      expect(applyBurn.res.status).toBe(200);
+      expect(applyBurn.json.data.transaction.status).toBe("confirmed");
+
+      const afterBurnRes = await request(
+        `/v1/issuance/tokens/${tokenId}/confidential/balance?walletAddress=${custodyAddress}`
+      );
+      const afterBurn = (await afterBurnRes.json()) as ConfidentialBalanceResponse;
+      expect(afterBurn.data.confidentialBalance.availableBalance).toBe("300000000");
+
+      // The real assertion: a second mint only succeeds if the decryptable supply
+      // was re-asserted correctly during the apply, since its proof is built
+      // against that value.
+      const remint = await post("/confidential/mint", {
+        destination: custodyAddress,
+        amount: "100",
+        signingCustodyWalletId: custodyWalletId,
+        supplyCustodyWalletId: supplyWalletId,
+      });
+      expect(remint.res.status).toBe(200);
+      expect(remint.json.data.transaction.status).toBe("confirmed");
+    });
+
+    // These fail before any transaction is built, so they assert the preflight
+    // rather than an on-chain rejection.
+    it("refuses the conversion operations a mint-burn mint has no side for", async () => {
+      const deposit = await post("/confidential/deposit", {
+        walletAddress: custodyAddress,
+        amount: "1",
+      });
+      expect(deposit.res.status).toBe(400);
+
+      const withdraw = await post("/confidential/withdraw", {
+        walletAddress: custodyAddress,
+        amount: "1",
+      });
+      expect(withdraw.res.status).toBe(400);
+
+      const plaintextMint = await request(`/v1/issuance/tokens/${tokenId}/mint`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signingCustodyWalletId: custodyWalletId,
+          mint: { destination: custodyAddress, amount: "1" },
+        }),
+      });
+      expect(plaintextMint.status).toBe(400);
+    });
+  }
+);

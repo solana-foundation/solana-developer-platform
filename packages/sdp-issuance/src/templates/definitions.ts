@@ -17,6 +17,11 @@ const CUSTOM_AVAILABLE_EXTENSIONS: TokenExtensionName[] = [
   "scaledUiAmount",
   "transferHook",
   "confidentialTransfers",
+  // Custom only. The stablecoin and tokenized-security templates are built around
+  // a plaintext supply the issuer mints and burns through the ordinary endpoints,
+  // and ConfidentialMintBurn takes that away outright — a mint-burn stablecoin
+  // could not be minted at all through the surface those templates promise.
+  "confidentialMintBurn",
 ];
 
 const STABLECOIN_OVERRIDE_EXTENSIONS: TokenExtensionName[] = [

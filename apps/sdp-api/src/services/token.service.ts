@@ -441,6 +441,25 @@ const WALLET_TRANSACTION_MATCH_CONFIG = {
     publicKeyFields: ["accountAddress"],
     tokenAccountFields: ["accountAddress"],
   },
+  // Confidential mint credits a holder's account; confidential burn debits one.
+  confidential_mint: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
+  confidential_burn: {
+    publicKeyFields: ["accountAddress"],
+    tokenAccountFields: ["accountAddress"],
+  },
+  // Supply-level: both act on the mint's encrypted supply, not on any account,
+  // so there is nothing for a wallet-scoped query to match on.
+  confidential_apply_pending_burn: {
+    publicKeyFields: [],
+    tokenAccountFields: [],
+  },
+  confidential_update_supply: {
+    publicKeyFields: [],
+    tokenAccountFields: [],
+  },
 } satisfies Record<TokenTransactionType, WalletTransactionMatchConfig>;
 
 interface TokenAccountMatch {
@@ -3355,6 +3374,30 @@ export class TokenService {
     );
 
     await this.db.batch(statements);
+  }
+
+  /**
+   * Record the supply ElGamal public key a `ConfidentialMintBurn` mint was
+   * created with.
+   *
+   * Written once the mint has landed. It is what later lets an operation tell
+   * "the wrong wallet signed the derivation" from "this mint was created
+   * somewhere else": the mint stores this key but nothing that maps it back to a
+   * wallet, so without the record a mismatch has no diagnosis.
+   */
+  async recordConfidentialSupplyKey(tokenId: string, supplyElgamalPubkey: string): Promise<void> {
+    const { extensions } = await this.getTokenExtensionState(tokenId);
+    const configured = extensions?.confidentialMintBurn;
+    if (!configured) {
+      return;
+    }
+
+    await this.setTokenExtension(
+      tokenId,
+      "confidentialMintBurn",
+      { ...configured, supplyElgamalPubkey },
+      new Date().toISOString()
+    );
   }
 
   private async setTokenExtension(

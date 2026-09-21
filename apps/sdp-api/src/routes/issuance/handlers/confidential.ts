@@ -33,7 +33,11 @@ import {
   planSignatureFields,
   summarizeConfidentialSettlement,
 } from "@/services/issuance/confidential-plan";
-import { tokenHasConfidentialBalances } from "@/services/issuance/confidential-support";
+import {
+  assertTokenNotConfidentialMintBurn,
+  tokenHasConfidentialBalances,
+  tokenHasConfidentialMintBurn,
+} from "@/services/issuance/confidential-support";
 import type { TokenService } from "@/services/token.service";
 import { parsePositiveTokenAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
@@ -45,7 +49,10 @@ import {
 import type {
   confidentialAccountSchema,
   confidentialAmountSchema,
+  confidentialApplyBurnSchema,
   confidentialApproveSchema,
+  confidentialBurnSchema,
+  confidentialMintSchema,
   confidentialTransferSchema,
 } from "../schemas";
 import { confidentialBalanceQuerySchema } from "../schemas";
@@ -54,6 +61,7 @@ import {
   resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
 } from "./authority-resolution";
+import { requireSupplyAuthority, withSupplyKeys } from "./confidential-supply";
 import { buildIdempotencyMetadata } from "./idempotency";
 import {
   persistSettledTransactionThenOutcome,
@@ -81,6 +89,13 @@ const CONFIDENTIAL_OPERATION_WALLET_PERMISSIONS = {
   confidential_transfer: ["tokens:admin"],
   confidential_withdraw: ["tokens:admin"],
   confidential_empty_account: ["tokens:write"],
+  // Supply-affecting, and unreviewable after the fact — the amounts are
+  // encrypted — so they sit with the other admin operations. Burn is the
+  // exception: a holder spending their own balance.
+  confidential_mint: ["tokens:admin"],
+  confidential_burn: ["tokens:write"],
+  confidential_apply_pending_burn: ["tokens:admin"],
+  confidential_update_supply: ["tokens:admin"],
 } as const satisfies Record<ConfidentialOperation, readonly Permission[]>;
 
 /**
@@ -93,6 +108,22 @@ export async function requireConfidentialTransfersDevnet(c: AppContext, next: Ne
     throw new AppError("SERVICE_UNAVAILABLE", "Confidential transfers are devnet-only");
   }
   await next();
+}
+
+/** The mint carries `ConfidentialMintBurn`, so supply operations are available. */
+export function assertTokenSupportsConfidentialMintBurn(token: TokenRecord): void {
+  if (tokenHasConfidentialMintBurn(token)) {
+    return;
+  }
+  throw new AppError(
+    "CONFIDENTIAL_NOT_ENABLED",
+    "This token was not created with an encrypted supply.",
+    {
+      hint:
+        "The ConfidentialMintBurn extension can only be added when the mint is created. " +
+        "Use the ordinary mint and burn operations.",
+    }
+  );
 }
 
 export function assertTokenSupportsConfidentialTransfers(token: TokenRecord): void {
@@ -242,7 +273,75 @@ function readCustomProgramError(error: unknown): number | null {
   return hex ? Number.parseInt(hex[1], 16) : null;
 }
 
-function toConfidentialAppError(error: unknown): AppError | null {
+/**
+ * Match the mosaic SDK's own fail-fast throws, which are plain `Error`s carrying
+ * no code — the message is the only discriminator there is.
+ *
+ * Matching on a pair of fragments rather than one keeps a stray "does not match"
+ * elsewhere from being mistaken for a key-scheme mismatch, and the fixtures in
+ * the unit tests copy the SDK's message text verbatim, so an upstream reword
+ * fails a test here instead of silently degrading into a 500 in production.
+ */
+function readSdkGuardError(error: unknown): AppError | null {
+  for (const link of causeChain(error)) {
+    const message = link instanceof Error ? link.message : "";
+    if (!message) {
+      continue;
+    }
+
+    if (message.includes("does not match") && message.includes("registered supply key")) {
+      return new AppError(
+        "CONFIDENTIAL_SUPPLY_KEYS_MISMATCH",
+        "The resolved supply wallet is not the one this mint's encrypted supply belongs to.",
+        {
+          hint:
+            "Supply keys are derived from the supply-authority wallet's own signature, and " +
+            "neither the mint address nor the mint authority can stand in for it. Check the " +
+            "supply wallet recorded for this token.",
+        }
+      );
+    }
+
+    if (message.includes("does not match") && message.includes("registered key")) {
+      return new AppError(
+        "CONFIDENTIAL_KEYS_MISMATCH",
+        "This account's confidential keys no longer match the ones it was configured with.",
+        {
+          hint:
+            "Key derivation is wallet-only now: an account configured under the previous " +
+            "owner+mint scheme derives different keys, and its balance can only be read with " +
+            "the key bytes from that time. Configure a new account for this mint.",
+        }
+      );
+    }
+
+    if (message.includes("has the ConfidentialMintBurn extension enabled")) {
+      return new AppError(
+        "CONFIDENTIAL_MINT_BURN_CONVERSION",
+        "This mint keeps its whole supply encrypted, so it has no plaintext side to convert.",
+        {
+          hint:
+            "Use the confidential mint and burn operations instead of deposit, withdraw, or " +
+            "the plaintext mint and burn endpoints.",
+        }
+      );
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Exported for the unit tests, which feed it the SDK's message text verbatim: the
+ * matching below is message-based by necessity, so an upstream reword has to fail
+ * a test here rather than silently become a 500 in production.
+ */
+export function toConfidentialAppError(error: unknown): AppError | null {
+  const guard = readSdkGuardError(error);
+  if (guard) {
+    return guard;
+  }
+
   switch (readCustomProgramError(error)) {
     case TOKEN_2022_EXTENSION_ALREADY_INITIALIZED:
       return new AppError(
@@ -297,10 +396,11 @@ interface RunConfidentialOptions {
  * operations: idempotent transaction row → replay short-circuit → critical audit
  * bracket → on-chain call → settlement.
  *
- * Multi-transaction plans settle on the LAST transaction (the one that carries
- * the operation's effect; the others set up and tear down proof context state).
- * Every signature is journaled into `params.planSignatures` so the intermediate
- * accounts stay traceable.
+ * A plan settles on the last transaction that confirmed, whether that is the
+ * operation itself or the cleanup that follows it — see `confidential-plan.ts`.
+ * When the plan ran to more than one transaction, every signature is journaled
+ * into `params.planSignatures` so the intermediate proof context-state accounts
+ * stay traceable.
  */
 async function runConfidentialOperation(
   options: RunConfidentialOptions
@@ -429,7 +529,12 @@ async function resolveHolderTarget(
   return { owner, tokenAccount };
 }
 
-/** Run `use` with the holder's confidential keys, always releasing them afterwards. */
+/**
+ * Run `use` with the holder's confidential keys, always releasing them afterwards.
+ *
+ * Derivation is wallet-only, so the mint plays no part: one wallet has one
+ * confidential key pair across every mint it holds.
+ */
 function withHolderKeys<T>(
   c: AppContext,
   resolved: ResolvedToken,
@@ -444,7 +549,6 @@ function withHolderKeys<T>(
       projectId: resolved.projectId,
       walletId,
       owner,
-      mint: resolved.mintAddress,
     },
     use
   );
@@ -536,6 +640,9 @@ export const depositConfidential = async (
   const { tokenId } = c.req.param();
   const body = c.req.valid("json");
   const resolved = await resolveConfidentialToken(c, tokenId);
+  // A mint-burn mint has no plaintext balance to deposit from; supply reaches a
+  // confidential balance through `confidential/mint` instead.
+  assertTokenNotConfidentialMintBurn(resolved.token, "depositing into a confidential balance");
   const { owner, tokenAccount } = await resolveHolderTarget(c, resolved, body.walletAddress);
   parsePositiveTokenAmount(body.amount, resolved.token.decimals);
 
@@ -639,6 +746,8 @@ export const withdrawConfidential = async (
   const { tokenId } = c.req.param();
   const body = c.req.valid("json");
   const resolved = await resolveConfidentialToken(c, tokenId);
+  // Nothing to withdraw *to*: holders redeem through `confidential/burn`.
+  assertTokenNotConfidentialMintBurn(resolved.token, "withdrawing to a public balance");
   const { owner, tokenAccount } = await resolveHolderTarget(c, resolved, body.walletAddress);
   parsePositiveTokenAmount(body.amount, resolved.token.decimals);
 
@@ -744,4 +853,226 @@ export const getConfidentialBalance = async (c: AppContext) => {
       pendingBalance: balance.pendingBalance?.toString() ?? null,
     },
   });
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Confidential mint/burn
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// These act on a mint whose supply exists only as an ElGamal ciphertext. Two
+// wallets are involved and they are not interchangeable: the mint authority
+// signs, and the supply-authority wallet's own confidential keys are the proof
+// material the amounts are proved against. The supply wallet never signs
+// anything on-chain, so it is resolved separately from the operation's signer.
+
+/**
+ * The mint authority that signs a supply operation, read from the mint itself.
+ *
+ * On-chain wins here as it does for approve: the caller never names it, so a
+ * rotated authority cannot leave SDP signing with a wallet the chain no longer
+ * accepts.
+ */
+async function requireMintAuthority(c: AppContext, resolved: ResolvedToken): Promise<Address> {
+  const authority = await resolveCurrentAuthorityForRole(
+    c.env,
+    resolved.tokenService,
+    resolved.token,
+    "mint"
+  );
+  if (!authority) {
+    throw badRequest("Mint authority is not available for this token");
+  }
+  return assertValidAddress(authority, "mintAuthority");
+}
+
+/** Resolve a holder's confidential token account for a mint/burn operation. */
+async function resolveMintBurnTarget(
+  c: AppContext,
+  resolved: ResolvedToken,
+  walletAddress: string,
+  field: string
+): Promise<Address> {
+  const owner = assertValidAddress(walletAddress, field);
+  return resolveConfidentialTokenAccount(c.env, owner, resolved.mintAddress, field);
+}
+
+export const confidentialMint = async (c: ValidatedBodyContext<typeof confidentialMintSchema>) => {
+  const { tokenId } = c.req.param();
+  const body = c.req.valid("json");
+  const resolved = await resolveConfidentialToken(c, tokenId);
+  assertTokenSupportsConfidentialMintBurn(resolved.token);
+  parsePositiveTokenAmount(body.amount, resolved.token.decimals);
+
+  const destination = await resolveMintBurnTarget(c, resolved, body.destination, "destination");
+  const mintAuthority = await requireMintAuthority(c, resolved);
+  const supplyAuthority = requireSupplyAuthority(resolved.token);
+
+  const transaction = await runConfidentialOperation({
+    c,
+    resolved,
+    operation: "confidential_mint",
+    signerAddress: mintAuthority,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    params: { accountAddress: destination, amount: body.amount, supplyAuthority },
+    requestBody: body,
+    run: (mosaic) =>
+      withSupplyKeys(
+        {
+          env: c.env,
+          auth: resolved.auth,
+          supplyAuthority,
+          requestedCustodyWalletId: body.supplyCustodyWalletId,
+        },
+        (supplyKeys) =>
+          mosaic.confidentialMint({
+            mint: resolved.mintAddress,
+            destinationToken: destination,
+            amount: body.amount,
+            supplyKeys,
+            feePayer: mintAuthority,
+          })
+      ),
+  });
+
+  return success(c, { transaction });
+};
+
+export const confidentialBurn = async (c: ValidatedBodyContext<typeof confidentialBurnSchema>) => {
+  const { tokenId } = c.req.param();
+  const body = c.req.valid("json");
+  const resolved = await resolveConfidentialToken(c, tokenId);
+  assertTokenSupportsConfidentialMintBurn(resolved.token);
+  const { owner, tokenAccount } = await resolveHolderTarget(c, resolved, body.walletAddress);
+  parsePositiveTokenAmount(body.amount, resolved.token.decimals);
+
+  const transaction = await runConfidentialOperation({
+    c,
+    resolved,
+    operation: "confidential_burn",
+    signerAddress: owner,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    params: { accountAddress: tokenAccount, walletAddress: owner, amount: body.amount },
+    requestBody: body,
+    // The holder's own keys, not the supply keys: the amount is debited from
+    // their balance, and the mint's pending burn is updated homomorphically.
+    run: (mosaic, walletId) =>
+      withHolderKeys(c, resolved, owner, walletId, (keys) =>
+        mosaic.confidentialBurn({
+          mint: resolved.mintAddress,
+          tokenAccount,
+          amount: body.amount,
+          keys,
+          feePayer: owner,
+        })
+      ),
+  });
+
+  return success(c, { transaction });
+};
+
+/**
+ * Roll the mint's pending burns into its encrypted supply.
+ *
+ * The true post-apply total is read from the mint itself and re-asserted in the
+ * same plan. It has to be: `ApplyPendingBurn` leaves the cheap-to-decrypt AES
+ * supply describing the old total, and every later confidential mint proves
+ * against that value.
+ */
+export const applyConfidentialPendingBurn = async (
+  c: ValidatedBodyContext<typeof confidentialApplyBurnSchema>
+) => {
+  const { tokenId } = c.req.param();
+  const body = c.req.valid("json");
+  const resolved = await resolveConfidentialToken(c, tokenId);
+  assertTokenSupportsConfidentialMintBurn(resolved.token);
+
+  const mintAuthority = await requireMintAuthority(c, resolved);
+  const supplyAuthority = requireSupplyAuthority(resolved.token);
+
+  const transaction = await runConfidentialOperation({
+    c,
+    resolved,
+    operation: "confidential_apply_pending_burn",
+    signerAddress: mintAuthority,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    params: { supplyAuthority },
+    requestBody: body,
+    run: (mosaic) =>
+      withSupplyKeys(
+        {
+          env: c.env,
+          auth: resolved.auth,
+          supplyAuthority,
+          requestedCustodyWalletId: body.supplyCustodyWalletId,
+        },
+        async (supplyKeys) => {
+          // Read the mint first: the resync has to assert what the supply will be
+          // once this apply lands, and the program re-encrypts whatever it is
+          // handed rather than checking it.
+          const supply = await mosaic.getConfidentialSupply({
+            mint: resolved.mintAddress,
+            supplyKeys,
+          });
+          return mosaic.applyConfidentialPendingBurn({
+            mint: resolved.mintAddress,
+            resyncSupply: { supplyKeys, rawSupply: supply.rawSupplyAfterApply },
+            feePayer: mintAuthority,
+          });
+        }
+      ),
+  });
+
+  return success(c, { transaction });
+};
+
+/**
+ * Re-assert the decryptable supply on its own — the repair path for a resync
+ * that was missed or written wrong, which otherwise leaves the mint unmintable.
+ */
+export const updateConfidentialSupply = async (
+  c: ValidatedBodyContext<typeof confidentialApplyBurnSchema>
+) => {
+  const { tokenId } = c.req.param();
+  const body = c.req.valid("json");
+  const resolved = await resolveConfidentialToken(c, tokenId);
+  assertTokenSupportsConfidentialMintBurn(resolved.token);
+
+  const mintAuthority = await requireMintAuthority(c, resolved);
+  const supplyAuthority = requireSupplyAuthority(resolved.token);
+
+  const transaction = await runConfidentialOperation({
+    c,
+    resolved,
+    operation: "confidential_update_supply",
+    signerAddress: mintAuthority,
+    requestedCustodyWalletId: body.signingCustodyWalletId,
+    params: { supplyAuthority },
+    requestBody: body,
+    run: (mosaic) =>
+      withSupplyKeys(
+        {
+          env: c.env,
+          auth: resolved.auth,
+          supplyAuthority,
+          requestedCustodyWalletId: body.supplyCustodyWalletId,
+        },
+        async (supplyKeys) => {
+          const supply = await mosaic.getConfidentialSupply({
+            mint: resolved.mintAddress,
+            supplyKeys,
+          });
+          // `currentSupply`, not the post-apply figure: this repairs the
+          // decryptable supply to what the mint's own ciphertext already says,
+          // and any pending burns are still pending until they are applied.
+          return mosaic.updateConfidentialDecryptableSupply({
+            mint: resolved.mintAddress,
+            supplyKeys,
+            rawSupply: supply.currentSupply,
+            feePayer: mintAuthority,
+          });
+        }
+      ),
+  });
+
+  return success(c, { transaction });
 };

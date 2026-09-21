@@ -10440,6 +10440,10 @@ describe("Issuance Routes", () => {
       "transfer",
       "withdraw",
       "empty",
+      "mint",
+      "burn",
+      "apply-pending-burn",
+      "supply",
     ];
 
     const confidentialRequest = (

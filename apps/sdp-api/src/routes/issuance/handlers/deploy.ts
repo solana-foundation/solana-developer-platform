@@ -39,6 +39,7 @@ import {
   type ResolvedIssuanceWallet,
   resolveIssuanceWallet,
 } from "./authority-resolution";
+import { requireSupplyAuthority, resolveConfidentialMintBurnInit } from "./confidential-supply";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
 import { toPublicToken } from "./public-response";
@@ -380,6 +381,41 @@ async function createDeployMetadataSigner(
   });
 }
 
+/**
+ * The `ConfidentialMintBurn` init values for a deploy, or undefined when the
+ * token does not carry the extension.
+ *
+ * Both values come from a signature by the supply-authority wallet — nothing on
+ * the mint or in the request can stand in for it — so the deploy has to reach
+ * custody before it can build the mint.
+ */
+async function resolveDeployMintBurnInit(
+  c: ValidatedBodyContext<typeof deployTokenSchema>,
+  auth: ApiKeyContext,
+  token: { extensions?: { confidentialMintBurn?: { supplyAuthority?: string } | null } | null }
+) {
+  if (!token.extensions?.confidentialMintBurn) {
+    return undefined;
+  }
+  return resolveConfidentialMintBurnInit({
+    env: c.env,
+    auth,
+    supplyAuthority: requireSupplyAuthority(token),
+  });
+}
+
+/** Record the supply key a mint-burn mint was created with, once it has landed. */
+async function recordDeploySupplyKey(
+  tokenService: TokenService,
+  tokenId: string,
+  init: { supplyElgamalPubkey: string } | undefined
+): Promise<void> {
+  if (!init) {
+    return;
+  }
+  await tokenService.recordConfidentialSupplyKey(tokenId, init.supplyElgamalPubkey);
+}
+
 export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -592,6 +628,10 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       await assertWalletCanPayDeployFees(c.env, signer.address);
     }
 
+    // Inside the try: this asks a wallet to sign, which can throw, and the deploy
+    // claim taken above has to be released if it does.
+    const confidentialMintBurnInit = await resolveDeployMintBurnInit(c, auth, token);
+
     // Create Mosaic service for template-based token deployment
     const mosaic = createIssuanceMosaicService(c, signer, feePayment);
 
@@ -612,10 +652,15 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       freezeAuthority,
       feePayer: signer,
       extensions: token.extensions ?? undefined,
+      confidentialMintBurnInit,
       enableAbl,
       aclMode,
     });
     onChainEffectCompleted = true;
+
+    // Only now, with the mint on-chain: the recorded key is what a later mint or
+    // burn checks the supply wallet's derivation against.
+    await recordDeploySupplyKey(tokenService, tokenId, confidentialMintBurnInit);
 
     // Update token with deployment info (including ABL list if created)
     const deployedToken = await tokenService.setTokenDeployed(

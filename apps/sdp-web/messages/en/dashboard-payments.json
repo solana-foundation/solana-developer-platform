@@ -1056,7 +1056,11 @@
           "confidential_apply_pending": "Apply pending balance",
           "confidential_transfer": "Confidential transfer",
           "confidential_withdraw": "Confidential withdrawal",
-          "confidential_empty_account": "Empty confidential account"
+          "confidential_empty_account": "Empty confidential account",
+          "confidential_mint": "Confidential mint",
+          "confidential_burn": "Confidential burn",
+          "confidential_apply_pending_burn": "Apply pending burn",
+          "confidential_update_supply": "Repair encrypted supply"
         },
         "rings": {
           "shield": "Shield",
