@@ -206,3 +206,110 @@ describe("WalletSetupFlow", () => {
     expect(markup).not.toContain("No wallet providers enabled");
   });
 });
+
+describe("WalletSetupFlow connection picker", () => {
+  function connection(
+    overrides: Partial<FlowProps["connections"] extends (infer T)[] | undefined ? T : never> = {}
+  ) {
+    return {
+      id: "conn-active",
+      provider: "privy" as const,
+      label: "Production signing",
+      status: "active" as const,
+      isDefault: false,
+      isRuntimeExecutionAllowed: true,
+      defaultCustodyWalletId: null,
+      createdAt: "2026-08-10T09:00:00.000Z",
+      activatedAt: "2026-08-10T09:05:00.000Z",
+      lastCheck: null,
+      pendingWalletLabel: null,
+      ...overrides,
+    };
+  }
+
+  function renderInstalledPrivy(
+    connections: FlowProps["connections"],
+    connectedProviders: FlowProps["connectedProviders"] = ["privy"]
+  ): string {
+    return renderToStaticMarkup(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <WalletSetupFlow
+          connectedProviders={connectedProviders}
+          enabledProviders={["privy"]}
+          initialProvider="privy"
+          privyByokEnabled
+          connections={connections}
+        />
+      </I18nProvider>
+    );
+  }
+
+  it("offers the connection once the project has a usable one", () => {
+    const markup = renderInstalledPrivy([connection()]);
+
+    expect(markup).toContain("The wallet is created in this connection");
+    expect(markup).toContain('name="connectionId"');
+  });
+
+  it("preselects the project default over the first connection", () => {
+    const markup = renderInstalledPrivy([
+      connection({ id: "conn-first" }),
+      connection({ id: "conn-default", isDefault: true }),
+    ]);
+
+    // The non-default connection must not be what submits.
+    expect(markup).toContain("conn-default");
+    expect(markup).not.toContain("conn-first");
+  });
+
+  // A project with only unfinished connections has nothing to choose between,
+  // so the wizard keeps the shape it had before the picker existed.
+  it("stays out of the way when nothing is selectable", () => {
+    const markup = renderInstalledPrivy([connection({ status: "pending" })]);
+
+    expect(markup).not.toContain("The wallet is created in this connection");
+    expect(markup).toContain("Wallet details");
+  });
+
+  it("stays out of the way when the project has no connections at all", () => {
+    const markup = renderInstalledPrivy([]);
+
+    expect(markup).not.toContain("The wallet is created in this connection");
+  });
+
+  // A BYOK-only project has no legacy config, so `/v1/wallets/configs` reports
+  // nothing connected; the active connection alone must mark privy installed.
+  it("offers an active connection when there is no legacy config and no default", () => {
+    const markup = renderInstalledPrivy([connection({ isDefault: false })], []);
+
+    expect(markup).toContain("Wallet details");
+    expect(markup).toContain('name="connectionId"');
+    expect(markup).toContain("conn-active");
+    expect(markup).toContain('name="label"');
+    expect(markup).not.toContain("data-privy-byok-form");
+    expect(markup).not.toMatch(/type="password"/);
+  });
+
+  it("keeps the credential form while the only connection is not active yet", () => {
+    const markup = renderInstalledPrivy([connection({ status: "pending" })], []);
+
+    expect(markup).toContain("data-privy-byok-form");
+    expect(markup).not.toContain('name="connectionId"');
+  });
+
+  // Connections belong to one provider; switching on step 1 must not carry them over.
+  it("ignores connections belonging to another provider", () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <WalletSetupFlow
+          connectedProviders={["fireblocks"]}
+          enabledProviders={["fireblocks"]}
+          initialProvider="fireblocks"
+          connections={[connection()]}
+        />
+      </I18nProvider>
+    );
+
+    expect(markup).not.toContain("The wallet is created in this connection");
+  });
+});

@@ -2,6 +2,8 @@ import type { ApprovalRequestStatus, WalletApprovalRequestSummary } from "@sdp/t
 import { describe, expect, it } from "vitest";
 import {
   type ApprovalInboxFilters,
+  approvalBadgeStatus,
+  approvalExecutionState,
   EMPTY_APPROVAL_FILTERS,
   filterApprovalRequests,
   formatApprovalLabel,
@@ -61,6 +63,8 @@ function approvalRequest(
       requiresApproval: true,
       evaluatedAt: "2026-07-16T12:00:00.000Z",
     },
+    viewerIsRequester: false,
+    viewerCanDecide: true,
     ...overrides,
   };
 }
@@ -159,5 +163,41 @@ describe("formatApprovalLabel", () => {
   it("formats API labels and camel case values", () => {
     expect(formatApprovalLabel("approval_required")).toBe("Approval Required");
     expect(formatApprovalLabel("pendingApproval")).toBe("Pending Approval");
+  });
+});
+
+describe("approvalExecutionState", () => {
+  function withOperationStatus(
+    status: ApprovalRequestStatus,
+    operationStatus: WalletApprovalRequestSummary["operation"]["status"]
+  ): WalletApprovalRequestSummary {
+    const request = approvalRequest("execution", status);
+    return { ...request, operation: { ...request.operation, status: operationStatus } };
+  }
+
+  it.each([
+    ["completed", "succeeded"],
+    ["failed", "failed"],
+    ["executing", "running"],
+    ["created", "not_run"],
+    ["evaluated", "not_run"],
+    ["pending_approval", "not_run"],
+    ["canceled", "not_run"],
+  ] as const)("reads an approved request with a %s operation as %s", (operationStatus, state) => {
+    expect(approvalExecutionState(withOperationStatus("approved", operationStatus))).toBe(state);
+  });
+
+  it.each(["pending", "rejected", "canceled", "expired", "failed"] as const)(
+    "has no execution outcome for a %s request",
+    (status) => {
+      expect(approvalExecutionState(withOperationStatus(status, "failed"))).toBeNull();
+    }
+  );
+
+  it("badges only an approved request whose execution failed as execution_failed", () => {
+    expect(approvalBadgeStatus(withOperationStatus("approved", "failed"))).toBe("execution_failed");
+    expect(approvalBadgeStatus(withOperationStatus("approved", "completed"))).toBe("approved");
+    expect(approvalBadgeStatus(withOperationStatus("approved", "executing"))).toBe("approved");
+    expect(approvalBadgeStatus(withOperationStatus("failed", "failed"))).toBe("failed");
   });
 });

@@ -5,22 +5,22 @@ import type {
   EarnStrategy,
   EarnVaultDepositRequest,
   EarnVaultPosition,
+  EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createEarnVaultDeposit,
+  createEarnVaultWithdrawalRequest,
   earnExternalWalletSummaryRefreshInterval,
   earnProgramsRefreshInterval,
   earnVaultMovementRefreshInterval,
   fetchEarnExternalWalletPositionSummary,
   fetchEarnExternalWalletPositions,
-  fetchEarnProgramDeposits,
   fetchEarnProgramsState,
   fetchEarnProgramWithdrawals,
   fetchEarnStrategies,
   fetchEarnVaultPositions,
-  hasPrograms,
-  isEarnVaultDepositAvailable,
+  fetchEarnVaultWithdrawalRequests,
 } from "./earn-program-data";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -396,27 +396,6 @@ describe("external-wallet position reads", () => {
   });
 });
 
-describe("vault deposit availability", () => {
-  const kamino = { ...strategy("kamino-vault"), provider: "kamino" };
-  const providerAccess = {
-    kamino: { entitled: true, configured: true, enabled: true },
-  };
-
-  it("opens only an active, fundable, surfaced vault-direct strategy in an enabled environment", () => {
-    expect(isEarnVaultDepositAvailable(kamino, "sandbox", providerAccess)).toBe(true);
-    expect(isEarnVaultDepositAvailable(kamino, "production", providerAccess)).toBe(false);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, fundable: false }, "sandbox", providerAccess)
-    ).toBe(false);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, status: "paused" }, "sandbox", providerAccess)
-    ).toBe(false);
-    expect(
-      isEarnVaultDepositAvailable({ ...kamino, provider: "upshift" }, "sandbox", providerAccess)
-    ).toBe(false);
-  });
-});
-
 describe("createEarnVaultDeposit", () => {
   it("sends idempotency only as a header and allowlists the JSON body", async () => {
     const deposit = {
@@ -607,7 +586,6 @@ describe("fetchEarnProgramsState", () => {
     stubProgramsResponse(200, { data: { programs: [], total: 0 } });
     const state = await fetchEarnProgramsState();
     expect(state).toEqual({ kind: "ready", programs: [] });
-    expect(hasPrograms(state)).toBe(false);
   });
 
   it("keeps every program, in the order the API returned them", async () => {
@@ -616,7 +594,6 @@ describe("fetchEarnProgramsState", () => {
     });
     const state = await fetchEarnProgramsState();
     if (state.kind !== "ready") throw new Error("expected ready");
-    expect(hasPrograms(state)).toBe(true);
     // Order is load-bearing: consumers that track one program across polls rely
     // on the head of this list being stable.
     expect(state.programs.map((program) => program.id)).toEqual(["p1", "p2"]);
@@ -685,19 +662,6 @@ describe("fetchEarnProgramsState pagination", () => {
       "Earn programs pagination exceeded its safety limit"
     );
     expect(fetchMock).toHaveBeenCalledTimes(20);
-  });
-});
-
-describe("fetchEarnProgramDeposits (via useEarnProgramDeposits fetcher)", () => {
-  /**
-   * No 404→empty mapping: the program id always comes from a program resolved
-   * through the live list in this org+environment, so a 404 can only be a
-   * broken proxy path or a scoping regression — and rendering that as "no
-   * deposits yet" on a funded program would mask the bug as calm.
-   */
-  it("throws on 404 rather than reporting an empty feed", async () => {
-    stubProgramsResponse(404, { error: { message: "not found" } });
-    await expect(fetchEarnProgramDeposits("prog_1")).rejects.toThrow("not found");
   });
 });
 
@@ -840,5 +804,133 @@ describe("earnProgramsRefreshInterval", () => {
 
   it("does not poll before the read resolves", () => {
     expect(earnProgramsRefreshInterval(undefined)).toBe(0);
+  });
+});
+
+function queuedWithdrawalRequest(withdrawalRequestId: string): EarnVaultWithdrawalRequestRecord {
+  return {
+    withdrawalRequestId,
+    positionId: "position_1",
+    provider: "veda",
+    providerReference: "vault_1",
+    ownerAddress: "owner_1",
+    requestAddress: `${withdrawalRequestId}_account`,
+    status: "pending",
+    assetMint: USDC,
+    shareMint: "Share1111111111111111111111111111111111111",
+    shares: "5",
+    quotedAssets: "4.995",
+    shareDecimals: 6,
+    assetDecimals: 6,
+    discountBps: 10,
+    nonce: "1",
+    creationTimestamp: "1789722000",
+    maturityTimestamp: "1789722060",
+    deadlineTimestamp: "1789722180",
+    creationSignature: "request_signature",
+    cancelSignature: null,
+    closingSignature: null,
+    assetsPaid: null,
+    failureReason: null,
+    fulfilledAt: null,
+    cancelledAt: null,
+    createdAt: TIMESTAMP,
+    updatedAt: TIMESTAMP,
+  };
+}
+
+describe("fetchEarnVaultWithdrawalRequests", () => {
+  it("uses the server-side unsettled filter while paging the durable recovery feed", async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (input: string) => {
+      calls.push(input);
+      const before = new URL(input, "https://sdp.test").searchParams.get("before");
+      return new Response(
+        JSON.stringify({
+          data: {
+            withdrawalRequests: [queuedWithdrawalRequest(before ? "request_2" : "request_1")],
+            hasMore: before === null,
+            nextCursor: before === null ? "cursor_2" : null,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const requests = await fetchEarnVaultWithdrawalRequests({ settled: false });
+
+    expect(requests.map((request) => request.withdrawalRequestId)).toEqual([
+      "request_1",
+      "request_2",
+    ]);
+    expect(calls).toEqual([
+      "/api/dashboard/markets/earn/vault-withdrawal-requests?limit=100&settled=false",
+      "/api/dashboard/markets/earn/vault-withdrawal-requests?limit=100&before=cursor_2&settled=false",
+    ]);
+  });
+
+  it("normalizes a policy-held request into an approval-pending outcome", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code: "SIGNING_PENDING",
+                message: "Wallet operation requires policy approval",
+                details: {
+                  approvalRequestId: "approval_1",
+                  walletOperationId: "operation_1",
+                },
+              },
+            }),
+            { status: 202, headers: { "Content-Type": "application/json" } }
+          )
+      )
+    );
+
+    const result = await createEarnVaultWithdrawalRequest(
+      { positionId: "position_1", shares: "5", discountBps: 25, deadlineSeconds: 360 },
+      "queued-request-key"
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      status: 202,
+      data: {
+        kind: "approval_pending",
+        message: "Wallet operation requires policy approval",
+        approvalRequestId: "approval_1",
+        walletOperationId: "operation_1",
+      },
+    });
+  });
+
+  it("refuses an approval hold returned with a success status other than 202", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: { code: "SIGNING_PENDING", message: "Requires policy approval" },
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } }
+          )
+      )
+    );
+
+    const result = await createEarnVaultWithdrawalRequest(
+      { positionId: "position_1", shares: "5", discountBps: 25, deadlineSeconds: 360 },
+      "queued-request-key"
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 201,
+      error: "Invalid queued withdrawal response",
+    });
   });
 });

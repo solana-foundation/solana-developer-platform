@@ -80,8 +80,24 @@ allowed_programs = [
     "Ed25519SigVerify111111111111111111111111111",   # Ed25519 sig-verify (Veda deposit plans)
 ]
 
-# Native SOL (wrapped) is required for fee payment
-allowed_tokens = ["So11111111111111111111111111111111111111112"]
+# Mints Kora names in `getSupportedTokens` and accepts in `transferTransaction`.
+# On the pinned Kora tags (e9bc391 here, f0377c0 deployed) sign-side validation
+# does not read this list, so it is the operator's DECLARED set, and SDP pins it
+# to Earn's deposit set so the two cannot drift: every devnet mint in
+# `EARN_DEPOSIT_TOKEN_SYMBOLS` (packages/sdp-types/src/earn.ts) must appear here
+# (asserted by vault-sponsorship-allowlist.test.ts) and in the deployed devnet
+# config (asserted live by kora-earn-sponsorship.test.ts). Mints come from
+# packages/sdp-types/src/well-known-tokens.ts, never from a chat or a search
+# result. USDT has no devnet mint. Keep kora-surfpool-shim.mjs in step.
+#
+# Wrapped SOL stays FIRST: the fee-payment adapter's `resolveFeeToken` takes
+# `tokens[0]` as the fee token.
+allowed_tokens = [
+    "So11111111111111111111111111111111111111112",  # Wrapped SOL (fee token, keep first)
+    "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",  # USDC (devnet)
+    "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7",  # USDG (devnet, Token-2022)
+    "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM",  # PYUSD (devnet, Token-2022)
+]
 
 # SPL tokens that can be used to pay fees (empty for SOL-only)
 allowed_spl_paid_tokens = []
@@ -137,6 +153,14 @@ allow_thaw_account = false
 type = "free"
 
 [validation.token2022]
+# No `transfer_hook_policy` here ON PURPOSE. The harness image (e9bc391) predates
+# the key and rejects unknown fields, and it has no mint-level transfer-hook scan
+# either, so PYUSD and USDG (mutable hook authority, Paxos) sign fine without it.
+# The DEPLOYED configs in sdp-infra run f0377c0, whose default is `deny_all` and
+# whose sign-only flow rejects any Token-2022 transfer of a mutable-hook mint,
+# so they set `transfer_hook_policy = "allow_all"` explicitly. Bumping this
+# image past e9bc391 must add the same line here or sponsored PYUSD/USDG
+# deposits start failing in the harness (PRO-1962).
 allow_confidential_transfers = true
 blocked_mint_extensions = []
 blocked_account_extensions = []

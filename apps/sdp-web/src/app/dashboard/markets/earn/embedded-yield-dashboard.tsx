@@ -39,12 +39,14 @@ import { explorerAddressUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
-import { earnStrategyLiquidityLabel } from "./earn-format";
+import { truncateMiddle } from "../truncate-middle";
+import { isPositiveDecimal } from "./earn-decimal";
 import {
-  earnMintAsset,
-  earnStrategyReferenceKey,
+  earnStrategyLiquidityLabel,
+  formatEpochSeconds,
   formatProviderAmount,
-} from "./earn-market-presentation";
+} from "./earn-format";
+import { earnMintAsset, earnStrategyReferenceKey } from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 
 function PortfolioInfoTip({ label }: { label: string }) {
@@ -362,7 +364,7 @@ function PortfolioOnboarding({ configureHref }: { configureHref: string }) {
 }
 
 function compactAddress(value: string) {
-  return `${value.slice(0, 5)}…${value.slice(-5)}`;
+  return truncateMiddle(value, 5, 5);
 }
 
 function formatLatestDepositDate(
@@ -414,6 +416,7 @@ function StrategyWalletDetails({
         <div className="divide-y divide-border-subtle">
           {positions.map((position) => {
             const asset = earnMintAsset(position.tokenMint);
+            const unlockTime = formatEpochSeconds(position.unlockTimestamp, locale);
             return (
               <article
                 key={position.id}
@@ -466,6 +469,13 @@ function StrategyWalletDetails({
                       position.shares ??
                       t("DashboardMarkets.earnProgram.valueUnavailable")}
                   </p>
+                  {unlockTime && !isPositiveDecimal(position.withdrawableShares ?? "0") ? (
+                    <p className="mt-1 text-[11px] leading-4 text-tertiary">
+                      {t("DashboardMarkets.earnProgram.sharesUnlockAt", {
+                        time: unlockTime,
+                      })}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-1">
                   <a

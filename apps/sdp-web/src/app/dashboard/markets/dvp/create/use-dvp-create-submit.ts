@@ -14,9 +14,10 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { explorerTxUrl } from "@/lib/explorer";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { dvpToastAction } from "../dvp-action-toast";
 import { freshDvpIdempotencyKey } from "../dvp-idempotency-key";
+import { dvpErrorEnvelopeSchema } from "../dvp-trade";
 import type { DvpPartyWire } from "./use-dvp-parties";
 
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
@@ -46,9 +47,6 @@ export interface DvpCreateSubmit {
   submit: (request: DvpCreateRequest) => Promise<void>;
   submitting: boolean;
 }
-
-/** A refusal's envelope. Only the message is read. */
-const errorEnvelopeSchema = z.object({ error: z.object({ message: z.string() }) });
 
 /** The created trade, as far as the confirmation needs it. */
 const createdEnvelopeSchema = z.object({
@@ -123,7 +121,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
       // Status before body. A non-2xx response carries an error envelope, not
       // a trade, and reading it as one would navigate to `undefined`.
       if (!response.ok) {
-        const failure = errorEnvelopeSchema.safeParse(await response.json().catch(() => null));
+        const failure = dvpErrorEnvelopeSchema.safeParse(await response.json().catch(() => null));
         setError(
           failure.success
             ? failure.data.error.message
@@ -149,18 +147,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
       // leaves somebody guessing whether they just did that twice.
       toast.success(t("DashboardMarkets.dvp.toastCreated"), {
         position: "bottom-right",
-        action:
-          createSignature === null
-            ? undefined
-            : {
-                label: t("DashboardMarkets.dvp.viewTransaction"),
-                onClick: () =>
-                  window.open(
-                    explorerTxUrl(createSignature, cluster),
-                    "_blank",
-                    "noopener,noreferrer"
-                  ),
-              },
+        action: dvpToastAction(t, createSignature, cluster),
       });
       router.push(`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${createdId}`);
     } catch (caught) {

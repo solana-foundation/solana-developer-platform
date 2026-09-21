@@ -1,14 +1,16 @@
 "use client";
 
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
-import { type EarnStrategy, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
-import { TokenMark } from "@/components/token-mark";
+import { type EarnStrategy, type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { ExternalLinkIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { truncateMiddle } from "../truncate-middle";
 import {
   type EarnDepositAvailabilityLabels,
   earnDepositAvailabilityLabel,
-  earnProviderLabel,
+  shortenMarketAddress,
 } from "./earn-format";
 import type { EarnVaultDepositAvailability } from "./earn-surfacing";
 
@@ -23,7 +25,7 @@ export function earnMintAsset(mint: string): EarnStrategyAsset {
   const token = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   return token
     ? { decimals: token.decimals, mint, symbol: token.symbol }
-    : { mint, symbol: mint.length <= 12 ? mint : `${mint.slice(0, 4)}…${mint.slice(-4)}` };
+    : { mint, symbol: mint.length <= 12 ? mint : truncateMiddle(mint, 4, 4) };
 }
 
 /** The first provider-declared deposit asset, resolved without assuming a cluster or stablecoin. */
@@ -53,8 +55,6 @@ export function sumDecimalStrings(values: readonly string[]): string | undefined
   return formatDecimalAmount(total, scale);
 }
 
-export { formatProviderAmount } from "./earn-format";
-
 /** APY is a decimal rate (`0.062` = 6.2%); absent and malformed values stay unavailable. */
 export function formatProviderApy(value: string | undefined, locale: string): string {
   if (value === undefined || !isDecimalString(value)) return "—";
@@ -67,8 +67,30 @@ export function formatProviderApy(value: string | undefined, locale: string): st
   }).format(rate);
 }
 
-export function shortenMarketAddress(value: string): string {
-  return value.length <= 16 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;
+/**
+ * The one transaction row both vault modals render: the signature shortened,
+ * the cluster's explorer one click away. The cluster comes resolved from the
+ * caller — a deposit reads it off the strategy, a withdrawal off the
+ * environment.
+ */
+export function TransactionLink({
+  signature,
+  cluster,
+}: {
+  signature: string;
+  cluster: SolanaCluster;
+}) {
+  return (
+    <a
+      className="inline-flex items-center gap-1 text-secondary underline decoration-border-strong underline-offset-4 transition-colors hover:text-primary"
+      href={explorerTxUrl(signature, cluster)}
+      rel="noreferrer"
+      target="_blank"
+    >
+      {shortenMarketAddress(signature)}
+      <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
+    </a>
+  );
 }
 
 /**
@@ -96,31 +118,5 @@ export function EarnDepositAvailabilityBadge({
     <Badge variant={availability === "available" ? "default" : "outline"}>
       {earnDepositAvailabilityLabel(availability, labels, strategy, t)}
     </Badge>
-  );
-}
-
-/** One strategy identity component shared by Treasury and Earn Program. */
-export function EarnStrategyIdentity({
-  showAssetMark = true,
-  strategy,
-}: {
-  showAssetMark?: boolean;
-  strategy: EarnStrategy;
-}) {
-  const asset = earnStrategyAsset(strategy);
-  return (
-    <div className="flex min-w-0 items-center gap-3">
-      {showAssetMark && asset ? (
-        <TokenMark mint={asset.mint} size="md" symbol={asset.symbol} />
-      ) : null}
-      <div className="min-w-0">
-        <p className="line-clamp-2 break-words text-sm text-primary" title={strategy.name}>
-          {strategy.name}
-        </p>
-        <p className="mt-0.5 truncate text-xs text-tertiary">
-          {[asset?.symbol, earnProviderLabel(strategy.provider)].filter(Boolean).join(" · ")}
-        </p>
-      </div>
-    </div>
   );
 }

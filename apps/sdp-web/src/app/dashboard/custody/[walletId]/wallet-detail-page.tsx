@@ -9,6 +9,7 @@ import { ListChecks, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
+import { fetchConnectionInstallation } from "@/app/dashboard/custody/connections/connection-detail.data";
 import {
   formatCustodyProviderName,
   getCustodyProviderCategory,
@@ -32,7 +33,7 @@ import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { issuance, policies } from "@/flags";
+import { issuance, policies, privyByok } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -211,8 +212,14 @@ export default async function WalletDetailPage({
 }: {
   params: Promise<{ walletId: string }>;
 }) {
-  const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled, policiesEnabled] =
-    await Promise.all([getTranslations(), auth(), params, issuance(), policies()]);
+  const [
+    t,
+    { userId, orgId, orgRole },
+    { walletId },
+    issuanceEnabled,
+    policiesEnabled,
+    byokEnabled,
+  ] = await Promise.all([getTranslations(), auth(), params, issuance(), policies(), privyByok()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -249,6 +256,13 @@ export default async function WalletDetailPage({
     ? formatCustodyProviderName(provider)
     : t("DashboardCustody.unknown");
   const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
+  // The connection label is optional; retain the wallet and its connection id if lookup fails.
+  const connection =
+    byokEnabled && canManageCustody && wallet.custodyConnectionId
+      ? await fetchConnectionInstallation(apiClient.request, wallet.custodyConnectionId).catch(
+          () => null
+        )
+      : null;
 
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
@@ -330,6 +344,17 @@ export default async function WalletDetailPage({
                 <WalletInfoRow
                   label={t("DashboardCustody.provider")}
                   value={formatCustodyProviderName(provider)}
+                />
+              ) : null}
+              {wallet.custodyConnectionId ? (
+                <WalletInfoRow
+                  label={t("DashboardCustody.connection")}
+                  value={connection?.label ?? truncateMiddle(wallet.custodyConnectionId)}
+                  href={
+                    byokEnabled && canManageCustody
+                      ? `/dashboard/integrations/${connection?.provider ?? provider ?? "privy"}/connections/${wallet.custodyConnectionId}`
+                      : undefined
+                  }
                 />
               ) : null}
               {purposeLabel ? (
@@ -686,25 +711,33 @@ function WalletInfoRow({
   value,
   monospace = false,
   trailing,
+  href,
 }: {
   label: string;
   value: string;
   monospace?: boolean;
   trailing?: ReactNode;
+  /** Renders the value as a link to the record it names. */
+  href?: string;
 }) {
+  const valueClassName = [
+    "truncate text-right text-[15px] text-primary",
+    monospace ? "font-mono text-xs" : "",
+  ].join(" ");
+
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0">
       <p className="text-[15px] text-secondary">{label}</p>
       <div className="flex min-w-0 items-center gap-2">
-        <p
-          className={[
-            "truncate text-right text-[15px] text-primary",
-            monospace ? "font-mono text-xs" : "",
-          ].join(" ")}
-          title={value}
-        >
-          {value}
-        </p>
+        {href ? (
+          <Link className={`${valueClassName} hover:underline`} href={href} title={value}>
+            {value}
+          </Link>
+        ) : (
+          <p className={valueClassName} title={value}>
+            {value}
+          </p>
+        )}
         {trailing}
       </div>
     </div>

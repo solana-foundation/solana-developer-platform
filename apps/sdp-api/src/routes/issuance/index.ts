@@ -10,6 +10,8 @@ import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   addAllowlistEntry,
+  extractAllowlistAddPolicyCandidate,
+  extractAllowlistRemovePolicyCandidate,
   listAllowlist,
   listAllowlistLabels,
   removeAllowlistEntry,
@@ -41,6 +43,7 @@ import {
 import {
   confirmDeploy,
   deployToken,
+  extractDeployPolicyCandidate,
   prepareDeploy,
   prepareDeployMetadata,
 } from "./handlers/deploy";
@@ -74,7 +77,14 @@ import {
 import { executeSeize, extractSeizePolicyCandidate, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
-import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
+import {
+  createToken,
+  extractTokenUpdatePolicyCandidate,
+  getToken,
+  listTokenFacets,
+  listTokens,
+  updateToken,
+} from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
 import type { AppContext } from "./helpers";
 import {
@@ -152,6 +162,7 @@ issuance.patch(
   "/tokens/:tokenId",
   requirePermissions("tokens:write"),
   validateBody(updateTokenSchema),
+  policyGate({ extract: extractTokenUpdatePolicyCandidate }),
   updateToken
 );
 
@@ -160,6 +171,7 @@ issuance.post(
   "/tokens/:tokenId/deploy",
   requirePermissions("tokens:write"),
   validateBody(deployTokenSchema),
+  policyGate({ extract: extractDeployPolicyCandidate }),
   deployToken
 );
 issuance.post(
@@ -408,11 +420,13 @@ issuance.post(
   "/tokens/:tokenId/allowlist",
   requirePermissions("tokens:write"),
   validateBody(addAllowlistSchema),
+  policyGate({ extract: extractAllowlistAddPolicyCandidate }),
   addAllowlistEntry
 );
 issuance.delete(
   "/tokens/:tokenId/allowlist/:entryId",
   requirePermissions("tokens:write"),
+  policyGate({ extract: extractAllowlistRemovePolicyCandidate }),
   removeAllowlistEntry
 );
 

@@ -1,7 +1,11 @@
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { logEvent } from "@/runtime/money-path-events";
-import { reconcileEarnVaultMovementBatch } from "@/services/earn/vault-movement-reconciliation.service";
+import {
+  reconcileEarnVaultMovementBatch,
+  repairUnvaluedWithdrawalPayouts,
+} from "@/services/earn/vault-movement-reconciliation.service";
+import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queued-withdrawal-reconciliation.service";
 import type { Env } from "@/types/env";
 
 const OUTBOX_BATCH_SIZE = 256;
@@ -40,10 +44,37 @@ const OUTBOX_BATCH_SIZE = 256;
  * fabricated one.
  */
 export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
-  const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const movements = await ledger.claimUnsettledVaultMovements(OUTBOX_BATCH_SIZE);
-  const stats = await reconcileEarnVaultMovementBatch(env, movements);
-  const backlogStats = await ledger.getUnsettledVaultMovementStats();
+  // Start the independent queue/PDA projection before touching the instant
+  // movement ledger. Even a persistent claim/payout/backlog query failure must
+  // not strand escrowed shares by preventing this sibling from running.
+  const queuedRun = reconcileEarnVaultQueuedWithdrawals(env).then(
+    () => null,
+    (error: unknown) => error
+  );
+  let ledger: ReturnType<typeof createPostgresEarnMovementsRepository>;
+  let movements: Awaited<ReturnType<typeof ledger.claimUnsettledVaultMovements>>;
+  let stats: Awaited<ReturnType<typeof reconcileEarnVaultMovementBatch>>;
+  let payoutRepair: Awaited<ReturnType<typeof repairUnvaluedWithdrawalPayouts>>;
+  let backlogStats: Awaited<ReturnType<typeof ledger.getUnsettledVaultMovementStats>>;
+  try {
+    ledger = createPostgresEarnMovementsRepository(getDb(env));
+    movements = await ledger.claimUnsettledVaultMovements(OUTBOX_BATCH_SIZE);
+    stats = await reconcileEarnVaultMovementBatch(env, movements);
+    // Second chance for withdrawal payouts the settlement could not observe;
+    // a failed history read must not understate `totalWithdrawn` forever.
+    payoutRepair = await repairUnvaluedWithdrawalPayouts(env);
+    backlogStats = await ledger.getUnsettledVaultMovementStats();
+  } catch (movementPipelineFailure) {
+    const queuedWithdrawalFailure = await queuedRun;
+    if (queuedWithdrawalFailure !== null) {
+      throw new AggregateError(
+        [movementPipelineFailure, queuedWithdrawalFailure],
+        "Earn vault movement and queued-withdrawal reconciliation both failed"
+      );
+    }
+    throw movementPipelineFailure;
+  }
+  const queuedWithdrawalFailure = await queuedRun;
 
   // Per-movement failures count toward the verdict too, not just chain reads:
   // a Postgres pool exhaustion or a send-side RPC outage makes every
@@ -51,7 +82,11 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   // reporting that batch as an ok tick is the same EARN-006 silence this job
   // exists to close. Same posture as the sponsorship reconciler, which emits
   // its tick and then throws an AggregateError when any item failed.
-  const failures = stats.statusReadFailures + stats.blockHeightReadFailures + stats.movementErrors;
+  const failures =
+    stats.statusReadFailures +
+    stats.blockHeightReadFailures +
+    stats.movementErrors +
+    payoutRepair.errors;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_reconciliation_tick",
     claimed: stats.claimed,
@@ -75,14 +110,29 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     // total, so a stuck withdrawal is visible without disaggregating.
     oldest_withdrawal_age_seconds: ageInSeconds(backlogStats.oldestWithdrawalCreatedAt),
     batch_saturated: movements.length === OUTBOX_BATCH_SIZE,
+    payout_repair_claimed: payoutRepair.claimed,
+    payout_repair_repaired: payoutRepair.repaired,
+    payout_repair_unobserved: payoutRepair.unobserved,
+    payout_repair_errors: payoutRepair.errors,
   });
 
   if (failures > 0) {
-    throw new Error(
+    const movementFailure = new Error(
       `Earn vault reconciliation failed ` +
         `(${stats.statusReadFailures} status-read, ${stats.blockHeightReadFailures} block-height, ` +
-        `${stats.movementErrors} per-movement failures) over ${stats.claimed} claimed movements`
+        `${stats.movementErrors} per-movement failures, ${payoutRepair.errors} payout-repair failures) ` +
+        `over ${stats.claimed} claimed movements`
     );
+    if (queuedWithdrawalFailure !== null) {
+      throw new AggregateError(
+        [movementFailure, queuedWithdrawalFailure],
+        "Earn vault movement and queued-withdrawal reconciliation both failed"
+      );
+    }
+    throw movementFailure;
+  }
+  if (queuedWithdrawalFailure !== null) {
+    throw queuedWithdrawalFailure;
   }
 }
 

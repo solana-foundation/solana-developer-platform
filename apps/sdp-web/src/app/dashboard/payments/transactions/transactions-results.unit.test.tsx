@@ -115,12 +115,18 @@ describe("TransactionsResults", () => {
       fireEvent.click(screen.getByText("Pay"));
     });
     expect(screen.getByText("Transaction details")).toBeDefined();
-    expect(screen.getByText("View in Payments").closest("a")?.getAttribute("href")).toContain(
-      "/dashboard/"
-    );
+    expect(screen.queryByText("View in Payments")).toBeNull();
     expect(screen.getByText("cpty_test").closest("a")?.getAttribute("href")).toBe(
       "/dashboard/payments/counterparty/cpty_test"
     );
+  });
+
+  it("keeps the link to a transaction's distinct module detail", () => {
+    renderResults({ transactions: [DVP_LEG], nextCursor: null }, { cursors: [] });
+    fireEvent.click(screen.getByText("Fund leg"));
+    expect(
+      screen.getByText("View in Delivery vs Payments").closest("a")?.getAttribute("href")
+    ).toBe("/dashboard/markets/dvp/dvp_trade");
   });
 
   it("shows the empty state when nothing matches", () => {

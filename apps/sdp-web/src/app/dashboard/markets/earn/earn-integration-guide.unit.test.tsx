@@ -65,6 +65,19 @@ const productionOnlyStrategy: EarnStrategy = {
   withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
 };
 
+/** Veda deposits stay sandbox-only until it names a production vault (PRO-1777). */
+const sandboxOnlyStrategy: EarnStrategy = {
+  ...liveStrategy,
+  id: "earn_strategy_veda",
+  provider: "veda",
+  providerReference: "VedaVault1111111111111111111111111111111111",
+  name: "Veda Treasury Fund",
+  sourceKind: "rwa",
+  shareMint: "ShareVeda1111111111111111111111111111111111",
+  depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+  withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+};
+
 const mocks = vi.hoisted(() => ({
   environment: "sandbox" as SdpEnvironment,
   strategyClusters: [] as Array<SolanaCluster | undefined>,
@@ -84,7 +97,7 @@ vi.mock("./earn-program-data", () => ({
         ? mocks.mainnetLoading
           ? undefined
           : [mainnetStrategy]
-        : [liveStrategy, secondLiveStrategy, productionOnlyStrategy],
+        : [liveStrategy, secondLiveStrategy, productionOnlyStrategy, sandboxOnlyStrategy],
       error: undefined,
       isLoading: mainnet && mocks.mainnetLoading,
     };
@@ -136,16 +149,25 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getByText("Kamino · Instant liquidity · 6.2% APY")).toBeTruthy();
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
 
-    // All four concerns stay visible as navigation, while only the active code
+    // All five concerns stay visible as navigation, while only the active code
     // slice renders. This keeps the whole flow findable without a wizard.
-    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw"];
+    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw", "Asynchronous exits"];
     const serverFlow = screen.getByLabelText("Server flow");
-    expect(within(serverFlow).getAllByRole("button")).toHaveLength(4);
+    expect(within(serverFlow).getAllByRole("button")).toHaveLength(5);
     expect(
       within(serverFlow).getByRole("button", { name: "Client" }).getAttribute("aria-pressed")
     ).toBe("true");
     expect(screen.getAllByText("embedded-yield.ts")).toHaveLength(1);
-    expect(screen.getByText("Keep SDP_API_KEY on your server, never in the client.")).toBeTruthy();
+    // The key callout says which key, says it covers Earn, and links to where it
+    // is made. A warning with no way to act on it is not guidance.
+    expect(
+      screen.getByText(
+        /for this project \(it includes earn:read and earn:write\)\. Keep it on your server, never in the client\./
+      )
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Developer API key" }).getAttribute("href")).toBe(
+      "/dashboard/api-keys"
+    );
 
     // The snippet is the REAL B2B2C contract (PRO-1722): build the unsigned
     // transaction, the customer's wallet signs, submit the signed bytes. The
@@ -166,15 +188,23 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("/v1/earn/external-wallet/deposits");
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
     expect(code).not.toContain("crypto.randomUUID()");
-    expect(code).toContain('"id": "earn_strategy_live"');
+    expect(code).toContain('const STRATEGY_ID = "earn_strategy_live"');
     expect(code).toContain("/v1/earn/strategies?page=1&pageSize=100");
     expect(code).toContain("ownerAddress");
-    expect(code).not.toContain("/v1/earn/vault-deposit-previews");
-    expect(code).not.toContain("/v1/earn/external-wallet/withdrawal-previews");
+    // The preview helpers ship for every strategy, but a strategy with no
+    // slippage contract must not compute or send a floor from one.
+    expect(code).toContain("const minSharesOut = undefined");
+    expect(code).toContain("const minAmountOut = undefined");
+    expect(code).not.toContain("floorForTolerance(quote.sharesOut");
+    expect(code).not.toContain("floorForTolerance(quote.assetsOut");
     expect(code).toContain("signedTransaction");
     expect(code).toContain("feePayer?: string");
-    expect(code).toContain("sourceTokenMint: EMBEDDED_YIELD_STRATEGY.directDepositMint");
-    expect(code.match(/return data\.transaction;/g)).toHaveLength(2);
+    // The deposit body names the strategy by id only; the old client-side
+    // strategy object and its source mint are gone from the copied module.
+    expect(code).toContain("strategyId: STRATEGY_ID");
+    expect(code).not.toContain("sourceTokenMint");
+    expect(code).not.toContain("EMBEDDED_YIELD_STRATEGY");
+    expect(code.match(/return data\.transaction;/g)).toHaveLength(4);
     expect(code).not.toContain("custodyWalletId");
     expect(code).not.toContain("vault-deposits");
     expect(code).not.toContain("requestId");
@@ -191,7 +221,11 @@ describe("EarnIntegrationGuide", () => {
     expect(code).not.toContain("/v1/earn/external-wallet/positions/");
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-transactions");
     expect(code).toContain("/v1/earn/external-wallet/withdrawals");
+    expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-transactions");
+    expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-cancel-transactions");
     expect(code).toContain("waitForEarnMovement");
+    expect(code).toContain("intervalMs = 1_000");
+    expect(code).toContain('movement.status === "confirmed"');
     expect(code).toContain('movement.status === "finalized"');
     expect(code).not.toContain("Buffer.from");
     expect(code).toContain("earnedUnavailableReason");
@@ -250,7 +284,7 @@ describe("EarnIntegrationGuide", () => {
     // rendered as code.
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/different network from this project/)).toBeTruthy();
-    expect(screen.queryByText(/"id": "earn_strategy_mainnet"/)).toBeNull();
+    expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeNull();
 
     await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
     const mainnetRow = await screen.findByRole("option", {
@@ -287,14 +321,14 @@ describe("EarnIntegrationGuide", () => {
     );
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.queryByText(/"id": "earn_strategy_mainnet"/)).toBeNull();
+    expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeNull();
   });
 
   it("generates quote-derived deposit and withdrawal floors for Veda", () => {
+    // The snippet builder reads only the id and the two slippage contracts; the
+    // provider no longer shapes the copied module.
     const sections = buildEarnIntegrationSections({
-      ...liveStrategy,
       id: "earn_strategy_veda",
-      provider: "veda",
       depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
       withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
     });
@@ -319,7 +353,7 @@ describe("EarnIntegrationGuide", () => {
 
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(screen.getByText("earn_strategy_live")).toBeTruthy();
-    expect(screen.getByText(/"id": "earn_strategy_live"/)).toBeTruthy();
+    expect(screen.getByText(/STRATEGY_ID = "earn_strategy_live"/)).toBeTruthy();
   });
 
   it("keeps the strategy dropdown available when a deep-linked id no longer resolves", () => {
@@ -349,7 +383,7 @@ describe("EarnIntegrationGuide", () => {
     await user.click(await screen.findByRole("option", { name: /Kamino Growth Vault.*8\.1%/ }));
 
     expect(screen.getByText("earn_strategy_growth")).toBeTruthy();
-    expect(screen.getByText(/"id": "earn_strategy_growth"/)).toBeTruthy();
+    expect(screen.getByText(/STRATEGY_ID = "earn_strategy_growth"/)).toBeTruthy();
     expect(screen.queryByText("earn_strategy_live")).toBeNull();
   });
 
@@ -369,7 +403,7 @@ describe("EarnIntegrationGuide", () => {
     // Deep link: the explanation says production-only, not sandbox-only.
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
     expect(screen.getByText(/Production projects only/)).toBeTruthy();
-    expect(screen.queryByText(/sandbox-only/)).toBeNull();
+    expect(screen.queryByText(/Sandbox projects only/)).toBeNull();
 
     // Dropdown: the disabled row carries the same verdict.
     await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
@@ -384,13 +418,16 @@ describe("EarnIntegrationGuide", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
         earnHref="/dashboard/markets/embedded-yield"
-        providerAccess={providerAccess}
-        strategyId="earn_strategy_live"
+        providerAccess={{
+          ...providerAccess,
+          veda: { entitled: true, configured: true, enabled: true },
+        }}
+        strategyId={sandboxOnlyStrategy.id}
       />
     );
 
     expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.getByText(/sandbox-only/)).toBeTruthy();
+    expect(screen.getByText(/Sandbox projects only/)).toBeTruthy();
     expect(screen.queryByText("2. Set up the server code")).toBeNull();
   });
 

@@ -64,14 +64,15 @@ capability to demand until you read it as ADR 0002's exit-safety rule: the queue
 is Veda's durable exit, and SDP will not open a position in a vault whose exit
 infrastructure is not configured and wired to that vault.
 
-It gates only the way IN. The catalogue read, position reads and any future exit
-path never call it, so it can never trap funds — only decline to create them.
+It gates only the way IN. The catalogue read, position reads, instant exit and
+queued-exit lifecycle never call it, so it can never trap funds — only decline
+to create them.
 
 Verdicts are cached per (cluster, endpoint, vault) for ten minutes.
 **Failures are never cached**: an incompatible or unreachable deployment is
 re-checked, not remembered.
 
-## The INSTANT exit is implemented; the QUEUE deliberately is not
+## Instant and queued exits are separate, implemented capabilities
 
 `VedaVaultDirectClient` implements `buildVaultWithdrawal` (ADR 0003 — "instant
 lands first, and alone"): burn shares, receive the vault asset, one
@@ -86,12 +87,14 @@ own refusals — `RESTRICTED_REDEMPTION` when a withdraw authority is set,
 `SHARE_LOCKED` inside the post-deposit lock window — surface as
 `WITHDRAW_REFUSED` with the SDK's own sentence, which the API maps to a 400.
 
-Veda's OTHER exit, the request → fulfil → cancel queue, stays unimplemented:
-its lifecycle is settled by a solver Veda operates and does not fit the
-movement model, so it waits on its own capability and schema (ADR 0003 §4).
-Implementing only the instant half is not auto-selecting a route — the caller
-asked for an immediate redemption and gets exactly that or a typed refusal;
-SDP never silently substitutes the queue.
+Veda's OTHER exit is exposed through `EarnVaultQueuedWithdrawProvider`, not the
+instant movement interface. The package reads queue limits, previews and builds
+the request, returns its deterministic request PDA, reads open/request state,
+builds post-deadline cancellation, and parses requested/cancelled/fulfilled
+events. Veda's solver owns fulfilment; SDP observes that landed account/event
+truth and never treats the SDK preview in `expectedRequest` as settlement.
+Both capabilities are reported independently, and SDP never silently
+substitutes one for the other.
 
 ## Slippage protection is never invented
 
@@ -150,7 +153,7 @@ contract first.
 
 ## Rent: the SDK hardcodes the owner as payer, so `rentPayer` is a payer SWAP
 
-Veda's `buildDeposit`/`buildWithdraw` create associated token accounts
+Veda's `buildDeposit`/`buildWithdraw`/`buildRequestWithdrawal` create associated token accounts
 idempotently (owner's share account + vault's asset account on the way in,
 owner's asset account on the way out) with the OWNER as funding payer — the
 SDK's `DepositInput` carries no payer knob at all (0.1.0-alpha.1). Left alone
@@ -187,14 +190,26 @@ discriminator, `allowed_user` at account index 14, the 57-byte size) are
 pinned to the committed IDL by `allowed-user.test.ts`, in the same falsifiable
 style as `idl-layout.test.ts`.
 
-Withdrawals deliberately skip the prefund: the withdraw instruction reads the
+Instant withdrawals deliberately skip the prefund: the withdraw instruction reads the
 same PDA, but a wallet can only redeem shares it deposited, so the record
 always exists by exit time.
+
+A queued request has two analogous program-internal creates: the 120-byte
+request account every time and the 16-byte per-user nonce account on the first
+request. `src/queue-rent.ts` recognizes the exact queue instruction
+discriminators and committed account positions. A sponsored build reads both
+live rent minima and pre-funds the owner with their sum before the request; it
+never estimates rent or assumes the one-time account exists. The same helper
+extracts the request PDA only from one unambiguous request instruction whose
+program and signer match the expected queue and owner.
 
 ## Positions are read in base units, and the valuation may be absent
 
 `getUserPosition` returns an exact atomic `bigint` for the share balance —
 never a JSON `uiAmount`, which loses value above 2^53 base units.
+The SDK's `unlockTimestamp` is carried to the Earn snapshot as an epoch-second
+string (or null), and `withdrawableShares` is zero until that instant because
+the Boring vault lock covers the holder's whole share account.
 
 `tokenValue` comes from `previewWithdraw`, so the figure is the vault's own
 accounting including its oracle and any withdraw premium, rather than
@@ -241,11 +256,26 @@ the committed IDLs against the SDK's shipped copies AND their recorded SHA-256s.
 Veda ABI change would otherwise become a silently wrong share mint on a
 customer's row. If Veda changes the ABI, this fails on the next `pnpm install`.
 
-`sdk.smoke.test.ts` is the exception to the offline rule: env-gated, skipped
-when unset, so CI never runs it. It takes its deployment from the environment
+`sdk.smoke.test.ts` is an env-gated live-RPC diagnostic, skipped when unset. It takes its deployment from the environment
 (rather than `VEDA_DEPLOYMENTS`) so it can exercise a candidate deployment
-before it is committed, and it is the only thing that can prove the
-integration works.
+before it is committed. It proves candidate addresses can be reached and read;
+it is not the committed value-moving lifecycle proof.
+
+`sdk.surfpool.test.ts` is the isolated real-program value-moving proof used by
+the Docker Surfpool runner. It clones the confirmed devnet deployment into a local ledger,
+deposits, waits through the share lock, requests the minimum valid queued exit,
+proves shares reached queue escrow, proves early cancellation is refused, warps
+past the deadline, cancels, and proves the shares and escrow balance return. It
+also retains both transaction signatures, fetches their finalized logs, and
+requires production `parseVedaWithdrawalLifecycleEvents` to decode the matching
+requested and cancelled events that the API reconciler trusts.
+
+Run that proof through its container-only entrypoint:
+
+```bash
+VEDA_SURFPOOL_DEVNET_RPC_URL=https://api.devnet.solana.com \
+scripts/kora-surfpool/e2e-veda.sh
+```
 
 ```bash
 VEDA_SMOKE_RPC_URL=https://api.devnet.solana.com \
@@ -256,6 +286,7 @@ pnpm --filter @sdp/veda test
 ```
 
 DEVNET only. Veda's own checklist requires their separate approval for any
-value-moving mainnet test, and Veda's entry in
-`EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` is sandbox-only for the same
-reason.
+value-moving mainnet test, and `VEDA_DEPLOYMENTS["mainnet-beta"]` stays null
+for the same reason: `EARN_PROVIDER_DEPLOYED_CLUSTERS` derives Veda's deposit
+environments from that table, so production deposits open only when PRO-1777
+fills it.

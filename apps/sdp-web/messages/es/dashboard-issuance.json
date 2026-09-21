@@ -237,7 +237,11 @@
       "error": "No se pudo cargar la actividad.",
       "recentTitle": "Actividad reciente",
       "viewAll": "Ver todo",
-      "actorSystem": "Sistema"
+      "actorSystem": "Sistema",
+      "createToken": "Crear Token",
+      "createAssetProfile": "Crear perfil de activo",
+      "approveRecipient": "Aprobar destinatario",
+      "removeRecipient": "Quitar destinatario"
     },
     "permissions": {
       "managedBadge": "Administrado por SDP",
@@ -566,7 +570,8 @@
       "pauseImpactWarning": "Esto afecta a todos los tenedores: no podrán enviar este Token ni hacer pagos con él. La creación de nuevos Tokens también quedará bloqueada una vez que se confirme la pausa.",
       "unpauseImpactWarning": "Una vez confirmada, esto levanta la pausa de todo el Token. Los tenedores elegibles podrán volver a enviar este Token y hacer pagos, y las Wallets autorizadas podrán crear nuevos Tokens. Asegúrate de que se haya resuelto el motivo de la pausa.",
       "requiredSignerAmbiguous": "Más de una Wallet controlada coincide con el firmante requerido. Resuelve el conflicto de Wallet antes de reintentar.",
-      "signingUnavailable": "La firma está deshabilitada para esta Wallet."
+      "signingUnavailable": "La firma está deshabilitada para esta Wallet.",
+      "supplyLocked": "Suministro bloqueado"
     },
     "forms": {
       "saveMetadata": "Guardar metadatos",
@@ -1005,14 +1010,6 @@
       "transferHook": "Reglas de transferencia personalizadas",
       "transferHookDescription": "Enruta las transferencias a través de un programa de reglas que tú proporcionas para validaciones adicionales.",
       "transferHookProgramId": "ID del programa",
-      "confidentialTransfers": "Saldos confidenciales",
-      "confidentialTransfersDescription": "Cifra los saldos y montos de transferencia en la cadena; solo el titular (y un auditor opcional) pueden descifrarlos. Solo en devnet.",
-      "confidentialTransfersPolicy": "Aprobación de cuenta",
-      "confidentialTransfersPolicyHint": "Con lista blanca, la autoridad confidencial debe aprobar cada cuenta antes de que pueda operar. Con adhesión voluntaria, se aprueba automáticamente.",
-      "confidentialTransfersPolicyOptIn": "Adhesión voluntaria (aprobación automática)",
-      "confidentialTransfersPolicyWhitelist": "Lista blanca (aprobación manual)",
-      "confidentialTransfersAuditorElgamalPubkey": "Clave pública del auditor",
-      "confidentialTransfersAuditorElgamalPubkeyHint": "Clave pública ElGamal opcional que puede descifrar cada monto de transferencia confidencial para revisión de cumplimiento.",
       "advancedSettingsTitle": "Configuración avanzada",
       "showTechnicalDetail": "Ver",
       "deployPreview": "Vista previa del despliegue",
@@ -1445,14 +1442,7 @@
         "seize": "Incautar",
         "force_burn": "Forzar burn",
         "burn": "Burn",
-        "mint": "Mint",
-        "confidential_configure": "Configurar cuenta confidencial",
-        "confidential_approve": "Aprobar cuenta confidencial",
-        "confidential_deposit": "Depositar en saldo confidencial",
-        "confidential_apply_pending": "Aplicar saldo confidencial pendiente",
-        "confidential_transfer": "Transferencia confidencial",
-        "confidential_withdraw": "Retirar de saldo confidencial",
-        "confidential_empty_account": "Vaciar cuenta confidencial"
+        "mint": "Mint"
       },
       "actionDescriptions": {
         "allowlist_add": "Agrega la Wallet al allowlist de este activo para que pueda mantener y transferir.",
@@ -1467,14 +1457,7 @@
         "seize": "Transfiere por la fuerza el saldo de un tenedor a otra Wallet. No se puede deshacer.",
         "force_burn": "Destruye Tokens de la Wallet de un tenedor. No se puede deshacer.",
         "burn": "Destruye Tokens de tu propio saldo de tesorería. No se puede deshacer.",
-        "mint": "Emite Tokens nuevos a una Wallet. No se puede deshacer.",
-        "confidential_configure": "Configura una cuenta de Token para transferencias confidenciales (saldo cifrado).",
-        "confidential_approve": "Aprueba una cuenta configurada para que pueda operar confidencialmente (política de whitelist).",
-        "confidential_deposit": "Mueve Tokens del saldo público al saldo confidencial pendiente.",
-        "confidential_apply_pending": "Aplica el saldo confidencial pendiente al saldo disponible.",
-        "confidential_transfer": "Transfiere un monto cifrado al saldo confidencial de otra Wallet. El monto no es visible después.",
-        "confidential_withdraw": "Mueve Tokens del saldo confidencial disponible de vuelta al saldo público.",
-        "confidential_empty_account": "Cierra los saldos de una cuenta confidencial una vez retirados a cero."
+        "mint": "Emite Tokens nuevos a una Wallet. No se puede deshacer."
       },
       "statusLabels": {
         "awaiting_review": "En espera de revisión",

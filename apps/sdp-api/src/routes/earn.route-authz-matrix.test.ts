@@ -54,8 +54,17 @@ const EARN_ROUTE_SCOPES: Record<string, EarnRouteDeclaration> = {
   "GET /vault-deposits/:movementId": keyed("earn:read", "wallets:read"),
   "POST /vault-withdrawals": keyed("earn:write", "wallets:read"),
   "POST /vault-withdrawal-previews": keyed("earn:read", "wallets:read"),
+  "POST /vault-withdrawal-options": keyed("earn:read", "wallets:read"),
+  "POST /vault-queued-withdrawal-previews": keyed("earn:read", "wallets:read"),
   "GET /vault-withdrawals": keyed("earn:read", "wallets:read"),
   "GET /vault-withdrawals/:movementId": keyed("earn:read", "wallets:read"),
+  "POST /vault-withdrawal-requests": keyed("earn:write", "wallets:read"),
+  "GET /vault-withdrawal-requests": keyed("earn:read", "wallets:read"),
+  "GET /vault-withdrawal-requests/:withdrawalRequestId": keyed("earn:read", "wallets:read"),
+  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel": keyed(
+    "earn:write",
+    "wallets:read"
+  ),
   "GET /vault-positions": keyed("earn:read", "wallets:read"),
   "GET /vault-share-reconciliation": keyed("earn:read", "wallets:read"),
   // External-wallet money (customer signs; the owner's signature is the final
@@ -64,7 +73,15 @@ const EARN_ROUTE_SCOPES: Record<string, EarnRouteDeclaration> = {
   "POST /external-wallet/deposits": keyed("earn:write"),
   "POST /external-wallet/withdrawal-previews": keyless("earn:read"),
   "POST /external-wallet/withdrawal-transactions": keyless("earn:write"),
+  "POST /external-wallet/withdrawal-options": keyless("earn:read"),
+  "POST /external-wallet/queued-withdrawal-previews": keyless("earn:read"),
+  "POST /external-wallet/withdrawal-request-transactions": keyless("earn:write"),
+  "POST /external-wallet/withdrawal-request-cancel-transactions": keyless("earn:write"),
   "POST /external-wallet/withdrawals": keyed("earn:write"),
+  "POST /external-wallet/withdrawal-requests": keyed("earn:write"),
+  "POST /external-wallet/withdrawal-request-cancellations": keyed("earn:write"),
+  "GET /external-wallet/withdrawal-requests": keyed("earn:read"),
+  "GET /external-wallet/withdrawal-requests/:withdrawalRequestId": keyed("earn:read"),
   // Unified feed
   "GET /movements": keyed("earn:read", "wallets:read"),
   // Managed programs
@@ -252,6 +269,18 @@ describe("route tier conformance", () => {
       expect(res.status, route).toBe(401);
       const body = (await res.json()) as ErrorBody;
       expect(body.error.code, route).toBe("INVALID_API_KEY");
+    }
+  );
+
+  it.each(KEYLESS_ROUTES.map((route) => ({ route })))(
+    "$route rejects a malformed bearer token instead of returning an internal error",
+    async ({ route }) => {
+      const res = await requestAsKey(route, "invalid");
+
+      expect(res.status, route).toBe(401);
+      const body = (await res.json()) as ErrorBody;
+      expect(body.error.code, route).toBe("UNAUTHORIZED");
+      expect(body.error.message, route).toBe("Invalid Clerk token");
     }
   );
 

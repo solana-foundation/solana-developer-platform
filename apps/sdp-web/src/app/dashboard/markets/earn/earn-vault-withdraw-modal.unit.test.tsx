@@ -184,6 +184,27 @@ describe("EarnVaultWithdrawModal", () => {
       projectBalance: true,
     });
   });
+
+  it("renders a confirmed withdrawal as complete while finalization continues", async () => {
+    const confirmed = withdrawal("confirmed");
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "withdrawal", withdrawal: confirmed },
+    });
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+
+    expect(await screen.findByText("Withdrawal complete")).toBeTruthy();
+    expect(screen.getByText(/confirmed on Solana and complete in the dashboard/)).toBeTruthy();
+    expect(screen.getByText("Active")).toBeTruthy();
+    expect(document.querySelector(".earn-processing-modal")).toBeNull();
+    expect(document.querySelector('[data-earn-outcome="success"]')).toBeTruthy();
+    expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeTruthy();
+  });
 });
 
 describe("exit slippage floors (quote-derived)", () => {
@@ -295,6 +316,119 @@ describe("exit slippage floors (quote-derived)", () => {
     expect(toleranceInput.value).toBe("10");
     await vi.waitFor(() => {
       expect(mocks.fetchEarnVaultWithdrawalPreview.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("replays a kept key's exit floor verbatim after an ambiguous failure", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "4.997",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      })
+      .mockResolvedValue({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "2.5",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      });
+    // A 5xx is the ambiguous case: the API may have recorded and broadcast the
+    // exit, and the key stays live in the store either way.
+    mocks.createEarnVaultWithdrawal
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "Bad gateway",
+        status: 503,
+        body: null,
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    // enterVedaShares hands back real timers before its confirm click; the
+    // second arm needs the fake clock again for the debounced quote.
+    vi.useFakeTimers();
+    renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+
+    // The retry is the SAME request under the SAME key, so it must carry the
+    // floor that key was MINTED with — not a fresh floor off the moved rate.
+    // A re-derived floor would conflict with the API's recorded fingerprint
+    // (a 409), retire the key, and let the next submit exit a second time
+    // while the first attempt may already have executed.
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0]).toMatchObject({
+      minAmountOut: "4.992003",
+    });
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+    );
+  });
+
+  it("stops a reused key whose exit floor memo was lost: error copy, no POST", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "4.997",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      })
+      .mockResolvedValue({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "2.5",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      });
+    mocks.createEarnVaultWithdrawal.mockResolvedValueOnce({
+      ok: false,
+      error: "Bad gateway",
+      status: 503,
+      body: null,
+    });
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    // The floor memo is bounded and stored separately from the key store, so
+    // a busy session can evict a live key's floor while the key lives on.
+    // Simulate that eviction at the storage tier.
+    sessionStorage.removeItem("sdp:earn:vault-withdrawal:floor:v1");
+
+    // enterVedaShares hands back real timers before its confirm click; the
+    // second arm needs the fake clock again for the debounced quote.
+    vi.useFakeTimers();
+    renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+
+    // The retry must NOT go out under a freshly derived floor: that pairs the
+    // live key with a changed request, and the API's 409 retires the key while
+    // the ambiguous first attempt may already have executed. The submission
+    // stops with its own words instead, key untouched.
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/could not confirm the exact terms/);
     });
   });
 

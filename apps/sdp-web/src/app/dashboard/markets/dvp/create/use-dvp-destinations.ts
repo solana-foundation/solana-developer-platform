@@ -9,8 +9,14 @@
  * hidden empty input never said so: you opened a disclosure, found two blank
  * fields, and had to infer what leaving them blank meant. Worse, redirecting a
  * payout is precisely the shape a forged trade takes, so burying it was exactly
- * the wrong emphasis. Making it two radio options states the default and makes
+ * the wrong emphasis. Making it an explicit choice states the default and makes
  * the redirect a deliberate act.
+ *
+ * A destination is named the same three ways a PARTY is — an SDP wallet, a
+ * registered counterparty, or a pasted address — because it is the same kind of
+ * question and somebody who just answered it upstream should not meet a
+ * different control downstream. Reusing `DvpPartySlot` means one resolver
+ * (`resolvePartySlotAddress`) decides what an answer means on both.
  *
  * Values are kept AS TYPED and trimmed on the way out. Empty means "pay the
  * party", which is what the program records for an omitted destination, and the
@@ -21,15 +27,37 @@
 import { useState } from "react";
 
 import { BASE58_ADDRESS_PATTERN } from "../../base58-address";
+import type { DvpCreateContext } from "./dvp-create.data";
+import { type DvpPartySlot, resolvePartySlotAddress } from "./use-dvp-parties";
 
 export type PayoutMode = "party" | "elsewhere";
+
+/** A destination nobody has named yet. Blank, not a guess at the first wallet. */
+const EMPTY_SLOT: DvpPartySlot = { mode: "address", address: "" };
 
 export interface DvpPayout {
   mode: PayoutMode;
   setMode: (next: PayoutMode) => void;
-  /** As typed, so the field renders what was entered. */
+  /** Which reference kind names this destination, and its value. */
+  slot: DvpPartySlot;
+  /** A person chose this destination. Marks it `touched`. */
+  setSlot: (next: DvpPartySlot) => void;
+  /**
+   * The FORM chose this destination, mirroring the party. Leaves it untouched,
+   * so it keeps following the party until a person overrides it.
+   */
+  seedSlot: (next: DvpPartySlot) => void;
+  /**
+   * Somebody has answered this picker themselves.
+   *
+   * The one thing that decides whether re-seeding may overwrite it. Comparing
+   * the destination to the party's address cannot: picking the party's own
+   * address on purpose is a real answer, and an address check reads it as the
+   * default and silently redirects it on the next party edit.
+   */
+  touched: boolean;
+  /** What the slot resolves to. As typed when the slot is a pasted address. */
   address: string;
-  setAddress: (next: string) => void;
   /** Something is typed and it is not a base58 address. Blank is not wrong. */
   looksWrong: boolean;
   /** Chosen "elsewhere" but not yet given a usable address. */
@@ -47,31 +75,49 @@ export interface DvpDestinations {
   anyRedirected: boolean;
 }
 
-function usePayout(): DvpPayout {
+function usePayout(context: DvpCreateContext): DvpPayout {
   const [mode, setMode] = useState<PayoutMode>("party");
-  const [address, setAddress] = useState("");
+  const [slot, setSlotState] = useState<DvpPartySlot>(EMPTY_SLOT);
+  const [touched, setTouched] = useState(false);
 
+  // One resolver for parties and payouts alike, so a wallet means the same
+  // address in both places and neither can drift.
+  const address = resolvePartySlotAddress(slot, context);
   const trimmed = address.trim();
+  // Only a PASTED value can be malformed. A wallet or counterparty that does
+  // not resolve is unanswered, which is `incomplete`, not wrong.
   const looksWrong =
-    mode === "elsewhere" && trimmed.length > 0 && !BASE58_ADDRESS_PATTERN.test(trimmed);
+    mode === "elsewhere" &&
+    slot.mode === "address" &&
+    trimmed.length > 0 &&
+    !BASE58_ADDRESS_PATTERN.test(trimmed);
   const incomplete = mode === "elsewhere" && trimmed.length === 0;
 
   return {
     mode,
     setMode,
+    slot,
+    setSlot: (next: DvpPartySlot) => {
+      setSlotState(next);
+      setTouched(true);
+    },
+    seedSlot: (next: DvpPartySlot) => {
+      setSlotState(next);
+      setTouched(false);
+    },
+    touched,
     address,
-    setAddress,
     looksWrong,
     incomplete,
-    // Switching back to the default must not smuggle a typed address into the
-    // request, so this reads the mode rather than only the text.
+    // Switching back to the default must not smuggle a chosen address into the
+    // request, so this reads the mode rather than only the value.
     resolved: mode === "elsewhere" ? trimmed : "",
   };
 }
 
-export function useDvpDestinations(): DvpDestinations {
-  const a = usePayout();
-  const b = usePayout();
+export function useDvpDestinations(context: DvpCreateContext): DvpDestinations {
+  const a = usePayout(context);
+  const b = usePayout(context);
 
   return {
     a,
@@ -80,3 +126,5 @@ export function useDvpDestinations(): DvpDestinations {
     anyRedirected: a.resolved.length > 0 || b.resolved.length > 0,
   };
 }
+
+export { EMPTY_SLOT as EMPTY_PAYOUT_SLOT };

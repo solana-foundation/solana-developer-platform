@@ -25,7 +25,12 @@ import {
   type TransactionError,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
-import { getSolanaConfig, resolveSolanaRpcProviderUrls } from "./config";
+import {
+  explicitClusterRpcUrl,
+  getSolanaConfig,
+  resolveDefaultCluster,
+  resolveSolanaRpcProviderUrls,
+} from "./config";
 import { solanaRpcError } from "./errors";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
@@ -229,6 +234,28 @@ export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
   const transports = urls.map((url) => withRequestTimeout(buildTransport(url), timeoutMs));
   return createSolanaRpcFromTransport(
     createFailoverTransport(transports, { stickyKey: urls.join("|") })
+  );
+}
+
+/**
+ * An RPC client for `cluster` on a process that may serve both clusters. An
+ * explicit `SOLANA_<CLUSTER>_RPC_URL` wins for any cluster, the default
+ * cluster included, so a pinned private endpoint is used for every read of
+ * that cluster (Earn execution and sponsorship reconciliation must observe the
+ * same chain). Without one, the process default cluster keeps the full
+ * failover client `createRpc` builds, and the other cluster throws, so a
+ * caller never silently reads or prices against the wrong chain.
+ */
+export function createClusterRpc(
+  env: RpcEnv,
+  cluster: "devnet" | "mainnet-beta",
+  options?: Omit<RpcClientOptions, "rpcUrl">
+): SolanaRpc {
+  const rpcUrl = explicitClusterRpcUrl(env, cluster);
+  if (rpcUrl) return createRpc(env, { ...options, rpcUrl });
+  if (cluster === resolveDefaultCluster(env)) return createRpc(env, options);
+  throw new Error(
+    `No RPC endpoint is configured for ${cluster}: set SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL`
   );
 }
 
@@ -522,6 +549,48 @@ export async function getAccountInfo(
   return response.value;
 }
 
+/** The most addresses one `getMultipleAccounts` call accepts. */
+export const GET_MULTIPLE_ACCOUNTS_LIMIT = 100;
+
+/**
+ * Lamports held by each address, in the order asked, from one `getMultipleAccounts`
+ * call. An address with no account holds 0. Account data is sliced to nothing, since
+ * only the balance is read.
+ *
+ * @throws When asked for more than {@link GET_MULTIPLE_ACCOUNTS_LIMIT} addresses (the
+ *   caller chunks, so it decides what one failed chunk costs), or when the RPC answers
+ *   for a different number of addresses than it was asked about.
+ */
+export async function getMultipleAccountsLamports(
+  rpc: SolanaRpc,
+  addresses: readonly Address[],
+  commitment: Commitment = "confirmed"
+): Promise<bigint[]> {
+  if (addresses.length > GET_MULTIPLE_ACCOUNTS_LIMIT) {
+    throw new RangeError(
+      `getMultipleAccounts accepts at most ${GET_MULTIPLE_ACCOUNTS_LIMIT} addresses, got ${addresses.length}`
+    );
+  }
+  if (addresses.length === 0) {
+    return [];
+  }
+
+  const response = await rpc
+    .getMultipleAccounts(addresses, {
+      encoding: "base64",
+      commitment,
+      dataSlice: { offset: 0, length: 0 },
+    })
+    .send();
+  // A short answer would shift every balance onto the wrong address.
+  if (response.value.length !== addresses.length) {
+    throw new Error(
+      `getMultipleAccounts returned ${response.value.length} accounts for ${addresses.length} addresses`
+    );
+  }
+  return response.value.map((account) => (account === null ? 0n : account.lamports));
+}
+
 /**
  * Check if an account exists
  */
@@ -555,6 +624,14 @@ export interface SignatureInfo {
   slot: bigint;
   blockTime: bigint | null;
   err: unknown | null;
+  /**
+   * Commitment level the RPC currently reports for this signature
+   * ("processed" | "confirmed" | "finalized"), or null when unknown. Callers
+   * that must distinguish finality (e.g. to decide whether a transaction body
+   * is immutable) should treat everything short of "finalized" — including an
+   * absent field from older mocks/callers — as not finalized.
+   */
+  confirmationStatus?: Commitment | null;
 }
 
 /**
@@ -586,6 +663,7 @@ export async function getSignaturesForAddress(
     slot: item.slot,
     blockTime: item.blockTime ?? null,
     err: item.err ?? null,
+    confirmationStatus: item.confirmationStatus ?? null,
   }));
 }
 
@@ -649,12 +727,27 @@ export interface ParsedInstruction {
   info: Record<string, unknown> | null;
 }
 
+/** One token-account balance as the RPC reports it before or after a transaction. */
+export interface ParsedTokenBalance {
+  /** Index into the transaction's account keys. */
+  accountIndex: number;
+  mint: string;
+  /** The token account's owner; absent from some RPC responses. */
+  owner: string | null;
+  /** Base units as a decimal integer string, exactly as reported. */
+  amount: string;
+  decimals: number;
+}
+
 export interface ParsedTransaction {
   slot: bigint;
   err: unknown | null;
   fee?: bigint;
   preBalances?: readonly bigint[];
   postBalances?: readonly bigint[];
+  /** SPL token balances touched by the transaction; empty when meta has none. */
+  preTokenBalances?: ParsedTokenBalance[];
+  postTokenBalances?: ParsedTokenBalance[];
   /** Top-level + inner instructions flattened, in no particular order. */
   instructions: ParsedInstruction[];
 }
@@ -666,6 +759,13 @@ interface RawParsedInstruction {
   parsed?: { type?: string; info?: Record<string, unknown> };
 }
 
+interface RawTokenBalance {
+  accountIndex: number;
+  mint: string;
+  owner?: string;
+  uiTokenAmount: { amount: string; decimals: number };
+}
+
 interface RawGetTransactionResponse {
   slot: bigint;
   meta: {
@@ -673,6 +773,8 @@ interface RawGetTransactionResponse {
     fee: bigint;
     preBalances: readonly bigint[];
     postBalances: readonly bigint[];
+    preTokenBalances?: readonly RawTokenBalance[] | null;
+    postTokenBalances?: readonly RawTokenBalance[] | null;
     innerInstructions?: Array<{ instructions?: RawParsedInstruction[] }> | null;
   } | null;
   transaction: {
@@ -687,6 +789,45 @@ const toParsedInstruction = (ix: RawParsedInstruction): ParsedInstruction => ({
   parsedType: ix.parsed?.type ?? null,
   info: ix.parsed?.info ?? null,
 });
+
+const toParsedTokenBalance = (balance: RawTokenBalance): ParsedTokenBalance => ({
+  accountIndex: Number(balance.accountIndex),
+  mint: balance.mint,
+  owner: balance.owner ?? null,
+  amount: String(balance.uiTokenAmount.amount),
+  decimals: Number(balance.uiTokenAmount.decimals),
+});
+
+export interface TokenBalanceDelta {
+  /** Σpost − Σpre in base units; negative when the owner paid out. */
+  baseUnits: bigint;
+  decimals: number;
+}
+
+/**
+ * Net change of one owner's holdings of one mint across a landed transaction,
+ * summed over every token account the RPC attributes to that owner and mint.
+ * A token account the transaction creates has no pre entry and counts from
+ * zero; one it closes has no post entry and counts to zero.
+ *
+ * Returns null when neither side names the pair at all: that is "not
+ * observed", which callers must keep distinct from a zero delta.
+ */
+export function tokenBalanceDelta(
+  transaction: Pick<ParsedTransaction, "preTokenBalances" | "postTokenBalances">,
+  match: { mint: string; owner: string }
+): TokenBalanceDelta | null {
+  const matches = (balance: ParsedTokenBalance) =>
+    balance.mint === match.mint && balance.owner === match.owner;
+  const pre = (transaction.preTokenBalances ?? []).filter(matches);
+  const post = (transaction.postTokenBalances ?? []).filter(matches);
+  if (pre.length === 0 && post.length === 0) return null;
+
+  const decimals = (post[0] ?? pre[0])?.decimals ?? 0;
+  const sum = (balances: ParsedTokenBalance[]) =>
+    balances.reduce((total, balance) => total + BigInt(balance.amount), 0n);
+  return { baseUnits: sum(post) - sum(pre), decimals };
+}
 
 /**
  * Fetch a confirmed transaction with its instructions decoded (`jsonParsed`).
@@ -728,6 +869,8 @@ export async function getTransaction(
     fee: response.meta?.fee ?? 0n,
     preBalances: response.meta?.preBalances ?? [],
     postBalances: response.meta?.postBalances ?? [],
+    preTokenBalances: (response.meta?.preTokenBalances ?? []).map(toParsedTokenBalance),
+    postTokenBalances: (response.meta?.postTokenBalances ?? []).map(toParsedTokenBalance),
     instructions: [...topLevel, ...inner].map(toParsedInstruction),
   };
 }

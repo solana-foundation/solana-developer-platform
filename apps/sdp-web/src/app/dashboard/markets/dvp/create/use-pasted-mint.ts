@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Resolving a mint somebody pasted, so its leg can take a human amount.
+ * Resolving a mint somebody pasted, so its leg can take a human amount, and
+ * reading whether a trade on the chosen mint would be accepted at all.
  *
  * A listed token carries its decimals with it. A pasted address carried
  * nothing, so its amount field silently changed meaning to base units — the
@@ -17,18 +18,27 @@
 
 import { isAddress } from "@sdp/solana";
 import { useEffect, useState } from "react";
+import { z } from "zod";
 
 const DEBOUNCE_MS = 350;
 
-export interface PastedMint {
-  decimals: number;
-  name: string | null;
-  symbol: string | null;
-  tokenProgram: string;
-  eligible: boolean;
-  /** The extension DvP refuses, when this mint is ruled out. */
-  blockedBy: string | null;
-}
+/** The mint inspection's answer, as far as the form reads it. */
+const pastedMintSchema = z.object({
+  // Null when the mint exists but SDP could not decode it, which also makes it
+  // ineligible: without a scale no amount on this leg has a meaning.
+  decimals: z.number().int().nonnegative().nullable(),
+  name: z.string().nullable(),
+  symbol: z.string().nullable(),
+  tokenProgram: z.string().min(1),
+  /** False when create would refuse a trade on this mint. */
+  eligible: z.boolean(),
+  /** The extension that rules it out, when it is not eligible. */
+  blockedBy: z.string().nullable(),
+});
+
+const inspectionEnvelopeSchema = z.object({ data: z.object({ mint: pastedMintSchema }) });
+
+export type PastedMint = z.infer<typeof pastedMintSchema>;
 
 export interface PastedMintState {
   mint: PastedMint | null;
@@ -101,8 +111,10 @@ export function usePastedMint(address: string): PastedMintState {
           setLookup({ address: wanted, mint: null, notFound: response.status === 404 });
           return;
         }
-        const body = (await response.json()) as { data?: { mint?: PastedMint } };
-        const mint = body.data?.mint ?? null;
+        // An answer that does not parse is not a mint: no scale, and no claim
+        // either way about whether a trade on it would be accepted.
+        const body = inspectionEnvelopeSchema.safeParse(await response.json());
+        const mint = body.success ? body.data.data.mint : null;
         setLookup({ address: wanted, mint, notFound: mint === null });
       } catch (error) {
         if ((error as Error)?.name === "AbortError") {

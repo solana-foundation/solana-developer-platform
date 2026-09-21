@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1.7
+
+# Surfpool 1.5.0 publishes a Linux x64 native binding but no Linux arm64
+# binding. `e2e-veda.sh` therefore builds and runs this image as linux/amd64,
+# including on Apple Silicon hosts.
+FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03
+
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    SDP_VEDA_SURFPOOL_IN_CONTAINER=1
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && corepack enable \
+ && corepack prepare pnpm@10.16.0 --activate
+
+WORKDIR /repo
+COPY . .
+
+# Keep every Node dependency in the image. The three filters cover the Veda
+# package under test, the embedded Surfpool/Kora shim, and the local keygen the
+# harness uses; their dependency closures pull in the workspace packages they
+# need without installing unrelated web/docs applications.
+RUN --mount=type=cache,id=sdp-veda-surfpool-pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile \
+      --filter @sdp/veda... \
+      --filter @sdp/api-integration... \
+      --filter @sdp/api...
+
+CMD ["bash", "scripts/kora-surfpool/e2e-veda.sh"]

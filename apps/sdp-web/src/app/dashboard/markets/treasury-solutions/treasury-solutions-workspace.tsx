@@ -54,16 +54,17 @@ import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import {
   type EarnDepositAvailabilityLabels,
   earnProviderLabel,
+  formatProviderAmount,
   formatUsd,
+  positionDisplayName,
+  shortenMarketAddress,
 } from "../earn/earn-format";
 import {
   EarnDepositAvailabilityBadge,
   earnMintAsset,
   earnStrategyAsset,
   earnStrategyReferenceKey,
-  formatProviderAmount,
   formatProviderApy,
-  shortenMarketAddress,
   sumDecimalStrings,
 } from "../earn/earn-market-presentation";
 import {
@@ -88,15 +89,14 @@ import {
   EarnVaultDepositModal,
   EarnVaultDepositOutcomeTracker,
 } from "../earn/earn-vault-deposit-modal";
+import { EarnVaultExitModal } from "../earn/earn-vault-exit-modal";
 import {
   earnVaultDepositUiState,
   earnVaultPositionStatusDisplay,
   earnVaultWithdrawalUiState,
 } from "../earn/earn-vault-ui-state";
-import {
-  EarnVaultWithdrawalOutcomeTracker,
-  EarnVaultWithdrawModal,
-} from "../earn/earn-vault-withdraw-modal";
+import { EarnVaultWithdrawalOutcomeTracker } from "../earn/earn-vault-withdraw-modal";
+import { EarnVaultWithdrawalRequestsCard } from "../earn/earn-vault-withdrawal-requests-card";
 import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import { useKaminoVaultAllocations } from "./kamino-allocations";
@@ -274,6 +274,23 @@ function mergeTrackedVaultMovements<Movement extends { movementId: string; obser
   return next.slice(-MAX_VISIBLE_VAULT_ACTIVITY);
 }
 
+/**
+ * Stamp the incoming movements newest-first with their place in the page's
+ * single activity order, ready for `mergeTrackedVaultMovements`. Shared by the
+ * deposit and withdrawal watchers, whose stamping is otherwise line-for-line
+ * identical. Pure apart from `nextOrder`, and called BEFORE the state updater
+ * runs so the order advances exactly once per observed movement.
+ */
+function observeIncomingVaultMovements<Movement>(
+  incoming: readonly Movement[],
+  nextOrder: () => number
+): (Movement & { observedOrder: number })[] {
+  return [...incoming].reverse().map((movement) => ({
+    ...movement,
+    observedOrder: nextOrder(),
+  }));
+}
+
 function subtractUnsignedDecimalStrings(left: string, right: string): string | undefined {
   if (
     compareUnsignedDecimals(left, "0") === undefined ||
@@ -315,7 +332,7 @@ function createVaultBalanceProjection(
 function vaultBalanceProjectionIsVisible(activity: TrackedVaultActivity): boolean {
   return activity.kind === "deposit"
     ? activity.movement.status === "confirmed"
-    : activity.movement.status === "finalized";
+    : activity.movement.status === "confirmed" || activity.movement.status === "finalized";
 }
 
 function balanceProjectionReachedProvider(
@@ -913,17 +930,16 @@ function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
 
 function StrategyDepositAction({
   availability,
-  environment,
   onDeposit,
+  sandboxMainnet,
   strategy,
 }: {
   availability: EarnVaultDepositAvailability;
-  environment: SdpEnvironment;
   onDeposit: (strategy: EarnStrategy) => void;
+  sandboxMainnet: boolean;
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
-  const sandboxMainnet = environment === "sandbox" && strategy.hostCluster === "mainnet-beta";
   const canDeposit = availability === "available" && !sandboxMainnet;
   const button = (
     <Button
@@ -1093,8 +1109,8 @@ function StrategyTable({
                     )}
                     <StrategyDepositAction
                       availability={availability}
-                      environment={environment}
                       onDeposit={onDeposit}
+                      sandboxMainnet={sandboxMainnet}
                       strategy={strategy}
                     />
                   </div>
@@ -1241,7 +1257,7 @@ function ActiveVaultPositionsCard({
                     <TableRow key={position.id}>
                       <TableCell>
                         <TreasuryPositionIdentity
-                          name={position.label || shortenMarketAddress(position.providerReference)}
+                          name={positionDisplayName(position)}
                           provider={earnProviderLabel(position.provider)}
                         />
                       </TableCell>
@@ -1777,6 +1793,9 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
   } = props;
   const t = useTranslations();
 
+  // A failed positions read hides the rows rather than hinting at a portfolio.
+  const readablePositions = positionsError ? undefined : positions;
+
   return (
     <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
       <TreasuryAllocationCard
@@ -1797,11 +1816,13 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         error={positionsError}
         isLoading={positionsLoading}
         onWithdraw={onWithdrawPosition}
-        positions={positionsError ? undefined : positions}
+        positions={readablePositions}
         unrecordedShareMints={allocation.unrecordedShareMints}
         wallets={activeWallets}
         withdrawals={vaultWithdrawals}
       />
+
+      <EarnVaultWithdrawalRequestsCard onChanged={onRefresh} />
 
       <TreasuryStrategiesCard
         devnetError={devnetCatalogueError}
@@ -1813,7 +1834,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         mainnetLoading={mainnetCatalogueLoading}
         onDeposit={onDeposit}
         onRefresh={onRefresh}
-        positions={positionsError ? undefined : positions}
+        positions={readablePositions}
         providerAccess={providerAccess}
         strategies={catalogueStrategies}
         unrecordedShareMints={allocation.unrecordedShareMints}
@@ -2008,10 +2029,10 @@ export function TreasurySolutionsWorkspace({
   // and must not have side effects (StrictMode double-invokes it in dev).
   const addVaultDepositWatches = useCallback(
     (incoming: readonly VaultDepositWatchInput[]) => {
-      const observedIncoming = [...incoming].reverse().map((deposit) => ({
-        ...deposit,
-        observedOrder: ++vaultActivityOrder.current,
-      }));
+      const observedIncoming = observeIncomingVaultMovements(
+        incoming,
+        () => ++vaultActivityOrder.current
+      );
       setVaultDepositWatches((current) =>
         mergeTrackedVaultMovements(current, observedIncoming, settledVaultDepositIds)
       );
@@ -2022,10 +2043,10 @@ export function TreasurySolutionsWorkspace({
   // Same pure-updater and tombstone rules as the deposit watches above.
   const addVaultWithdrawalWatches = useCallback(
     (incoming: readonly VaultWithdrawalWatchInput[]) => {
-      const observedIncoming = [...incoming].reverse().map((withdrawal) => ({
-        ...withdrawal,
-        observedOrder: ++vaultActivityOrder.current,
-      }));
+      const observedIncoming = observeIncomingVaultMovements(
+        incoming,
+        () => ++vaultActivityOrder.current
+      );
       setVaultWithdrawalWatches((current) =>
         mergeTrackedVaultMovements(current, observedIncoming, settledVaultWithdrawalIds)
       );
@@ -2191,6 +2212,13 @@ export function TreasurySolutionsWorkspace({
     walletsError,
     walletsLoading,
   });
+  const refreshTreasury = () => {
+    refreshWalletBalances();
+    refreshStrategies();
+    if (catalogueCluster !== undefined) refreshCatalogue();
+    refreshPositions();
+    refreshPrograms();
+  };
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -2206,13 +2234,7 @@ export function TreasurySolutionsWorkspace({
         mainnetCatalogueError={mainnetCatalogueError}
         mainnetCatalogueLoading={mainnetCatalogueLoading}
         onDeposit={setDepositStrategy}
-        onRefresh={() => {
-          refreshWalletBalances();
-          refreshStrategies();
-          if (catalogueCluster !== undefined) refreshCatalogue();
-          refreshPositions();
-          refreshPrograms();
-        }}
+        onRefresh={refreshTreasury}
         onWithdrawPosition={setWithdrawPosition}
         onWithdrawProgram={setWithdrawProgram}
         portfolioApy={portfolioApy}
@@ -2286,7 +2308,7 @@ export function TreasurySolutionsWorkspace({
       ) : null}
 
       {withdrawPosition ? (
-        <EarnVaultWithdrawModal
+        <EarnVaultExitModal
           environment={sdpEnvironment}
           onClose={() => setWithdrawPosition(null)}
           onWithdrawn={(withdrawal, intent) => {
@@ -2316,6 +2338,13 @@ export function TreasurySolutionsWorkspace({
             refreshWalletBalances();
           }}
           onMovementUpdated={updateVaultWithdrawalWatch}
+          onAsyncRequest={() => {
+            // An asynchronous request can move or escrow shares without paying
+            // assets yet. Refresh holdings without projecting an instant exit.
+            refreshPositions();
+            refreshWalletBalances();
+          }}
+          onAsyncRequestSettled={refreshTreasury}
           position={withdrawPosition}
           projectId={selectedProjectId}
         />

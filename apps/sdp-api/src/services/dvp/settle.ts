@@ -6,28 +6,35 @@
  */
 
 import * as solanaRpc from "@sdp/rpc/solana";
+import { DVP_CLOSE_REFUSAL } from "@sdp/types";
 import {
   appendTransactionMessageInstructions,
   createNoopSigner,
   createTransactionMessage,
+  getBase58Decoder,
   getTransactionEncoder,
   pipe,
   type Signature,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signature,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
-import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
-import { badRequest, conflict } from "@/lib/errors";
+import { getDb } from "@/db";
+import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
+import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import { badRequest, conflict, transactionFailed } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { createRequestSponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
+  isDefiniteSubmissionError,
   type SignedSubmissionStore,
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 import { isPastDvpExpiry } from "./observe";
 import { readDvpAccounts } from "./read-chain";
 import { deriveDvpSettleAtas } from "./settle-atas";
@@ -48,8 +55,13 @@ const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
 
 export type DvpCloseAction = "settle" | "cancel";
 
+/** How long a close waits for its own confirmation before leaving it to the reconciler. */
+const CLOSE_CONFIRM_TIMEOUT_MS = 15_000;
+
 export interface DvpCloseResult {
   signature: Signature;
+  /** Whether the close is confirmed. Only a confirmed close is recorded as settled or cancelled. */
+  landed: boolean;
 }
 
 /**
@@ -87,12 +99,23 @@ function assertInsideSettlementWindow(
   }
 }
 
-/** Settles or cancels a trade using the wallet already authorized by the handler. */
+/**
+ * Settles or cancels a trade using the wallet already authorized by the handler.
+ *
+ * @param c - Request context.
+ * @param trade - The trade to close.
+ * @param action - Settle or cancel.
+ * @param settlement - The settlement wallet the handler authorized.
+ * @param recordAttempt - Called with the sponsored transaction before it is
+ *   broadcast, so a retry on the same Idempotency-Key can resolve it from the
+ *   chain instead of signing a second close.
+ */
 export async function closeDvpTrade(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
   action: DvpCloseAction,
-  settlement: DvpSettlementWallet
+  settlement: DvpSettlementWallet,
+  recordAttempt: RecordDvpLegActionAttempt
 ): Promise<DvpCloseResult> {
   const env = c.env;
 
@@ -179,22 +202,124 @@ export async function closeDvpTrade(
     (m) => appendTransactionMessageInstructions(instructions, m)
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-  const bytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
+  const authoritySignatureBytes = partiallySigned.signatures[signer.address];
+  if (authoritySignatureBytes === null || authoritySignatureBytes === undefined) {
+    throw new Error("DvP close transaction is missing the settlement authority signature");
+  }
+  const claimSignature = signature(getBase58Decoder().decode(authoritySignatureBytes));
+
+  // The trade's close lock, before anything is sponsored or sent, so of two
+  // closes only one goes out. Then the leg locks, which a funding or reclaim
+  // takes before it sends: whichever of the two locks commits second sees the
+  // first, so a close and a leg action never both go out.
+  const trades = createDvpTradeRepository(env);
+  const claimed = await trades.claimClose(trade.id, {
+    action,
+    signature: claimSignature,
+    expiryHeight: lastValidBlockHeight.toString(),
+  });
+  if (!claimed) {
+    throw conflict(`DvP trade ${trade.id}: another settle or cancel is already in flight`, {
+      reason: DVP_CLOSE_REFUSAL.closeInProgress,
+    });
+  }
+  const blockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
+  if (
+    await createPostgresDvpLegFundingClaimRepository(getDb(env)).hasLiveClaim(trade.id, blockHeight)
+  ) {
+    await trades.releaseCloseClaim(trade.id, claimSignature);
+    throw conflict(`DvP trade ${trade.id}: a leg is still being funded or reclaimed`, {
+      reason: DVP_CLOSE_REFUSAL.legMoving,
+    });
+  }
+
+  let heldSignature: Signature = claimSignature;
   const store: SignedSubmissionStore = {
-    persistSigned: async ({ signature }) => {
-      getLogger().info({ tradeId: trade.id, action, signature }, "DvP close signed");
+    persistSigned: async ({ signature: sponsored }) => {
+      if (!(await trades.rebindCloseClaim(trade.id, claimSignature, sponsored))) {
+        throw new Error("close lock was released before the sponsored signature could be attached");
+      }
+      heldSignature = sponsored;
+      // The sponsored signature is the one that lands, and this runs before the
+      // send, so a retry on the same Idempotency-Key asks the chain about the
+      // transaction that actually went out (PRO-1993). No amount: a close moves
+      // both legs.
+      await recordAttempt({
+        signature: sponsored,
+        amount: null,
+        expiryHeight: lastValidBlockHeight.toString(),
+      });
+      getLogger().info({ tradeId: trade.id, action, signature: sponsored }, "DvP close signed");
     },
     markStarted: async () => {},
     hasStarted: async () => false,
   };
 
-  const signature = await submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: bytes,
-    lastValidBlockHeight,
-    store,
-  });
+  let closeSignature: Signature;
+  try {
+    closeSignature = await submitSponsoredTransaction({
+      feePayment,
+      rpc,
+      transaction: new Uint8Array(getTransactionEncoder().encode(partiallySigned)),
+      lastValidBlockHeight,
+      store,
+    });
+  } catch (error) {
+    // Never signed, or refused before the network: nothing can land. Anything
+    // ambiguous keeps the lock until its blockhash expires.
+    if (heldSignature === claimSignature || isDefiniteSubmissionError(error)) {
+      await trades.releaseCloseClaim(trade.id, heldSignature);
+    }
+    throw error;
+  }
 
-  return { signature };
+  return {
+    signature: closeSignature,
+    landed: await closeOutcome(trades, rpc, trade.id, action, closeSignature),
+  };
+}
+
+/**
+ * What became of a close on the wire. The status is written only from this,
+ * never from the RPC accepting the transaction: a second close can be accepted
+ * and still be the one that fails.
+ *
+ * @returns True once the close is confirmed. False while it is unconfirmed; the
+ *   lock stays until its blockhash expires and the reconciler records whatever
+ *   landed.
+ * @throws 400 `dvp_close_failed_on_chain` when the program refused it.
+ */
+async function closeOutcome(
+  trades: ReturnType<typeof createDvpTradeRepository>,
+  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  tradeId: string,
+  action: DvpCloseAction,
+  closeSignature: Signature
+): Promise<boolean> {
+  let confirmation: Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>;
+  try {
+    confirmation = await solanaRpc.confirmTransaction(rpc, closeSignature, {
+      timeoutMs: CLOSE_CONFIRM_TIMEOUT_MS,
+    });
+  } catch (error) {
+    getLogger().warn(
+      { error, tradeId, action, signature: closeSignature },
+      "dvp close: not confirmed in time; the reconciler records the close once it lands"
+    );
+    return false;
+  }
+  if (
+    confirmation.confirmationStatus !== "confirmed" &&
+    confirmation.confirmationStatus !== "finalized"
+  ) {
+    return false;
+  }
+  if (confirmation.err !== null) {
+    await trades.releaseCloseClaim(tradeId, closeSignature);
+    throw transactionFailed(
+      `DvP trade ${tradeId}: the ${action} was refused on chain; nothing moved`,
+      { reason: DVP_CLOSE_REFUSAL.closeFailedOnChain }
+    );
+  }
+  return true;
 }

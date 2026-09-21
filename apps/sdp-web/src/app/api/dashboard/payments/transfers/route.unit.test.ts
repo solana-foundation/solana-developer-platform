@@ -17,7 +17,7 @@ vi.mock("@/lib/request-tracing", () => ({
   logRouteResult: vi.fn(),
 }));
 
-import { GET } from "./route";
+import { GET, POST } from "./route";
 
 describe("GET /api/dashboard/payments/transfers", () => {
   beforeEach(() => {
@@ -53,5 +53,42 @@ describe("GET /api/dashboard/payments/transfers", () => {
       path: "/v1/payments/transfers?wallet=provider-wallet",
     });
     expect(mocks.getSelectedProjectId).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/dashboard/payments/transfers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 202 }));
+  });
+
+  // Without the key a retried send is a new payment, and a retry of one a
+  // policy is holding opens a second approval.
+  it("forwards the Idempotency-Key and nothing else from the caller", async () => {
+    const request = new Request("https://dashboard.example/api/dashboard/payments/transfers", {
+      method: "POST",
+      headers: { "Idempotency-Key": "transfer-key-1", Cookie: "session=secret" },
+    });
+
+    await POST(request);
+
+    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
+      request,
+      traceSource: "route.dashboard.payments.transfers.post",
+      path: "/v1/payments/transfers",
+      upstreamHeaders: { "Idempotency-Key": "transfer-key-1" },
+    });
+  });
+
+  it("forwards no key when the caller sent none", async () => {
+    const request = new Request("https://dashboard.example/api/dashboard/payments/transfers", {
+      method: "POST",
+    });
+
+    await POST(request);
+
+    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
+      expect.objectContaining({ upstreamHeaders: undefined })
+    );
   });
 });

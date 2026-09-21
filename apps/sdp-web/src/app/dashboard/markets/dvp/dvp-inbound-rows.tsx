@@ -21,7 +21,7 @@ import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loadi
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
 import { AddressWithCopy } from "./dvp-party-cell";
-import { type DvpPartyRef, formatLegAmount } from "./dvp-trade";
+import { type DvpPartyRef, dvpTimestampToIso, formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -161,7 +161,7 @@ export function InboundRows({ trades }: { trades: DvpInboundTrade[] }) {
           </span>
         </TableCell>
         <TableCell className="text-secondary text-sm">
-          {formatTimestamp(new Date(Number(trade.expiryTimestamp) * 1000).toISOString(), t)}
+          {formatTimestamp(dvpTimestampToIso(trade.expiryTimestamp), t)}
         </TableCell>
         <TableCell>
           {funded ? null : (

@@ -10,7 +10,21 @@ import type {
   EarnVaultInstruction,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
+  EarnVaultQueuedWithdrawalCancelInput,
+  EarnVaultQueuedWithdrawalLifecycleEvent,
+  EarnVaultQueuedWithdrawalLifecycleInput,
+  EarnVaultQueuedWithdrawalQuote,
+  EarnVaultQueuedWithdrawalQuoteInput,
+  EarnVaultQueuedWithdrawalRequest,
+  EarnVaultQueuedWithdrawalRequestInput,
+  EarnVaultQueuedWithdrawalRequestInputByAddress,
+  EarnVaultQueuedWithdrawalRequestLookup,
+  EarnVaultQueuedWithdrawalRequestPlan,
+  EarnVaultQueuedWithdrawalRequestsInput,
+  EarnVaultQueuedWithdrawProvider,
   EarnVaultTransactionPlan,
+  EarnVaultWithdrawalOptions,
+  EarnVaultWithdrawalOptionsInput,
   EarnVaultWithdrawInput,
   EarnVaultWithdrawProvider,
   EarnVaultWithdrawQuote,
@@ -29,12 +43,25 @@ import {
 } from "./programs";
 import {
   buildVedaDepositPlan,
+  buildVedaQueuedWithdrawalCancelPlan,
+  buildVedaQueuedWithdrawalRequestPlan,
   buildVedaWithdrawPlan,
+  parseVedaWithdrawalLifecycleEvents,
   previewVedaDeposit,
+  previewVedaQueuedWithdrawal,
   previewVedaWithdraw,
   readVedaPosition,
+  readVedaQueuedWithdrawalRequest,
+  readVedaQueuedWithdrawalRequests,
+  readVedaWithdrawalOptions,
 } from "./sdk";
-import type { VedaInstructionPlan, VedaRuntime } from "./types";
+import type {
+  VedaInstructionPlan,
+  VedaQueuedWithdrawalRequest,
+  VedaQueuedWithdrawalRequestPlan,
+  VedaRuntime,
+  VedaWithdrawalLifecycleEvent,
+} from "./types";
 
 /** One position page may fan out over several vaults; never fan out unbounded. */
 export const VEDA_POSITION_READ_CONCURRENCY = 4;
@@ -111,6 +138,81 @@ export function toEarnVaultTransactionPlan(plan: VedaInstructionPlan): EarnVault
   };
 }
 
+/** Serialize a queue request without losing its deterministic on-chain identity. */
+export function toEarnVaultQueuedWithdrawalRequestPlan(
+  plan: VedaQueuedWithdrawalRequestPlan
+): EarnVaultQueuedWithdrawalRequestPlan {
+  return {
+    ...toEarnVaultTransactionPlan(plan),
+    requestAddress: String(plan.requestAddress),
+    expectedRequest: {
+      assetMint: String(plan.expectedRequest.assetMint),
+      shares: plan.expectedRequest.shares,
+      assets: plan.expectedRequest.assets,
+      discountBps: plan.expectedRequest.discountBps,
+      maturityTimestamp: plan.expectedRequest.maturityTimestamp,
+      deadlineTimestamp: plan.expectedRequest.deadlineTimestamp,
+    },
+  };
+}
+
+function toEarnQueuedWithdrawalRequest(
+  request: VedaQueuedWithdrawalRequest
+): EarnVaultQueuedWithdrawalRequest {
+  return {
+    requestAddress: String(request.requestAddress),
+    providerReference: String(request.vault),
+    owner: String(request.owner),
+    nonce: request.nonce,
+    assetMint: String(request.assetMint),
+    shares: request.shares,
+    assets: request.assets,
+    creationTimestamp: request.creationTimestamp,
+    maturityTimestamp: request.maturityTimestamp,
+    deadlineTimestamp: request.deadlineTimestamp,
+    status: request.status,
+  };
+}
+
+/** Keep Veda's branded addresses and provider-only event fields behind the adapter. */
+function toEarnQueuedWithdrawalLifecycleEvent(
+  event: VedaWithdrawalLifecycleEvent
+): EarnVaultQueuedWithdrawalLifecycleEvent {
+  const identity = {
+    requestAddress: String(event.requestAddress),
+    owner: String(event.owner),
+    assetMint: String(event.assetMint),
+    nonce: event.nonce,
+  };
+  switch (event.kind) {
+    case "withdrawalRequested":
+      return {
+        kind: event.kind,
+        ...identity,
+        shares: event.shares,
+        assets: event.assets,
+        creationTimestamp: event.creationTimestamp,
+        maturityTimestamp: event.maturityTimestamp,
+        deadlineTimestamp: event.deadlineTimestamp,
+      };
+    case "withdrawalCancelled":
+      return {
+        kind: event.kind,
+        ...identity,
+        sharesReturned: event.sharesReturned,
+        cancelledAt: event.cancelledAt,
+      };
+    case "withdrawalFulfilled":
+      return {
+        kind: event.kind,
+        ...identity,
+        sharesBurned: event.sharesBurned,
+        assetsPaid: event.assetsPaid,
+        fulfilledAt: event.fulfilledAt,
+      };
+  }
+}
+
 /**
  * Veda as an EXECUTING provider: the catalogue client plus the vault-direct
  * capability.
@@ -125,23 +227,18 @@ export function toEarnVaultTransactionPlan(plan: VedaInstructionPlan): EarnVault
  * still discover the capability with `supportsVaultDirect`, never a provider-id
  * check.
  *
- * **Money OUT is the INSTANT exit only** (`buildVaultWithdrawal`,
- * `supportsVaultWithdraw`): burn shares, receive the vault asset, one
- * transaction — the shape the movement model already carries (ADR 0003,
- * "instant lands first, and alone"). Veda's OTHER exit, the request/fulfil
- * queue, is deliberately still absent: its lifecycle is settled by a solver
- * Veda operates and does not fit `pending|submitted|confirmed|failed`, so it
- * waits on its own capability and schema (ADR 0003 §4). Implementing only the
- * instant half here is not auto-selecting a route — the caller asked for an
- * immediate redemption and gets exactly that, or a typed refusal
- * (`WITHDRAW_REFUSED`) when the vault restricts it; SDP never silently
- * substitutes the queue.
+ * Money OUT has two independent capabilities. `buildVaultWithdrawal` is the
+ * one-transaction instant exit. `EarnVaultQueuedWithdrawProvider` covers the
+ * request/solver/cancel lifecycle and exposes provider truth separately from
+ * pre-execution previews. SDP reports both routes and never silently chooses
+ * one when the caller requested the other.
  */
 export class VedaVaultDirectClient
   extends VedaEarnClient
   implements
     EarnVaultDirectProvider,
     EarnVaultDepositQuoteProvider,
+    EarnVaultQueuedWithdrawProvider,
     EarnVaultWithdrawProvider,
     EarnVaultWithdrawQuoteProvider
 {
@@ -341,6 +438,173 @@ export class VedaVaultDirectClient
     };
   }
 
+  /** Independently report instant and queued routes; never choose one. */
+  async getWithdrawalOptions(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawalOptionsInput
+  ): Promise<EarnVaultWithdrawalOptions> {
+    const options = await this.withRuntime(
+      ctx,
+      "Reading vault withdrawal options",
+      (runtime, config) =>
+        readVedaWithdrawalOptions(runtime, config, {
+          vault: address(input.providerReference),
+        })
+    );
+    return {
+      instant: options.instant,
+      queued: options.queued,
+      withdrawAuthority: String(options.withdrawAuthority),
+      queueState: options.queueState === null ? null : String(options.queueState),
+      queueAsset:
+        options.queueAsset === null
+          ? null
+          : {
+              assetMint: String(options.queueAsset.assetMint),
+              allowWithdrawals: options.queueAsset.allowWithdrawals,
+              secondsToMaturity: options.queueAsset.secondsToMaturity,
+              minimumSecondsToDeadline: options.queueAsset.minimumSecondsToDeadline,
+              minimumDiscountBps: options.queueAsset.minimumDiscountBps,
+              maximumDiscountBps: options.queueAsset.maximumDiscountBps,
+              minimumShares: options.queueAsset.minimumShares,
+              shareDecimals: options.queueAsset.shareDecimals,
+            },
+    };
+  }
+
+  async quoteQueuedWithdrawal(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalQuoteInput
+  ): Promise<EarnVaultQueuedWithdrawalQuote> {
+    const quote = await this.withRuntime(
+      ctx,
+      "Quoting the queued vault withdrawal",
+      (runtime, config) =>
+        previewVedaQueuedWithdrawal(runtime, config, {
+          vault: address(input.providerReference),
+          shares: input.shares,
+          discountBps: input.discountBps,
+          deadlineSeconds: input.deadlineSeconds,
+        })
+    );
+    return {
+      assetMint: String(quote.assetMint),
+      shares: quote.shares,
+      shareDecimals: quote.shareDecimals,
+      assets: quote.assets,
+      assetDecimals: quote.assetDecimals,
+      discountBps: quote.discountBps,
+      maturityTimestamp: quote.maturityTimestamp,
+      deadlineTimestamp: quote.deadlineTimestamp,
+      blockingIssues: quote.issues,
+    };
+  }
+
+  async buildQueuedWithdrawalRequest(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalRequestInput
+  ): Promise<EarnVaultQueuedWithdrawalRequestPlan> {
+    const plan = await this.withRuntime(
+      ctx,
+      "Building the queued vault withdrawal",
+      (runtime, config) =>
+        buildVedaQueuedWithdrawalRequestPlan(runtime, config, {
+          vault: address(input.providerReference),
+          owner: address(input.owner),
+          shares: input.shares,
+          discountBps: input.discountBps,
+          deadlineSeconds: input.deadlineSeconds,
+          ...(input.rentPayer === undefined ? {} : { rentPayer: address(input.rentPayer) }),
+        })
+    );
+    return toEarnVaultQueuedWithdrawalRequestPlan(plan);
+  }
+
+  async buildQueuedWithdrawalCancel(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalCancelInput
+  ): Promise<EarnVaultTransactionPlan> {
+    const plan = await this.withRuntime(
+      ctx,
+      "Building the queued vault withdrawal cancellation",
+      (runtime, config) =>
+        buildVedaQueuedWithdrawalCancelPlan(runtime, config, {
+          vault: address(input.providerReference),
+          owner: address(input.owner),
+          request: address(input.requestAddress),
+        })
+    );
+    return toEarnVaultTransactionPlan(plan);
+  }
+
+  async readQueuedWithdrawalRequests(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalRequestsInput
+  ): Promise<EarnVaultQueuedWithdrawalRequest[]> {
+    const requests = await this.withRuntime(
+      ctx,
+      "Reading queued vault withdrawals",
+      (runtime, config) =>
+        readVedaQueuedWithdrawalRequests(runtime, config, {
+          vault: address(input.providerReference),
+          owner: address(input.owner),
+        })
+    );
+    return requests.map(toEarnQueuedWithdrawalRequest);
+  }
+
+  async readQueuedWithdrawalRequest(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalRequestInputByAddress
+  ): Promise<EarnVaultQueuedWithdrawalRequestLookup> {
+    const lookup = await this.withRuntime(
+      ctx,
+      "Reading the queued vault withdrawal",
+      (runtime, config) =>
+        readVedaQueuedWithdrawalRequest(runtime, config, {
+          vault: address(input.providerReference),
+          request: address(input.requestAddress),
+        })
+    );
+    if (lookup.request === null) {
+      return {
+        requestAddress: String(lookup.requestAddress),
+        status: "closedOrUnknown",
+        request: null,
+      };
+    }
+    return {
+      requestAddress: String(lookup.requestAddress),
+      status: lookup.status,
+      request: toEarnQueuedWithdrawalRequest(lookup.request),
+    };
+  }
+
+  /**
+   * Decode only lifecycle logs authenticated by this environment's configured
+   * Veda queue program. Reconciliation consumes the provider-neutral events;
+   * queue addresses, vault ids, and Kit-branded values remain inside Veda.
+   */
+  async decodeQueuedWithdrawalLifecycleEvents(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultQueuedWithdrawalLifecycleInput
+  ): Promise<readonly EarnVaultQueuedWithdrawalLifecycleEvent[]> {
+    const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
+    const queueProgramAddress = vedaClusterConfig(cluster).queueProgramAddress;
+    if (!queueProgramAddress) {
+      throw new SdpVedaError(
+        "INCOMPATIBLE_DEPLOYMENT",
+        `The Veda ${cluster} deployment declares no withdrawal queue, so lifecycle events ` +
+          "cannot be authenticated."
+      );
+    }
+    return parseVedaWithdrawalLifecycleEvents(input.logs, {
+      queueProgramAddress,
+      shareDecimals: input.shareDecimals,
+      assetDecimals: input.assetDecimals,
+    }).map(toEarnQueuedWithdrawalLifecycleEvent);
+  }
+
   /**
    * Live positions, read from chain per call and never persisted — positions are
    * provider truth (ADR 0002), and for a vault-direct provider "the provider" is
@@ -417,6 +681,7 @@ export class VedaVaultDirectClient
               cluster: position.cluster,
               shares: position.shares,
               withdrawableShares: position.withdrawableShares,
+              unlockTimestamp: position.unlockTimestamp,
               ...(position.tokenValue === undefined ? {} : { tokenValue: position.tokenValue }),
               tokenMint: String(position.tokenMint),
               shareMint: String(position.shareMint),

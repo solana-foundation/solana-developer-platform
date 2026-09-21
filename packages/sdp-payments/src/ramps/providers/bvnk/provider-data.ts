@@ -1,9 +1,4 @@
-import type {
-  BvnkBankFundingDetails,
-  BvnkOnboardingStatus,
-  BvnkPaymentRampInstruction,
-  SdpEnvironment,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
@@ -14,43 +9,233 @@ import { badRequest, internalError } from "../../../errors";
 import { hashString } from "../../../hash";
 import { readRecord } from "../../../json";
 import { readyCounterparty } from "../../requirements";
+import type { BvnkCustomer, BvnkCustomerStatus, BvnkPartyDetails } from "./schemas";
 
-export interface BvnkRuleEntityAddress {
-  addressLine1: string;
-  addressLine2?: string;
-  postalCode?: string;
-  city: string;
-  countryCode: string;
-  /** ISO 3166-1 alpha-2 country; BVNK rule validation rejects a blank `country`. */
-  country: string;
-  /** ISO 3166-2 region/state code; BVNK requires it for US beneficiaries. */
-  stateCode?: string;
-}
+/** The ONE place BVNK payout network codes are encoded: create/list/read use the network code, dry-run uses the protocol code (probe: "SOLANA" vs "SOL"). */
+export const BVNK_PAYOUT_NETWORK = {
+  create: "SOLANA",
+  dryRun: "SOL",
+} as const satisfies Record<"create" | "dryRun", string>;
 
-export type BvnkEntityType = "INDIVIDUAL" | "COMPANY";
+/** On-ramp remittance prefix, exactly 10 chars so a truncating rail keeps it whole in the paymentReference slot. */
+export const BVNK_ONRAMP_REMITTANCE_PREFIX = "SDP-ONRAMP" as const;
 
 /**
- * Beneficiary entity accepted by a BVNK on-ramp payment rule.
+ * Builds the bank remittance line for a BVNK on-ramp transfer.
+ *
+ * The rail splits the joined value at 10 chars: `paymentReference` carries
+ * `BVNK_ONRAMP_REMITTANCE_PREFIX` and `metadata.additionalRemittanceInformation`
+ * carries the leading space plus the transfer id, preserving case and hyphens.
+ *
+ * @param transferId SDP payment transfer id, for example `xfr_<uuid>`.
+ * @returns Remittance in `SDP-ONRAMP <transferId>` format.
  */
-export interface BvnkRuleEntity {
-  type: BvnkEntityType;
-  customerIdentifier: string;
-  relationshipType: "SELF_OWNED" | "THIRD_PARTY";
-  firstName?: string;
-  lastName?: string;
-  dateOfBirth?: string;
-  legalName?: string;
-  registrationNumber?: string;
-  address?: BvnkRuleEntityAddress;
+export function bvnkOnrampRemittance(transferId: string): string {
+  return `${BVNK_ONRAMP_REMITTANCE_PREFIX} ${transferId}`;
 }
 
-export interface BvnkComplianceInput {
-  partyDetails?: Record<string, unknown>[];
+const BVNK_TRANSFER_ID_REMITTANCE_PATTERN =
+  /xfr_[0-9a-f]{2}(?:\s*[0-9a-f]{2}){3}\s*-\s*[0-9a-f]{4}\s*-\s*[0-9a-f]{4}\s*-\s*[0-9a-f]{4}\s*-\s*[0-9a-f]{12}/gi;
+
+/**
+ * Recovers the SDP transfer id from a BVNK pay-in webhook remittance.
+ *
+ * The rail delivers the id either whole (a non-splitting rail) or split across
+ * `paymentReference` (first 10 chars, uppercased) and the overflow
+ * (`metadata.additionalRemittanceInformation` carries the rest of the id with
+ * its leading space). Searching the joined fields lets the halves reassemble
+ * even though the overflow never carries the `xfr_` prefix.
+ *
+ * @param paymentReference - First remittance segment, truncated and uppercased by the rail.
+ * @param additionalRemittanceInformation - Overflow segment including its leading
+ *   space, or undefined when the rail did not split the remittance.
+ * @returns The lowercased transfer id when exactly one distinct id matches, or
+ * null when no transfer id appears in the remittance.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when more than one distinct id
+ * matches — an ambiguous remittance; the webhook layer converts this to its
+ * terminal error.
+ */
+export function parseBvnkTransferIdFromRemittance(
+  paymentReference: string,
+  additionalRemittanceInformation: string | undefined
+): string | null {
+  const joined =
+    additionalRemittanceInformation === undefined
+      ? paymentReference
+      : `${paymentReference} ${additionalRemittanceInformation}`;
+  const distinctMatches = new Set(
+    [...joined.matchAll(BVNK_TRANSFER_ID_REMITTANCE_PATTERN)].map((match) =>
+      match[0].replace(/\s+/g, "").toLowerCase()
+    )
+  );
+  if (distinctMatches.size > 1) {
+    throw internalError(
+      `Ambiguous BVNK remittance: ${distinctMatches.size} distinct transfer ids match`
+    );
+  }
+  if (distinctMatches.size === 1) {
+    return distinctMatches.values().next().value as string;
+  }
+  return null;
+}
+
+/**
+ * Maps the v1 customer GET onto the payout `partyDetails` element BVNK accepts.
+ *
+ * The mapping is built JIT from the BVNK customer read and is never stored:
+ * SDP persists no PII on the transfer row.
+ *
+ * @param customer - Typed v1 customer response from the v1 customer GET; the
+ *   `individual.person` block's `firstName`, `lastName`, `dateOfBirth`, and
+ *   `address.countryCode` become the party details.
+ * @returns The party details element accepted by `POST /api/v1/pay/summary`.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the customer has no
+ * individual details to build the party details from.
+ */
+export function bvnkPayoutPartyDetailsFromCustomer(customer: BvnkCustomer): BvnkPartyDetails {
+  const person = customer.individual?.person;
+  if (person === undefined) {
+    throw internalError(
+      `BVNK customer ${customer.reference} has no individual details for the payout party details`
+    );
+  }
+  return {
+    type: "BENEFICIARY",
+    entityType: "INDIVIDUAL",
+    firstName: person.firstName,
+    lastName: person.lastName,
+    dateOfBirth: person.dateOfBirth,
+    relationshipType: "THIRD_PARTY",
+    countryCode: person.address.countryCode,
+  };
+}
+
+/**
+ * Typed `provider_data.bvnk` payload for BVNK on-ramp transfers. Every key is
+ * absent until its flow step writes it: the prebook initializes the payload to
+ * `{}`, the pay-in webhook writes `payin`, the reconciler writes `payout`, and
+ * the sandbox simulate writes `simulation`. Keys are never JSON null; unknown
+ * keys are rejected so a stray write can never be read as shaped state.
+ *
+ * `payout.intent` is absent on one legitimate state: the definitive pre-create
+ * rejection (unknown asset or dry-run refusal) writes `{claimedAt, attempts:
+ * 1, lastError}` with no intent because no validated spend amount ever
+ * existed. That row is `failed` and never enters recovery, so an absent
+ * intent is the "no automation" signal.
+ */
+export const bvnkOnrampTransferDataSchema = z
+  .object({
+    payin: z
+      .object({
+        id: z.string().min(1),
+        receivedAmount: z.string().min(1),
+        receivedCurrency: z.string().min(1),
+        walletId: z.string().min(1),
+        customerId: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+    payout: z
+      .object({
+        claimedAt: z.string().min(1),
+        attempts: z.number().int().nonnegative(),
+        intent: z
+          .object({
+            amount: z.string().min(1),
+            currency: z.string().min(1),
+            cryptoCurrency: z.string().min(1),
+            network: z.string().min(1),
+            address: z.string().min(1),
+          })
+          .strict()
+          .optional(),
+        payoutId: z.string().min(1).optional(),
+        lastError: z.string().min(1).optional(),
+        lastPolledAt: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+    simulation: z
+      .object({
+        requestedAt: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type BvnkOnrampTransferData = z.infer<typeof bvnkOnrampTransferDataSchema>;
+
+/**
+ * Reads a BVNK on-ramp transfer's `provider_data.bvnk` payload strictly.
+ *
+ * @param providerData - The transfer row's `provider_data` column; the `bvnk`
+ *   object must be present (the prebook initializes it to `{}`).
+ * @returns The parsed on-ramp transfer data.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the `bvnk` key is missing
+ * or the payload does not match {@link bvnkOnrampTransferDataSchema}.
+ */
+export function readBvnkOnrampTransferData(
+  providerData: CounterpartyRow["provider_data"]
+): BvnkOnrampTransferData {
+  const bvnk = providerData.bvnk;
+  if (bvnk === undefined) {
+    throw internalError("BVNK on-ramp transfer provider_data has no bvnk object");
+  }
+  const parsed = bvnkOnrampTransferDataSchema.safeParse(bvnk);
+  if (!parsed.success) {
+    throw internalError("BVNK on-ramp transfer provider_data.bvnk is malformed");
+  }
+  return parsed.data;
 }
 
 export const BVNK_NETWORKS = ["SOLANA"] as const;
 
 export type BvnkNetwork = (typeof BVNK_NETWORKS)[number];
+
+/** Provider-native crypto payout statuses that settle the transfer; their completions must carry the on-chain delivery facts. */
+export const BVNK_CRYPTO_PAYOUT_COMPLETED_STATUSES = ["COMPLETE", "COMPLETED"] as const;
+export type BvnkCryptoPayoutCompletedStatus =
+  (typeof BVNK_CRYPTO_PAYOUT_COMPLETED_STATUSES)[number];
+
+/** Provider-native crypto payout statuses that fail the transfer; the fiat funds stay in the funding wallet. */
+export const BVNK_CRYPTO_PAYOUT_FAILED_STATUSES = ["FAILED", "CANCELLED", "EXPIRED"] as const;
+export type BvnkCryptoPayoutFailedStatus = (typeof BVNK_CRYPTO_PAYOUT_FAILED_STATUSES)[number];
+
+/** Whether a parsed crypto payout status settles the transfer. */
+export function isBvnkPayoutCompleted(value: string): value is BvnkCryptoPayoutCompletedStatus {
+  return BVNK_CRYPTO_PAYOUT_COMPLETED_STATUSES.some((candidate) => candidate === value);
+}
+
+/** Whether a parsed crypto payout status fails the transfer. */
+export function isBvnkPayoutFailed(value: string): value is BvnkCryptoPayoutFailedStatus {
+  return BVNK_CRYPTO_PAYOUT_FAILED_STATUSES.some((candidate) => candidate === value);
+}
+
+/** The trusted BVNK receipt host per environment; receipts from any other host are never stored or rendered. */
+export function bvnkReceiptUrlHost(environment: SdpEnvironment): string {
+  return environment === "sandbox" ? "pay.sandbox.bvnk.com" : "pay.bvnk.com";
+}
+
+/** Whether a provider receipt url is a trusted BVNK receipt link for the payout: https, no credentials, the environment's exact receipt host, and the expected `/payout/<payoutId>` path. */
+export function isValidBvnkReceiptUrl(
+  url: string,
+  environment: SdpEnvironment,
+  payoutId: string
+): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return (
+    parsed.protocol === "https:" &&
+    parsed.username === "" &&
+    parsed.password === "" &&
+    parsed.host === bvnkReceiptUrlHost(environment) &&
+    parsed.pathname === `/payout/${payoutId}`
+  );
+}
 
 export const BVNK_CRYPTO_CURRENCIES = [
   "SOL",
@@ -95,8 +280,6 @@ export function normalizeBvnkCurrencyAndNetwork(value: string): BvnkCurrencyNetw
   );
 }
 
-export type BvnkVerificationStatus = "init" | "pending" | "completed" | "failed";
-
 /**
  * Builds BVNK's `Idempotency-Key` header for fiat wallet creation.
  *
@@ -113,9 +296,6 @@ export async function buildBvnkWalletIdempotencyKey(walletName: string): Promise
 }
 
 const BVNK_VERIFIED_STATUSES = new Set(["VERIFIED", "COMPLETED", "APPROVED"]);
-const BVNK_VERIFYING_STATUSES = new Set(["PENDING"]);
-const BVNK_VERIFICATION_REQUIRED_STATUSES = new Set(["ACTIONS_REQUIRED", "INFO_REQUIRED"]);
-const BVNK_VERIFICATION_FAILED_STATUSES = new Set(["REJECTED", "TERMINATED"]);
 
 /**
  * Whether a cached BVNK customer status counts as fully verified. The customer
@@ -127,27 +307,51 @@ export function isBvnkCustomerVerified(status: string | undefined): boolean {
 }
 
 /**
- * Onboarding phase for a not-yet-verified BVNK customer, decided from the v2
- * customer status. PENDING means the applicant has submitted and is under
- * review; INFO_REQUIRED and ACTIONS_REQUIRED mean the applicant must still act;
- * REJECTED and TERMINATED are terminal-negative. Any other unverified status is
- * unmapped and throws so it surfaces loudly instead of silently stranding the
- * buyer mid-onboarding.
+ * Maps a parsed v1 customer status to the client-facing verification
+ * requirement. PENDING means the applicant is under review; INFO_REQUIRED and
+ * ACTIONS_REQUIRED mean the applicant must still act and carry a JIT Sumsub
+ * link; REJECTED and TERMINATED are terminal-negative; VERIFIED is ready.
+ * Every status in the enum is mapped; the exhausted switch fails loudly on a
+ * status the provider schema no longer knows.
+ *
+ * @param status - The v1 customer status parsed from the customer GET.
+ * @param direction - Ramp direction used in the requirement response.
+ * @param verificationUrl - The customer's current JIT verification URL, required
+ *   when the status maps to `verification_required`.
+ * @returns The verification requirement for the status, or `ready`.
  */
-export function bvnkUnverifiedOnboardingStatus(
-  status: string | undefined
-): Extract<BvnkOnboardingStatus, "verifying" | "verification_required" | "verification_failed"> {
-  const normalized = status?.toUpperCase();
-  if (normalized && BVNK_VERIFYING_STATUSES.has(normalized)) {
-    return "verifying";
+export function bvnkCustomerStatusRequirements(
+  status: BvnkCustomerStatus,
+  direction: RampDirection,
+  verificationUrl?: string
+): CounterpartyRequirements {
+  switch (status) {
+    case "VERIFIED":
+      return readyCounterparty("bvnk", direction);
+    case "PENDING":
+      return { provider: "bvnk", direction, status: "customer_verifying" };
+    case "INFO_REQUIRED":
+    case "ACTIONS_REQUIRED": {
+      if (!verificationUrl) {
+        throw internalError(
+          'BVNK reported "verification_required" without a JIT verification URL.'
+        );
+      }
+      return {
+        provider: "bvnk",
+        direction,
+        status: "customer_verification_required",
+        verificationUrl,
+      };
+    }
+    case "REJECTED":
+    case "TERMINATED":
+      return { provider: "bvnk", direction, status: "customer_verification_failed" };
+    default: {
+      const exhaustive: never = status;
+      throw internalError(`Unhandled BVNK customer KYC status: ${String(exhaustive)}`);
+    }
   }
-  if (normalized && BVNK_VERIFICATION_REQUIRED_STATUSES.has(normalized)) {
-    return "verification_required";
-  }
-  if (normalized && BVNK_VERIFICATION_FAILED_STATUSES.has(normalized)) {
-    return "verification_failed";
-  }
-  throw internalError(`Unmapped BVNK customer KYC status: ${status ?? "(missing)"}`);
 }
 
 /**
@@ -199,28 +403,28 @@ export function readBvnkOfframpReference(reference: string): string | undefined 
 export interface BvnkCustomerResolution {
   /**
    * BVNK customer `externalReference` value. For SDP-created customers this is
-   * a reversible `cp_<uuid_without_hyphens>` alias for the SDP counterparty id,
-   * sized to fit BVNK's 36-character limit.
+   * the counterparty uuid without the `cpty_` prefix, which is exactly BVNK's
+   * 36-character limit.
    */
   externalReference?: string;
   customerReference?: string;
   status?: string;
-  verificationStatus?: BvnkVerificationStatus;
+  verificationStatus?: string;
 }
 
 /**
  * Builds the value stored in BVNK's customer `externalReference` field.
  *
  * BVNK limits `externalReference` to 36 characters, while SDP counterparty ids
- * are `cpty_<uuid>` and therefore too long. This function creates a
- * reversible BVNK-facing id in `cp_<uuid_without_hyphens>` format. BVNK returns
+ * are `cpty_<uuid>` and therefore too long. The bare hyphenated uuid is exactly
+ * 36 characters, so the prefix is dropped and nothing else changes. BVNK returns
  * this caller-provided value in customer/payment webhooks, letting handlers
  * reconstruct the SDP counterparty id and load by primary key.
  *
  * @param counterpartyId SDP counterparty primary key in `cpty_<uuid>` format.
- * @returns BVNK customer `externalReference` in `cp_<32_hex_uuid>` format.
+ * @returns BVNK customer `externalReference`: the counterparty uuid without its prefix.
  * @throws SdpPaymentsError with `INTERNAL_ERROR` when the counterparty id cannot be
- * represented in BVNK's compact externalReference format.
+ * represented as a BVNK externalReference.
  */
 export function buildBvnkCustomerExternalReference(counterpartyId: string): string {
   const match = SDP_COUNTERPARTY_ID_PATTERN.exec(counterpartyId);
@@ -229,43 +433,23 @@ export function buildBvnkCustomerExternalReference(counterpartyId: string): stri
       `Malformed SDP counterparty id for BVNK externalReference: ${counterpartyId}`
     );
   }
-  return `cp_${match.slice(1).join("").toLowerCase()}`;
+  return match.slice(1).join("-").toLowerCase();
 }
 
 const BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN =
-  /^cp_([0-9a-f]{8})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})$/;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * Recovers the SDP counterparty id from a BVNK customer `externalReference`.
  *
- * @param reference - Candidate `cp_<32_hex_uuid>` external reference.
+ * @param reference - Candidate external reference (a bare counterparty uuid).
  * @returns The `cpty_<uuid>` counterparty id, or null when the value is not an SDP external reference.
  */
 export function parseBvnkCustomerExternalReference(reference: string): string | null {
-  const match = BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN.exec(reference);
-  if (!match) {
+  if (!BVNK_CUSTOMER_EXTERNAL_REFERENCE_PATTERN.test(reference)) {
     return null;
   }
-  return `cpty_${match.slice(1).join("-")}`;
-}
-
-/** Per funding-spec (fiat+token+destination) virtual wallet + rule. */
-export interface BvnkOnrampRequestSpec {
-  currency: BvnkCryptoCurrency;
-  network: BvnkNetwork;
-  destinationWalletAddress: string;
-  fiatCurrency: RampFiatCurrency;
-}
-
-export interface BvnkOnrampPaymentRuleState {
-  walletId?: string;
-  walletName?: string;
-  walletStatus?: string;
-  ruleId?: string;
-  ruleStatus?: string;
-  bankAccount?: BvnkBankFundingDetails;
-  request?: BvnkOnrampRequestSpec;
-  provisioningError?: string;
+  return `cpty_${reference}`;
 }
 
 const BVNK_WALLET_ACTIVE_STATUSES = new Set(["ACTIVE", "COMPLETED"]);
@@ -274,56 +458,11 @@ export function isBvnkWalletActive(status: string | undefined): boolean {
   return status !== undefined && BVNK_WALLET_ACTIVE_STATUSES.has(status.toUpperCase());
 }
 
-export interface BvnkPaymentRuleResolution {
-  customer: BvnkCustomerResolution;
-  entry: BvnkOnrampPaymentRuleState;
-  onboardingStatus: BvnkOnboardingStatus;
-}
-
 export function readBvnkData(
   providerData: CounterpartyRow["provider_data"]
 ): Record<string, unknown> {
   const bvnk = providerData.bvnk;
   return bvnk && typeof bvnk === "object" ? (bvnk as Record<string, unknown>) : {};
-}
-
-export function readBvnkWallets(
-  providerData: CounterpartyRow["provider_data"]
-): Record<string, BvnkOnrampPaymentRuleState> {
-  const wallets = readBvnkData(providerData).wallets;
-  return wallets && typeof wallets === "object"
-    ? (wallets as Record<string, BvnkOnrampPaymentRuleState>)
-    : {};
-}
-
-export function withBvnkOnrampPaymentRuleState(
-  providerData: CounterpartyRow["provider_data"],
-  onrampPaymentRuleKey: string,
-  paymentRule: Partial<BvnkOnrampPaymentRuleState>
-): CounterpartyRow["provider_data"] {
-  const bvnk = readBvnkData(providerData);
-  const wallets = readBvnkWallets(providerData);
-  return {
-    ...providerData,
-    bvnk: {
-      ...bvnk,
-      wallets: {
-        ...wallets,
-        [onrampPaymentRuleKey]: {
-          ...wallets[onrampPaymentRuleKey],
-          ...paymentRule,
-        },
-      },
-    },
-  };
-}
-
-export function pendingBvnkOnrampPaymentRuleKeys(
-  providerData: CounterpartyRow["provider_data"]
-): string[] {
-  return Object.entries(readBvnkWallets(providerData))
-    .filter(([, entry]) => entry.request && !entry.ruleId)
-    .map(([key]) => key);
 }
 
 /** Merchant-owned BVNK off-ramp wallet, one per fiat currency. */
@@ -339,58 +478,57 @@ export function buildBvnkOfframpWalletName(
   return `sdp:offramp:${fiatCurrency}:${counterpartyId}`;
 }
 
+/** Fiat currency SDP provisions BVNK customer funding wallets for (the US-only residence list this slice). */
+export const BVNK_FUNDING_WALLET_FIAT = "USD" as const satisfies RampFiatCurrency;
+
 /**
- * Builds the BVNK wallet name for customer-owned on-ramp funding wallets.
- *
- * The name carries the SDP counterparty id and the deterministic on-ramp
- * payment rule fields so wallet lifecycle webhooks can update
- * `provider_data.bvnk.wallets[onrampPaymentRuleKey]` directly.
- *
- * @param counterpartyId SDP counterparty primary key.
- * @param onrampPaymentRuleKey Deterministic key from `buildBvnkOnrampPaymentRuleKey`.
- * @returns BVNK wallet name in
- * `sdp:onramp:<counterparty_id>:<fiat>:<crypto>_<network>:<destination>` format.
+ * BVNK does not deduplicate concurrent wallet creates under one idempotency
+ * key, so a freshly claimed funding-wallet row with no wallet reference is
+ * treated as creation in flight. A claim older than this window is a crashed
+ * claimer and is taken over; the name-hashed idempotency key makes that
+ * takeover a non-concurrent retry, which BVNK does dedupe.
  */
-export function buildBvnkOnrampWalletName(
-  counterpartyId: string,
-  onrampPaymentRuleKey: string
-): string {
-  const key = parseBvnkOnrampPaymentRuleKey(onrampPaymentRuleKey);
-  return `sdp:onramp:${counterpartyId}:${key.fiatCurrency}:${key.cryptoCurrency}_${key.cryptoNetwork}:${key.destinationWalletAddress}`;
+export const BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS = 2 * 60 * 1000;
+
+/** Builds the BVNK wallet name for a customer funding wallet, keyed by the customer-link row id. */
+export function buildBvnkFundingWalletName(providerAccountId: string): string {
+  return `sdp:onramp:${providerAccountId}`;
 }
 
-const BVNKOfframpWalletName = z.object({
+const BVNKMerchantOfframpWalletName = z.object({
   namespace: z.literal("sdp"),
-  direction: z.literal("offramp"),
+  kind: z.literal("merchant_offramp"),
   fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
   counterpartyId: z.string().min(1),
 });
 
-const BVNKOnrampWalletName = z.object({
+const BVNKFundingWalletName = z.object({
   namespace: z.literal("sdp"),
-  direction: z.literal("onramp"),
-  counterpartyId: z.string().min(1),
-  onrampKey: z.string().min(1),
+  kind: z.literal("funding_wallet"),
+  providerAccountId: z.string().min(1),
 });
 
-export const BVNKWallet = z.discriminatedUnion("direction", [
-  BVNKOfframpWalletName,
-  BVNKOnrampWalletName,
+export const BVNKWallet = z.discriminatedUnion("kind", [
+  BVNKMerchantOfframpWalletName,
+  BVNKFundingWalletName,
 ]);
 
 export type BVNKWallet = z.infer<typeof BVNKWallet>;
 
 export function parseBvnkOfframpWalletName(
   walletName: string
-): Extract<BVNKWallet, { direction: "offramp" }> {
+): Extract<BVNKWallet, { kind: "merchant_offramp" }> {
   const parts = walletName.split(":");
   if (parts.length !== 4) {
     throw internalError(`Malformed BVNK off-ramp wallet name: ${walletName}`);
   }
   const [namespace, direction, fiatCurrency, counterpartyId] = parts;
-  const parsed = BVNKOfframpWalletName.safeParse({
+  if (direction !== "offramp") {
+    throw internalError(`Malformed BVNK off-ramp wallet name: ${walletName}`);
+  }
+  const parsed = BVNKMerchantOfframpWalletName.safeParse({
     namespace,
-    direction,
+    kind: "merchant_offramp",
     fiatCurrency,
     counterpartyId,
   });
@@ -401,45 +539,62 @@ export function parseBvnkOfframpWalletName(
 }
 
 /**
- * Parses a customer-owned BVNK funding wallet name back into its SDP owner and
- * on-ramp entry key.
+ * Parses a customer funding wallet name back into its SDP provider-account id.
  *
  * @param walletName BVNK wallet `name` value.
- * @returns Parsed SDP counterparty id and `buildBvnkOnrampPaymentRuleKey` value.
- * @throws SdpPaymentsError with `INTERNAL_ERROR` when the name does not match the SDP
- * on-ramp wallet naming contract.
+ * @returns Parsed provider-account id the funding wallet belongs to.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the name does not match the
+ * SDP funding wallet naming contract.
  */
-export function parseBvnkOnrampWalletName(
+export function parseBvnkFundingWalletName(
   walletName: string
-): Extract<BVNKWallet, { direction: "onramp" }> {
+): Extract<BVNKWallet, { kind: "funding_wallet" }> {
   const parts = walletName.split(":");
-  if (parts.length !== 6) {
-    throw internalError(`Malformed BVNK on-ramp wallet name: ${walletName}`);
+  if (parts.length !== 3) {
+    throw internalError(`Malformed BVNK funding wallet name: ${walletName}`);
   }
-  const [namespace, direction, counterpartyId, fiatCurrency, cryptoRail, destinationWalletAddress] =
-    parts;
-  let onrampKey = `${fiatCurrency}:${cryptoRail}:${destinationWalletAddress}`;
-  try {
-    const key = parseBvnkOnrampPaymentRuleKey(onrampKey);
-    onrampKey = buildBvnkOnrampPaymentRuleKey(
-      key.fiatCurrency,
-      key.cryptoCurrency,
-      key.cryptoNetwork,
-      key.destinationWalletAddress
-    );
-  } catch {
-    throw internalError(`Malformed BVNK on-ramp wallet name: ${walletName}`);
+  if (parts[1] !== "onramp") {
+    throw internalError(`Malformed BVNK funding wallet name: ${walletName}`);
   }
-  const parsed = BVNKOnrampWalletName.safeParse({
-    namespace,
-    direction,
-    counterpartyId,
-    onrampKey,
+  const parsed = BVNKFundingWalletName.safeParse({
+    namespace: parts[0],
+    kind: "funding_wallet",
+    providerAccountId: parts[2],
   });
   if (!parsed.success) {
-    throw internalError(`Malformed BVNK on-ramp wallet name: ${walletName}`);
+    throw internalError(`Malformed BVNK funding wallet name: ${walletName}`);
   }
   return parsed.data;
+}
+
+/**
+ * Parses an SDP-created BVNK wallet name into its logical wallet reference, or
+ * reports the name as unrecognised. The name's second segment is the
+ * `direction` slot: `offramp` names the merchant off-ramp wallet and a 3-part
+ * `onramp` name the customer funding wallet. Every other shape — including the
+ * 6-part legacy on-ramp names sandbox still holds — is
+ * `unrecognised`: webhooks must acknowledge those events terminal, never
+ * retry them.
+ *
+ * @param walletName BVNK wallet `name` value.
+ * @returns The parsed funding or merchant off-ramp wallet reference, or the
+ * unrecognised name when it does not match either SDP naming contract.
+ */
+export function parseBvnkWalletName(walletName: string): BVNKWallet | BvnkUnrecognisedWalletName {
+  const parts = walletName.split(":");
+  if (parts[1] === "offramp" && parts.length === 4) {
+    return parseBvnkOfframpWalletName(walletName);
+  }
+  if (parts[1] === "onramp" && parts.length === 3) {
+    return parseBvnkFundingWalletName(walletName);
+  }
+  return { kind: "unrecognised", name: walletName };
+}
+
+/** A wallet name SDP no longer provisions or manages; its events are acknowledged, never retried. */
+export interface BvnkUnrecognisedWalletName {
+  kind: "unrecognised";
+  name: string;
 }
 
 export function readBvnkOfframpWallets(
@@ -537,216 +692,8 @@ export function latestBvnkOfframpBeneficiary(
   return entries[0] ?? null;
 }
 
-/**
- * Schema for the logical components encoded into
- * `provider_data.bvnk.wallets[onrampPaymentRuleKey]`.
- */
-export const BVNKOnrampPaymentRuleKey = z.object({
-  fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
-  cryptoCurrency: z.enum(BVNK_CRYPTO_CURRENCIES),
-  cryptoNetwork: z.enum(BVNK_NETWORKS),
-  destinationWalletAddress: z
-    .string()
-    .min(1)
-    .refine((value) => !value.includes(":")),
-});
-
-export type BVNKOnrampPaymentRuleKey = z.infer<typeof BVNKOnrampPaymentRuleKey>;
-
-/**
- * Builds the deterministic key for a BVNK on-ramp payment rule.
- *
- * This key identifies the exact funding rule SDP needs for one fiat funding
- * currency, one crypto asset/network destination, and one destination wallet.
- * It is stored under `provider_data.bvnk.wallets` and embedded into the BVNK
- * wallet name so webhook handlers can reverse it without scanning by wallet id.
- *
- * @param fiatCurrency Fiat currency the counterparty sends into the BVNK funding account.
- * @param cryptoCurrency Crypto asset BVNK delivers for the on-ramp, such as `USDC`.
- * @param cryptoNetwork Blockchain network BVNK delivers on, such as `SOLANA`.
- * @param destinationWalletAddress Destination wallet address that receives the on-ramped crypto.
- * @returns Serialized on-ramp payment rule key in `<fiat>:<crypto>_<network>:<destination>` format.
- * @throws SdpPaymentsError with `INTERNAL_ERROR` when inputs do not satisfy the SDP key contract.
- */
-export function buildBvnkOnrampPaymentRuleKey(
-  fiatCurrency: RampFiatCurrency,
-  cryptoCurrency: BvnkCryptoCurrency,
-  cryptoNetwork: BvnkNetwork,
-  destinationWalletAddress: string
-): string {
-  const parsed = BVNKOnrampPaymentRuleKey.safeParse({
-    fiatCurrency,
-    cryptoCurrency,
-    cryptoNetwork,
-    destinationWalletAddress,
-  });
-  if (!parsed.success) {
-    throw internalError("Malformed BVNK on-ramp payment rule key input");
-  }
-  return `${parsed.data.fiatCurrency}:${parsed.data.cryptoCurrency}_${parsed.data.cryptoNetwork}:${parsed.data.destinationWalletAddress}`;
-}
-
-/**
- * Parses a stored BVNK on-ramp payment rule key back to its logical components.
- *
- * @param key Serialized key from `buildBvnkOnrampPaymentRuleKey`.
- * @returns Parsed fiat funding currency, on-ramped crypto asset/network, and destination wallet.
- * @throws SdpPaymentsError with `INTERNAL_ERROR` when the key no longer matches SDP's BVNK key contract.
- */
-export function parseBvnkOnrampPaymentRuleKey(key: string): BVNKOnrampPaymentRuleKey {
-  const parts = key.split(":");
-  if (parts.length !== 3) {
-    throw internalError(`Malformed BVNK on-ramp payment rule key: ${key}`);
-  }
-  const [fiatCurrency, cryptoRail, destinationWalletAddress] = parts;
-  if (!cryptoRail.endsWith("_SOLANA")) {
-    throw internalError(`Malformed BVNK on-ramp payment rule key: ${key}`);
-  }
-  const cryptoNetwork: BvnkNetwork = "SOLANA";
-  const cryptoCurrency = cryptoRail.slice(0, -"_SOLANA".length);
-  const parsed = BVNKOnrampPaymentRuleKey.safeParse({
-    fiatCurrency,
-    cryptoCurrency,
-    cryptoNetwork,
-    destinationWalletAddress,
-  });
-  if (!parsed.success) {
-    throw internalError(`Malformed BVNK on-ramp payment rule key: ${key}`);
-  }
-  return parsed.data;
-}
-
-export function readBvnkOnrampPaymentRuleState(
-  providerData: CounterpartyRow["provider_data"],
-  key: string
-): BvnkOnrampPaymentRuleState {
-  const entry = readBvnkWallets(providerData)[key];
-  return entry && typeof entry === "object" ? entry : {};
-}
-
-export async function bvnkRuleReference(
-  counterpartyId: string,
-  onrampKey: string
-): Promise<string> {
-  return (await hashString(`bvnk-rule:${counterpartyId}:${onrampKey}`)).slice(0, 36);
-}
-
 export function buildBvnkPartyDetails(counterparty: CounterpartyRow): never {
   throw badRequest(
     `BVNK offramp requires identity fields for counterparty ${counterparty.id} that are no longer stored; JIT collection is not wired yet`
   );
-}
-
-export function buildBvnkOnrampInstruction(
-  resolution: BvnkPaymentRuleResolution,
-  params: {
-    network: string;
-    destinationWalletAddress: string;
-    fiatCurrency: string;
-    mode: SdpEnvironment;
-  }
-): BvnkPaymentRampInstruction {
-  const { entry, onboardingStatus } = resolution;
-  const verificationNote =
-    params.mode === "sandbox"
-      ? "Complete identity verification to activate your funding account. BVNK requires you to verify the counterparty through Sumsub. No information entered via the sandbox will be verified."
-      : "Complete identity verification to activate your funding account. BVNK requires you to verify the counterparty through Sumsub.";
-  const notesByStatus = {
-    ready: `Fund your ${params.fiatCurrency} BVNK virtual account to receive crypto on ${params.network}.`,
-    verification_required: verificationNote,
-    verification_failed:
-      "Identity verification was not approved, so this funding account can't be activated. Contact support if you believe this is a mistake.",
-    provisioning: "Setting up your funding account; bank details will appear in a moment.",
-    verifying: "Identity verification is in review; funding details will appear once approved.",
-  } as const satisfies Record<BvnkOnboardingStatus, string>;
-  const notes = notesByStatus[onboardingStatus];
-  return {
-    provider: "bvnk",
-    kind: "fiat_funding",
-    onboardingStatus,
-    ruleId: entry.ruleId,
-    ruleStatus: entry.ruleStatus,
-    fundingWalletId: entry.walletId,
-    fiatCurrency: params.fiatCurrency,
-    beneficiaryAddress: params.destinationWalletAddress,
-    network: params.network,
-    bankAccount: entry.bankAccount,
-    instructionsNotes: notes,
-  };
-}
-
-export function bvnkOnboardingRequirements(
-  resolution: BvnkPaymentRuleResolution,
-  direction: RampDirection,
-  verificationUrl?: string
-): CounterpartyRequirements {
-  switch (resolution.onboardingStatus) {
-    case "ready":
-      return readyCounterparty("bvnk", direction);
-    case "verification_required": {
-      if (!verificationUrl) {
-        throw internalError(
-          'BVNK reported "verification_required" without a JIT verification URL.'
-        );
-      }
-      return {
-        provider: "bvnk",
-        direction,
-        status: "customer_verification_required",
-        verificationUrl,
-      };
-    }
-    case "verifying":
-      return { provider: "bvnk", direction, status: "customer_verifying" };
-    case "verification_failed":
-      return { provider: "bvnk", direction, status: "customer_verification_failed" };
-    case "provisioning":
-      return {
-        provider: "bvnk",
-        direction,
-        status: "customer_funding_account_provisioning",
-      };
-    default: {
-      const exhaustive: never = resolution.onboardingStatus;
-      throw internalError(`Unhandled BVNK onboarding status: ${String(exhaustive)}`);
-    }
-  }
-}
-
-/**
- * Resolves stored BVNK wallet/rule state using customer metadata from the accounts row.
- *
- * @param providerData - Stored wallet and rule state; it contains no customer PII or URLs.
- * @param params - Funding specification for the on-ramp.
- * @param customer - Provider customer id and current status.
- * @returns The pure onboarding and provisioning resolution.
- */
-export function bvnkOnrampPaymentRuleResolutionFromProviderData(
-  providerData: CounterpartyRow["provider_data"],
-  params: { cryptoToken: string; fiatCurrency: RampFiatCurrency; destinationWalletAddress: string },
-  customer: BvnkCustomerResolution
-): BvnkPaymentRuleResolution {
-  if (!customer.customerReference || !customer.status) {
-    throw internalError("BVNK customer account metadata is missing its id or status.");
-  }
-  if (!isBvnkCustomerVerified(customer.status)) {
-    return {
-      customer,
-      entry: {},
-      onboardingStatus: bvnkUnverifiedOnboardingStatus(customer.status),
-    };
-  }
-  const { currency, network } = normalizeBvnkCurrencyAndNetwork(params.cryptoToken);
-  const key = buildBvnkOnrampPaymentRuleKey(
-    params.fiatCurrency,
-    currency,
-    network,
-    params.destinationWalletAddress
-  );
-  const entry = readBvnkOnrampPaymentRuleState(providerData, key);
-  return {
-    customer,
-    entry,
-    onboardingStatus: entry.ruleId && entry.bankAccount?.accountNumber ? "ready" : "provisioning",
-  };
 }

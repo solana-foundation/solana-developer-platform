@@ -1,15 +1,29 @@
 # 0003. Veda vault withdrawals — the exit path for `vault_direct`
 
 Date: 2026-08-19
-Status: Partially implemented (2026-08-21). The context below predates
-PRO-1702, which landed `POST /v1/earn/vault-withdrawals`, its service and the
-Kamino exit — so "there is no route at all" is HISTORY, not the present.
-Decision 3 ("instant lands first, and alone") is implemented: `@sdp/veda`
-builds the instant redemption through that route, with a quote-derived
-`minAmountOut` floor (`supportsVaultWithdrawQuote` /
-`POST /v1/earn/vault-withdrawal-previews`). Decisions 1 (the queued
-capability), 4 (the request table) and 6 (the closed-request indexer) remain
-open on the product answer to open question 5.
+Status: Implemented for the configured devnet deployment (2026-09-18).
+
+The context below is retained as the decision record. The implementation now
+includes the separate queued-withdraw capability, live options and previews,
+custody and external-wallet request/cancel flows, durable request/action/build
+tables, and a closing-event reconciler that distinguishes fulfillment from
+cancellation and records the provider-paid asset amount. Treasury and Embedded
+Yield expose both exit routes without choosing between them.
+
+The real-program Surfpool scenario in
+`packages/sdp-veda/src/sdk.surfpool.test.ts` proves deposit → share lock → queue
+request → escrow, an on-chain refusal before the deadline, and cancellation
+after the deadline with the shares returned. It does not impersonate Veda's
+private solve authority, so solver fulfillment is verified at the SDK event
+and reconciliation boundaries rather than fabricated in the end-to-end test.
+This supersedes any inference that the older external audit completed a cancel:
+`docs/earn/veda-svm-audit/SUMMARY.md` records that all of its cancel attempts
+failed and its shares remained escrowed.
+
+Two release gates remain outside this implementation: the new runtime routes
+must not enter the public OpenAPI document without a named EARN-027 security
+sign-off, and production remains fail-closed until Veda names approved mainnet
+vaults for SDP rather than the shared Test Vault.
 
 ## Context
 

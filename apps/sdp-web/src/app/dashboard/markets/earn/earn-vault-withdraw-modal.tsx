@@ -6,7 +6,7 @@ import {
   earnWithdrawSlippageFloor,
   type SdpEnvironment,
 } from "@sdp/types";
-import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,14 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
 import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals } from "./earn-decimal";
+import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
-import { formatTokenQuantity, formatUsd } from "./earn-format";
-import { earnMintAsset, shortenMarketAddress } from "./earn-market-presentation";
+import { formatTokenQuantity, formatUsd, positionDisplayName } from "./earn-format";
+import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
 import {
   createEarnVaultWithdrawal,
   type EarnVaultWithdrawal,
@@ -30,17 +29,31 @@ import {
   fetchEarnVaultWithdrawalsByRequestId,
   useEarnVaultWithdrawalOutcome,
 } from "./earn-program-data";
+import { EarnVaultApprovalResult } from "./earn-vault-approval-result";
 import {
-  floorForTolerance,
+  mergeObservedVaultMovement,
+  observableVaultMovement,
+  vaultApprovalPending,
+  vaultMovementHappened,
+  vaultMovementPanelKey,
+  vaultMovementProcessing,
+  vaultMovementProgressStep,
+} from "./earn-vault-movement";
+import {
+  derivedMinOut,
+  floorToReplay,
   isSlippageExceededRefusal,
-  isZeroQuote,
   parseSlippageToleranceBps,
   quoteForKey,
   useDebouncedVaultQuote,
   type VaultQuoteState,
 } from "./earn-vault-slippage";
-import { VaultSlippageSection } from "./earn-vault-slippage-section";
-import { earnVaultPositionStatusDisplay, earnVaultWithdrawalUiState } from "./earn-vault-ui-state";
+import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
+import {
+  earnVaultPositionStatusDisplay,
+  earnVaultWithdrawalUiState,
+  vaultOutcomeTone,
+} from "./earn-vault-ui-state";
 import {
   VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   validateVaultWithdrawalAmount,
@@ -54,59 +67,6 @@ import {
   vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
-
-/** The floor the current quote and tolerance imply, or `undefined` while they cannot. */
-function derivedMinAmountOut(
-  toleranceBps: number | null,
-  quote: VaultQuoteState<EarnVaultWithdrawalPreview>
-): string | undefined {
-  if (toleranceBps === null || quote.kind !== "quoted") return undefined;
-  if (quote.preview.blockingIssues.length > 0) return undefined;
-  // `null` — a zero-asset quote — has no satisfiable floor; blocking the
-  // submission is the only honest answer (see `floorForTolerance`).
-  return (
-    floorForTolerance(quote.preview.assetsOut, quote.preview.assetDecimals, toleranceBps) ??
-    undefined
-  );
-}
-
-/** Quote-state notices under the summary: loading, unavailable, or blocked. */
-function WithdrawalQuoteNotices({ quote }: { quote: VaultQuoteState<EarnVaultWithdrawalPreview> }) {
-  const t = useTranslations();
-  if (quote.kind === "loading") {
-    return (
-      <p className="mt-2 text-xs text-tertiary" role="status">
-        {t("DashboardEarn.vaultWithdraw.quoteLoading")}
-      </p>
-    );
-  }
-  if (quote.kind === "unavailable") {
-    return (
-      <p className="mt-2 text-xs text-error" role="alert">
-        {t("DashboardEarn.vaultWithdraw.quoteUnavailable")}
-      </p>
-    );
-  }
-  const blockingIssue = quote.kind === "quoted" ? quote.preview.blockingIssues[0] : undefined;
-  if (blockingIssue) {
-    return (
-      <p className="mt-2 text-xs text-error" role="alert">
-        {t("DashboardEarn.vaultWithdraw.quoteBlocked", { message: blockingIssue.message })}
-      </p>
-    );
-  }
-  if (
-    quote.kind === "quoted" &&
-    isZeroQuote(quote.preview.assetsOut, quote.preview.assetDecimals)
-  ) {
-    return (
-      <p className="mt-2 text-xs text-error" role="alert">
-        {t("DashboardEarn.vaultWithdraw.quoteZeroAssets")}
-      </p>
-    );
-  }
-  return null;
-}
 
 function amountBalanceHint(
   t: ReturnType<typeof useTranslations>,
@@ -137,7 +97,7 @@ type WithdrawalOutcome =
     }
   | {
       kind: "withdrawal";
-      withdrawal: EarnVaultWithdrawal;
+      movement: EarnVaultWithdrawal;
       /**
        * The approval executor won the race between the held-key pre-flight and
        * this POST: real money DID move — once, via the approval — but THIS
@@ -149,10 +109,6 @@ type WithdrawalOutcome =
 type WithdrawalSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: WithdrawalOutcome; withdrawn?: EarnVaultWithdrawal };
-
-function shouldProjectWithdrawalBalance(outcome: WithdrawalOutcome): boolean {
-  return outcome.kind === "withdrawal" && !outcome.absorbedByApproval;
-}
 
 function resolveWithdrawalSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultWithdrawal>>,
@@ -167,18 +123,7 @@ function resolveWithdrawalSubmission(
     return { kind: "error", message: result.error || fallbackError };
   }
   if (result.data.kind === "approval_pending") {
-    return {
-      kind: "outcome",
-      outcome: {
-        kind: "approval_pending",
-        ...(result.data.approvalRequestId
-          ? { approvalRequestId: result.data.approvalRequestId }
-          : {}),
-        ...(result.data.walletOperationId
-          ? { walletOperationId: result.data.walletOperationId }
-          : {}),
-      },
-    };
+    return { kind: "outcome", outcome: vaultApprovalPending(result.data) };
   }
 
   const withdrawal = result.data.withdrawal;
@@ -191,39 +136,15 @@ function resolveWithdrawalSubmission(
   if (withdrawal.replayed && keyWasHeld) {
     return {
       kind: "outcome",
-      outcome: { kind: "withdrawal", withdrawal, absorbedByApproval: true },
+      outcome: { kind: "withdrawal", movement: withdrawal, absorbedByApproval: true },
       withdrawn: withdrawal,
     };
   }
-  return { kind: "outcome", outcome: { kind: "withdrawal", withdrawal }, withdrawn: withdrawal };
-}
-
-function observableWithdrawalMovementId(outcome: WithdrawalOutcome | null): string | undefined {
-  if (outcome?.kind !== "withdrawal" || outcome.absorbedByApproval) return undefined;
-  return outcome.withdrawal.movementId;
-}
-
-function mergeObservedWithdrawal(
-  outcome: WithdrawalOutcome | null,
-  observedWithdrawal: EarnVaultWithdrawal | undefined
-): WithdrawalOutcome | null {
-  if (outcome?.kind !== "withdrawal" || !observedWithdrawal) return outcome;
-  return { ...outcome, withdrawal: { ...outcome.withdrawal, ...observedWithdrawal } };
-}
-
-function withdrawalProgressStep(
-  outcome: WithdrawalOutcome | null,
-  step: "details" | "review"
-): number {
-  if (!outcome) return step === "review" ? 1 : 0;
-  if (outcome.kind !== "withdrawal" || outcome.absorbedByApproval) return 2;
-  return earnVaultWithdrawalUiState(outcome.withdrawal.status).progressStep;
-}
-
-function withdrawalPanelKey(outcome: WithdrawalOutcome | null, step: "details" | "review"): string {
-  if (!outcome) return `form:${step}`;
-  if (outcome.kind === "approval_pending") return "outcome:approval";
-  return outcome.absorbedByApproval ? "outcome:withdrawal:absorbed" : "outcome:withdrawal";
+  return {
+    kind: "outcome",
+    outcome: { kind: "withdrawal", movement: withdrawal },
+    withdrawn: withdrawal,
+  };
 }
 
 function deriveWithdrawalFormState(
@@ -272,28 +193,6 @@ function deriveWithdrawalFormState(
   };
 }
 
-function TransactionLink({
-  signature,
-  environment,
-}: {
-  signature: string;
-  environment: SdpEnvironment;
-}) {
-  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
-
-  return (
-    <a
-      className="inline-flex items-center gap-1 text-secondary underline decoration-border-strong underline-offset-4 transition-colors hover:text-primary"
-      href={explorerTxUrl(signature, cluster)}
-      rel="noreferrer"
-      target="_blank"
-    >
-      {shortenMarketAddress(signature)}
-      <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
-    </a>
-  );
-}
-
 function WithdrawalApprovalResult({
   outcome,
   onClose,
@@ -301,48 +200,12 @@ function WithdrawalApprovalResult({
   outcome: Extract<WithdrawalOutcome, { kind: "approval_pending" }>;
   onClose: () => void;
 }) {
-  const t = useTranslations();
-
   return (
-    <>
-      <EarnOutcomeMark tone="warning" />
-      <div className="flex items-center gap-2 pr-8">
-        <h2
-          className="text-base font-medium text-primary outline-none"
-          data-modal-focus-target
-          tabIndex={-1}
-        >
-          {t("DashboardEarn.vaultWithdraw.approvalTitle")}
-        </h2>
-        <Badge variant="warning">{t("DashboardEarn.vaultWithdraw.approvalStatus")}</Badge>
-      </div>
-      <p className="mt-2 text-sm leading-5 text-secondary">
-        {t("DashboardEarn.vaultWithdraw.approvalBody")}
-      </p>
-      {outcome.approvalRequestId || outcome.walletOperationId ? (
-        <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-          {outcome.approvalRequestId ? (
-            <div className="flex items-start justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultApprovalRequest")}</dt>
-              <dd className="max-w-64 break-all text-right text-primary">
-                {outcome.approvalRequestId}
-              </dd>
-            </div>
-          ) : null}
-          {outcome.walletOperationId ? (
-            <div className="flex items-start justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.withdraw.referenceLabel")}</dt>
-              <dd className="max-w-64 break-all text-right text-primary">
-                {outcome.walletOperationId}
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-      ) : null}
-      <div className="mt-5 flex justify-end">
-        <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
-      </div>
-    </>
+    <EarnVaultApprovalResult
+      approvalRequestId={outcome.approvalRequestId}
+      onClose={onClose}
+      walletOperationId={outcome.walletOperationId}
+    />
   );
 }
 
@@ -367,7 +230,7 @@ function withdrawalResultCopy(
       statusVariant: "info",
     };
   }
-  switch (outcome.withdrawal.status) {
+  switch (outcome.movement.status) {
     case "requested":
       return {
         title: t("DashboardEarn.vaultWithdraw.recordedTitle"),
@@ -380,9 +243,9 @@ function withdrawalResultCopy(
       return {
         title: t("DashboardEarn.vaultWithdraw.confirmedTitle"),
         body: t("DashboardEarn.vaultWithdraw.confirmedBody"),
-        note: t("DashboardEarn.vaultWithdraw.settlingNote"),
+        note: t("DashboardEarn.vaultWithdraw.balanceRefreshNote"),
         status: t("DashboardEarn.vaultWithdraw.confirmedStatus"),
-        statusVariant: "warning",
+        statusVariant: "success",
       };
     case "finalized":
       return {
@@ -396,17 +259,11 @@ function withdrawalResultCopy(
       return {
         title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
         body: t("DashboardEarn.vaultWithdraw.submittedBody"),
-        note: t("DashboardEarn.vaultWithdraw.settlingNote"),
+        note: t("DashboardEarn.vaultWithdraw.balanceRefreshNote"),
         status: t("DashboardEarn.vaultWithdraw.submittedStatus"),
         statusVariant: "default",
       };
   }
-}
-
-function outcomeTone(statusVariant: BadgeVariant): "info" | "success" | "warning" {
-  if (statusVariant === "success") return "success";
-  if (statusVariant === "warning") return "warning";
-  return "info";
 }
 
 function WithdrawalMovementResult({
@@ -425,9 +282,9 @@ function WithdrawalMovementResult({
   const t = useTranslations();
   const locale = useLocale();
   const asset = earnMintAsset(position.tokenMint);
-  const positionName = position.label || shortenMarketAddress(position.providerReference);
+  const positionName = positionDisplayName(position);
 
-  const { withdrawal } = outcome;
+  const { movement: withdrawal } = outcome;
   const copy = withdrawalResultCopy(outcome, t);
   const sharedStatus = outcome.absorbedByApproval
     ? null
@@ -440,13 +297,11 @@ function WithdrawalMovementResult({
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
   const processing =
     !outcome.absorbedByApproval &&
-    (withdrawal.status === "requested" ||
-      withdrawal.status === "submitted" ||
-      withdrawal.status === "confirmed");
+    (withdrawal.status === "requested" || withdrawal.status === "submitted");
 
   return (
     <>
-      {processing ? null : <EarnOutcomeMark tone={outcomeTone(statusVariant)} />}
+      {processing ? null : <EarnOutcomeMark tone={vaultOutcomeTone(statusVariant)} />}
       <div className="flex items-center gap-2 pr-8">
         <h2
           className="text-base font-medium text-primary outline-none"
@@ -478,7 +333,10 @@ function WithdrawalMovementResult({
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
             <dd className="text-right">
-              <TransactionLink environment={environment} signature={withdrawal.signature} />
+              <TransactionLink
+                cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
+                signature={withdrawal.signature}
+              />
             </dd>
           </div>
         )}
@@ -598,9 +456,7 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
           action={
             <EarnAmountMaxButton
               disabled={
-                submitting ||
-                availableAmount === undefined ||
-                compareUnsignedDecimals(availableAmount, "0") !== 1
+                submitting || availableAmount === undefined || !isPositiveDecimal(availableAmount)
               }
               label={t("DashboardEarn.vaultWithdraw.max")}
               onClick={onMax}
@@ -691,9 +547,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
       <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-          <dd className="max-w-64 text-right text-primary">
-            {position.label || shortenMarketAddress(position.providerReference)}
-          </dd>
+          <dd className="max-w-64 text-right text-primary">{positionDisplayName(position)}</dd>
         </div>
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.amountLabel")}</dt>
@@ -721,7 +575,17 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
         ) : null}
       </dl>
 
-      <WithdrawalQuoteNotices quote={quote} />
+      <VaultQuoteNotices
+        decimals={(preview) => preview.assetDecimals}
+        keys={{
+          blocked: "DashboardEarn.vaultWithdraw.quoteBlocked",
+          loading: "DashboardEarn.vaultWithdraw.quoteLoading",
+          unavailable: "DashboardEarn.vaultWithdraw.quoteUnavailable",
+          zero: "DashboardEarn.vaultWithdraw.quoteZeroAssets",
+        }}
+        quantity={(preview) => preview.assetsOut}
+        quote={quote}
+      />
 
       {slippagePolicy ? (
         <VaultSlippageSection
@@ -801,25 +665,20 @@ export function EarnVaultWithdrawModal({
   const submittingRef = useRef(false);
   const requestControllerRef = useRef<AbortController | null>(null);
   const observedWithdrawal = useEarnVaultWithdrawalOutcome(
-    observableWithdrawalMovementId(outcome),
+    observableVaultMovement(outcome)?.movementId,
     undefined,
     onMovementUpdated
   );
-  const visibleOutcome = mergeObservedWithdrawal(outcome, observedWithdrawal);
-  const progressStep = withdrawalProgressStep(visibleOutcome, step);
+  const visibleOutcome = mergeObservedVaultMovement(outcome, observedWithdrawal);
+  const progressStep = vaultMovementProgressStep(visibleOutcome, step, earnVaultWithdrawalUiState);
   const progressSteps = [
     t("DashboardEarn.vaultWithdraw.flowDetails"),
     t("DashboardEarn.vaultWithdraw.flowReview"),
     t("DashboardEarn.vaultWithdraw.flowProcessing"),
     t("DashboardEarn.vaultWithdraw.flowComplete"),
   ];
-  const movementProcessing =
-    visibleOutcome?.kind === "withdrawal" &&
-    !visibleOutcome.absorbedByApproval &&
-    (visibleOutcome.withdrawal.status === "requested" ||
-      visibleOutcome.withdrawal.status === "submitted" ||
-      visibleOutcome.withdrawal.status === "confirmed");
-  const panelKey = withdrawalPanelKey(visibleOutcome, step);
+  const movementProcessing = vaultMovementProcessing(visibleOutcome, ["requested", "submitted"]);
+  const panelKey = vaultMovementPanelKey(visibleOutcome, step, "withdrawal");
   const contentRef = useModalFocus({
     focusKey: panelKey,
     initialFocusSelector: "[data-modal-focus-target]",
@@ -868,7 +727,12 @@ export function EarnVaultWithdrawModal({
     quoteRefreshKey
   );
   const quote = quoteForKey(rawQuote, quoteKey);
-  const minAmountOut = derivedMinAmountOut(slippageBps, quote);
+  const minAmountOut = derivedMinOut(
+    slippageBps,
+    quote,
+    (preview) => preview.assetsOut,
+    (preview) => preview.assetDecimals
+  );
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
   async function submitResolvedIntent(controller: AbortController, shares: string, amount: string) {
@@ -891,18 +755,33 @@ export function EarnVaultWithdrawModal({
     }
 
     // A HELD key must replay the floor it was MINTED with, verbatim — the
-    // deposit modal documents why. A fresh key takes the freshly derived
-    // floor, and records it for exactly that future replay.
-    const heldFloor = resolvedKey.wasHeld ? recallVaultWithdrawalFloor(fingerprint) : undefined;
-    const floorForRequest = heldFloor !== undefined ? heldFloor : (minAmountOut ?? null);
-    rememberVaultWithdrawalFloor(fingerprint, floorForRequest);
+    // deposit modal documents why. A KEPT key — one a prior ambiguous attempt
+    // (a 5xx, a lost answer) left live — must replay its minted floor too,
+    // and worse: the changed-request refusal is a 409, which retires the key
+    // and lets the next submit mint a fresh one while the first attempt may
+    // already have exited. The floor memo answers for both. A fresh key takes
+    // the freshly derived floor, and records it for exactly that future replay.
+    // A reuse whose memo LOST the floor cannot re-floor safely at all — it
+    // stops here, submitting nothing, rather than pair the live key with a
+    // changed request.
+    const replay = floorToReplay(
+      resolvedKey,
+      recallVaultWithdrawalFloor,
+      fingerprint,
+      minAmountOut ?? null
+    );
+    if (replay.kind === "unavailable") {
+      setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
+      return;
+    }
+    rememberVaultWithdrawalFloor(fingerprint, replay.floor);
 
     // No abort signal on the value-moving POST — see the deposit modal.
     const result = await createEarnVaultWithdrawal(
       {
         positionId: position.id,
         shares,
-        ...(floorForRequest === null ? {} : { minAmountOut: floorForRequest }),
+        ...(replay.floor === null ? {} : { minAmountOut: replay.floor }),
       },
       resolvedKey.key
     );
@@ -939,7 +818,7 @@ export function EarnVaultWithdrawModal({
     if (resolution.withdrawn) {
       onWithdrawn?.(resolution.withdrawn, {
         amount,
-        projectBalance: shouldProjectWithdrawalBalance(resolution.outcome),
+        projectBalance: vaultMovementHappened(resolution.outcome),
       });
     }
   }
@@ -979,7 +858,7 @@ export function EarnVaultWithdrawModal({
   }
 
   const modalLabel = t("DashboardEarn.vaultWithdraw.title", {
-    position: position.label || shortenMarketAddress(position.providerReference),
+    position: positionDisplayName(position),
   });
 
   if (visibleOutcome) {

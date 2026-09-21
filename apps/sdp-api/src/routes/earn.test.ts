@@ -459,15 +459,81 @@ describe("Earn routes — environment scoping", () => {
     expect(listBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
   });
 
-  it("serves the deployment-scoped catalogue without resolving a tenant", async () => {
+  it("lets an anonymous caller pick the shelf, production unless it asks for sandbox", async () => {
+    // A keyless caller has no project, so the deployment's own ENVIRONMENT
+    // never decides (PRO-1998): the query does, and the detail route answers
+    // whichever shelf the id names.
     const sandbox = await seedStrategy();
-    await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+    const production = await seedStrategy({
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
 
-    const res = await getEarnAnonymously("/v1/earn/strategies");
+    const defaulted = await getEarnAnonymously("/v1/earn/strategies");
+    expect(defaulted.status).toBe(200);
+    const defaultedBody = (await defaulted.json()) as {
+      data: { strategies: Array<{ id: string }> };
+    };
+    expect(defaultedBody.data.strategies.map((s) => s.id)).toEqual([production.id]);
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { strategies: Array<{ id: string }> } };
-    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([sandbox.id]);
+    const sandboxShelf = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox");
+    expect(sandboxShelf.status).toBe(200);
+    const sandboxBody = (await sandboxShelf.json()) as {
+      data: { strategies: Array<{ id: string }> };
+    };
+    expect(sandboxBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
+
+    expect((await getEarnAnonymously(`/v1/earn/strategies/${sandbox.id}`)).status).toBe(200);
+    expect((await getEarnAnonymously(`/v1/earn/strategies/${production.id}`)).status).toBe(200);
+  });
+
+  it("refuses a key that names a shelf other than its project's", async () => {
+    await seedAuth();
+    await seedStrategy();
+
+    const mismatch = await getEarn("/v1/earn/strategies?environment=production");
+    expect(mismatch.status).toBe(400);
+    const mismatchBody = (await mismatch.json()) as { error: { code: string; message: string } };
+    expect(mismatchBody.error.code).toBe("BAD_REQUEST");
+    expect(mismatchBody.error.message).toContain("follows the project");
+
+    const same = await getEarn("/v1/earn/strategies?environment=sandbox");
+    expect(same.status).toBe(200);
+  });
+
+  it("publishes depositSlippage for the caller's environment, the same answer the build gates on", async () => {
+    // Kamino declares a floor in every environment. The row must say so, or a
+    // caller who follows the catalogue builds without one and meets a 400.
+    await seedAuth();
+    await seedSessionAuth();
+    const sandbox = await seedStrategy();
+    const production = await seedStrategy({
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
+
+    const sandboxRow = await getEarn(`/v1/earn/strategies/${sandbox.id}`);
+    expect(sandboxRow.status).toBe(200);
+    const sandboxBody = (await sandboxRow.json()) as {
+      data: { strategy: { provider: string; depositSlippage: unknown } };
+    };
+    expect(sandboxBody.data.strategy).toMatchObject({
+      provider: "kamino",
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+    });
+
+    const productionRow = await getEarnAsSession(
+      `/v1/earn/strategies/${production.id}`,
+      TEST_PRODUCTION_PROJECT.id
+    );
+    expect(productionRow.status).toBe(200);
+    const productionBody = (await productionRow.json()) as {
+      data: { strategy: { provider: string; depositSlippage: unknown } };
+    };
+    expect(productionBody.data.strategy).toMatchObject({
+      provider: "kamino",
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+    });
   });
 });
 
@@ -520,7 +586,11 @@ describe("Earn routes — strategy catalogue", () => {
     await seedStrategy();
     const corsHeaders = { Origin: "http://localhost:3000" };
 
-    const anonymous = await getEarnAnonymously("/v1/earn/strategies", corsHeaders);
+    // The seeded row is sandbox; an anonymous reader must ask for that shelf.
+    const anonymous = await getEarnAnonymously(
+      "/v1/earn/strategies?environment=sandbox",
+      corsHeaders
+    );
     const keyed = await getEarn("/v1/earn/strategies", corsHeaders);
 
     expect(anonymous.status).toBe(200);
@@ -551,7 +621,7 @@ describe("Earn routes — strategy catalogue", () => {
       name: "Upshift USDC",
     });
 
-    const list = await getEarnAnonymously("/v1/earn/strategies");
+    const list = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox");
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: { strategies: Array<{ id: string }>; total: number };
@@ -929,6 +999,31 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     for (const strategy of hidden) {
       expect(await repository.getStrategyById(strategy.id)).not.toBeNull();
     }
+  });
+
+  it("publishes the Kamino deposit floor required by production builds", async () => {
+    curation.bypassCuratedVaults = true;
+    await seedAuth();
+    const kamino = await seedStrategy({ hostCluster: "mainnet-beta" });
+
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      data: {
+        strategies: Array<{
+          id: string;
+          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
+        }>;
+      };
+    };
+    expect(body.data.strategies).toEqual([
+      expect.objectContaining({
+        id: kamino.id,
+        depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+        withdrawalSlippage: null,
+      }),
+    ]);
   });
 
   it("shows the supported Jupiter Lend provider independently of Kamino's allowlist", async () => {

@@ -31,6 +31,8 @@ export interface Env {
   EARN_ANONYMOUS_RPC_MAX_REQUESTS?: string;
   EARN_ANONYMOUS_RPC_WINDOW_SECONDS?: string;
   API_VERSION: string;
+  /** Build SHA baked into the image; shared by the api and worker services. */
+  SDP_BUILD_SHA?: string;
   // Injected automatically by Cloud Run services and jobs.
   K_SERVICE?: string;
   K_REVISION?: string;
@@ -218,6 +220,13 @@ export interface Env {
   KORA_API_KEY?: string;
   KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
+  /** Per-cluster Kora endpoints for a process sponsoring on both clusters (see @sdp/payments `resolveKoraEndpoint`). */
+  KORA_RPC_URL_DEVNET?: string;
+  KORA_API_KEY_DEVNET?: string;
+  KORA_CLOUD_RUN_AUDIENCE_DEVNET?: string;
+  KORA_RPC_URL_MAINNET?: string;
+  KORA_API_KEY_MAINNET?: string;
+  KORA_CLOUD_RUN_AUDIENCE_MAINNET?: string;
   KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
@@ -292,7 +301,6 @@ export interface Env {
   BVNK_HAWK_SECRET_KEY?: string;
   BVNK_WALLET_ID?: string;
   BVNK_WEBHOOK_SECRET?: string;
-  BVNK_API_BASE_URL?: string;
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
@@ -328,6 +336,10 @@ export interface Env {
   // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
   // process serves both clusters and withdrawals are not environment-gated.
   EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
+  // Whether the Earn volume caps (ADR 0004) refuse deposits. Unset or false is
+  // shadow mode: evaluate and emit `sdp_api_earn_volume_cap_evaluated`, refuse
+  // nothing. See `isEarnVolumeCapsEnforced`.
+  EARN_VOLUME_CAPS_ENFORCED?: string;
 
   // Earn vault-infra provider configuration
   UPSHIFT_API_KEY?: string;

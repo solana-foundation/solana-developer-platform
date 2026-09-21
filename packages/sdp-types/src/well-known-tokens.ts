@@ -316,6 +316,11 @@ export const CLUSTER_BY_SDP_ENVIRONMENT = {
   production: "mainnet-beta",
 } as const satisfies Record<SdpEnvironment, SolanaCluster>;
 
+export const SDP_ENVIRONMENT_BY_CLUSTER = {
+  devnet: "sandbox",
+  "mainnet-beta": "production",
+} as const satisfies Record<SolanaCluster, SdpEnvironment>;
+
 /**
  * Each cluster's genesis hash — the only honest way to ask an RPC endpoint
  * WHICH CHAIN it actually serves.

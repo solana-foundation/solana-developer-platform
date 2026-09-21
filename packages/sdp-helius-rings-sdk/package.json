@@ -24,7 +24,7 @@
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "26.4.0",
+    "@types/node": "26.5.1",
     "vitest": "4.1.11"
   }
 }

@@ -1,11 +1,16 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
-import type { SdpEnvironment } from "@sdp/types";
-import { type EarnProviderId, earnDepositStyle } from "@sdp/types/provider-access";
+import { isVaultDirectDepositEnabled, type SdpEnvironment } from "@sdp/types";
+import {
+  type EarnProviderId,
+  earnDepositSlippagePolicy,
+  earnDepositStyle,
+} from "@sdp/types/provider-access";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { getAuth } from "@/lib/auth";
-import { badRequest } from "@/lib/errors";
+import { badRequest, forbidden } from "@/lib/errors";
+import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
 import {
   assertEarnProviderSurfaced,
   assertProviderAvailable,
@@ -62,21 +67,57 @@ export function assertStrategyDepositable(
 }
 
 /**
+ * Whether `provider` takes NEW vault deposits from a project in `environment`:
+ * the environment's cluster must carry one of the provider's deployments
+ * (`EARN_PROVIDER_DEPLOYED_CLUSTERS` in @sdp/types). A mainnet vault is
+ * therefore depositable from a production project only, whichever provider
+ * fronts it. The dashboard reads the same predicate, so it never advertises
+ * an action this refuses. Exits never call this (ADR 0002).
+ */
+export function assertVaultDepositEnvironmentOpen(
+  environment: SdpEnvironment,
+  provider: EarnProviderId
+): void {
+  if (!isVaultDirectDepositEnabled(environment, provider)) {
+    throw forbidden(
+      `Vault deposits for ${provider} are not available from a ${environment} project.`
+    );
+  }
+}
+
+/**
  * The ONE vault money-in gate sequence for every handler that commits a
- * strategy to the vault-deposit path — today that is `POST /vault-deposits`.
- * Runs, in order: deposit-style shape, provider registration, surfacing,
- * entitlement/credentials, catalogue admission. Keep it shared if a second
- * money-in caller appears: a second copy is a second thing that can drift
- * toward permissive.
+ * strategy to the vault-deposit path: `POST /vault-deposits` (custody) and
+ * `POST /external-wallet/deposit-transactions` (caller-signed). Runs, in
+ * order: deposit-style shape, provider registration, environment capability,
+ * surfacing, entitlement/credentials, catalogue admission, and LAST, when the caller
+ * passes the deposit `amount`, the SDP-wide vault exposure cap (ADR 0004
+ * layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy
+ * is a second thing that can drift toward permissive.
+ *
+ * The cap runs last on purpose: it is the only step that reads the ledger,
+ * and a caller refused by a cheaper gate should hear that reason, not "the
+ * vault is full". Omitting `amount` skips the cap; only callers that are not
+ * about to move money (none today) may do that, and a new money-in caller
+ * must pass it.
+ *
+ * Money OUT never reaches this function (ADR 0002): withdrawals take none of
+ * these gates, the exposure cap included. A vault over its cap is exit-only,
+ * the same posture as `paused`.
  *
  * Strategy RESOLUTION stays with the caller on purpose: the deposit route
  * resolves bare-by-id (browse policy never gates money).
  */
 export async function assertVaultDepositAdmissible(
   c: AppContext,
-  strategy: EarnStrategyRow
+  strategy: EarnStrategyRow,
+  amount?: string,
+  options: {
+    environment?: SdpEnvironment;
+    organizationId?: string | null;
+  } = {}
 ): Promise<EarnProviderId> {
-  const environment = resolveSdpEnvironment(c);
+  const environment = options.environment ?? resolveSdpEnvironment(c);
 
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {
     throw badRequest(
@@ -90,16 +131,28 @@ export async function assertVaultDepositAdmissible(
   }
   const provider = strategy.provider;
 
+  assertVaultDepositEnvironmentOpen(environment, provider);
   assertEarnProviderSurfaced(provider);
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    getAuth(c).organizationId,
-    "earn",
-    provider,
-    environment === "sandbox"
-  );
+  const organizationId =
+    options.organizationId === undefined ? getAuth(c).organizationId : options.organizationId;
+  if (organizationId !== null) {
+    await assertProviderAvailable(
+      c.env,
+      getDb(c.env),
+      organizationId,
+      "earn",
+      provider,
+      environment === "sandbox"
+    );
+  }
   assertStrategyDepositable(strategy, environment);
+
+  if (amount !== undefined) {
+    // Deposits only. The withdrawal handlers never call this function, and
+    // must not start to: refusing an exit over a platform cap traps funds
+    // (ADR 0002), which is the one thing no cap may do.
+    await assertVaultExposureWithinCap(c, strategy, amount, { environment });
+  }
 
   return provider;
 }
@@ -118,4 +171,26 @@ export function isStrategyDepositable(
   } catch {
     return false;
   }
+}
+
+/**
+ * The share-floor gate both deposit routes call before building. It refuses a
+ * request that omits `minSharesOut` when `earnDepositSlippagePolicy` says the
+ * build enforces a floor for this provider in this environment: every
+ * production deposit, plus any provider whose builder refuses an implicit
+ * floor. The catalogue publishes that same policy as `depositSlippage`, so a
+ * caller who follows the row they were shown never trips this.
+ */
+export function assertDepositFloorPresent(
+  provider: string,
+  environment: SdpEnvironment,
+  minSharesOut: string | undefined
+): void {
+  if (minSharesOut !== undefined) return;
+  if (earnDepositSlippagePolicy(provider, environment) === null) return;
+  throw badRequest(
+    environment === "production"
+      ? "minSharesOut is required: every production deposit carries a share floor. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut."
+      : `minSharesOut is required: ${provider} deposits carry a share floor in every environment. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut.`
+  );
 }

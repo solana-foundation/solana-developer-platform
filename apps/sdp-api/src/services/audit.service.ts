@@ -69,6 +69,18 @@ export const AUDIT_ACTIONS = [
   // the ledger movement id, actor matching the row's createdBy/initiatedByKeyId.
   "deposit",
   "withdraw",
+  // Asynchronous vault exits: the request escrows shares and cancellation
+  // restores them. Neither is the provider's eventual asset payout.
+  "withdraw_request",
+  "withdraw_cancel",
+  // DvP money movements (PRO-1992): resourceType "dvp_trade", resourceId the
+  // trade id, the leg's side in the metadata because a leg has no id of its
+  // own. Bare verbs like the issuance actions above; the resource type is what
+  // distinguishes a DvP settle from anything else that could be said to settle.
+  "fund",
+  "reclaim",
+  "settle",
+  "cancel",
   // Privileged audit-ledger operations (verification checkpoints, restore evidence).
   "maintenance",
 ] as const;
@@ -104,6 +116,8 @@ export type ResourceType =
   | "provider_credential"
   | "custody_connection"
   | "earn_movement"
+  | "earn_vault_withdrawal_request"
+  | "dvp_trade"
   | "payment_request"
   | "payment_transfer"
   | "audit_ledger";
@@ -462,6 +476,72 @@ export class AuditService {
       status: "success",
     });
     return { id: intentId, entry };
+  }
+
+  /**
+   * `beginCritical` for callers without an HTTP context (webhook- or
+   * job-driven effects). Shares the fail-closed system write path, so a
+   * refused intent aborts the effect it would have admitted.
+   */
+  async beginCriticalSystem(entry: SystemAuditLogEntry): Promise<AuditIntent> {
+    const intentId = `aint_${crypto.randomUUID()}`;
+    await this.logSystem({
+      organizationId: entry.organizationId,
+      requestId: entry.requestId,
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: intentId,
+      metadata: {
+        auditPhase: "intent",
+        target: {
+          action: entry.action,
+          resourceType: entry.resourceType,
+          resourceId: entry.resourceId ?? null,
+          metadata: entry.metadata ? scrubAuditMetadata(entry.metadata) : null,
+        },
+      },
+      status: "success",
+    });
+    return { id: intentId, entry };
+  }
+
+  /**
+   * `completeCritical` for system callers: best-effort like its request-path
+   * twin — the durable intent, not the outcome write, is the guarantee.
+   */
+  async completeCriticalSystem(
+    intent: AuditIntent,
+    outcome: Partial<
+      Pick<AuditLogEntry, "action" | "resourceType" | "resourceId" | "metadata" | "status">
+    > = {}
+  ): Promise<boolean> {
+    try {
+      await this.logSystem({
+        ...intent.entry,
+        ...outcome,
+        metadata: {
+          ...intent.entry.metadata,
+          ...outcome.metadata,
+          auditPhase: "outcome",
+          auditIntentId: intent.id,
+        },
+        status: outcome.status ?? "success",
+      });
+      return true;
+    } catch (error) {
+      getLogger().error(
+        {
+          event: "audit_critical_outcome_persistence_failed",
+          auditIntentId: intent.id,
+          targetAction: intent.entry.action,
+          targetResourceType: intent.entry.resourceType,
+          targetResourceId: intent.entry.resourceId ?? null,
+          error,
+        },
+        "Critical operation outcome was not persisted; durable audit intent requires reconciliation"
+      );
+      return false;
+    }
   }
 
   /**

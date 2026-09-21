@@ -8,19 +8,28 @@ import { seedTestDatabase } from "@/test/mocks/db";
 
 const getSignatureStatuses = vi.hoisted(() => vi.fn());
 const getBlockHeight = vi.hoisted(() => vi.fn());
+const getTransaction = vi.hoisted(() => vi.fn());
+const readVaultPositions = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
+const reconcileEarnVaultQueuedWithdrawals = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/rpc/solana", () => ({
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
   getSignatureStatuses,
+  getTransaction,
 }));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   assertClusterEndpoint: vi.fn(async () => {}),
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+  resolveVaultDirectClient: () => ({ readVaultPositions }),
 }));
 vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransaction }));
+vi.mock("@/services/earn/vault-queued-withdrawal-reconciliation.service", () => ({
+  reconcileEarnVaultQueuedWithdrawals,
+}));
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
   logEvent,
@@ -28,7 +37,7 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
 const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
-const { reconcileEarnVaultMovementReadThrough } = await import(
+const { reconcileEarnVaultMovementReadThrough, repairUnvaluedWithdrawalPayouts } = await import(
   "../earn/vault-movement-reconciliation.service"
 );
 
@@ -73,6 +82,11 @@ beforeEach(async () => {
       .bind(WALLET),
   ]);
   broadcastVaultTransaction.mockResolvedValue(undefined);
+  // Settlement observations default to "nothing observed": no landed
+  // transaction to read a payout from, no live snapshot to close a holding on.
+  getTransaction.mockResolvedValue(null);
+  readVaultPositions.mockResolvedValue([]);
+  reconcileEarnVaultQueuedWithdrawals.mockResolvedValue(undefined);
 });
 
 async function seedMovement(lastValidBlockHeight = "100") {
@@ -183,6 +197,322 @@ async function seedExternalWalletMovement() {
     externalWalletTransactionId: built.id,
   });
 }
+
+const EXTERNAL_OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
+const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SHARE = "So11111111111111111111111111111111111111112";
+
+/**
+ * A finalized external-wallet deposit followed by a SUBMITTED exit of some of
+ * its shares: the row whose settlement carries the two 0103 observations.
+ */
+async function seedExternalWalletWithdrawal(shares = "1") {
+  const repository = createPostgresEarnMovementsRepository(getDb(env));
+  const deposit = await seedExternalWalletMovement();
+  const settledAt = new Date().toISOString();
+  await repository.advanceVaultMovement({
+    movementId: deposit.movement.id,
+    organizationId: ORG,
+    toStatus: "finalized",
+    confirmedAt: settledAt,
+    settledAt,
+  });
+  const transactionId = `earn_ewt_${crypto.randomUUID()}`;
+  await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+    id: transactionId,
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    provider: "kamino",
+    direction: "withdrawal",
+    ownerAddress: EXTERNAL_OWNER,
+    vaultAddress: deposit.position.vault_address as string,
+    tokenMint: USDC,
+    shareMint: SHARE,
+    label: "USDC Vault",
+    denomination: SHARE,
+    amountRequested: shares,
+    createsShareAccount: false,
+    unsignedTransaction: Buffer.from([10, 11, 12]).toString("base64"),
+    lastValidBlockHeight: "100",
+  });
+  const withdrawal = await repository.createSignedExternalWalletWithdrawalIntent({
+    organizationId: ORG,
+    projectId: PROJECT,
+    environment: "sandbox",
+    provider: "kamino",
+    positionId: deposit.position.id,
+    vaultAddress: deposit.position.vault_address as string,
+    ownerAddress: EXTERNAL_OWNER,
+    shareMint: SHARE,
+    requestedShares: shares,
+    signature: `sig_${crypto.randomUUID()}`,
+    signedTransaction: Buffer.from([10, 11, 12]).toString("base64"),
+    lastValidBlockHeight: "100",
+    requestId: crypto.randomUUID(),
+    idempotencyFingerprint: crypto.randomUUID(),
+    externalWalletTransactionId: transactionId,
+  });
+  await repository.advanceVaultMovement({
+    movementId: withdrawal.movement.id,
+    organizationId: ORG,
+    toStatus: "submitted",
+  });
+  const submitted = await ledgerRow(withdrawal.movement.id);
+  if (!submitted) throw new Error("withdrawal did not persist");
+  return { movement: submitted, position: withdrawal.position };
+}
+
+/** The receiver's USDC balance moving up by `payoutBaseUnits` in a landed transaction. */
+function landedPayout(receiver: string, payoutBaseUnits: string, mint = USDC) {
+  return {
+    slot: 1n,
+    err: null,
+    instructions: [],
+    preTokenBalances: [
+      { accountIndex: 1, mint, owner: receiver, amount: "500000", decimals: 6 },
+      { accountIndex: 2, mint: SHARE, owner: receiver, amount: "1000000", decimals: 6 },
+    ],
+    postTokenBalances: [
+      {
+        accountIndex: 1,
+        mint,
+        owner: receiver,
+        amount: String(500000n + BigInt(payoutBaseUnits)),
+        decimals: 6,
+      },
+      { accountIndex: 2, mint: SHARE, owner: receiver, amount: "0", decimals: 6 },
+    ],
+  };
+}
+
+function liveSnapshot(position: { vault_address: string | null }, owner: string, shares: string) {
+  return [
+    {
+      providerReference: position.vault_address,
+      owner,
+      cluster: "devnet",
+      shares,
+      withdrawableShares: shares,
+      tokenValue: shares,
+      tokenMint: USDC,
+      shareMint: SHARE,
+    },
+  ];
+}
+
+async function positionRow(positionId: string) {
+  return getDb(env)
+    .prepare("SELECT closed_at FROM earn_positions WHERE id = ?")
+    .bind(positionId)
+    .first<{ closed_at: string | null }>();
+}
+
+describe("settlement observations (0103): withdrawal payout and empty-holding close", () => {
+  it("records the observed token payout and closes a holding left empty", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1004500"));
+    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, EXTERNAL_OWNER, "0"));
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    // Shares stay shares; the token column carries what the wallet received,
+    // formatted at the mint's decimals.
+    expect(movement).toMatchObject({
+      status: "finalized",
+      amount_settled: "1",
+      token_amount_settled: "1.0045",
+    });
+    expect(getTransaction).toHaveBeenCalledWith(expect.anything(), seeded.movement.signature);
+    expect(readVaultPositions).toHaveBeenCalledWith(
+      { env, environment: "sandbox" },
+      { owner: EXTERNAL_OWNER, providerReferences: [seeded.position.vault_address] }
+    );
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({
+      closed_at: expect.any(String),
+    });
+  });
+
+  it("leaves the holding open when live shares remain after a partial exit", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1000000"));
+    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, EXTERNAL_OWNER, "0.5"));
+
+    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "finalized",
+      token_amount_settled: "1",
+    });
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({ closed_at: null });
+  });
+
+  it("fails soft: an unobservable payout stays NULL and an unreadable balance leaves the row open", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockRejectedValue(new Error("rpc unavailable"));
+    readVaultPositions.mockRejectedValue(new Error("provider unavailable"));
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    // Finalization itself is never blocked by either observation.
+    expect(movement).toMatchObject({
+      status: "finalized",
+      amount_settled: "1",
+      token_amount_settled: null,
+    });
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({ closed_at: null });
+  });
+
+  it("repairs an unvalued payout on a later sweep once the transaction can be read", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockRejectedValue(new Error("rpc unavailable"));
+    readVaultPositions.mockRejectedValue(new Error("provider unavailable"));
+    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "finalized",
+      token_amount_settled: null,
+    });
+
+    // The history read recovers; the sweep's repair pass values the row (the
+    // read-through never stamped an attempt, so the row is due immediately).
+    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1000000"));
+    await expect(repairUnvaluedWithdrawalPayouts(env)).resolves.toEqual({
+      claimed: 1,
+      repaired: 1,
+      unobserved: 0,
+      errors: 0,
+    });
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      token_amount_settled: "1",
+    });
+    // Valued rows leave the claim set, so a second pass has nothing to do.
+    await expect(repairUnvaluedWithdrawalPayouts(env)).resolves.toMatchObject({ claimed: 0 });
+  });
+
+  it("spaces repair retries and keeps a still-unreadable payout NULL", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockRejectedValue(new Error("rpc unavailable"));
+    readVaultPositions.mockRejectedValue(new Error("provider unavailable"));
+    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    await expect(repairUnvaluedWithdrawalPayouts(env)).resolves.toEqual({
+      claimed: 1,
+      repaired: 0,
+      unobserved: 1,
+      errors: 0,
+    });
+    // Attempted just now: not claimable again until the spacing elapses.
+    await expect(repairUnvaluedWithdrawalPayouts(env)).resolves.toMatchObject({ claimed: 0 });
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      token_amount_settled: null,
+    });
+  });
+
+  it("never guesses: a payout to another owner, another mint, or a non-positive delta is not recorded", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockResolvedValue({
+      slot: 1n,
+      err: null,
+      instructions: [],
+      preTokenBalances: [
+        {
+          accountIndex: 1,
+          mint: USDC,
+          owner: "SomeoneElse111111111111111111111111111111111",
+          amount: "0",
+          decimals: 6,
+        },
+        { accountIndex: 3, mint: SHARE, owner: EXTERNAL_OWNER, amount: "9", decimals: 6 },
+      ],
+      postTokenBalances: [
+        {
+          accountIndex: 1,
+          mint: USDC,
+          owner: "SomeoneElse111111111111111111111111111111111",
+          amount: "7",
+          decimals: 6,
+        },
+        { accountIndex: 3, mint: SHARE, owner: EXTERNAL_OWNER, amount: "0", decimals: 6 },
+      ],
+    });
+    // A snapshot for the wrong vault must not close this holding either.
+    readVaultPositions.mockResolvedValue(
+      liveSnapshot({ vault_address: "some_other_vault" }, EXTERNAL_OWNER, "0")
+    );
+
+    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "finalized",
+      token_amount_settled: null,
+    });
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({ closed_at: null });
+  });
+
+  it("runs the same observations from the scheduled sweep, including custody exits", async () => {
+    // Custody withdrawal rows record the custody wallet's public key as the
+    // destination, which is both the payout receiver and the live-read owner.
+    const custodyWallet = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+    const seeded = await seedWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockResolvedValue(landedPayout(custodyWallet, "2500000"));
+    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, custodyWallet, "0"));
+
+    await reconcileEarnVaultMovements(env);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      direction: "withdrawal",
+      status: "finalized",
+      amount_settled: "1",
+      token_amount_settled: "2.5",
+    });
+    expect(readVaultPositions).toHaveBeenCalledWith(
+      { env, environment: "sandbox" },
+      { owner: custodyWallet, providerReferences: [seeded.position.vault_address] }
+    );
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({
+      closed_at: expect.any(String),
+    });
+  });
+
+  it("stamps a deposit's token amount from its settled amount without reading the chain twice", async () => {
+    const seeded = await seedMovement();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    await reconcileEarnVaultMovements(env);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      direction: "deposit",
+      status: "finalized",
+      amount_settled: "1",
+      token_amount_settled: "1",
+    });
+    expect(getTransaction).not.toHaveBeenCalled();
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+});
 
 describe("reconcileEarnVaultMovementReadThrough", () => {
   it("records confirmed chain status during an interactive detail read", async () => {
@@ -542,6 +872,25 @@ describe("reconcileEarnVaultMovements", () => {
       status: "finalized",
       failure_reason: null,
     });
+  });
+});
+
+describe("reconcileEarnVaultMovements: async-withdrawal sibling", () => {
+  it("runs the queued-withdrawal sweep independently and propagates its failure", async () => {
+    const queueFailure = new Error("queued withdrawal RPC unavailable");
+    reconcileEarnVaultQueuedWithdrawals.mockRejectedValueOnce(queueFailure);
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toBe(queueFailure);
+
+    expect(reconcileEarnVaultQueuedWithdrawals).toHaveBeenCalledOnce();
+    expect(reconcileEarnVaultQueuedWithdrawals).toHaveBeenCalledWith(env);
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_reconciliation_tick",
+        claimed: 0,
+      })
+    );
   });
 });
 

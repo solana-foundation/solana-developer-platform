@@ -40,8 +40,10 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
+import { assertTradeNotClosing } from "./close-exclusion";
 import { readDvpFundingReceipt } from "./funding-receipt";
 import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
+import { UNSUPPORTED_MINT_EXTENSIONS } from "./mints";
 import { readDvpAccounts } from "./read-chain";
 import { buildReclaimInstructions } from "./reclaim-instructions";
 
@@ -183,6 +185,17 @@ export async function reclaimDvpTradeLeg(
     });
   }
 
+  // With the leg locked, a settle or cancel that starts now sees the lock and
+  // backs off. One that locked the trade first is seen here instead. Backing off
+  // after taking over a receipt drops that receipt; the transfer it pointed at
+  // has already landed or provably moved nothing, so no funding is lost.
+  try {
+    await assertTradeNotClosing(env, rpc, trade.id);
+  } catch (error) {
+    await claims.release(trade.id, side, claimSignature);
+    throw error;
+  }
+
   let heldSignature: Signature = claimSignature;
   let reclaimSignature: Signature;
   try {
@@ -284,6 +297,9 @@ async function readReclaimableEscrow(rpc: Rpc, trade: DvpTradeRow, side: DvpTrad
  * `validate_mint_extensions` allows TransferHook, and the program forwards hook
  * accounts as trailing extras. SDP does not resolve those, so the Token-2022 CPI
  * would refuse the refund; say so instead of paying to find out.
+ *
+ * Create refuses these mints now (`UNSUPPORTED_MINT_EXTENSIONS`), so this only
+ * catches a trade created before that refusal existed.
  */
 async function refuseTransferHookMint(rpc: Rpc, tradeId: string, mint: Address) {
   const mintAccount = await fetchMaybeMint(rpc, mint);
@@ -295,7 +311,7 @@ async function refuseTransferHookMint(rpc: Rpc, tradeId: string, mint: Address) 
   const extensions = mintAccount.data.extensions;
   if (
     extensions.__option === "Some" &&
-    extensions.value.some((extension) => extension.__kind === "TransferHook")
+    extensions.value.some((extension) => UNSUPPORTED_MINT_EXTENSIONS.has(extension.__kind))
   ) {
     throw conflict(
       `DvP trade ${tradeId}: mint ${mint} carries a transfer hook, which reclaim does not support yet; nothing was sent`,

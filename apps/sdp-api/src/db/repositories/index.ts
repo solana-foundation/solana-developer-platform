@@ -10,6 +10,7 @@ export type {
 } from "./asset-profile.repository";
 export { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
 export type { RepositoryDbClient } from "./base";
+export { createPostgresBvnkOnrampTransfersRepository } from "./bvnk-onramp-transfers.repository.postgres";
 export type {
   ArchiveCounterpartyInput,
   CounterpartiesRepository,
@@ -34,6 +35,8 @@ export type {
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
   ArchiveExternalAccountInput,
+  AssignFundingWalletReferenceInput,
+  ClaimFundingWalletInput,
   CompleteExternalAccountInput,
   CounterpartyProviderAccountKind,
   CounterpartyProviderAccountRow,
@@ -41,7 +44,6 @@ export type {
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
   GetExternalAccountByIdInput,
-  GetFundingWalletByOnrampKeyInput,
   InsertPendingExternalAccountInput,
   InsertProviderResourceAccountInput,
   ListActiveExternalAccountsInput,
@@ -53,6 +55,7 @@ export type {
 } from "./counterparty-provider-account.repository";
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 export type {
+  DvpCloseClaim,
   DvpTradeInsert,
   DvpTradeRepository,
   DvpTradeRow,
@@ -299,6 +302,7 @@ export type {
   PolicyRepository,
   PolicyRepositoryContext,
   ReplaceApiKeyWalletPolicyBindingsInput,
+  SumWalletOperationAmountsInput,
   UpdateApprovalRequestStatusInput,
   UpsertApiKeyWalletPolicyBindingInput,
   WalletControlProfileRevisionHistoryRow,

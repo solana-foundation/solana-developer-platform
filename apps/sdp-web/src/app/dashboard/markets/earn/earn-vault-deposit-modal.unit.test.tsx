@@ -11,7 +11,7 @@ import {
   walletBalanceForMint,
 } from "./earn-vault-deposit-modal";
 import {
-  claimVaultDepositIdempotencyKey,
+  vaultDepositIdempotencyKeyStore,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
 import {
@@ -93,9 +93,10 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultDoneStatus": "Awaiting confirmation",
   "DashboardEarn.deposit.vaultSettlingNote":
     "Your vault position will refresh after the chain confirms it.",
-  "DashboardEarn.deposit.vaultConfirmedTitle": "Deposit confirmed",
-  "DashboardEarn.deposit.vaultConfirmedBody": "The deposit is confirmed on Solana.",
-  "DashboardEarn.deposit.vaultConfirmedStatus": "Confirmed",
+  "DashboardEarn.deposit.vaultConfirmedTitle": "Deposit complete",
+  "DashboardEarn.deposit.vaultConfirmedBody":
+    "The deposit is confirmed on Solana and your position is active.",
+  "DashboardEarn.deposit.vaultConfirmedStatus": "Deposited",
   "DashboardEarn.deposit.vaultConfirmedNote":
     "Your live vault position will refresh automatically.",
   "DashboardEarn.deposit.vaultTransaction": "Transaction",
@@ -114,6 +115,8 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
     "The details below are the approved deposit. If you intended a second deposit of the same amount, submit again.",
   "DashboardEarn.deposit.vaultHeldKeyUnavailable":
     "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment.",
+  "DashboardEarn.deposit.vaultFloorUnavailable":
+    "SDP could not confirm the exact terms this deposit's earlier attempt was submitted with, so nothing was sent. Check your position, then try again in a moment.",
   "DashboardEarn.deposit.vaultMinShares": "Minimum shares received",
   "DashboardEarn.deposit.vaultExpectedShares": "Expected shares",
   "DashboardEarn.deposit.vaultQuoteLoading": "Fetching the live share quote…",
@@ -163,11 +166,11 @@ vi.mock("./earn-program-data", () => ({
 
 const strategy: EarnStrategy = {
   id: "strategy_1",
-  provider: "kamino",
+  provider: "upshift",
   providerReference: "vault_1",
   name: "Institutional USDC Vault",
   sourceKind: "defi",
-  underlyingSource: "Kamino Lend",
+  underlyingSource: "Upshift",
   depositMints: [USDC_MINT],
   shareMint: "Share1111111111111111111111111111111111111",
   apyType: "variable",
@@ -229,8 +232,8 @@ beforeEach(() => {
   mocks.createEarnVaultDeposit.mockReset();
   mocks.fetchEarnVaultDepositByRequestId.mockReset();
   mocks.fetchEarnVaultDepositPreview.mockReset();
-  // Kamino declares no floor policy, so most tests never quote; the veda
-  // suites override this with a real quote.
+  // Upshift declares no floor policy, so most tests never quote; the
+  // floor-policy suite overrides this with truthful Kamino metadata.
   mocks.fetchEarnVaultDepositPreview.mockResolvedValue({ kind: "unavailable" });
   // Default: nothing recorded under the key yet, so a held key stays held.
   mocks.fetchEarnVaultDepositByRequestId.mockResolvedValue({ kind: "absent" });
@@ -592,7 +595,7 @@ describe("EarnVaultDepositModal", () => {
     ) as Array<{ id: string; createdAt: number; expiresAt?: number | null }>;
     const held = entries.find((entry) => entry.id === fingerprint);
     expect(held?.expiresAt).toBeNull();
-    expect(claimVaultDepositIdempotencyKey(fingerprint)).toBe(
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(
       mocks.createEarnVaultDeposit.mock.calls[0][1]
     );
   });
@@ -621,7 +624,7 @@ describe("EarnVaultDepositModal", () => {
     mocks.createEarnVaultDeposit.mockResolvedValue({
       ok: true,
       status: 200,
-      data: { kind: "submitted", deposit: { ...vaultDeposit("submitted"), replayed: true } },
+      data: { kind: "submitted", deposit: { ...vaultDeposit("confirmed"), replayed: true } },
     });
     const onDeposited = vi.fn();
     render(
@@ -637,6 +640,10 @@ describe("EarnVaultDepositModal", () => {
     // The truthful headline, not the success screen.
     expect(await screen.findByText("Deposit already completed by your approval")).toBeTruthy();
     expect(screen.queryByText("Deposit submitted")).toBeNull();
+    // The absorbed record is the approval's own execution and it is already
+    // confirmed, so the stepper maps its status — Complete, not Processing.
+    const progress = screen.getByRole("navigation", { name: "Progress" });
+    expect(progress.querySelector('[aria-current="step"]')?.textContent).toBe("Complete");
     // The SAME held key was knowingly reused — no fresh key, no second approval.
     expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
       mocks.createEarnVaultDeposit.mock.calls[0][1]
@@ -655,7 +662,7 @@ describe("EarnVaultDepositModal", () => {
       amount: "1",
       toleranceBps: null,
     });
-    expect(claimVaultDepositIdempotencyKey(fingerprint)).not.toBe(
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).not.toBe(
       mocks.createEarnVaultDeposit.mock.calls[1][1]
     );
   });
@@ -789,7 +796,7 @@ describe("EarnVaultDepositModal", () => {
   it.each([
     ["pending", "Deposit pending", "Pending"],
     ["submitted", "Deposit submitted", "Pending"],
-    ["confirmed", "Deposit confirmed", "Active"],
+    ["confirmed", "Deposit complete", "Active"],
   ] as const)(
     "renders a truthful %s result and refresh callback",
     async (status, title, statusLabel) => {
@@ -1111,16 +1118,23 @@ describe("slippage tolerance helpers", () => {
 });
 
 describe("slippage-floored providers", () => {
-  const vedaStrategy: EarnStrategy = { ...strategy, provider: "veda" };
+  // The modal reads the floor policy off the catalogue row, which the API
+  // answers per environment; the provider name alone decides nothing.
+  const flooredStrategy: EarnStrategy = {
+    ...strategy,
+    provider: "kamino",
+    underlyingSource: "Kamino Lend",
+    depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+  };
 
   function primeQuote(sharesOut: string, blockingIssues: { code: string; message: string }[] = []) {
     mocks.fetchEarnVaultDepositPreview.mockResolvedValue({
       kind: "quoted",
-      preview: { strategyId: vedaStrategy.id, sharesOut, shareDecimals: 6, blockingIssues },
+      preview: { strategyId: flooredStrategy.id, sharesOut, shareDecimals: 6, blockingIssues },
     });
   }
 
-  async function enterVedaDepositAmount(amount = "1.000000") {
+  async function enterFlooredDepositAmount(amount = "1.000000") {
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
@@ -1133,6 +1147,37 @@ describe("slippage-floored providers", () => {
     return user;
   }
 
+  it("takes the policy from the row, so a production Kamino row gets the floor too", async () => {
+    // Kamino declares no floor of its own; production requires one anyway and
+    // the API says so on the row. The modal must follow the row, not the
+    // provider, or a production Kamino deposit goes out unprotected and 400s.
+    primeQuote("0.99999");
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{
+          ...strategy,
+          hostCluster: "mainnet-beta",
+          depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+        }}
+        onClose={vi.fn()}
+      />
+    );
+    await enterFlooredDepositAmount("1.000000");
+    await screen.findByText("Deposit submitted");
+    expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
+      strategyId: strategy.id,
+      custodyWalletId: "wallet_1",
+      amount: "1",
+      minSharesOut: "0.99899",
+    });
+  });
+
   it("reads the confirm note from the strategy, not the quote", async () => {
     // The quote does not claim sponsorship; the strategy does. The strategy
     // wins: it is the per-request answer of the execution gate, while a quote is
@@ -1141,7 +1186,7 @@ describe("slippage-floored providers", () => {
     render(
       <EarnVaultDepositModal
         projectId={PROJECT_ID}
-        strategy={{ ...vedaStrategy, feeSponsored: true }}
+        strategy={{ ...flooredStrategy, feeSponsored: true }}
         onClose={vi.fn()}
       />
     );
@@ -1161,7 +1206,7 @@ describe("slippage-floored providers", () => {
   it("keeps the wallet-pays note while the strategy is not sponsored", async () => {
     primeQuote("0.99999");
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
@@ -1184,12 +1229,12 @@ describe("slippage-floored providers", () => {
       data: { kind: "submitted", deposit: vaultDeposit("submitted") },
     });
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
-    await enterVedaDepositAmount("1.000000");
+    await enterFlooredDepositAmount("1.000000");
     await screen.findByText("Deposit submitted");
     expect(mocks.fetchEarnVaultDepositPreview).toHaveBeenCalledWith(
-      { strategyId: vedaStrategy.id, amount: "1" },
+      { strategyId: flooredStrategy.id, amount: "1" },
       expect.anything()
     );
     expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
@@ -1222,7 +1267,7 @@ describe("slippage-floored providers", () => {
   it("disables the deposit while the quote is unavailable, never guessing a floor", async () => {
     mocks.fetchEarnVaultDepositPreview.mockResolvedValue({ kind: "unavailable" });
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
@@ -1242,7 +1287,7 @@ describe("slippage-floored providers", () => {
   it("surfaces a vault-reported blocking issue in its own words and refuses to arm", async () => {
     primeQuote("1", [{ code: "TELLER_PAUSED", message: "The teller is paused." }]);
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
     const user = userEvent.setup();
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
@@ -1263,7 +1308,7 @@ describe("slippage-floored providers", () => {
       return {
         kind: "quoted" as const,
         preview: {
-          strategyId: vedaStrategy.id,
+          strategyId: flooredStrategy.id,
           sharesOut,
           shareDecimals: 6,
           blockingIssues: [] as { code: string; message: string }[],
@@ -1293,7 +1338,7 @@ describe("slippage-floored providers", () => {
     }
 
     /** Select the wallet, enter 1 USDC, and wait out the quote debounce. */
-    async function armVedaDeposit() {
+    async function armFlooredDeposit() {
       screen.getByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
       fireEvent.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
       fireEvent.change(screen.getByLabelText("Amount"), {
@@ -1314,9 +1359,13 @@ describe("slippage-floored providers", () => {
           })
       );
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       expect(screen.getByText("0.999")).toBeTruthy();
 
       // The TTL elapses: the refresh fires on its own and is IN FLIGHT here…
@@ -1351,9 +1400,13 @@ describe("slippage-floored providers", () => {
         data: { kind: "submitted", deposit: vaultDeposit("submitted") },
       });
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       // The clock passes the TTL without the auto-refresh timer firing — the
       // throttled-background-tab case the submit-time check exists for.
       vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
@@ -1383,9 +1436,13 @@ describe("slippage-floored providers", () => {
         .mockResolvedValueOnce(quoted("1"))
         .mockResolvedValue(quoted("0.99"));
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
 
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
@@ -1415,18 +1472,26 @@ describe("slippage-floored providers", () => {
       });
 
       const held = render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
       await flushSubmission();
       screen.getByText("Approval required");
       held.unmount();
 
       render(
-        <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
       );
-      await armVedaDeposit();
+      await armFlooredDeposit();
       vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
       fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
       await flushSubmission();
@@ -1441,6 +1506,111 @@ describe("slippage-floored providers", () => {
       expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
         mocks.createEarnVaultDeposit.mock.calls[0][1]
       );
+    });
+
+    it("replays a kept key's floor verbatim — an ambiguous-failure retry must not re-floor", async () => {
+      mocks.fetchEarnVaultDepositPreview
+        .mockResolvedValueOnce(quoted("1"))
+        .mockResolvedValue(quoted("0.5"));
+      // A 5xx is the ambiguous case: the API may have recorded and broadcast
+      // the deposit, and the key stays live in the store either way.
+      mocks.createEarnVaultDeposit
+        .mockResolvedValueOnce({
+          ok: false,
+          error: "Bad gateway",
+          status: 503,
+          body: null,
+        })
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+        });
+
+      const first = render(
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
+      );
+      await armFlooredDeposit();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+      first.unmount();
+
+      render(
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
+      );
+      await armFlooredDeposit();
+      vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+
+      // The retry is the SAME request under the SAME key, so it must carry the
+      // floor that key was MINTED with — not a fresh floor off the moved rate.
+      // A re-derived floor would conflict with the API's recorded fingerprint
+      // (a 409), retire the key, and let the next submit deposit a second time
+      // while the first attempt may already have executed.
+      expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][0]).toMatchObject({
+        minSharesOut: "0.999",
+      });
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
+        mocks.createEarnVaultDeposit.mock.calls[0][1]
+      );
+    });
+
+    it("stops a reused key whose floor memo lost the floor: error copy, no POST", async () => {
+      mocks.fetchEarnVaultDepositPreview
+        .mockResolvedValueOnce(quoted("1"))
+        .mockResolvedValue(quoted("0.5"));
+      mocks.createEarnVaultDeposit.mockResolvedValueOnce({
+        ok: false,
+        error: "Bad gateway",
+        status: 503,
+        body: null,
+      });
+
+      const first = render(
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
+      );
+      await armFlooredDeposit();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+      first.unmount();
+
+      // The floor memo is bounded and stored separately from the key store,
+      // so a busy session can evict a live key's floor while the key lives
+      // on. Simulate that eviction at the storage tier.
+      sessionStorage.removeItem("sdp:earn:vault-deposit:floor:v1");
+
+      render(
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
+      );
+      await armFlooredDeposit();
+      vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+
+      // The retry must NOT go out under a freshly derived floor: that pairs
+      // the live key with a changed request, and the API's 409 retires the
+      // key while the ambiguous first attempt may already have executed. The
+      // submission stops with its own words instead, key untouched.
+      expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/could not confirm the exact terms/)).toBeTruthy();
     });
   });
 
@@ -1460,9 +1630,9 @@ describe("slippage-floored providers", () => {
       },
     });
     render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={vedaStrategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
     );
-    await enterVedaDepositAmount("1.000000");
+    await enterFlooredDepositAmount("1.000000");
 
     // This surface's own words, not the relayed simulation log…
     expect(await screen.findByText(/Increase the tolerance below/)).toBeTruthy();
@@ -1480,10 +1650,9 @@ describe("slippage-floored providers", () => {
 });
 
 describe("fee sponsorship copy", () => {
-  it("names SDP as the fee payer for a sponsored Kamino deposit that never quotes", async () => {
-    // The regression: Kamino declares no deposit floor, so no quote is ever
-    // fetched, and a flag riding on the quote left the note on wallet-pays for
-    // every sponsored Kamino deposit.
+  it("names SDP as fee payer for a sponsored provider without a quote policy", async () => {
+    // Sponsorship copy must come from strategy metadata even when the provider
+    // has no quote path to carry it.
     render(
       <EarnVaultDepositModal
         projectId={PROJECT_ID}
@@ -1500,7 +1669,7 @@ describe("fee sponsorship copy", () => {
     expect(mocks.fetchEarnVaultDepositPreview).not.toHaveBeenCalled();
   });
 
-  it("keeps the wallet-pays note for an unsponsored Kamino deposit", async () => {
+  it("keeps the wallet-pays note for an unsponsored provider", async () => {
     render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
     const user = userEvent.setup();

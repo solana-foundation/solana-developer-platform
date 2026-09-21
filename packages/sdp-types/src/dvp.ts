@@ -46,7 +46,7 @@ export const DVP_LEG_OUTCOMES = [
   "overfunded",
   /** The escrow token account is frozen. */
   "frozen",
-  /** A previously observed deposit has been reclaimed. */
+  /** The escrow's latest recorded transfer took tokens out, and it holds less than the trade requires. */
   "reclaimed",
   /** The open trade expired before settlement. */
   "expired",
@@ -60,6 +60,26 @@ export const DVP_LEG_OUTCOMES = [
   "closed",
 ] as const;
 export type DvpLegOutcome = (typeof DVP_LEG_OUTCOMES)[number];
+
+/** What one movement in or out of a leg's escrow was, as far as the trade can tell. */
+export const DVP_LEG_TRANSFER_KINDS = [
+  /** Tokens paid into the escrow, by anyone. */
+  "deposit",
+  /** Tokens taken out of the escrow before any close. */
+  "reclaim",
+  /** The settlement's outflow. */
+  "delivery",
+  /** The cancellation's or rejection's outflow. */
+  "refund",
+  /** An outflow after the close: a late deposit recovered. */
+  "recovery",
+  /**
+   * An outflow from a closed trade whose closing transaction is not among the
+   * leg's transfers, so it cannot be told apart from a reclaim or the close.
+   */
+  "withdrawal",
+] as const;
+export type DvpLegTransferKind = (typeof DVP_LEG_TRANSFER_KINDS)[number];
 
 /**
  * Whether a DvP trade can settle, derived by the API from the cluster clock read
@@ -113,6 +133,8 @@ export const DVP_LEG_REFUSAL = {
    * party address, and the program accepts no other signer.
    */
   signerNotParty: "dvp_signer_not_party",
+  /** A settle or cancel is in flight on the trade, and the leg would move under it. */
+  tradeClosing: "dvp_trade_closing",
   /**
    * The leg's mint carries a transfer hook, whose extra accounts SDP does not
    * resolve, so the refund transfer would be refused by the token program.
@@ -120,3 +142,16 @@ export const DVP_LEG_REFUSAL = {
   transferHookUnsupported: "dvp_transfer_hook_unsupported",
 } as const;
 export type DvpLegRefusalReason = (typeof DVP_LEG_REFUSAL)[keyof typeof DVP_LEG_REFUSAL];
+
+/**
+ * Why a settle or cancel was refused before it was sent, as `error.details.reason`.
+ */
+export const DVP_CLOSE_REFUSAL = {
+  /** Another settle or cancel already holds the trade. */
+  closeInProgress: "dvp_close_in_progress",
+  /** A funding or reclaim of one of the legs has not landed yet. */
+  legMoving: "dvp_leg_moving",
+  /** The close reached the chain and the program refused it; nothing moved. */
+  closeFailedOnChain: "dvp_close_failed_on_chain",
+} as const;
+export type DvpCloseRefusalReason = (typeof DVP_CLOSE_REFUSAL)[keyof typeof DVP_CLOSE_REFUSAL];

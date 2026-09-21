@@ -7,7 +7,9 @@
  *  1. `pending` with no signature, stuck > 5 min → failed (never broadcast).
  *  2. `submitted` with a signature → getSignatureStatuses on the deposit's
  *     project's configured RPC → `confirmed` / `failed`; signature not found + stale
- *     → failed.
+ *     → failed. Status reads are batched per tick: every submitted signature
+ *     targeting the same project RPC rides a single getSignatureStatuses call
+ *     instead of one RPC round trip per row.
  *
  * `confirmed → settled` is not driven: the operator's channel-side credit is
  * off-chain and gateway `getTransaction` is Operator-only, so we can't observe
@@ -75,6 +77,41 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
 
   const now = Date.now();
 
+  // Submitted deposits bucketed by project RPC: every signature targeting the
+  // same project shares one batched getSignatureStatuses call per tick instead
+  // of paying one RPC round trip per row. Buckets stay well under the RPC's
+  // 256-signature cap because MAX_PER_RUN bounds the whole tick.
+  const buckets = new Map<
+    string,
+    { projectRpc: Promise<PrivateChannelProjectRpcClient>; deposits: PrivateChannelDepositRow[] }
+  >();
+
+  const reconcileSubmitted = async (
+    deposit: PrivateChannelDepositRow,
+    instance: PrivateChannelInstanceRow
+  ): Promise<void> => {
+    if (!deposit.signature) {
+      await failIfStale(env, repo, deposit, now, "Deposit was submitted without a signature.");
+      return;
+    }
+    const key = `${instance.organization_id}:${instance.project_id}`;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      const projectRpc = loadProjectRpc(instance);
+      // The RPC client starts resolving during pass 1, but its rejection is
+      // only awaited — inside a try/catch — in pass 2. Attach a no-op handler
+      // now so a failed project lookup can't surface as an unhandled rejection
+      // in the window before pass 2 runs (the API shuts down on those); the
+      // same promise still re-raises when pass 2 awaits it.
+      projectRpc.catch(() => {});
+      bucket = { projectRpc, deposits: [] };
+      buckets.set(key, bucket);
+    }
+    bucket.deposits.push(deposit);
+  };
+
+  // Pass 1 — local transitions (stale fails, CAS promotions) and bucketing; no
+  // per-row RPC.
   for (const deposit of pending) {
     try {
       if (deposit.status === "pending" && !deposit.signature) {
@@ -95,7 +132,7 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
         if (promoted) {
           const instance = await loadInstance(promoted.instance_id);
           if (instance) {
-            await reconcileSubmitted(env, repo, promoted, await loadProjectRpc(instance), now);
+            await reconcileSubmitted(promoted, instance);
           }
         }
       } else if (deposit.status === "submitted") {
@@ -109,13 +146,56 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
           await failStale(env, repo, deposit, now, "Deposit instance no longer connected.");
           continue;
         }
-        await reconcileSubmitted(env, repo, deposit, await loadProjectRpc(instance), now);
+        await reconcileSubmitted(deposit, instance);
       }
       // `confirmed` intentionally has no transition here — see module docstring.
     } catch (err) {
       logReconcileError(deposit.id, deposit.status, err);
     }
   }
+
+  // Pass 2 — one batched status read per project RPC, then per-row verdicts.
+  await Promise.all(
+    [...buckets.values()].map(async (bucket) => {
+      let statuses: Array<solanaRpc.SignatureStatusInfo | null>;
+      try {
+        // searchTransactionHistory because every caller of this is already past the
+        // node's short recent-status cache: a submitted row is only polled on the
+        // reconciler's cadence, and the signed-pending promotion reaches here
+        // strictly AFTER STUCK_AFTER_MS. Without it an executed deposit reads null,
+        // gets failed as "not found on chain", and the dashboard hands the caller a
+        // fresh idempotency key for a deposit that already moved funds.
+        statuses = await solanaRpc.getSignatureStatuses(
+          (await bucket.projectRpc).rpc,
+          bucket.deposits.map((deposit) => deposit.signature as Signature),
+          { searchTransactionHistory: true }
+        );
+      } catch (err) {
+        getLogger().error(
+          {
+            deposits: bucket.deposits.length,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "trackPendingDeposits: batched getSignatureStatuses failed"
+        );
+        return;
+      }
+      if (statuses.length !== bucket.deposits.length) {
+        getLogger().error(
+          { deposits: bucket.deposits.length, statuses: statuses.length },
+          "trackPendingDeposits: getSignatureStatuses returned a mismatched batch"
+        );
+        return;
+      }
+      for (const [index, deposit] of bucket.deposits.entries()) {
+        try {
+          await applySubmittedVerdict(env, repo, deposit, statuses[index] ?? null, now);
+        } catch (err) {
+          logReconcileError(deposit.id, "submitted", err);
+        }
+      }
+    })
+  );
 }
 
 function logReconcileError(depositId: string, status: string, err: unknown): void {
@@ -169,31 +249,14 @@ async function failStale(
   }
 }
 
-/** submitted → confirmed/failed via on-chain signature status. */
-async function reconcileSubmitted(
+/** submitted → confirmed/failed by applying an already-fetched signature status. */
+async function applySubmittedVerdict(
   env: Env,
   repo: PrivateChannelDepositRepository,
   deposit: PrivateChannelDepositRow,
-  projectRpc: PrivateChannelProjectRpcClient,
+  status: solanaRpc.SignatureStatusInfo | null,
   now: number
 ): Promise<void> {
-  if (!deposit.signature) {
-    await failIfStale(env, repo, deposit, now, "Deposit was submitted without a signature.");
-    return;
-  }
-
-  // searchTransactionHistory because every caller of this is already past the
-  // node's short recent-status cache: a submitted row is only polled on the
-  // reconciler's cadence, and the signed-pending promotion below reaches here
-  // strictly AFTER STUCK_AFTER_MS. Without it an executed deposit reads null,
-  // gets failed as "not found on chain", and the dashboard hands the caller a
-  // fresh idempotency key for a deposit that already moved funds.
-  const [status] = await solanaRpc.getSignatureStatuses(
-    projectRpc.rpc,
-    [deposit.signature as Signature],
-    { searchTransactionHistory: true }
-  );
-
   if (!status) {
     // Not found on chain; if it's been a while, treat the tx as dropped.
     if (now - Date.parse(deposit.updated_at) > STUCK_AFTER_MS) {

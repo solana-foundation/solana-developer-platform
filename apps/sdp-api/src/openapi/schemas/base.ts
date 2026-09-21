@@ -211,6 +211,7 @@ export const errorCodeSchema = z
     "PROVIDER_NOT_CONFIGURED",
     "PROVIDER_UNAVAILABLE",
     "UNSUPPORTED_CORRIDOR",
+    "VAULT_EXPOSURE_CAP",
   ])
   .openapi({ description: "Machine-readable error code." });
 

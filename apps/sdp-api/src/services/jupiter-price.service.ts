@@ -1,4 +1,5 @@
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
+import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import type { Env } from "@/types/env";
 
 /**
@@ -19,6 +20,16 @@ const JUPITER_LITE_PRICE_URL = "https://lite-api.jup.ag/price/v3";
 const MAX_MINTS_PER_REQUEST = 50;
 
 const REQUEST_TIMEOUT_MS = 4_000;
+
+/** A spot price is fresh enough for a balance view for this long, and no longer. */
+const PRICE_CACHE_TTL_MS = 30_000;
+
+const priceCache = createMintLookupCache<number>(PRICE_CACHE_TTL_MS);
+
+/** @internal Test-only: forget cached prices so specs are order-independent. */
+export function clearJupiterPriceCacheForTests(): void {
+  priceCache.clearForTests();
+}
 
 interface JupiterPriceEntry {
   usdPrice?: number;
@@ -91,6 +102,9 @@ async function fetchPriceChunk(
  * USD prices for the mints Jupiter can price. Mints it cannot are absent from the result
  * rather than present with a zero, so a caller can tell "worth nothing" from "unknown".
  *
+ * A price is reused for 30 seconds per cluster and mint. A mint left unpriced, by
+ * Jupiter or by a failed batch, is asked about again on the next call.
+ *
  * Never throws. Pricing decorates a balance response; a pricing outage should render
  * balances unpriced, not fail the request that carries them.
  */
@@ -98,25 +112,22 @@ export async function fetchJupiterUsdPrices(
   env: Env,
   mints: string[]
 ): Promise<Map<string, number>> {
-  const prices = new Map<string, number>();
-  const uniqueMints = [...new Set(mints.map((mint) => mint.trim()).filter(Boolean))];
-  if (uniqueMints.length === 0) {
-    return prices;
-  }
-
   const { url, apiKey } = resolveJupiterPriceConfig(env);
 
-  // Chunks are independent, so one failing batch must not discard the others.
-  const results = await Promise.allSettled(
-    chunk(uniqueMints, MAX_MINTS_PER_REQUEST).map((batch) => fetchPriceChunk(url, apiKey, batch))
-  );
+  return priceCache.lookup(env.SOLANA_NETWORK ?? "devnet", mints, async (missingMints) => {
+    const prices = new Map<string, number>();
+    // Chunks are independent, so one failing batch must not discard the others.
+    const results = await Promise.allSettled(
+      chunk(missingMints, MAX_MINTS_PER_REQUEST).map((batch) => fetchPriceChunk(url, apiKey, batch))
+    );
 
-  for (const result of results) {
-    if (result.status !== "fulfilled") continue;
-    for (const [mint, price] of result.value) {
-      prices.set(mint, price);
+    for (const result of results) {
+      if (result.status !== "fulfilled") continue;
+      for (const [mint, price] of result.value) {
+        prices.set(mint, price);
+      }
     }
-  }
 
-  return prices;
+    return prices;
+  });
 }

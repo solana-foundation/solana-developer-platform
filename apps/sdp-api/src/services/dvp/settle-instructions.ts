@@ -57,10 +57,12 @@ export function buildRequiredAtaInstructions(
  * Settles a trade: both legs delivered, surplus refunded, escrows and trade
  * account closed. Only the settlement authority can sign it.
  *
- * `legAExtrasCount` is 0 because V1 refuses transfer-hook mints before reaching
- * here. It splits the instruction's remaining accounts between the two legs'
- * hook extras, and resolving those off-chain is a separate piece of work —
- * passing a wrong count would mis-attribute accounts across legs.
+ * `legAExtrasCount` is 0 because create refuses transfer-hook mints
+ * (`UNSUPPORTED_MINT_EXTENSIONS` in `mints.ts`), so no hook extras are passed.
+ * It splits the instruction's remaining accounts between the two legs' hook
+ * extras, and resolving those off-chain is a separate piece of work: passing a
+ * wrong count would mis-attribute accounts across legs. A hook-mint trade
+ * created before that refusal existed still fails here, on chain.
  */
 export function buildSettleInstruction(
   trade: DvpTradeRow,

@@ -73,6 +73,7 @@ export function buildDvpTradeRow(overrides: Partial<DvpTradeRow> = {}): DvpTrade
     createSignature: null,
     createLastValidBlockHeight: null,
     closeSignature: null,
+    closeClaim: null,
     closeResolutionAttempts: 0,
     closeResolutionAfter: null,
     closedAt: null,

@@ -304,6 +304,11 @@ export interface EarnVaultPosition {
   shares?: string;
   /** Unstaked shares immediately redeemable through SDP; absent when unreadable. */
   withdrawableShares?: string;
+  /**
+   * Unix epoch seconds when provider-locked shares become eligible to exit.
+   * Absent when no lock applies or when live provider state is unavailable.
+   */
+  unlockTimestamp?: string | null;
   /** Deposit-token value, absent when the provider cannot hydrate the position. */
   tokenValue?: string;
 }
@@ -329,6 +334,8 @@ export interface EarnExternalWalletPosition {
   shares?: string;
   /** Absent when the live provider read failed. */
   withdrawableShares?: string;
+  /** Unix epoch seconds when provider-locked shares become eligible to exit, when applicable. */
+  unlockTimestamp?: string | null;
   /** Deposit-token value, absent when the live provider read failed. */
   tokenValue?: string;
 }
@@ -550,6 +557,112 @@ export interface EarnVaultWithdrawalsPage {
   nextCursor: string | null;
 }
 
+/** One asset's live provider queue limits. These are chain state, never UI defaults. */
+export interface EarnVaultQueuedWithdrawalTerms {
+  assetMint: string;
+  allowWithdrawals: boolean;
+  secondsToMaturity: number;
+  minimumSecondsToDeadline: number;
+  minimumDiscountBps: number;
+  maximumDiscountBps: number;
+  /** Decimal string in vault-share units. */
+  minimumShares: string;
+  shareDecimals: number;
+}
+
+/** Independently available exit routes for one owned vault position. */
+export interface EarnVaultWithdrawalOptions {
+  positionId: string;
+  instant: boolean;
+  queued: boolean;
+  /** Queue authority when the provider exposes a queued exit; null for instant-only providers. */
+  withdrawAuthority: string | null;
+  queueState: string | null;
+  queueAsset: EarnVaultQueuedWithdrawalTerms | null;
+}
+
+/** Queue quote inputs shared by preview and request creation. */
+export interface EarnVaultQueuedWithdrawalTermsRequest {
+  positionId: string;
+  /** Decimal string in vault-share units. */
+  shares: string;
+  discountBps: number;
+  /** Solver window, in seconds after maturity. */
+  deadlineSeconds: number;
+}
+
+/** Pre-execution queue quote. Landed request state replaces these expected values. */
+export interface EarnVaultQueuedWithdrawalPreview {
+  positionId: string;
+  assetMint: string;
+  shares: string;
+  shareDecimals: number;
+  assets: string;
+  assetDecimals: number;
+  discountBps: number;
+  /** Unix epoch seconds, kept as a decimal string for JSON safety. */
+  maturityTimestamp: string;
+  /** Unix epoch seconds, kept as a decimal string for JSON safety. */
+  deadlineTimestamp: string;
+  blockingIssues: Array<{ code: string; message: string }>;
+}
+
+export type EarnVaultWithdrawalRequestStatus =
+  | "creating"
+  | "pending"
+  | "fulfillable"
+  | "expiredCancelable"
+  | "cancelling"
+  | "fulfilled"
+  | "cancelled"
+  | "closedOrUnknown"
+  | "failed";
+
+/** Durable queued-withdrawal lifecycle; request creation itself is not a payout. */
+export interface EarnVaultWithdrawalRequestRecord {
+  withdrawalRequestId: string;
+  positionId: string;
+  provider: string;
+  providerReference: string;
+  ownerAddress: string;
+  requestAddress: string;
+  status: EarnVaultWithdrawalRequestStatus;
+  assetMint: string;
+  shareMint: string;
+  shares: string;
+  quotedAssets: string;
+  shareDecimals: number;
+  assetDecimals: number;
+  discountBps: number;
+  /** Provider request nonce, populated only after the request lands on chain. */
+  nonce: string | null;
+  /** Provider-recorded Unix creation time, populated from landed chain state. */
+  creationTimestamp: string | null;
+  maturityTimestamp: string;
+  deadlineTimestamp: string;
+  creationSignature: string | null;
+  cancelSignature: string | null;
+  closingSignature: string | null;
+  assetsPaid: string | null;
+  failureReason: string | null;
+  fulfilledAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Present on mutation responses when the Idempotency-Key replayed. */
+  replayed?: boolean;
+}
+
+export interface EarnVaultWithdrawalRequestResponse {
+  withdrawalRequest: EarnVaultWithdrawalRequestRecord;
+}
+
+export interface EarnVaultWithdrawalRequestsPage {
+  withdrawalRequests: EarnVaultWithdrawalRequestRecord[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
 /**
  * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
  *
@@ -690,6 +803,27 @@ export interface EarnExternalWalletWithdrawalTransactionResponse {
     };
 }
 
+/** The two signed actions in a queued external-wallet withdrawal lifecycle. */
+export type EarnExternalWalletWithdrawalRequestAction = "request" | "cancel";
+
+/**
+ * Unsigned queued-withdrawal action for the owner (and optional partner fee
+ * payer) to sign. Request builds carry the expected quote fields; cancellation
+ * builds identify only the already-landed request.
+ */
+export interface EarnExternalWalletWithdrawalRequestTransactionResponse {
+  transaction: EarnExternalWalletTransaction &
+    Partial<EarnExternalWalletExitReference> & {
+      action: EarnExternalWalletWithdrawalRequestAction;
+      requestAddress: string;
+      shares?: string;
+      assets?: string;
+      discountBps?: number;
+      maturityTimestamp?: string;
+      deadlineTimestamp?: string;
+    };
+}
+
 /** One recorded external-wallet vault movement, either direction. */
 export interface EarnExternalWalletMovement {
   movementId: string;
@@ -705,6 +839,14 @@ export interface EarnExternalWalletMovement {
   amount: string;
   /** Token mint for a deposit; share mint for a withdrawal. */
   denomination: string;
+  /** The position's deposit-token mint: the unit an activity feed renders in. */
+  tokenMint: string;
+  /**
+   * Quantity in `tokenMint` units. A deposit's amount; a withdrawal's observed
+   * payout once finalized, null before that or when it could not be observed.
+   * `amount`/`denomination` stay the on-chain quantity (shares on a withdrawal).
+   */
+  tokenAmount: string | null;
   failureReason: string | null;
   createdAt: string;
   confirmedAt: string | null;
@@ -742,14 +884,14 @@ export interface EarnExternalWalletMovementResponse {
  * - `movements_pending`: a movement is still settling, so live value and the
  *   ledger describe different moments.
  * - `withdrawals_not_valued`: a currently held position has a finalized
- *   withdrawal, and the ledger records exits in shares, not in the deposit
- *   token, so no exact token-denominated earned figure exists (ADR 0002).
+ *   withdrawal whose token payout was not observed at settlement (rows that
+ *   predate the observation, or a settlement whose transaction read failed),
+ *   so `totalWithdrawn` is incomplete and earned cannot be exact (ADR 0002).
  *
  * Every earnings figure covers the wallet's CURRENTLY HELD positions: a fully
  * exited position drops out entirely (its deposits leave `totalDeposited`
- * along with its unvalued withdrawal), so one full exit does not withhold the
- * open positions' earned forever. The exited history stays on the movements
- * list.
+ * along with its withdrawals), so one full exit does not withhold the open
+ * positions' earned. The exited history stays on the movements list.
  */
 export type EarnExternalWalletEarnedUnavailableReason =
   | "live_value_unavailable"
@@ -767,10 +909,17 @@ export interface EarnExternalWalletTokenEarnings {
   /** Sum of finalized SDP deposits, a pure ledger fact — always present. */
   totalDeposited: string;
   /**
-   * `currentValue − totalDeposited`, signed. Absent (with the reason below)
-   * whenever it cannot be stated exactly. Live value reads the owner's WHOLE
-   * vault balance, so shares acquired outside SDP inflate this figure — a
-   * documented property of non-custodial hydration, not a bug (ADR 0002).
+   * Sum of the observed token payouts of finalized withdrawals, a ledger fact,
+   * always present. Excludes withdrawals whose payout was not observed; those
+   * are what `withdrawals_not_valued` reports.
+   */
+  totalWithdrawn: string;
+  /**
+   * `currentValue + totalWithdrawn − totalDeposited`, signed. Absent (with the
+   * reason below) whenever it cannot be stated exactly. Live value reads the
+   * owner's WHOLE vault balance, so shares acquired outside SDP inflate this
+   * figure, a documented property of non-custodial hydration, not a bug
+   * (ADR 0002).
    */
   earned?: string;
   earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;
@@ -1320,6 +1469,13 @@ export interface EarnMovementRecord {
   amountRequested: string;
   /** What actually moved, once the provider or the chain has said so. */
   amountSettled?: string;
+  /**
+   * Deposit-token payout observed for a finalized vault withdrawal. These two
+   * fields are paired and remain absent when settlement could not be valued.
+   * `amountSettled` remains share-denominated for vault withdrawals.
+   */
+  tokenAmount?: string;
+  tokenMint?: string;
   feeAmount?: string;
   /** Share units (vault movements only). */
   minSharesOut?: string;

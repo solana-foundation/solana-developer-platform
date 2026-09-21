@@ -3,7 +3,7 @@ import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
-import { getListConfig } from "@solana/mosaic-sdk";
+import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
 import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
@@ -40,6 +40,15 @@ export async function resolveAllowlistAuthority(env: Env, listAddress: string): 
     listConfig: assertValidAddress(listAddress, "ablListAddress"),
   });
   return authority;
+}
+
+/** Resolve the live Token-2022 pausable authority used for pause/unpause signing. */
+export async function resolvePauseAuthority(env: Env, mintAddress: string): Promise<string | null> {
+  const token = await inspectToken(
+    createRpcForSdk<Parameters<typeof inspectToken>[0]>(env),
+    assertValidAddress(mintAddress, "mintAddress")
+  );
+  return token.authorities.pausableAuthority ?? null;
 }
 
 /** Validate an existing direct-action replay without consulting live authority state. */
@@ -321,19 +330,7 @@ export async function resolveCurrentAuthorityForRole(
       break;
     }
     case "freeze": {
-      if (!token.mintAddress) {
-        currentAuthority = token.freezeAuthority;
-        break;
-      }
-      try {
-        const { freezeAuthority } = await fetchMintAuthorities(env, token.mintAddress);
-        currentAuthority = freezeAuthority;
-      } catch (error) {
-        throw new AppError(
-          "SOLANA_RPC_ERROR",
-          error instanceof Error ? error.message : "Failed to resolve freeze authority"
-        );
-      }
+      currentAuthority = await resolveFreezeOperationAuthority(env, token);
       break;
     }
     case "permanentDelegate":

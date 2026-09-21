@@ -52,6 +52,7 @@ function OfframpManualQuoteStep({
   }
 
   const cryptoToken = getCryptoRailAssetLabel(selectedRampPair.assetRail);
+  const depositCopy = { amount: fields.amount.trim(), token: cryptoToken };
 
   return (
     <ManualInstructionsQuote
@@ -60,10 +61,13 @@ function OfframpManualQuoteStep({
       fiatCurrency={selectedRampPair.fiatCurrency}
       cryptoToken={cryptoToken}
       instructions={quote.paymentInstructions}
-      description={t("DashboardPayments.ramps.offrampManualDescription", {
-        amount: fields.amount.trim(),
-        token: cryptoToken,
-      })}
+      // Held for approval: the send is already queued, so asking for it again
+      // would invite a second payment, and the quote is not held while it waits.
+      description={
+        wizard.heldApprovalRequestId === null
+          ? t("DashboardPayments.ramps.offrampManualDescription", depositCopy)
+          : t("DashboardPayments.ramps.offrampHeldDescription", depositCopy)
+      }
     />
   );
 }
@@ -102,6 +106,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     isAdvancing,
     retryOnboarding,
     pendingAgreements,
+    acceptedAgreements,
+    toggleAgreement,
     memoRows,
     setMemoRows,
     sourceWalletHint,
@@ -194,7 +200,12 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     // blocker renders above STILL-ENABLED fields: the country select is the only
     // way out of a blocked corridor, so it must stay interactive.
     return pendingAgreements !== null ? (
-      <BvnkAgreementConsent agreements={pendingAgreements} />
+      <BvnkAgreementConsent
+        agreements={pendingAgreements}
+        acceptedAgreements={acceptedAgreements}
+        onToggle={toggleAgreement}
+        disabled={isAdvancing}
+      />
     ) : onboarding !== null &&
       hasOnboardingLifecycle(onboarding.provider) &&
       isOnboardingPanelStatus(onboarding) ? (

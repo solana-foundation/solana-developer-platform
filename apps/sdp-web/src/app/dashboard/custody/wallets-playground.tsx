@@ -12,7 +12,7 @@ import {
 
 interface WalletsPlaygroundProps {
   apiBaseUrl?: string | null;
-  apiKeyValue: string;
+  apiKeyId: string | null;
   connectedProviders: KnownCustodyProvider[];
   configsError: string | null;
   hasActiveApiKeys: boolean;
@@ -22,7 +22,7 @@ interface WalletsPlaygroundProps {
 
 export function WalletsPlayground({
   apiBaseUrl,
-  apiKeyValue,
+  apiKeyId,
   connectedProviders,
   configsError,
   hasActiveApiKeys,
@@ -42,7 +42,7 @@ export function WalletsPlayground({
         endpoints={endpoints}
         defaultEndpointId="list-wallets"
         apiBaseUrl={apiBaseUrl}
-        apiKeyValue={apiKeyValue}
+        apiKeyId={apiKeyId}
         apiKeySelector={<PlaygroundApiKeySelector />}
         requiresApiKey={!hasActiveApiKeys}
         leftMessages={[

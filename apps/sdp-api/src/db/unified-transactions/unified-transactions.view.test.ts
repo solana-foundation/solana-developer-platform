@@ -310,6 +310,68 @@ describe("unified_transactions view (postgres)", () => {
     }
   });
 
+  async function seedVaultWithdrawal(id: string, tokenAmountSettled: string | null) {
+    const positionId = "earn_position_vault_direct";
+    await getDb(env).execute(
+      `INSERT INTO earn_positions
+         (id, organization_id, project_id, environment, provider, kind, custody_wallet_id,
+          vault_address, share_mint, token_mint, label, created_by, activated_at)
+       VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, 'vault', 'share-mint',
+               'token-mint', 'Vault', ?, ?)
+       ON CONFLICT (id) DO NOTHING`,
+      [positionId, TEST_ORG.id, PROJECT, CUSTODY_WALLET, TEST_USER.id, CREATED_AT]
+    );
+    await getDb(env).execute(
+      `INSERT INTO earn_movements
+         (id, organization_id, project_id, environment, provider, execution_model, direction,
+          position_id, status, confirmed_at, settled_at, denomination, amount_requested,
+          amount_settled, token_amount_settled, custody_wallet_id, vault_address, signature,
+          signed_transaction, last_valid_block_height, request_id, idempotency_fingerprint,
+          created_by, created_at, updated_at)
+       VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', 'withdrawal', ?, 'finalized', ?, ?,
+               'share-mint', '4', '4', ?, ?, 'vault', ?, ?, '100', ?, ?, ?, ?, ?)`,
+      [
+        id,
+        TEST_ORG.id,
+        PROJECT,
+        positionId,
+        CREATED_AT,
+        CREATED_AT,
+        tokenAmountSettled,
+        CUSTODY_WALLET,
+        `signature-${id}`,
+        `transaction-${id}`,
+        `request-${id}`,
+        `fingerprint-${id}`,
+        TEST_USER.id,
+        CREATED_AT,
+        CREATED_AT,
+      ]
+    );
+    return getDb(env).queryOne<{ amount: string | null; token: string | null; kind: string }>(
+      `SELECT amount, token, kind FROM unified_transactions
+       WHERE organization_id = ? AND project_id = ? AND module = 'earn' AND id = ?`,
+      [TEST_ORG.id, PROJECT, id]
+    );
+  }
+
+  it("reports a finalized vault withdrawal as its observed deposit-token payout", async () => {
+    // Recorded in shares (4 of share-mint); the customer received 4.1 token-mint.
+    await expect(seedVaultWithdrawal("earn_withdrawal_valued", "4.1")).resolves.toEqual({
+      kind: "withdraw",
+      amount: "4.1",
+      token: "token-mint",
+    });
+  });
+
+  it("keeps the share quantity and share mint while a withdrawal's payout is unvalued", async () => {
+    await expect(seedVaultWithdrawal("earn_withdrawal_unvalued", null)).resolves.toEqual({
+      kind: "withdraw",
+      amount: "4",
+      token: "share-mint",
+    });
+  });
+
   it("keeps persisted status vocabularies equal to the contracts", async () => {
     const constrained = [
       ["payments", "payment_transfers_status_check"],

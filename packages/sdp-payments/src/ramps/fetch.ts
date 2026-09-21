@@ -6,6 +6,7 @@ export interface ProviderRequestInit<TBody> {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   headers?: HeadersInit;
   body?: TBody;
+  signal?: AbortSignal;
 }
 
 export interface ProviderResponse {
@@ -54,6 +55,19 @@ export function extractProviderErrorMessage(payload: unknown, fallback: string):
   return typeof message === "string" && message.trim() ? scrubTelemetryString(message) : fallback;
 }
 
+/**
+ * Performs a provider HTTP request and returns the raw response plus its
+ * parsed JSON body. The optional `signal` is forwarded to the underlying
+ * fetch call; the fetch covers the request and, for the undici/Node runtime,
+ * the response body read (a supplied signal is the only fence a hung body
+ * read needs). A non-JSON body yields `parsed: undefined` rather than a parse
+ * failure.
+ *
+ * @param provider - Ramp provider id, used in errors and telemetry.
+ * @param url - Request URL.
+ * @param init - Method, headers, body, and optional abort signal.
+ * @returns The response, its raw text, and its parsed JSON body.
+ */
 export async function providerFetch<TBody = never>(
   provider: RampProviderId,
   url: string,
@@ -65,6 +79,7 @@ export async function providerFetch<TBody = never>(
       method: init.method,
       headers: { "Content-Type": "application/json", Accept: "application/json", ...init.headers },
       body: serializeProviderBody(init.body),
+      signal: init.signal,
     });
   } catch {
     throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", `Failed to reach the ${provider} API`, {
@@ -72,7 +87,17 @@ export async function providerFetch<TBody = never>(
     });
   }
 
-  const raw = await response.text();
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch {
+    throw new SdpPaymentsError(
+      "PROVIDER_UNAVAILABLE",
+      `Failed to read the ${provider} API response`,
+      { provider }
+    );
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);

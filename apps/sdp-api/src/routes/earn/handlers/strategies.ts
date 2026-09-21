@@ -4,7 +4,7 @@ import {
   type EarnProviderId,
   type EarnStrategy,
   type EarnStrategyResponse,
-  earnDepositSlippageFloor,
+  earnDepositSlippagePolicy,
   earnWithdrawSlippageFloor,
   isEarnProviderSurfaced,
   type ListEarnStrategiesResponse,
@@ -16,7 +16,12 @@ import { notFound } from "@/lib/errors";
 import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
 import type { Env } from "@/types/env";
-import { type AppContext, getEarnRepository, resolveKeylessEarnEnvironment } from "../context";
+import {
+  type AppContext,
+  getEarnRepository,
+  requireEarnStrategyForCaller,
+  resolveEarnCatalogueEnvironment,
+} from "../context";
 import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "../schemas";
 import { CURATED_VAULTS, HIDDEN_STRATEGY_TERMS, HIDDEN_VAULTS } from "./curation";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
@@ -67,13 +72,18 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
  * gate: the flag plus the cluster allowlist `resolveVaultSponsorship` reads at
  * execution, answered for the row's own cluster. A row that is not fundable is
  * never sponsored (there is no movement to sponsor), so the two agree.
+ *
+ * `depositSlippage` is derived per request too: every production deposit
+ * carries a share floor, so the field answers for the caller's environment
+ * exactly as the deposit routes gate (`earnDepositSlippagePolicy`). A row that
+ * reads null never meets a build that demands `minSharesOut`.
  */
 export function mapToEarnStrategy(
   row: EarnStrategyRow,
   environment: SdpEnvironment,
   env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED">
 ): EarnStrategy {
-  const depositSlippage = earnDepositSlippageFloor(row.provider);
+  const depositSlippage = earnDepositSlippagePolicy(row.provider, environment);
   const withdrawalSlippage = earnWithdrawSlippageFloor(row.provider);
   const fundable = isClusterFundableInEnvironment(row.host_cluster, environment);
   return {
@@ -107,32 +117,27 @@ export function mapToEarnStrategy(
 
 /**
  * Loads a strategy and applies the same environment and visibility policy as
- * the list route. The catalogue is platform-global, so environment scoping
- * happens here rather than via project scoping.
+ * the list route. The catalogue is platform-global: a tenant caller sees its
+ * project's environment, an anonymous caller sees the shelf the id names.
  */
 export async function requireEarnStrategy(
   c: AppContext,
   strategyId: string
-): Promise<EarnStrategyRow> {
-  const repo = getEarnRepository(c);
-  const strategy = await repo.getStrategyById(strategyId);
-
-  if (
-    !strategy ||
-    strategy.environment !== resolveKeylessEarnEnvironment(c) ||
-    isHiddenStrategy(strategy)
-  ) {
+): Promise<{ strategy: EarnStrategyRow; environment: SdpEnvironment }> {
+  const resolved = await requireEarnStrategyForCaller(c, strategyId);
+  if (isHiddenStrategy(resolved.strategy)) {
     throw notFound("Earn strategy");
   }
-
-  return strategy;
+  return resolved;
 }
 
 export const listEarnStrategies = async (c: AppContext) => {
   const query = parseQuery(c, listEarnStrategiesQuerySchema);
 
   const repo = getEarnRepository(c);
-  const environment = resolveKeylessEarnEnvironment(c);
+  // A tenant reads its project's shelf; an anonymous caller picks one with
+  // `?environment=` (production when omitted). See resolveEarnCatalogueEnvironment.
+  const environment = resolveEarnCatalogueEnvironment(c, query.environment);
   // The shelf a caller can act on is the default; `?cluster=` is the explicit
   // opt-in that browses another cluster's sub-shelf — in practice a sandbox
   // reader reviewing the mirrored mainnet catalogue (PRO-1742). Opting in
@@ -166,10 +171,10 @@ export const listEarnStrategies = async (c: AppContext) => {
 export const getEarnStrategy = async (c: AppContext) => {
   const { strategyId } = parseParams(c, earnStrategyIdParamsSchema);
 
-  const strategy = await requireEarnStrategy(c, strategyId);
+  const { strategy, environment } = await requireEarnStrategy(c, strategyId);
 
   const response: EarnStrategyResponse = {
-    strategy: mapToEarnStrategy(strategy, resolveKeylessEarnEnvironment(c), c.env),
+    strategy: mapToEarnStrategy(strategy, environment, c.env),
   };
   return success(c, response);
 };

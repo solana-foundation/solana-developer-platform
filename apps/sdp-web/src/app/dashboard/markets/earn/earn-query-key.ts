@@ -1,7 +1,5 @@
 export const earnQueryKeys = {
   programs: () => "dashboard-earn-programs",
-  programDeposits: ({ programId }: { programId: string }) =>
-    ["dashboard-earn-program-deposits", programId] as const,
   strategies: ({ cluster }: { cluster: string }) => ["dashboard-earn-strategies", cluster] as const,
   vaultPositions: () => "dashboard-earn-vault-positions",
   vaultDepositsInFlight: () => "dashboard-earn-vault-deposits-in-flight",
@@ -10,6 +8,9 @@ export const earnQueryKeys = {
   vaultWithdrawalsInFlight: () => "dashboard-earn-vault-withdrawals-in-flight",
   vaultWithdrawal: ({ movementId }: { movementId: string }) =>
     ["dashboard-earn-vault-withdrawal", movementId] as const,
+  vaultWithdrawalRequestsOpen: () => "dashboard-earn-vault-withdrawal-requests-open",
+  vaultWithdrawalRequest: ({ withdrawalRequestId }: { withdrawalRequestId: string }) =>
+    ["dashboard-earn-vault-withdrawal-request", withdrawalRequestId] as const,
   programWithdrawals: ({ programId }: { programId: string }) =>
     ["dashboard-earn-program-withdrawals", programId] as const,
   withdrawal: ({ programId, withdrawalRef }: { programId: string; withdrawalRef: string }) =>

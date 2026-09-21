@@ -275,15 +275,18 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return row ? mapCounterpartyRow(row) : null;
     },
 
-    async findActiveCounterpartyById(counterpartyId: string) {
+    async findActiveCounterpartyById(params) {
       const row = await db
         .prepare(
-          `SELECT * FROM counterparties
-            WHERE id = ?
-              AND status = 'active'
+          `SELECT c.*
+             FROM counterparties c
+             JOIN projects prj ON prj.id = c.project_id
+            WHERE c.id = ?
+              AND c.status = 'active'
+              AND prj.environment = ?
             LIMIT 1`
         )
-        .bind(counterpartyId)
+        .bind(params.counterpartyId, params.environment)
         .first<Record<string, unknown>>();
       return row ? mapCounterpartyRow(row) : null;
     },
@@ -297,15 +300,17 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                ON cpa.counterparty_id = c.id
               AND cpa.organization_id = c.organization_id
               AND cpa.project_id = c.project_id
+             JOIN projects prj ON prj.id = c.project_id
             WHERE c.status = 'active'
               AND cpa.provider = ?
               AND cpa.provider_customer_reference = ?
               AND cpa.kind = 'customer_link'
               AND cpa.status = 'active'
+              AND prj.environment = ?
             ORDER BY c.id
             LIMIT 2`
         )
-        .bind(params.provider, params.providerCustomerReference)
+        .bind(params.provider, params.providerCustomerReference, params.environment)
         .all<Record<string, unknown>>();
       if (rows.results.length !== 1) {
         return null;
@@ -341,22 +346,12 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
     },
 
     async upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput) {
-      const providerCustomerReference = params.customer.customerReference;
-      if (providerCustomerReference === undefined) {
-        throw internalError("BVNK customer reference is missing from provider-account state.");
-      }
       const metadata: BvnkCustomerProviderAccountMetadata = {};
-      if (params.customer.status !== undefined) {
-        metadata.status = params.customer.status;
-      }
-      if (params.customer.verificationStatus !== undefined) {
-        metadata.verificationStatus = params.customer.verificationStatus;
-      }
       if (params.customer.residenceCountryCode !== undefined) {
         metadata.residenceCountryCode = params.customer.residenceCountryCode;
       }
-      if (params.customer.agreements !== undefined) {
-        metadata.agreements = params.customer.agreements;
+      if (params.customer.session !== undefined) {
+        metadata.session = params.customer.session;
       }
       const parsedMetadata = bvnkCustomerProviderAccountMetadataSchema.parse(metadata);
       await createPostgresCounterpartyProviderAccountsRepository(db).upsertProviderAccount({
@@ -364,7 +359,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
         projectId: params.projectId,
         counterpartyId: params.counterpartyId,
         provider: "bvnk",
-        providerCustomerReference,
+        providerCustomerReference: params.customer.customerReference,
         metadata: parsedMetadata,
       });
     },

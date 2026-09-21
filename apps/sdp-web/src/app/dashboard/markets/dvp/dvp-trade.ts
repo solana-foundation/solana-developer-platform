@@ -7,15 +7,17 @@
  */
 
 import {
+  DVP_LEG_TRANSFER_KINDS,
   DVP_TRADE_SIDES,
   type DvpLegOutcome,
+  type DvpLegTransferKind,
   type DvpSettlementAvailability,
   type DvpTradeSide,
   type DvpTradeStatus,
 } from "@sdp/types";
 import { z } from "zod";
 
-export { DVP_TRADE_SIDES, type DvpSettlementAvailability, type DvpTradeSide, type DvpTradeStatus };
+export type { DvpLegTransferKind, DvpSettlementAvailability, DvpTradeStatus };
 
 /**
  * The caller's standing on a trade, derived per caller by the API.
@@ -43,6 +45,18 @@ export const dvpActionWalletSchema = z.object({
 
 export type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
 
+/**
+ * A DvP endpoint's refusal envelope. Only the message — and, when the refusal
+ * is a structured one, its reason code — is ever read by the dashboard;
+ * everything else the API attached is stripped.
+ */
+export const dvpErrorEnvelopeSchema = z.object({
+  error: z.object({
+    message: z.string(),
+    details: z.object({ reason: z.string() }).partial().optional(),
+  }),
+});
+
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
   address: string;
@@ -59,6 +73,25 @@ export interface DvpPartyRef {
   /** Present on action-bearing reads; null means no readable funding target. */
   actionWallet?: DvpActionWallet | null;
 }
+
+/**
+ * One token movement in or out of a leg's escrow, read off the chain. Parsed at
+ * the card rather than trusted: the dashboard and the API deploy separately.
+ */
+const dvpLegTransferSchema = z.object({
+  signature: z.string().min(1),
+  direction: z.enum(["in", "out"]),
+  /** What the movement was, named by the API from the trade's close. */
+  kind: z.enum(DVP_LEG_TRANSFER_KINDS),
+  /** Base units moved, always positive. */
+  amount: z.string().regex(/^[1-9]\d*$/),
+  slot: z.string(),
+  /** When the block was produced, or null when the cluster recorded no time. */
+  blockTime: z.string().nullable(),
+  feePayer: z.string(),
+});
+
+export type DvpLegTransfer = z.infer<typeof dvpLegTransferSchema>;
 
 export interface DvpTradeLeg {
   /** The mint's decimals, or null when unknown. Never guessed. */
@@ -82,6 +115,17 @@ export interface DvpTradeLeg {
    */
   fundingSignature: string | null;
   outcome: DvpLegOutcome;
+  /** Every recorded movement in and out of the escrow, oldest first. Unvalidated wire data. */
+  transfers: unknown;
+}
+
+/**
+ * A leg's transfers, or null when the answer cannot be read. Null is not "no
+ * transfers": the card shows none rather than claiming nothing moved.
+ */
+export function legTransfers(leg: DvpTradeLeg): DvpLegTransfer[] | null {
+  const parsed = z.array(dvpLegTransferSchema).safeParse(leg.transfers);
+  return parsed.success ? parsed.data : null;
 }
 
 export interface DvpTrade {
@@ -169,7 +213,12 @@ const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
   "expired",
 ]);
 
-export function isDvpTradeOpen(trade: DvpTrade): boolean {
+/**
+ * Whether a trade can still move: the statuses a settle or cancel is reachable
+ * from, and the ones a leg's funding or reclaim actions answer to. The detail
+ * page's per-leg gates read this rather than re-spelling the set.
+ */
+export function isDvpTradeOpen(trade: { status: DvpTradeStatus }): boolean {
   return OPEN.has(trade.status);
 }
 
@@ -232,6 +281,15 @@ export function formatLegAmount(baseUnits: string, decimals: number | null): str
   const fraction = decimals === 0 ? "" : digits.slice(digits.length - decimals).replace(/0+$/, "");
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
+}
+
+/**
+ * A u64-seconds wire timestamp as an ISO instant, for `formatTimestamp`.
+ * One expression, three surfaces: the conversion spelled inline is how an
+ * expiry once rendered in microseconds.
+ */
+export function dvpTimestampToIso(seconds: string): string {
+  return new Date(Number(seconds) * 1000).toISOString();
 }
 
 /**

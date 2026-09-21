@@ -38,13 +38,9 @@ function useWizardSteps() {
  */
 /** Whether each stage has been answered, in stage order. */
 function stageAnswered(form: DvpCreateForm): boolean[] {
-  const legsResolved =
-    !form.asset.pendingLookup &&
-    !form.cash.pendingLookup &&
-    Boolean(form.asset.mint && form.cash.mint) &&
-    Boolean(form.asset.baseUnits && form.cash.baseUnits);
-
-  return [form.partiesReady && legsResolved && !form.destinations.anyLooksWrong, form.ready];
+  // The parties stage answers everything `ready` asks except the expiry,
+  // which belongs to the review step whose picker can clear it.
+  return [form.readyIgnoringExpiry, form.ready];
 }
 
 /** Back, plus either Continue or the one irreversible button. */

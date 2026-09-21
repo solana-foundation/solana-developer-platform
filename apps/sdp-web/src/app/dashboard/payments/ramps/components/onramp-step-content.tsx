@@ -48,6 +48,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     isAdvancing,
     retryOnboarding,
     pendingAgreements,
+    acceptedAgreements,
+    toggleAgreement,
     quote,
     transferStatus,
     quoteSimulationLoading,
@@ -113,7 +115,12 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     // while the advance POST is in flight, so mid-flight edits can't desync the
     // form from what the provider was sent.
     return pendingAgreements !== null ? (
-      <BvnkAgreementConsent agreements={pendingAgreements} />
+      <BvnkAgreementConsent
+        agreements={pendingAgreements}
+        acceptedAgreements={acceptedAgreements}
+        onToggle={toggleAgreement}
+        disabled={isAdvancing}
+      />
     ) : onboarding !== null &&
       hasOnboardingLifecycle(onboarding.provider) &&
       isOnboardingPanelStatus(onboarding) ? (
@@ -152,7 +159,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  if (currentStepId === "PROVIDER" && quote && transferStatus?.status === "completed") {
+  if (currentStepId === "PROVIDER" && quote && wizard.showCompleteScreen) {
+    if (transferStatus === undefined) {
+      return <RampQuoteSkeleton />;
+    }
     return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
   }
 

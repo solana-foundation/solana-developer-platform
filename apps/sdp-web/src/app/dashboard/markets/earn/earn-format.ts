@@ -6,6 +6,7 @@ import {
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { truncateMiddle } from "../truncate-middle";
 import {
   type EarnVaultDepositAvailability,
   earnVaultDepositOnlyEnvironment,
@@ -75,7 +76,23 @@ export function formatUsd(
 }
 
 export function tokenSymbol(mint: string): string {
-  return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+  return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? truncateMiddle(mint, 4, 4);
+}
+
+export function shortenMarketAddress(value: string): string {
+  return value.length <= 16 ? value : truncateMiddle(value, 6, 6);
+}
+
+/**
+ * A vault position's display name: the label the provider gave it, or the
+ * shortened provider reference when it arrives unnamed. One rule for every
+ * surface that names a position.
+ */
+export function positionDisplayName(position: {
+  label: string;
+  providerReference: string;
+}): string {
+  return position.label || shortenMarketAddress(position.providerReference);
 }
 
 export function formatTokenQuantity(
@@ -84,6 +101,22 @@ export function formatTokenQuantity(
   symbol: string
 ): string {
   return formatProviderAmount(value, locale, symbol, 6);
+}
+
+/** Format Unix epoch seconds only when JavaScript can represent the resulting date. */
+export function formatEpochSeconds(
+  value: string | null | undefined,
+  locale: string
+): string | undefined {
+  if (value === undefined || value === null || !/^\d+$/.test(value)) return undefined;
+  const seconds = Number(value);
+  if (!Number.isSafeInteger(seconds)) return undefined;
+  const date = new Date(seconds * 1_000);
+  if (!Number.isFinite(date.getTime())) return undefined;
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 /**

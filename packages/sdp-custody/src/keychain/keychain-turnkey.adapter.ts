@@ -5,7 +5,6 @@
  * Turnkey provides hosted wallet custody via the Turnkey API.
  */
 
-import type { SolanaSigner } from "@solana/keychain-core";
 import { TurnkeySigner } from "@solana/keychain-turnkey";
 import type {
   Address,
@@ -14,7 +13,6 @@ import type {
   TransactionWithLifetime,
 } from "@solana/kit";
 import { createSignableMessage, type SignatureDictionary } from "@solana/signers";
-import type { SignRequest, SignResult } from "../signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainTurnkeyConfig } from "./types";
 
@@ -44,8 +42,6 @@ class SdpTurnkeySigner<TAddress extends string = string> extends TurnkeySigner<T
 export class KeychainTurnkeyAdapter extends BaseKeychainAdapter {
   readonly providerId = "turnkey";
 
-  protected signer!: SolanaSigner;
-
   private readonly config: KeychainTurnkeyConfig;
   private readonly signerByWalletId = new Map<string, Promise<SdpTurnkeySigner>>();
 
@@ -59,31 +55,6 @@ export class KeychainTurnkeyAdapter extends BaseKeychainAdapter {
    */
   async getTransactionSigner(walletId?: string, walletPublicKey?: Address): Promise<TurnkeySigner> {
     return this.getTurnkeySigner(walletId, walletPublicKey);
-  }
-
-  /**
-   * Turnkey signing is synchronous from the API perspective.
-   */
-  requiresApproval(): boolean {
-    return false;
-  }
-
-  /**
-   * Get the public key, ensuring initialization first.
-   */
-  async getPublicKey(walletId?: string, walletPublicKey?: Address): Promise<Address> {
-    const signer = await this.getTurnkeySigner(walletId, walletPublicKey);
-    return signer.address as Address;
-  }
-
-  /**
-   * SigningPort does not specify a wallet ID; for Turnkey, we sign with the
-   * configured default wallet.
-   */
-  async sign(request: SignRequest): Promise<SignResult> {
-    const signer = await this.getTurnkeySigner();
-    this.signer = signer as unknown as SolanaSigner;
-    return super.sign(request);
   }
 
   private async getTurnkeySigner(

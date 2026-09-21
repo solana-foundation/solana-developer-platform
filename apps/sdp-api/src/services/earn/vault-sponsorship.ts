@@ -69,12 +69,13 @@ export interface ResolveVaultSponsorshipInput {
  * outage; resolving sponsorship first would make a already-signed movement
  * un-returnable exactly when a caller is retrying.
  *
- * Fail-closed by construction: an unset flag or an unlisted cluster answers
- * `wallet-pays`, so turning sponsorship off is a configuration change and never
- * a code change. Provider construction goes through the shared sponsorship
- * boundary rather than a raw adapter, so managed deployments keep the budget
- * reservation and the Kora usage identity that boundary owns; bypassing it would
- * spend the fee payer's lamports without any budget seeing it.
+ * Fail-closed by construction: an unset flag, or a cluster with no paymaster
+ * configured, answers `wallet-pays`, so turning sponsorship off (or on, per
+ * cluster) is a configuration change and never a code change. Provider
+ * construction goes through the shared sponsorship boundary rather than a raw
+ * adapter, so managed deployments keep the budget reservation and the Kora
+ * usage identity that boundary owns; bypassing it would spend the fee payer's
+ * lamports without any budget seeing it.
  */
 export async function resolveVaultSponsorship(
   env: Env,
@@ -88,6 +89,7 @@ export async function resolveVaultSponsorship(
     organizationId: input.organizationId,
     projectId: input.projectId,
     actor: { type: "wallet", id: input.walletId },
+    cluster: input.cluster,
   });
   const sponsor = await input.deadline.run("Resolving the sponsored fee payer", () =>
     feePayment.getFeePayer()

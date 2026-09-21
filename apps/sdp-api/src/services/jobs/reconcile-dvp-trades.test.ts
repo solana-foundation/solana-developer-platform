@@ -1,7 +1,8 @@
-import { getBase58Decoder } from "@solana/kit";
+import { getBase58Decoder, signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import { createPostgresDvpLegTransferRepository } from "@/db/repositories/dvp-leg-transfer.repository";
 import { createPostgresDvpTradeRepository } from "@/db/repositories/dvp-trade.repository.postgres";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -19,6 +20,11 @@ vi.mock("@sdp/rpc/solana", () => ({
 }));
 vi.mock("@/services/dvp/read-chain", () => ({ readDvpTradeObservation }));
 vi.mock("@/services/dvp/closing-transaction", () => ({ resolveDvpClose }));
+const syncDvpLegTransfers = vi.hoisted(() => vi.fn());
+vi.mock("@/services/dvp/leg-transfers", () => ({
+  syncDvpLegTransfers,
+  createDvpEscrowHistoryReader: () => ({}),
+}));
 
 const { reconcileDvpTrades } = await import("./reconcile-dvp-trades");
 
@@ -155,6 +161,7 @@ describe("reconcileDvpTrades", () => {
     // receipt rows survive. Tests that exercise a dead broadcast override.
     getSignatureStatusesMock.mockResolvedValue(LANDED_STATUS);
     resolveDvpClose.mockResolvedValue({ kind: "absent" });
+    syncDvpLegTransfers.mockResolvedValue(0);
     readDvpTradeObservation.mockResolvedValue(observation());
 
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -209,7 +216,11 @@ describe("reconcileDvpTrades", () => {
 
   it("records the observed balances and advances the status", async () => {
     await seedTrade("dvp_funding", "created");
-    readDvpTradeObservation.mockResolvedValue(observation({ legA: leg(1000n), legB: leg(2000n) }));
+    // Pinned, not read from the wall clock again after the sweep: a second can tick between the two.
+    const clusterUnixTimestamp = BigInt(Math.floor(Date.now() / 1000));
+    readDvpTradeObservation.mockResolvedValue(
+      observation({ legA: leg(1000n), legB: leg(2000n), clusterUnixTimestamp })
+    );
 
     await reconcileDvpTrades(env);
 
@@ -222,7 +233,93 @@ describe("reconcileDvpTrades", () => {
     // The observation timestamp is part of the answer: a status with no
     // recorded reading time is a claim with no provenance.
     expect(row?.observed_at).toBeTruthy();
-    expect(row?.observed_cluster_timestamp).toBe(String(Math.floor(Date.now() / 1000)));
+    expect(row?.observed_cluster_timestamp).toBe(clusterUnixTimestamp.toString());
+  });
+
+  /**
+   * PRO-1941. Each leg's escrow history is read into the transfer ledger when
+   * the leg may have moved: never read, the trade changed, or its last complete
+   * read is five minutes old. The read itself is `syncDvpLegTransfers`.
+   */
+  describe("escrow transfer ledger", () => {
+    async function scanned(tradeId: string, scannedAt: string | null) {
+      const transfers = createPostgresDvpLegTransferRepository(getDb(env));
+      for (const side of ["a", "b"] as const) {
+        await transfers.saveScan(tradeId, { side, cursor: null, scannedAt });
+      }
+    }
+
+    async function quiet(tradeId: string) {
+      await seedTrade(tradeId, "created");
+      await getDb(env)
+        .prepare("UPDATE dvp_trades SET escrow_a_amount = '0', escrow_b_amount = '0' WHERE id = ?")
+        .bind(tradeId)
+        .run();
+    }
+
+    it("reads both legs of a trade whose history was never read", async () => {
+      await seedTrade("dvp_ledger_new", "created");
+
+      await reconcileDvpTrades(env);
+
+      expect(
+        syncDvpLegTransfers.mock.calls.map(([, , leg, scan]) => [leg.tradeId, leg.side, scan])
+      ).toEqual([
+        ["dvp_ledger_new", "a", null],
+        ["dvp_ledger_new", "b", null],
+      ]);
+      // History is read back no further than the trade's own creation.
+      const row = await getDb(env)
+        .prepare("SELECT created_at FROM dvp_trades WHERE id = ?")
+        .bind("dvp_ledger_new")
+        .first<{ created_at: string }>();
+      expect(syncDvpLegTransfers.mock.calls[0]?.[2]).toMatchObject({
+        createdAt: row?.created_at,
+      });
+    });
+
+    it("leaves legs read a moment ago alone while nothing about the trade changed", async () => {
+      await quiet("dvp_ledger_quiet");
+      await scanned("dvp_ledger_quiet", new Date().toISOString());
+
+      await reconcileDvpTrades(env);
+
+      expect(syncDvpLegTransfers).not.toHaveBeenCalled();
+    });
+
+    it("reads again once the escrow balance moved, however recent the last read", async () => {
+      await quiet("dvp_ledger_moved");
+      await scanned("dvp_ledger_moved", new Date().toISOString());
+      readDvpTradeObservation.mockResolvedValue(observation({ legA: leg(500n) }));
+
+      await reconcileDvpTrades(env);
+
+      expect(syncDvpLegTransfers).toHaveBeenCalledTimes(2);
+    });
+
+    // A deposit and a reclaim between two sweeps leave the balance unchanged.
+    it("reads again when the last complete read is stale or never finished", async () => {
+      await quiet("dvp_ledger_stale");
+      await scanned("dvp_ledger_stale", new Date(Date.now() - 6 * 60_000).toISOString());
+      await quiet("dvp_ledger_unfinished");
+      await scanned("dvp_ledger_unfinished", null);
+
+      await reconcileDvpTrades(env);
+
+      expect(syncDvpLegTransfers).toHaveBeenCalledTimes(4);
+    });
+
+    it("still records the observation when the transfer read fails", async () => {
+      await seedTrade("dvp_ledger_down", "created");
+      syncDvpLegTransfers.mockRejectedValue(new Error("429 Too Many Requests"));
+      readDvpTradeObservation.mockResolvedValue(
+        observation({ legA: leg(1000n), legB: leg(2000n) })
+      );
+
+      await reconcileDvpTrades(env);
+
+      await expect(statusOf("dvp_ledger_down")).resolves.toMatchObject({ status: "funded" });
+    });
   });
 
   // The program judges expiry by its own Clock. A cluster clock already past
@@ -354,6 +451,27 @@ describe("reconcileDvpTrades", () => {
     expect(Date.parse(String(row?.close_resolution_after))).toBeGreaterThanOrEqual(
       before + 4 * 60_000
     );
+  });
+
+  // PRO-1974. A trade whose account is gone and whose close is not in the
+  // history the RPC returns yet used to rescan that history on every tick.
+  it("backs off a close lookup that found nothing, as it does a capped one", async () => {
+    await seedTrade("dvp_absent", "closed_unknown", { closeResolutionAttempts: 0 });
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET closed_at = sdp_iso_now() WHERE id = ?")
+      .bind("dvp_absent")
+      .run();
+    readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
+    resolveDvpClose.mockResolvedValue({ kind: "absent" });
+    const before = Date.now();
+
+    await reconcileDvpTrades(env);
+    await reconcileDvpTrades(env);
+
+    const row = await statusOf("dvp_absent");
+    expect(row?.close_resolution_attempts).toBe(1);
+    expect(Date.parse(String(row?.close_resolution_after))).toBeGreaterThanOrEqual(before + 60_000);
+    expect(resolveDvpClose).toHaveBeenCalledTimes(1);
   });
 
   it("does not resolve a close before its deferred instant", async () => {
@@ -510,6 +628,86 @@ describe("reconcileDvpTrades", () => {
   // `claim()`'s ON CONFLICT refuses every retry, so the leg 409s forever.
   // Past last-valid height the chain's answer is final: no status found means
   // it can never land, and the row must go.
+  // PRO-1973. A settle or cancel that died holding its lock, or whose send was
+  // ambiguous and never landed, must not keep the trade from closing or its
+  // legs from moving. One that can still land keeps its lock.
+  it("releases close locks past their last valid height and keeps live ones", async () => {
+    await seedTrade("dvp_close_dead", "funded");
+    await seedTrade("dvp_close_live", "funded");
+    const trades = createPostgresDvpTradeRepository(getDb(env));
+    const signatureOf = (byte: number) =>
+      signature(getBase58Decoder().decode(new Uint8Array(64).fill(byte)));
+    await trades.claimClose("dvp_close_dead", {
+      action: "settle",
+      signature: signatureOf(7),
+      expiryHeight: "999",
+    });
+    await trades.claimClose("dvp_close_live", {
+      action: "cancel",
+      signature: signatureOf(8),
+      expiryHeight: "1000",
+    });
+
+    await reconcileDvpTrades(env);
+
+    const read = async (id: string) =>
+      (await trades.getByIdAsParty(id))?.closeClaim?.signature ?? null;
+    expect(await read("dvp_close_dead")).toBeNull();
+    expect(await read("dvp_close_live")).toBe(signatureOf(8));
+  });
+
+  // PRO-1974. Expired receipts are asked about in chunks of 256, not one call
+  // each. A chunk whose read fails deletes nothing and does not stop the next.
+  it("reads expired receipts in chunks of 256, and a failed chunk deletes nothing", async () => {
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    const receiptSignature = (index: number) => {
+      const bytes = new Uint8Array(64);
+      new DataView(bytes.buffer).setUint32(0, index + 1);
+      bytes[63] = 1;
+      return getBase58Decoder().decode(bytes);
+    };
+    const receipts = 257;
+    for (let index = 0; index < receipts; index += 2) {
+      const tradeId = `dvp_receipts_${index}`;
+      await seedTrade(tradeId, "created");
+      for (const [offset, side] of [
+        [0, "a"],
+        [1, "b"],
+      ] as const) {
+        if (index + offset >= receipts) {
+          continue;
+        }
+        const receipt = receiptSignature(index + offset);
+        await claims.claim({
+          tradeId,
+          side,
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT_ID,
+          custodyWalletId: CUSTODY_WALLET_ID,
+          signature: receipt,
+          expiryHeight: "900",
+        });
+        await claims.recordFundingTx(tradeId, side, receipt);
+      }
+    }
+    getSignatureStatusesMock
+      .mockRejectedValueOnce(new Error("429 Too Many Requests"))
+      .mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+        signatures.map(() => null)
+      );
+
+    await reconcileDvpTrades(env);
+
+    expect(getSignatureStatusesMock.mock.calls.map(([, signatures]) => signatures.length)).toEqual([
+      256, 1,
+    ]);
+    const remaining = await db
+      .prepare("SELECT COUNT(*)::int AS count FROM dvp_leg_funding_claims")
+      .first<{ count: number }>();
+    expect(remaining?.count).toBe(256);
+  });
+
   it("releases an expired broadcast claim whose transfer never landed", async () => {
     await seedTrade("dvp_dead_broadcast", "created");
     const db = getDb(env);

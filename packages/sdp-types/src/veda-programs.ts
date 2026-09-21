@@ -23,8 +23,11 @@ import { type SolanaCluster, wellKnownMint } from "./well-known-tokens";
  *   against genesis-proved endpoints: all three programs exist and are
  *   executable, the vault state is owned by the vault program, its asset
  *   config references THIS cluster's USDC (`4zMMC9srt…`, exactly the
- *   well-known devnet USDC mint) and not mainnet's, and a full signed
- *   deposit → queued-withdrawal → cancel lifecycle landed on devnet.
+ *   well-known devnet USDC mint) and not mainnet's. The audit also landed a
+ *   deposit and queued-withdrawal request on devnet. Its cancellation attempts
+ *   were all made before the request deadline and correctly failed, leaving
+ *   the shares escrowed; the committed report is not evidence that a cancel
+ *   landed. SDP's reproducible Surfpool scenario is the cancellation proof.
  *
  * That answers the three questions this file used to hold open: the program
  * addresses, the vault-state allowlist, and the docs' unusual claim that

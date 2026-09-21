@@ -67,6 +67,13 @@ function renderDetail(value: DvpTrade): string {
   );
 }
 
+/** Each transfer row's label, in page order. */
+function transferLabels(html: string): string[] {
+  return [
+    ...html.matchAll(/<li[^>]*><span[^>]*><span[^>]*><svg[^>]*>.*?<\/svg>([^<]+)<\/span>/g),
+  ].map((match) => match[1] ?? "");
+}
+
 describe("DvpTradeDetailWorkspace", () => {
   it.each(["fund", "reclaim"] as const)(
     "shows and uses the server-selected exact wallet for %s",
@@ -171,26 +178,143 @@ describe("DvpTradeDetailWorkspace", () => {
     expect(text).not.toContain(value.settlementAuthority);
   });
 
-  // The link is the transfer this organization sent, so it is labelled as that
-  // and not as the leg's funding, which anyone may have paid.
-  it("labels a funded leg's link as the transfer sent from the caller's wallet", () => {
-    const html = renderDetail(
-      trade({
-        status: "funded",
-        legs: {
-          a: testLeg({
-            party: ownParty(),
-            funding: FUNDED,
-            fundingSignature: "sig_funding_receipt",
-            outcome: "funded",
-          }),
-          b: testLeg({ funding: FUNDED, outcome: "funded" }),
-        },
-      })
-    );
+  // PRO-1941. The leg card lists what the escrow's own history shows, whoever
+  // sent it, in place of the one transfer this organization broadcast.
+  describe("escrow transfers", () => {
+    const DEPOSIT = {
+      signature: "sig_deposit",
+      direction: "in",
+      kind: "deposit",
+      amount: "1000000000",
+      slot: "420",
+      blockTime: "2026-09-10T00:26:40.000Z",
+      feePayer: OTHER_ADDRESS,
+    };
+    const DELIVERY = {
+      ...DEPOSIT,
+      signature: "sig_settle",
+      direction: "out",
+      kind: "delivery",
+      slot: "421",
+    };
+    const REFUND_IN = { ...DEPOSIT, signature: "sig_redeposit", slot: "422" };
 
-    expect(html).toContain("Sent from your wallet");
-    expect(html).toContain("tx/sig_funding_receipt?cluster=devnet");
+    it("starts with the latest five transfers and reveals earlier history in order", () => {
+      const transfers = Array.from({ length: 12 }, (_, index) => ({
+        ...DEPOSIT,
+        signature: `sig_${index}`,
+        slot: String(420 + index),
+      }));
+      const value = trade({
+        status: "settled",
+        legs: {
+          a: testLeg({ funding: FUNDED, outcome: "delivered", transfers }),
+          b: testLeg({ funding: FUNDED, outcome: "delivered" }),
+        },
+      });
+      const { container } = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+        </I18nProvider>
+      );
+      const page = within(container);
+      const links = () => page.getAllByRole("link", { name: "View transaction" });
+      expect(links()).toHaveLength(5);
+      expect(links()[0].getAttribute("href")).toContain("tx/sig_7?");
+      fireEvent.click(page.getByRole("button", { name: "Show earlier transfers (7)" }));
+      expect(links()).toHaveLength(10);
+      fireEvent.click(page.getByRole("button", { name: "Show earlier transfers (2)" }));
+      expect(links()).toHaveLength(12);
+      expect(links()[0].getAttribute("href")).toContain("tx/sig_0?");
+      expect(page.queryByRole("button", { name: /Show earlier transfers/ })).toBeNull();
+    });
+
+    // The API names each movement; the card says what it was and links it.
+    it("labels each movement by its kind, with each transaction linked", () => {
+      const html = renderDetail(
+        trade({
+          status: "settled",
+          legs: {
+            a: testLeg({
+              funding: FUNDED,
+              fundingSignature: "sig_deposit",
+              outcome: "delivered",
+              transfers: [DEPOSIT, DELIVERY],
+            }),
+            b: testLeg({ funding: FUNDED, outcome: "delivered" }),
+          },
+        })
+      );
+
+      expect(html).toContain("Transfers");
+      expect(transferLabels(html)).toEqual(["Deposit", "Delivered"]);
+      expect(html).toContain("1,000 ATD");
+      expect(html).toContain("tx/sig_deposit?cluster=devnet");
+      expect(html).toContain("tx/sig_settle?cluster=devnet");
+    });
+
+    it("lists a reclaim between two deposits in order", () => {
+      const html = renderDetail(
+        trade({
+          status: "funded",
+          legs: {
+            a: testLeg({
+              funding: FUNDED,
+              outcome: "funded",
+              transfers: [
+                DEPOSIT,
+                { ...DELIVERY, signature: "sig_reclaim", kind: "reclaim" },
+                REFUND_IN,
+              ],
+            }),
+            b: testLeg({ funding: FUNDED, outcome: "funded" }),
+          },
+        })
+      );
+
+      expect(transferLabels(html)).toEqual(["Deposit", "Reclaimed", "Deposit"]);
+    });
+
+    // A partly paid leg still shows where to pay, with what arrived beneath it.
+    it("keeps the escrow address above the deposits on a leg still receiving", () => {
+      const html = renderDetail(
+        trade({
+          status: "partially_funded",
+          legs: {
+            a: testLeg({ outcome: "partial", transfers: [DEPOSIT] }),
+            b: testLeg(),
+          },
+        })
+      );
+
+      expect(html).toContain("Funding instructions");
+      expect(html.indexOf("Funding instructions")).toBeLessThan(
+        html.indexOf("</svg>Deposit</span>")
+      );
+      expect(transferLabels(html)).toEqual(["Deposit"]);
+    });
+
+    // An answer the page cannot read is not "nothing moved": no list, and the
+    // footer says what the observation says.
+    it("shows no list, not an empty one, when the transfers cannot be read", () => {
+      const html = renderDetail(
+        trade({
+          status: "funded",
+          legs: {
+            a: testLeg({
+              funding: FUNDED,
+              outcome: "funded",
+              transfers: [{ ...DEPOSIT, amount: "-5" }],
+            }),
+            b: testLeg({ funding: FUNDED, outcome: "funded" }),
+          },
+        })
+      );
+
+      expect(html).not.toContain("Transfers");
+      expect(transferLabels(html)).toEqual([]);
+      expect(html).toContain("Sent by the counterparty");
+    });
   });
 
   // Only the leg's own party can sign a reclaim, and only a deposit can come back.

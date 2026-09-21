@@ -11,14 +11,14 @@ import {
 
 interface CounterpartyPlaygroundProps {
   apiBaseUrl?: string | null;
-  apiKeyValue: string;
+  apiKeyId: string | null;
   hasActiveApiKeys: boolean;
   counterparties: CounterpartyPlaygroundView[];
 }
 
 export function CounterpartyPlayground({
   apiBaseUrl,
-  apiKeyValue,
+  apiKeyId,
   hasActiveApiKeys,
   counterparties,
 }: CounterpartyPlaygroundProps) {
@@ -34,7 +34,7 @@ export function CounterpartyPlayground({
       endpoints={endpoints}
       defaultEndpointId="list-counterparties"
       apiBaseUrl={apiBaseUrl}
-      apiKeyValue={apiKeyValue}
+      apiKeyId={apiKeyId}
       apiKeySelector={<PlaygroundApiKeySelector />}
       requiresApiKey={!hasActiveApiKeys}
       leftMessages={[]}

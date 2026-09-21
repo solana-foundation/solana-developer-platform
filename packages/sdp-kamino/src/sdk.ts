@@ -16,6 +16,14 @@ import { invalidAmount, SdpKaminoError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { loadVaultLookupTableAddresses } from "./lookup-table";
 import { kaminoClusterConfig } from "./programs";
+import {
+  deriveKaminoDepositQuote,
+  deriveKaminoWithdrawQuote,
+  type KaminoDepositQuote,
+  type KaminoDepositQuoteInput,
+  type KaminoWithdrawQuote,
+  type KaminoWithdrawQuoteInput,
+} from "./quotes";
 import { createKaminoRpc } from "./rpc";
 import { parseShareTokenAccountBalances, sumRawTokenAccountBaseUnits } from "./share-balances";
 import type {
@@ -248,6 +256,82 @@ function asInstructions(raw: readonly Kit2[]): readonly Instruction[] {
   return (raw ?? []).filter(Boolean) as readonly Instruction[];
 }
 
+/** An unsigned integer field off SDK state (`BN`, `Decimal` or number), exactly. */
+function bigintField(label: string, value: unknown): bigint {
+  const raw = String(value ?? "").trim();
+  if (!/^\d+$/.test(raw)) {
+    throw new SdpKaminoError("VAULT_UNREADABLE", `Kamino ${label} was not an unsigned integer`);
+  }
+  return BigInt(raw);
+}
+
+/** Integer lamports the SDK reports as a `Decimal`, as exact base units. */
+function lamportsToBaseUnits(label: string, value: unknown): bigint {
+  return BigInt(requireNonNegativeFiniteDecimal(label, value).floor().toFixed(0));
+}
+
+/**
+ * Fetch the kvault global config under the RIGHT program id.
+ *
+ * The SDK's own loader repeats the constructor trap: `withdrawIxs` without
+ * explicit penalties calls `loadKVaultGlobalConfig`, which derives the config
+ * PDA with the client's program id but then fetches it with the DEFAULT
+ * (mainnet) id as the expected owner, so a devnet exit throws "belongs to
+ * wrong program" before building anything. Measured 2026-08-20 against a
+ * devnet fork; deposits never load the config, which is why only the exit
+ * path bites. Passing penalties derived from THIS config short-circuits that
+ * loader entirely.
+ */
+async function loadKvaultGlobalConfig(
+  runtime: KaminoRuntime,
+  vaultAddress: Address,
+  config: ReturnType<typeof kaminoClusterConfig>,
+  rpc: Kit2
+): Promise<Kit2> {
+  const globalConfigAddress = await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2);
+  let globalConfig: Kit2;
+  try {
+    globalConfig = await KVaultGlobalConfig.fetch(
+      rpc,
+      globalConfigAddress,
+      config.kvaultProgramId as Kit2
+    );
+  } catch (cause) {
+    throw vaultUnreadable(vaultAddress, runtime.cluster, cause);
+  }
+  if (!globalConfig) {
+    throw vaultUnreadable(vaultAddress, runtime.cluster, "kvault global config not found");
+  }
+  return globalConfig;
+}
+
+/**
+ * Effective withdrawal penalties: max(vault, global config) per field, exactly
+ * as the SDK's private `getEffectiveWithdrawalPenaltyParams` computes them.
+ * Shared by the exit builder and the exit quote so both price the same fee.
+ */
+function effectiveWithdrawalPenalties(state: Kit2, globalConfig: Kit2) {
+  return {
+    withdrawalPenaltyLamports: Decimal.max(
+      requireNonNegativeFiniteDecimal(
+        "vault withdrawal penalty lamports",
+        state.withdrawalPenaltyLamports
+      ),
+      requireNonNegativeFiniteDecimal(
+        "global withdrawal penalty lamports",
+        globalConfig.withdrawalPenaltyLamports
+      )
+    ),
+    withdrawalPenaltyBps: Decimal.max(
+      requireNonNegativeFiniteDecimal("vault withdrawal penalty bps", state.withdrawalPenaltyBps),
+      requireNonNegativeFiniteDecimal(
+        "global withdrawal penalty bps",
+        globalConfig.withdrawalPenaltyBps
+      )
+    ),
+  };
+}
+
 /**
  * Build a deposit.
  *
@@ -369,11 +453,13 @@ export async function buildKaminoDepositPlan(
  * the accepted request. This prevents the ledger from claiming a quantity that
  * differs from what the signed transaction can move.
  *
- * NOT covered, deliberately (see CLAUDE.md → known gaps): withdrawal penalties
- * are not quoted, and shares staked in a vault farm are not unstaked — the
- * deposit path never stakes (it passes no farm state), so an SDP-managed
- * position has none; externally staked shares must be unstaked outside SDP
- * before they can exit through it.
+ * Withdrawal penalties are priced by `quoteKaminoWithdraw`, not here: the
+ * kvault withdraw instruction takes only a share amount, so this builder has
+ * no floor to encode. NOT covered, deliberately (see CLAUDE.md, known gaps):
+ * shares staked in a vault farm are not unstaked. The deposit path never
+ * stakes (it passes no farm state), so an SDP-managed position has none;
+ * externally staked shares must be unstaked outside SDP before they can exit
+ * through it.
  */
 export async function buildKaminoWithdrawPlan(
   runtime: KaminoRuntime,
@@ -412,10 +498,7 @@ export async function buildKaminoWithdrawPlan(
       config.klendProgramId,
       config.slotDurationMs
     ),
-    (async () => {
-      const globalConfigAddress = await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2);
-      return KVaultGlobalConfig.fetch(rpc, globalConfigAddress, config.kvaultProgramId as Kit2);
-    })(),
+    loadKvaultGlobalConfig(runtime, input.vault, config, rpc),
     loadVaultLookupTableAddresses(
       rpc as ReturnType<typeof createKaminoRpc>,
       state.vaultLookupTable === undefined ? undefined : String(state.vaultLookupTable)
@@ -432,39 +515,10 @@ export async function buildKaminoWithdrawPlan(
     accounts: shareAccounts,
   });
 
-  // The SDK's global-config loader repeats the constructor trap.
-  // `withdrawIxs` without explicit penalties calls `loadKVaultGlobalConfig`,
-  // which derives the config PDA with the client's program id but then fetches
-  // it with the DEFAULT (mainnet) id as the expected owner — so a devnet exit
-  // throws "belongs to wrong program" before building anything. Measured
-  // 2026-08-20 against a devnet fork; deposits never load the config, which is
-  // why only the exit path bites. Passing `withdrawalPenalties` short-circuits
-  // that loader entirely; the values are computed exactly as the SDK's private
-  // `getEffectiveWithdrawalPenaltyParams` does — max(vault, global config),
-  // per field — from a config fetched with the RIGHT program id.
-  if (!globalConfig) {
-    throw vaultUnreadable(input.vault, runtime.cluster, "kvault global config not found");
-  }
+  // Passed explicitly so the SDK never runs its own (mainnet-defaulting)
+  // global-config loader; see `loadKvaultGlobalConfig`.
   assertActive();
-  const withdrawalPenalties = {
-    withdrawalPenaltyLamports: Decimal.max(
-      requireNonNegativeFiniteDecimal(
-        "vault withdrawal penalty lamports",
-        state.withdrawalPenaltyLamports
-      ),
-      requireNonNegativeFiniteDecimal(
-        "global withdrawal penalty lamports",
-        globalConfig.withdrawalPenaltyLamports
-      )
-    ),
-    withdrawalPenaltyBps: Decimal.max(
-      requireNonNegativeFiniteDecimal("vault withdrawal penalty bps", state.withdrawalPenaltyBps),
-      requireNonNegativeFiniteDecimal(
-        "global withdrawal penalty bps",
-        globalConfig.withdrawalPenaltyBps
-      )
-    ),
-  };
+  const withdrawalPenalties = effectiveWithdrawalPenalties(state, globalConfig);
 
   // THIRD-PARTY SDK PATCH: klend-sdk plans exits from the share ATA only and
   // exposes no supported shares-state parameter. SDP position reads include
@@ -801,4 +855,218 @@ export async function readKaminoPosition(
     tokenMint: assetIdentity.depositTokenMint,
     sharesMint: assetIdentity.shareMint,
   };
+}
+
+/** klend-sdk's `DEFAULT_PUBLIC_KEY`: an allocation slot with no reserve. */
+const EMPTY_ALLOCATION_RESERVE = "11111111111111111111111111111111";
+
+/**
+ * The pricing inputs `estimateSharesFromTokens` uses, replicated so the cap
+ * clamp it applies silently can be detected (`detectDepositCapClamp`). Mirrors
+ * the SDK's own arithmetic: crank funds are charged per allocation with a live
+ * reserve, positive weight and positive cap; the net AUM is the holdings less
+ * pending fees plus rewards vested up to now, rounded up to base units.
+ */
+function observeDepositPricing(
+  client: Kit2,
+  state: Kit2,
+  slot: Kit2,
+  reserves: Kit2,
+  tokenDecimals: number,
+  amountBaseUnits: bigint
+) {
+  const allocations = (state.vaultAllocationStrategy ?? []) as Kit2[];
+  const chargedReserves = allocations.filter(
+    (allocation) =>
+      String(allocation.reserve) !== EMPTY_ALLOCATION_RESERVE &&
+      bigintField("allocation weight", allocation.targetAllocationWeight) > 0n &&
+      bigintField("allocation cap", allocation.tokenAllocationCap) > 0n
+  ).length;
+  const crankFunds =
+    bigintField("crank fund fee", state.crankFundFeePerReserve) * BigInt(chargedReserves);
+  const sharesIssued = bigintField("shares issued", state.sharesIssued);
+
+  let netAum = 0n;
+  if (sharesIssued > 0n) {
+    const holdings = client.computeVaultHoldings(state, slot, reserves, slot);
+    const netAumTokens = requireNonNegativeFiniteDecimal(
+      "vault net AUM",
+      holdings.totalAUMIncludingFees.sub(holdings.pendingFees)
+    );
+    const perSecond = bigintField("reward per second", state.rewardInfo.rewardPerSecond);
+    const rewardsAvailable = bigintField("rewards available", state.rewardInfo.rewardsAvailable);
+    const issuedAt = bigintField("reward issuance timestamp", state.rewardInfo.lastIssuanceTs);
+    let vested = 0n;
+    if (perSecond > 0n && rewardsAvailable > 0n && issuedAt !== 0n) {
+      const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
+      const elapsed = nowSeconds > issuedAt ? nowSeconds - issuedAt : 0n;
+      const accrued = elapsed * perSecond;
+      vested = accrued < rewardsAvailable ? accrued : rewardsAvailable;
+    }
+    netAum =
+      BigInt(netAumTokens.mul(new Decimal(10).pow(tokenDecimals)).ceil().toFixed(0)) + vested;
+  }
+
+  return {
+    tokensForSharesBaseUnits: amountBaseUnits - crankFunds,
+    tokenDecimals,
+    crankFundsBaseUnits: crankFunds,
+    depositCapBaseUnits: bigintField("deposit cap", state.depositCap),
+    netAumBaseUnits: netAum,
+    sharesIssuedBaseUnits: sharesIssued,
+  };
+}
+
+/**
+ * Quote a deposit: the shares the vault would mint for `amount` right now.
+ *
+ * A READ. No instruction is built and nothing is signed; the estimate is a
+ * pure function of the state loaded here, and the SDK's own doc calls it an
+ * estimate (accrual between quote and execution lowers the shares out), so a
+ * floor derived from it should carry a discount. Blocking conditions come
+ * back as `issues` rather than as thrown errors.
+ */
+export async function quoteKaminoDeposit(
+  runtime: KaminoRuntime,
+  input: KaminoDepositQuoteInput,
+  assertActive: AssertActive = alwaysActive
+): Promise<KaminoDepositQuote> {
+  const { client, state, config, rpc } = await bindVault(runtime, input.vault, assertActive);
+  const tokenDecimals = mintDecimals(state.tokenMintDecimals, "tokenMintDecimals");
+  const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
+  const acceptedAmount = acceptAtMintScale("amount", input.amount, tokenDecimals);
+  if (isZeroAmount(acceptedAmount)) throw invalidAmount("amount", input.amount);
+  const amount = toDecimal(acceptedAmount, "amount");
+
+  assertActive();
+  const reserves = await loadStateOnlyReserves(
+    runtime,
+    input.vault,
+    client,
+    state,
+    rpc,
+    config.klendProgramId,
+    config.slotDurationMs
+  );
+  assertActive();
+
+  let sharesOutBaseUnits: bigint;
+  let pricing: ReturnType<typeof observeDepositPricing>;
+  try {
+    const estimate = requireNonNegativeFiniteDecimal(
+      "estimated shares",
+      client.estimateSharesFromTokens(state, amount, input.slot as Kit2, reserves)
+    );
+    // Same fixed-point round trip as the position read: what leaves this
+    // package is scaled exactly like every other amount in SDP.
+    sharesOutBaseUnits = parseDecimalAmount(
+      estimate.toFixed(shareDecimals, Decimal.ROUND_DOWN),
+      shareDecimals
+    );
+    pricing = observeDepositPricing(
+      client,
+      state,
+      input.slot as Kit2,
+      reserves,
+      tokenDecimals,
+      parseDecimalAmount(acceptedAmount, tokenDecimals)
+    );
+  } catch (cause) {
+    if (cause instanceof SdpKaminoError) throw cause;
+    throw vaultUnreadable(input.vault, runtime.cluster, cause);
+  }
+
+  return deriveKaminoDepositQuote({
+    sharesOutBaseUnits,
+    shareDecimals,
+    minimumDepositBaseUnits: bigintField("minimum deposit", state.minDepositAmount),
+    ...pricing,
+  });
+}
+
+/**
+ * Quote an exit: the tokens `shares` would return right now, net of the
+ * effective withdrawal penalties and lowered for a split exit (see
+ * `conservativeExitNetBaseUnits`). A READ, same posture as the deposit quote.
+ */
+export async function quoteKaminoWithdraw(
+  runtime: KaminoRuntime,
+  input: KaminoWithdrawQuoteInput,
+  assertActive: AssertActive = alwaysActive
+): Promise<KaminoWithdrawQuote> {
+  const { client, state, config, rpc } = await bindVault(runtime, input.vault, assertActive);
+  const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
+  const assetDecimals = mintDecimals(state.tokenMintDecimals, "tokenMintDecimals");
+  const acceptedShares = acceptAtMintScale("shares", input.shares, shareDecimals);
+  if (isZeroAmount(acceptedShares)) throw invalidAmount("shares", input.shares);
+  const shares = toDecimal(acceptedShares, "shares");
+
+  assertActive();
+  const [reserves, globalConfig] = await Promise.all([
+    loadStateOnlyReserves(
+      runtime,
+      input.vault,
+      client,
+      state,
+      rpc,
+      config.klendProgramId,
+      config.slotDurationMs
+    ),
+    loadKvaultGlobalConfig(runtime, input.vault, config, rpc),
+  ]);
+  assertActive();
+  const withdrawalPenalties = effectiveWithdrawalPenalties(state, globalConfig);
+
+  let plan: Kit2;
+  try {
+    const tokensPerShare = await client.getTokensPerShareSingleVault(
+      state,
+      input.slot as Kit2,
+      reserves,
+      input.slot as Kit2
+    );
+    // The Earn quote input names no owner, so the requested quantity is priced
+    // on its own: the SDK clamps an exit to `totalUserShareTokens`, and passing
+    // the request there plans exactly the requested shares. Whether the wallet
+    // holds them is the builder's check (`buildShareAccountConsolidation`).
+    plan = await client.getShareExitLiquidityPlan(
+      state,
+      input.slot as Kit2,
+      reserves,
+      shares,
+      shares,
+      tokensPerShare,
+      withdrawalPenalties as Kit2
+    );
+  } catch (cause) {
+    throw vaultUnreadable(input.vault, runtime.cluster, cause);
+  }
+  assertActive();
+
+  // One entry per withdraw instruction the exit will emit, in plan order: the
+  // idle-liquidity leg when the plan draws on it, then each reserve leg.
+  const availableLeg = lamportsToBaseUnits(
+    "idle-liquidity exit leg",
+    plan.availableTokenLamportsToWithdraw
+  );
+  const legNetBaseUnits = [
+    ...(availableLeg > 0n ? [availableLeg] : []),
+    ...[...(plan.reserveTokenLamportsToWithdraw as Map<unknown, Kit2>).values()].map((leg) =>
+      lamportsToBaseUnits("reserve exit leg", leg)
+    ),
+  ];
+  return deriveKaminoWithdrawQuote({
+    netBaseUnits: lamportsToBaseUnits("net exit amount", plan.netTokenLamportsToWithdraw),
+    flatPenaltyBaseUnits: lamportsToBaseUnits(
+      "flat withdrawal penalty",
+      withdrawalPenalties.withdrawalPenaltyLamports
+    ),
+    legNetBaseUnits,
+    remainingBaseUnits: lamportsToBaseUnits(
+      "unfilled exit amount",
+      plan.remainingNetTokenLamportsToWithdraw
+    ),
+    minimumWithdrawalBaseUnits: bigintField("minimum withdrawal", state.minWithdrawAmount),
+    assetDecimals,
+  });
 }

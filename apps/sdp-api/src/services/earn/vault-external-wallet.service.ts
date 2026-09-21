@@ -27,7 +27,7 @@ import {
   createPostgresEarnSplitSwapAdvisoriesRepository,
   generateEarnSplitSwapAdvisoryId,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
-import { badRequest, internalError, notFound } from "@/lib/errors";
+import { badRequest, internalError, notFound, transactionExpired } from "@/lib/errors";
 import {
   buildEarnExternalWalletDepositFingerprint,
   buildEarnExternalWalletWithdrawalFingerprint,
@@ -61,9 +61,11 @@ import {
   type UnsignedVaultTransaction,
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
+import { ledgerVaultExposureGate } from "./vault-exposure";
 import {
   broadcastRecordedVaultMovement,
   isSlippageSimulationFailure,
+  readConfirmedBlockHeight,
 } from "./vault-intent-execution.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
@@ -231,6 +233,43 @@ export type ExternalWalletDepositBuildResult =
       swapTransaction: UnsignedVaultTransaction;
     };
 
+type ExternalWalletDepositAttempt =
+  | {
+      fit: true;
+      unsigned: UnsignedVaultTransaction;
+      plan: EarnVaultTransactionPlan;
+      depositAmount: string;
+      minSharesOut: string | null;
+      swapLeg?: JupiterSwapLeg;
+    }
+  | { fit: false; swapLeg: JupiterSwapLeg };
+
+async function firstExternalWalletDepositAttempt(
+  attemptBuild: (
+    maxAccounts?: number,
+    compactMemo?: boolean
+  ) => Promise<ExternalWalletDepositAttempt>,
+  swapFunded: boolean,
+  fee: VaultFeeMode
+): Promise<ExternalWalletDepositAttempt> {
+  try {
+    return await attemptBuild();
+  } catch (error) {
+    if (swapFunded || !(error instanceof VaultTransactionTooLargeError)) throw error;
+  }
+
+  try {
+    return await attemptBuild(undefined, true);
+  } catch (error) {
+    if (!(error instanceof VaultTransactionTooLargeError)) throw error;
+    throw badRequest(
+      fee.kind === "caller-provided"
+        ? "This vault deposit cannot fit in one Solana transaction with a separate fee payer. Retry without feePayer so the owner pays the network fee."
+        : "This vault deposit cannot fit in one Solana transaction, even with a compact request binding."
+    );
+  }
+}
+
 export async function buildExternalWalletDepositTransaction(
   env: Env,
   input: ExternalWalletDepositBuildInput
@@ -275,18 +314,9 @@ export async function buildExternalWalletDepositTransaction(
    * provider plan (the guaranteed output moves with the route).
    */
   const attemptBuild = async (
-    maxAccounts?: number
-  ): Promise<
-    | {
-        fit: true;
-        unsigned: UnsignedVaultTransaction;
-        plan: EarnVaultTransactionPlan;
-        depositAmount: string;
-        minSharesOut: string | null;
-        swapLeg?: JupiterSwapLeg;
-      }
-    | { fit: false; swapLeg: JupiterSwapLeg }
-  > => {
+    maxAccounts?: number,
+    compactMemo = false
+  ): Promise<ExternalWalletDepositAttempt> => {
     let swapLeg: JupiterSwapLeg | undefined;
     let depositAmount = input.amount;
     if (input.swap) {
@@ -295,6 +325,7 @@ export async function buildExternalWalletDepositTransaction(
         outputMint: input.tokenMint,
         sourceAmount: input.amount,
         owner: input.ownerAddress,
+        ...(fee.kind === "caller-provided" ? { payer: fee.feePayer } : {}),
         slippageBps: input.swap.slippageBps,
         ...(maxAccounts === undefined ? {} : { maxAccounts }),
       });
@@ -320,7 +351,8 @@ export async function buildExternalWalletDepositTransaction(
       plan = appendVaultRequestMemo(
         swapLeg ? prependSwapLegToVaultPlan(built, swapLeg) : built,
         "external-deposit",
-        transactionId
+        transactionId,
+        { compact: compactMemo }
       );
     } catch (error) {
       rethrowProviderBuildFailure(error, "external-wallet deposit");
@@ -333,51 +365,51 @@ export async function buildExternalWalletDepositTransaction(
     }
     const accepted = requireAcceptedPlan(plan, { ...input, amount: depositAmount });
 
-    // Swap-funded plans carry a LOCALLY derived compute-unit limit (see the
-    // sizing note in jupiter-swap.service.ts): probe-simulate at the maximum,
-    // then pin the buffered, capped consumption as the plan's first
-    // instruction. Without it, a high-CU route under the 1.4M ceiling would
-    // die on Solana's per-instruction default budget despite being valid.
-    if (swapLeg) {
-      plan = await pinProbedComputeUnitLimit(env, {
+    try {
+      // Swap-funded plans carry a LOCALLY derived compute-unit limit (see the
+      // sizing note in jupiter-swap.service.ts): probe-simulate at the maximum,
+      // then pin the buffered, capped consumption as the plan's first
+      // instruction. Without it, a high-CU route under the 1.4M ceiling would
+      // die on Solana's per-instruction default budget despite being valid.
+      if (swapLeg) {
+        plan = await pinProbedComputeUnitLimit(env, {
+          cluster,
+          deadline,
+          expectedAssetIdentity,
+          plan,
+          ownerAddress: input.ownerAddress,
+          rpcUrl,
+          fee,
+          probeLabel: "external-wallet deposit: compute-unit probe simulation failed",
+          refusalNoun: "Vault deposit",
+        });
+      }
+
+      // Simulate with the resolved fee payer, using the exact shape that will be
+      // signed. This is also the funds check: it asks the FEE PAYER's lamports
+      // (the partner's wallet on a feePayer build). The zero-SOL owners this
+      // exists for must not fail here) and the owner's tokens, surfacing both as
+      // readable errors at build time, before anyone signs anything.
+      // On a swap-funded build the swap leg executes inside this simulation, so
+      // "the owner holds enough of the SOURCE token" is checked by the chain
+      // itself rather than re-derived here.
+      const simulation = await simulateVaultPlan(env, {
         cluster,
         deadline,
         expectedAssetIdentity,
         plan,
-        ownerAddress: input.ownerAddress,
+        owner: address(input.ownerAddress),
         rpcUrl,
         fee,
-        probeLabel: "external-wallet deposit: compute-unit probe simulation failed",
-        refusalNoun: "Vault deposit",
       });
-    }
+      if (!simulation.ok) {
+        getLogger().error(
+          { error: simulation.error, logs: simulation.logs.slice(-5) },
+          "external-wallet deposit: simulation failed"
+        );
+        throwSimulationRefusal("Vault deposit simulation failed", simulation);
+      }
 
-    // Simulate with the resolved fee payer — the exact shape that will be
-    // signed. This is also the funds check: it asks the FEE PAYER's lamports
-    // (the partner's wallet on a feePayer build — the zero-SOL owners this
-    // exists for must not fail here) and the owner's tokens, surfacing both as
-    // readable errors at build time, before anyone signs anything.
-    // On a swap-funded build the swap leg executes inside this simulation, so
-    // "the owner holds enough of the SOURCE token" is checked by the chain
-    // itself rather than re-derived here.
-    const simulation = await simulateVaultPlan(env, {
-      cluster,
-      deadline,
-      expectedAssetIdentity,
-      plan,
-      owner: address(input.ownerAddress),
-      rpcUrl,
-      fee,
-    });
-    if (!simulation.ok) {
-      getLogger().error(
-        { error: simulation.error, logs: simulation.logs.slice(-5) },
-        "external-wallet deposit: simulation failed"
-      );
-      throwSimulationRefusal("Vault deposit simulation failed", simulation);
-    }
-
-    try {
       const unsigned = compileUnsignedVaultTransaction({
         cluster,
         deadline,
@@ -396,9 +428,10 @@ export async function buildExternalWalletDepositTransaction(
         ...(swapLeg === undefined ? {} : { swapLeg }),
       };
     } catch (error) {
-      // Only a swap-funded plan has a legitimate next move on overflow; an
-      // unswapped provider plan that cannot fit is the provider's own defect
-      // and keeps failing loudly, exactly as before.
+      // Size is measured before every RPC simulation as well as at the final
+      // compile. Only a swap-funded plan has a legitimate next move on
+      // overflow; an unswapped provider plan that cannot fit is the provider's
+      // own defect and keeps failing loudly, exactly as before.
       if (swapLeg && error instanceof VaultTransactionTooLargeError) {
         return { fit: false, swapLeg };
       }
@@ -406,14 +439,19 @@ export async function buildExternalWalletDepositTransaction(
     }
   };
 
-  let attempt = await attemptBuild();
+  let attempt = await firstExternalWalletDepositAttempt(
+    attemptBuild,
+    input.swap !== undefined,
+    fee
+  );
   if (!attempt.fit) {
-    attempt = await attemptBuild(RETRY_SWAP_MAX_ACCOUNTS);
+    attempt = await attemptBuild(RETRY_SWAP_MAX_ACCOUNTS, true);
   }
   if (!attempt.fit) {
     // Split flow: the swap alone, compiled through the same simulate-and-size
-    // seam, for the owner to sign and broadcast itself. It carries no request
-    // memo and records NO movement: it moves the owner's own funds between the
+    // seam, for the owner and any separate fee payer to sign before the owner
+    // broadcasts it. It carries no request memo and records NO movement: it moves
+    // the owner's own funds between the
     // owner's own accounts, and the follow-up deposit build takes the ordinary
     // path. A keyed build records an ADVISORY (PRO-1864, EARN-026): the
     // standalone swap is the one transaction this flow hands out that SDP never
@@ -582,7 +620,7 @@ async function pinProbedComputeUnitLimit(
 /**
  * Compile the swap leg alone as one unsigned owner-signed transaction, for the
  * split flow. It rides the same simulate-then-compile seam as every vault
- * transaction — same owner-as-fee-payer funds check, same size assertion —
+ * transaction with the same resolved fee-payer funds check and size assertion,
  * with an asset identity that states the swap's own mints (source in, deposit
  * token out) since there is no vault leg to testify to.
  */
@@ -711,54 +749,94 @@ export async function buildExternalWalletWithdrawalTransaction(
     : { kind: "wallet-pays" };
   const rentPayer = vaultRentPayer(fee);
 
-  let plan: EarnVaultTransactionPlan;
-  try {
-    const built = await client.buildVaultWithdrawal(runtime, {
-      providerReference: input.vaultAddress,
-      owner: input.ownerAddress,
-      shares: input.shares,
-      ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
-      ...(rentPayer === undefined ? {} : { rentPayer }),
-      ...(rentRefundTo === undefined ? {} : { rentRefundTo }),
-    });
-    plan = appendVaultRequestMemo(built, "external-withdrawal", transactionId);
-  } catch (error) {
-    rethrowProviderBuildFailure(error, "external-wallet withdrawal");
-  }
+  const buildPlan = async (compactMemo = false): Promise<EarnVaultTransactionPlan> => {
+    try {
+      const built = await client.buildVaultWithdrawal(runtime, {
+        providerReference: input.vaultAddress,
+        owner: input.ownerAddress,
+        shares: input.shares,
+        ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
+        ...(rentPayer === undefined ? {} : { rentPayer }),
+        ...(rentRefundTo === undefined ? {} : { rentRefundTo }),
+      });
+      return appendVaultRequestMemo(built, "external-withdrawal", transactionId, {
+        compact: compactMemo,
+      });
+    } catch (error) {
+      rethrowProviderBuildFailure(error, "external-wallet withdrawal");
+    }
+  };
+
+  let plan = await buildPlan();
 
   if (plan.cluster !== cluster) {
     throw internalError(
       `Vault builder returned a ${plan.cluster} plan for the configured ${cluster} cluster`
     );
   }
+  // A floor the plan does not encode protects nothing on chain (Kamino's
+  // kvault withdraw takes only a share amount). The custody exit treats the
+  // same gap as an invariant breach; here the caller chose the floor, so it
+  // is the caller's 400. A floor the plan echoes differently stays the
+  // shared internal check below.
+  if (input.minAmountOut !== undefined && plan.accepted?.minAmountOut === undefined) {
+    throw badRequest(
+      `minAmountOut is not supported for ${input.provider} exits: the vault's withdraw ` +
+        "instruction takes only a share amount, so no floor can be enforced on chain. " +
+        "Omit minAmountOut; withdrawalSlippage is null for this strategy."
+    );
+  }
   requireAcceptedWithdrawalPlan(plan, input);
 
-  const simulation = await simulateVaultPlan(env, {
-    cluster,
-    deadline,
-    expectedAssetIdentity,
-    plan,
-    owner: address(input.ownerAddress),
-    rpcUrl,
-    fee,
-  });
-  if (!simulation.ok) {
-    getLogger().error(
-      { error: simulation.error, logs: simulation.logs.slice(-5) },
-      "external-wallet withdrawal: simulation failed"
-    );
-    throwSimulationRefusal("Vault withdrawal simulation failed", simulation);
-  }
+  const simulateAndCompile = async () => {
+    const simulation = await simulateVaultPlan(env, {
+      cluster,
+      deadline,
+      expectedAssetIdentity,
+      plan,
+      owner: address(input.ownerAddress),
+      rpcUrl,
+      fee,
+    });
+    if (!simulation.ok) {
+      getLogger().error(
+        { error: simulation.error, logs: simulation.logs.slice(-5) },
+        "external-wallet withdrawal: simulation failed"
+      );
+      throwSimulationRefusal("Vault withdrawal simulation failed", simulation);
+    }
 
-  const unsigned = compileUnsignedVaultTransaction({
-    cluster,
-    deadline,
-    expectedAssetIdentity,
-    plan,
-    owner: address(input.ownerAddress),
-    ...(fee.kind === "caller-provided" ? { feePayer: fee.feePayer } : {}),
-    prepared: simulation.prepared,
-  });
+    return compileUnsignedVaultTransaction({
+      cluster,
+      deadline,
+      expectedAssetIdentity,
+      plan,
+      owner: address(input.ownerAddress),
+      ...(fee.kind === "caller-provided" ? { feePayer: fee.feePayer } : {}),
+      prepared: simulation.prepared,
+    });
+  };
+
+  let unsigned: UnsignedVaultTransaction;
+  try {
+    unsigned = await simulateAndCompile();
+  } catch (error) {
+    if (!(error instanceof VaultTransactionTooLargeError)) {
+      throw error;
+    }
+    plan = await buildPlan(true);
+    requireAcceptedWithdrawalPlan(plan, input);
+    try {
+      unsigned = await simulateAndCompile();
+    } catch (compactError) {
+      if (!(compactError instanceof VaultTransactionTooLargeError)) throw compactError;
+      throw badRequest(
+        fee.kind === "caller-provided"
+          ? "This vault withdrawal cannot fit in one Solana transaction with a separate fee payer. Retry without feePayer so the owner can always exit."
+          : "This vault withdrawal cannot fit in one Solana transaction, even with a compact request binding."
+      );
+    }
+  }
 
   if (!hasExternalWalletBuildTenant(input)) {
     return {
@@ -872,6 +950,7 @@ export async function submitExternalWalletDeposit(
     return replayedSubmitResult(ledger, input, prior);
   }
 
+  await refuseExpiredBuild(env, input, built);
   const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
 
   const result = await ledger.createSignedExternalWalletDepositIntent({
@@ -886,6 +965,18 @@ export async function submitExternalWalletDeposit(
     label: built.label,
     requestedAmount: built.amount_requested,
     acceptedMinSharesOut: built.min_shares_out,
+    // ADR 0004 layer 1, the write-side half (see the custody deposit): the
+    // build's admission gate could not see a deposit admitted a moment
+    // earlier, so the cap is decided again here under a per-vault lock. The
+    // customer has signed; nothing has been sent. A refusal is the typed 409
+    // and records nothing, which is the ADR's direction over landing a
+    // deposit past the cap.
+    admit: ledgerVaultExposureGate(env, {
+      environment: input.environment,
+      provider: built.provider,
+      vaultAddress: built.vault_address,
+      amount: built.amount_requested,
+    }),
     signature: signed.signature,
     signedTransaction: signed.signedTransactionBase64,
     lastValidBlockHeight: built.last_valid_block_height,
@@ -938,6 +1029,7 @@ export async function submitExternalWalletWithdrawal(
     return replayedSubmitResult(ledger, input, prior);
   }
 
+  await refuseExpiredBuild(env, input, built);
   const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
 
   const result = await ledger.createSignedExternalWalletWithdrawalIntent({
@@ -993,6 +1085,42 @@ async function requireSubmittableBuiltTransaction(
   return built;
 }
 
+const EXPIRED_BUILD_MESSAGE =
+  "This transaction's blockhash expired before it was submitted. " +
+  "Build a new transaction and have the customer sign it again.";
+
+/**
+ * Refuse an expired build BEFORE anything is recorded. Past
+ * `last_valid_block_height` the signed bytes cannot land, so recording them
+ * would only manufacture a `failed` row for the reconciler to expire and a
+ * `requested` answer the caller has to poll to learn that. Ordered after the
+ * replay short-circuit (a replay answers from the ledger, never from a chain
+ * read) and skipped for a consumed build (its second key answers the
+ * consumption conflict, which names the movement). A failed height read
+ * does not refuse: the broadcast and the reconciler stay the safety net.
+ */
+async function refuseExpiredBuild(
+  env: Env,
+  input: ExternalWalletSubmitInput,
+  built: EarnExternalWalletTransactionRow
+): Promise<void> {
+  if (built.movement_id !== null) return;
+  let currentBlockHeight: bigint;
+  try {
+    const rpcUrl = resolveClusterRpcUrl(env, earnClusterFor(input.environment));
+    currentBlockHeight = await readConfirmedBlockHeight(env, rpcUrl);
+  } catch (error) {
+    getLogger().warn(
+      { transactionId: built.id, error },
+      "external-wallet submit: block height unreadable; expiry left to the broadcast and reconciler"
+    );
+    return;
+  }
+  if (currentBlockHeight > BigInt(built.last_valid_block_height)) {
+    throw transactionExpired(EXPIRED_BUILD_MESSAGE);
+  }
+}
+
 async function replayedSubmitResult(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   input: ExternalWalletSubmitInput,
@@ -1031,7 +1159,7 @@ async function broadcastSubmitResult(
   return { ...result, movement };
 }
 
-interface VerifiedSignedExternalWalletTransaction {
+export interface VerifiedSignedExternalWalletTransaction {
   bytes: Uint8Array;
   signature: string;
   /** Canonical re-encoding of the verified bytes, for the ledger outbox. */
@@ -1053,8 +1181,11 @@ interface VerifiedSignedExternalWalletTransaction {
  * durable movement that parks reconcilable until its blockhash expires,
  * failing a customer minutes later for something knowable now.
  */
-async function verifySignedExternalWalletTransaction(
-  built: EarnExternalWalletTransactionRow,
+export async function verifySignedExternalWalletTransaction(
+  built: Pick<
+    EarnExternalWalletTransactionRow,
+    "id" | "owner_address" | "fee_payer" | "unsigned_transaction"
+  >,
   signedTransactionBase64: string
 ): Promise<VerifiedSignedExternalWalletTransaction> {
   let signedBytes: Uint8Array;

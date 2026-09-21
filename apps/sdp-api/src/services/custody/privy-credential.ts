@@ -25,7 +25,8 @@ export async function checkPrivyCredential(
 ): Promise<PrivyCredentialCheckResult> {
   const baseUrl = (env.PRIVY_API_BASE_URL ?? "https://api.privy.io/v1").replace(/\/+$/, "");
   try {
-    const response = await fetch(`${baseUrl}/wallets?limit=1&chain_type=solana`, {
+    // Privy can return 500 for an empty app with limit=1; use its default first page.
+    const response = await fetch(`${baseUrl}/wallets`, {
       method: "GET",
       headers: {
         Authorization: `Basic ${Buffer.from(`${credential.appId}:${credential.appSecret}`).toString("base64")}`,

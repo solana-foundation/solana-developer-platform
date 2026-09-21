@@ -162,6 +162,62 @@ describe("trackPendingWithdrawals", () => {
     );
   });
 
+  it("batches submitted burns sharing a gateway into one getSignatureStatuses call", async () => {
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "submitted", signature: "burnsig1" }),
+      withdrawalRow({ id: "w2", status: "submitted", signature: "burnsig2" }),
+    ]);
+    getSignatureStatuses.mockResolvedValueOnce([
+      { confirmationStatus: "confirmed" },
+      { err: { InstructionError: [0, "Custom"] } },
+    ]);
+
+    await trackPendingWithdrawals({} as Env);
+
+    // One batched read for the whole tick, not one RPC per row; one RPC client
+    // per gateway.
+    expect(createRpc).toHaveBeenCalledTimes(1);
+    expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
+    expect(getSignatureStatuses).toHaveBeenCalledWith(expect.anything(), ["burnsig1", "burnsig2"], {
+      searchTransactionHistory: true,
+    });
+    expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "w1", status: "confirmed", expectedStatus: "submitted" })
+    );
+    expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "w2", status: "failed", expectedStatus: "submitted" })
+    );
+  });
+
+  it("uses one batched read per distinct gateway", async () => {
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "submitted", signature: "burnsig1" }),
+      withdrawalRow({
+        id: "w2",
+        instance_id: "inst-2",
+        status: "submitted",
+        signature: "burnsig2",
+      }),
+    ]);
+    instanceRepo.getById
+      .mockResolvedValueOnce(instanceRow({ gateway_url: "http://gw-a" }))
+      .mockResolvedValueOnce(instanceRow({ id: "inst-2", gateway_url: "http://gw-b" }));
+    getSignatureStatuses
+      .mockResolvedValueOnce([{ confirmationStatus: "confirmed" }])
+      .mockResolvedValueOnce([{ confirmationStatus: "confirmed" }]);
+
+    await trackPendingWithdrawals({} as Env);
+
+    expect(createRpc).toHaveBeenCalledTimes(2);
+    expect(getSignatureStatuses).toHaveBeenCalledTimes(2);
+    expect(getSignatureStatuses).toHaveBeenCalledWith(expect.anything(), ["burnsig1"], {
+      searchTransactionHistory: true,
+    });
+    expect(getSignatureStatuses).toHaveBeenCalledWith(expect.anything(), ["burnsig2"], {
+      searchTransactionHistory: true,
+    });
+  });
+
   it("fails a submitted burn that errored on-chain (pre-confirmation failure allowed)", async () => {
     withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
       withdrawalRow({ id: "w1", status: "submitted" }),

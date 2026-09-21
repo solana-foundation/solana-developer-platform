@@ -3,22 +3,28 @@ export type PolicyDefaultAction = "allow" | "deny" | "approval_required" | "revi
 export type EffectivePolicySource = "implicit_default_allow" | "customer_profile";
 
 export const WALLET_OPERATION_TYPES = [
-  // Settling a DvP trade moves BOTH legs in one transaction and closes the
-  // trade permanently; cancelling refunds both. They are the only two actions
-  // the settlement authority can take, and both are irreversible, which is
-  // exactly the shape an org should be able to require approval on.
-  "dvp_cancel",
   // Moving SDP's own leg into escrow. A spend from a custody wallet like any
   // other, and irreversible once the escrow holds it: only settle, cancel or
   // reclaim get it back.
   "dvp_fund",
+  // Settling delivers both legs in one transaction and closes the trade
+  // permanently. Cancel and reclaim, the paths that get an escrow's tokens back
+  // out, are deliberately NOT declared: gating an exit can strand a deposit, so
+  // no rule may govern them (`apps/sdp-api/src/routes/dvp/policy.ts`). An
+  // operation type with no call site is the state the audit flagged, so the two
+  // ungated actions get no type rather than one an org can write a dead rule
+  // against.
   "dvp_settle",
   "earn_program_withdrawal",
   "earn_vault_deposit",
   "earn_vault_withdrawal",
+  "issuance_allowlist_add_execute",
+  "issuance_allowlist_remove_execute",
   "issuance_burn_execute",
+  "issuance_deploy_execute",
   "issuance_force_burn_execute",
   "issuance_freeze_execute",
+  "issuance_metadata_update_execute",
   "issuance_mint_execute",
   "issuance_pause_execute",
   "issuance_seize_execute",
@@ -60,14 +66,26 @@ export const WALLET_OPERATION_FAMILIES = [
 
 export type WalletOperationFamily = (typeof WALLET_OPERATION_FAMILIES)[number];
 
-export type WalletOperationStatus =
-  | "created"
-  | "evaluated"
-  | "pending_approval"
-  | "executing"
-  | "completed"
-  | "failed"
-  | "canceled";
+export const WALLET_OPERATION_STATUSES = [
+  "created",
+  "evaluated",
+  "pending_approval",
+  "executing",
+  "completed",
+  "failed",
+  "canceled",
+] as const;
+export type WalletOperationStatus = (typeof WALLET_OPERATION_STATUSES)[number];
+
+export const TERMINAL_WALLET_OPERATION_STATUSES = [
+  "completed",
+  "failed",
+  "canceled",
+] as const satisfies readonly WalletOperationStatus[];
+
+export function isTerminalWalletOperationStatus(status: WalletOperationStatus): boolean {
+  return TERMINAL_WALLET_OPERATION_STATUSES.some((terminal) => terminal === status);
+}
 
 export type PolicyDecision =
   | "allow"
@@ -132,6 +150,29 @@ export interface AmountPolicyRule extends PolicyRuleBase {
   assets?: string[];
 }
 
+/** Whose wallet-operation history a `velocity` rule's rolling window sums. */
+export type VelocityPolicyRuleScope = "wallet" | "organization" | "api_key";
+
+/**
+ * Rolling-window volume cap. Unlike every other kind, `action` is the
+ * decision ON BREACH (default `deny`); within the limit the rule abstains.
+ * ADR 0004 layer 2 relies on that so a breached tier default yields
+ * `approval_required` rather than a refusal.
+ */
+export interface VelocityPolicyRule extends PolicyRuleBase {
+  kind: "velocity";
+  /** Whose history the window sums. Default "wallet". */
+  scope?: VelocityPolicyRuleScope;
+  /** ISO 8601 duration, e.g. "PT1H", "P1D", "P1DT12H". Required. */
+  window: string;
+  /** Decimal string in the asset's units. Required. */
+  max: string;
+  asset?: string;
+  assets?: string[];
+  /** Optional filter; absent means every operation type counts. */
+  operationTypes?: WalletOperationType[];
+}
+
 export interface ApprovalPolicyRule extends PolicyRuleBase {
   kind: "approval";
   families?: WalletOperationFamily[];
@@ -150,6 +191,7 @@ export type PolicyRule =
   | AssetPolicyRule
   | DestinationPolicyRule
   | AmountPolicyRule
+  | VelocityPolicyRule
   | ApprovalPolicyRule
   | AlwaysPolicyRule;
 
@@ -163,13 +205,34 @@ export type PolicyProviderSyncStatus =
 export type PolicyControlInventoryTarget = "wallet" | "api_key" | "all";
 export type PolicyControlInventoryStatus = "default_allow" | "draft" | "active" | "disabled";
 export type ApprovalGroupStatus = "active" | "archived";
-export type ApprovalRequestStatus =
-  | "pending"
-  | "approved"
-  | "rejected"
-  | "canceled"
-  | "expired"
-  | "failed";
+export const APPROVAL_REQUEST_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+  "canceled",
+  "expired",
+  "failed",
+] as const;
+export type ApprovalRequestStatus = (typeof APPROVAL_REQUEST_STATUSES)[number];
+
+export const UNEXECUTABLE_APPROVAL_REQUEST_STATUSES = [
+  "rejected",
+  "canceled",
+  "expired",
+  "failed",
+] as const satisfies readonly ApprovalRequestStatus[];
+
+export function canReleaseApprovalPaymentKey(
+  status: ApprovalRequestStatus,
+  operationStatus: WalletOperationStatus | undefined
+): boolean {
+  return (
+    UNEXECUTABLE_APPROVAL_REQUEST_STATUSES.some((terminal) => terminal === status) ||
+    (status === "approved" &&
+      operationStatus !== undefined &&
+      isTerminalWalletOperationStatus(operationStatus))
+  );
+}
 
 /**
  * Historical read model: rows predating a vocabulary trim keep their retired
@@ -228,6 +291,18 @@ export interface WalletApprovalRequestSummary {
   } | null;
   operation: WalletApprovalRequestOperationSummary;
   policyEvaluation: WalletApprovalRequestPolicyEvaluationSummary | null;
+  /**
+   * Whether the caller raised this request, directly or through an API key
+   * they created. Such a caller can cancel it but never approve or reject it,
+   * the same owner check the decision routes enforce.
+   */
+  viewerIsRequester: boolean;
+  /**
+   * Whether the caller may approve or reject this request: not its requester,
+   * and an active approver in its approval group, or an organization admin when
+   * it has no group. The same check the decision routes enforce.
+   */
+  viewerCanDecide: boolean;
 }
 
 export interface WalletControlProfile {

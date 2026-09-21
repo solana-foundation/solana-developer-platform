@@ -158,6 +158,17 @@ function resolveObservedTimestamp(blockTime: bigint | number | null | undefined)
   return new Date().toISOString();
 }
 
+function resolveObservedSlot(
+  freshSlot: bigint | null | undefined,
+  cachedSlot: number | null | undefined
+): number | null {
+  if (typeof freshSlot === "bigint") {
+    return Number(freshSlot);
+  }
+
+  return typeof cachedSlot === "number" && Number.isFinite(cachedSlot) ? cachedSlot : null;
+}
+
 function readInstructionInfoString(
   info: Record<string, unknown> | undefined,
   key: string
@@ -292,7 +303,81 @@ export async function resolveWalletTokenAccountAddresses(
   }
 }
 
-async function fetchParsedTransaction(
+type ParsedTransaction = NonNullable<ParsedTransactionResponse["result"]>;
+
+/**
+ * Cap on cached parsed transactions. Only finalized transaction bodies are
+ * cached — a finalized transaction's instructions, balances, and placement are
+ * immutable, so entries never need revalidation; the bound exists only to keep
+ * memory flat as signatures rotate through the FIFO. Fork-sensitive metadata
+ * (slot, blockTime) is additionally always taken from the fresh
+ * signature-history entry rather than the cached body (see
+ * buildObservedTransferRows).
+ */
+export const PARSED_TRANSACTION_CACHE_MAX_ENTRIES = 1_000;
+
+const PARSED_TRANSACTION_CACHE_TTL_MS = 60 * 60 * 1000;
+
+interface ParsedTransactionCacheEntry {
+  expiresAt: number;
+  value: ParsedTransaction;
+}
+
+const parsedTransactionCache = new Map<string, ParsedTransactionCacheEntry>();
+const inFlightParsedTransactions = new Map<string, Promise<ParsedTransactionResponse["result"]>>();
+
+/**
+ * Drops every cached parsed transaction and in-flight lookup. Cache entries
+ * are keyed by signature alone and shared across tenants (a parsed body is
+ * tenant-independent), so callers that stub the RPC must clear the cache to
+ * stay isolated.
+ */
+export function clearObservedTransferCaches() {
+  parsedTransactionCache.clear();
+  inFlightParsedTransactions.clear();
+}
+
+function readCachedParsedTransaction(signature: string): ParsedTransaction | null {
+  const entry = parsedTransactionCache.get(signature);
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.expiresAt <= Date.now()) {
+    parsedTransactionCache.delete(signature);
+    return null;
+  }
+
+  return entry.value;
+}
+
+function writeParsedTransactionCache(signature: string, parsed: ParsedTransaction): void {
+  if (!parsedTransactionCache.has(signature)) {
+    while (parsedTransactionCache.size >= PARSED_TRANSACTION_CACHE_MAX_ENTRIES) {
+      const oldest = parsedTransactionCache.keys().next();
+      if (oldest.done) {
+        break;
+      }
+      parsedTransactionCache.delete(oldest.value);
+    }
+  }
+
+  parsedTransactionCache.set(signature, {
+    value: parsed,
+    expiresAt: Date.now() + PARSED_TRANSACTION_CACHE_TTL_MS,
+  });
+}
+
+/**
+ * A body is fork-proof only once it roots into a finalized block. Finality is
+ * reported by the fresh signature-history entry (`getSignaturesForAddress`
+ * returns each signature's `confirmationStatus`), not by the transaction body:
+ * `getTransaction` responses carry no finality field at all, so the history —
+ * which this request just fetched — is the only current source. Anything short
+ * of "finalized" keeps the body uncached: a fork can still drop and re-land a
+ * merely-confirmed transaction with different metadata.
+ */
+async function fetchParsedTransactionFromRpc(
   env: Env,
   signature: string
 ): Promise<ParsedTransactionResponse["result"]> {
@@ -326,16 +411,65 @@ async function fetchParsedTransaction(
   return payload.result ?? null;
 }
 
+async function fetchParsedTransaction(
+  env: Env,
+  signature: string,
+  isFinalized: boolean
+): Promise<ParsedTransactionResponse["result"]> {
+  const cached = readCachedParsedTransaction(signature);
+  if (cached) {
+    return cached;
+  }
+
+  const inFlight = inFlightParsedTransactions.get(signature);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const pending = fetchParsedTransactionFromRpc(env, signature)
+    .then((parsedTransaction) => {
+      // Cache a body only once the fresh signature history reports the
+      // signature finalized. A null means the transaction is not yet indexed
+      // at the confirmed commitment; caching it would hide a just-submitted
+      // transfer until the TTL lapsed, delaying on-chain status. A
+      // confirmed-but-not-finalized body stays uncached too: a fork can still
+      // drop and re-land it with different metadata, so it is served fresh on
+      // every read until it roots (the fetch happens per read, so freshness
+      // is never traded for the cache). Failures stay uncached so the next
+      // read retries.
+      if (parsedTransaction && isFinalized) {
+        writeParsedTransactionCache(signature, parsedTransaction);
+      }
+      return parsedTransaction;
+    })
+    .finally(() => {
+      inFlightParsedTransactions.delete(signature);
+    });
+  inFlightParsedTransactions.set(signature, pending);
+
+  return pending;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
 function buildObservedTransferRows(
   parsedTransaction: ParsedTransactionResponse["result"],
-  signature: string,
-  fallbackBlockTime: bigint | number | null,
+  signatureInfo: SignatureHistoryEntry,
   context: ObservedTransferContext
 ): TransferRow[] {
   if (!parsedTransaction) {
     return [];
   }
+
+  const signature = String(signatureInfo.signature);
+  // A transaction confirmed on a minority fork can be dropped and re-land in a
+  // different slot, so slot and blockTime always come from the fresh
+  // signature-history entry; the cached body's copy is only a fallback for
+  // history entries that lack the metadata.
+  const timestamp = resolveObservedTimestamp(
+    signatureInfo.blockTime ?? parsedTransaction.blockTime
+  );
+  const slot = resolveObservedSlot(signatureInfo.slot, parsedTransaction.slot);
+  const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
 
   const accountKeys = (parsedTransaction.transaction?.message?.accountKeys ?? [])
     .map((accountKey) => resolveParsedAccountKey(accountKey))
@@ -376,9 +510,6 @@ function buildObservedTransferRows(
           : current.decimals,
     });
   }
-
-  const timestamp = resolveObservedTimestamp(parsedTransaction.blockTime ?? fallbackBlockTime);
-  const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
 
   for (const instruction of flattenParsedInstructions({ result: parsedTransaction })) {
     const parsedType = instruction.parsed?.type;
@@ -441,7 +572,7 @@ function buildObservedTransferRows(
         signed_transaction: null,
         last_valid_block_height: null,
         submission_started_at: null,
-        slot: parsedTransaction.slot ?? null,
+        slot,
         block_time: timestamp,
         fee: parsedTransaction.meta?.fee ?? null,
         error: null,
@@ -529,7 +660,7 @@ function buildObservedTransferRows(
         signed_transaction: null,
         last_valid_block_height: null,
         submission_started_at: null,
-        slot: parsedTransaction.slot ?? null,
+        slot,
         block_time: timestamp,
         fee: parsedTransaction.meta?.fee ?? null,
         error: null,
@@ -625,7 +756,7 @@ function buildObservedTransferRows(
       signed_transaction: null,
       last_valid_block_height: null,
       submission_started_at: null,
-      slot: parsedTransaction.slot ?? null,
+      slot,
       block_time: timestamp,
       fee: parsedTransaction.meta?.fee ?? null,
       error: null,
@@ -658,13 +789,15 @@ export async function buildObservedTransfersForSignatures(
     signatures,
     SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
     async (signatureInfo) => {
-      const parsedTransaction = await fetchParsedTransaction(env, String(signatureInfo.signature));
-      return buildObservedTransferRows(
-        parsedTransaction,
+      // The history entry was fetched fresh for this request, so its
+      // confirmationStatus is the current finality signal for the body gate.
+      const isFinalized = signatureInfo.confirmationStatus === "finalized";
+      const parsedTransaction = await fetchParsedTransaction(
+        env,
         String(signatureInfo.signature),
-        signatureInfo.blockTime,
-        context
+        isFinalized
       );
+      return buildObservedTransferRows(parsedTransaction, signatureInfo, context);
     }
   );
 

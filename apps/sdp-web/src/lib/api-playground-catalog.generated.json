@@ -609,7 +609,9 @@
                   "matchedRules": [{}],
                   "requiresApproval": true,
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
-                }
+                },
+                "viewerIsRequester": false,
+                "viewerCanDecide": false
               }
             ]
           },
@@ -684,7 +686,9 @@
                 "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              }
+              },
+              "viewerIsRequester": false,
+              "viewerCanDecide": false
             }
           },
           "meta": {
@@ -758,7 +762,9 @@
                 "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              }
+              },
+              "viewerIsRequester": false,
+              "viewerCanDecide": false
             }
           },
           "meta": {
@@ -832,7 +838,9 @@
                 "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              }
+              },
+              "viewerIsRequester": false,
+              "viewerCanDecide": false
             }
           },
           "meta": {
@@ -906,7 +914,9 @@
                 "matchedRules": [{}],
                 "requiresApproval": true,
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              }
+              },
+              "viewerIsRequester": false,
+              "viewerCanDecide": false
             }
           },
           "meta": {
@@ -1656,6 +1666,20 @@
               "deliveryMode": "session_widget",
               "fiatCurrency": "USD",
               "fiatAmount": "100.00",
+              "settlement": {
+                "provider": "moonpay",
+                "status": "completed",
+                "transactionId": "transaction_example",
+                "baseCurrencyCode": "example",
+                "baseCurrencyAmount": 1,
+                "quoteCurrencyCode": "example",
+                "quoteCurrencyAmount": 1,
+                "feeAmount": 1,
+                "extraFeeAmount": 1,
+                "networkFeeAmount": 1,
+                "areFeesIncluded": false,
+                "usdRate": 1
+              },
               "risk": {
                 "provider": "trm",
                 "score": "0.12",
@@ -1940,6 +1964,20 @@
               "deliveryMode": "session_widget",
               "fiatCurrency": "USD",
               "fiatAmount": "100.00",
+              "settlement": {
+                "provider": "moonpay",
+                "status": "completed",
+                "transactionId": "transaction_example",
+                "baseCurrencyCode": "example",
+                "baseCurrencyAmount": 1,
+                "quoteCurrencyCode": "example",
+                "quoteCurrencyAmount": 1,
+                "feeAmount": 1,
+                "extraFeeAmount": 1,
+                "networkFeeAmount": 1,
+                "areFeesIncluded": false,
+                "usdRate": 1
+              },
               "risk": {
                 "provider": "trm",
                 "score": "0.12",
@@ -2019,6 +2057,20 @@
               "deliveryMode": "session_widget",
               "fiatCurrency": "USD",
               "fiatAmount": "100.00",
+              "settlement": {
+                "provider": "moonpay",
+                "status": "completed",
+                "transactionId": "transaction_example",
+                "baseCurrencyCode": "example",
+                "baseCurrencyAmount": 1,
+                "quoteCurrencyCode": "example",
+                "quoteCurrencyAmount": 1,
+                "feeAmount": 1,
+                "extraFeeAmount": 1,
+                "networkFeeAmount": 1,
+                "areFeesIncluded": false,
+                "usdRate": 1
+              },
               "risk": {
                 "provider": "trm",
                 "score": "0.12",
@@ -2167,6 +2219,20 @@
                 "deliveryMode": "session_widget",
                 "fiatCurrency": "USD",
                 "fiatAmount": "100.00",
+                "settlement": {
+                  "provider": "moonpay",
+                  "status": "completed",
+                  "transactionId": "transaction_example",
+                  "baseCurrencyCode": "example",
+                  "baseCurrencyAmount": 1,
+                  "quoteCurrencyCode": "example",
+                  "quoteCurrencyAmount": 1,
+                  "feeAmount": 1,
+                  "extraFeeAmount": 1,
+                  "networkFeeAmount": 1,
+                  "areFeesIncluded": false,
+                  "usdRate": 1
+                },
                 "risk": {
                   "provider": "trm",
                   "score": "0.12",
@@ -2385,6 +2451,20 @@
                 "deliveryMode": "session_widget",
                 "fiatCurrency": "USD",
                 "fiatAmount": "100.00",
+                "settlement": {
+                  "provider": "moonpay",
+                  "status": "completed",
+                  "transactionId": "transaction_example",
+                  "baseCurrencyCode": "example",
+                  "baseCurrencyAmount": 1,
+                  "quoteCurrencyCode": "example",
+                  "quoteCurrencyAmount": 1,
+                  "feeAmount": 1,
+                  "extraFeeAmount": 1,
+                  "networkFeeAmount": 1,
+                  "areFeesIncluded": false,
+                  "usdRate": 1
+                },
                 "risk": {
                   "provider": "trm",
                   "score": "0.12",
@@ -2920,6 +3000,20 @@
               "deliveryMode": "session_widget",
               "fiatCurrency": "USD",
               "fiatAmount": "100.00",
+              "settlement": {
+                "provider": "moonpay",
+                "status": "completed",
+                "transactionId": "transaction_example",
+                "baseCurrencyCode": "example",
+                "baseCurrencyAmount": 1,
+                "quoteCurrencyCode": "example",
+                "quoteCurrencyAmount": 1,
+                "feeAmount": 1,
+                "extraFeeAmount": 1,
+                "networkFeeAmount": 1,
+                "areFeesIncluded": false,
+                "usdRate": 1
+              },
               "risk": {
                 "provider": "trm",
                 "score": "0.12",
@@ -3896,10 +3990,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -4370,10 +4460,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -4645,10 +4731,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -5119,10 +5201,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -5466,6 +5544,7 @@
           {
             "key": "search",
             "label": "search",
+            "description": "Prefix match against transaction id, module id, or signature — not a substring search.",
             "required": false
           },
           {
@@ -5866,10 +5945,6 @@
                 "value": "AWG"
               },
               {
-                "label": "AZN",
-                "value": "AZN"
-              },
-              {
                 "label": "BAM",
                 "value": "BAM"
               },
@@ -6340,10 +6415,6 @@
               {
                 "label": "TJS",
                 "value": "TJS"
-              },
-              {
-                "label": "TMT",
-                "value": "TMT"
               },
               {
                 "label": "TND",
@@ -7689,11 +7760,22 @@
                 "accountNumberLast4": "6789",
                 "paymentRails": ["ACH", "WIRE"],
                 "customerLink": {
+                  "provider": "bvnk",
                   "id": "counterparty_provider_account_customer",
-                  "providerCustomerReference": "Customer:0193b2c4",
                   "status": "active",
                   "providerStatus": "ACTIVE",
-                  "createdAt": "2025-01-01T00:00:00.000Z"
+                  "createdAt": "2025-01-01T00:00:00.000Z",
+                  "providerCustomerReference": "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+                  "residenceCountryCode": "US",
+                  "agreements": [
+                    {
+                      "name": "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
+                      "displayName": "Embedded US Partner Platform Customers Agreement",
+                      "url": "https://help.bvnk.com/hc/en-us/sections/example",
+                      "privacyPolicyUrl": "https://help.bvnk.com/hc/en-us/articles/example",
+                      "signedAt": "2025-01-01T00:00:00.000Z"
+                    }
+                  ]
                 }
               }
             ]
@@ -7995,7 +8077,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8367,7 +8451,7 @@
         "operationId": "getToken",
         "title": "Get token",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeMetadataAuthority={includeMetadataAuthority}",
+        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeFreezeAuthority={includeFreezeAuthority}&includeMetadataAuthority={includeMetadataAuthority}&includePauseAuthority={includePauseAuthority}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8395,9 +8479,45 @@
             ]
           },
           {
+            "key": "includeFreezeAuthority",
+            "label": "includeFreezeAuthority",
+            "description": "Opt in to a read-only lookup of the authority that controls freeze operations. Token ACL mints return the live mint-config controller.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
             "key": "includeMetadataAuthority",
             "label": "includeMetadataAuthority",
             "description": "Opt in to a read-only lookup of the current metadata authority for wallet selection. Tokens with a mint use live chain state; tokens without a mint use the stored metadata authority, falling back to stored mint authority, without RPC. Ordinary token reads do not perform this lookup.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
+            "key": "includePauseAuthority",
+            "label": "includePauseAuthority",
+            "description": "Opt in to a read-only lookup of the live Token-2022 pausable authority for wallet selection.",
             "defaultValue": "true",
             "required": false,
             "kind": "select",
@@ -8482,7 +8602,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8584,7 +8706,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8697,7 +8821,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -9047,7 +9173,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -9191,7 +9319,9 @@
               "updatedAt": "2025-01-02T00:00:00.000Z"
             },
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
-            "metadataAuthority": "So11111111111111111111111111111111111111112"
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",

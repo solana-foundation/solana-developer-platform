@@ -126,6 +126,8 @@ function sharedWizard<TId extends string>(
     isAdvancing: false,
     retryOnboarding: noop,
     pendingAgreements: null,
+    acceptedAgreements: [],
+    toggleAgreement: noop,
     hostedQuoteLoading: false,
     counterpartyDialogOpen: false,
     setCounterpartyDialogOpen: noop,
@@ -149,6 +151,11 @@ function onrampWizard(
     quoteSimulationLoading: false,
     quoteSimulationSucceeded: false,
     simulateCurrentQuote: asyncNoop,
+    showCompleteScreen:
+      transferStatus?.status === "completed" ||
+      (transferStatus?.status === "settling" &&
+        transferStatus.settlement !== undefined &&
+        transferStatus.settlement.provider === "bvnk"),
   };
 }
 
@@ -168,6 +175,7 @@ function offrampWizard(
     canSendOnchain: false,
     onchainSendLoading: false,
     onchainSendResult: null,
+    heldApprovalRequestId: null,
     sendCryptoToDeposit: asyncNoop,
     quoteExpired: false,
   };

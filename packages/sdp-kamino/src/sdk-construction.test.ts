@@ -83,6 +83,8 @@ describe("vault construction", () => {
       "buildKaminoDepositPlan",
       "buildKaminoWithdrawPlan",
       "readKaminoPosition",
+      "quoteKaminoDeposit",
+      "quoteKaminoWithdraw",
     ]) {
       const body = sdk.slice(sdk.indexOf(`export async function ${entry}`));
       const fnBody = body.slice(0, body.indexOf("\n}\n") + 3);

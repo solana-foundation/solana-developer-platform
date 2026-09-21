@@ -4,6 +4,7 @@ import type {
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultProvider,
+  EarnVaultQueuedWithdrawProvider,
   EarnVaultWithdrawProvider,
   EarnVaultWithdrawQuoteProvider,
   EarnWithdrawalApprovalProvider,
@@ -158,6 +159,37 @@ export function supportsVaultWithdrawQuote(
     Record<(typeof VAULT_WITHDRAW_QUOTE_METHODS)[number], unknown>
   >;
   return VAULT_WITHDRAW_QUOTE_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const VAULT_QUEUED_WITHDRAW_METHODS = [
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "getWithdrawalOptions",
+  "quoteQueuedWithdrawal",
+  "buildQueuedWithdrawalRequest",
+  "buildQueuedWithdrawalCancel",
+  "readQueuedWithdrawalRequests",
+  "readQueuedWithdrawalRequest",
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "decodeQueuedWithdrawalLifecycleEvents",
+] as const satisfies readonly Exclude<
+  keyof EarnVaultQueuedWithdrawProvider,
+  keyof EarnVaultDirectProvider
+>[];
+
+/**
+ * Capability discovery for asynchronous queue exits. All methods are required:
+ * advertising request creation without cancellation and lifecycle reads would
+ * strand the caller with an obligation SDP could neither recover nor explain.
+ * Independent from instant withdrawal because either route may exist alone.
+ */
+export function supportsVaultQueuedWithdraw(
+  client: EarnVaultProvider
+): client is EarnVaultQueuedWithdrawProvider {
+  if (!supportsVaultDirect(client)) return false;
+  const candidate = client as Partial<
+    Record<(typeof VAULT_QUEUED_WITHDRAW_METHODS)[number], unknown>
+  >;
+  return VAULT_QUEUED_WITHDRAW_METHODS.every((method) => typeof candidate[method] === "function");
 }
 
 const LIVE_METRICS_METHODS = ["listStrategyMetrics"] as const satisfies readonly Exclude<

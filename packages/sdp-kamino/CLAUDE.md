@@ -142,7 +142,17 @@ authorize one asset while the transaction moves another.
 `KaminoInstructionPlan.instructions` keeps the provider-neutral `Instruction[]`
 shape containing one complete ordered transaction instruction sequence.
 `KaminoVaultDirectClient` implements `buildVaultWithdrawal`, so
-`supportsVaultWithdraw` answers true.
+`supportsVaultWithdraw` answers true. It also implements `quoteVaultDeposit`
+and `quoteVaultWithdrawal` (`quoteKaminoDeposit` / `quoteKaminoWithdraw` in
+`sdk.ts`; the arithmetic and issue rules live in the firewall-free
+`quotes.ts`), so both quote guards answer true. Quotes are reads: they build
+nothing and return blocking conditions as `issues` (`DEPOSIT_CAP_EXCEEDED`,
+`DEPOSIT_BELOW_MINIMUM`, `ZERO_SHARES_OUT`,
+`INSUFFICIENT_WITHDRAWAL_LIQUIDITY`, `ZERO_ASSETS_OUT`,
+`BELOW_MINIMUM_WITHDRAWAL`) rather than throwing. The deposit minimum compares
+the amount remaining after crank funds with the vault's live
+`minDepositAmount`; its message reports the minimum request inclusive of those
+crank funds.
 
 - The vault's published lookup table is loaded best-effort (`lookup-table.ts`,
   via kit's `fetchAddressesForLookupTables`). When used, its address travels on
@@ -156,16 +166,31 @@ shape containing one complete ordered transaction instruction sequence.
 
 ## Known gaps (deliberate, and owed to the caller)
 
-- **Withdrawal penalties are not quoted.** Kamino charges
-  `max(bps × gross, flat)` **per withdraw instruction**, so a multi-reserve exit
-  can pay N × flat. The SDK exposes `getVaultWithdrawPenalties` /
-  `ShareExitLiquidityPlan`; until one is wired, this package returns no estimate
-  rather than a derived one. A wrong number here is worse than none — same rule as
-  the dashboard's "missing renders —, never a fabricated rate".
-- **`minSharesOut` is optional and unset by default.** Computing a real floor needs
-  the live exchange rate. Passing `"0"` would be the appearance of slippage
-  protection without the substance, so the caller computes a floor or passes
-  nothing. The API requires one in PRODUCTION for exactly that reason.
+- **Exit quotes are conservative, and exits still carry no on-chain floor.**
+  `quoteKaminoWithdraw` prices an exit through the SDK's `ShareExitLiquidityPlan`
+  with the effective penalties (`max(vault, global config)` per field). The SDK
+  charges the penalty once on the aggregate, while the program charges
+  `max(bps x gross, flat)` **per withdraw instruction**, so for an exit split
+  across N reserves the quote subtracts a further `(N - 1) x (flat + 1)` base
+  units and can only understate what lands (`conservativeExitNetBaseUnits`).
+  `min_withdraw_amount` is a per-instruction guard on the NET amount, so the
+  quote checks every planned leg (the idle-liquidity leg plus one per reserve)
+  and reports `BELOW_MINIMUM_WITHDRAWAL` when any leg is at or below it, not
+  only when the aggregate is.
+  The kvault withdraw instruction takes only a share amount, so `assetsOut`
+  informs the caller and nothing enforces it on chain; the Kamino slippage
+  policy leaves the exit floor-less.
+- **The deposit cap clamp is detected, not read.** klend-sdk's
+  `estimateSharesFromTokens` silently clamps to the remaining cap the way the
+  program does. `observeDepositPricing` replicates its AUM inputs and
+  `detectDepositCapClamp` reports `DEPOSIT_CAP_EXCEEDED` only when the SDK's
+  estimate matches the clamped prediction and differs from the uncapped one, so
+  a replica that drifts can withhold the issue but never invent it.
+- **`minSharesOut` stays optional at the package boundary.** Computing a real
+  floor needs the live exchange rate. Passing `"0"` would be the appearance of
+  slippage protection without the substance, so the builder never invents it.
+  SDP's Kamino policy is an explicit 10 bps in every environment; the caller
+  derives the exact floor from the live quote and supplies it.
 - **Withdrawals do not unstake farm-staked shares.** The withdraw builder
   passes no farm state, matching the deposit builder (which never stakes), so
   an SDP-managed position has nothing staked and nothing to unstake. Shares

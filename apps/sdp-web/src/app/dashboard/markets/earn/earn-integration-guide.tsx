@@ -15,6 +15,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useCopy } from "@/lib/use-copy";
 import { EarnIntegrationGuideSkeleton } from "../markets-route-skeletons";
 import {
@@ -69,6 +70,12 @@ const GUIDE_SECTIONS = [
     navigationKey: "DashboardMarkets.earnProgram.guideWithdrawNavigation",
     titleKey: "DashboardMarkets.earnProgram.guideWithdrawTitle",
     descriptionKey: "DashboardMarkets.earnProgram.guideWithdrawDescription",
+  },
+  {
+    id: "asyncWithdraw",
+    navigationKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawNavigation",
+    titleKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawTitle",
+    descriptionKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawDescription",
   },
 ] as const satisfies ReadonlyArray<{
   id: keyof EarnIntegrationSections;
@@ -434,7 +441,21 @@ function IntegrationReference({
         </Button>
       </div>
 
-      <Callout variant="warning">{t("DashboardMarkets.earnProgram.secretKeyDisclosure")}</Callout>
+      {/* The one thing the copied module needs that this page cannot generate: a
+          key. Informational rather than a warning, and it links to where the key
+          is made, because a warning with no way to act on it only says "no". The
+          sentence is split around the link since the catalog has no rich-text
+          helper. */}
+      <Callout variant="info">
+        {t("DashboardMarkets.earnProgram.apiKeyCalloutBefore")}{" "}
+        <Link
+          className="font-medium underline underline-offset-2"
+          href={DASHBOARD_SIDE_NAV_HREFS.apiKeys}
+        >
+          {t("DashboardMarkets.earnProgram.apiKeyCalloutLink")}
+        </Link>{" "}
+        {t("DashboardMarkets.earnProgram.apiKeyCalloutAfter")}
+      </Callout>
 
       <SegmentedControl
         aria-label={t("DashboardMarkets.earnProgram.guideNavigationTitle")}

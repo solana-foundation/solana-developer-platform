@@ -17,6 +17,10 @@
  *    a counterparty to pay into.
  *
  * 2. The mint carries none of the four extensions the program refuses.
+ *
+ * 3. The mint carries no extension SDP cannot move yet, even where the program
+ *    accepts it. A trade SDP can create but never settle, cancel or reclaim is
+ *    a trap for whoever funds it.
  */
 
 import type { SolanaRpc } from "@sdp/rpc/solana";
@@ -40,8 +44,9 @@ import {
  * of the escrow, so anything that lands there is stranded with no settle,
  * refund or reclaim.
  *
- * Everything else is allowed — including `PermanentDelegate`,
- * `DefaultAccountState`, `TransferHook` and `Pausable`.
+ * Everything else passes the program, including `PermanentDelegate`,
+ * `DefaultAccountState`, `TransferHook` and `Pausable`. See
+ * `UNSUPPORTED_MINT_EXTENSIONS` for what SDP refuses on top.
  */
 export const BLOCKED_MINT_EXTENSIONS: ReadonlySet<string> = new Set([
   "TransferFeeConfig",
@@ -50,6 +55,18 @@ export const BLOCKED_MINT_EXTENSIONS: ReadonlySet<string> = new Set([
   "ScaledUiAmountConfig",
   "NonTransferable",
 ]);
+
+/**
+ * Extensions the program accepts that SDP cannot move yet, so it refuses them
+ * before a trade exists.
+ *
+ * `TransferHook`: every transfer out of an escrow (settle, cancel, reclaim) runs
+ * the mint's hook, and the program forwards the hook's extra accounts as
+ * trailing accounts on the instruction. SDP does not resolve those accounts, so
+ * the token program refuses each of those transfers. Accepting the mint at
+ * create would leave a funded leg with no way out.
+ */
+export const UNSUPPORTED_MINT_EXTENSIONS: ReadonlySet<string> = new Set(["TransferHook"]);
 
 /** The two token programs a DvP leg may use. */
 const SUPPORTED_TOKEN_PROGRAMS: ReadonlySet<string> = new Set([
@@ -115,10 +132,24 @@ export async function validateDvpMints(
       continue;
     }
 
-    const blocked = readBlockedExtensions(account);
-    for (const extension of blocked) {
+    const extensionProblems = readMintExtensionProblems(account);
+    if (extensionProblems === null) {
+      // The program would still refuse its own four, but it accepts a transfer
+      // hook, so a mint SDP cannot read is one it cannot rule a hook out of.
+      problems.push(
+        `${leg.label} ${leg.mint} has extension data SDP cannot read, so it cannot confirm the mint is settleable`
+      );
+      continue;
+    }
+    const { refusedByProgram, unsupportedBySdp } = extensionProblems;
+    for (const extension of refusedByProgram) {
       problems.push(
         `${leg.label} ${leg.mint} carries the ${extension} extension, which DvP settlement refuses`
+      );
+    }
+    for (const extension of unsupportedBySdp) {
+      problems.push(
+        `${leg.label} ${leg.mint} carries the ${extension} extension, which SDP cannot settle, cancel or reclaim yet`
       );
     }
   }
@@ -152,26 +183,34 @@ export async function readMintDecimals(rpc: SolanaRpc, mint: Address): Promise<n
 }
 
 /**
- * Names the deny-listed extensions present on a mint's raw account data.
+ * Names the ruled-out extensions present on a mint's raw account data: those
+ * the program refuses, and those SDP cannot move yet.
  *
- * Returns nothing on data it cannot parse rather than throwing. This is a
- * pre-flight whose only job is to turn a would-be on-chain failure into a
- * useful 400; if it cannot read the mint, the program still enforces the same
- * rule and the trade fails there instead. Refusing a trade because our parser
- * tripped would be worse than the round trip we are saving.
+ * Returns null on data it cannot decode, and the caller refuses the mint. The
+ * program enforces its own refusals on chain, but not SDP's: an unreadable
+ * mint could carry a transfer hook, and accepting it would strand the funded
+ * leg.
  *
  * @param account - A fetched, existing account owned by Token-2022.
- * @returns The blocked extension names present, empty when none.
+ * @returns The ruled-out extension names present, split by who rules them out,
+ *   or null when the mint cannot be decoded.
  */
-function readBlockedExtensions(account: EncodedAccount): string[] {
+function readMintExtensionProblems(account: EncodedAccount): {
+  refusedByProgram: string[];
+  unsupportedBySdp: string[];
+} | null {
   let mint: Account<Mint>;
   try {
     mint = decodeMint(account);
   } catch {
-    return [];
+    return null;
   }
-  const extensions = mint.data.extensions.__option === "Some" ? mint.data.extensions.value : [];
-  return extensions
-    .map((extension) => extension.__kind)
-    .filter((kind) => BLOCKED_MINT_EXTENSIONS.has(kind));
+  const kinds =
+    mint.data.extensions.__option === "Some"
+      ? mint.data.extensions.value.map((extension) => extension.__kind)
+      : [];
+  return {
+    refusedByProgram: kinds.filter((kind) => BLOCKED_MINT_EXTENSIONS.has(kind)),
+    unsupportedBySdp: kinds.filter((kind) => UNSUPPORTED_MINT_EXTENSIONS.has(kind)),
+  };
 }

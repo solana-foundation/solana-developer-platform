@@ -207,6 +207,7 @@ export async function fetchPaymentTransfers(
   options: {
     custodyWalletId?: string;
     includeObserved?: boolean;
+    signal?: AbortSignal;
   } = {}
 ): Promise<FetchResult<PaymentTransferSummary[]>> {
   try {
@@ -216,7 +217,10 @@ export async function fetchPaymentTransfers(
       ...(options.custodyWalletId ? { custodyWalletId: options.custodyWalletId } : {}),
       includeObserved: String(options.includeObserved ?? false),
     }).toString();
-    const response = await request(`/v1/payments/transfers?${query}`);
+    const path = `/v1/payments/transfers?${query}`;
+    const response = await (options.signal
+      ? request(path, { signal: options.signal })
+      : request(path));
     if (!response.ok) {
       const body = await response.text();
       return {
@@ -256,21 +260,87 @@ function dedupeTransfers(transfers: PaymentTransferSummary[]): PaymentTransferSu
   return [...byKey.values()];
 }
 
+/**
+ * How long Home waits for one wallet's transfers. Observed history reads the chain and
+ * one slow wallet used to hold the whole list back on every refresh; past this, the
+ * list goes out without that wallet and says so. Only a caller that can say so opts in.
+ */
+export const WALLET_TRANSFERS_DEADLINE_MS = 2_500;
+
+/**
+ * Transfers across the organization's wallets, and how many wallets are missing from
+ * them. A wallet that failed or missed its deadline is not loaded, which is not the
+ * same as having no transfers, so a caller must say the list is partial.
+ */
+export type DashboardPaymentTransfersResult = FetchResult<PaymentTransferSummary[]> & {
+  /**
+   * How many wallets are missing from the list, or null when even the wallet
+   * list failed, so how many exist is unknown. Zero is the only value that says
+   * the list is complete; a caller that shows a total reads it that way.
+   */
+  walletsNotLoaded: number | null;
+};
+
+/**
+ * One wallet's transfers, or "timed_out" once the deadline passes. The request is
+ * aborted then, so it stops holding a connection it can no longer answer on.
+ */
+async function fetchWalletTransfersWithinDeadline(
+  request: SdpApiClient["request"],
+  pageSize: number,
+  deadlineMs: number,
+  options: { custodyWalletId: string; includeObserved: boolean }
+): Promise<FetchResult<PaymentTransferSummary[]> | "timed_out"> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"timed_out">((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve("timed_out");
+    }, deadlineMs);
+  });
+  try {
+    return await Promise.race([
+      fetchPaymentTransfers(request, pageSize, { ...options, signal: controller.signal }),
+      deadline,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface DashboardPaymentTransfersOptions {
+  /**
+   * Give up on a wallet's transfers after this long. Without it every wallet is waited
+   * on: a caller that drops a slow wallet must be able to tell the reader the list is
+   * partial, and only Home activity does.
+   */
+  walletDeadlineMs?: number;
+}
+
 export async function fetchDashboardPaymentTransfers(
   request: SdpApiClient["request"],
-  pageSize = 20
-): Promise<FetchResult<PaymentTransferSummary[]>> {
+  pageSize = 20,
+  options: DashboardPaymentTransfersOptions = {}
+): Promise<DashboardPaymentTransfersResult> {
   const walletsResult = await fetchPaymentsWallets(request, { view: "summary" });
-  return fetchDashboardPaymentTransfersForWallets(request, walletsResult, pageSize);
+  return fetchDashboardPaymentTransfersForWallets(request, walletsResult, pageSize, options);
 }
 
 export async function fetchDashboardPaymentTransfersForWallets(
   request: SdpApiClient["request"],
   walletsResult: FetchResult<PaymentsDashboardWallet[]>,
-  pageSize = 20
-): Promise<FetchResult<PaymentTransferSummary[]>> {
+  pageSize = 20,
+  options: DashboardPaymentTransfersOptions = {}
+): Promise<DashboardPaymentTransfersResult> {
   if (!walletsResult.ok || (walletsResult.data?.length ?? 0) === 0) {
-    return fetchPaymentTransfers(request, pageSize);
+    // Without the wallet list this is only the persisted history: the observed
+    // transfers are read per wallet, so a failed wallet read leaves a list
+    // whose completeness is unknown rather than a complete one.
+    return {
+      ...(await fetchPaymentTransfers(request, pageSize)),
+      walletsNotLoaded: walletsResult.ok ? 0 : null,
+    };
   }
 
   const observedAddresses = new Set<string>();
@@ -281,24 +351,37 @@ export async function fetchDashboardPaymentTransfersForWallets(
         const address = wallet.publicKey.trim();
         const includeObserved = address.length > 0 && !observedAddresses.has(address);
         if (includeObserved) observedAddresses.add(address);
-        return fetchPaymentTransfers(request, pageSize, {
-          custodyWalletId: wallet.id,
-          includeObserved,
-        });
+        const walletOptions = { custodyWalletId: wallet.id, includeObserved };
+        return options.walletDeadlineMs === undefined
+          ? fetchPaymentTransfers(request, pageSize, walletOptions)
+          : fetchWalletTransfersWithinDeadline(
+              request,
+              pageSize,
+              options.walletDeadlineMs,
+              walletOptions
+            );
       })
     ),
   ]);
 
   const mergedTransfers: PaymentTransferSummary[] = persistedResult.data ?? [];
   let lastError: string | undefined;
+  let walletsNotLoaded = 0;
 
   for (const result of settledTransfers) {
     if (result.status !== "fulfilled") {
+      walletsNotLoaded += 1;
       lastError = result.reason instanceof Error ? result.reason.message : undefined;
       continue;
     }
 
+    if (result.value === "timed_out") {
+      walletsNotLoaded += 1;
+      continue;
+    }
+
     if (!result.value.ok) {
+      walletsNotLoaded += 1;
       lastError = result.value.error;
       continue;
     }
@@ -308,17 +391,19 @@ export async function fetchDashboardPaymentTransfersForWallets(
 
   if (mergedTransfers.length === 0) {
     if (persistedResult.ok || !lastError) {
-      return persistedResult;
+      return { ...persistedResult, walletsNotLoaded };
     }
 
     return {
       ok: false,
       error: lastError,
+      walletsNotLoaded,
     };
   }
 
   return {
     ok: true,
+    walletsNotLoaded,
     data: dedupeTransfers(mergedTransfers)
       .sort((left, right) => {
         const leftTimestamp = left.createdAt ? new Date(left.createdAt).getTime() : 0;

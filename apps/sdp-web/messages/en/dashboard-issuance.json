@@ -403,7 +403,11 @@
       "loading": "Loading activity…",
       "error": "Couldn't load activity.",
       "recentTitle": "Recent activity",
-      "viewAll": "View all"
+      "viewAll": "View all",
+      "createToken": "Create token",
+      "createAssetProfile": "Create asset profile",
+      "approveRecipient": "Approve recipient",
+      "removeRecipient": "Remove recipient"
     },
     "permissions": {
       "managedBadge": "SDP-managed",
@@ -564,6 +568,7 @@
       "lockSupplyMinted": "Minted {amount}. Revoking the mint authority next…",
       "lockSupplyRevoking": "Revoking the mint authority…",
       "lockSupplyLocked": "Supply is now locked on-chain.",
+      "supplyLocked": "Supply locked",
       "lockSupplyNoMaxSupply": "Set a maximum supply before locking supply on-chain.",
       "lockSupplyAlreadyLocked": "Supply is already locked — the mint authority has been revoked.",
       "lockSupplyAmountUnavailable": "The remaining supply could not be calculated for this token.",

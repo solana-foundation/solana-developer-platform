@@ -2,12 +2,11 @@ import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/sola
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import { isIntlDecimalLiteral } from "../earn/earn-format";
-import { sumDecimalStrings } from "../earn/earn-market-presentation";
+import { earnStrategyReferenceKey, sumDecimalStrings } from "../earn/earn-market-presentation";
 
 /**
  * Portfolio-level allocation for the Treasury overview (PRO-1723): available
- * cash in custody wallets, value deployed into vault positions, and the two
- * shares those make of the float.
+ * cash in custody wallets and value deployed into vault positions.
  *
  * ONE function computes every figure this page renders, including each wallet's
  * own line and the set of holdings no position records. That is deliberate:
@@ -98,13 +97,10 @@ export function isOpenVaultPosition(position: TreasuryAllocationPosition): boole
  * was opened outside SDP and has no recorded row). Rendering nothing there
  * would present a deployed wallet as idle, which is the same lie as `0`.
  */
-export type WalletDeploymentDisplay =
+type WalletDeploymentDisplay =
   | { kind: "none" }
   | { kind: "unavailable" }
   | { kind: "value"; value: string };
-
-/** Why the percentage split is absent, so no caption re-derives it. */
-export type AllocationSharesAbsence = "unavailable" | "empty_float";
 
 /**
  * Why the deployed figure is absent. Two genuinely different failures that a
@@ -113,21 +109,13 @@ export type AllocationSharesAbsence = "unavailable" | "empty_float";
  * position value could not be read" would be false on a screen that is listing
  * those values, hydrated, in the table below.
  */
-export type DeployedAbsence = "unreadable" | "unreconciled";
+type DeployedAbsence = "unreadable" | "unreconciled";
 
 export interface TreasuryAllocation {
   /** USD-stable cash across wallets; undefined when any wallet read is unavailable. */
   availableCash: string | undefined;
   /** Value of open vault positions; undefined when it cannot be certified complete. */
   deployedValue: string | undefined;
-  /**
-   * Shares as decimal RATE strings ("0.05" = 5%), quantized to tenths of a
-   * percent so the pair always totals exactly 100%.
-   */
-  deployedShare: string | undefined;
-  remainingShare: string | undefined;
-  /** Set exactly when the shares are absent. */
-  sharesAbsence: AllocationSharesAbsence | undefined;
   /** Set exactly when `deployedValue` is absent. */
   deployedAbsence: DeployedAbsence | undefined;
   /** Each custody row's deployment line, keyed by wallet id. */
@@ -218,13 +206,13 @@ export function availableTreasuryCashForWallet(
   return availableStableCash([wallet]);
 }
 
-export interface TreasuryRateStrategy {
+interface TreasuryRateStrategy {
   currentApy?: string;
   provider: string;
   providerReference: string;
 }
 
-export interface TreasuryRatePosition extends TreasuryAllocationPosition {
+interface TreasuryRatePosition extends TreasuryAllocationPosition {
   provider: string;
   providerReference: string;
 }
@@ -246,15 +234,16 @@ export function estimatedTreasuryApy({
 
   const strategyByReference = new Map(
     strategies.map((strategy) => [
-      JSON.stringify([strategy.provider, strategy.providerReference]),
+      earnStrategyReferenceKey(strategy.provider, strategy.providerReference),
       strategy,
     ])
   );
   const values = open.map((position) => position.tokenValue);
   const rates = open.map(
     (position) =>
-      strategyByReference.get(JSON.stringify([position.provider, position.providerReference]))
-        ?.currentApy
+      strategyByReference.get(
+        earnStrategyReferenceKey(position.provider, position.providerReference)
+      )?.currentApy
   );
   if (
     values.some((value) => value === undefined || !isIntlDecimalLiteral(value)) ||
@@ -284,7 +273,7 @@ export function estimatedTreasuryApy({
  * Value deployed across the open positions given. Undefined when any open
  * position cannot be honestly valued.
  */
-export function deployedVaultValue(
+function deployedVaultValue(
   positions: readonly TreasuryAllocationPosition[] | undefined
 ): string | undefined {
   if (positions === undefined) return undefined;
@@ -321,26 +310,6 @@ function openPositionsByPublicKey(
     else grouped.set(publicKey, [position]);
   }
   return grouped;
-}
-
-function allocationShares(
-  cash: string | undefined,
-  deployed: string | undefined
-): { deployed: string; remaining: string } | undefined {
-  if (cash === undefined || deployed === undefined) return undefined;
-  const scale = Math.max(decimalScale(cash), decimalScale(deployed));
-  const cashUnits = parseDecimalAmount(cash, scale);
-  const deployedUnits = parseDecimalAmount(deployed, scale);
-  const total = cashUnits + deployedUnits;
-  // 0/0 is not a share; rendering 0%/100% would fabricate an allocation.
-  if (total === 0n) return undefined;
-  // Round-half-up to tenths of a percent, then take the complement so the two
-  // rendered figures always total exactly 100.
-  const deployedTenths = (deployedUnits * 2000n + total) / (2n * total);
-  return {
-    deployed: formatDecimalAmount(deployedTenths, 3),
-    remaining: formatDecimalAmount(1000n - deployedTenths, 3),
-  };
 }
 
 /** One wallet's line, given everything already resolved about it. */
@@ -445,16 +414,6 @@ export function summarizeTreasuryAllocation({
   const certified = unrecordedShareMints !== undefined && unrecordedShareMints.size === 0;
   const deployedValue = certified ? deployedVaultValue(positions) : undefined;
 
-  // Shares additionally require the float to be fully OBSERVED. The wallet read
-  // serves active wallets only, so an open position custodied by a wallet
-  // absent from it means idle cash this read cannot see. The deployed dollar
-  // figure still counts that position; only the split would be fabricated.
-  const observedWalletIds = new Set((wallets ?? []).map((wallet) => wallet.id));
-  const openPositionsObserved = (positions ?? [])
-    .filter(isOpenVaultPosition)
-    .every((position) => observedWalletIds.has(position.custodyWalletId));
-  const shares = openPositionsObserved ? allocationShares(availableCash, deployedValue) : undefined;
-
   const readFailed = positions === undefined || wallets === undefined || someWalletUnreadable;
   return {
     availableCash,
@@ -467,30 +426,7 @@ export function summarizeTreasuryAllocation({
           certified || readFailed
           ? "unreadable"
           : "unreconciled",
-    deployedShare: shares?.deployed,
-    remainingShare: shares?.remaining,
-    sharesAbsence:
-      shares !== undefined
-        ? undefined
-        : // Both figures read as real zeros: there is nothing to split.
-          availableCash === "0" && deployedValue === "0"
-          ? "empty_float"
-          : "unavailable",
     deploymentByWalletId,
     unrecordedShareMints,
   };
-}
-
-/**
- * Render an allocation share at exactly one fraction digit. The share is
- * already quantized to tenths of a percent, so this formatting never rounds:
- * the displayed pair keeps totalling 100.0%.
- */
-export function formatAllocationShare(share: string | undefined, locale: string): string {
-  if (share === undefined || !isIntlDecimalLiteral(share)) return "—";
-  return new Intl.NumberFormat(locale, {
-    style: "percent",
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  }).format(share);
 }

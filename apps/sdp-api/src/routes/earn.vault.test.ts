@@ -1,3 +1,4 @@
+import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
@@ -8,11 +9,13 @@ import { z } from "zod";
  * Surfacing is real by default here — Kamino AND Veda are offered, so both
  * providers' happy paths run against the shipped map with no help.
  *
- * `forceOn` remains for exactly one case: the unknown-provider dispatch test,
- * which must get PAST the surfacing gate to measure the gate behind it. The
- * surfacing gate itself keeps its own tests, pinned against the real map with
- * upshift — registered and `vault_direct` but not offered. Same pattern as
- * `earn-program.test.ts` (upshift plays that role for the program routes).
+ * `forceOn` opens the two OFFERING gates (deployed-cluster environment
+ * capability and surfacing) for the few cases that must get PAST them to
+ * measure the gate behind: the unknown-provider dispatch test and the
+ * registry-null quote test. Both gates keep their own tests, pinned against
+ * the real maps with upshift — registered and `vault_direct` but deployed
+ * nowhere and not offered. Same pattern as `earn-program.test.ts` (upshift
+ * plays that role for the program routes).
  */
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
 
@@ -22,6 +25,8 @@ vi.mock("@sdp/types", async (importOriginal) => {
     ...actual,
     isEarnProviderSurfaced: (provider: string) =>
       surfacing.forceOn || actual.isEarnProviderSurfaced(provider),
+    isVaultDirectDepositEnabled: (environment: string, provider: string) =>
+      surfacing.forceOn || actual.isVaultDirectDepositEnabled(environment, provider),
   };
 });
 
@@ -39,6 +44,8 @@ import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { SigningService } from "@/services/domain/signing.service";
+import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
+import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -56,9 +63,9 @@ vi.mock("@/services/earn/vault-deposit.service", async (importOriginal) => ({
  * Per-test override for the executing vault-direct client, delegating to the
  * REAL registry when unset. The preview route reaches the client directly (no
  * service seam to mock), and the real Veda client would quote against a live
- * RPC. Kamino cases stay on the real registry, which is itself the fixture:
- * its client genuinely lacks `quoteVaultDeposit`, so the 501 is measured, not
- * staged.
+ * RPC. The 501 case stays on the real registry, which is itself the fixture:
+ * upshift has no executing client there, so the refusal is measured, not
+ * staged (Kamino held that role until it learned to quote).
  */
 const vaultDirectClientOverride = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -258,7 +265,7 @@ function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
       providerReference: strategy.provider_reference,
       custodyWalletId: "cwlt_earn_vault_connection",
       amount: "10",
-      minSharesOut: null,
+      minSharesOut: "1",
     }),
     createdBy: TEST_USER.id,
   });
@@ -396,7 +403,10 @@ function postVaultDeposit(
   idempotencyKey?: string,
   apiKey = TEST_API_KEY.raw
 ) {
-  const request = { ...body };
+  // Kamino requires a live-quote-derived floor in every environment. Most
+  // route tests exercise another gate, so their shared valid request carries
+  // one unless a missing-floor case explicitly overrides it with `undefined`.
+  const request: Record<string, unknown> = { minSharesOut: "1", ...body };
   const key =
     idempotencyKey ?? (typeof request.requestId === "string" ? request.requestId : undefined);
   delete request.requestId;
@@ -937,6 +947,87 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
 });
 
 describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
+  it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
+    await seedAuth();
+    await seedWallet({
+      configId: "cfg_earn_vault_kamino_prod",
+      custodyWalletId: "cwlt_earn_vault_kamino_prod",
+      providerWalletId: "privy_earn_vault_kamino_prod",
+      projectId: TEST_PRODUCTION_PROJECT.id,
+    });
+    const strategy = await seedStrategy({ hostCluster: "mainnet-beta", environment: "production" });
+
+    const missingFloor = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_kamino_prod",
+        amount: "10",
+        minSharesOut: undefined,
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+    expect(missingFloor.status).toBe(400);
+    const missingFloorBody = (await missingFloor.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(missingFloorBody.error.code).toBe("BAD_REQUEST");
+    expect(missingFloorBody.error.message).toContain("POST /v1/earn/vault-deposit-previews");
+    expect(depositIntoVault).not.toHaveBeenCalled();
+
+    const res = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_kamino_prod",
+        amount: "10",
+        minSharesOut: "9.99",
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+    expect(res.status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        environment: "production",
+        provider: "kamino",
+        minSharesOut: "9.99",
+      }),
+      expect.anything()
+    );
+  });
+
+  it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
+    await seedAuth();
+    await seedWallet({
+      configId: "cfg_earn_vault_veda_prod",
+      custodyWalletId: "cwlt_earn_vault_veda_prod",
+      providerWalletId: "privy_earn_vault_veda_prod",
+      projectId: TEST_PRODUCTION_PROJECT.id,
+    });
+    const strategy = await seedStrategy({
+      provider: "veda",
+      underlyingSource: "veda",
+      hostCluster: "mainnet-beta",
+      environment: "production",
+    });
+    const res = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_veda_prod",
+        amount: "10",
+        minSharesOut: "9.99",
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("not available");
+    expect(body.error.message).toContain("production");
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
     await seedWallet({
@@ -961,6 +1052,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
         strategyId: strategy.id,
         custodyWalletId: "cwlt_earn_vault_jupiter",
         amount: "10",
+        minSharesOut: undefined,
       },
       crypto.randomUUID(),
       PROD_API_KEY.raw
@@ -1044,6 +1136,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
         strategyId: strategy.id,
         custodyWalletId: "cwlt_earn_vault_ondo",
         amount: "10",
+        minSharesOut: undefined,
       },
       crypto.randomUUID(),
       PROD_API_KEY.raw
@@ -1147,6 +1240,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
           strategyId: strategy.id,
           custodyWalletId: "cwlt_earn_vault_connection",
           amount: "10",
+          minSharesOut: "1",
         }),
       },
       env
@@ -1158,6 +1252,112 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       .prepare("SELECT COUNT(*) AS count FROM wallet_operations")
       .first<{ count: number | string }>();
     expect(Number(operationCount?.count ?? 0)).toBe(0);
+  });
+
+  it("reports the velocity verdict on a policy dry-run without writing an operation", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedConnectionWallet();
+    env.PRIVY_BYOK_ENABLED = "false";
+
+    const repo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    const profile = await repo.createWalletControlProfile({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: "cwlt_earn_vault_connection",
+      name: "Daily deposit volume",
+      createdBy: TEST_USER.id,
+    });
+    if (!profile) throw new Error("Failed to create wallet control profile");
+    const revision = await repo.createWalletControlProfileRevision({
+      profileId: profile.id,
+      rules: [
+        {
+          id: "daily-volume",
+          kind: "velocity",
+          scope: "organization",
+          window: "P1D",
+          max: "100",
+          asset: USDC_MINT,
+          action: "approval_required",
+        },
+      ],
+      defaultAction: "allow",
+      createdBy: TEST_USER.id,
+    });
+    if (!revision) throw new Error("Failed to create wallet control profile revision");
+    await repo.activateWalletControlProfileRevision({
+      profileId: profile.id,
+      revisionId: revision.id,
+    });
+    // Prior history inside the window: 95 already deposited today.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO wallet_operations (
+           id, organization_id, project_id, custody_wallet_id, wallet_id, api_key_id,
+           source, operation_family, operation_type, asset, amount, status
+         ) VALUES (?, ?, ?, 'cwlt_earn_vault_connection', 'privy_earn_vault_connection', ?,
+                   'earn_vault_deposit', 'program', 'earn_vault_deposit', ?, '95', 'completed')`
+      )
+      .bind("wop_earn_vault_prior", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, USDC_MINT)
+      .run();
+
+    const dryRun = (amount: string) =>
+      app.request(
+        "/v1/earn/vault-deposits",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+            "Dry-Run": "true",
+          },
+          body: JSON.stringify({
+            strategyId: strategy.id,
+            custodyWalletId: "cwlt_earn_vault_connection",
+            amount,
+            minSharesOut: "1",
+          }),
+        },
+        env
+      );
+
+    const within = await dryRun("5");
+    expect(within.status).toBe(200);
+    expect(await within.json()).toMatchObject({
+      data: {
+        decision: "allow",
+        criteria: expect.arrayContaining([
+          expect.objectContaining({ kind: "velocity", ruleId: "daily-volume", matched: false }),
+        ]),
+      },
+    });
+
+    const breach = await dryRun("10");
+    expect(breach.status).toBe(200);
+    expect(await breach.json()).toMatchObject({
+      data: {
+        decision: "approval_required",
+        criteria: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "velocity",
+            ruleId: "daily-volume",
+            matched: true,
+            action: "approval_required",
+            reason: expect.stringContaining("Window total 95 plus operation amount 10"),
+          }),
+        ]),
+      },
+    });
+
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    const operationCount = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM wallet_operations")
+      .first<{ count: number | string }>();
+    expect(Number(operationCount?.count ?? 0)).toBe(1);
   });
 
   it("requires an Idempotency-Key header, because the chain has no dedupe of its own", async () => {
@@ -1357,7 +1557,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       providerReference: strategy.provider_reference,
       custodyWalletId: "cwlt_earn_vault_pending",
       amount: "10",
-      minSharesOut: null,
+      minSharesOut: "1",
     });
     const policyRepo = createPostgresPolicyRepository(
       getDb(env),
@@ -1638,6 +1838,28 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     });
   });
 
+  it("quotes anonymously on the shelf the strategy names, not the deployment's", async () => {
+    // The row decides (PRO-1998): a production Kamino strategy quotes on
+    // mainnet for a caller with no project, from any deployment.
+    const strategy = await seedStrategy({
+      provider: "kamino",
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
+    vaultDirectClientOverride.current = quoteCapableClient({
+      sharesOut: "9.99999",
+      shareDecimals: 6,
+      blockingIssues: [],
+    });
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      data: { strategyId: strategy.id, sharesOut: "9.99999" },
+    });
+  });
+
   it("answers the provider's own quote for a surfaced, quotable strategy", async () => {
     await seedAuth();
     const strategy = await seedStrategy({ provider: "veda" });
@@ -1701,15 +1923,29 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
   });
 
-  it("answers 501 for a provider that cannot quote, measured against the real client", async () => {
-    await seedAuth();
-    const strategy = await seedStrategy();
+  /**
+   * Measured against the real registry on a provider that genuinely lacks
+   * quoting: upshift is registered and `vault_direct` but has no executing
+   * client, so the registry answers null. Surfacing is forced on to get past
+   * the gate in front of the capability check, and the call is anonymous so
+   * no entitlement row is needed.
+   */
+  it("answers 501 for a provider that cannot quote, measured against the real registry", async () => {
+    surfacing.forceOn = true;
+    const strategy = await seedStrategy({ provider: "upshift" });
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("NOT_IMPLEMENTED");
+  });
+
+  /** The real Kamino client, as the registry builds it, now clears the quote guard. */
+  it("measures the real Kamino client as deposit-quote capable", () => {
+    const client = resolveEarnExecutionClient(env, "kamino", createVaultDeadline());
+    if (!client) throw new Error("the registry must build a Kamino client");
+    expect(supportsVaultDepositQuote(client)).toBe(true);
   });
 
   it("answers 404 for a strategy this workspace cannot see", async () => {

@@ -14,13 +14,13 @@ import type { SolanaCluster } from "@sdp/types";
 import { useMemo } from "react";
 import { z } from "zod";
 import { useZodForm } from "@/lib/use-zod-form";
-import { cashOptionsFor } from "./dvp-cash-options";
 import type {
   DvpCreateContext,
   DvpCreateOption,
   DvpCreateWallet,
   DvpWalletBalance,
 } from "./dvp-create.data";
+import { assetOptionsFor, cashOptionsFor } from "./dvp-leg-options";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 import { type DvpDestinations, useDvpDestinations } from "./use-dvp-destinations";
 import { type DvpLeg, useDvpLeg } from "./use-dvp-leg";
@@ -29,13 +29,6 @@ import {
   type DvpPartyResolved,
   type DvpPartyWire,
   deriveDvpParties,
-  partySlotSchema,
-} from "./use-dvp-parties";
-
-export { CUSTOM } from "./use-dvp-leg";
-export {
-  type DvpPartySlot,
-  type DvpPartyWire,
   partySlotSchema,
 } from "./use-dvp-parties";
 
@@ -50,9 +43,10 @@ function defaultExpiry(): string {
 /**
  * The fields the form itself owns.
  *
- * The two party slots validate on their own step via `partiesStepSchema`; the
- * terms and payer gate the last steps. One form so a submit reads one set of
- * values, never a field out of step with the slot that owns it.
+ * The two party slots validate per slot (`partySlotSchema`) and gate the
+ * parties step; the terms and payer gate the last steps. One form so a submit
+ * reads one set of values, never a field out of step with the slot that owns
+ * it.
  */
 const createFormSchema = z.object({
   partyA: partySlotSchema,
@@ -63,14 +57,6 @@ const createFormSchema = z.object({
 });
 
 export type DvpCreateFormValues = z.infer<typeof createFormSchema>;
-
-/** The terms and payer the last stages read. */
-const termsStepSchema = z.object({
-  expiry: z.string().min(1),
-  refString: z.string(),
-});
-
-export { termsStepSchema };
 
 export interface DvpCreateForm {
   values: DvpCreateFormValues;
@@ -83,6 +69,8 @@ export interface DvpCreateForm {
   cash: DvpLeg;
   /** The cash slot's wallet balance of the cash mint, when it names one. */
   cashBalance: DvpWalletBalance | null;
+  /** What the asset leg can pick: the org's issued tokens, then the cluster catalogue. */
+  assetOptions: DvpCreateOption[];
   cashOptions: DvpCreateOption[];
   error: string | null;
   expiry: string;
@@ -96,6 +84,11 @@ export interface DvpCreateForm {
   destinations: DvpDestinations;
   /** Whether the whole form can be submitted: legs, parties and payouts. */
   ready: boolean;
+  /**
+   * Everything `ready` demands except the expiry, which the review step owns
+   * and its picker can clear. Gates the parties stage's Continue.
+   */
+  readyIgnoringExpiry: boolean;
   /** Whether the two party slots are complete and the addresses differ. */
   partiesReady: boolean;
   /** Both slots resolve to the SAME address: the program refuses one party. */
@@ -108,19 +101,17 @@ export interface DvpCreateForm {
 }
 
 /**
- * Whether the form describes a trade that can be created.
+ * Whether the form describes a trade that can be created, apart from the
+ * expiry.
  *
  * Pure and outside the hook: it is a dozen independent conditions, and holding
  * them inline made the hook's control flow mostly this one expression.
  */
-function canCreateTrade(input: {
+function tradeAnsweredWithoutExpiry(input: {
   asset: DvpLeg;
   cash: DvpLeg;
-  /** Both party slots filled and the two addresses differ. */
   partiesReady: boolean;
   destinationLooksWrong: boolean;
-  /** The expiry datetime; the picker's Clear can empty it on review. */
-  expiry: string;
 }): boolean {
   const { asset, cash } = input;
   // Never while a leg's scale is still being read. The amount would be encoded
@@ -129,6 +120,8 @@ function canCreateTrade(input: {
   const legsResolved = Boolean(
     !asset.pendingLookup && !cash.pendingLookup && asset.mint && cash.mint
   );
+  // A mint create would refuse is answered at the field, not by a 400 on submit.
+  const legsAccepted = !(asset.ineligible || cash.ineligible);
   // No base units means no scale, so there is no quantity to send. Never a
   // rounded fallback.
   const amountsResolved = Boolean(asset.baseUnits && cash.baseUnits);
@@ -136,7 +129,7 @@ function canCreateTrade(input: {
   // a round trip that costs a custody-provider call.
   const partiesUsable = Boolean(input.partiesReady && !input.destinationLooksWrong);
 
-  return legsResolved && amountsResolved && partiesUsable && input.expiry.trim().length > 0;
+  return legsResolved && legsAccepted && amountsResolved && partiesUsable;
 }
 
 /**
@@ -147,14 +140,15 @@ function canCreateTrade(input: {
  * and the over-balance guard with it, so switching to a wallet that cannot
  * deliver the leg would silently look fine. Zero is only knowable once the
  * wallet and the mint's scale are both settled; before that there is genuinely
- * nothing to claim, and this returns null.
+ * nothing to claim, and this returns null. So it does for a wallet whose
+ * balances were never loaded: not loaded is unknown, never zero.
  */
 function resolveWalletBalance(
   wallet: DvpCreateWallet | null,
   leg: DvpLeg
 ): DvpWalletBalance | null {
   const decimals = leg.token?.decimals ?? leg.pasted.mint?.decimals ?? null;
-  if (!(wallet && leg.mint) || decimals === null) {
+  if (!(wallet && leg.mint) || wallet.balances === null || decimals === null) {
     return null;
   }
   return (
@@ -169,8 +163,12 @@ function resolveWalletBalance(
 
 export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateContext): DvpCreateForm {
   const cashOptions = useMemo(() => cashOptionsFor(cluster), [cluster]);
+  const assetOptions = useMemo(
+    () => assetOptionsFor(cluster, context.tokens),
+    [cluster, context.tokens]
+  );
   // Both legs start unselected — the trade's whole point is choosing them.
-  const asset = useDvpLeg(context.tokens, false);
+  const asset = useDvpLeg(assetOptions, false);
   const cash = useDvpLeg(cashOptions, false);
   const { error, submit: send, submitting } = useDvpCreateSubmit(cluster);
 
@@ -181,17 +179,17 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     refString: "",
   });
 
-  const destinations = useDvpDestinations();
+  const destinations = useDvpDestinations(context);
   const parties = deriveDvpParties({ partyA: values.partyA, partyB: values.partyB }, context);
   const { expiry, refString } = values;
 
-  const ready = canCreateTrade({
+  const readyIgnoringExpiry = tradeAnsweredWithoutExpiry({
     asset,
     cash,
     partiesReady: parties.ready,
     destinationLooksWrong: destinations.anyLooksWrong,
-    expiry,
   });
+  const ready = readyIgnoringExpiry && expiry.trim().length > 0;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -230,6 +228,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     assetBalance: resolveWalletBalance(assetWallet, asset),
     cash,
     cashBalance: resolveWalletBalance(cashWallet, cash),
+    assetOptions,
     cashOptions,
     error,
     expiry,
@@ -241,6 +240,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
     refString,
     destinations,
     ready,
+    readyIgnoringExpiry,
     partiesReady: parties.ready,
     sameAddress: parties.sameAddress,
     request: parties.request,

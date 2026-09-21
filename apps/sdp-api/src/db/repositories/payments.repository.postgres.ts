@@ -148,9 +148,12 @@ function buildTransferListWhere(params: ListTransfersInput): {
   return { whereClause: clauses.join(" AND "), values };
 }
 
-type PaymentTransferProjectionRow = Record<string, unknown> & { kind: PaymentTransactionKind };
+export type PaymentTransferProjectionRow = Record<string, unknown> & {
+  kind: PaymentTransactionKind;
+};
 
-function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
+/** Maps a raw `payment_transfers` projection row into the shared row shape; `kind` must ride the SELECT. */
+export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,

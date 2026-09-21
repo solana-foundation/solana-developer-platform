@@ -52,13 +52,16 @@ export type ErrorCode =
   | "CUSTODY_ERROR"
   // Transaction errors
   | "TRANSACTION_FAILED"
+  | "TRANSACTION_EXPIRED"
   | "SIGNING_FAILED"
   | "SIGNING_REJECTED"
   | "SIGNING_PENDING"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
   | "ESTIMATE_NOT_AVAILABLE"
-  | "UNSUPPORTED_CORRIDOR";
+  | "UNSUPPORTED_CORRIDOR"
+  // Earn volume caps (ADR 0004)
+  | "VAULT_EXPOSURE_CAP";
 
 export interface ApiError {
   code: ErrorCode;
@@ -117,6 +120,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   CUSTODY_ERROR: 502,
   // Transaction errors
   TRANSACTION_FAILED: 400,
+  // 409, like an expired quote: the request was well-formed, but the thing it
+  // names can no longer be acted on and must be rebuilt.
+  TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
   SIGNING_PENDING: 202,
@@ -124,6 +130,8 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   PROVIDER_UNAVAILABLE: 503,
   ESTIMATE_NOT_AVAILABLE: 503,
   UNSUPPORTED_CORRIDOR: 400,
+  // Earn volume caps (ADR 0004)
+  VAULT_EXPOSURE_CAP: 409,
 };
 
 export const PUBLIC_INTERNAL_ERROR_MESSAGE = "An internal error occurred";
@@ -176,6 +184,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   CUSTODY_ERROR: "Custody provider error",
   // Transaction errors
   TRANSACTION_FAILED: "Transaction failed",
+  TRANSACTION_EXPIRED: "The transaction's blockhash expired before it was submitted",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
   SIGNING_PENDING: "Signing request pending approval",
@@ -184,6 +193,9 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   ESTIMATE_NOT_AVAILABLE:
     "An indicative estimate is not available; the rate is known at quote time",
   UNSUPPORTED_CORRIDOR: "Provider does not support this currency corridor",
+  // Earn volume caps (ADR 0004)
+  VAULT_EXPOSURE_CAP:
+    "This deposit would take SDP's total holdings in the vault past its exposure cap",
 };
 
 export class AppError extends Error {
@@ -257,6 +269,11 @@ export function conflict(message?: string, details?: Record<string, unknown>): A
   return new AppError("CONFLICT", message, details);
 }
 
+/** A signed transaction whose blockhash window closed before submission. */
+export function transactionExpired(message?: string, details?: Record<string, unknown>): AppError {
+  return new AppError("TRANSACTION_EXPIRED", message, details);
+}
+
 export function rateLimited(message?: string): AppError {
   return new AppError("RATE_LIMITED", message);
 }
@@ -287,6 +304,19 @@ export function accountFrozen(message?: string, details?: Record<string, unknown
 
 export function providerNotConfigured(message?: string): AppError {
   return new AppError("PROVIDER_NOT_CONFIGURED", message);
+}
+
+/**
+ * ADR 0004 layer 1: the deposit would push SDP-wide holdings in one vault past
+ * its cap. A 409 rather than a 400 because nothing about the request is
+ * malformed; the vault is full for SDP right now, and the same request may be
+ * admissible after other customers exit. Never raised on a withdrawal.
+ */
+export function vaultExposureCapExceeded(
+  message?: string,
+  details?: Record<string, unknown>
+): AppError {
+  return new AppError("VAULT_EXPOSURE_CAP", message, details);
 }
 
 export function providerUnavailable(message?: string, details?: Record<string, unknown>): AppError {

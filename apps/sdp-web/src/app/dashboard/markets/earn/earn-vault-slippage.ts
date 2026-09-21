@@ -79,6 +79,63 @@ export function floorForTolerance(
 }
 
 /**
+ * The floor the current quote and tolerance imply, or `undefined` while they
+ * cannot — shared verbatim by the DEPOSIT (`sharesOut`/`shareDecimals`) and
+ * WITHDRAWAL (`assetsOut`/`assetDecimals`) modals, which name their quote
+ * fields through the accessors.
+ */
+export function derivedMinOut<Preview extends { blockingIssues: readonly unknown[] }>(
+  toleranceBps: number | null,
+  quote: VaultQuoteState<Preview>,
+  quantity: (preview: Preview) => string,
+  decimals: (preview: Preview) => number
+): string | undefined {
+  if (toleranceBps === null || quote.kind !== "quoted") return undefined;
+  if (quote.preview.blockingIssues.length > 0) return undefined;
+  // `null` — a zero-output quote — has no satisfiable floor; blocking the
+  // submission is the only honest answer (see `floorForTolerance`).
+  return (
+    floorForTolerance(quantity(quote.preview), decimals(quote.preview), toleranceBps) ?? undefined
+  );
+}
+
+/**
+ * What a submission's floor must be, decided from the idempotency-key
+ * resolution and the flow's floor memo:
+ *
+ * - `fresh`: the resolution carries a brand-new key — the floor is the one
+ *   derived from the live quote, remembered for exactly that key's future
+ *   replays.
+ * - `replay`: the key is a REUSE — a held approval's replay or a kept key's
+ *   retry after an ambiguous failure — and the memo still holds the floor it
+ *   was MINTED with, which must go out verbatim. A freshly derived floor would
+ *   pair the reused key with a changed request, which the API refuses (its
+ *   idempotency fingerprint includes the floor) and the refusal retires the
+ *   key.
+ * - `unavailable`: the key is a reuse but the memo has LOST its floor —
+ *   evicted, another tab, storage refused. Sending a freshly derived floor
+ *   would risk exactly the changed-request refusal above, and the refusal
+ *   retires the key and lets a later submit move funds a second time while
+ *   the first attempt may already have executed. The caller must stop the
+ *   submission instead of silently re-flooring.
+ */
+export type VaultFloorReplay =
+  | { kind: "fresh"; floor: string | null }
+  | { kind: "replay"; floor: string | null }
+  | { kind: "unavailable" };
+
+export function floorToReplay(
+  resolution: { wasHeld: boolean; wasReused: boolean },
+  recallFloor: (fingerprint: string) => string | null | undefined,
+  fingerprint: string,
+  freshFloor: string | null
+): VaultFloorReplay {
+  if (!resolution.wasHeld && !resolution.wasReused) return { kind: "fresh", floor: freshFloor };
+  const floor = recallFloor(fingerprint);
+  return floor === undefined ? { kind: "unavailable" } : { kind: "replay", floor };
+}
+
+/**
  * True when the quote expects ZERO atoms out — nothing any floor could protect.
  * An over-scale (malformed) quote is not PROVABLY zero, so it answers `false`;
  * the floor it derives is `null` and blocks the submission instead.

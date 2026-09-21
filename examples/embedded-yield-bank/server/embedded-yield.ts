@@ -1,95 +1,169 @@
+import "server-only";
+
 import type { KeyPairSigner } from "@solana/kit";
-import type {
-  DashboardData,
-  TokenBalance,
-  TokenEarnings,
-  YieldMovement,
-  YieldPosition,
-  YieldStrategy,
-} from "../src/types.ts";
-import { addDecimals, floorForTolerance } from "./decimal.ts";
-import { getConfig, getDemoSigner, getFeePayerSigner } from "./env.ts";
-import { EmbeddedYieldClient, SdpApiError } from "./sdp-client.ts";
-import { readWalletBalances, signTransaction } from "./solana.ts";
+import { floorForTolerance, isPositiveDecimal } from "../src/lib/decimal";
+import type { DashboardData, YieldMovement, YieldStrategy } from "../src/types";
+import { getConfig, getDemoSigner, getFeePayerSigner } from "./env";
+import {
+  belongsToStrategy,
+  canDeposit,
+  isOpenPosition,
+  pickSavingsStrategy,
+  requireDepositMint,
+  sharesForAmount,
+  summarizeSavings,
+} from "./savings";
+import { EmbeddedYieldClient, SdpApiError } from "./sdp-client";
+import { assertRpcCluster, readTokenBalance, signTransaction } from "./solana";
 
-const POSITIVE_DECIMAL_PATTERN = /^(?=.*[1-9])\d+(\.\d+)?$/;
 const DEFAULT_WITHDRAWAL_TOLERANCE_BPS = 10;
+const STRATEGY_CACHE_MS = 5 * 60_000;
 
-export async function loadDashboard(): Promise<DashboardData> {
+let strategyCache:
+  | { strategies: YieldStrategy[]; expiresAt: number }
+  | undefined;
+
+/**
+ * The catalogue changes rarely and the dashboard polls often. Reading it once
+ * every few minutes keeps the steady-state refresh to two SDP calls and one
+ * RPC read. An actively watched movement adds one short-lived chain-aware
+ * detail read so confirmation reaches the UI without waiting for the
+ * background sweep.
+ */
+async function listStrategies(
+  client: EmbeddedYieldClient
+): Promise<YieldStrategy[]> {
+  if (strategyCache && strategyCache.expiresAt > Date.now()) {
+    return strategyCache.strategies;
+  }
+  const strategies = await client.listStrategies();
+  strategyCache = { strategies, expiresAt: Date.now() + STRATEGY_CACHE_MS };
+  return strategies;
+}
+
+export async function loadDashboard(
+  activeMovementIds: readonly string[] = []
+): Promise<DashboardData> {
   const config = getConfig();
   const { owner, feePayer } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
-  const strategies = await client.listStrategies();
+  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
+  const strategy = pickSavingsStrategy(
+    await listStrategies(client),
+    config.SOLANA_CLUSTER,
+    config.DEMO_STRATEGY_ID
+  );
+  const tokenMint = requireDepositMint(strategy);
 
-  const [positions, movements, earnings, walletBalances] = await Promise.all([
+  let [positions, allMovements, checking] = await Promise.all([
     client.listPositions(owner.address),
-    client.listActivity(owner.address),
-    client.getEarnings(owner.address),
-    readWalletBalances(config.SOLANA_RPC_URL, owner.address, strategies),
+    client.listMovements(owner.address),
+    readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
   ]);
 
-  const fundedDepositMints = new Set(
-    walletBalances.tokens
-      .filter((balance) => balance.amount !== "0")
-      .map((balance) => balance.mint)
+  // Scope by strategy, never by open-position ids: SDP drops a position from
+  // the list once it closes, but its movements (and their payouts) remain.
+  const confirmation = await refreshConfirmingMovements(
+    client,
+    allMovements.filter((movement) => belongsToStrategy(movement, strategy)),
+    activeMovementIds
   );
-  const livePositions = positions.filter((position) =>
-    position.shares === undefined
-      ? true
-      : POSITIVE_DECIMAL_PATTERN.test(position.shares)
-  );
+  const movements = confirmation.movements;
+
+  // The first balance reads can race the detail read that discovers Solana
+  // confirmation. Re-read them after that handoff so the response uses balance
+  // snapshots requested after confirmation instead of the earlier reads.
+  if (confirmation.reachedConfirmation) {
+    [positions, checking] = await Promise.all([
+      client.listPositions(owner.address),
+      readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
+    ]);
+  }
+
+  const position =
+    positions
+      .filter((candidate) => belongsToStrategy(candidate, strategy))
+      .find(isOpenPosition) ?? null;
+  const { total, ...savings } = summarizeSavings(checking, position, movements);
+
   return {
     wallet: {
       address: owner.address,
-      solBalance: walletBalances.solBalance,
-      cluster: "devnet",
+      cluster: config.SOLANA_CLUSTER,
       feesPaidBy: feePayer ? "northstar" : "customer",
     },
-    balances: walletBalances.tokens,
-    strategies: strategies.filter(
-      (strategy) =>
-        strategy.fundable &&
-        strategy.status === "active" &&
-        strategy.hostCluster === "devnet" &&
-        fundedDepositMints.has(strategy.depositMints[0] ?? "")
-    ),
-    positions: livePositions,
+    token: { mint: tokenMint, symbol: checking.symbol },
+    checking: { balance: checking.amount },
+    savings: { strategy, position, ...savings },
+    total,
     movements,
-    earnings,
-    totals: summarizeAccountToken(
-      walletBalances.tokens,
-      livePositions,
-      earnings
-    ),
     connection: {
       apiLabel: localApiLabel(config.SDP_API_BASE_URL),
-      projectScoped: true,
       checkedAt: new Date().toISOString(),
     },
   };
 }
 
-export async function deposit(
-  strategyId: string,
-  amount: string
-): Promise<YieldMovement> {
+/**
+ * Detail reads check the exact signature on Solana and advance a submitted
+ * movement immediately. Confirmation is the UI finish line; finalized rows no
+ * longer need a fast read because SDP continues that bookkeeping itself.
+ */
+export async function refreshConfirmingMovements(
+  client: Pick<EmbeddedYieldClient, "getMovement">,
+  movements: readonly YieldMovement[],
+  activeMovementIds: readonly string[]
+): Promise<{
+  movements: YieldMovement[];
+  reachedConfirmation: boolean;
+}> {
+  const active = new Set(activeMovementIds);
+  const refreshed = await Promise.all(
+    movements.map(async (movement) => {
+      if (
+        !active.has(movement.movementId) ||
+        (movement.status !== "requested" && movement.status !== "submitted")
+      ) {
+        return movement;
+      }
+      try {
+        return await client.getMovement(movement.movementId);
+      } catch {
+        // Keep the last durable state on a transient detail-read failure. The
+        // next browser refresh and SDP's background reconciler both retry.
+        return movement;
+      }
+    })
+  );
+  return {
+    movements: refreshed,
+    reachedConfirmation: refreshed.some((movement, index) => {
+      const previous = movements[index];
+      return (
+        previous !== undefined &&
+        (previous.status === "requested" || previous.status === "submitted") &&
+        (movement.status === "confirmed" || movement.status === "finalized")
+      );
+    }),
+  };
+}
+
+/** Move money from checking into savings. */
+export async function deposit(amount: string): Promise<YieldMovement> {
   assertAmount(amount);
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
-  const strategy = (await client.listStrategies()).find(
-    (candidate) => candidate.id === strategyId
+  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
+  const strategy = pickSavingsStrategy(
+    await listStrategies(client),
+    config.SOLANA_CLUSTER,
+    config.DEMO_STRATEGY_ID
   );
-  if (
-    !strategy?.fundable ||
-    strategy.status !== "active" ||
-    strategy.hostCluster !== "devnet"
-  ) {
-    throw new Error("This strategy is not available for devnet deposits");
+  if (!canDeposit(strategy)) {
+    throw new Error(`${strategy.name} is not accepting deposits right now`);
   }
-  const sourceTokenMint = strategy.depositMints[0];
-  if (!sourceTokenMint)
-    throw new Error("This strategy does not publish a direct deposit mint");
+  const sourceTokenMint = requireDepositMint(strategy);
 
   // 1. Preview only when the strategy requires a quote-derived floor.
   let minSharesOut: string | undefined;
@@ -103,7 +177,7 @@ export async function deposit(
     );
   }
 
-  // 2. Build an unsigned transaction for the managed demo wallet.
+  // 2. Build an unsigned transaction for the customer's managed wallet.
   const built = await client.buildDeposit({
     strategyId: strategy.id,
     ownerAddress: owner.address,
@@ -114,47 +188,42 @@ export async function deposit(
   });
   assertBuiltFeePayer(built.feePayer, feePayer?.address);
 
-  // 3. The owner signs locally, joined by Northstar when it pays the fees.
+  // 3. The owner signs on the server, joined by Northstar when it pays fees.
   // Private keys never reach the browser.
   const signedTransaction = await signTransaction(built.transaction, all);
 
   // 4. Submit with a unique key. An uncertain retry must reuse this exact key.
   const idempotencyKey = `northstar-deposit-${crypto.randomUUID()}`;
-  const movement = await retryUncertainSubmit(() =>
+  return retryUncertainSubmit(() =>
     client.submitDeposit(built.transactionId, signedTransaction, idempotencyKey)
   );
-
-  // 5. Poll through confirmed. Only finalized and failed are terminal.
-  return client.waitForMovement(movement.movementId);
+  // Settlement is polled by the browser through the dashboard route, which
+  // keeps this handler short enough for serverless functions.
 }
 
-export async function withdraw(
-  positionId: string,
-  shares: string
-): Promise<YieldMovement> {
-  assertAmount(shares);
+/** Move money from savings back into checking. */
+export async function withdraw(amount: string): Promise<YieldMovement> {
+  assertAmount(amount);
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
-  const [positions, strategies] = await Promise.all([
+  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
+  const [strategies, positions] = await Promise.all([
+    listStrategies(client),
     client.listPositions(owner.address),
-    client.listStrategies(),
   ]);
-  const position = positions.find((candidate) => candidate.id === positionId);
-  if (!position)
-    throw new Error("The position is not available to this demo wallet");
-  if (position.withdrawableShares === undefined) {
-    throw new Error(
-      "Live withdrawable shares are unavailable; refresh before retrying"
-    );
-  }
-
-  const strategy = strategies.find(
-    (candidate) =>
-      candidate.provider === position.provider &&
-      candidate.providerReference === position.providerReference
+  const strategy = pickSavingsStrategy(
+    strategies,
+    config.SOLANA_CLUSTER,
+    config.DEMO_STRATEGY_ID
   );
+  const position = positions
+    .filter((candidate) => belongsToStrategy(candidate, strategy))
+    .find(isOpenPosition);
+  if (!position) throw new Error("Savings is empty");
 
+  // The customer thinks in tokens; the vault redeems shares.
+  const shares = sharesForAmount(amount, position);
   const minAmountOut = await deriveWithdrawalFloor(
     client,
     position,
@@ -171,62 +240,18 @@ export async function withdraw(
   assertBuiltFeePayer(built.feePayer, feePayer?.address);
   const signedTransaction = await signTransaction(built.transaction, all);
   const idempotencyKey = `northstar-withdrawal-${crypto.randomUUID()}`;
-  const movement = await retryUncertainSubmit(() =>
+  return retryUncertainSubmit(() =>
     client.submitWithdrawal(
       built.transactionId,
       signedTransaction,
       idempotencyKey
     )
   );
-  return client.waitForMovement(movement.movementId);
-}
-
-export function summarizeAccountToken(
-  balances: readonly TokenBalance[],
-  positions: readonly YieldPosition[],
-  earnings: readonly TokenEarnings[]
-): DashboardData["totals"] {
-  const accountBalance =
-    balances.find((balance) => balance.symbol === "USDC") ?? balances[0];
-  const tokenMint = accountBalance?.mint ?? null;
-  const accountPositions = tokenMint
-    ? positions.filter((position) => position.tokenMint === tokenMint)
-    : [];
-  const accountEarnings = tokenMint
-    ? earnings.filter((item) => item.tokenMint === tokenMint)
-    : [];
-  const unavailableYieldPositions = accountPositions.filter(
-    (position) => position.tokenValue === undefined
-  ).length;
-  const available = accountBalance?.amount ?? "0";
-  const inYield = unavailableYieldPositions
-    ? undefined
-    : addDecimals(
-        accountPositions.map((position) => position.tokenValue ?? "0")
-      );
-  const earned = accountEarnings.some((item) => item.earned === undefined)
-    ? undefined
-    : addDecimals(
-        accountEarnings
-          .map((item) => item.earned)
-          .filter((value): value is string => value !== undefined)
-      );
-
-  return {
-    tokenMint,
-    tokenSymbol: accountBalance?.symbol ?? null,
-    available,
-    inYield,
-    portfolio:
-      inYield === undefined ? undefined : addDecimals([available, inYield]),
-    earned,
-    unavailableYieldPositions,
-  };
 }
 
 export async function deriveWithdrawalFloor(
   client: Pick<EmbeddedYieldClient, "previewWithdrawal">,
-  position: Pick<YieldPosition, "id">,
+  position: { id: string },
   shares: string,
   strategy: YieldStrategy | undefined
 ): Promise<string | undefined> {
@@ -298,7 +323,7 @@ async function retryUncertainSubmit(
 }
 
 function assertAmount(amount: string): void {
-  if (!POSITIVE_DECIMAL_PATTERN.test(amount))
+  if (!isPositiveDecimal(amount))
     throw new Error("Enter a positive decimal amount");
 }
 

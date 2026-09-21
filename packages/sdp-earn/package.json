@@ -76,11 +76,12 @@
     "lint": "biome check src/"
   },
   "dependencies": {
+    "@sdp/redaction": "workspace:*",
     "@sdp/types": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "26.4.0",
-    "tsx": "4.23.12",
+    "@types/node": "26.5.1",
+    "tsx": "4.23.13",
     "typescript": "6.0.3"
   }
 }

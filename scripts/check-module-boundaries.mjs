@@ -98,7 +98,13 @@ const MODULE_METADATA = [
     name: "@sdp/earn",
     directory: "packages/sdp-earn",
     purpose: "Earn domain services, yield strategies, and vault-infra providers.",
-    allowedDependencies: ["@sdp/payments", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: [
+      "@sdp/payments",
+      "@sdp/redaction",
+      "@sdp/rpc",
+      "@sdp/solana",
+      "@sdp/types",
+    ],
   },
   {
     name: "@sdp/env-config",
@@ -146,7 +152,8 @@ const MODULE_METADATA = [
   {
     name: "@sdp/veda",
     directory: "packages/sdp-veda",
-    purpose: "Kit-native Veda SVM vault deposit plans and position reads over @vedatech/svm-sdk.",
+    purpose:
+      "Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk.",
     // The arrow points INWARD and only inward: this package depends on
     // @sdp/earn (for the provider contract and the catalogue client it extends),
     // and @sdp/earn must never depend back — its hourly catalogue cron would

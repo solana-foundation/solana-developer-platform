@@ -170,7 +170,10 @@
       "sandboxSimulationFailed": "Sandbox simulation failed.",
       "muralSandboxCurrencyUnsupported": "Mural sandbox payin does not support {currency}.",
       "transferSignatureMissing": "Transfer did not return a signature (status: {status}).",
+      "transferHeldForApproval": "This wallet's policy needs this transfer approved before it's sent, so MoneyGram can't continue. Nothing has moved yet. If it shouldn't go out later, cancel the request in Approvals.",
+      "transferApprovalPending": "Waiting for approval",
       "offrampManualDescription": "Send {amount} {token} to the deposit address below before the quote expires. The provider converts it at the locked rate and pays out to the saved bank account automatically.",
+      "offrampHeldDescription": "Nothing has moved yet. Once approved, {amount} {token} is sent to the deposit address below. If the quote expires first, the send won't go through and you'll need a new quote.",
       "noPayoutProviders": "No payout providers are enabled for this organization.",
       "providerPayout": "{provider} payout",
       "noDepositProviders": "No deposit providers are enabled for this organization.",
@@ -297,7 +300,10 @@
       "transferFailed": "Transfer failed.",
       "transferSuccess": "Your transfer was sent successfully.",
       "transferStatus": "Status: {status}",
-      "viewOnExplorer": "View on explorer"
+      "viewOnExplorer": "View on explorer",
+      "approvalPendingTitle": "Waiting for approval",
+      "approvalPendingDescription": "This wallet's policy needs someone to approve the transfer before it's sent. Nothing has moved yet.",
+      "viewApprovalRequest": "View approval request"
     },
     "onchainReceive": {
       "wallet": "Wallet",
@@ -308,8 +314,9 @@
     "bvnk": {
       "agreementRequiredTitle": "Review and accept the agreements",
       "agreementRequiredDescription": "BVNK requires the counterparty to accept the platform agreement for their tax residence before their details are collected.",
-      "viewAgreement": "View agreement",
       "acceptAgreements": "I agree and continue",
+      "agreementSigningTitle": "Confirming agreement",
+      "agreementSigningDescription": "Waiting for the provider to confirm the signed agreement. This usually takes a few seconds.",
       "verificationRequiredTitle": "Verify your identity",
       "verificationRequiredDescription": "BVNK partners with Sumsub to confirm your identity before activating your funding account. Hit “Complete Verification” to get started — this page refreshes automatically once you're approved, and your instructions will appear right here.",
       "verificationInReviewTitle": "Verification in review",
@@ -322,11 +329,15 @@
       "provisioningFailedDescription": "Something went wrong provisioning your funding account. Please try again.",
       "readyTitle": "Preparing your instructions",
       "readyDescription": "Your funding account is ready — fetching your details now.",
-      "onrampProvisioningDetail": "Provisioning a BVNK wallet and fiat→crypto payment rule for this quote.",
+      "onrampProvisioningDetail": "Provisioning a BVNK wallet and fiat conversion account for this quote.",
       "offrampProvisioningDetail": "Provisioning a dedicated BVNK payout wallet for this currency.",
       "simulateDeposit": "Simulate Deposit",
       "simulating": "Simulating...",
-      "depositSimulated": "Deposit Simulated"
+      "depositSimulated": "Deposit Simulated",
+      "agreementConsentPrefix": "I have read and agree to the",
+      "privacyPolicy": "privacy policy",
+      "settlementProcessing": "Processing at BVNK",
+      "settlementCompleted": "Completed"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verify your identity",
@@ -465,7 +476,6 @@
       "notes": "Notes",
       "depositAddress": "Deposit address",
       "bankCode": "Bank code",
-      "paymentReference": "Payment reference",
       "identityVerificationRequired": "Identity verification required",
       "completeVerification": "Complete verification",
       "provisioningAccount": "BVNK is provisioning your virtual bank account",
@@ -477,7 +487,9 @@
       "quotedAmount": "the quoted amount",
       "cryptoDeposit": "{currency} deposit",
       "virtualAccount": "{currency} virtual account",
-      "payin": "{currency} payin"
+      "payin": "{currency} payin",
+      "paymentReferenceRequired": "Payment reference (required)",
+      "remittancePrefix": "Remittance prefix"
     },
     "providerRisk": {
       "close": "Close {title}",
@@ -596,6 +608,11 @@
       "providerAccountStatus": "Status",
       "copyCustomerId": "Copy customer ID",
       "customerIdCopied": "Customer ID copied",
+      "taxResidence": "Tax residence",
+      "agreementSigned": "Signed",
+      "agreementAwaitingSignature": "Awaiting signature",
+      "viewAgreement": "Agreement",
+      "viewPrivacyPolicy": "Privacy policy",
       "noPayoutAccounts": "No payout accounts yet.",
       "addExternalAccountTitle": "Add Crypto Address",
       "manage": "Manage",
@@ -707,7 +724,11 @@
       "lastUpdated": "Last updated",
       "copy": "Copy {label}",
       "viewReceipt": "View receipt",
-      "receipt": "Receipt"
+      "receipt": "Receipt",
+      "status": "Status",
+      "payinId": "Pay-in ID",
+      "fiatSent": "Amount converted",
+      "cryptoToReceive": "Crypto to receive"
     },
     "requestFailed": "Request failed.",
     "submitting": "Submitting...",
@@ -1032,8 +1053,14 @@
           "onramp": "Onramp",
           "offramp": "Offramp"
         },
-        "earn": { "deposit": "Deposit", "withdraw": "Withdraw" },
-        "dvp": { "fund": "Fund leg", "close": "Close leg" },
+        "earn": {
+          "deposit": "Deposit",
+          "withdraw": "Withdraw"
+        },
+        "dvp": {
+          "fund": "Fund leg",
+          "close": "Close leg"
+        },
         "private_channels": {
           "transfer": "Transfer",
           "deposit": "Deposit",

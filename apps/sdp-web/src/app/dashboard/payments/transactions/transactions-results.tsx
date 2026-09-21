@@ -116,14 +116,16 @@ function TransactionDetail({
           </div>
         ))}
       </dl>
-      <EntityLink
-        className="mt-5 text-sm"
-        href={TRANSACTION_MODULE_HREFS[transaction.module](transaction.moduleId)}
-      >
-        {t("DashboardPayments.transactions.viewInModule", {
-          module: t(`DashboardPayments.transactions.modules.${transaction.module}` as MessageKey),
-        })}
-      </EntityLink>
+      {transaction.module !== "payments" && (
+        <EntityLink
+          className="mt-5 text-sm"
+          href={TRANSACTION_MODULE_HREFS[transaction.module](transaction.moduleId)}
+        >
+          {t("DashboardPayments.transactions.viewInModule", {
+            module: t(`DashboardPayments.transactions.modules.${transaction.module}` as MessageKey),
+          })}
+        </EntityLink>
+      )}
     </div>
   );
 }

@@ -52,6 +52,7 @@ import {
   type ApprovalInboxFilters,
   type ApprovalInboxTab,
   approvalApiKeyLabel,
+  approvalBadgeStatus,
   approvalReason,
   approvalWalletLabel,
   EMPTY_APPROVAL_FILTERS,
@@ -577,7 +578,7 @@ function ApprovalRequestRows({
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <ApprovalStatusBadge status={request.status} />
+                  <ApprovalStatusBadge status={approvalBadgeStatus(request)} />
                   <span className="text-xs text-secondary">
                     {formatApprovalRelativeTime(request.createdAt, locale, relativeTimeBase)}
                   </span>
@@ -612,10 +613,10 @@ function ApprovalRequestRows({
       </div>
 
       <div className="hidden lg:block">
-        <Table className="min-w-0 rounded-none border-0 [&_table]:min-w-[1118px] [&_table]:table-fixed">
+        <Table className="min-w-0 rounded-none border-0 [&_table]:min-w-[1178px] [&_table]:table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[88px]">{t("DashboardApprovals.statusColumn")}</TableHead>
+              <TableHead className="w-[148px]">{t("DashboardApprovals.statusColumn")}</TableHead>
               <TableHead className="w-[145px]">{t("DashboardApprovals.walletColumn")}</TableHead>
               <TableHead className="w-[145px]">{t("DashboardApprovals.operationColumn")}</TableHead>
               <TableHead className="w-[120px]">
@@ -651,7 +652,7 @@ function ApprovalRequestRows({
               return (
                 <TableRow key={request.id} className="group hover:bg-fill-subtle">
                   <ApprovalCell>
-                    <ApprovalStatusBadge status={request.status} />
+                    <ApprovalStatusBadge status={approvalBadgeStatus(request)} />
                   </ApprovalCell>
                   <ApprovalCell>
                     <Link href={href} className="font-medium text-primary hover:underline">

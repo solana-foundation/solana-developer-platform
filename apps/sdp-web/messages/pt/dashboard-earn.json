@@ -307,7 +307,10 @@
       "liquidityFact": "{liquidity} de liquidez",
       "apyFact": "{apy} de APY",
       "unavailableClusterDescription": "Esta estratégia roda em uma rede diferente da deste projeto. Mude para um projeto nessa rede para integrá-la.",
-      "unavailableEnvironmentProductionDescription": "Este provedor aceita novos depósitos em vault somente de projetos de Produção. Mude para um projeto de Produção para integrá-lo."
+      "unavailableEnvironmentProductionDescription": "Este provedor aceita novos depósitos em vault somente de projetos de Produção. Mude para um projeto de Produção para integrá-lo.",
+      "apiKeyCalloutBefore": "Você precisa de uma",
+      "apiKeyCalloutLink": "Developer API key",
+      "apiKeyCalloutAfter": "para este projeto (inclui earn:read e earn:write). Mantenha-a no seu servidor, nunca no cliente."
     },
     "liquidity": {
       "instant": "Instantânea",
@@ -556,7 +559,13 @@
       "statusFundedTooEarly": "Com funding",
       "toastReclaimed": "Seu depósito está a caminho de volta.",
       "txFundingSent": "Enviada da sua Wallet",
-      "viewTransaction": "Ver transação"
+      "viewTransaction": "Ver transação",
+      "legRefusedTradeClosing": "Este trade está sendo liquidado ou cancelado, então nada foi enviado.",
+      "closeRefusedFailedOnChain": "A rede recusou esta operação, então nada foi movimentado. Atualize o trade para ver como ele está.",
+      "closeRefusedInProgress": "Este trade já está sendo liquidado ou cancelado. Verifique novamente em instantes.",
+      "closeRefusedLegMoving": "Uma perna ainda está sendo financiada ou recuperada. Tente novamente assim que ela concluir.",
+      "toastCancelSent": "Cancelamento enviado. O trade é atualizado assim que for confirmado.",
+      "toastSettleSent": "Liquidação enviada. O trade é atualizado assim que for confirmado."
     }
   },
   "DashboardEarn": {

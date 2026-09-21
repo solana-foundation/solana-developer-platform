@@ -65,10 +65,11 @@ async function fetchWalletBalances(): Promise<Record<string, CustodyWalletTokenB
 
   return Object.fromEntries(
     body.data.wallets
-      .filter((wallet): wallet is { walletId: string; balances?: CustodyWalletTokenBalance[] } =>
-        Boolean(wallet.walletId)
+      .filter(
+        (wallet): wallet is { walletId: string; balances: CustodyWalletTokenBalance[] } =>
+          Boolean(wallet.walletId) && Array.isArray(wallet.balances)
       )
-      .map((wallet) => [wallet.walletId, wallet.balances ?? []])
+      .map((wallet) => [wallet.walletId, wallet.balances])
   );
 }
 
@@ -116,9 +117,11 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     {
       key: "wallet-card-balances",
       ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
+      version: 2,
     }
   );
-  const batchFailed = Boolean(batchError);
+  const batchFailed =
+    Boolean(batchError) || (batchBalances !== undefined && batchBalances[walletId] === undefined);
   const { data: fallbackBalances, error: fallbackError } = usePersistedDashboardSWR<
     CustodyWalletTokenBalance[]
   >(

@@ -6,7 +6,7 @@
  * Successful and failed action outcomes, and what each request carries.
  */
 
-import { DVP_LEG_REFUSAL } from "@sdp/types";
+import { DVP_CLOSE_REFUSAL, DVP_LEG_REFUSAL } from "@sdp/types";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
@@ -27,12 +27,17 @@ function withI18n({ children }: { children: ReactNode }) {
 
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 const originalFetch = global.fetch;
 
-/** What a close, fund or reclaim answers with: the transaction it broadcast. */
-const BROADCAST = { data: { tradeId: "dvp_1", action: "settle", signature: "sig_close" } };
+/**
+ * What a close, fund or reclaim answers with: the transaction it broadcast. A
+ * close also says whether it confirmed; a leg action ignores the field.
+ */
+const BROADCAST = {
+  data: { tradeId: "dvp_1", action: "settle", signature: "sig_close", confirmed: true },
+};
 
 function respond(status: number, body: unknown = status < 300 ? BROADCAST : {}) {
   return vi.fn().mockResolvedValue({
@@ -58,6 +63,37 @@ describe("useDvpTradeActions", () => {
 
     await act(async () => await result.current.act("settle"));
 
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  // 202 is an ok status, so without its own branch the success read fails on an
+  // approval envelope and the action reports as unconfirmed: a held funding
+  // looking like a broken one.
+  it.each([
+    ["fund", "Funding pending approval"],
+    ["settle", "Settlement pending approval"],
+  ] as const)("says %s is pending approval when policy holds it", async (action, expected) => {
+    global.fetch = respond(202, {
+      error: { code: "SIGNING_PENDING", details: { approvalRequestId: "appr_1" } },
+    }) as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(async () =>
+      action === "fund"
+        ? await result.current.act("fund", { side: "a", walletId: "cwlt_1", symbol: "ATD" })
+        : await result.current.act("settle")
+    );
+
+    expect(toast.info).toHaveBeenCalledWith(
+      expected,
+      expect.objectContaining({
+        description:
+          "This wallet's policy requires approval before it sends. Nothing has moved yet.",
+      })
+    );
+    expect(toast.error).not.toHaveBeenCalled();
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   });
 
@@ -226,7 +262,7 @@ describe("useDvpTradeActions", () => {
   it("links the broadcast transaction from the success toast", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     global.fetch = respond(200, {
-      data: { tradeId: "dvp_1", action: "settle", signature: "sig_close" },
+      data: { tradeId: "dvp_1", action: "settle", signature: "sig_close", confirmed: true },
     }) as never;
     const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
       wrapper: withI18n,
@@ -244,6 +280,95 @@ describe("useDvpTradeActions", () => {
       "https://explorer.solana.com/tx/sig_close?cluster=devnet",
       "_blank",
       "noopener,noreferrer"
+    );
+  });
+
+  // A close that went out but did not confirm within the request has not
+  // settled anything yet. Saying "Trade settled" there is the wrong status.
+  it.each([
+    ["settle", true, "Trade settled. Both legs delivered."],
+    ["settle", false, "Settlement sent. The trade updates once it confirms."],
+    ["cancel", true, "Trade cancelled. Both legs refunded."],
+    ["cancel", false, "Cancellation sent. The trade updates once it confirms."],
+  ] as const)(
+    "reports a %s with confirmed %s in its own words",
+    async (action, confirmed, copy) => {
+      global.fetch = respond(200, {
+        data: { tradeId: "dvp_1", action, signature: "sig_close", confirmed },
+      }) as never;
+      const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+        wrapper: withI18n,
+      });
+
+      await act(async () => await result.current.act(action));
+
+      expect(toast.success).toHaveBeenCalledWith(copy, expect.anything());
+    }
+  );
+
+  // A close answer without the flag is not read as confirmed.
+  it("reports a close answer missing its confirmation as unconfirmed", async () => {
+    global.fetch = respond(200, {
+      data: { tradeId: "dvp_1", action: "settle", signature: "sig_close" },
+    }) as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(async () => await result.current.act("settle"));
+
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      "SDP sent this but couldn't read the answer. Check the trade before trying again.",
+      expect.anything()
+    );
+  });
+
+  it.each([
+    [
+      DVP_CLOSE_REFUSAL.closeInProgress,
+      "This trade is already being settled or cancelled. Check back in a moment.",
+    ],
+    [
+      DVP_CLOSE_REFUSAL.legMoving,
+      "A leg is still being funded or reclaimed. Try again once it lands.",
+    ],
+    [
+      DVP_CLOSE_REFUSAL.closeFailedOnChain,
+      "The network refused this, so nothing moved. Refresh the trade to see where it stands.",
+    ],
+  ] as const)("names the %s close refusal in plain words", async (reason, copy) => {
+    global.fetch = respond(409, {
+      error: { message: "DvP trade dvp_1: a cancel is in flight", details: { reason } },
+    }) as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(async () => await result.current.act("settle"));
+
+    expect(toast.error).toHaveBeenCalledWith(copy, expect.anything());
+  });
+
+  it("says a leg action was refused because the trade is closing", async () => {
+    global.fetch = respond(409, {
+      error: {
+        message: "DvP trade dvp_1: a settle is in flight on this trade; nothing was sent",
+        details: { reason: DVP_LEG_REFUSAL.tradeClosing },
+      },
+    }) as never;
+    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+      wrapper: withI18n,
+    });
+
+    await act(
+      async () =>
+        await result.current.act("fund", { side: "a", walletId: "cwlt_1", symbol: "USDC" })
+    );
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "This trade is being settled or cancelled, so nothing was sent.",
+      expect.anything()
     );
   });
 

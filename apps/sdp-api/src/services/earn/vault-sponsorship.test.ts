@@ -16,7 +16,12 @@ const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q" as Address;
 
 function scope(env: Partial<Env> = {}) {
   return {
-    env: { EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true", ...env } as Env,
+    env: {
+      EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true",
+      SOLANA_NETWORK: "devnet",
+      KORA_RPC_URL: "https://kora-devnet.example",
+      ...env,
+    } as Env,
     input: {
       organizationId: "org_1",
       projectId: "prj_1",
@@ -64,17 +69,36 @@ describe("resolveVaultSponsorship", () => {
    * One API process serves both clusters, and withdrawals are deliberately NOT
    * environment-gated (ADR 0002 forbids money-out inheriting a money-in gate).
    * A deployment-global flag would therefore sponsor mainnet withdrawals the
-   * instant devnet deposits were enabled, against a mainnet Kora that
-   * allowlists no Kamino program and a disabled mainnet budget policy: a 5xx on
-   * a customer's exit.
+   * instant devnet deposits were enabled, against a paymaster this deployment
+   * may not even have for that cluster: a 5xx on a customer's exit. Which
+   * clusters sponsor is configuration: a cluster with no Kora endpoint answers
+   * wallet-pays, flag or no flag.
    */
-  it("never sponsors mainnet, even with the flag on", async () => {
-    const { env, input } = scope();
+  it("keeps mainnet at wallet-pays while no mainnet paymaster is configured, flag on", async () => {
+    const { env, input } = scope({ SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet" });
 
     const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
 
     expect(fee).toEqual({ kind: "wallet-pays" });
     expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+  });
+
+  it("sponsors mainnet once its own paymaster is wired (PRO-1738)", async () => {
+    const { env, input } = scope({
+      SOLANA_NETWORK: "devnet",
+      KORA_RPC_URL: "https://kora-devnet",
+      KORA_RPC_URL_MAINNET: "https://kora-mainnet",
+    });
+
+    const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
+
+    expect(fee).toMatchObject({ kind: "sponsored", sponsor: SPONSOR });
+    // The cluster rides the scope so the mainnet Kora signs and the mainnet
+    // budget is charged, not the process default's.
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ cluster: "mainnet-beta" })
+    );
   });
 
   it("goes through the shared sponsorship boundary, scoped to the custody wallet", async () => {
@@ -89,6 +113,7 @@ describe("resolveVaultSponsorship", () => {
       organizationId: "org_1",
       projectId: "prj_1",
       actor: { type: "wallet", id: "cwlt_1" },
+      cluster: "devnet",
     });
   });
 

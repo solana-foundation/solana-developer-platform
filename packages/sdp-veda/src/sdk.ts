@@ -1,6 +1,6 @@
 import { isVedaDepositMint } from "@sdp/types/veda-programs";
 import { type Address, address, type Instruction } from "@solana/kit";
-import { createVedaClient, VedaSdkError } from "@vedatech/svm-sdk";
+import { createVedaClient, parseLifecycleEvents, VedaSdkError } from "@vedatech/svm-sdk";
 import { accountExists, minimumBalanceForRentExemption } from "./accounts";
 import {
   allowedUserAccountForDeposit,
@@ -12,6 +12,10 @@ import { SdpVedaError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { readMintDecimals } from "./mint";
 import type { VedaClusterConfig } from "./programs";
+import {
+  queuedWithdrawalOwnerFundedAccountSizes,
+  queuedWithdrawalRequestAddress,
+} from "./queue-rent";
 import { chargeAtaCreationRentTo, createdAtaAddressForMint } from "./rent";
 import { createVedaRpc } from "./rpc";
 import type {
@@ -21,7 +25,20 @@ import type {
   VedaInstructionPlan,
   VedaPosition,
   VedaPositionInput,
+  VedaQueuedWithdrawalCancelInput,
+  VedaQueuedWithdrawalQuote,
+  VedaQueuedWithdrawalQuoteInput,
+  VedaQueuedWithdrawalRequest,
+  VedaQueuedWithdrawalRequestInput,
+  VedaQueuedWithdrawalRequestInputByAddress,
+  VedaQueuedWithdrawalRequestLookup,
+  VedaQueuedWithdrawalRequestPlan,
+  VedaQueuedWithdrawalRequestsInput,
   VedaRuntime,
+  VedaWithdrawalLifecycleEvent,
+  VedaWithdrawalLifecycleScales,
+  VedaWithdrawalOptions,
+  VedaWithdrawalOptionsInput,
   VedaWithdrawInput,
   VedaWithdrawQuote,
   VedaWithdrawQuoteInput,
@@ -557,6 +574,526 @@ export async function previewVedaWithdraw(
   };
 }
 
+/** Read both Veda exit routes and the SDP-facing asset's queue limits. */
+export async function readVedaWithdrawalOptions(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaWithdrawalOptionsInput
+): Promise<VedaWithdrawalOptions> {
+  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  let state: { shareDecimals: unknown };
+  let options: {
+    instant: boolean;
+    queued: boolean;
+    withdrawAuthority: Kit7;
+    queueState: Kit7 | null;
+  };
+  try {
+    state = await vaultClient.getState();
+    options = await vaultClient.getWithdrawalOptions();
+  } catch (cause) {
+    throw mapVedaSdkError(cause, `Veda could not read withdrawal options for ${input.vault}`);
+  }
+
+  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  let queueAsset: {
+    asset: Kit7;
+    allowWithdrawals: boolean;
+    secondsToMaturity: number;
+    minimumSecondsToDeadline: number;
+    minimumDiscountBps: number;
+    maximumDiscountBps: number;
+    minimumShares: bigint;
+  } | null;
+  try {
+    queueAsset = await vaultClient.getQueueWithdrawalAsset(asset.mint as Kit7);
+  } catch (cause) {
+    throw mapVedaSdkError(cause, `Veda could not read queue limits for ${input.vault}`);
+  }
+
+  const shareDecimals = shareMintDecimals(state.shareDecimals, input.vault);
+  return {
+    instant: options.instant,
+    // The SDK's vault-level flag cannot account for this specific asset's
+    // queue pause. Report the route as available only when both layers agree.
+    queued: options.queued && queueAsset?.allowWithdrawals === true,
+    withdrawAuthority: address(String(options.withdrawAuthority)),
+    queueState: options.queueState === null ? null : address(String(options.queueState)),
+    queueAsset:
+      queueAsset === null
+        ? null
+        : {
+            assetMint: address(String(queueAsset.asset)),
+            allowWithdrawals: queueAsset.allowWithdrawals,
+            secondsToMaturity: queueAsset.secondsToMaturity,
+            minimumSecondsToDeadline: queueAsset.minimumSecondsToDeadline,
+            minimumDiscountBps: queueAsset.minimumDiscountBps,
+            maximumDiscountBps: queueAsset.maximumDiscountBps,
+            minimumShares: formatAtomic(queueAsset.minimumShares, shareDecimals),
+            shareDecimals,
+          },
+  };
+}
+
+/** Preview the discounted assets and exact maturity/deadline of a queue request. */
+export async function previewVedaQueuedWithdrawal(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaQueuedWithdrawalQuoteInput
+): Promise<VedaQueuedWithdrawalQuote> {
+  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  let state: { shareDecimals: unknown };
+  try {
+    state = await vaultClient.getState();
+  } catch (cause) {
+    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+  }
+
+  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  const shareDecimals = shareMintDecimals(state.shareDecimals, input.vault);
+  const shares = acceptPositiveAtMintScale("shares", input.shares, shareDecimals);
+  const discountBps = queueInteger("discountBps", input.discountBps, 65_535);
+  const deadlineSeconds = queueInteger("deadlineSeconds", input.deadlineSeconds, 4_294_967_295);
+
+  let quote: {
+    assetsOut: bigint;
+    assetDecimals: unknown;
+    discountBps: number;
+    maturityTimestamp: bigint;
+    deadlineTimestamp: bigint;
+    issues: readonly { code: unknown; message: unknown }[];
+  };
+  try {
+    quote = await vaultClient.previewRequestWithdrawal({
+      asset: asset.mint as Kit7,
+      shares: shares.baseUnits,
+      discountBps,
+      deadlineSeconds,
+    });
+  } catch (cause) {
+    throw mapVedaSdkError(
+      cause,
+      `Veda could not quote a queued withdrawal for vault ${input.vault}`,
+      "WITHDRAW_REFUSED"
+    );
+  }
+
+  return {
+    assetMint: asset.mint,
+    shares: shares.canonical,
+    shareDecimals,
+    assets: formatAtomic(quote.assetsOut, asset.decimals),
+    assetDecimals: asset.decimals,
+    discountBps: quote.discountBps,
+    maturityTimestamp: quote.maturityTimestamp.toString(),
+    deadlineTimestamp: quote.deadlineTimestamp.toString(),
+    issues: quote.issues.map((issue) => ({
+      code: String(issue.code),
+      message: String(issue.message),
+    })),
+  };
+}
+
+/**
+ * Build the holder's queue request. The request PDA is read from the emitted
+ * instruction and verified against the expected queue program and owner.
+ */
+export async function buildVedaQueuedWithdrawalRequestPlan(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaQueuedWithdrawalRequestInput
+): Promise<VedaQueuedWithdrawalRequestPlan> {
+  const quote = await previewVedaQueuedWithdrawal(runtime, config, input);
+  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  let state: { shareMint: Kit7; shareDecimals: unknown };
+  try {
+    state = await vaultClient.getState();
+  } catch (cause) {
+    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+  }
+
+  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  if (asset.mint !== quote.assetMint) {
+    throw new SdpVedaError(
+      "INCOMPATIBLE_DEPLOYMENT",
+      `Veda vault ${input.vault} changed its SDP-facing asset while a queue request was built.`
+    );
+  }
+  const shares = acceptPositiveAtMintScale(
+    "shares",
+    input.shares,
+    shareMintDecimals(state.shareDecimals, input.vault)
+  );
+  const discountBps = queueInteger("discountBps", input.discountBps, 65_535);
+  const deadlineSeconds = queueInteger("deadlineSeconds", input.deadlineSeconds, 4_294_967_295);
+
+  let sdkPlan: { instructions: readonly Kit7[] };
+  try {
+    sdkPlan = await vaultClient.buildRequestWithdrawal({
+      owner: input.owner as Kit7,
+      asset: asset.mint as Kit7,
+      shares: shares.baseUnits,
+      discountBps,
+      deadlineSeconds,
+    });
+  } catch (cause) {
+    throw mapVedaSdkError(
+      cause,
+      `Veda could not build a queued withdrawal for vault ${input.vault}`,
+      "WITHDRAW_REFUSED"
+    );
+  }
+
+  const queueProgram = config.queueProgramAddress;
+  if (queueProgram === undefined) {
+    throw new SdpVedaError(
+      "UNSUPPORTED_VAULT",
+      `The Veda ${config.cluster} deployment has no queued-withdrawal program.`
+    );
+  }
+  const requestAddress = queuedWithdrawalRequestAddress(
+    sdkPlan.instructions as readonly Instruction[],
+    queueProgram,
+    input.owner
+  );
+  if (requestAddress === undefined) {
+    throw new SdpVedaError(
+      "INCOMPATIBLE_DEPLOYMENT",
+      "Veda's queued-withdrawal plan did not expose the expected request PDA."
+    );
+  }
+
+  const sponsor =
+    input.rentPayer === undefined || input.rentPayer === input.owner ? undefined : input.rentPayer;
+  let instructions =
+    sponsor === undefined
+      ? ([...sdkPlan.instructions] as readonly Instruction[])
+      : chargeAtaCreationRentTo(sdkPlan.instructions as readonly Instruction[], sponsor);
+  if (sponsor !== undefined) {
+    const accountSizes = queuedWithdrawalOwnerFundedAccountSizes(
+      instructions,
+      queueProgram,
+      input.owner
+    );
+    const rents = await Promise.all(
+      accountSizes.map((bytes) => minimumBalanceForRentExemption(runtime.rpcUrl, bytes))
+    );
+    const ownerFundedRent = rents.reduce((total, rent) => total + rent, 0n);
+    if (ownerFundedRent > 0n) {
+      instructions = [
+        prefundOwnerRentInstruction(sponsor, input.owner, ownerFundedRent),
+        ...instructions,
+      ];
+    }
+  }
+
+  const built: VedaQueuedWithdrawalRequestPlan = {
+    cluster: config.cluster,
+    instructions,
+    lookupTables: [],
+    assetIdentity: {
+      depositTokenMint: asset.mint,
+      shareMint: address(String(state.shareMint)),
+    },
+    accepted: { shares: shares.canonical },
+    requestAddress,
+    expectedRequest: {
+      assetMint: quote.assetMint,
+      shares: quote.shares,
+      assets: quote.assets,
+      discountBps: quote.discountBps,
+      maturityTimestamp: quote.maturityTimestamp,
+      deadlineTimestamp: quote.deadlineTimestamp,
+    },
+  };
+  assertPlanTargetsCluster(built, config);
+  return built;
+}
+
+/** Build the holder's post-deadline cancellation, which returns escrowed shares. */
+export async function buildVedaQueuedWithdrawalCancelPlan(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaQueuedWithdrawalCancelInput
+): Promise<VedaInstructionPlan> {
+  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  let lookup: Kit7;
+  try {
+    lookup = await vaultClient.getWithdrawalRequest(input.request as Kit7);
+  } catch (cause) {
+    if (cause instanceof VedaSdkError && cause.code === "ACCOUNT_NOT_FOUND") {
+      throw new SdpVedaError(
+        "WITHDRAWAL_REQUEST_NOT_FOUND",
+        `Veda withdrawal request ${input.request} does not exist or is already closed.`,
+        { cause }
+      );
+    }
+    throw mapVedaSdkError(cause, `Veda could not read withdrawal request ${input.request}`);
+  }
+  if (lookup.status === "closedOrUnknown" || lookup.request === null) {
+    throw new SdpVedaError(
+      "WITHDRAWAL_REQUEST_NOT_FOUND",
+      `Veda withdrawal request ${input.request} does not exist or is already closed.`
+    );
+  }
+
+  let state: { shareMint: Kit7; shareDecimals: unknown };
+  try {
+    state = await vaultClient.getState();
+  } catch (cause) {
+    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+  }
+  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  if (String(lookup.request.asset) !== String(asset.mint)) {
+    throw new SdpVedaError(
+      "UNSUPPORTED_VAULT",
+      `Veda withdrawal request ${input.request} uses asset ${lookup.request.asset}, ` +
+        `not SDP's ${asset.mint}.`
+    );
+  }
+
+  let sdkPlan: { instructions: readonly Kit7[] };
+  try {
+    sdkPlan = await vaultClient.buildCancelWithdrawal({
+      owner: input.owner as Kit7,
+      request: input.request as Kit7,
+    });
+  } catch (cause) {
+    if (cause instanceof VedaSdkError && cause.code === "ACCOUNT_NOT_FOUND") {
+      throw new SdpVedaError(
+        "WITHDRAWAL_REQUEST_NOT_FOUND",
+        `Veda withdrawal request ${input.request} closed before its cancellation could be built.`,
+        { cause }
+      );
+    }
+    throw mapVedaSdkError(
+      cause,
+      `Veda could not cancel withdrawal request ${input.request}`,
+      "WITHDRAW_REFUSED"
+    );
+  }
+
+  return assertPlanTargetsCluster(
+    {
+      cluster: config.cluster,
+      instructions: [...sdkPlan.instructions],
+      lookupTables: [],
+      assetIdentity: {
+        depositTokenMint: asset.mint,
+        shareMint: address(String(state.shareMint)),
+      },
+      accepted: {
+        shares: formatAtomic(
+          BigInt(lookup.request.shares),
+          shareMintDecimals(state.shareDecimals, input.vault)
+        ),
+      },
+    },
+    config
+  );
+}
+
+/** List the still-open requests for this owner and SDP-facing vault asset. */
+export async function readVedaQueuedWithdrawalRequests(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaQueuedWithdrawalRequestsInput
+): Promise<VedaQueuedWithdrawalRequest[]> {
+  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  let state: { shareDecimals: unknown };
+  let requests: readonly Kit7[];
+  try {
+    state = await vaultClient.getState();
+    requests = await vaultClient.listOpenWithdrawalRequests(input.owner as Kit7);
+  } catch (cause) {
+    throw mapVedaSdkError(cause, `Veda could not list withdrawal requests for ${input.owner}`);
+  }
+  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  const shareDecimals = shareMintDecimals(state.shareDecimals, input.vault);
+  return requests
+    .filter((request) => String(request.asset) === String(asset.mint))
+    .map((request) => queuedRequestView(request, input.vault, shareDecimals, asset.decimals));
+}
+
+/** Read one request, preserving the SDK's honest closed-or-unknown terminal state. */
+export async function readVedaQueuedWithdrawalRequest(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaQueuedWithdrawalRequestInputByAddress
+): Promise<VedaQueuedWithdrawalRequestLookup> {
+  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  let lookup: Kit7;
+  try {
+    lookup = await vaultClient.getWithdrawalRequest(input.request as Kit7);
+  } catch (cause) {
+    throw mapVedaSdkError(cause, `Veda could not read withdrawal request ${input.request}`);
+  }
+  if (lookup.status === "closedOrUnknown" || lookup.request === null) {
+    return { requestAddress: input.request, status: "closedOrUnknown", request: null };
+  }
+
+  let state: { shareDecimals: unknown };
+  try {
+    state = await vaultClient.getState();
+  } catch (cause) {
+    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+  }
+  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  if (String(lookup.request.asset) !== String(asset.mint)) {
+    throw new SdpVedaError(
+      "UNSUPPORTED_VAULT",
+      `Veda withdrawal request ${input.request} uses an asset SDP does not front for this vault.`
+    );
+  }
+  const request = queuedRequestView(
+    lookup.request,
+    input.vault,
+    shareMintDecimals(state.shareDecimals, input.vault),
+    asset.decimals
+  );
+  return { requestAddress: input.request, status: request.status, request };
+}
+
+/** Decode queue lifecycle logs without allowing the SDK's Kit-7 types to escape. */
+export function parseVedaWithdrawalLifecycleEvents(
+  logs: readonly string[] | null | undefined,
+  scales: VedaWithdrawalLifecycleScales
+): readonly VedaWithdrawalLifecycleEvent[] {
+  const shareDecimals = mintDecimals(scales.shareDecimals, "share decimals");
+  const assetDecimals = mintDecimals(scales.assetDecimals, "asset decimals");
+  const trustedLogs = lifecycleLogsEmittedByProgram(logs, String(scales.queueProgramAddress));
+  return parseLifecycleEvents(trustedLogs).flatMap(
+    (event: Kit7): VedaWithdrawalLifecycleEvent[] => {
+      switch (event.kind) {
+        case "withdrawalRequested":
+          return [
+            {
+              kind: event.kind,
+              queueState: address(String(event.queueState)),
+              requestAddress: address(String(event.request)),
+              vaultId: BigInt(event.vaultId).toString(),
+              owner: address(String(event.user)),
+              assetMint: address(String(event.assetMint)),
+              nonce: BigInt(event.nonce).toString(),
+              shares: formatAtomic(BigInt(event.shares), shareDecimals),
+              assets: formatAtomic(BigInt(event.assets), assetDecimals),
+              creationTimestamp: BigInt(event.creationTime).toString(),
+              maturityTimestamp: BigInt(event.maturityTime).toString(),
+              deadlineTimestamp: BigInt(event.deadline).toString(),
+            },
+          ];
+        case "withdrawalCancelled":
+          return [
+            {
+              kind: event.kind,
+              queueState: address(String(event.queueState)),
+              requestAddress: address(String(event.request)),
+              vaultId: BigInt(event.vaultId).toString(),
+              owner: address(String(event.user)),
+              assetMint: address(String(event.assetMint)),
+              nonce: BigInt(event.nonce).toString(),
+              sharesReturned: formatAtomic(BigInt(event.sharesReturned), shareDecimals),
+              cancelledAt: BigInt(event.cancelledAt).toString(),
+            },
+          ];
+        case "withdrawalFulfilled":
+          return [
+            {
+              kind: event.kind,
+              queueState: address(String(event.queueState)),
+              requestAddress: address(String(event.request)),
+              vaultId: BigInt(event.vaultId).toString(),
+              owner: address(String(event.user)),
+              assetMint: address(String(event.assetMint)),
+              nonce: BigInt(event.nonce).toString(),
+              sharesBurned: formatAtomic(BigInt(event.sharesBurned), shareDecimals),
+              assetsPaid: formatAtomic(BigInt(event.assetsPaid), assetDecimals),
+              vaultAssetsOut: formatAtomic(BigInt(event.vaultAssetsOut), assetDecimals),
+              excessReturned: formatAtomic(BigInt(event.excessReturned), assetDecimals),
+              fulfilledAt: BigInt(event.fulfilledAt).toString(),
+            },
+          ];
+        default:
+          return [];
+      }
+    }
+  );
+}
+
+/**
+ * Anchor's event parser accepts any `Program data:` line and cannot know which
+ * program emitted it. Preserve only lines emitted while the configured queue
+ * program is the active invocation frame; otherwise a later transaction that
+ * merely mentions a closed request PDA could forge a terminal-looking event.
+ */
+function lifecycleLogsEmittedByProgram(
+  logs: readonly string[] | null | undefined,
+  expectedProgram: string
+): readonly string[] {
+  if (!logs) return [];
+  const invocationStack: string[] = [];
+  const trusted: string[] = [];
+  for (const log of logs) {
+    const invocation = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) invoke \[(\d+)\]$/.exec(log);
+    if (invocation) {
+      const depth = Number(invocation[2]);
+      if (!Number.isSafeInteger(depth) || depth < 1 || depth > invocationStack.length + 1) {
+        invocationStack.length = 0;
+        continue;
+      }
+      invocationStack.length = depth - 1;
+      invocationStack.push(invocation[1] ?? "");
+      continue;
+    }
+
+    const completion = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) (?:success|failed:.*)$/.exec(log);
+    if (completion) {
+      if (invocationStack.at(-1) !== completion[1]) {
+        invocationStack.length = 0;
+      } else {
+        invocationStack.pop();
+      }
+      continue;
+    }
+
+    if (log.startsWith("Program data: ") && invocationStack.at(-1) === expectedProgram) {
+      trusted.push(log);
+    }
+  }
+  return trusted;
+}
+
+function queuedRequestView(
+  request: Kit7,
+  vault: Address,
+  shareDecimals: number,
+  assetDecimals: number
+): VedaQueuedWithdrawalRequest {
+  return {
+    requestAddress: address(String(request.address)),
+    vault,
+    owner: address(String(request.user)),
+    nonce: BigInt(request.nonce).toString(),
+    assetMint: address(String(request.asset)),
+    shares: formatAtomic(BigInt(request.shares), shareDecimals),
+    assets: formatAtomic(BigInt(request.assets), assetDecimals),
+    creationTimestamp: BigInt(request.creationTimestamp).toString(),
+    maturityTimestamp: BigInt(request.maturityTimestamp).toString(),
+    deadlineTimestamp: BigInt(request.deadlineTimestamp).toString(),
+    status: request.status,
+  };
+}
+
+function queueInteger(field: string, value: number, maximum: number): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > maximum) {
+    throw new SdpVedaError(
+      "INVALID_QUEUE_PARAMETERS",
+      `Veda ${field} must be an integer between 0 and ${maximum}; received ${String(value)}`
+    );
+  }
+  return value;
+}
+
 /**
  * One wallet's holding in one vault, read live.
  *
@@ -606,6 +1143,7 @@ export async function readVedaPosition(
     cluster: config.cluster,
     shares: formatAtomic(position.shares, shareDecimals),
     withdrawableShares: formatAtomic(locked ? 0n : position.shares, shareDecimals),
+    unlockTimestamp: position.unlockTimestamp?.toString() ?? null,
     ...(await valuation(vaultClient, asset, position.shares)),
     tokenMint: asset.mint,
     shareMint: address(String(state.shareMint)),
@@ -717,10 +1255,11 @@ export function mapVedaSdkError(
     case "INCOMPATIBLE_DEPLOYMENT":
       return new SdpVedaError("INCOMPATIBLE_DEPLOYMENT", message, { cause });
     case "QUEUE_NOT_CONFIGURED":
-    case "INVALID_QUEUE_PARAMETERS":
     case "TRANSFER_FEE_MINT_UNSUPPORTED":
     case "UNSUPPORTED_CPI_DIGEST_ASSET":
       return new SdpVedaError("UNSUPPORTED_VAULT", message, { cause });
+    case "INVALID_QUEUE_PARAMETERS":
+      return new SdpVedaError("INVALID_QUEUE_PARAMETERS", message, { cause });
     case "SLIPPAGE_PROTECTION_REQUIRED":
       // Unreachable: this package always supplies `minAmountOut`. Mapped
       // anyway, so a future path that forgets gets a caller-fixable answer

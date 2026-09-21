@@ -25,16 +25,12 @@ import type {
   PayoutRequirementAccount,
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import type { BvnkComplianceInput } from "./providers/bvnk/provider-data";
+import type { BvnkComplianceInput } from "./providers/bvnk/schemas";
 import type { LightsparkPurposeOfPayment } from "./providers/lightspark/provider-data";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
 
-export type {
-  BvnkComplianceInput,
-  BvnkCustomerResolution,
-  BvnkPaymentRuleResolution,
-  BvnkRuleEntity,
-} from "./providers/bvnk/provider-data";
+export type { BvnkCustomerResolution } from "./providers/bvnk/provider-data";
+export type { BvnkComplianceInput } from "./providers/bvnk/schemas";
 export type { LightsparkCustomerResolution } from "./providers/lightspark/client";
 export type {
   MuralAccountResolution,
@@ -190,7 +186,15 @@ export type RampSettlementEvent =
        */
       cryptoDeposit?: RampCryptoDeposit | null;
     })
-  | (BaseRampSettlementEvent & { kind: "settling" })
+  | (BaseRampSettlementEvent & {
+      kind: "settling";
+      /**
+       * On-ramp only: the fiat amount the observed pay-in settled for (writes
+       * `fiat_amount`). Off-ramp settling events leave it absent; when the
+       * type ever carries it, it writes `amount`.
+       */
+      receivedAmount?: string;
+    })
   | (BaseRampSettlementEvent & {
       kind: "settled";
       /** Amount the receiving side settled for, in display units — fiat for off-ramp, crypto for on-ramp. */

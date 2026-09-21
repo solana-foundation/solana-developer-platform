@@ -23,9 +23,13 @@ const SHARED_TABLES: Record<string, string> = {
   earn_execution_models: "shared movement vocabulary (0062_earn_movements)",
   earn_movement_directions: "shared movement vocabulary (0062_earn_movements)",
   earn_movement_statuses: "shared movement vocabulary (0062_earn_movements)",
+  earn_vault_withdrawal_request_statuses: "shared queued-withdrawal request vocabulary (0113)",
+  earn_vault_withdrawal_action_statuses: "shared queued-withdrawal action vocabulary (0113)",
   helius_rings_asset_allowlist: "platform reference data seeded by 0057_helius_rings",
   ramp_webhook_events:
     "system webhook inbox; rows are persisted before tenant resolution and only system jobs read them",
+  earn_vault_withdrawal_request_pda_leases:
+    "public chain PDA coordination only; contains no tenant, owner, or intent data",
 };
 
 interface TableSecurityRow {
@@ -77,6 +81,29 @@ describe("tenant isolation coverage", () => {
       .map((view) => view.view_name);
 
     expect(ownerRights).toEqual([]);
+  });
+
+  it("lets no function carry a function-level SET of an app.* parameter", async () => {
+    // `CREATE FUNCTION ... SET app.tenant_isolation_identity = 'system'` is
+    // stored in proconfig, and Postgres only lets a SUPERUSER (or a role
+    // granted SET ON PARAMETER) store a SET on a custom parameter. Cloud SQL
+    // never hands out either, so such a migration passes here as the
+    // superuser and then fails on stage/prod with "permission denied to set
+    // parameter" (migration 0101, 2026-09-16). A function that must widen its
+    // read stamps set_config() transaction-locally and restores the caller's
+    // identity itself, as 0101 does.
+    const rows = await env.db.queryMany<{ function_name: string; config: string[] | null }>(
+      `SELECT p.proname AS function_name, p.proconfig AS config
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proconfig IS NOT NULL
+       ORDER BY p.proname`
+    );
+    const appParameterSetting = rows
+      .filter((row) => (row.config ?? []).some((entry) => entry.startsWith("app.")))
+      .map((row) => row.function_name);
+
+    expect(appParameterSetting).toEqual([]);
   });
 
   it("keeps the shared-table registry free of stale entries", async () => {

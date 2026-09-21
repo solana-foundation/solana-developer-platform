@@ -35,6 +35,7 @@ import type {
   PolicyEvaluationRow,
   PolicyRepository,
   ReplaceApiKeyWalletPolicyBindingsInput,
+  SumWalletOperationAmountsInput,
   UpdateApprovalRequestStatusInput,
   UpsertApiKeyWalletPolicyBindingInput,
   WalletControlProfileRevisionRow,
@@ -2059,6 +2060,79 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       return getWalletOperationByIdInternal(db, walletOperationId);
     },
 
+    async sumWalletOperationAmounts(input: SumWalletOperationAmountsInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.sumWalletOperationAmounts");
+      const conditions: string[] = [
+        "organization_id = ?",
+        "asset = ?",
+        "created_at >= ?",
+        // `created` is an undecided contender: enforcement inserts the row
+        // before it evaluates, so counting that status lets two concurrent
+        // same-scope operations each count the other and both breach a window
+        // one of them fits in. Only decided, still-live rows count; the
+        // overshoot that concurrency can then cause is bounded by the in-flight
+        // set and is the failure direction ADR 0004 prefers over false refusals.
+        "status NOT IN ('created', 'failed', 'canceled')",
+        // `amount` is TEXT; only rows that cast cleanly may reach SUM. The
+        // write path validates amounts, so this guards history, not input.
+        "amount IS NOT NULL",
+        "amount ~ '^[0-9]*\\.?[0-9]*$'",
+        "amount ~ '[0-9]'",
+      ];
+      const params: unknown[] = [scope.organizationId, input.asset, input.since];
+
+      switch (input.scope) {
+        case "organization":
+          break;
+        case "wallet":
+          // The branch mirrors the identity the write path stamps: every
+          // producer of a custody-wallet operation records the row with its
+          // `custody_wallet_id` set from the same resolved wallet the
+          // candidate carries, so filtering on it cannot silently drop rows
+          // of that wallet. Rows without the column belong to non-custody
+          // (user) wallets and sum under `wallet_id` below.
+          if (input.custodyWalletId !== null) {
+            conditions.push("custody_wallet_id = ?");
+            params.push(input.custodyWalletId);
+          } else {
+            conditions.push("wallet_id = ?");
+            params.push(input.walletId);
+          }
+          break;
+        case "api_key":
+          if (input.apiKeyId === null) {
+            return "0";
+          }
+          conditions.push("api_key_id = ?");
+          params.push(input.apiKeyId);
+          break;
+        default: {
+          const exhaustive: never = input.scope;
+          throw new Error(`Unhandled velocity scope: ${String(exhaustive)}`);
+        }
+      }
+
+      if (input.excludeWalletOperationId !== null) {
+        conditions.push("id <> ?");
+        params.push(input.excludeWalletOperationId);
+      }
+      if (input.operationTypes !== null && input.operationTypes.length > 0) {
+        conditions.push(`operation_type IN (${input.operationTypes.map(() => "?").join(", ")})`);
+        params.push(...input.operationTypes);
+      }
+
+      const row = await db
+        .prepare(
+          `SELECT COALESCE(SUM(amount::numeric), 0)::text AS total
+           FROM wallet_operations
+           WHERE ${conditions.join("\n             AND ")}`
+        )
+        .bind(...params)
+        .first<{ total: string | number }>();
+
+      return row === null ? "0" : String(row.total);
+    },
+
     async updateWalletOperationStatus(
       walletOperationId: string,
       status: WalletOperationRow["status"]
@@ -2223,24 +2297,29 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       return row ? mapWalletOperationRow(row) : null;
     },
 
-    async isApprovalGroupMember(approvalGroupId: string, userId: string) {
-      const row = await db
+    async listApproverGroupIds(approvalGroupIds: readonly string[], userId: string) {
+      const unique = [...new Set(approvalGroupIds)];
+      if (unique.length === 0) {
+        return new Set<string>();
+      }
+      // One read for every group on the page: the approvals inbox refreshes
+      // every few seconds, and a query per group multiplied with each refresh.
+      const placeholders = unique.map(() => "?").join(", ");
+      const result = await db
         .prepare(
-          `SELECT 1 AS allowed
+          `SELECT DISTINCT ag.id
            FROM approval_groups ag
            INNER JOIN approval_group_members agm ON agm.approval_group_id = ag.id
-           WHERE ag.id = ?
+           WHERE ag.id IN (${placeholders})
              AND ag.organization_id = ?
              AND ag.project_id IS NOT DISTINCT FROM ?
              AND ag.status = 'active'
              AND agm.user_id = ?
-             AND agm.role = 'approver'
-           LIMIT 1`
+             AND agm.role = 'approver'`
         )
-        .bind(approvalGroupId, scope.organizationId, scope.projectId, userId)
-        .first<{ allowed: number }>();
-
-      return row?.allowed === 1;
+        .bind(...unique, scope.organizationId, scope.projectId, userId)
+        .all<{ id: string }>();
+      return new Set(result.results.map((row) => row.id));
     },
 
     async getApiKeyCreatorUserId(apiKeyId: string) {
@@ -2260,6 +2339,33 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         .first<{ created_by: string | null }>();
 
       return row?.created_by ?? null;
+    },
+
+    async getApiKeyCreatorUserIds(apiKeyIds: readonly string[]) {
+      const creators = new Map<string, string>();
+      const unique = [...new Set(apiKeyIds)];
+      if (unique.length === 0) {
+        return creators;
+      }
+      // One read for the whole list: the approvals inbox refreshes every few
+      // seconds, and a lookup per requester turned one page into hundreds.
+      const placeholders = unique.map(() => "?").join(", ");
+      const result = await db
+        .prepare(
+          `SELECT id, created_by
+           FROM api_keys
+           WHERE id IN (${placeholders})
+             AND organization_id = ?
+             AND (?::text IS NULL OR project_id IS NOT DISTINCT FROM ?)`
+        )
+        .bind(...unique, scope.organizationId, scope.projectId, scope.projectId)
+        .all<{ id: string; created_by: string | null }>();
+      for (const row of result.results) {
+        if (row.created_by !== null) {
+          creators.set(row.id, row.created_by);
+        }
+      }
+      return creators;
     },
 
     async createPolicyEvaluation(input: CreatePolicyEvaluationInput) {

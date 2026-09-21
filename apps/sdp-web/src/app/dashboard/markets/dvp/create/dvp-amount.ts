@@ -12,12 +12,7 @@
  * arithmetic.
  */
 
-import {
-  decimalScale,
-  formatDecimalAmount,
-  isDecimalString,
-  parseDecimalAmount,
-} from "@sdp/solana/amount";
+import { decimalScale, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 
 export type AmountResult =
   | { ok: true; baseUnits: string }
@@ -42,14 +37,4 @@ export function toBaseUnits(input: string, decimals: number): AmountResult {
   }
 
   return { ok: true, baseUnits: parseDecimalAmount(trimmed, decimals).toString() };
-}
-
-/**
- * Renders base units back as a decimal amount, for showing a stored value.
- *
- * @param baseUnits - A u64 as a decimal string.
- * @param decimals - The mint's decimals.
- */
-export function fromBaseUnits(baseUnits: string, decimals: number): string {
-  return formatDecimalAmount(baseUnits, decimals);
 }

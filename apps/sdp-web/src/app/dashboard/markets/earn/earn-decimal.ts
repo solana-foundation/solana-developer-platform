@@ -69,3 +69,15 @@ export function compareUnsignedDecimals(left: string, right: string): -1 | 0 | 1
   if (ordering === 0) return 0;
   return ordering < 0 ? -1 : 1;
 }
+
+/**
+ * Whether the value parses as an unsigned decimal AND is strictly above zero.
+ *
+ * Every money surface answers the same question — a balance of "0" offers
+ * nothing to deposit or withdraw, and an unparseable one offers even less — so
+ * the comparison against "0" is spelled once. An unparseable value is NOT
+ * positive, which is the fail-closed answer.
+ */
+export function isPositiveDecimal(value: string): boolean {
+  return compareUnsignedDecimals(value, "0") === 1;
+}

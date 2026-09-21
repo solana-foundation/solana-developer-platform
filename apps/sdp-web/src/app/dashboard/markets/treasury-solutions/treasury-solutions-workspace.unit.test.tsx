@@ -125,6 +125,10 @@ const mocks = vi.hoisted(() => ({
           positionId: string;
           status: string;
         }) => void;
+        onAsyncRequestSettled?: (event: {
+          kind: "queue";
+          request: { withdrawalRequestId: string };
+        }) => void;
         position: { label: string };
       }
     | undefined,
@@ -604,6 +608,40 @@ vi.mock("../earn/earn-vault-withdraw-modal", () => ({
   },
 }));
 
+vi.mock("../earn/earn-vault-exit-modal", () => ({
+  EarnVaultExitModal: (props: {
+    onWithdrawn?: (
+      withdrawal: {
+        createdAt: string;
+        failureReason: string | null;
+        movementId: string;
+        positionId: string;
+        status: string;
+      },
+      intent?: { amount: string; projectBalance: boolean }
+    ) => void;
+    onMovementUpdated?: (withdrawal: {
+      createdAt: string;
+      failureReason: string | null;
+      movementId: string;
+      positionId: string;
+      status: string;
+    }) => void;
+    onAsyncRequestSettled?: (event: {
+      kind: "queue";
+      request: { withdrawalRequestId: string };
+    }) => void;
+    position: { label: string };
+  }) => {
+    mocks.vaultWithdrawalModal = props;
+    return <div role="dialog">Withdraw from {props.position.label}</div>;
+  },
+}));
+
+vi.mock("../earn/earn-vault-withdrawal-requests-card", () => ({
+  EarnVaultWithdrawalRequestsCard: () => null,
+}));
+
 vi.mock("../earn/earn-vault-deposit-modal", () => ({
   EarnVaultDepositModal: (props: {
     onDeposited?: (
@@ -838,7 +876,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ).toBeTruthy();
   });
 
-  it("shows live withdrawal settlement beside the affected position", async () => {
+  it("shows a confirmed withdrawal as complete beside the affected position", async () => {
     const user = userEvent.setup();
     mocks.vaultWithdrawals = [
       {
@@ -852,17 +890,17 @@ describe("TreasurySolutionsWorkspace", () => {
 
     renderWorkspace();
 
-    const status = await screen.findByRole("button", {
-      name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
+    const positionRow = (await screen.findAllByText("Steakhouse USDC"))
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!positionRow) throw new Error("Expected affected position row");
+    const status = within(positionRow).getByRole("button", {
+      name: "Active: This position is active.",
     });
     expect(status.closest("tr")?.textContent).toContain("Steakhouse USDC");
 
     await user.hover(status);
-    expect(
-      await screen.findByText(
-        "A deposit or withdrawal is still settling. Follow the flow for detailed progress."
-      )
-    ).toBeTruthy();
+    expect(await screen.findByText("This position is active.")).toBeTruthy();
   });
 
   it("keeps a locally submitted deposit newest without comparing browser and server clocks", async () => {
@@ -924,11 +962,16 @@ describe("TreasurySolutionsWorkspace", () => {
       </I18nProvider>
     );
 
-    expect(
-      await screen.findByRole("button", {
-        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
-      })
-    ).toBeTruthy();
+    await waitFor(() => {
+      const positionRow = screen
+        .getAllByText("Steakhouse USDC")
+        .map((element) => element.closest("tr"))
+        .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+      if (!positionRow) throw new Error("Expected affected position row");
+      expect(
+        within(positionRow).getByRole("button", { name: "Active: This position is active." })
+      ).toBeTruthy();
+    });
   });
 
   it("updates the deposit badge from the fast detail poll without a toast", async () => {
@@ -1313,7 +1356,7 @@ describe("TreasurySolutionsWorkspace", () => {
     ).toBeTruthy();
   });
 
-  it("projects a finalized withdrawal into the position balance with the same status update", async () => {
+  it("projects a confirmed withdrawal into the position balance with the same status update", async () => {
     const user = userEvent.setup();
     const movementId = "earn_vault_withdrawal_balance_projection";
     renderWorkspace();
@@ -1340,7 +1383,7 @@ describe("TreasurySolutionsWorkspace", () => {
         failureReason: null,
         movementId,
         positionId: "earn_vault_position_live",
-        status: "finalized",
+        status: "confirmed",
       });
     });
 
@@ -1921,6 +1964,28 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Steakhouse USDC");
   });
 
+  it("refreshes positions and custody balances after an asynchronous exit settles", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const vaultPositionRow = screen
+      .getAllByText("Steakhouse USDC")
+      .map((element) => element.closest("tr"))
+      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
+    if (!vaultPositionRow) throw new Error("Expected vault position row");
+    await user.click(within(vaultPositionRow).getByRole("button", { name: "Withdraw" }));
+
+    act(() => {
+      mocks.vaultWithdrawalModal?.onAsyncRequestSettled?.({
+        kind: "queue",
+        request: { withdrawalRequestId: "earn_vault_withdrawal_request_fulfilled" },
+      });
+    });
+
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the vault exit verb live in production, where deposits are closed", () => {
     // ADR 0002: the environment fail-close guards the way IN only. A position
     // that exists in production must keep its way out.
@@ -1939,19 +2004,17 @@ describe("TreasurySolutionsWorkspace", () => {
   });
 
   it("keeps sandbox-only vault deposits disabled when another provider is open in production", () => {
+    // Kamino deposits open in production since PRO-1986; Veda is the provider
+    // the deposit-environment map still leaves sandbox-only (PRO-1777).
     mocks.environment = "production";
     renderWorkspace();
 
-    const row = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((candidate) => candidate?.textContent?.includes("6.2%"));
+    const row = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!row) throw new Error("Expected vault strategy row");
     expect(
       (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
     ).toBe(true);
     expect(within(row).getByText("Sandbox only")).toBeTruthy();
-    expect(within(row).getByText("$12,345,678.90")).toBeTruthy();
     expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
   });
 

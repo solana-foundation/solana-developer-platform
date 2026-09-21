@@ -22,6 +22,41 @@ test("classifies conventional and breaking commits", () => {
   });
 });
 
+test("reads a breaking change from a footer, not from prose", () => {
+  // A real footer, which is what Conventional Commits defines.
+  assert.equal(
+    releaseCommitSemantics("fix(api): adjust route", "BREAKING CHANGE: the route moved").breaking,
+    true
+  );
+  // The hyphenated spelling the spec also allows.
+  assert.equal(
+    releaseCommitSemantics("fix(api): adjust route", "BREAKING-CHANGE: the route moved").breaking,
+    true
+  );
+  // A footer after other body text still counts.
+  assert.equal(
+    releaseCommitSemantics("fix(api): adjust route", "Some context.\n\nBREAKING CHANGE: gone")
+      .breaking,
+    true
+  );
+
+  // The exact prose that made 0.79.0 announce its own tooling commit as
+  // breaking. It contains the substring, and it is not a footer.
+  assert.equal(
+    releaseCommitSemantics(
+      "fix(release): surface breaking changes in the changelog",
+      "a breaking commit keeps its entry in its type section and also surfaces in a BREAKING CHANGES section on top"
+    ).breaking,
+    false
+  );
+  // A mid-line mention is not a footer either.
+  assert.equal(
+    releaseCommitSemantics("docs: explain policy", "We document every BREAKING CHANGE: here.")
+      .breaking,
+    false
+  );
+});
+
 test("ignores the inaccurate breaking footer on the overridden commit", () => {
   assert.equal(nextReleaseVersion("0.56.0", [overriddenCommit]), "0.56.1");
 });

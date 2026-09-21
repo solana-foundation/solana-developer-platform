@@ -194,11 +194,14 @@ describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
     "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF/allocations?vault=",
     "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF#",
   ])(
-    "refuses a vault that is not a bare public key before it can alter the upstream URL",
+    "answers 400 for a vault that is not a bare public key before it can alter the upstream URL",
     async (vault) => {
       const response = await GET(request(vault));
 
-      expect(response.status).toBe(502);
+      // A malformed vault is a client bug, not an upstream miss: 400, and
+      // neither the catalogue allowlist nor Kamino is asked about it.
+      expect(response.status).toBe(400);
+      expect(mocks.catalogue).not.toHaveBeenCalled();
       expect(mocks.fetch).not.toHaveBeenCalled();
     }
   );

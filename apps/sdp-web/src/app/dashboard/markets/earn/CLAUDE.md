@@ -30,8 +30,11 @@ api/dashboard/markets/earn/
                                      Kamino's allocations source is
                                      mainnet-only, so the handler refuses any
                                      other cluster with a 400 before reading
-                                     anything else. Everything else about the
-                                     request is policed by the store module —
+                                     anything else, and a vault that is not
+                                     even a public key is a client bug —
+                                     400 before anything downstream. The
+                                     rest of the request is policed by the
+                                     store module —
                                      the server boundary: Kamino would answer
                                      any well-formed mainnet vault, so the
                                      store admits a vault only if it is a
@@ -65,12 +68,17 @@ api/dashboard/markets/earn/
   vault-deposits/[movementId]/       GET one recorded deposit (poll to terminal)
   vault-withdrawals/route.ts         POST create (vault exit) · GET the movement list
   vault-withdrawals/[movementId]/    GET one recorded withdrawal
+  vault-withdrawal-options/route.ts  POST live instant/queued route discovery
+  vault-queued-withdrawal-previews/  POST live queue terms preview
+  vault-withdrawal-requests/         POST create · GET durable request list
+    [withdrawalRequestId]/           GET one request (poll to terminal)
+    [withdrawalRequestId]/cancel/    POST cancel after the recovery deadline
   vault-positions/route.ts           GET list (keyset cursor)
   movements/route.ts                 GET the cross-provider ledger feed
                                      (keyset cursor + equality filters)
 ```
 
-`provider-query.ts` holds FIVE validators with deliberately different failure
+`provider-query.ts` holds SEVEN validators with deliberately different failure
 modes. `programProxyQuery` is permissive-by-omission — an unrecognized param is
 dropped — because those routes predate the typed client and are reachable with
 arbitrary query strings. `vaultPositionsProxyQuery` is **strict**: it is
@@ -82,6 +90,9 @@ reshaping the page. A typo must not return a different page of someone's money.
 `requestId` is validated to the API's OWN `[\x20-\x7e]{1,255}` idempotency-key
 shape, because a tidier rule would 400 a legitimate key containing a slash.
 `vaultWithdrawalsProxyQuery` is its exit mirror, parameter for parameter.
+`vaultWithdrawalRequestsProxyQuery` adds a strict `settled=true|false` filter so
+the recovery surface asks the server for open requests instead of downloading
+and filtering terminal history.
 `earnMovementsProxyQuery` (PRO-1705) is strict in the same way over the
 cross-provider feed, and its filter values are checked for SHAPE and length only,
 never against a vocabulary: `status` is per execution model and `provider` is an
@@ -93,9 +104,9 @@ is the honest result.
 tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
 API on its own. A route forwards one deliberately, per header, through the
 optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/` and `vault-withdrawals/` are the
-two routes that opt in, forwarding that single header and nothing else; the
-program create still sends the body `requestId` form.
+(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
+queued request create/cancel routes opt in, forwarding that single header and
+nothing else; the program create still sends the body `requestId` form.
 
 ## Routes
 
@@ -181,9 +192,12 @@ program create still sends the body `requestId` form.
   freely navigable reference tabs (client setup, deposits, reads, withdraw).
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
-  a warning callout, because the module they document carries a secret API key.
-  Do not imply that catalogue, preview, or unsigned build access always needs
-  that key; the public guide documents their keyless tier.
+  an info callout that links to the API keys page (a Developer key includes
+  earn:read and earn:write), because the module they document carries a secret
+  API key. The module needs only the strategy id and that key: no strategy
+  object, no `sourceTokenMint` on a direct deposit. Do not imply that catalogue,
+  preview, or unsigned build access always needs the key; the public guide
+  documents their keyless tier.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is
@@ -263,12 +277,12 @@ program create still sends the body `requestId` form.
     request for one intent. The controller gates state updates and the outcome
     screen; key bookkeeping (`applyVaultDepositIdempotencyKeyOutcome`) runs
     unconditionally, before the abort check.
-  - `claimVaultDepositIdempotencyKey` mints once per fingerprint; `releaseVaultDepositIdempotencyKey` retires it. **Retire only on
+  - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint; `vaultDepositIdempotencyKeyStore.release` retires it. **Retire only on
     a 4xx or a recorded deposit.** A 5xx is the dangerous one — a gateway timing
     out downstream of an API that already recorded and broadcast looks exactly
     like a provider being unavailable before it did. A key released too early is
     a double deposit; a key held too long is a replay the API reports honestly.
-  - `holdVaultDepositIdempotencyKey` SUSPENDS expiry while a policy approval is
+  - `vaultDepositIdempotencyKeyStore.hold` SUSPENDS expiry while a policy approval is
     pending. The default TTL is calibrated to a blockhash (~90s to terminal);
     an approval answers to a human and can take hours, and a lapsed key there
     resubmits into a SECOND approval request for one intent.
@@ -276,7 +290,7 @@ program create still sends the body `requestId` form.
     a later legitimate deposit of the same amount from the same wallet silently
     replays the approved one. So before reusing a HELD key the modal asks the
     server whether a movement exists for it
-    (`isVaultDepositIdempotencyKeyHeld` -> `fetchEarnVaultDepositByRequestId`): a
+    (`vaultDepositIdempotencyKeyStore.isHeld` -> `fetchEarnVaultDepositByRequestId`): a
     movement means the write happened and the key is spent. That lookup returns
     THREE outcomes — `found` / `absent` / `unavailable` — and an unavailable read
     REFUSES the submit rather than picking a key, because both guesses are wrong
@@ -347,6 +361,15 @@ program create still sends the body `requestId` form.
   Its five-second detail poll reports the terminal movement back to Treasury;
   Treasury keeps the latest state in the Active positions status column rather
   than announcing a long-running chain result with a toast.
+- `earn-vault-exit-modal.tsx` and `earn-vault-queued-withdraw-modal.tsx` — route
+  discovery is live per position. When instant and queued routes coexist the
+  customer must choose explicitly; SDP never infers timing or price preference.
+  Queue discount/deadline defaults and bounds come from the provider's live
+  terms, and the provider preview must resolve before shares can be escrowed.
+- `earn-vault-withdrawal-requests-card.tsx` — durable queued-request recovery.
+  Its discovery read asks the server for `settled=false`, then polls request
+  detail through terminal state. An expired request exposes an idempotent cancel
+  action that recovers escrowed shares; closing the create modal never hides it.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
   (fingerprint: project, position, shares, minAmountOut — the derived exit
   floor is in there for the same reason the deposit's is) under its own
@@ -369,7 +392,19 @@ program create still sends the body `requestId` form.
   past the TTL without re-quoting first: still satisfiable proceeds with the
   floor the user reviewed, a rate beyond it stops client-side through the
   blown-floor copy and control. Held floors bypass the check — a replay must
-  carry the floor its key was minted with, verbatim.
+  carry the floor its key was minted with, verbatim. The floor POLICY (whether
+  the control renders at all, and its default tolerance) is the catalogue row's
+  `depositSlippage`, which the API answers per environment
+  (`earnDepositSlippagePolicy` in @sdp/types: Kamino declares 10 bps in every
+  environment and every production row is non-null), never the provider map,
+  so a Kamino deposit is always floored.
+- `earn-vault-movement.ts`: the submit-outcome rules BOTH vault modals share:
+  when a submission counts as money moved (`observableVaultMovement`), how a
+  watcher's fresher record folds into it, the stepper position and focus-panel
+  key per state, and the 202 approval-pending shape. One copy on purpose, same
+  reasoning as the slippage machinery; the deposit and withdrawal modals
+  resolving "did my submission move anything" differently is how a double-count
+  ships.
 - `@/lib/idempotency-key-store.ts` — the shared machinery behind BOTH tracking
   modules (storage tiers, quota divergence, approval holds, entry bounds), plus
   `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted
@@ -377,10 +412,13 @@ program create still sends the body `requestId` form.
   one drifts.
 - **The withdrawal outcome poll uses the UNIFIED ledger vocabulary**:
   `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct` (`finalized | failed`),
-  `confirmed` still in flight because `EarnVaultWithdrawal` speaks the
-  ledger's own words. This is the OPPOSITE of the deposit poll's rule (legacy
-  DTO, legacy terminal set); the two sets sit side by side in
-  `earn-program-data.ts` with the reasoning attached to each.
+  because `EarnVaultWithdrawal` speaks the ledger's own words. That backend
+  polling contract is intentionally stricter than presentation: the UI treats
+  `confirmed` as complete, removes foreground loading, and projects the
+  resulting balance while the poll continues to protocol finality. This is the
+  OPPOSITE of the deposit poll's rule (legacy DTO, legacy terminal set); the two
+  sets sit side by side in `earn-program-data.ts` with the reasoning attached
+  to each.
 
 ## Where these seams are consumed — do not delete them as dead code
 
@@ -427,8 +465,9 @@ transaction reached the network, which is the one case where the customer's
 money is genuinely in the air. **Keep using
 `EARN_TERMINAL_VAULT_MOVEMENT_STATUSES` here, not the similarly named
 `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`** (PRO-1705): that one is the
-unified ledger's vocabulary, where `confirmed` is NOT terminal because
-`finalized` exists after it. This poll reads the legacy wire field, so switching
+unified ledger's vocabulary, where the background watcher continues past
+`confirmed` because `finalized` exists after it. Customer-facing UI still
+treats `confirmed` as Done. This poll reads the legacy wire field, so switching
 to the unified set would make it wait for a `finalized` nothing writes yet and
 never stop. An unreadable poll returns `undefined` and keeps
 polling; a read that failed says nothing about whether the deposit landed.
@@ -526,8 +565,9 @@ is a plain parameter), beside `use-escape-key`. `Modal` still owns Escape.
 ## The client/server boundary bug — why `earn-surfacing.ts` exists
 
 The surfacing constants live in **`earn-surfacing.ts`, which carries NO
-`"use client"` directive**, and `earn-program-data.ts` merely re-exports them so
-client callers keep one import site. Do not move them back.
+`"use client"` directive**; client callers import them from that file directly
+(never through `earn-program-data.ts`, whose former re-export hop is retired).
+Do not move them back.
 
 They started in `earn-program-data.ts` (a client module). A Server Component
 importing a *value* from a client module receives a **client-reference proxy,
@@ -583,8 +623,7 @@ browser pass on `/dashboard/markets/embedded-yield` and
   does not win; it loses to CSS source order (`.whitespace-nowrap` is emitted
   after `.whitespace-normal`), and under `table-fixed` the still-unwrapped text
   overflows into the next column. Declare wrapping and clamping on the child
-  spans, where nothing competes — that is why `EarnStrategyIdentity` clamps and
-  truncates internally. Long text wraps inside a bounded clamp or truncates with
+  spans, where nothing competes. Long text wraps inside a bounded clamp or truncates with
   a `title` carrying the full string; numbers never truncate.
 - Provider-unconfigured (503) must degrade to a quiet notice, never crash. Note
   the asymmetry: the money-in writes answer 403 even for *missing credentials*,

@@ -317,17 +317,19 @@ export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralPro
       case "account_credited":
         return handleAccountCredited(env, event);
       case "payout_settled":
-        return applyRampSettlementEvent(env, {
+        await applyRampSettlementEvent(env, {
           provider: "mural",
           kind: "settled",
           reference: event.payoutRequestId,
         });
+        return;
       case "payout_failed":
-        return applyRampSettlementEvent(env, {
+        await applyRampSettlementEvent(env, {
           provider: "mural",
           kind: "failed",
           reference: event.payoutRequestId,
         });
+        return;
     }
   }
 }

@@ -89,6 +89,11 @@
       "import": "./src/ramps/providers/bvnk/counterparty.ts",
       "default": "./src/ramps/providers/bvnk/counterparty.ts"
     },
+    "./ramps/providers/bvnk/currencies": {
+      "types": "./src/ramps/providers/bvnk/currencies.ts",
+      "import": "./src/ramps/providers/bvnk/currencies.ts",
+      "default": "./src/ramps/providers/bvnk/currencies.ts"
+    },
     "./ramps/providers/bvnk/provider-data": {
       "types": "./src/ramps/providers/bvnk/provider-data.ts",
       "import": "./src/ramps/providers/bvnk/provider-data.ts",
@@ -103,6 +108,16 @@
       "types": "./src/ramps/providers/bvnk/schemas.ts",
       "import": "./src/ramps/providers/bvnk/schemas.ts",
       "default": "./src/ramps/providers/bvnk/schemas.ts"
+    },
+    "./ramps/providers/bvnk/settlement": {
+      "types": "./src/ramps/providers/bvnk/settlement.ts",
+      "import": "./src/ramps/providers/bvnk/settlement.ts",
+      "default": "./src/ramps/providers/bvnk/settlement.ts"
+    },
+    "./ramps/providers/bvnk/test-fixtures": {
+      "types": "./src/ramps/providers/bvnk/test-fixtures.ts",
+      "import": "./src/ramps/providers/bvnk/test-fixtures.ts",
+      "default": "./src/ramps/providers/bvnk/test-fixtures.ts"
     },
     "./ramps/providers/coinbase/client": {
       "types": "./src/ramps/providers/coinbase/client.ts",
@@ -182,11 +197,11 @@
     "@solana/kit": "catalog:",
     "@solana/kora": "0.3.0-beta.3",
     "yaml": "2.9.0",
-    "zod": "4.4.3"
+    "zod": "4.6.1"
   },
   "devDependencies": {
-    "@types/node": "26.4.0",
-    "tsx": "4.23.12",
+    "@types/node": "26.5.1",
+    "tsx": "4.23.13",
     "typescript": "6.0.3"
   }
 }

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { supportsPortfolioWallets, supportsWithdrawalApprovals } from "./capabilities";
+import {
+  supportsPortfolioWallets,
+  supportsVaultQueuedWithdraw,
+  supportsWithdrawalApprovals,
+} from "./capabilities";
 import { EARN_PROVIDER_CLIENTS } from "./index";
 
 describe("supportsPortfolioWallets", () => {
@@ -39,5 +43,41 @@ describe("supportsWithdrawalApprovals", () => {
       { listPendingWithdrawalApprovals: async () => [] }
     );
     assert.equal(supportsWithdrawalApprovals(partial), false);
+  });
+});
+
+describe("supportsVaultQueuedWithdraw", () => {
+  const directMethods = {
+    buildVaultDeposit: async () => ({}),
+    readVaultPositions: async () => [],
+    sponsoredPrograms: () => [],
+  };
+
+  it("rejects clients with no queued-withdraw implementation", () => {
+    assert.equal(supportsVaultQueuedWithdraw(EARN_PROVIDER_CLIENTS.veda), false);
+  });
+
+  it("rejects a partial queue implementation", () => {
+    const partial = Object.assign(Object.create(EARN_PROVIDER_CLIENTS.veda), directMethods, {
+      getWithdrawalOptions: async () => ({ instant: false, queued: false }),
+    });
+    assert.equal(supportsVaultQueuedWithdraw(partial), false);
+  });
+
+  it("requires provider-owned lifecycle decoding as part of the complete queue lifecycle", () => {
+    const withoutDecoder = Object.assign(Object.create(EARN_PROVIDER_CLIENTS.veda), directMethods, {
+      getWithdrawalOptions: async () => ({}),
+      quoteQueuedWithdrawal: async () => ({}),
+      buildQueuedWithdrawalRequest: async () => ({}),
+      buildQueuedWithdrawalCancel: async () => ({}),
+      readQueuedWithdrawalRequests: async () => [],
+      readQueuedWithdrawalRequest: async () => ({}),
+    });
+    assert.equal(supportsVaultQueuedWithdraw(withoutDecoder), false);
+
+    const complete = Object.assign(withoutDecoder, {
+      decodeQueuedWithdrawalLifecycleEvents: async () => [],
+    });
+    assert.equal(supportsVaultQueuedWithdraw(complete), true);
   });
 });

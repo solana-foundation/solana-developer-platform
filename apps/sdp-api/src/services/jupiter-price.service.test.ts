@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
-import { fetchJupiterUsdPrices } from "./jupiter-price.service";
+import { clearJupiterPriceCacheForTests, fetchJupiterUsdPrices } from "./jupiter-price.service";
 
 const env = {} as Env;
 
@@ -13,6 +13,8 @@ function priceResponse(body: unknown, status = 200): Response {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
+  clearJupiterPriceCacheForTests();
 });
 
 describe("fetchJupiterUsdPrices", () => {
@@ -120,5 +122,47 @@ describe("fetchJupiterUsdPrices", () => {
 
     await expect(fetchJupiterUsdPrices(env, ["", "   "])).resolves.toEqual(new Map());
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("reuses a price for 30 seconds, then asks again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
+
+    await fetchJupiterUsdPrices(env, ["MintA"]);
+    vi.advanceTimersByTime(29_000);
+    await expect(fetchJupiterUsdPrices(env, ["MintA"])).resolves.toEqual(new Map([["MintA", 2]]));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(1_000);
+    await fetchJupiterUsdPrices(env, ["MintA"]);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks again after a failed request instead of remembering no price", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
+
+    await expect(fetchJupiterUsdPrices(env, ["MintA"])).resolves.toEqual(new Map());
+    await expect(fetchJupiterUsdPrices(env, ["MintA"])).resolves.toEqual(new Map([["MintA", 2]]));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends one request for two callers pricing the same mint at once", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
+
+    const [first, second] = await Promise.all([
+      fetchJupiterUsdPrices(env, ["MintA"]),
+      fetchJupiterUsdPrices(env, ["MintA"]),
+    ]);
+
+    expect(first).toEqual(new Map([["MintA", 2]]));
+    expect(second).toEqual(first);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });

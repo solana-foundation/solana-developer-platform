@@ -1,3 +1,10 @@
+import type {
+  ApprovalRequestStatus,
+  WalletApprovalRequestSummary,
+  WalletOperationStatus,
+} from "@sdp/types";
+import { z } from "zod";
+
 export const APPROVAL_ACTIONS = ["approve", "reject", "cancel"] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 export type ApprovalActionOutcome =
@@ -28,4 +35,90 @@ export function classifyApprovalActionResponse(
   if (status === 409) return "stale";
   if (status === 403) return "forbidden";
   return "failure";
+}
+
+const APPROVAL_REQUEST_STATUS = {
+  pending: "pending",
+  approved: "approved",
+  rejected: "rejected",
+  canceled: "canceled",
+  expired: "expired",
+  failed: "failed",
+} as const satisfies { [Status in ApprovalRequestStatus]: Status };
+
+const WALLET_OPERATION_STATUS = {
+  created: "created",
+  evaluated: "evaluated",
+  pending_approval: "pending_approval",
+  executing: "executing",
+  completed: "completed",
+  failed: "failed",
+  canceled: "canceled",
+} as const satisfies { [Status in WalletOperationStatus]: Status };
+
+/**
+ * The fields the detail page branches on: who may decide, and what execution
+ * did. Everything else on the summary is display-only and passes through.
+ */
+const approvalRequestEnvelopeSchema = z.object({
+  data: z.object({
+    approvalRequest: z.looseObject({
+      id: z.string().min(1),
+      status: z.enum(APPROVAL_REQUEST_STATUS),
+      // Optional: sdp-web can deploy ahead of the API release that adds them.
+      viewerIsRequester: z.boolean().optional(),
+      viewerCanDecide: z.boolean().optional(),
+      operation: z.looseObject({
+        status: z.enum(WALLET_OPERATION_STATUS),
+        executionCompletedAt: z.string().nullable(),
+        executionError: z.string().nullable(),
+      }),
+    }),
+  }),
+});
+
+const errorEnvelopeSchema = z.object({
+  error: z.union([
+    z
+      .string()
+      .min(1)
+      .transform((message) => ({ message, details: undefined })),
+    z.object({
+      message: z.string().min(1).optional(),
+      details: z.looseObject({ reason: z.string().optional() }).optional(),
+    }),
+  ]),
+});
+
+export type ApprovalActionResponse =
+  | { ok: true; approvalRequest: WalletApprovalRequestSummary | null }
+  | { ok: false; status: number; message: string | null; reason: string | undefined };
+
+/**
+ * Reads an approval request response from the dashboard proxy. A 2xx whose
+ * body does not carry a request yields `approvalRequest: null`, so the caller
+ * refetches instead of trusting a partial body. An error keeps the API's own
+ * message and reason, which name the rule or runtime state that refused it.
+ */
+export async function readApprovalActionResponse(
+  response: Response
+): Promise<ApprovalActionResponse> {
+  if (response.ok) {
+    const parsed = approvalRequestEnvelopeSchema.safeParse(await response.json().catch(() => null));
+    return {
+      ok: true,
+      approvalRequest: parsed.success
+        ? // SAFETY: the proxy forwards the API's WalletApprovalRequestSummary
+          // unchanged; the schema checks every field this page branches on.
+          (parsed.data.data.approvalRequest as unknown as WalletApprovalRequestSummary)
+        : null,
+    };
+  }
+  const error = errorEnvelopeSchema.safeParse(await response.json().catch(() => null));
+  return {
+    ok: false,
+    status: response.status,
+    message: error.success ? (error.data.error.message ?? null) : null,
+    reason: error.success ? error.data.error.details?.reason : undefined,
+  };
 }

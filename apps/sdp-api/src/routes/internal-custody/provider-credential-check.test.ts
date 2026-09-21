@@ -4,6 +4,7 @@ import { type DatabaseExecutor, getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError, internalError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { env } from "@/test/helpers/env";
@@ -519,9 +520,7 @@ describe("exact Custody Connection installation routes", () => {
       },
     });
     expect(providerFetch).toHaveBeenCalledTimes(3);
-    expect(providerFetch.mock.calls[0]?.[0]).toBe(
-      "https://privy.example.test/v1/wallets?limit=1&chain_type=solana"
-    );
+    expect(providerFetch.mock.calls[0]?.[0]).toBe("https://privy.example.test/v1/wallets");
     expect(providerFetch.mock.calls[1]?.[0]).toBe(PRIVY_EXTERNAL_WALLET_URL);
     expect(providerFetch.mock.calls[2]).toEqual([
       "https://privy.example.test/v1/wallets",
@@ -570,6 +569,9 @@ describe("exact Custody Connection installation routes", () => {
 
     env.PRIVY_BYOK_ENABLED = "false";
     providerFetch.mockClear();
+    const auditAdmission = vi
+      .spyOn(AuditService.prototype, "beginCritical")
+      .mockRejectedValue(internalError());
     const secretFactory = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
     const replay = await installationRequest(app, token, "complete");
 
@@ -583,6 +585,8 @@ describe("exact Custody Connection installation routes", () => {
     });
     expect(providerFetch).not.toHaveBeenCalled();
     expect(secretFactory).not.toHaveBeenCalled();
+    expect((await getInstallation(app, token)).status).toBe(200);
+    expect(auditAdmission).not.toHaveBeenCalled();
   });
 
   it("keeps completion successful and replayable when its audit outcome cannot be persisted", async () => {
@@ -638,14 +642,96 @@ describe("exact Custody Connection installation routes", () => {
     expect(audit?.count).toBe(1);
   });
 
-  it("performs no Provider I/O when the completion audit intent cannot be persisted", async () => {
+  it("retains an unresolved intent and signals when Provider success cannot be persisted", async () => {
+    successfulPrivyFetch();
+    const db = getDb(env);
+    const runTransaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementationOnce((callback) =>
+      runTransaction(async (tx) => {
+        await callback(tx);
+        await tx.execute("SELECT 1 / 0");
+      })
+    );
+    const logger = vi.spyOn(getLogger(), "warn");
+    const { app, token } = buildApp();
+
+    const response = await installationRequest(app, token, "complete");
+
+    expect(response.status).toBe(409);
+    expect(await getState()).toMatchObject({
+      credential_status: "pending",
+      connection_status: "checking",
+      last_check_status: "running",
+    });
+    const audits = await db.queryMany<{ resource_id: string; audit_phase: string }>(
+      `SELECT resource_id, metadata::jsonb ->> 'auditPhase' AS audit_phase
+       FROM audit_logs WHERE organization_id = ?`,
+      [ORGANIZATION_ID]
+    );
+    expect(audits).toHaveLength(1);
+    const [intent] = audits;
+    if (!intent) throw new Error("Expected the unresolved installation audit intent");
+    expect(intent).toEqual({ resource_id: expect.any(String), audit_phase: "intent" });
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_credential_installation_audit_unresolved",
+        auditIntentId: intent.resource_id,
+        connectionId: CONNECTION_ID,
+        providerCredentialId: CREDENTIAL_ID,
+        reasonCode: "completion_outcome_unknown",
+      }),
+      expect.any(String)
+    );
+  });
+
+  it("does not close a rejected-credential attempt after an uncertain COMMIT response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(privyJson({ error: "invalid credentials" }, 401))
+    );
+    const db = getDb(env);
+    const runTransaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {
+      await runTransaction(callback);
+      throw internalError();
+    });
+    const logger = vi.spyOn(getLogger(), "warn");
+    const { app, token } = buildApp();
+
+    const response = await installationRequest(app, token, "complete");
+
+    expect(response.status).toBe(500);
+    expect(await getState()).toMatchObject({
+      credential_status: "failed_validation",
+      connection_status: "failed",
+      last_check_status: "failed",
+    });
+    expect(
+      await db.queryMany(
+        `SELECT metadata::jsonb AS metadata FROM audit_logs WHERE organization_id = ?`,
+        [ORGANIZATION_ID]
+      )
+    ).toMatchObject([{ metadata: { auditPhase: "intent" } }]);
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_credential_installation_audit_unresolved",
+        connectionId: CONNECTION_ID,
+        reasonCode: "completion_outcome_unknown",
+      }),
+      expect.any(String)
+    );
+  });
+
+  it("performs no secret or Provider I/O when the completion audit intent cannot be persisted", async () => {
     vi.spyOn(AuditService.prototype, "beginCritical").mockRejectedValue(internalError());
+    const secretFactory = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
     const providerFetch = successfulPrivyFetch();
     const { app, token } = buildApp();
 
     const response = await installationRequest(app, token, "complete");
 
     expect(response.status).toBe(500);
+    expect(secretFactory).not.toHaveBeenCalled();
     expect(providerFetch).not.toHaveBeenCalled();
     expect(await getState()).toMatchObject({
       credential_status: "pending",
@@ -654,6 +740,117 @@ describe("exact Custody Connection installation routes", () => {
       provider_account_fingerprint: null,
       default_custody_wallet_id: null,
     });
+  });
+
+  it("records a safe failed completion attempt when credential storage is unavailable", async () => {
+    const rawError = `storage payload ${APP_SECRET} bearer private-provider-token`;
+    vi.spyOn(
+      credentialSecretStore.EncryptedDbCredentialSecretStore.prototype,
+      "read"
+    ).mockRejectedValue(
+      new credentialSecretStore.CredentialSecretStoreError(rawError, "UPSTREAM_ERROR")
+    );
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+    const { app, token } = buildApp();
+
+    const response = await installationRequest(app, token, "complete");
+
+    expect(response.status).toBe(503);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await getState()).toMatchObject({
+      connection_status: "pending",
+      last_check_status: null,
+    });
+    const audits = await getDb(env).queryMany<{
+      resource_id: string;
+      user_id: string;
+      request_id: string;
+      status: string;
+      metadata: string;
+      audit_phase: string;
+      audit_intent_id: string | null;
+      target_resource_id: string | null;
+      target_credential_id: string | null;
+      target_project_id: string | null;
+      event: string | null;
+      failure_code: string | null;
+    }>(
+      `SELECT resource_id, user_id, request_id, status, metadata,
+              metadata::jsonb ->> 'auditPhase' AS audit_phase,
+              metadata::jsonb ->> 'auditIntentId' AS audit_intent_id,
+              metadata::jsonb -> 'target' ->> 'resourceId' AS target_resource_id,
+              metadata::jsonb -> 'target' -> 'metadata' ->> 'providerCredentialId' AS target_credential_id,
+              metadata::jsonb -> 'target' -> 'metadata' ->> 'projectId' AS target_project_id,
+              metadata::jsonb ->> 'event' AS event,
+              metadata::jsonb ->> 'failureCode' AS failure_code
+       FROM audit_logs WHERE organization_id = ? ORDER BY ledger_sequence`,
+      [ORGANIZATION_ID]
+    );
+    expect(audits).toHaveLength(2);
+    const [intent, outcome] = audits;
+    if (!intent || !outcome) throw new Error("Expected installation audit intent and outcome");
+    expect(intent).toMatchObject({
+      resource_id: expect.any(String),
+      user_id: USER_ID,
+      request_id: "req_provider_credential_installation",
+      audit_phase: "intent",
+      target_resource_id: CONNECTION_ID,
+      target_credential_id: CREDENTIAL_ID,
+      target_project_id: PROJECT_ID,
+    });
+    expect(outcome).toMatchObject({
+      resource_id: CONNECTION_ID,
+      user_id: USER_ID,
+      request_id: "req_provider_credential_installation",
+      status: "failure",
+      audit_phase: "outcome",
+      audit_intent_id: intent.resource_id,
+      event: "provider_credential_installation_completion_failed",
+      failure_code: "credential_storage_failed",
+    });
+    const serialized = JSON.stringify(audits);
+    expect(serialized).not.toContain(APP_SECRET);
+    expect(serialized).not.toContain("private-provider-token");
+    expect(serialized).not.toContain(rawError);
+  });
+
+  it("audits runtime credential continuity refusal before Provider I/O", async () => {
+    await useRuntimeCredential();
+    await getDb(env).execute(
+      "UPDATE custody_connections SET provider_account_fingerprint = ? WHERE id = ?",
+      [PROVIDER_ACCOUNT_FINGERPRINT, CONNECTION_ID]
+    );
+    env.PRIVY_APP_ID = "a-different-provider-account";
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+    const { app, token } = buildApp();
+
+    const response = await installationRequest(app, token, "complete");
+
+    expect(response.status).toBe(409);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await getState()).toMatchObject({
+      connection_status: "pending",
+      last_check_status: null,
+    });
+    expect(
+      await getDb(env).queryMany(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs
+       WHERE resource_id = ? AND action = 'check'`,
+        [CONNECTION_ID]
+      )
+    ).toMatchObject([
+      {
+        status: "failure",
+        metadata: {
+          event: "provider_credential_installation_completion_failed",
+          failureCode: "provider_account_mismatch",
+          providerCredentialId: CREDENTIAL_ID,
+          projectId: PROJECT_ID,
+        },
+      },
+    ]);
   });
 
   it("accepts an organization admin dashboard session", async () => {
@@ -687,7 +884,7 @@ describe("exact Custody Connection installation routes", () => {
   });
 
   it("returns retry_unknown without terminally changing the installation", async () => {
-    const providerFetch = vi.fn().mockResolvedValue(privyJson({ error: "temporary" }, 503));
+    const providerFetch = vi.fn().mockImplementation(() => privyJson({ error: "temporary" }, 503));
     vi.stubGlobal("fetch", providerFetch);
     const { app, token } = buildApp();
 
@@ -714,6 +911,86 @@ describe("exact Custody Connection installation routes", () => {
       last_check_failure_code: "provider_response_unknown",
       default_custody_wallet_id: null,
     });
+    expect((await installationRequest(app, token, "complete")).status).toBe(200);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(
+      await getDb(env).queryMany(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs
+       WHERE action = 'check' AND resource_id = ?`,
+        [CONNECTION_ID]
+      )
+    ).toMatchObject([
+      { status: "failure", metadata: { completionStatus: "retry_unknown" } },
+      { status: "failure", metadata: { completionStatus: "retry_unknown" } },
+    ]);
+  });
+
+  it("audits the confirmed retry_unknown attempt when a later attempt succeeds before its reload", async () => {
+    const db = getDb(env);
+    const execute = db.execute.bind(db);
+    let markPersisted: () => void = () => undefined;
+    let releaseFirst: () => void = () => undefined;
+    const persisted = new Promise<void>((resolve) => {
+      markPersisted = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    vi.spyOn(db, "execute").mockImplementation(async (sql, params) => {
+      const result = await execute(sql, params);
+      if (sql.includes("last_check_status = 'retry_unknown'")) {
+        markPersisted();
+        await released;
+      }
+      return result;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(privyJson({ error: "temporary" }, 503)));
+    const { app, token } = buildApp();
+
+    const first = installationRequest(app, token, "complete");
+    await persisted;
+    try {
+      successfulPrivyFetch();
+      expect((await installationRequest(app, token, "complete")).status).toBe(200);
+    } finally {
+      releaseFirst();
+    }
+    const firstResponse = await first;
+    expect(firstResponse.status).toBe(200);
+    expect(await firstResponse.json()).toMatchObject({
+      data: { completion: { status: "success" } },
+    });
+    const intents = await db.queryMany<{ resource_id: string }>(
+      `SELECT resource_id FROM audit_logs WHERE organization_id = ?
+       AND metadata::jsonb ->> 'auditPhase' = 'intent' ORDER BY ledger_sequence`,
+      [ORGANIZATION_ID]
+    );
+    expect(intents).toHaveLength(2);
+    const [firstIntent, secondIntent] = intents;
+    if (!firstIntent || !secondIntent) throw new Error("Expected both completion audit intents");
+    expect(firstIntent.resource_id).toEqual(expect.any(String));
+    expect(secondIntent.resource_id).toEqual(expect.any(String));
+    expect(secondIntent.resource_id).not.toBe(firstIntent.resource_id);
+    expect(
+      await db.queryMany(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs
+       WHERE resource_id = ? AND action = 'check' ORDER BY ledger_sequence`,
+        [CONNECTION_ID]
+      )
+    ).toMatchObject([
+      {
+        status: "success",
+        metadata: { auditIntentId: secondIntent.resource_id, completionStatus: "success" },
+      },
+      {
+        status: "failure",
+        metadata: {
+          auditIntentId: firstIntent.resource_id,
+          completionStatus: "retry_unknown",
+          failureCode: "provider_response_unknown",
+        },
+      },
+    ]);
   });
 
   it("stores invalid credentials as a redacted terminal failure and replays it flag-off", async () => {
@@ -1199,7 +1476,7 @@ describe("exact Custody Connection installation routes", () => {
     });
     const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
+      if (init?.method === "GET" && url.endsWith("/wallets")) {
         enterValidation?.();
         await validationGate;
         return privyJson({ data: [] });
@@ -1259,7 +1536,7 @@ describe("exact Custody Connection installation routes", () => {
     let validationCalls = 0;
     const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
+      if (init?.method === "GET" && url.endsWith("/wallets")) {
         validationCalls += 1;
         if (validationCalls === 1) {
           firstValidationEntered?.();
@@ -1297,6 +1574,20 @@ describe("exact Custody Connection installation routes", () => {
     expect(
       await getDb(env).prepare("SELECT COUNT(*) AS count FROM custody_wallets").first()
     ).toEqual({ count: 1 });
+    expect(
+      await getDb(env).queryMany(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs WHERE action = 'check' AND resource_id = ?`,
+        [CONNECTION_ID]
+      )
+    ).toMatchObject([
+      { status: "success", metadata: { event: "provider_credential_installation_completed" } },
+    ]);
+    expect(
+      await getDb(env).queryOne(
+        `SELECT COUNT(*) AS count FROM audit_logs
+       WHERE metadata::jsonb ->> 'event' = 'provider_credential_installation_completion_replayed'`
+      )
+    ).toEqual({ count: 1 });
   });
 
   it("returns the committed success when a stale completion later reports a conflict", async () => {
@@ -1311,7 +1602,7 @@ describe("exact Custody Connection installation routes", () => {
     let lookupCalls = 0;
     const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/wallets?limit=1&chain_type=solana")) {
+      if (init?.method === "GET" && url.endsWith("/wallets")) {
         return privyJson({ data: [] });
       }
       if (url === PRIVY_EXTERNAL_WALLET_URL) {

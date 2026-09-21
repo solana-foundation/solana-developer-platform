@@ -6,7 +6,7 @@ import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, conflict } from "@/lib/errors";
+import { AppError, badRequest, conflict, serviceUnavailable } from "@/lib/errors";
 import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -47,46 +47,19 @@ import type {
   setDefaultWalletSchema,
   updateWalletSchema,
 } from "../schemas";
-
-const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
-
-interface CacheEntry<T> {
-  expiresAt: number;
-  value: T;
-}
-
-const walletBalanceCache = new Map<string, CacheEntry<CustodyWalletTokenBalance[]>>();
+import {
+  clearWalletBalanceCache,
+  readWalletBalances,
+  type WalletBalanceTarget,
+} from "../wallet-balances";
 
 export function clearWalletCaches() {
-  walletBalanceCache.clear();
+  clearWalletBalanceCache();
 }
 
-function readCache<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
-  const entry = cache.get(key);
-  if (!entry) {
-    return null;
-  }
-
-  if (entry.expiresAt <= Date.now()) {
-    cache.delete(key);
-    return null;
-  }
-
-  return entry.value;
-}
-
-function writeCache<T>(cache: Map<string, CacheEntry<T>>, key: string, value: T, ttlMs: number): T {
-  cache.set(key, {
-    value,
-    expiresAt: Date.now() + ttlMs,
-  });
-
-  return value;
-}
-
-function buildWalletBalanceCacheKey(c: AppContext, publicKey: string): string {
+function buildWalletBalanceCacheScope(c: AppContext): string {
   const auth = getAuth(c);
-  return `${auth.organizationId}:${auth.projectId ?? "org"}:${publicKey}`;
+  return `${auth.organizationId}:${auth.projectId ?? "org"}`;
 }
 
 function logWalletStep(
@@ -223,92 +196,27 @@ function resolveWalletFilters(
 
 async function getBalancesByWalletId(
   c: AppContext,
-  walletPublicKeys: Array<{ id: string; walletId: string; publicKey: string }>,
+  walletPublicKeys: WalletBalanceTarget[],
   options: { includeUsdValues?: boolean } = {}
 ) {
-  const rpc = solanaRpc.createRpc(c.env);
-  const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
-  const balanceEntries = await Promise.all(
-    walletPublicKeys.map(async (wallet) => {
-      const cacheKey = buildWalletBalanceCacheKey(c, wallet.publicKey);
-      const cachedBalances = readCache(walletBalanceCache, cacheKey);
-      if (cachedBalances) {
-        return [wallet.id, cachedBalances] as const;
-      }
-
-      const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
-        solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address),
-        tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, {
-          tokenLabelsByMint,
-        }),
-      ]);
-      const lamports =
-        solBalanceResult.status === "fulfilled" ? (solBalanceResult.value?.lamports ?? 0n) : 0n;
-      const splBalances = splBalancesResult.status === "fulfilled" ? splBalancesResult.value : [];
-
-      if (solBalanceResult.status === "rejected") {
-        getLogger().error(
-          {
-            requestId: c.get("requestId"),
-            walletId: wallet.walletId,
-            publicKey: wallet.publicKey,
-            error:
-              solBalanceResult.reason instanceof Error
-                ? solBalanceResult.reason.message
-                : String(solBalanceResult.reason),
-          },
-          "getBalancesByWalletId: failed to fetch SOL balance"
-        );
-      }
-
-      if (splBalancesResult.status === "rejected") {
-        getLogger().error(
-          {
-            requestId: c.get("requestId"),
-            walletId: wallet.walletId,
-            publicKey: wallet.publicKey,
-            error:
-              splBalancesResult.reason instanceof Error
-                ? splBalancesResult.reason.message
-                : String(splBalancesResult.reason),
-          },
-          "getBalancesByWalletId: failed to fetch SPL balances"
-        );
-      }
-
-      // A partial observation is not a zero balance. Omit this wallet's
-      // balance field entirely so callers can distinguish an RPC failure from
-      // a successful empty account, and never cache a synthetic zero that
-      // would survive the transient failure for the cache TTL.
-      if (solBalanceResult.status === "rejected" || splBalancesResult.status === "rejected") {
-        return null;
-      }
-
-      const walletBalances = writeCache(
-        walletBalanceCache,
-        cacheKey,
-        [
-          {
-            token: "SOL",
-            mint: tokenAccounts.SOL_MINT,
-            amount: lamports.toString(),
-            uiAmount: formatDecimalAmount(lamports, 9),
-            decimals: 9,
-          },
-          ...splBalances,
-        ],
-        WALLET_BALANCE_CACHE_TTL_MS
-      );
-
-      return [wallet.id, walletBalances] as const;
-    })
+  // Labels and chain reads start together; neither needs the other until both are in.
+  const [tokenLabelsByMint, observedBalances] = await Promise.all([
+    resolveIssuedTokenLabelsByMint(c),
+    readWalletBalances(
+      solanaRpc.createRpc(c.env),
+      buildWalletBalanceCacheScope(c),
+      walletPublicKeys,
+      c.get("requestId")
+    ),
+  ]);
+  const labeledBalances = new Map(
+    [...observedBalances].map(([walletId, balances]) => [
+      walletId,
+      tokenAccounts.withIssuedTokenLabels(balances, tokenLabelsByMint),
+    ])
   );
 
-  const balancesByWalletId = balanceEntries.filter(
-    (entry): entry is readonly [string, CustodyWalletTokenBalance[]] => entry !== null
-  );
-
-  const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, new Map(balancesByWalletId));
+  const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, labeledBalances);
 
   if (options.includeUsdValues === false) {
     return balancesMap;
@@ -359,6 +267,8 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
     }
     if (target?.kind === "connection") {
       const wallet = await runtimeTargets.createConnectionWallet({
+        auditContext: c,
+        creationReason: "wallet_api",
         organizationId: actor.organizationId,
         projectId: target.projectId,
         connectionId: target.connectionId,
@@ -544,95 +454,120 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
     if (!wallet.isRuntimeExecutionAllowed) {
       throw new AppError("CONFLICT", "Custody Connection is unavailable");
     }
-    const updated = await getDb(c.env)
-      .prepare(
-        `UPDATE custody_connections
-         SET default_custody_wallet_id = ?, updated_at = sdp_iso_now()
-         WHERE id = ?
-           AND organization_id = ?
-           AND project_id = ?
-           AND status = 'active'
-           AND EXISTS (
-             SELECT 1
-             FROM custody_wallets w
-             WHERE w.id = ?
-               AND w.custody_connection_id = custody_connections.id
-               AND w.status = 'active'
-           )`
-      )
-      .bind(wallet.id, wallet.custodyConnectionId, actor.organizationId, projectId, wallet.id)
-      .run();
-    if (updated !== 1) {
-      throw new AppError("CONFLICT", "Custody Connection is unavailable");
+  } else {
+    const signingService = signingServiceModule.createSigningService(
+      c.env,
+      getRequestTenantScope(c)
+    );
+    const config = await signingService.getConfigurationForMutation(
+      actor.organizationId,
+      projectId,
+      wallet.provider
+    );
+    if (!config?.id || config.id !== wallet.custodyConfigId) {
+      throw new AppError("CONFLICT", "Wallet signing is not initialized");
     }
-
-    const auditService = new AuditService(getDb(c.env));
-    await auditService.log(c, {
-      action: "update",
-      resourceType: "custody_connection",
-      resourceId: wallet.custodyConnectionId,
-      metadata: {
-        event: "default_wallet_changed",
-        provider: wallet.provider,
-        walletId: wallet.walletId,
-        projectId: projectId ?? null,
-      },
-    });
-    clearWalletCaches();
-    return success(c, { defaultWalletId: wallet.walletId });
+    await assertProviderAvailable(
+      c.env,
+      getDb(c.env),
+      actor.organizationId,
+      "custody",
+      config.provider
+    );
   }
 
-  const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
-  const config = await signingService.getConfigurationForMutation(
-    actor.organizationId,
-    projectId,
-    wallet.provider
-  );
-
-  if (!config?.id || config.id !== wallet.custodyConfigId) {
-    throw new AppError("CONFLICT", "Wallet signing is not initialized");
-  }
-
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    actor.organizationId,
-    "custody",
-    config.provider
-  );
-
-  // Membership check and pointer update in one conditional statement so a
-  // concurrent wallet delete/deactivate cannot slip between them.
-  const updated = await getDb(c.env)
-    .prepare(
-      `UPDATE custody_configs
-     SET default_wallet_id = ?, updated_at = datetime('now')
-     WHERE id = ?
-       AND EXISTS (
-         SELECT 1
-         FROM custody_wallets w
-         WHERE w.custody_config_id = custody_configs.id
-           AND w.wallet_id = ?
-           AND w.status = 'active'
-       )`
-    )
-    .bind(wallet.walletId, config.id, wallet.walletId)
-    .run();
-
-  if (updated === 0) {
-    throw badRequest("Unknown walletId for this wallet signing configuration");
-  }
-
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
+  const db = getDb(c.env);
+  const auditService = new AuditService(db);
+  const ownerId = wallet.custodyConnectionId ?? wallet.custodyConfigId;
+  const intent = await auditService.beginCritical(c, {
     action: "update",
-    resourceType: "custody_config",
-    resourceId: config.id,
+    resourceType: wallet.custodyConnectionId ? "custody_connection" : "custody_config",
+    resourceId: ownerId,
     metadata: {
-      event: "default_wallet_changed",
-      provider: config.provider,
+      event: "default_wallet_change_started",
+      ownerKind: wallet.custodyConnectionId ? "connection" : "config",
+      provider: wallet.provider,
+      custodyWalletId: wallet.id,
       walletId: wallet.walletId,
       projectId: projectId ?? null,
+    },
+  });
+
+  let previous: { custody_wallet_id: string | null; wallet_id: string | null };
+  try {
+    previous = await db.transaction(async (tx) => {
+      // Lock the owner before reading its previous default so concurrent
+      // selections cannot be attributed to this request in the audit outcome.
+      const current = await tx.queryOne<typeof previous>(
+        wallet.custodyConnectionId
+          ? `SELECT c.default_custody_wallet_id AS custody_wallet_id, w.wallet_id
+             FROM custody_connections c
+             LEFT JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
+             WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
+             FOR UPDATE OF c`
+          : `SELECT w.id AS custody_wallet_id, c.default_wallet_id AS wallet_id
+             FROM custody_configs c
+             LEFT JOIN custody_wallets w
+               ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
+             WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?
+             FOR UPDATE OF c`,
+        [ownerId, actor.organizationId, projectId ?? null]
+      );
+      if (!current) throw conflict("Wallet signing is not initialized");
+
+      // Keep the membership guard on the UPDATE: a wallet may have become
+      // inactive after the request's authorization lookup.
+      const updated = wallet.custodyConnectionId
+        ? await tx.execute(
+            `UPDATE custody_connections
+             SET default_custody_wallet_id = ?, updated_at = sdp_iso_now()
+             WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
+               AND EXISTS (SELECT 1 FROM custody_wallets w WHERE w.id = ?
+                 AND w.custody_connection_id = custody_connections.id AND w.status = 'active')`,
+            [wallet.id, ownerId, actor.organizationId, projectId, wallet.id]
+          )
+        : await tx.execute(
+            `UPDATE custody_configs
+             SET default_wallet_id = ?, updated_at = datetime('now')
+             WHERE id = ? AND EXISTS (SELECT 1 FROM custody_wallets w
+               WHERE w.custody_config_id = custody_configs.id AND w.wallet_id = ? AND w.status = 'active')`,
+            [wallet.walletId, ownerId, wallet.walletId]
+          );
+      if (updated !== 1) {
+        if (wallet.custodyConnectionId) throw conflict("Custody Connection is unavailable");
+        throw badRequest("Unknown walletId for this wallet signing configuration");
+      }
+      return current;
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      await auditService.completeCritical(c, intent, {
+        status: "failure",
+        metadata: { event: "default_wallet_change_failed", reason: "selection_unavailable" },
+      });
+    } else {
+      // A lost COMMIT acknowledgement cannot be attributed by rereading the
+      // current pointer: another request may already have selected it.
+      getLogger().error({
+        event: "custody_default_wallet_audit_unresolved",
+        auditIntentId: intent.id,
+        organizationId: actor.organizationId,
+        projectId: projectId ?? null,
+        ownerId,
+        reason: "persistence_result_unknown",
+      });
+    }
+    throw error;
+  }
+  const changed = previous.custody_wallet_id !== wallet.id;
+  await auditService.completeCritical(c, intent, {
+    action: changed ? "update" : "maintenance",
+    resourceType: changed ? intent.entry.resourceType : "audit_ledger",
+    resourceId: changed ? ownerId : intent.id,
+    metadata: {
+      event: changed ? "default_wallet_changed" : "default_wallet_selection_unchanged",
+      previousCustodyWalletId: previous.custody_wallet_id,
+      previousWalletId: previous.wallet_id,
     },
   });
 
@@ -753,10 +688,17 @@ export const getWalletAggregate = async (c: AppContext) => {
     walletCount: wallets.length,
   });
 
+  const walletBalances = wallets.map((wallet) => {
+    const balances = balancesByWalletId.get(wallet.id);
+    if (balances === undefined) {
+      throw serviceUnavailable("Wallet balances are temporarily unavailable. Try again.");
+    }
+    return balances;
+  });
   const aggregateStartedAt = performance.now();
   const aggregatedBalances = await attachUsdValuesToBalances(
     c.env,
-    aggregateTrackedWalletBalances(wallets.map((wallet) => balancesByWalletId.get(wallet.id) ?? []))
+    aggregateTrackedWalletBalances(walletBalances)
   );
   logWalletStep("aggregate_wallets", "attach_usd_values", aggregateStartedAt, {
     balanceCount: aggregatedBalances.length,

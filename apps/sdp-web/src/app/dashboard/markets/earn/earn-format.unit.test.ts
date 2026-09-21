@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   earnProviderLabel,
+  formatEpochSeconds,
   formatProviderAmount,
   formatTokenQuantity,
   formatUsd,
@@ -37,5 +38,15 @@ describe("Earn display formatting", () => {
   it("renders the mainnet-only provider names in both Markets product tables", () => {
     expect(earnProviderLabel("jupiter_lend")).toBe("Jupiter Lend");
     expect(earnProviderLabel("ondo")).toBe("Ondo");
+  });
+
+  it("formats only renderable Unix epoch seconds", () => {
+    expect(formatEpochSeconds("1756684800", "en-US")).toBe(
+      new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(
+        new Date(1_756_684_800_000)
+      )
+    );
+    expect(formatEpochSeconds("not-an-epoch", "en-US")).toBeUndefined();
+    expect(formatEpochSeconds("99999999999999999999", "en-US")).toBeUndefined();
   });
 });

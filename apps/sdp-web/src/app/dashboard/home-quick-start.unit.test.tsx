@@ -26,8 +26,14 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => workspace,
   useOptionalDashboardWorkspace: () => workspace,
 }));
+const swr = vi.hoisted(() => ({
+  activity: { activityRows: [] } as Record<string, unknown>,
+  volume: { todaysVolume: 0, todaysVolumeError: null } as Record<string, unknown> | undefined,
+}));
 vi.mock("@/lib/dashboard-swr", () => ({
-  usePersistedDashboardSWR: () => ({ data: { activityRows: [], todaysVolume: 0 } }),
+  usePersistedDashboardSWR: (key: string) => ({
+    data: key === "dashboard-home-volume" ? swr.volume : swr.activity,
+  }),
 }));
 vi.mock("./wallets/section-entry", () => ({
   SectionEntry: ({ children }: { children: ReactNode }) => children,
@@ -57,6 +63,8 @@ function ui(totalBalanceError: string | null = null) {
 afterEach(() => {
   cleanup();
   workspace.sdpEnvironment = "sandbox";
+  swr.activity = { activityRows: [] };
+  swr.volume = { todaysVolume: 0, todaysVolumeError: null };
 });
 
 describe("home after quick start", () => {
@@ -130,5 +138,26 @@ describe("home after quick start", () => {
     expect(view.getByText("Unavailable")).toBeTruthy();
     expect(view.getByText("Balance data is unavailable right now.")).toBeTruthy();
     expect(view.queryByRole("heading", { name: "Tutorials" })).toBeNull();
+  });
+
+  it("says why today's volume is missing on the page, not only on hover", () => {
+    setQuickStart(progressKey, "done");
+    swr.volume = {
+      todaysVolume: null,
+      todaysVolumeError: "Payments activity is unavailable right now.",
+    };
+    const view = render(ui());
+    const reason = view.getByText("Payments activity is unavailable right now.");
+    expect(reason.tagName).toBe("DD");
+    expect(view.container.querySelector("dd[title]")).toBeNull();
+  });
+  // Volume waits on every wallet, so it can land after the page: until then it
+  // is unknown, which is a dash, never a measured $0.00.
+  it("shows a dash, not $0.00, while today's volume is still loading", () => {
+    setQuickStart(progressKey, "done");
+    swr.volume = undefined;
+    const view = render(ui());
+    const label = view.getByText("Today's Volume");
+    expect(label.nextElementSibling?.textContent).toBe("—");
   });
 });

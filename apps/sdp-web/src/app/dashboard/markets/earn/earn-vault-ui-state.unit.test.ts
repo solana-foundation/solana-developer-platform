@@ -27,8 +27,8 @@ describe("earn vault UI state", () => {
       progressStep: 2,
     });
     expect(earnVaultWithdrawalUiState("confirmed")).toEqual({
-      positionStatus: "pending",
-      progressStep: 2,
+      positionStatus: "active",
+      progressStep: 3,
     });
     expect(earnVaultWithdrawalUiState("finalized")).toEqual({
       positionStatus: "active",

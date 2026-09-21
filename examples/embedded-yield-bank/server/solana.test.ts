@@ -15,7 +15,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { signTransaction } from "./solana.ts";
+import { assertRpcCluster, signTransaction } from "./solana";
 
 const blockhash = getBase58Codec().decode(
   new Uint8Array(32).fill(1)
@@ -52,6 +52,29 @@ describe("Northstar transaction signing", () => {
     ]);
     expect(signed.signatures[northstar.address]).not.toBeNull();
     expect(signed.signatures[customer.address]).not.toBeNull();
+  });
+});
+
+describe("Northstar RPC cluster guard", () => {
+  it("accepts the configured cluster and rejects a mismatch", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      Response.json({
+        jsonrpc: "2.0",
+        id: "test",
+        result: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+      });
+
+    try {
+      await expect(
+        assertRpcCluster("https://devnet.example.test", "devnet")
+      ).resolves.toBeUndefined();
+      await expect(
+        assertRpcCluster("https://wrong.example.test", "mainnet-beta")
+      ).rejects.toThrow("does not serve mainnet-beta");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 

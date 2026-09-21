@@ -1,6 +1,11 @@
 import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import type { EarnVaultPosition } from "@sdp/types";
-import { compareUnsignedDecimals, MAX_AMOUNT_LENGTH, parseUnsignedDecimal } from "./earn-decimal";
+import {
+  compareUnsignedDecimals,
+  isPositiveDecimal,
+  MAX_AMOUNT_LENGTH,
+  parseUnsignedDecimal,
+} from "./earn-decimal";
 
 export const VAULT_WITHDRAWAL_AMOUNT_DECIMALS = 6;
 const MAX_SOLANA_MINT_DECIMALS = 9;
@@ -14,7 +19,7 @@ export function validateVaultWithdrawalAmount(value: string): VaultWithdrawalAmo
   if (
     !amount ||
     amount.fraction.length > VAULT_WITHDRAWAL_AMOUNT_DECIMALS ||
-    compareUnsignedDecimals(amount.canonical, "0") !== 1
+    !isPositiveDecimal(amount.canonical)
   ) {
     return { kind: "invalid" };
   }
@@ -34,7 +39,7 @@ function multiplyDivideDecimal(
     !parsedLeft ||
     !parsedRight ||
     !parsedDivisor ||
-    compareUnsignedDecimals(parsedDivisor.canonical, "0") !== 1
+    !isPositiveDecimal(parsedDivisor.canonical)
   ) {
     return undefined;
   }
@@ -61,7 +66,7 @@ export function vaultWithdrawalAvailableAmount(
     position.shares === undefined ||
     position.withdrawableShares === undefined ||
     position.tokenValue === undefined ||
-    compareUnsignedDecimals(position.shares, "0") !== 1
+    !isPositiveDecimal(position.shares)
   ) {
     return undefined;
   }
@@ -108,5 +113,5 @@ export function vaultWithdrawalSharesForAmount(
     position.tokenValue,
     shareDecimals
   );
-  return shares && compareUnsignedDecimals(shares, "0") === 1 ? shares : undefined;
+  return shares && isPositiveDecimal(shares) ? shares : undefined;
 }

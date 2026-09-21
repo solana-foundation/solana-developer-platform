@@ -334,7 +334,11 @@
       "agreementRequiredTitle": "Revise e aceite os acordos",
       "agreementRequiredDescription": "A BVNK exige que a contraparte aceite o acordo da plataforma referente à sua residência fiscal antes que os dados dela sejam coletados.",
       "viewAgreement": "Ver acordo",
-      "acceptAgreements": "Concordo e continuar"
+      "acceptAgreements": "Concordo e continuar",
+      "agreementSigningTitle": "Confirmando acordo",
+      "agreementSigningDescription": "Aguardando o provedor confirmar o acordo assinado. Isso costuma levar alguns segundos.",
+      "agreementConsentPrefix": "Li e concordo com a",
+      "privacyPolicy": "política de privacidade"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verifique sua identidade",
@@ -667,7 +671,12 @@
       "providerAccountStatus": "Status",
       "copyCustomerId": "Copiar ID do cliente",
       "customerIdCopied": "ID do cliente copiado",
-      "noPayoutAccounts": "Nenhuma conta de pagamento ainda."
+      "noPayoutAccounts": "Nenhuma conta de pagamento ainda.",
+      "taxResidence": "Residência fiscal",
+      "agreementSigned": "Assinado",
+      "agreementAwaitingSignature": "Aguardando assinatura",
+      "viewAgreement": "Acordo",
+      "viewPrivacyPolicy": "Política de privacidade"
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -1129,14 +1138,7 @@
           "update_authority": "Update authority",
           "pause": "Pausar",
           "unpause": "Despausar",
-          "deploy": "Deploy",
-          "confidential_configure": "Configure confidential account",
-          "confidential_approve": "Approve confidential account",
-          "confidential_deposit": "Confidential deposit",
-          "confidential_apply_pending": "Apply pending balance",
-          "confidential_transfer": "Confidential transfer",
-          "confidential_withdraw": "Confidential withdrawal",
-          "confidential_empty_account": "Empty confidential account"
+          "deploy": "Deploy"
         },
         "rings": {
           "shield": "Proteger",

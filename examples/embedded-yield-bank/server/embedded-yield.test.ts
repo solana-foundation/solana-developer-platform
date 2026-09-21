@@ -1,43 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import type {
-  TokenBalance,
-  TokenEarnings,
-  YieldPosition,
-  YieldStrategy,
-} from "../src/types.ts";
+import type { YieldMovement, YieldStrategy } from "../src/types";
 import {
   assertBuiltFeePayer,
   deriveWithdrawalFloor,
-  summarizeAccountToken,
-} from "./embedded-yield.ts";
-import { SdpApiError } from "./sdp-client.ts";
+  refreshConfirmingMovements,
+} from "./embedded-yield";
+import { SdpApiError } from "./sdp-client";
 
 describe("Embedded Yield orchestration", () => {
-  it("keeps account totals in one token denomination", () => {
-    const balances: TokenBalance[] = [
-      { mint: "eurc", symbol: "EURC", amount: "100", decimals: 6 },
-      { mint: "usdc", symbol: "USDC", amount: "20", decimals: 6 },
-    ];
-    const positions = [
-      position("usdc-position", "usdc", "1.25"),
-      position("eurc-position", "eurc", "50"),
-    ];
-    const earnings: TokenEarnings[] = [
-      earningsFor("usdc", "0.25"),
-      earningsFor("eurc", "10"),
-    ];
-
-    expect(summarizeAccountToken(balances, positions, earnings)).toEqual({
-      tokenMint: "usdc",
-      tokenSymbol: "USDC",
-      available: "20",
-      inYield: "1.25",
-      portfolio: "21.25",
-      earned: "0.25",
-      unavailableYieldPositions: 0,
-    });
-  });
-
   it("quotes a withdrawal when its strategy is absent from the catalogue", async () => {
     const previewWithdrawal = vi.fn().mockResolvedValue({
       assetsOut: "10",
@@ -97,37 +67,85 @@ describe("Embedded Yield orchestration", () => {
       "unexpected fee payer"
     );
   });
+
+  it("refreshes only movements still waiting for confirmation", async () => {
+    const submitted = movement("submitted", "submitted");
+    const confirmed = movement("confirmed", "confirmed");
+    const getMovement = vi
+      .fn()
+      .mockResolvedValue({ ...submitted, status: "confirmed" });
+
+    await expect(
+      refreshConfirmingMovements(
+        { getMovement },
+        [submitted, confirmed],
+        [submitted.movementId]
+      )
+    ).resolves.toEqual({
+      movements: [{ ...submitted, status: "confirmed" }, confirmed],
+      reachedConfirmation: true,
+    });
+    expect(getMovement).toHaveBeenCalledTimes(1);
+    expect(getMovement).toHaveBeenCalledWith(submitted.movementId);
+  });
+
+  it("keeps the durable status when a confirmation read is unavailable", async () => {
+    const submitted = movement("submitted", "submitted");
+    const getMovement = vi.fn().mockRejectedValue(new Error("RPC unavailable"));
+
+    await expect(
+      refreshConfirmingMovements(
+        { getMovement },
+        [submitted],
+        [submitted.movementId]
+      )
+    ).resolves.toEqual({
+      movements: [submitted],
+      reachedConfirmation: false,
+    });
+  });
+
+  it("does not detail-read historical movements outside the active watch set", async () => {
+    const historical = movement("submitted", "historical");
+    const active = movement("submitted", "active");
+    const getMovement = vi
+      .fn()
+      .mockResolvedValue({ ...active, status: "confirmed" });
+
+    await expect(
+      refreshConfirmingMovements(
+        { getMovement },
+        [historical, active],
+        [active.movementId]
+      )
+    ).resolves.toEqual({
+      movements: [historical, { ...active, status: "confirmed" }],
+      reachedConfirmation: true,
+    });
+    expect(getMovement).toHaveBeenCalledTimes(1);
+    expect(getMovement).toHaveBeenCalledWith(active.movementId);
+  });
 });
 
-function position(
-  id: string,
-  tokenMint: string,
-  tokenValue: string
-): YieldPosition {
+function movement(
+  status: YieldMovement["status"],
+  movementId: string
+): YieldMovement {
   return {
-    id,
-    ownerAddress: "owner",
+    movementId,
+    positionId: "position",
     provider: "provider",
     providerReference: "vault",
-    label: id,
-    tokenMint,
-    shareMint: "shares",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    closedAt: null,
-    shares: "1",
-    withdrawableShares: "1",
-    tokenValue,
-  };
-}
-
-function earningsFor(tokenMint: string, earned: string): TokenEarnings {
-  return {
-    tokenMint,
-    positionCount: 1,
-    unavailablePositionCount: 0,
-    currentValue: "1",
-    totalDeposited: "0.75",
-    earned,
+    direction: "deposit",
+    status,
+    signature: "signature",
+    amount: "1",
+    denomination: "usdc",
+    tokenMint: "usdc",
+    tokenAmount: "1",
+    failureReason: null,
+    createdAt: "2026-09-18T00:00:00.000Z",
+    settledAt: null,
   };
 }
 

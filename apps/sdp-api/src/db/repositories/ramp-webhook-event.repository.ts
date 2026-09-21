@@ -44,6 +44,11 @@ export interface RecordRampWebhookEventFailureInput {
    * `maxAttempts` the row is parked as `failed` for an operator. */
   attempts: number;
   maxAttempts: number;
+  /** The application revision doing the parking; stamped only when the row
+   * parks, so the replay job can re-arm it after the next deploy. */
+  appRevision: string;
+  /** A permanent failure: the row parks as terminal and no deploy re-arms it. */
+  terminal?: boolean;
 }
 
 export interface ParkExhaustedRampWebhookEventsInput {
@@ -51,6 +56,7 @@ export interface ParkExhaustedRampWebhookEventsInput {
    * final attempt still running is not swept out from under its worker. */
   updatedBefore: string;
   maxAttempts: number;
+  appRevision: string;
 }
 
 export interface RampWebhookEventsRepository {
@@ -77,6 +83,14 @@ export interface RampWebhookEventsRepository {
    * claim excludes them.
    */
   parkExhausted(input: ParkExhaustedRampWebhookEventsInput): Promise<RampWebhookEventRow[]>;
+  /**
+   * Re-arms rows parked by a DIFFERENT application revision: the deploy that
+   * replaced it may carry the fix, so the row goes back to pending with fresh
+   * attempts and the minutely replay retries it. A row parked by the current
+   * revision stays parked — retrying the same code against the same payload
+   * only burns attempts.
+   */
+  rearmParkedByOtherRevisions(appRevision: string): Promise<RampWebhookEventRow[]>;
 }
 
 function mapRow(row: Record<string, unknown>): RampWebhookEventRow {
@@ -131,10 +145,22 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
              SET attempts = GREATEST(attempts, ?),
                  last_error = ?,
                  status = CASE WHEN GREATEST(attempts, ?) >= ? THEN 'failed' ELSE status END,
+                 parked_app_revision = CASE WHEN GREATEST(attempts, ?) >= ? THEN ? ELSE parked_app_revision END,
+                 terminal = ?,
                  updated_at = sdp_iso_now()
            WHERE id = ?`
         )
-        .bind(input.attempts, input.error, input.attempts, input.maxAttempts, input.id)
+        .bind(
+          input.attempts,
+          input.error,
+          input.attempts,
+          input.maxAttempts,
+          input.attempts,
+          input.maxAttempts,
+          input.appRevision,
+          input.terminal === true,
+          input.id
+        )
         .run();
     },
 
@@ -161,11 +187,35 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
       const result = await db
         .prepare(
           `UPDATE ramp_webhook_events
-             SET status = 'failed', updated_at = sdp_iso_now()
+             SET status = 'failed', parked_app_revision = ?, updated_at = sdp_iso_now()
            WHERE status = 'pending' AND attempts >= ? AND updated_at <= ?
            RETURNING *`
         )
-        .bind(input.maxAttempts, input.updatedBefore)
+        .bind(input.appRevision, input.maxAttempts, input.updatedBefore)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapRow);
+    },
+
+    async rearmParkedByOtherRevisions(appRevision) {
+      // Same batch and lock discipline as the claim path: bounded per pass —
+      // the parked set is small by nature, and the next minutely pass takes
+      // the rest — and SKIP LOCKED so overlapping passes never fight over a
+      // row.
+      const result = await db
+        .prepare(
+          `UPDATE ramp_webhook_events
+             SET status = 'pending', attempts = 0, parked_app_revision = NULL,
+                 updated_at = sdp_iso_now()
+           WHERE id IN (
+             SELECT id FROM ramp_webhook_events
+              WHERE status = 'failed' AND NOT terminal AND parked_app_revision IS DISTINCT FROM ?
+              ORDER BY created_at ASC
+              LIMIT 100
+              FOR UPDATE SKIP LOCKED
+           )
+           RETURNING *`
+        )
+        .bind(appRevision)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },

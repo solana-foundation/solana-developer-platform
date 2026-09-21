@@ -145,11 +145,12 @@ ones for every READ.
 The withdraw counterpart landed with PRO-1702: `POST /v1/earn/vault-withdrawals`
 records one share-mint-denominated signed movement before broadcasting it, and
 the treasury dashboard's exit action drives it. The shared vault reconciliation
-sweep finishes an ambiguous or interrupted submission. Production vault
-deposits open PER PROVIDER (`EARN_PROVIDER_VAULT_DIRECT_DEPOSIT_ENVIRONMENTS`
-in `@sdp/types`): the two mainnet-only providers, Jupiter Lend and Ondo, accept
-production deposits, while Kamino and Veda stay sandbox-only until PRO-1635's
-launch checklist opens them; the exit route itself takes no environment gate —
+sweep finishes an ambiguous or interrupted submission. Vault deposits open
+where the provider is DEPLOYED (`EARN_PROVIDER_DEPLOYED_CLUSTERS` in
+`@sdp/types`, derived from each provider's program table and mapped through
+`CLUSTER_BY_SDP_ENVIRONMENT`): Kamino from sandbox and production, Jupiter Lend
+and Ondo from production only, Veda from sandbox until PRO-1777 fills its
+mainnet deployment; the exit route itself takes no environment gate —
 money out beats money off.
 
 The removed pre-PRO-1634 execution sketch is not a contract. New providers must
@@ -165,7 +166,7 @@ per-provider movement endpoints or status polling types from git history.
 | Org/project tenancy | `projectContextMiddleware` | Authenticated program, build, movement, position, and withdrawal scoping. Anonymous requests receive no tenant context and write no tenant state. | ✅ wired |
 | Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
 | Custody + signing | `services/solana`, `@sdp/custody` | Treasury vault deposits and withdrawals sign provider-built instructions with the admitted organization wallet after policy enforcement | ✅ vault-direct treasury paths |
-| Fee sponsorship | `@sdp/payments/fee-payment` (Kora), `services/earn/vault-sponsorship.ts` | Sign-only sponsorship of the network fee **and** share-ATA rent, resolved once per request and applied to the fee payer, the provider's `rentPayer` and the simulation payer together. The exit closes the share ATA and refunds its rent to whoever funded it: `earn_positions.share_ata_rent_funder` (0066), written by whichever movement in either direction actually created the account, or this exit's own rent payer when the exit creates it. Cluster-gated to devnet and off by default: deployed devnet carries the Earn ids on its Kora allowlist (sdp-infra#64, asserted by the `Kora / Live Smoke` shard on secret-bearing CI runs); mainnet additionally needs `allow_create_account` opened and `sbp_mainnet_global` enabled (PRO-1736) | ✅ code · ✅ devnet deploy · ⏸ mainnet |
+| Fee sponsorship | `@sdp/payments/fee-payment` (Kora), `services/earn/vault-sponsorship.ts` | Sign-only sponsorship of the network fee **and** share-ATA rent, resolved once per request and applied to the fee payer, the provider's `rentPayer` and the simulation payer together. The exit closes the share ATA and refunds its rent to whoever funded it: `earn_positions.share_ata_rent_funder` (0066), written by whichever movement in either direction actually created the account, or this exit's own rent payer when the exit creates it. Per cluster and off by default: a cluster sponsors when the flag is on AND the deployment has a Kora for it (`KORA_RPC_URL` for the `SOLANA_NETWORK` cluster, `KORA_RPC_URL_MAINNET` for the other); the movement's cluster selects the Kora, the budget network and the fee-pricing RPC. Deployed devnet carries the Earn ids on its Kora allowlist (sdp-infra#64, asserted by the `Kora / Live Smoke` shard on secret-bearing CI runs); mainnet additionally needs `allow_create_account` opened, `sbp_mainnet_global` enabled and its Kora wired (PRO-1738) | ✅ code · ✅ devnet deploy · ⏸ mainnet |
 | Solana RPC | `@sdp/rpc`, `services/earn/execution-registry.ts` | Cluster-proved provider build, simulation, broadcast, and live vault-position hydration | ✅ vault-direct paths |
 | Helius DAS | `services/helius-das.service.ts` | No V1 consumer; vault positions use direct RPC reads | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |
@@ -175,7 +176,7 @@ per-provider movement endpoints or status polling types from git history.
 | Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Treasury vault deposits and withdrawals emit `program` / `earn_vault_deposit` or `earn_vault_withdrawal`, enforce before custody, and fence approved retries against the signed intent; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
 | Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
-| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public Earn route inventory and the optional-auth contract for the keyless subset | 🔨 regenerate after the security-reviewed contract change |
+| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public Earn route inventory and the optional-auth contract for the six keyless operations | ✅ source and generated artifacts aligned |
 
 **Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
 (Kamino, Veda, Jupiter Lend and Ondo carry real catalogue reads;

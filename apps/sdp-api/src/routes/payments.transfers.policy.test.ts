@@ -1,14 +1,21 @@
+import { SOL_MINT } from "@sdp/types";
 import { address, createNoopSigner } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
+import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { walletApprovalRequestResponseSchema } from "@/openapi/schemas/custody";
+import {
+  walletApprovalRequestResponseSchema,
+  walletApprovalRequestsResponseSchema,
+} from "@/openapi/schemas/custody";
 import { walletPolicyResponseSchema } from "@/openapi/schemas/payments";
 import { SigningService } from "@/services/domain/signing.service";
+import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -45,6 +52,7 @@ const TEST_ALIAS_AUTHORIZED_CUSTODY_WALLET_ID = "cwlt_payments_alias_authorized_
 const responseSchema = <T extends z.ZodType>(data: T) => z.object({ data });
 const walletPolicyHttpResponseSchema = responseSchema(walletPolicyResponseSchema);
 const walletApprovalHttpResponseSchema = responseSchema(walletApprovalRequestResponseSchema);
+const walletApprovalListHttpResponseSchema = responseSchema(walletApprovalRequestsResponseSchema);
 const dryRunResponseSchema = responseSchema(
   z.object({
     decision: z.string(),
@@ -709,6 +717,95 @@ describe("Payments routes — transfer policy", () => {
     expect(await countTransferRows()).toBe(1);
   });
 
+  // The single-transfer dashboard retries with one stable key per payment. The
+  // gate does not collapse a retry into the pending approval (each POST opens
+  // its own request), so this pins what the key does guarantee: approving both
+  // requests executes the payment once, because the second execution replays
+  // the first transfer recorded under that key. Without a key it moves twice,
+  // which is why the dashboard sends one.
+  it.each([
+    ["under the same Idempotency-Key", 1, "pay-same-intent"],
+    ["with no Idempotency-Key", 2, undefined],
+  ] as const)(
+    "approving two requests opened %s executes the payment as %i transfer(s)",
+    async (_label, expectedTransfers, idempotencyKey) => {
+      const sessionId = "ses_same_key_payment_approver";
+      const approverUserId = "usr_same_key_payment_approver";
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+          )
+          .bind(approverUserId, "same-key-payment-approver@example.com"),
+        getDb(env)
+          .prepare(
+            `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'admin', 'active')`
+          )
+          .bind("om_same_key_payment_approver", TEST_ORG.id, approverUserId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+          )
+          .bind("pm_same_key_payment_approver", TEST_PROJECT.id, approverUserId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+          )
+          .bind(sessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      ]);
+      await seedWalletControlProfile({
+        rules: [
+          {
+            id: "approve-payment-execution",
+            kind: "approval",
+            operationTypes: ["payment_transfer_execute"],
+          },
+        ],
+      });
+      const payment = {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "0.1",
+      };
+
+      const first = await postTransfer(payment, { idempotencyKey });
+      const retry = await postTransfer(payment, { idempotencyKey });
+      expect(first.status).toBe(202);
+      expect(retry.status).toBe(202);
+      const firstApproval = approvalErrorDetailsSchema.parse(
+        (await readErrorResponse(first)).error.details
+      ).approvalRequestId;
+      const retryApproval = approvalErrorDetailsSchema.parse(
+        (await readErrorResponse(retry)).error.details
+      ).approvalRequestId;
+      expect(retryApproval).not.toBe(firstApproval);
+      expect(await countTransferRows()).toBe(0);
+
+      const adminHeaders = {
+        Cookie: `sdp_session=${sessionId}`,
+        "x-project-id": TEST_PROJECT.id,
+      };
+      for (const approvalRequestId of [firstApproval, retryApproval]) {
+        const approved = await app.request(
+          `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+          { method: "POST", headers: adminHeaders },
+          env
+        );
+        expect(approved.status).toBe(200);
+      }
+
+      const transfers = await listTransferRows();
+      expect(transfers).toHaveLength(expectedTransfers);
+      // Each row is a separate execution attempt of the same payment. (With no key
+      // the second attempt fails in this harness only because the mocked RPC
+      // hands back the first signature; on a live cluster it would send.)
+    }
+  );
+
   it("fails an approved Payments replay whose route does not match its operation type", async () => {
     await seedWalletControlProfile({
       rules: [
@@ -955,10 +1052,33 @@ describe("Payments routes — transfer policy", () => {
     const ownerSessionId = "ses_payment_request_owner";
     const approverSessionId = "ses_payment_approver";
     const approverUserId = "usr_payment_approver";
+    const outsiderSessionId = "ses_payment_outsider";
+    const outsiderUserId = "usr_payment_outsider";
     await getDb(env).batch([
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
         .bind(approverUserId, "payment-approver@example.com"),
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(outsiderUserId, "payment-outsider@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'member', 'active')`
+        )
+        .bind("om_payment_outsider", TEST_ORG.id, outsiderUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'developer')`
+        )
+        .bind("pm_payment_outsider", TEST_PROJECT.id, outsiderUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(outsiderSessionId, outsiderUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
       getDb(env)
         .prepare(
           `INSERT INTO organization_members (id, organization_id, user_id, role, status)
@@ -1045,6 +1165,53 @@ describe("Payments routes — transfer policy", () => {
       "x-project-id": TEST_PROJECT.id,
     };
 
+    // Reads report the same owner check the decision routes enforce, so the
+    // dashboard can hide a decision the API would refuse. The request came from
+    // an API key the owner created, so the owner's session is its requester.
+    const detailPath = `/v1/wallets/approval-requests/${pendingDetails.approvalRequestId}`;
+    const ownerRead = walletApprovalHttpResponseSchema.parse(
+      await (await app.request(detailPath, { headers: ownerSessionHeaders }, env)).json()
+    );
+    // The owner is also an approver in the group, but a requester never decides.
+    expect(ownerRead.data.approvalRequest).toMatchObject({
+      viewerIsRequester: true,
+      viewerCanDecide: false,
+    });
+    const approverRead = walletApprovalHttpResponseSchema.parse(
+      await (await app.request(detailPath, { headers: approverSessionHeaders }, env)).json()
+    );
+    expect(approverRead.data.approvalRequest).toMatchObject({
+      viewerIsRequester: false,
+      viewerCanDecide: true,
+    });
+    const outsiderSessionHeaders = {
+      "Content-Type": "application/json",
+      Cookie: `sdp_session=${outsiderSessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
+    const outsiderRead = await app.request(detailPath, { headers: outsiderSessionHeaders }, env);
+    expect(outsiderRead.status).toBe(200);
+    expect(
+      walletApprovalHttpResponseSchema.parse(await outsiderRead.json()).data.approvalRequest
+    ).toMatchObject({ viewerIsRequester: false, viewerCanDecide: false });
+    const outsiderDecision = await app.request(
+      approvalPath,
+      { method: "POST", headers: outsiderSessionHeaders },
+      env
+    );
+    expect(outsiderDecision.status).toBe(403);
+    expect(await outsiderDecision.json()).toMatchObject({
+      error: { message: "Approval request must be decided by an active approval-group member" },
+    });
+    const listed = walletApprovalListHttpResponseSchema.parse(
+      await (
+        await app.request("/v1/wallets/approval-requests", { headers: apiHeaders }, env)
+      ).json()
+    );
+    expect(
+      listed.data.approvalRequests.find((item) => item.id === pendingDetails.approvalRequestId)
+    ).toMatchObject({ viewerIsRequester: true, viewerCanDecide: false });
+
     const apiKeyDecision = await app.request(
       approvalPath,
       { method: "POST", headers: apiHeaders },
@@ -1114,4 +1281,157 @@ describe("Payments routes — transfer policy", () => {
     );
     expect(mixedAuthSelfCancel.status).toBe(200);
   });
+  // An off-ramp deposit held for approval sends nothing. Approving it replays
+  // the send, which still requires the provider sale to be waiting for this
+  // exact deposit. The provider's own events can move the sale in between.
+  it.each([
+    {
+      name: "still awaiting this deposit",
+      event: null,
+      executionError: null,
+      transferStatus: "settling",
+    },
+    {
+      name: "failed by the provider",
+      event: { kind: "failed", error: "Deposit timeout" },
+      executionError: "Ramp transfer is no longer awaiting payment (status: failed)",
+      transferStatus: "failed",
+    },
+    {
+      name: "moved to a new deposit address",
+      event: {
+        kind: "awaiting_payment",
+        cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet3, amount: "1" },
+      },
+      executionError: "Transfer does not match the off-ramp deposit instruction",
+      transferStatus: "awaiting_payment",
+    },
+  ] as const)(
+    "approves a held off-ramp deposit whose sale was $name",
+    async ({ event, executionError, transferStatus }) => {
+      const sessionId = "ses_offramp_deposit_approver";
+      const approverUserId = "usr_offramp_deposit_approver";
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+          )
+          .bind(approverUserId, "offramp-deposit-approver@example.com"),
+        getDb(env)
+          .prepare(
+            `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+             VALUES (?, ?, ?, 'admin', 'active')`
+          )
+          .bind("om_offramp_deposit_approver", TEST_ORG.id, approverUserId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id, role)
+             VALUES (?, ?, ?, 'admin')`
+          )
+          .bind("pm_offramp_deposit_approver", TEST_PROJECT.id, approverUserId),
+        getDb(env)
+          .prepare(
+            `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+             VALUES (?, ?, ?, 'session', ?)`
+          )
+          .bind(sessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      ]);
+      await seedWalletControlProfile({
+        rules: [
+          {
+            id: "approve-offramp-deposit",
+            kind: "approval",
+            operationTypes: ["payment_transfer_execute"],
+          },
+        ],
+      });
+      const transferId = generatePaymentTransferId();
+      const tenant = createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id });
+      await createPostgresPaymentsRepository(getDb(env), tenant).createTransfer({
+        id: transferId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_WALLET_ID,
+        counterpartyId: null,
+        sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        destinationAddress: null,
+        token: SOL_MINT,
+        amount: "1",
+        memo: null,
+        type: "offramp",
+        direction: "outbound",
+        status: "awaiting_payment",
+        provider: "moonpay",
+        providerReference: "moonpay-held-deposit",
+        deliveryMode: "hosted",
+        fiatCurrency: "USD",
+        fiatAmount: "100",
+        providerData: {
+          cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+        },
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: TEST_API_KEY.id,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
+      });
+
+      const held = await postTransfer(
+        {
+          transferId,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "1",
+        },
+        {}
+      );
+      expect(held.status).toBe(202);
+      const { approvalRequestId } = approvalErrorDetailsSchema.parse(
+        (await readErrorResponse(held)).error.details
+      );
+      expect(await readTransferRow(transferId)).toMatchObject({
+        status: "awaiting_payment",
+        signature: null,
+      });
+
+      if (event !== null) {
+        // The provider's webhook lands before anyone approves.
+        await applyRampSettlementEvent(env, {
+          provider: "moonpay",
+          reference: "moonpay-held-deposit",
+          ...event,
+        });
+      }
+
+      const approved = await app.request(
+        `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+        {
+          method: "POST",
+          headers: { Cookie: `sdp_session=${sessionId}`, "x-project-id": TEST_PROJECT.id },
+        },
+        env
+      );
+      expect(approved.status).toBe(200);
+      const approvedBody = walletApprovalHttpResponseSchema.parse(await approved.json());
+      expect(approvedBody.data.approvalRequest).toMatchObject({
+        status: "approved",
+        operation: {
+          status: executionError === null ? "completed" : "failed",
+          executionError,
+        },
+      });
+
+      const row = await readTransferRow(transferId);
+      expect(row.status).toBe(transferStatus);
+      if (executionError === null) {
+        expect(row.signature).toBeTruthy();
+        expect(row.destination_address).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+      } else {
+        expect(row.signature).toBeNull();
+      }
+    }
+  );
 });

@@ -84,9 +84,10 @@ async function postWithSigningProviderRetry<T>(
     try {
       return await api.post<T>(path, body);
     } catch (error) {
+      // The fee sponsor (Kora) answers 503 while it warms up on Surfpool.
       const isRetryable =
         error instanceof Error &&
-        error.message.includes("signing provider is temporarily unavailable");
+        error.message.includes("Transaction fees can't be sponsored right now");
       if (!isRetryable || attempt === maxAttempts) {
         throw error;
       }
@@ -679,7 +680,7 @@ test.describe
       );
 
       await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
-      await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
+      await page.locator("[data-wallet-activity-state]").scrollIntoViewIfNeeded();
 
       const expectedActivityRows = [
         { operationLabel: "Burn", token: deployedToken.symbol, amount: "2" },
@@ -775,7 +776,7 @@ test.describe
       await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "deferred");
       expect(activityRequestCount).toBe(0);
 
-      await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
+      await activityRegion.scrollIntoViewIfNeeded();
       await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "mounted");
       await expect.poll(() => activityRequestCount).toBe(1);
 
@@ -797,7 +798,7 @@ test.describe
       await page.waitForTimeout(1_000);
       expect(activityRequestCount).toBe(requestCountBeforeReconnect);
 
-      await page.getByRole("heading", { name: "Recent activity" }).scrollIntoViewIfNeeded();
+      await activityRegion.scrollIntoViewIfNeeded();
       await expect(activityRegion).toHaveAttribute("data-wallet-activity-visible", "true");
       await expect.poll(() => activityRequestCount).toBe(requestCountBeforeReconnect + 1);
 

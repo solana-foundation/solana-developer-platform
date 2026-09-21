@@ -1,6 +1,7 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types";
+import { isRampOnboardingPendingStatus } from "@sdp/types/ramp-requirements";
 import { SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -17,11 +18,13 @@ import type { RailProps } from "./ramp-action-page";
 import { getRampTransferState } from "./ramp-transfer-state";
 import { preStepSummaryDetails } from "./wizard-summary";
 
+type Translate = ReturnType<typeof useTranslations>;
+
 function offrampPrimaryLabel(
   wizard: OfframpWizard,
   verificationPending: boolean,
   verificationUrl: string | undefined,
-  t: ReturnType<typeof useTranslations>
+  t: Translate
 ): string {
   switch (true) {
     case wizard.hostedQuoteLoading:
@@ -53,6 +56,122 @@ function offrampPrimaryAction(
   }
 }
 
+/** The final step's heading once the payout reached an outcome worth naming. */
+function offrampCompletionTitle(wizard: OfframpWizard, t: Translate): string | undefined {
+  if (wizard.transferStatus?.status === "completed") {
+    return t("DashboardPayments.ramps.payoutComplete");
+  }
+  if (wizard.heldApprovalRequestId !== null) {
+    return t("DashboardPayments.ramps.transferApprovalPending");
+  }
+  return undefined;
+}
+
+/**
+ * Whether the title row carries the polled transfer status. A held send hides
+ * it: the heading already says the send waits for approval, and the row still
+ * reads `awaiting_payment`, which would ask for a send that is already queued.
+ */
+function showOfframpInlineStatus(wizard: OfframpWizard, hosted: boolean): boolean {
+  if (!wizard.onTransactionStage || wizard.heldApprovalRequestId !== null) {
+    return false;
+  }
+  return hosted || wizard.depositTarget !== null;
+}
+
+type OfframpFooterAction =
+  | { kind: "transaction" }
+  | { kind: "approval"; approvalRequestId: string }
+  | { kind: "send"; depositTarget: NonNullable<OfframpWizard["depositTarget"]> };
+
+/** The one action the final step offers, in precedence order. */
+function offrampFooterAction(wizard: OfframpWizard): OfframpFooterAction | null {
+  const transfer = wizard.transferStatus;
+  if (transfer !== undefined && getRampTransferState(transfer.status).terminal) {
+    return { kind: "transaction" };
+  }
+  if (wizard.heldApprovalRequestId !== null) {
+    return { kind: "approval", approvalRequestId: wizard.heldApprovalRequestId };
+  }
+  return wizard.depositTarget === null
+    ? null
+    : { kind: "send", depositTarget: wizard.depositTarget };
+}
+
+function OfframpFooterActionButton({
+  action,
+  wizard,
+}: {
+  action: OfframpFooterAction;
+  wizard: OfframpWizard;
+}) {
+  const t = useTranslations();
+  switch (action.kind) {
+    case "transaction":
+      return (
+        <Button asChild type="button">
+          <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
+            {t("DashboardPayments.goToTransaction")}
+          </Link>
+        </Button>
+      );
+    case "approval":
+      return (
+        <Button asChild type="button">
+          <Link href={`/dashboard/approvals/${encodeURIComponent(action.approvalRequestId)}`}>
+            {t("DashboardPayments.onchainSend.viewApprovalRequest")}
+          </Link>
+        </Button>
+      );
+    case "send":
+      return (
+        <InstructionActionButton
+          variant="default"
+          size="default"
+          action={{
+            loading: wizard.onchainSendLoading,
+            succeeded: wizard.onchainSendResult !== null,
+            disabled: !wizard.canSendOnchain || wizard.quoteExpired,
+            onClick: () => void wizard.sendCryptoToDeposit(),
+            icon: <SendIcon />,
+            idleLabel: wizard.quoteExpired
+              ? t("DashboardPayments.ramps.quoteExpired")
+              : t("DashboardPayments.ramps.sendCrypto", {
+                  amount: action.depositTarget.amount,
+                  token: getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail),
+                }),
+            busyLabel: t("DashboardPayments.ramps.sending"),
+            doneLabel: t("DashboardPayments.ramps.transferSubmitted"),
+          }}
+        />
+      );
+  }
+}
+
+/**
+ * Where the provider's own onboarding has got to, as the footer reads it: a
+ * verification the person still has to open, or a wait on the provider. Only
+ * the steps that host onboarding consult it.
+ */
+function offrampOnboardingState(wizard: OfframpWizard): {
+  verificationUrl: string | undefined;
+  verificationPending: boolean;
+} {
+  const onOnboardingStep =
+    wizard.currentStepId === "COMPLETE" || wizard.currentStepId === "REQUIREMENTS";
+  if (!onOnboardingStep) {
+    return { verificationUrl: undefined, verificationPending: false };
+  }
+  const onboarding = wizard.onboarding;
+  return {
+    verificationUrl:
+      onboarding?.status === "customer_verification_required"
+        ? onboarding.verificationUrl
+        : undefined,
+    verificationPending: onboarding !== null && isRampOnboardingPendingStatus(onboarding.status),
+  };
+}
+
 export function OfframpRail({
   wallets,
   walletsError,
@@ -80,29 +199,16 @@ export function OfframpRail({
 
   const transferState =
     wizard.transferStatus === undefined ? null : getRampTransferState(wizard.transferStatus.status);
-  const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
-  const showInlineStatus =
-    wizard.onTransactionStage && (hostedStage || Boolean(wizard.depositTarget));
-  const onOnboardingStep =
-    wizard.currentStepId === "COMPLETE" || wizard.currentStepId === "REQUIREMENTS";
-  const verificationUrl =
-    onOnboardingStep && wizard.onboarding?.status === "customer_verification_required"
-      ? wizard.onboarding.verificationUrl
-      : undefined;
-  const verificationPending =
-    onOnboardingStep &&
-    (wizard.onboarding?.status === "customer_verifying" ||
-      wizard.onboarding?.status === "customer_funding_account_provisioning" ||
-      wizard.onboarding?.status === "funding_account_provisioning");
+  const liveTransferState = wizard.onTransactionStage ? transferState : null;
+  const cancelable = liveTransferState?.cancelable === true;
+  const hosted = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
+  const footerAction = offrampFooterAction(wizard);
+  const { verificationUrl, verificationPending } = offrampOnboardingState(wizard);
   return (
     <RampWizardShell
       steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
-      completionTitle={
-        wizard.transferStatus?.status === "completed"
-          ? t("DashboardPayments.ramps.payoutComplete")
-          : undefined
-      }
+      completionTitle={offrampCompletionTitle(wizard, t)}
       primaryDisabled={
         wizard.hostedQuoteLoading ||
         verificationPending ||
@@ -130,54 +236,18 @@ export function OfframpRail({
         )
       }
       header={
-        showInlineStatus ? (
-          <RampStatusInline
-            direction="offramp"
-            hosted={hostedStage}
-            transfer={wizard.transferStatus}
-          />
+        showOfframpInlineStatus(wizard, hosted) ? (
+          <RampStatusInline direction="offramp" hosted={hosted} transfer={wizard.transferStatus} />
         ) : undefined
       }
-      secondaryLabel={
-        wizard.onTransactionStage && transferState !== null && transferState.cancelable
-          ? t("DashboardPayments.counterparty.cancel")
-          : undefined
-      }
-      confirmSecondary={
-        wizard.onTransactionStage && transferState !== null && transferState.cancelable
-      }
+      secondaryLabel={cancelable ? t("DashboardPayments.counterparty.cancel") : undefined}
+      confirmSecondary={cancelable}
       secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading}
-      hideSecondary={
-        wizard.onTransactionStage && transferState !== null && !transferState.cancelable
-      }
+      hideSecondary={liveTransferState !== null && !liveTransferState.cancelable}
       footerActions={
-        transferState !== null && transferState.terminal ? (
-          <Button asChild type="button">
-            <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
-              {t("DashboardPayments.goToTransaction")}
-            </Link>
-          </Button>
-        ) : wizard.depositTarget ? (
-          <InstructionActionButton
-            variant="default"
-            size="default"
-            action={{
-              loading: wizard.onchainSendLoading,
-              succeeded: wizard.onchainSendResult !== null,
-              disabled: !wizard.canSendOnchain || wizard.quoteExpired,
-              onClick: () => void wizard.sendCryptoToDeposit(),
-              icon: <SendIcon />,
-              idleLabel: wizard.quoteExpired
-                ? t("DashboardPayments.ramps.quoteExpired")
-                : t("DashboardPayments.ramps.sendCrypto", {
-                    amount: wizard.depositTarget.amount,
-                    token: getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail),
-                  }),
-              busyLabel: t("DashboardPayments.ramps.sending"),
-              doneLabel: t("DashboardPayments.ramps.transferSubmitted"),
-            }}
-          />
-        ) : null
+        footerAction === null ? undefined : (
+          <OfframpFooterActionButton action={footerAction} wizard={wizard} />
+        )
       }
       hidePrimary={wizard.currentStepId === "COMPLETE"}
     >

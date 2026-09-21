@@ -1,3 +1,5 @@
+import "server-only";
+
 import {
   getBase64EncodedWireTransaction,
   getTransactionDecoder,
@@ -5,8 +7,10 @@ import {
   partiallySignTransaction,
 } from "@solana/kit";
 import { z } from "zod";
-import type { TokenBalance, YieldStrategy } from "../src/types.ts";
-import { formatAtoms } from "./decimal.ts";
+import { formatAtoms } from "../src/lib/decimal";
+import type { TokenBalance } from "../src/types";
+
+export type SolanaCluster = "devnet" | "mainnet-beta";
 
 const rpcEnvelopeSchema = z.object({
   result: z.unknown().optional(),
@@ -32,11 +36,22 @@ const tokenAccountsSchema = z.object({
   ),
 });
 
-const balanceSchema = z.object({ value: z.number().int().nonnegative() });
+export const USDC_MINTS = {
+  devnet: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+  "mainnet-beta": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+} as const satisfies Record<SolanaCluster, string>;
 
-const DEVNET_SYMBOLS: Record<string, string> = {
-  "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU": "USDC",
+const GENESIS_HASHES = {
+  devnet: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "mainnet-beta": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+} as const satisfies Record<SolanaCluster, string>;
+
+const KNOWN_TOKENS: Record<string, string> = {
+  [USDC_MINTS.devnet]: "USDC",
+  [USDC_MINTS["mainnet-beta"]]: "USDC",
 };
+
+let verifiedRpc: { rpcUrl: string; cluster: SolanaCluster } | undefined;
 
 export async function signTransaction(
   transactionBase64: string,
@@ -52,38 +67,8 @@ export async function signTransaction(
   return getBase64EncodedWireTransaction(signed);
 }
 
-export async function readWalletBalances(
-  rpcUrl: string,
-  ownerAddress: string,
-  strategies: readonly YieldStrategy[]
-): Promise<{ solBalance: string; tokens: TokenBalance[] }> {
-  const mints = [
-    ...new Set(
-      strategies
-        .filter(
-          (strategy) => strategy.fundable && strategy.hostCluster === "devnet"
-        )
-        .flatMap((strategy) => strategy.depositMints)
-    ),
-  ];
-
-  const [lamports, tokenBalances] = await Promise.all([
-    rpcCall(rpcUrl, "getBalance", [
-      ownerAddress,
-      { commitment: "confirmed" },
-    ]).then((result) => balanceSchema.parse(result)),
-    Promise.all(
-      mints.map((mint) => readTokenBalance(rpcUrl, ownerAddress, mint))
-    ),
-  ]);
-
-  return {
-    solBalance: formatAtoms(BigInt(lamports.value), 9),
-    tokens: tokenBalances,
-  };
-}
-
-async function readTokenBalance(
+/** The customer's balance of the savings token: one RPC call per refresh. */
+export async function readTokenBalance(
   rpcUrl: string,
   ownerAddress: string,
   mint: string
@@ -105,10 +90,28 @@ async function readTokenBalance(
 
   return {
     mint,
-    symbol: DEVNET_SYMBOLS[mint] ?? `Token ${mint.slice(0, 4)}`,
+    symbol: KNOWN_TOKENS[mint] ?? `Token ${mint.slice(0, 4)}`,
     amount: formatAtoms(atoms, decimals),
     decimals,
   };
+}
+
+/** Fail closed before reading balances or signing against the wrong cluster. */
+export async function assertRpcCluster(
+  rpcUrl: string,
+  cluster: SolanaCluster
+): Promise<void> {
+  if (verifiedRpc?.rpcUrl === rpcUrl && verifiedRpc.cluster === cluster) return;
+
+  const observed = z
+    .string()
+    .parse(await rpcCall(rpcUrl, "getGenesisHash", []));
+  if (observed !== GENESIS_HASHES[cluster]) {
+    throw new Error(
+      `SOLANA_RPC_URL does not serve ${cluster}; refusing to continue`
+    );
+  }
+  verifiedRpc = { rpcUrl, cluster };
 }
 
 async function rpcCall(

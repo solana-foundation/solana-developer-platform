@@ -21,6 +21,12 @@ export function getBvnkOnboardingCopy(
       icon: Loader2Icon,
       iconClassName: "animate-spin text-secondary",
     },
+    counterparty_agreement_signing: {
+      title: t("DashboardPayments.bvnk.agreementSigningTitle"),
+      description: t("DashboardPayments.bvnk.agreementSigningDescription"),
+      icon: Loader2Icon,
+      iconClassName: "animate-spin text-secondary",
+    },
     customer_verification_failed: {
       title: t("DashboardPayments.bvnk.verificationFailedTitle"),
       description: t("DashboardPayments.bvnk.verificationFailedDescription"),

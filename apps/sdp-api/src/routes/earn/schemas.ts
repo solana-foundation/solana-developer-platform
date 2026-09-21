@@ -31,6 +31,10 @@ export const listEarnStrategiesQuerySchema = z.object({
   // environment's own cluster — the shelf the caller can act on. Naming the
   // foreign cluster browses its mirrored sub-shelf; rows stay fundable: false.
   cluster: z.enum(SOLANA_CLUSTERS).optional(),
+  // The shelf an ANONYMOUS caller reads (PRO-1998). It has no project, so it
+  // picks: production, the real-money shelf, unless it asks for sandbox. A
+  // tenant caller's shelf is its project's; naming a different one is a 400.
+  environment: z.enum(["sandbox", "production"]).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -420,6 +424,76 @@ export const earnVaultWithdrawalPreviewSchema = z.object({
 export const earnVaultWithdrawalsQuerySchema = earnVaultMovementsQuerySchema;
 
 // ---------------------------------------------------------------------------
+// Queued vault withdrawals. These intentionally use their own request
+// resource rather than `earn_movements`: a finalized request transaction has
+// only escrowed shares, while fulfillment is a later solver transaction.
+// ---------------------------------------------------------------------------
+
+const earnVaultQueuedWithdrawalTermsShape = {
+  shares: earnWithdrawalSharesSchema,
+  discountBps: z.number().int().min(0).max(10_000),
+  /** Seconds after maturity during which a solver may fulfill the request. */
+  deadlineSeconds: z.number().int().positive().max(31_536_000),
+} as const;
+
+export const earnVaultWithdrawalOptionsSchema = z
+  .object({ positionId: earnWithdrawalPositionIdSchema })
+  .strict();
+
+export const earnVaultQueuedWithdrawalPreviewSchema = z
+  .object({
+    positionId: earnWithdrawalPositionIdSchema,
+    ...earnVaultQueuedWithdrawalTermsShape,
+  })
+  .strict();
+
+export const earnVaultWithdrawalRequestSchema = z
+  .object({
+    positionId: earnWithdrawalPositionIdSchema,
+    ...earnVaultQueuedWithdrawalTermsShape,
+    requestId: z
+      .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
+      .optional(),
+  })
+  .strict();
+
+export const earnVaultWithdrawalRequestParamsSchema = z
+  .object({ withdrawalRequestId: z.string().min(1).max(128) })
+  .strict();
+
+export const earnVaultWithdrawalRequestCancelSchema = z
+  .object({
+    requestId: z
+      .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
+      .optional(),
+  })
+  .strict();
+
+export const earnVaultWithdrawalRequestsQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    before: z.string().min(1).optional(),
+    settled: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
+    status: z
+      .enum([
+        "creating",
+        "pending",
+        "fulfillable",
+        "expiredCancelable",
+        "cancelling",
+        "closedOrUnknown",
+        "fulfilled",
+        "cancelled",
+        "failed",
+      ])
+      .optional(),
+  })
+  .strict();
+
+// ---------------------------------------------------------------------------
 // External-wallet (caller-signed) vault flows (PRO-1722, PRO-1943): SDP builds
 // unsigned transactions for a wallet it does not custody. Only keyed builds
 // can be submitted back for a durable movement and SDP broadcast.
@@ -526,6 +600,82 @@ export const earnExternalWalletWithdrawalPreviewSchema = z.union([
     shares: earnWithdrawalSharesSchema,
   }),
 ]);
+
+const earnExternalWalletQueuedTermsShape = {
+  ...earnVaultQueuedWithdrawalTermsShape,
+} as const;
+
+/** Optional-auth locator shared by queued exit options, previews and builds. */
+export const earnExternalWalletWithdrawalOptionsSchema = z.union([
+  z.object({ positionId: earnWithdrawalPositionIdSchema }).strict(),
+  z
+    .object({
+      strategyId: z.string().min(1),
+      ownerAddress: solanaOwnerAddressSchema,
+    })
+    .strict(),
+]);
+
+export const earnExternalWalletQueuedWithdrawalPreviewSchema = z.union([
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnExternalWalletQueuedTermsShape,
+    })
+    .strict(),
+  z
+    .object({
+      strategyId: z.string().min(1),
+      ownerAddress: solanaOwnerAddressSchema,
+      ...earnExternalWalletQueuedTermsShape,
+    })
+    .strict(),
+]);
+
+export const earnExternalWalletWithdrawalRequestTransactionSchema = z.union([
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnExternalWalletFeePayerShape,
+      ...earnExternalWalletQueuedTermsShape,
+    })
+    .strict(),
+  z
+    .object({
+      strategyId: z.string().min(1),
+      ownerAddress: solanaOwnerAddressSchema,
+      ...earnExternalWalletFeePayerShape,
+      ...earnExternalWalletQueuedTermsShape,
+    })
+    .strict(),
+]);
+
+export const earnExternalWalletWithdrawalRequestCancelTransactionSchema = z.union([
+  z
+    .object({
+      withdrawalRequestId: z.string().min(1).max(128),
+      ...earnExternalWalletFeePayerShape,
+    })
+    .strict(),
+  z
+    .object({
+      strategyId: z.string().min(1),
+      ownerAddress: solanaOwnerAddressSchema,
+      requestAddress: solanaOwnerAddressSchema,
+      ...earnExternalWalletFeePayerShape,
+    })
+    .strict(),
+]);
+
+export const earnExternalWalletWithdrawalRequestsQuerySchema = z
+  .object({
+    ownerAddress: solanaOwnerAddressSchema,
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    before: z.string().min(1).optional(),
+    status: earnVaultWithdrawalRequestsQuerySchema.shape.status,
+    settled: earnVaultWithdrawalRequestsQuerySchema.shape.settled,
+  })
+  .strict();
 
 /**
  * Submit the signed bytes back, both directions. `signedTransaction` is

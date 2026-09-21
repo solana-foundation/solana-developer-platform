@@ -1,6 +1,6 @@
 ---
 name: sdp-make-pr
-description: Prepare and open an SDP pull request with a concise technical summary, before/after behavior, flow or pseudocode, verification, and risk notes. Use when opening or updating a pull request for SDP work.
+description: Prepare and open an SDP pull request with a 120-word body (200 ceiling): one or two sentences, up to six one-line bullets, one verification line, a table only for three or more same-shape rows. Use when opening or updating a pull request for SDP work.
 ---
 
 # SDP make PR
@@ -32,58 +32,28 @@ Example: `feat(payments): add retryable settlement polling`
 
 Do not require or search for an issue ticket. Mention one only when the user explicitly asks for it.
 
-Never emit one long flat bullet list: split the bullets under **bolded section labels**, adding bolded sub-labels when a section holds more than ~5 bullets (group by concern or domain). Dots always sit under a bolded label; a flat list is acceptable only for tiny PRs.
-
-Write the body with a concise summary first and the technical behavior second. Explain only the changed seam: name the user-visible or operational result, the mechanism that produces it, the important failure semantics, and the evidence that verifies it. Omit unchanged architecture and background that does not help review the diff.
+**Target 120 words, ceiling 200.** The body is a routing document. Over the ceiling means a section goes, not tighter phrasing.
 
 ```markdown
-- <3–7 short bullets: behavior, mechanism, important failure semantics, tests>
+<One or two sentences: what changed, and where it sits in a stack if stacked.>
 
-**before** — <name the old runtime flow>:
+- <Up to six bullets, one line each: behavior, the one mechanism a reviewer must know, what they would otherwise get wrong. **Bold the load-bearing clause.**>
 
-1. <old step>
-2. <old step>
-3. <failure, stall, duplicate, or limitation>
-
-**after** — <name the new runtime flow>:
-
-1. <new step>
-2. <new step>
-3. <how success, retry, failure, or terminal state now behaves>
-
-## How <changed mechanism> works <!-- only when the mechanism needs proof -->
-
-<compact flow, pseudocode, query, state transition, or API example>
-
-**Verification**
-
-- `<exact command>` — <result>
-
-Known gaps <!-- only real, scoped follow-ups -->
-- <gap and tracking link when one exists>
+Verification: <counts, not narration; name what was NOT run>.
 ```
 
-## 3. Explain before and after technically
+Earning more space, in this order and only when true:
 
-The before/after section is mandatory for behavior changes. It must compare runtime behavior, not filenames.
+- One table, when three or more rows share a shape (file to change, env to status, work outside this PR to status).
+- Two lines of before/after, when runtime behavior changed. Never two numbered lists.
+- Headings, only past 150 words, one level.
+- Screenshots (step 4) and one trimmed request/response pair (step 5). No prose around them.
 
-Good:
+Never: "how it works" sections, pseudocode, numbered runtime walkthroughs, decision-by-decision rationale, file inventories, a closing recap. Rationale that must survive lives in the repo (ADR, migration header, CLAUDE.md, code comment) and the body points at it.
 
-```text
-before: confirmed row -> processing-only poll -> row never selected again
-after:  confirmed row -> rotating finalization poll -> finalized or retried later
-```
+## 3. Reviewer aids
 
-Weak: “Before: old service. After: new service.”
-
-Include at least one reviewer aid in every PR:
-
-- Numbered flow for ordering, orchestration, or failure isolation.
-- State transition for lifecycle changes.
-- Pseudocode for branching or algorithm changes.
-- Compact SQL/API example for persistence or contract changes.
-
-Use both a flow and a mechanism section only when each answers a different reviewer question.
+Fold what a reviewer would otherwise get wrong into the bullets. Reach for a diagram, pseudocode or a state table only when the user asks, or when the change cannot be reviewed without one; then it is one compact block, not a section per mechanism.
 
 ## 4. Screenshot UI changes
 

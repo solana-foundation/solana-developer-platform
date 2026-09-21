@@ -651,6 +651,48 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("rejects minting to a wallet whose Token-2022 account is frozen", async () => {
+      const token = await seedIssuedToken({ id: "tok_issuance_mint_frozen_destination" });
+      const [frozenTokenAccount] = await findAssociatedTokenPda({
+        owner: address(TEST_SOLANA_ADDRESSES.wallet2),
+        mint: address(token.mintAddress ?? ""),
+        tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO frozen_accounts (
+             id, token_id, account_address, reason, frozen_at, frozen_by
+           ) VALUES ('frz_mint_destination', ?, ?, 'QA hold', sdp_iso_now(), ?)`
+        )
+        .bind(token.id, frozenTokenAccount, TEST_PROJECT_API_KEY.id)
+        .run();
+      const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/mint`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "ACCOUNT_FROZEN",
+          details: { field: "destination", tokenAccount: frozenTokenAccount },
+        },
+      });
+      expect(mintToSpy).not.toHaveBeenCalled();
+    });
+
     it("dry-runs an authority update with zero writes", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_authority_dry_run",
@@ -912,6 +954,509 @@ describe("Issuance Routes", () => {
       } finally {
         aclSpy.mockRestore();
         targetSpy.mockRestore();
+      }
+    });
+
+    it("replays an approved metadata-update PATCH through to the token", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_metadata_approved",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_metadata_approved",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        metadataAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [
+              {
+                id: "approve-issuance-metadata",
+                kind: "approval",
+                operationTypes: ["issuance_metadata_update_execute"],
+              },
+            ],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const updateMetadataSpy = vi
+        .spyOn(MosaicService.prototype, "updateMetadata")
+        .mockResolvedValue({ signature: "sig_metadata_approved", slot: 42n });
+
+      try {
+        const pendingResponse = await app.request(
+          `/v1/issuance/tokens/${token.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ name: "Approved metadata rename" }),
+          },
+          env
+        );
+        expect(pendingResponse.status).toBe(202);
+        const pendingBody = (await pendingResponse.json()) as {
+          error: { details: { approvalRequestId: string; walletOperationId: string } };
+        };
+        const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+        const repository = createPostgresPolicyRepository(
+          getDb(env),
+          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+        );
+        await repository.updateApprovalRequestStatus({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId,
+          status: "approved",
+          operationStatus: "executing",
+          resolvedBy: TEST_PROJECT_API_KEY.id,
+        });
+
+        // The stored envelope must replay as a PATCH against the same route —
+        // this is what a POST-only envelope silently broke.
+        expect(await recoverApprovedWalletOperations(env)).toBe(1);
+        expect(await repository.getWalletOperationById(walletOperationId)).toMatchObject({
+          status: "completed",
+        });
+        expect(updateMetadataSpy).toHaveBeenCalledTimes(1);
+        const stored = await getDb(env)
+          .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{ name: string }>();
+        expect(stored).toEqual({ name: "Approved metadata rename" });
+      } finally {
+        updateMetadataSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied metadata update before signer and token mutation", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_metadata_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_metadata_denied",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        metadataAuthority: policyMintAuthority,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-metadata", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ name: "Denied metadata rename" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(403);
+      expect(signerSpy).not.toHaveBeenCalled();
+      const stored = await getDb(env)
+        .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+        .bind(token.id)
+        .first<{ name: string }>();
+      expect(stored?.name).not.toBe("Denied metadata rename");
+      const operationCount = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_metadata_update_execute'"
+        )
+        .first<{ count: number }>();
+      expect(operationCount).toEqual({ count: 1 });
+    });
+
+    it("stops a denied deploy before signer and issuance side effects", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_deploy_denied",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_deploy_denied",
+        mintAddress: null,
+        status: "pending",
+        signingCustodyWalletId: wallet.custodyWalletId,
+        signingWalletId: wallet.walletId,
+        requiresAllowlist: false,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-deploy", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const createTokenSpy = vi.spyOn(MosaicService.prototype, "createToken");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/deploy`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({}),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(createTokenSpy).not.toHaveBeenCalled();
+        const stored = await getDb(env)
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{ status: string }>();
+        expect(stored).toEqual({ status: "pending" });
+        const transactionCount = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+          .first<{ count: number }>();
+        expect(transactionCount).toEqual({ count: 0 });
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_deploy_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        createTokenSpy.mockRestore();
+      }
+    });
+
+    it("stops a deploy whose metadata authority wallet is denied by its own policy", async () => {
+      const deployWallet = await seedIssuanceActivityWallet(
+        "wal_issuance_deploy_meta_ok",
+        policyMintAuthority
+      );
+      const metadataWallet = await seedIssuanceActivityWallet(
+        "wal_issuance_deploy_meta_denied",
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_deploy_meta_denied",
+        mintAddress: null,
+        status: "pending",
+        signingCustodyWalletId: deployWallet.custodyWalletId,
+        signingWalletId: deployWallet.walletId,
+        requiresAllowlist: false,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${metadataWallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-deploy-metadata", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const createTokenSpy = vi.spyOn(MosaicService.prototype, "createToken");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/deploy`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              authorityCustodyWalletIds: { metadata: metadataWallet.custodyWalletId },
+            }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(createTokenSpy).not.toHaveBeenCalled();
+        const stored = await getDb(env)
+          .prepare("SELECT status FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{ status: string }>();
+        expect(stored).toEqual({ status: "pending" });
+      } finally {
+        createTokenSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied allowlist add before signer and list mutation", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_allowlist_add_denied",
+        TEST_ACTIVE_TOKEN.mintAuthority ?? TEST_SOLANA_ADDRESSES.wallet3
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_allowlist_add_denied",
+        signingWalletId: wallet.walletId,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-allowlist-add", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(addToListSpy).not.toHaveBeenCalled();
+        const row = await getDb(env)
+          .prepare("SELECT id FROM token_allowlists WHERE token_id = ? AND address = ?")
+          .bind(token.id, TEST_SOLANA_ADDRESSES.wallet1)
+          .first<{ id: string }>();
+        expect(row).toBeNull();
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_allowlist_add_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        addToListSpy.mockRestore();
+      }
+    });
+
+    it("replays an approved allowlist removal whose envelope path carries a query string", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_allowlist_remove_approved",
+        TEST_ACTIVE_TOKEN.mintAuthority ?? TEST_SOLANA_ADDRESSES.wallet3
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_allowlist_remove_approved",
+        signingWalletId: wallet.walletId,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO token_allowlists (id, token_id, address, status, added_by)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "tal_policy_remove_approved",
+          token.id,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          "active",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [
+              {
+                id: "approve-issuance-allowlist-remove",
+                kind: "approval",
+                operationTypes: ["issuance_allowlist_remove_execute"],
+              },
+            ],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const removeFromListSpy = vi
+        .spyOn(MosaicService.prototype, "removeFromList")
+        .mockResolvedValue({ signature: "sig_allowlist_remove_approved" } as never);
+
+      try {
+        const pendingResponse = await app.request(
+          `/v1/issuance/tokens/${token.id}/allowlist/tal_policy_remove_approved?signingCustodyWalletId=${wallet.custodyWalletId}`,
+          {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              "Idempotency-Key": "issuance-allowlist-remove-approved-query",
+            },
+          },
+          env
+        );
+        expect(pendingResponse.status).toBe(202);
+        const pendingBody = (await pendingResponse.json()) as {
+          error: { details: { approvalRequestId: string; walletOperationId: string } };
+        };
+        const { approvalRequestId, walletOperationId } = pendingBody.error.details;
+        const repository = createPostgresPolicyRepository(
+          getDb(env),
+          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+        );
+        await repository.updateApprovalRequestStatus({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          approvalRequestId,
+          status: "approved",
+          operationStatus: "executing",
+          resolvedBy: TEST_PROJECT_API_KEY.id,
+        });
+
+        expect(await recoverApprovedWalletOperations(env)).toBe(1);
+        expect(await repository.getWalletOperationById(walletOperationId)).toMatchObject({
+          status: "completed",
+        });
+        expect(removeFromListSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        removeFromListSpy.mockRestore();
+      }
+    });
+
+    it("stops a denied allowlist removal before signer and list mutation", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_allowlist_remove_denied",
+        TEST_ACTIVE_TOKEN.mintAuthority ?? TEST_SOLANA_ADDRESSES.wallet3
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_allowlist_remove_denied",
+        signingWalletId: wallet.walletId,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO token_allowlists (id, token_id, address, status, added_by)
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "tal_policy_remove_denied",
+          token.id,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          "active",
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [{ id: "deny-issuance-allowlist-remove", kind: "always", action: "deny" }],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signerSpy.mockClear();
+      const removeFromListSpy = vi.spyOn(MosaicService.prototype, "removeFromList");
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/allowlist/tal_policy_remove_denied`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(response.status).toBe(403);
+        expect(signerSpy).not.toHaveBeenCalled();
+        expect(removeFromListSpy).not.toHaveBeenCalled();
+        const row = await getDb(env)
+          .prepare("SELECT status FROM token_allowlists WHERE id = ?")
+          .bind("tal_policy_remove_denied")
+          .first<{ status: string }>();
+        expect(row).toEqual({ status: "active" });
+        const operationCount = await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_allowlist_remove_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        removeFromListSpy.mockRestore();
       }
     });
 
@@ -1497,6 +2042,61 @@ describe("Issuance Routes", () => {
         admitSpy.mockRestore();
         updateAuthoritySpy.mockRestore();
       }
+    });
+
+    it("executes a freeze-controller rotation with the live Token ACL controller signer", async () => {
+      const controller = TEST_SOLANA_ADDRESSES.wallet2;
+      const wallet = await seedIssuanceActivityWallet("wal_issuance_acl_controller", controller);
+      const token = await seedIssuedToken({
+        id: "tok_issuance_acl_controller",
+        signingWalletId: wallet.walletId,
+        freezeAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+      });
+      vi.mocked(AuthorityResolution.resolveCurrentAuthorityForRole).mockRestore();
+      const configSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: controller },
+      } as never);
+      const updateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "updateAuthority")
+        .mockResolvedValue({ signature: "sig_acl_controller_rotation", slot: 777n });
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/authority`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            signingCustodyWalletId: wallet.custodyWalletId,
+            authority: {
+              role: "freeze",
+              newAuthority: TEST_SOLANA_ADDRESSES.wallet3,
+            },
+          }),
+        },
+        env
+      );
+
+      expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+      expect(configSpy).toHaveBeenCalledOnce();
+      expect(updateAuthoritySpy).toHaveBeenCalledWith({
+        mint: address(token.mintAddress ?? ""),
+        role: Token2022.AuthorityType.FreezeAccount,
+        currentAuthority: expect.objectContaining({ address: controller }),
+        newAuthority: address(TEST_SOLANA_ADDRESSES.wallet3),
+        feePayer: expect.objectContaining({ address: controller }),
+      });
+      const stored = await app.request(
+        `/v1/issuance/tokens/${token.id}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect((await stored.json()).data.token.freezeAuthority).toBe(TEST_SOLANA_ADDRESSES.wallet3);
+      updateAuthoritySpy.mockRestore();
+      configSpy.mockRestore();
     });
 
     it("loads the approved authority signer before starting the external-effect fence", async () => {
@@ -3650,6 +4250,22 @@ describe("Issuance Routes", () => {
       expect(missBody.meta.hasMore).toBe(false);
     });
 
+    it("treats the exact Smoky SQL-shaped unicode search as an ordinary empty result", async () => {
+      const search = "qa-no-match-' OR 1=1 -- 🚀";
+      const query = new URLSearchParams({ search });
+      const response = await app.request(
+        `/v1/issuance/tokens?${query.toString()}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: [],
+        meta: { total: 0, hasMore: false },
+      });
+    });
+
     it("accepts a blank search as no filter", async () => {
       const res = await app.request(
         "/v1/issuance/tokens?search=",
@@ -3898,7 +4514,10 @@ describe("Issuance Routes", () => {
           updateAuthority: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet2 }),
         })
       );
-      expect(mintRead).toHaveBeenCalledTimes(2);
+      // Three mint reads: the policy gate's extractor resolves the live
+      // metadata authority once to judge the signing wallet, and the handler
+      // resolves it again for the GET and the update itself.
+      expect(mintRead).toHaveBeenCalledTimes(3);
     });
 
     it.each(["", "?includeMetadataAuthority=false"])(
@@ -3917,6 +4536,61 @@ describe("Issuance Routes", () => {
         expect(mintRead).not.toHaveBeenCalled();
       }
     );
+
+    it("returns the live pausable authority when requested", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_pause_authority_read",
+        mintAuthority: null,
+        isMintable: false,
+        extensions: { pausable: {} },
+      });
+      const pauseAuthority = TEST_SOLANA_ADDRESSES.wallet2;
+      const inspectSpy = vi.spyOn(MosaicSdk, "inspectToken").mockResolvedValue({
+        authorities: { pausableAuthority: pauseAuthority },
+      } as Awaited<ReturnType<typeof MosaicSdk.inspectToken>>);
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}?includePauseAuthority=true`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        data: {
+          pauseAuthority,
+          token: { mintAuthority: null, isMintable: false },
+        },
+      });
+      expect(inspectSpy).toHaveBeenCalledOnce();
+    });
+
+    it("returns the live Token ACL freeze controller instead of the stored mint authority", async () => {
+      const token = await seedIssuedToken({
+        id: "tok_freeze_authority_read",
+        freezeAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+      });
+      const controller = TEST_SOLANA_ADDRESSES.wallet2;
+      const configSpy = vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: controller },
+      } as never);
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}?includeFreezeAuthority=true`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: {
+          freezeAuthority: controller,
+          token: { freezeAuthority: TEST_SOLANA_ADDRESSES.wallet1 },
+        },
+      });
+      expect(configSpy).toHaveBeenCalledOnce();
+    });
 
     it.each([
       {
@@ -4536,6 +5210,51 @@ describe("Issuance Routes", () => {
       expect(body.data.token.decimals).toBe(2);
     });
 
+    it("rejects changing stablecoin draft decimals away from six", async () => {
+      const createRes = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            name: "Stablecoin Draft",
+            symbol: "STBL",
+            template: "stablecoin",
+          }),
+        },
+        env
+      );
+      expect(createRes.status).toBe(201);
+      const stablecoinId = (await createRes.json()).data.token.id;
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${stablecoinId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ decimals: 9 }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "BAD_REQUEST", message: "Stablecoin decimals must be 6" },
+      });
+      const stored = await app.request(
+        `/v1/issuance/tokens/${stablecoinId}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect((await stored.json()).data.token.decimals).toBe(6);
+    });
+
     it("rejects symbol and decimals changes after deployment", async () => {
       const db = getDb(env);
       const deployedTokenId = "tok_symbollocked1";
@@ -4899,6 +5618,51 @@ describe("Issuance Routes", () => {
       expect(body.error.code).toBe("TOKEN_NOT_ACTIVE");
     });
 
+    it("refuses to prepare a mint to a frozen Token-2022 account", async () => {
+      const activeMintAddress = TEST_ACTIVE_TOKEN.mintAddress;
+      if (!activeMintAddress) {
+        throw new Error("Active token fixture must have a mint address");
+      }
+      const [frozenTokenAccount] = await findAssociatedTokenPda({
+        owner: address(TEST_SOLANA_ADDRESSES.wallet2),
+        mint: address(activeMintAddress),
+        tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO frozen_accounts (
+             id, token_id, account_address, reason, frozen_at, frozen_by
+           ) VALUES ('frz_prepare_mint_destination', ?, ?, 'QA hold', sdp_iso_now(), ?)`
+        )
+        .bind(activeTokenId, frozenTokenAccount, TEST_PROJECT_API_KEY.id)
+        .run();
+      const prepareMintToSpy = vi.spyOn(MosaicService.prototype, "prepareMintTo");
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "ACCOUNT_FROZEN",
+          details: { field: "destination", tokenAccount: frozenTokenAccount },
+        },
+      });
+      expect(prepareMintToSpy).not.toHaveBeenCalled();
+    });
+
     it("returns 400 when max supply would be exceeded", async () => {
       const db = getDb(env);
 
@@ -5257,6 +6021,76 @@ describe("Issuance Routes", () => {
         expect(body.data.entry.status).toBe("active");
         expect(admitSpy).not.toHaveBeenCalled();
         admitSpy.mockRestore();
+      });
+
+      it("refuses to re-add an address already on the control list", async () => {
+        const first = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+        expect(first.status).toBe(201);
+
+        const replay = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+        expect(replay.status).toBe(409);
+        const count = await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM token_allowlists WHERE token_id = ?")
+          .bind(tokenId)
+          .first<{ count: number }>();
+        expect(count).toEqual({ count: 1 });
+      });
+
+      it("acknowledges removing an already revoked allowlist entry without signing", async () => {
+        const createRes = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
+        expect(createRes.status).toBe(201);
+        const entryId = (await createRes.json()).data.entry.id as string;
+        await getDb(env)
+          .prepare("UPDATE token_allowlists SET status = 'revoked' WHERE id = ?")
+          .bind(entryId)
+          .run();
+        const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        signerSpy.mockClear();
+
+        const res = await app.request(
+          `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+          },
+          env
+        );
+
+        expect(res.status).toBe(204);
+        expect(signerSpy).not.toHaveBeenCalled();
       });
 
       it("syncs the control list on-chain when an ABL address is configured", async () => {

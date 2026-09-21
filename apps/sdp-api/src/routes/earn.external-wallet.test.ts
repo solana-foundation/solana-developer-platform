@@ -9,11 +9,18 @@ import {
 } from "@/db/repositories";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
-import { badRequest } from "@/lib/errors";
+import { badRequest, transactionExpired } from "@/lib/errors";
+import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import {
+  clearKVStores,
+  readRateLimitCount,
+  seedCachedApiKey,
+  seedRateLimit,
+} from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 const buildExternalWalletDepositTransaction = vi.hoisted(() => vi.fn());
 const buildExternalWalletWithdrawalTransaction = vi.hoisted(() => vi.fn());
@@ -30,6 +37,9 @@ const resolveVaultWithdrawClient = vi.hoisted(() =>
   }))
 );
 const surfacingEnabled = vi.hoisted(() => ({ value: true }));
+// Flip to simulate a rate-limit counter-store outage for the requests that
+// follow. Only the rateLimits store breaks: auth still reads its key cache.
+const rateLimitStoreDown = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/services/earn/vault-external-wallet.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/vault-external-wallet.service")>()),
@@ -48,6 +58,31 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/types/provider-access")>()),
   isEarnProviderSurfaced: () => surfacingEnabled.value,
 }));
+
+vi.mock("@/runtime/kv-redis", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/runtime/kv-redis")>();
+  return {
+    ...original,
+    createKVStoreSet: (env: Env) => {
+      const stores = original.createKVStoreSet(env);
+      if (!rateLimitStoreDown.value) {
+        return stores;
+      }
+      return {
+        ...stores,
+        rateLimits: new Proxy(stores.rateLimits, {
+          get(target, property) {
+            if (property === "admitSlidingWindow") {
+              return () => Promise.reject(new Error("counter store down"));
+            }
+            const value = Reflect.get(target, property);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }),
+      };
+    },
+  };
+});
 
 /**
  * The external-wallet (caller-signed) routes — the gates, and the ADR 0002
@@ -280,7 +315,8 @@ function builtRow(overrides: Record<string, unknown> = {}) {
 function submitResult(overrides: Record<string, unknown> = {}) {
   const movementId = `earn_movement_${crypto.randomUUID()}`;
   return {
-    position: { id: "earn_position_ext_test" },
+    // The wire's tokenMint/tokenAmount come from the position's deposit token.
+    position: { id: "earn_position_ext_test", token_mint: USDC_MINT },
     movement: {
       id: movementId,
       position_id: "earn_position_ext_test",
@@ -305,8 +341,9 @@ function submitResult(overrides: Record<string, unknown> = {}) {
 function post(
   path: string,
   body: Record<string, unknown>,
-  options: { idempotencyKey?: string | null; apiKey?: string | null } = {}
+  options: { idempotencyKey?: string | null; apiKey?: string | null; ip?: string } = {}
 ) {
+  const requestBody = path === "deposit-transactions" ? { minSharesOut: "1", ...body } : body;
   return app.request(
     `/v1/earn/external-wallet/${path}`,
     {
@@ -317,8 +354,9 @@ function post(
           : { Authorization: `Bearer ${options.apiKey ?? TEST_API_KEY.raw}` }),
         "Content-Type": "application/json",
         ...(options.idempotencyKey == null ? {} : { "Idempotency-Key": options.idempotencyKey }),
+        ...(options.ip === undefined ? {} : { "X-Forwarded-For": options.ip }),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
     },
     env
   );
@@ -330,6 +368,7 @@ beforeEach(async () => {
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   surfacingEnabled.value = true;
+  rateLimitStoreDown.value = false;
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
@@ -365,7 +404,11 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
     const res = await post(
       "deposit-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+      },
       { apiKey: null }
     );
 
@@ -377,6 +420,26 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(input).not.toHaveProperty("organizationId");
     expect(input).not.toHaveProperty("projectId");
     expect(input).not.toHaveProperty("feePayer");
+  });
+
+  it("builds anonymously against the shelf the strategy names, not the deployment", async () => {
+    // A keyless caller has no project, so the row it named decides: a
+    // production strategy builds on mainnet from any deployment (PRO-1998).
+    const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ environment: "production", provider: "kamino" })
+    );
+    const input = buildExternalWalletDepositTransaction.mock.calls[0]?.[1];
+    expect(input).not.toHaveProperty("organizationId");
   });
 
   it("builds against a resolved, admitted strategy", async () => {
@@ -698,7 +761,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       expect(body.data.followUp.feePayer).toBe(feePayer);
     });
 
-    it("omits the follow-up floor only when the original request carried none", async () => {
+    it("requires a floor for a sandbox Kamino split build", async () => {
       await seedAuth();
       const strategy = await seedStrategy();
       buildExternalWalletDepositTransaction.mockResolvedValue({
@@ -715,13 +778,11 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         ownerAddress: OWNER,
         amount: "25",
         sourceTokenMint: SOURCE_MINT,
+        minSharesOut: undefined,
       });
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: { followUp: Record<string, unknown> };
-      };
-      expect(body.data.followUp).toEqual({ strategyId: strategy.id, amount: "24.8" });
+      expect(res.status).toBe(400);
+      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
     });
   });
 
@@ -800,9 +861,47 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(res.status).toBe(400);
   });
 
-  it("keeps production closed by the environment capability", async () => {
+  it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
-    const strategy = await seedStrategy({ environment: "production" });
+    const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+    const missingFloor = await post(
+      "deposit-transactions",
+      {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+        minSharesOut: undefined,
+      },
+      { apiKey: PROD_API_KEY.raw }
+    );
+    expect(missingFloor.status).toBe(400);
+    const missingFloorBody = (await missingFloor.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(missingFloorBody.error.code).toBe("BAD_REQUEST");
+    expect(missingFloorBody.error.message).toContain("POST /v1/earn/vault-deposit-previews");
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
+      { apiKey: PROD_API_KEY.raw }
+    );
+    expect(res.status).toBe(200);
+    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ environment: "production", provider: "kamino", minSharesOut: "1" })
+    );
+  });
+
+  it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({
+      provider: "veda",
+      underlyingSource: "veda",
+      environment: "production",
+      hostCluster: "mainnet-beta",
+    });
     const res = await post(
       "deposit-transactions",
       { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
@@ -812,6 +911,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("not available");
     expect(body.error.message).toContain("production");
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
@@ -828,7 +928,12 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     });
     const missingFloor = await post(
       "deposit-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      {
+        strategyId: strategy.id,
+        ownerAddress: OWNER,
+        amount: "25",
+        minSharesOut: undefined,
+      },
       { apiKey: PROD_API_KEY.raw }
     );
     expect(missingFloor.status).toBe(400);
@@ -902,6 +1007,27 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
       { idempotencyKey: crypto.randomUUID() }
     );
     expect(res.status).toBe(400);
+  });
+
+  it("answers an expired build as 409 TRANSACTION_EXPIRED", async () => {
+    await seedAuth();
+    submitExternalWalletDeposit.mockRejectedValue(
+      transactionExpired(
+        "This transaction's blockhash expired before it was submitted. " +
+          "Build a new transaction and have the customer sign it again."
+      )
+    );
+
+    const res = await post(
+      "deposits",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("TRANSACTION_EXPIRED");
+    expect(body.error.message).toContain("Build a new transaction");
   });
 
   it("records the submit and answers the movement in ledger vocabulary", async () => {
@@ -1210,6 +1336,138 @@ describe("exit safety (ADR 0002): the exit outlives every money-in gate", () => 
   });
 });
 
+/**
+ * The keyed deposit BUILD is money-in against paid RPC (a simulation probe per
+ * build, Jupiter on a swap-funded one), so it carries the same keyed meter as
+ * the deposit quote (PRO-1994). The exit build and preview carry NONE, and that
+ * is load-bearing: `meteredQuota` fails closed, and a 5xx on the way out of a
+ * position is what ADR 0002 exit safety rules out. See routes/earn/CLAUDE.md,
+ * "Metered quotas".
+ */
+describe("metered quotas (PRO-1994): the deposit build is metered, the exit never is", () => {
+  const ACTOR_SCOPE = `metered:earn-provider-read:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`;
+
+  it("429s a keyed deposit build once the actor's quota is exhausted", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await seedRateLimit(env, ACTOR_SCOPE, 60);
+
+    const res = await post("deposit-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      amount: "25",
+    });
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+    // Refused before the RPC probe was paid for, which is the whole point.
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+  });
+
+  it("charges nothing for a keyed request the body validator refuses", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+
+    const res = await post("deposit-transactions", { strategyId: strategy.id, amount: "25" });
+
+    expect(res.status).toBe(400);
+    // The org pool is shared: malformed requests must not be able to drain it.
+    expect(await readRateLimitCount(env, ACTOR_SCOPE)).toBe(0);
+    expect(await readRateLimitCount(env, `metered:earn-provider-read:org:${TEST_ORG.id}`)).toBe(0);
+  });
+
+  it("meters the anonymous build by client address, not by the org's exhausted pool", async () => {
+    const strategy = await seedStrategy();
+    await seedRateLimit(env, `metered:earn-provider-read:org:${TEST_ORG.id}`, 1000);
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null, ip: "203.0.113.7" }
+    );
+    expect(res.status).toBe(200);
+    // The client ADDRESS paid one charge from its own counter — the "by
+    // client address" half of this contract, which a bare 200 would never
+    // prove.
+    expect(await readRateLimitCount(env, "metered:earn-rpc:anonymous:ip:203.0.113.7")).toBe(1);
+    // ...and the org pool the exhausted keys share was not touched.
+    expect(await readRateLimitCount(env, `metered:earn-provider-read:org:${TEST_ORG.id}`)).toBe(
+      1000
+    );
+
+    // Once THAT address reaches its own ceiling, the meter refuses it without
+    // paying for the RPC probe.
+    await seedRateLimit(
+      env,
+      "metered:earn-rpc:anonymous:ip:203.0.113.7",
+      EARN_ANONYMOUS_RPC_QUOTA.maxRequests(env)
+    );
+    const refused = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null, ip: "203.0.113.7" }
+    );
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledTimes(1);
+
+    // The CONTRAST: a different address meters independently of the exhausted one.
+    const otherAddress = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null, ip: "203.0.113.8" }
+    );
+    expect(otherAddress.status).toBe(200);
+    expect(await readRateLimitCount(env, "metered:earn-rpc:anonymous:ip:203.0.113.8")).toBe(1);
+  });
+
+  it("never lets an exhausted quota stand between the owner and its exit", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    const positionId = await seedExternalWalletPosition();
+    // Both Earn quotas exhausted for this actor AND the whole organization.
+    for (const quota of ["earn-provider-read", "earn-chain-read"]) {
+      await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`, 1000);
+      await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}`, 1000);
+    }
+
+    const preview = await post("withdrawal-previews", { positionId, shares: "10" });
+    expect(preview.status).toBe(200);
+    const exit = await post("withdrawal-transactions", { positionId, shares: "10" });
+    expect(exit.status).toBe(200);
+    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
+
+    // The CONTRAST under identical conditions: the deposit build is refused.
+    const deposit = await post("deposit-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      amount: "25",
+    });
+    expect(deposit.status).toBe(429);
+  });
+
+  it("a counter-store outage refuses the deposit build and never the exit", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    const positionId = await seedExternalWalletPosition();
+    rateLimitStoreDown.value = true;
+
+    const preview = await post("withdrawal-previews", { positionId, shares: "10" });
+    expect(preview.status).toBe(200);
+    const exit = await post("withdrawal-transactions", { positionId, shares: "10" });
+    expect(exit.status).toBe(200);
+
+    const deposit = await post("deposit-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      amount: "25",
+    });
+    expect(deposit.status).toBe(503);
+    expect(await deposit.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+  });
+});
+
 describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
   function auditRows(action: "deposit" | "withdraw") {
     return getDb(env)
@@ -1314,6 +1572,39 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "failure" });
     expect(String(rows[0]?.metadata)).toContain("signature verification failed");
+  });
+
+  it("closes the deposit intent as a failure when the build expired (409)", async () => {
+    await seedAuth();
+    submitExternalWalletDeposit.mockRejectedValue(transactionExpired());
+
+    const res = await post(
+      "deposits",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(409);
+
+    // The expiry refusal is pre-record, so it takes the same 4xx gate as a
+    // verification failure: closed, never paged.
+    const rows = await auditRows("deposit");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "failure" });
+  });
+
+  it("writes no withdrawal audit row when the exit build expired (409)", async () => {
+    await seedAuth();
+    submitExternalWalletWithdrawal.mockRejectedValue(transactionExpired());
+
+    const res = await post(
+      "withdrawals",
+      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
+      { idempotencyKey: crypto.randomUUID() }
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("TRANSACTION_EXPIRED");
+    await expect(auditRows("withdraw")).resolves.toHaveLength(0);
   });
 
   it("leaves the deposit intent unresolved on an ambiguous 5xx", async () => {

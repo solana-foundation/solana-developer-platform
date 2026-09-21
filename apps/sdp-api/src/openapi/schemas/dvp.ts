@@ -9,8 +9,10 @@
  */
 
 import {
+  DVP_CLOSE_REFUSAL,
   DVP_LEG_OUTCOMES,
   DVP_LEG_REFUSAL,
+  DVP_LEG_TRANSFER_KINDS,
   DVP_SETTLEMENT_AVAILABILITY,
   DVP_TRADE_SIDES,
   DVP_TRADE_STATUSES,
@@ -74,7 +76,7 @@ const dvpSettlementAvailabilitySchema = z.enum(DVP_SETTLEMENT_AVAILABILITY).null
 
 const dvpLegOutcomeSchema = z.enum(DVP_LEG_OUTCOMES).openapi({
   description:
-    "Server-derived leg state: awaiting, partial, funded, overfunded, frozen, reclaimed, expired, delivered, refunded, recoverable after a late deposit, or closed without a recoverable balance.",
+    "Server-derived leg state: awaiting, partial, funded, overfunded, frozen, reclaimed, expired, delivered, refunded, recoverable after a late deposit, or closed without a recoverable balance. An open leg reads from its escrow balance against its amount, and reads reclaimed while the escrow's latest recorded transfer took tokens out and the balance is short of the amount.",
 });
 
 const dvpCallerWalletSchema = z
@@ -115,6 +117,36 @@ export const dvpTradePartySchema = z
     }),
   })
   .openapi({ description: "One party of the trade, as the caller may see it." });
+
+const dvpLegTransferSchema = z
+  .object({
+    signature: z.string().openapi({ description: "The transaction that moved the tokens." }),
+    direction: z.enum(["in", "out"]).openapi({
+      description: "Into the escrow or out of it.",
+    }),
+    kind: z.enum(DVP_LEG_TRANSFER_KINDS).openapi({
+      description:
+        "What the movement was: a deposit into the escrow; a reclaim out of it before any close; the settlement's delivery or the cancellation's refund; a recovery of a late deposit after the close; or a withdrawal from a closed trade whose closing transaction is not among the transfers, which cannot be placed against the close.",
+    }),
+    amount: z.string().openapi({
+      description: "Base units moved, always positive, as a decimal string (u64).",
+      example: "1000000",
+    }),
+    slot: z.string().openapi({ description: "Slot the transaction landed in, as a string (u64)." }),
+    blockTime: isoDateTimeSchema.nullable().openapi({
+      description: "When the block was produced, or null when the cluster recorded no time.",
+    }),
+    feePayer: z.string().openapi({ description: "The account that paid the transaction's fee." }),
+  })
+  .openapi({
+    description:
+      "One token movement in or out of a leg's escrow, read off the chain from the escrow's balance before and after the transaction. Deposits from any address, settlement, cancellation and reclaims all appear here, whoever sent them.",
+  });
+
+const dvpLegTransfersSchema = z.array(dvpLegTransferSchema).openapi({
+  description:
+    "Every recorded token movement in and out of this leg's escrow, oldest first. Filled by a background read of the escrow's history, so a transaction appears shortly after it confirms, not at once. A confirmed transaction the cluster later drops is removed. History before the trade was created is not read.",
+});
 
 const dvpTradeLegSchema = z
   .object({
@@ -168,9 +200,10 @@ const dvpTradeLegSchema = z
       }),
     fundingSignature: z.string().nullable().openapi({
       description:
-        "The transfer the calling organization sent into this leg's escrow, once it was broadcast. Null while that transfer is still being sent, for a leg funded by anyone else, and for an organization that did not fund it. Not a record of every deposit: the escrow accepts transfers from any address.",
+        "The transfer the calling organization sent into this leg's escrow, once it was broadcast. Null while that transfer is still being sent, for a leg funded by anyone else, and for an organization that did not fund it. Not a record of every deposit: the escrow accepts transfers from any address, and `transfers` lists them all.",
     }),
     outcome: dvpLegOutcomeSchema,
+    transfers: dvpLegTransfersSchema,
   })
   .openapi({ description: "One leg of the trade." });
 
@@ -268,6 +301,7 @@ const dvpInboundLegSchema = z
         "Whether the escrow account was last observed frozen. Null before the reconciler looked, which is not the same as thawed.",
     }),
     outcome: dvpLegOutcomeSchema,
+    transfers: dvpLegTransfersSchema,
   })
   .openapi({ description: "One leg of an inbound trade." });
 
@@ -322,6 +356,10 @@ export const dvpCloseResponseSchema = z.object({
       "settle delivers each leg to the other party; cancel refunds each leg to whoever deposited it. Both close the trade permanently.",
   }),
   signature: z.string().openapi({ description: "Signature of the closing transaction." }),
+  confirmed: z.boolean().openapi({
+    description:
+      "Whether the close is confirmed on chain. Only a confirmed close is recorded as settled or cancelled; an unconfirmed one is recorded by the reconciler once it lands.",
+  }),
 });
 
 export const dvpLegActionResponseSchema = z.object({
@@ -354,3 +392,21 @@ export const dvpLegRefusalErrorResponseSchema = z
     meta: z.object({ requestId: z.string().optional() }).optional(),
   })
   .openapi({ description: "Error response for a refused DvP leg action." });
+
+/** The error envelope settle and cancel refuse with, with the refusal code documented. */
+export const dvpCloseRefusalErrorResponseSchema = z
+  .object({
+    error: errorSchema.extend({
+      details: z
+        .object({
+          reason: z.enum(DVP_CLOSE_REFUSAL).optional().openapi({
+            description:
+              "Why this settle or cancel was refused, for a client to name in its own words. Absent on refusals that are not about the close, such as a trade that is not funded.",
+          }),
+        })
+        .catchall(z.unknown())
+        .optional(),
+    }),
+    meta: z.object({ requestId: z.string().optional() }).optional(),
+  })
+  .openapi({ description: "Error response for a refused DvP settle or cancel." });

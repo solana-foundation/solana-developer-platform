@@ -3,13 +3,9 @@
 import type { MoneygramRampEvent, PaymentRampQuote } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
-import { address } from "@solana/kit";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import {
-  createTransfer,
-  postMoneygramRampEvent,
-} from "@/app/dashboard/payments/payments-workspace.data";
+import { postMoneygramRampEvent } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { MONEYGRAM_SDK_URL } from "@/lib/moneygram-sdk";
 import {
@@ -21,6 +17,7 @@ import {
   buildOnrampTransactionPrefill,
   type MoneygramTransactionPrefill,
 } from "./moneygram-prefill";
+import { signMoneygramTransfer } from "./moneygram-sign-transaction";
 
 const SESSION_REFRESH_MS = 50 * 60 * 1000;
 
@@ -207,46 +204,17 @@ export function MoneygramRampWidget({
             direction === "onramp"
               ? buildOnrampTransactionPrefill(cryptoAmount, cryptoAsset)
               : buildOfframpTransactionPrefill(fiatCurrency, cryptoAsset, cryptoAmount),
-          onSignTransaction: async (tx) => {
-            if (tx.chain !== "solana" || tx.asset !== cryptoAsset) {
-              throw new Error(
-                t("DashboardPayments.ramps.unsupportedMoneygramTransaction", {
-                  asset: tx.asset,
-                  chain: tx.chain,
-                })
-              );
-            }
-            if (!sourceTokenMint) {
-              throw new Error(t("DashboardPayments.ramps.sourceWalletNoUsdc"));
-            }
-            const transfer = await createTransfer(
-              {
-                sourceCustodyWalletId: sourceWalletId,
-                destination: tx.to,
-                token: address(sourceTokenMint),
-                amount: tx.amount,
-                ...(tx.memo ? { memo: tx.memo } : {}),
+          onSignTransaction: async (tx) =>
+            signMoneygramTransfer(tx, {
+              cryptoAsset,
+              sessionId,
+              sourceWalletId,
+              sourceTokenMint,
+              onSigned: (transferId) => {
+                signedTransferIdRef.current = transferId;
               },
-              t
-            );
-            if (!transfer.signature) {
-              throw new Error(
-                t("DashboardPayments.ramps.transferSignatureMissing", {
-                  status: transfer.status,
-                })
-              );
-            }
-            signedTransferIdRef.current = transfer.id;
-            await postMoneygramRampEvent(
-              {
-                kind: "signed",
-                sessionId,
-                cryptoTransferId: transfer.id,
-              },
-              t
-            );
-            return transfer.signature;
-          },
+              t,
+            }),
           onComplete: (transaction) => {
             if (direction === "onramp") {
               post({

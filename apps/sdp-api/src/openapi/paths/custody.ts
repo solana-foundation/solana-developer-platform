@@ -228,7 +228,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Aggregate wallet balances",
     operationId: "aggregateWalletBalances",
     description:
-      "Aggregates tracked balances for active wallets under the same owner-aware inclusion rules as the wallet list, without exposing one aggregate-level owner or runtime-admission value.",
+      "Aggregates tracked balances for active wallets under the same owner-aware inclusion rules as the wallet list, without exposing one aggregate-level owner or runtime-admission value. Returns 503 if any included wallet balance cannot be read, rather than returning an incomplete total.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -242,7 +242,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Aggregated wallet balances",
         content: jsonContent(custodyWalletAggregateResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500, 503]),
     },
   });
 
