@@ -8,7 +8,7 @@ import {
   EARN_VAULT_MOVEMENT_STATUSES,
   type EarnExternalWalletPosition,
   type EarnExternalWalletPositionSummary,
-  type EarnExternalWalletPositionSummaryResponse,
+  type EarnExternalWalletTokenTotal,
   type EarnPortfolioToken,
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
@@ -425,11 +425,74 @@ export async function fetchEarnExternalWalletPositions(
   );
 }
 
+/** One per-token aggregate; `tokenValue` is absent when any position is unavailable. */
+const earnExternalWalletTokenTotalSchema: z.ZodType<EarnExternalWalletTokenTotal> = z.object({
+  tokenMint: z.string(),
+  walletCount: z.number().int().nonnegative(),
+  positionCount: z.number().int().nonnegative(),
+  unavailablePositionCount: z.number().int().nonnegative(),
+  /** Absent when any contributing position is unavailable; never a partial total. */
+  tokenValue: z.string().optional(),
+});
+
+const earnExternalWalletPositionRecordSchema: z.ZodType<EarnExternalWalletPosition> = z.object({
+  id: z.string(),
+  ownerAddress: z.string(),
+  provider: z.string(),
+  providerReference: z.string(),
+  label: z.string(),
+  tokenMint: z.string(),
+  shareMint: z.string(),
+  createdAt: z.string(),
+  closedAt: z.string().nullable(),
+  /** Absent when the live provider read failed; unavailable is never encoded as zero. */
+  shares: z.string().optional(),
+  withdrawableShares: z.string().optional(),
+  unlockTimestamp: z.string().nullable().optional(),
+  tokenValue: z.string().optional(),
+});
+
+/**
+ * The per-customer portfolio summary, checked at the boundary like every other
+ * seam in this file — the type assert this replaced declared a shape it never
+ * looked at, so a malformed envelope (an older API, a drifted contract) would
+ * reach the Embedded Yield dashboard's render path and crash it on a
+ * non-array `totalsByStrategy` or mis-derive the onboarding/portfolio split
+ * from unvalidated counts.
+ */
+const earnExternalWalletPositionSummarySchema: z.ZodType<EarnExternalWalletPositionSummary> =
+  z.object({
+    walletCount: z.number().int().nonnegative(),
+    positionCount: z.number().int().nonnegative(),
+    unavailablePositionCount: z.number().int().nonnegative(),
+    totalsByStrategy: z.array(
+      z.object({
+        provider: z.string(),
+        providerReference: z.string(),
+        label: z.string(),
+        ownerAddresses: z.array(z.string()).optional(),
+        positions: z.array(earnExternalWalletPositionRecordSchema).optional(),
+        walletCount: z.number().int().nonnegative(),
+        positionCount: z.number().int().nonnegative(),
+        totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
+      })
+    ),
+    totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
+  });
+
+const earnExternalWalletSummaryResponseSchema = z.object({
+  data: z.object({ summary: earnExternalWalletPositionSummarySchema }),
+});
+
 export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
-  const body = await requestJsonOk<{ data: EarnExternalWalletPositionSummaryResponse }>(
+  const body = await requestJsonOk<unknown>(
     "/api/dashboard/markets/earn/external-wallet/positions/summary"
   );
-  return body.data.summary;
+  const parsed = earnExternalWalletSummaryResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new Error("Invalid external-wallet position summary response");
+  }
+  return parsed.data.data.summary;
 }
 
 export function earnExternalWalletSummaryRefreshInterval(

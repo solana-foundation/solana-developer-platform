@@ -86,10 +86,17 @@ function floorForTolerance(quote: string, decimals: number, toleranceBps: number
     throw new Error("slippage tolerance must be 1-1000 basis points");
   }
   const [whole, fraction = ""] = quote.split(".");
-  if (!/^\\d+$/.test(whole ?? "") || !/^\\d*$/.test(fraction) || fraction.length > decimals) {
+  // Providers do not canonicalize scale: a trailing-zero-PADDED fraction
+  // ("1.2000000" at scale 6) is not finer precision, so the padding is
+  // stripped before the scale check and the value still parses. A quote with
+  // more SIGNIFICANT fractional digits than the mint has atoms is malformed —
+  // padEnd would silently over-count its atoms ("1.234" at scale 2 reads as
+  // 1234) — so that stays a thrown error.
+  const significant = fraction.replace(/0+$/, "");
+  if (!/^\\d+$/.test(whole ?? "") || !/^\\d*$/.test(fraction) || significant.length > decimals) {
     throw new Error("provider quote is not a valid decimal at the reported mint scale");
   }
-  const atoms = BigInt((whole ?? "0") + fraction.padEnd(decimals, "0"));
+  const atoms = BigInt((whole ?? "0") + significant.padEnd(decimals, "0"));
   if (atoms === 0n) throw new Error("provider quote returned zero output");
   const floored = (atoms * BigInt(10_000 - toleranceBps)) / 10_000n || 1n;
   const digits = floored.toString().padStart(decimals + 1, "0");

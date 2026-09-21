@@ -443,8 +443,35 @@ describe("external-wallet position reads", () => {
                   walletCount: 2,
                   positionCount: 3,
                   unavailablePositionCount: 0,
-                  totalsByStrategy: [],
-                  totalsByToken: [],
+                  totalsByStrategy: [
+                    {
+                      provider: "kamino",
+                      providerReference: "vault_1",
+                      label: "Vault one",
+                      ownerAddresses: ["9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"],
+                      positions: [externalWalletPosition("p1")],
+                      walletCount: 1,
+                      positionCount: 1,
+                      totalsByToken: [
+                        {
+                          tokenMint: USDC,
+                          walletCount: 1,
+                          positionCount: 1,
+                          unavailablePositionCount: 0,
+                          tokenValue: "1.05",
+                        },
+                      ],
+                    },
+                  ],
+                  totalsByToken: [
+                    {
+                      tokenMint: USDC,
+                      walletCount: 2,
+                      positionCount: 3,
+                      unavailablePositionCount: 0,
+                      tokenValue: "3.15",
+                    },
+                  ],
                 },
               },
             }),
@@ -456,7 +483,65 @@ describe("external-wallet position reads", () => {
     await expect(fetchEarnExternalWalletPositionSummary()).resolves.toMatchObject({
       walletCount: 2,
       positionCount: 3,
+      totalsByStrategy: [{ provider: "kamino", positions: [{ id: "p1" }] }],
+      totalsByToken: [{ tokenMint: USDC, tokenValue: "3.15" }],
     });
+  });
+
+  it.each([
+    {
+      name: "a non-array totalsByStrategy",
+      summary: {
+        walletCount: 0,
+        positionCount: 0,
+        unavailablePositionCount: 0,
+        totalsByStrategy: {},
+        totalsByToken: [],
+      },
+    },
+    {
+      name: "a missing positionCount",
+      summary: {
+        walletCount: 0,
+        unavailablePositionCount: 0,
+        totalsByStrategy: [],
+        totalsByToken: [],
+      },
+    },
+    {
+      name: "a numeric withdrawableShares inside a position record",
+      summary: {
+        walletCount: 1,
+        positionCount: 1,
+        unavailablePositionCount: 0,
+        totalsByStrategy: [
+          {
+            provider: "kamino",
+            providerReference: "vault_1",
+            label: "Vault one",
+            positions: [{ ...externalWalletPosition("p1"), withdrawableShares: 0 }],
+            walletCount: 1,
+            positionCount: 1,
+            totalsByToken: [],
+          },
+        ],
+        totalsByToken: [],
+      },
+    },
+  ])("refuses the summary envelope when the contract drifts: $name", async ({ summary }) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ data: { summary } }), {
+            headers: { "Content-Type": "application/json" },
+          })
+      )
+    );
+
+    await expect(fetchEarnExternalWalletPositionSummary()).rejects.toThrow(
+      "Invalid external-wallet position summary response"
+    );
   });
 });
 
