@@ -950,10 +950,11 @@ function useEarnVaultMovementOutcome<Movement extends WatchableVaultMovement>(in
  * rule. `pending` counts as in flight: it means SDP could not establish that
  * the transaction reached the network, not that it failed.
  *
- * No settlement fork: a provider-order deposit parks at `confirmed` until an
- * authenticated Connect order reconciler exists, and `confirmed` is already in
- * the legacy terminal set — watching past it would poll forever while the
- * stepper's "provider settlement" state lives in presentation, not the wire.
+ * No settlement fork: a provider-order deposit parks at `confirmed` on this
+ * legacy wire (the API maps the ledger's `finalized` chain-leg fact down to
+ * `confirmed`), and `confirmed` is already in the legacy terminal set —
+ * watching past it would poll forever while the stepper's "provider
+ * settlement" state lives in presentation, not the wire.
  */
 export function isEarnVaultDepositInFlight(deposit: EarnVaultDepositRecord): boolean {
   return !SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
@@ -1178,10 +1179,10 @@ const SETTLED_VAULT_WITHDRAWAL_STATUSES: ReadonlySet<EarnVaultDirectMovementStat
 
 /**
  * Watch-terminal statuses for a provider-order withdrawal: the chain leg plus
- * the unified ledger's terminal set. The reconciler caps a provider-order
- * withdrawal at `confirmed` — the strongest fact the wire can express, since
- * the NAV strike after it has no wire state to observe — so watching past
- * `confirmed` would poll forever with `onSettled` never firing.
+ * the unified ledger's terminal set. The reconciler parks a provider-order
+ * withdrawal once its chain leg finalizes — the NAV strike after it has no
+ * wire state to observe — so watching past `confirmed` would keep the modal
+ * open past the last honest transition, with `onSettled` never firing.
  */
 const PROVIDER_ORDER_WATCH_TERMINAL_STATUSES: ReadonlySet<EarnVaultDirectMovementStatus> = new Set([
   "confirmed",

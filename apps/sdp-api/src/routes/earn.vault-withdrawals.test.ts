@@ -1006,10 +1006,11 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
 
   it("keeps a finalized provider-order withdrawal out of the settled set", async () => {
     await seedAuth();
-    // The reconciler caps a provider-order row at confirmed and never stamps
-    // settled_at, so even a legacy FINALIZED wisdomtree withdrawal must stay
-    // discoverable under settled=false and absent under settled=true until a
-    // provider reconciler introduces its own durable completion fact.
+    // A finalized wisdomtree withdrawal — whether a legacy dual-written row or
+    // one the sweep stamped at chain finality — must stay discoverable under
+    // settled=false and absent under settled=true: the settlement surface
+    // never closes a provider-order row on a chain fact, only on an
+    // authenticated provider completion fact.
     const positionId = await seedPosition({ provider: "wisdomtree" });
     const { recorded } = await recordWithdrawal({
       requestId: "vw-wt-finalized",

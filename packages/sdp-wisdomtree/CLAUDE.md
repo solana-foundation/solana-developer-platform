@@ -33,11 +33,14 @@ Consequences that differ from Kamino:
 - **`minSharesOut` is refused, never ignored.** Settlement happens at a NAV
   struck after the transfer lands; no instruction can encode a share floor.
 - **A confirmed movement is not a settled order.** Even after Solana reports
-  the payment/share leg finalized, the ledger deliberately parks the movement
-  at `confirmed`: fund tokens (or redemption USDC) arrive later through
-  WisdomTree's transfer agent. `finalized` is reserved for a future
-  authenticated, correlated provider-completion signal. Position reads still
-  surface assets from live chain state. Order-status polling against
+  the payment/share leg finalized, that finality is all the ledger records:
+  the sweep stamps the durable chain fact (`finalized`/`settled_at`) and then
+  stops scheduling the row, but fund tokens (or redemption USDC) arrive later
+  through WisdomTree's transfer agent, and the settled surface never closes a
+  provider-order row on a chain fact. Connect's order completion — the
+  authenticated, correlated provider signal — is what a future reconciler
+  must bring before the settled view can close these rows. Position reads
+  still surface assets from live chain state. Order-status polling against
   `GET /api/orders/*` is deliberately NOT wired yet — see "Not done" below.
 
 ## The compliance model is the integration's spine
