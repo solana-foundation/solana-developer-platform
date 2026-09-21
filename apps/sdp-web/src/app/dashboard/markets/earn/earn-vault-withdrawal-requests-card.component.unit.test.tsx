@@ -70,9 +70,15 @@ function renderCard(onChanged = vi.fn()) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
-    IDEMPOTENCY_KEY as ReturnType<typeof crypto.randomUUID>
-  );
+  // Each mint returns a DISTINCT value, otherwise "the retry reused the key"
+  // would pass against a constant mock that proves nothing.
+  let minted = 0;
+  vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => {
+    minted += 1;
+    return (
+      minted === 1 ? IDEMPOTENCY_KEY : `22222222-2222-4222-8222-22222222222${minted}`
+    ) as ReturnType<typeof crypto.randomUUID>;
+  });
 });
 
 afterEach(() => {
@@ -123,6 +129,8 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel and recover shares" }));
     await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(2));
+    // The UUID source now mints a fresh value for every call, so a retry can
+    // only arrive under the SAME key if the card memoized the original one.
     expect(mocks.cancelRequest.mock.calls[1]).toEqual([
       recoverable.withdrawalRequestId,
       IDEMPOTENCY_KEY,
