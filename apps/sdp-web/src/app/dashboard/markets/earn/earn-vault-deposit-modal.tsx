@@ -67,9 +67,10 @@ import {
   atomsToDecimalString,
   derivedMinOut,
   floorToReplay,
+  initialSlippageInput,
   isExpiredQuote,
   isSlippageExceededRefusal,
-  parseSlippageToleranceBps,
+  parseSlippageToleranceState,
   quoteForKey,
   useDebouncedVaultQuote,
   type VaultFloorReplay,
@@ -272,8 +273,10 @@ function deriveDepositFormState(input: {
       ? compareUnsignedDecimals(amountValidation.canonicalAmount, selectedWalletBalance) === 1
       : false;
   const amountError = amountValidationMessage(amountInput, amountValidation, t);
-  const slippageBps = slippagePolicy ? parseSlippageToleranceBps(slippageInput) : null;
-  const slippageInvalid = slippagePolicy !== null && slippageBps === null;
+  const { slippageBps, slippageInvalid } = parseSlippageToleranceState(
+    slippagePolicy,
+    slippageInput
+  );
   const quoteAmount =
     slippagePolicy !== null && amountValidation.kind === "valid"
       ? amountValidation.canonicalAmount
@@ -819,10 +822,12 @@ function useVaultFundingToken(input: {
     return tokens;
   }, [supportedFundingTokens, wallets]);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
+  // Ranked order already covers "nothing selected": its first row is the
+  // default. With wallets loaded the ranking is a full permutation of the
+  // supported tokens, so the two arrays are the same length and there is no
+  // third fallback behind `fundingTokens[0]`.
   const fundingToken =
-    fundingTokens.find((token) => token.mint === fundingMint) ??
-    fundingTokens[0] ??
-    supportedFundingTokens[0];
+    fundingTokens.find((token) => token.mint === fundingMint) ?? fundingTokens[0];
   const swapActive = fundingToken !== undefined && fundingToken.mint !== depositMint;
 
   return {
@@ -1278,9 +1283,7 @@ export function EarnVaultDepositModal({
   // cannot be bounded by the Solana payment leg. Null renders no slippage
   // control at all.
   const slippagePolicy = strategy.depositSlippage;
-  const [slippageInput, setSlippageInput] = useState(() =>
-    slippagePolicy ? String(slippagePolicy.defaultToleranceBps) : ""
-  );
+  const [slippageInput, setSlippageInput] = useState(() => initialSlippageInput(slippagePolicy));
   const [slippageOpen, setSlippageOpen] = useState(false);
   const [step, setStep] = useState<"details" | "review">("details");
   const [submitting, setSubmitting] = useState(false);

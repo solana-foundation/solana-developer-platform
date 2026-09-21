@@ -78,26 +78,19 @@ export function kaminoDeployedWeightPct(unallocatedPct: string | undefined): str
 export function kaminoAllocationsByWeight(
   allocations: readonly KaminoVaultAllocation[]
 ): KaminoVaultAllocation[] {
-  const indexed = allocations.map((allocation, index) => {
-    const weight = Number(allocation.actualPct);
-    return {
-      index,
-      weight: Number.isFinite(weight) ? weight : undefined,
-    };
+  // Copy first: the caller's array is never reordered in place. The sort is
+  // stable, so ties keep the provider's order.
+  return allocations.slice().sort((left, right) => {
+    const leftWeight = Number(left.actualPct);
+    const rightWeight = Number(right.actualPct);
+    const leftComparable = Number.isFinite(leftWeight);
+    const rightComparable = Number.isFinite(rightWeight);
+    if (leftComparable && rightComparable && leftWeight !== rightWeight) {
+      return rightWeight - leftWeight;
+    }
+    if (leftComparable !== rightComparable) return leftComparable ? -1 : 1;
+    return 0;
   });
-  return indexed
-    .map(({ index }) => allocations[index])
-    .sort((left, right) => {
-      const leftWeight = Number(left.actualPct);
-      const rightWeight = Number(right.actualPct);
-      const leftComparable = Number.isFinite(leftWeight);
-      const rightComparable = Number.isFinite(rightWeight);
-      if (leftComparable && rightComparable && leftWeight !== rightWeight) {
-        return rightWeight - leftWeight;
-      }
-      if (leftComparable !== rightComparable) return leftComparable ? -1 : 1;
-      return 0;
-    });
 }
 
 type KaminoDisclosureRow =

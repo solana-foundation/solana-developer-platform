@@ -284,6 +284,19 @@ export function formatLegAmount(baseUnits: string, decimals: number | null): str
 }
 
 /**
+ * "100 USDC", or just "100" for a mint without a symbol. The amount and the
+ * symbol can come from different rows (a leg transfer carries its own
+ * amount), so they are taken as separate arguments.
+ */
+export function formatLegAmountWithSymbol(
+  baseUnits: string,
+  decimals: number | null,
+  symbol: string | null
+): string {
+  return `${formatLegAmount(baseUnits, decimals)}${symbol ? ` ${symbol}` : ""}`;
+}
+
+/**
  * A u64-seconds wire timestamp as an ISO instant, for `formatTimestamp`.
  * One expression, three surfaces: the conversion spelled inline is how an
  * expiry once rendered in microseconds.

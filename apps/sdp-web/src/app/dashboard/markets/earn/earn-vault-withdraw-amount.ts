@@ -61,6 +61,33 @@ export function vaultProviderOrderShares(
   return comparison === undefined || comparison === 1 ? undefined : validation.canonicalAmount;
 }
 
+/**
+ * The share intent for an amount that has already passed
+ * `validateVaultWithdrawalAmount`: `undefined` unless the amount is valid.
+ * The instant and queued exits both name their shares this way, so they
+ * cannot drift into minting an intent for an invalid amount.
+ */
+export function vaultWithdrawalSharesForValidatedAmount(
+  amountValidation: VaultWithdrawalAmountValidation,
+  position: Pick<EarnVaultPosition, "shares" | "withdrawableShares" | "tokenValue">
+): string | undefined {
+  return amountValidation.kind === "valid"
+    ? vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
+    : undefined;
+}
+
+/**
+ * The amount field's error, decided once for both exits: an empty or valid
+ * field is no error, anything else reads the caller's invalid-amount copy.
+ */
+export function vaultWithdrawalAmountError(
+  amount: string,
+  amountValidation: VaultWithdrawalAmountValidation,
+  invalidMessage: string
+): string | null {
+  return amount.trim() === "" || amountValidation.kind === "valid" ? null : invalidMessage;
+}
+
 function multiplyDivideDecimal(
   left: string,
   right: string,

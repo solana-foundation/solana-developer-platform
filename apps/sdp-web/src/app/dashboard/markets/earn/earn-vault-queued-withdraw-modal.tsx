@@ -27,7 +27,7 @@ import {
   formatEpochSeconds,
   formatTokenQuantity,
   formatUsd,
-  shortenMarketAddress,
+  positionDisplayName,
 } from "./earn-format";
 import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
 import {
@@ -49,8 +49,9 @@ import {
 import {
   VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   validateVaultWithdrawalAmount,
+  vaultWithdrawalAmountError,
   vaultWithdrawalAvailableAmount,
-  vaultWithdrawalSharesForAmount,
+  vaultWithdrawalSharesForValidatedAmount,
 } from "./earn-vault-withdraw-amount";
 
 interface QueuedWithdrawalModalProps {
@@ -115,15 +116,6 @@ function epochDate(value: string, locale: string, unavailable: string): string {
   return formatEpochSeconds(value, locale) ?? unavailable;
 }
 
-function queueSharesForAmount(
-  amountValidation: ReturnType<typeof validateVaultWithdrawalAmount>,
-  position: EarnVaultPosition
-): string | undefined {
-  return amountValidation.kind === "valid"
-    ? vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
-    : undefined;
-}
-
 function isQueueTermsValid(
   discountBps: number,
   deadlineSeconds: number,
@@ -157,20 +149,6 @@ function queueLockedUntil(
   return position.unlockTimestamp
     ? epochDate(position.unlockTimestamp, locale, unavailable)
     : undefined;
-}
-
-function queuePositionName(position: EarnVaultPosition): string {
-  return position.label || shortenMarketAddress(position.providerReference);
-}
-
-function queueAmountError(
-  amount: string,
-  amountValidation: ReturnType<typeof validateVaultWithdrawalAmount>,
-  t: ReturnType<typeof useTranslations>
-): string | null {
-  return amount.trim() === "" || amountValidation.kind === "valid"
-    ? null
-    : t("DashboardEarn.vaultWithdraw.amountInvalid");
 }
 
 function queuedWithdrawalSteps(
@@ -789,7 +767,7 @@ export function EarnVaultQueuedWithdrawModal({
   );
   const amountValidation = validateVaultWithdrawalAmount(amount);
   const availableAmount = vaultWithdrawalAvailableAmount(position);
-  const shares = queueSharesForAmount(amountValidation, position);
+  const shares = vaultWithdrawalSharesForValidatedAmount(amountValidation, position);
   // Same derivation as the instant exit modal: without it, an over-available
   // amount disables Continue with no explanation, because the shares
   // conversion silently answers undefined for an amount above the ceiling.
@@ -816,9 +794,13 @@ export function EarnVaultQueuedWithdrawModal({
     setError,
   });
 
-  const positionName = queuePositionName(position);
+  const positionName = positionDisplayName(position);
   const modalLabel = t("DashboardEarn.queuedWithdraw.title", { position: positionName });
-  const amountError = queueAmountError(amount, amountValidation, t);
+  const amountError = vaultWithdrawalAmountError(
+    amount,
+    amountValidation,
+    t("DashboardEarn.vaultWithdraw.amountInvalid")
+  );
 
   return (
     <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
