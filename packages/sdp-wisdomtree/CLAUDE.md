@@ -36,9 +36,12 @@ Consequences that differ from Kamino:
   the payment/share leg finalized, that finality is all the ledger records:
   the sweep stamps the durable chain fact (`finalized`/`settled_at`) and then
   stops scheduling the row, but fund tokens (or redemption USDC) arrive later
-  through WisdomTree's transfer agent, and the settled surface never closes a
-  provider-order row on a chain fact. Connect's order completion — the
-  authenticated, correlated provider signal — is what a future reconciler
+  through WisdomTree's transfer agent. The stamp never leaves the ledger: the
+  public wire (`movementStatusOnWire`) translates a provider-order row at
+  `finalized` down to `confirmed` with no `settledAt`, because the contract
+  defines `finalized` as terminal settlement, and the settled surface never
+  closes a provider-order row on a chain fact. Connect's order completion —
+  the authenticated, correlated provider signal — is what a future reconciler
   must bring before the settled view can close these rows. Position reads
   still surface assets from live chain state. Order-status polling against
   `GET /api/orders/*` is deliberately NOT wired yet — see "Not done" below.

@@ -125,6 +125,8 @@ async function seedPosition(input: {
   label: string;
   organizationId?: string;
   projectId?: string;
+  /** Defaults to kamino (atomic settlement). */
+  provider?: string;
   /** A fully exited holding; the position lists exclude it absent a re-entry. */
   closedAt?: string;
 }): Promise<string> {
@@ -134,12 +136,13 @@ async function seedPosition(input: {
       `INSERT INTO earn_positions (
          id, organization_id, project_id, environment, provider, kind,
          owner_address, vault_address, share_mint, token_mint, label, activated_at, closed_at
-       ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, ?, sdp_iso_now(), ?)`
+       ) VALUES (?, ?, ?, 'sandbox', ?, 'vault_direct', ?, ?, ?, ?, ?, sdp_iso_now(), ?)`
     )
     .bind(
       positionId,
       input.organizationId ?? ORG,
       input.projectId ?? PROJECT,
+      input.provider ?? "kamino",
       input.ownerAddress,
       input.vaultAddress,
       SHARE,
@@ -169,6 +172,8 @@ async function seedMovement(input: {
   createdAt: string;
   organizationId?: string;
   projectId?: string;
+  /** Defaults to kamino (atomic settlement) — the vocabulary pins below rely on it. */
+  provider?: string;
   /** A finalized withdrawal's observed deposit-token payout; omitted = not observed. */
   tokenAmountSettled?: string;
 }): Promise<string> {
@@ -197,13 +202,14 @@ async function seedMovement(input: {
          owner_address, vault_address, source_address, destination_address,
          signature, signed_transaction, last_valid_block_height, request_id,
          idempotency_fingerprint, created_at, confirmed_at, settled_at, failure_reason
-       ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, ?, ?, ?,
+       ) VALUES (?, ?, ?, 'sandbox', ?, 'vault_direct', ?, ?, ?, ?, ?, ?, ?,
                  ?, ?, ?, ?, ?, 'AQ==', '12345', ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       movementId,
       input.organizationId ?? ORG,
       input.projectId ?? PROJECT,
+      input.provider ?? "kamino",
       input.direction,
       input.positionId,
       input.status,
@@ -282,6 +288,42 @@ describe("external-wallet activity", () => {
     expect((await getAsProduction(`/v1/earn/external-wallet/movements/${movementId}`)).status).toBe(
       404
     );
+  });
+
+  it("reports a finalized provider-order redemption as confirmed with no settledAt", async () => {
+    // The ledger keeps the durable chain-finality evidence (`finalized` +
+    // settled_at — what took the row out of the sweep queue), but the wire
+    // must not claim a terminal settled state: WisdomTree completes the
+    // redemption after the NAV strike, outside the transaction.
+    const positionId = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-wtgxx",
+      tokenMint: USDC,
+      label: "WTGXX vault",
+      provider: "wisdomtree",
+    });
+    const movementId = await seedMovement({
+      positionId,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-wtgxx",
+      direction: "withdrawal",
+      status: "finalized",
+      amount: "3",
+      denomination: SHARE,
+      createdAt: "2026-08-30T00:00:00.000Z",
+      provider: "wisdomtree",
+    });
+
+    const detail = (await (
+      await get(`/v1/earn/external-wallet/movements/${movementId}`)
+    ).json()) as {
+      data: { movement: { status: string; settledAt: string | null; confirmedAt: string | null } };
+    };
+    expect(detail.data.movement).toMatchObject({
+      status: "confirmed",
+      settledAt: null,
+      confirmedAt: "2026-08-30T00:00:00.000Z",
+    });
   });
 
   it("lists one owner's movements newest first in ledger vocabulary, without wallets:read", async () => {

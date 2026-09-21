@@ -1026,13 +1026,14 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
     });
 
     const unsettled = (await (await getWithdrawal("?settled=false")).json()) as {
-      data: { withdrawals: Array<{ movementId: string }> };
+      data: {
+        withdrawals: Array<{ movementId: string; status: string; settledAt: string | null }>;
+      };
     };
-    expect(
-      unsettled.data.withdrawals.some(
-        (withdrawal) => withdrawal.movementId === recorded.movement.id
-      )
-    ).toBe(true);
+    const listed = unsettled.data.withdrawals.find(
+      (withdrawal) => withdrawal.movementId === recorded.movement.id
+    );
+    expect(listed).toBeDefined();
 
     const settledOnly = (await (await getWithdrawal("?settled=true")).json()) as {
       data: { withdrawals: Array<{ movementId: string }> };
@@ -1042,6 +1043,19 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
         (withdrawal) => withdrawal.movementId === recorded.movement.id
       )
     ).toBe(false);
+
+    // The wire never claims a terminal settled state for a provider order: the
+    // ledger's durable chain-finality evidence (`finalized` + settled_at)
+    // reads as `confirmed` with no settledAt — the strongest honest
+    // non-terminal fact, so clients keep seeing "awaiting provider settlement"
+    // while WisdomTree completes the redemption off chain.
+    const detail = (await (await getWithdrawal(`/${recorded.movement.id}`)).json()) as {
+      data: { withdrawal: { status: string; settledAt: string | null } };
+    };
+    expect(detail.data.withdrawal).toMatchObject({
+      status: "confirmed",
+      settledAt: null,
+    });
   });
 });
 

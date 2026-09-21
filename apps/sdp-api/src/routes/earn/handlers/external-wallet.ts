@@ -44,6 +44,7 @@ import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
 import { getLogger } from "@/runtime/logger";
 import { resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
 import type { JupiterSwapLeg } from "@/services/earn/jupiter-swap.service";
@@ -1386,10 +1387,13 @@ function toExternalWalletTransactionWire(built: ExternalWalletBuiltTransaction) 
 }
 
 /**
- * Movement to wire, ledger vocabulary. This surface postdates the unified
- * ledger, so `finalized` keeps its own name and there is no legacy status
- * table to translate through. `replayed` is a POST-only fact — the reads
- * leave it absent, because a stored row cannot say how it was asked for.
+ * Movement to wire, ledger vocabulary — with one translation: a provider-order
+ * row the ledger holds at `finalized` (durable chain-leg evidence) reads as
+ * `confirmed` with no `settledAt`, because the public contract defines
+ * `finalized` as terminal settlement and the provider has not reported
+ * completion yet. See `movementStatusOnWire`. `replayed` is a POST-only fact —
+ * the reads leave it absent, because a stored row cannot say how it was asked
+ * for.
  *
  * `amount`/`denomination` stay the on-chain quantity (shares on a withdrawal);
  * `tokenAmount`/`tokenMint` are the deposit-token view a feed renders: the
@@ -1405,13 +1409,14 @@ function toExternalWalletMovementWire(
       `Earn external-wallet movement ${movement.id} is missing execution details`
     );
   }
+  const { status, settledAt } = movementStatusOnWire(movement);
   return {
     movementId: movement.id,
     positionId: movement.position_id,
     provider: movement.provider,
     providerReference: movement.vault_address,
     direction: movement.direction,
-    status: movement.status as EarnVaultDirectMovementStatus,
+    status: status as EarnVaultDirectMovementStatus,
     signature: movement.signature,
     ownerAddress: movement.owner_address,
     amount: movement.amount_requested,
@@ -1424,7 +1429,7 @@ function toExternalWalletMovementWire(
     failureReason: movement.failure_reason,
     createdAt: movement.created_at,
     confirmedAt: movement.confirmed_at,
-    settledAt: movement.settled_at,
+    settledAt,
     ...(replayed === undefined ? {} : { replayed }),
   };
 }
