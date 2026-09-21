@@ -6,7 +6,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { formatDurationSeconds, shortenMarketAddress } from "./earn-format";
+import { formatDurationSeconds, positionDisplayName } from "./earn-format";
 import { fetchEarnVaultWithdrawalOptions } from "./earn-program-data";
 import { EarnVaultAsyncWithdrawModal } from "./earn-vault-async-withdraw-modal";
 import {
@@ -177,7 +177,7 @@ function ExitRouteChooser({
 }) {
   const t = useTranslations();
   const ready = options?.kind === "ready" ? options.value : null;
-  const positionName = position.label || shortenMarketAddress(position.providerReference);
+  const positionName = positionDisplayName(position);
   const modalLabel = t("DashboardEarn.exitRoute.title", { position: positionName });
 
   let body: ReactNode;

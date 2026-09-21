@@ -45,13 +45,6 @@ export function observableVaultMovement<M extends VaultMovementRecord>(
   return outcome.movement;
 }
 
-/** The `observableVaultMovement` rule as a predicate, for gates that only ask whether to project. */
-export function vaultMovementHappened<M extends VaultMovementRecord>(
-  outcome: VaultMovementOutcomeView<M> | null | undefined
-): boolean {
-  return observableVaultMovement(outcome) !== undefined;
-}
-
 /**
  * Fold one freshly observed movement record into a still-open outcome, so the
  * watcher's newer status wins over the submission's snapshot. Everything
@@ -86,6 +79,28 @@ export function vaultMovementProgressStep<M extends VaultMovementRecord>(
   if (!outcome) return step === "review" ? 1 : 0;
   if (outcome.kind === "approval_pending") return 2;
   return uiState(outcome.movement.status).progressStep;
+}
+
+/**
+ * The stepper labels for one value-moving flow: details, review and
+ * processing are common, and a provider-order settlement (whose confirmed
+ * status is not yet final) inserts its own step before the complete one.
+ * Both vault modals spell the same shape, so the order lives here once.
+ */
+export function vaultMovementProgressSteps(
+  labels: {
+    details: string;
+    review: string;
+    processing: string;
+    providerSettlement: string;
+    complete: string;
+  },
+  providerOrder: boolean
+): string[] {
+  const shared = [labels.details, labels.review, labels.processing];
+  return providerOrder
+    ? [...shared, labels.providerSettlement, labels.complete]
+    : [...shared, labels.complete];
 }
 
 /**

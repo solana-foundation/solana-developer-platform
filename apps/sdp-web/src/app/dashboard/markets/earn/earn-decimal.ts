@@ -81,3 +81,31 @@ export function compareUnsignedDecimals(left: string, right: string): -1 | 0 | 1
 export function isPositiveDecimal(value: string): boolean {
   return compareUnsignedDecimals(value, "0") === 1;
 }
+
+/**
+ * Order items by an optional decimal string: unknown values always sort last,
+ * ties resolve by original position, and comparable values order by the
+ * requested direction. Returns a new array; the input is not mutated. The
+ * comparison is fail-soft like `compareUnsignedDecimals` itself — a value
+ * that cannot be compared at sort time counts as a tie, never a crash. What
+ * counts as "unknown" is the caller's decision: pass a `valueFor` that
+ * answers `undefined` for every value it does not vouch for.
+ */
+export function sortByOptionalDecimal<Item>(
+  items: readonly Item[],
+  valueFor: (item: Item) => string | undefined,
+  direction: "ascending" | "descending"
+): Item[] {
+  return items
+    .map((item, index) => ({ index, item, value: valueFor(item) }))
+    .sort((left, right) => {
+      if (left.value === undefined && right.value === undefined) return left.index - right.index;
+      if (left.value === undefined) return 1;
+      if (right.value === undefined) return -1;
+
+      const order = compareUnsignedDecimals(left.value, right.value) ?? 0;
+      if (order === 0) return left.index - right.index;
+      return direction === "ascending" ? order : -order;
+    })
+    .map(({ item }) => item);
+}
