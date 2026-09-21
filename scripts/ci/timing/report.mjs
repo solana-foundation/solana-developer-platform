@@ -5,7 +5,10 @@
 import { formatSeconds, readRecords, writeStepSummary } from "./lib.mjs";
 
 function cell(value) {
-  return String(value).replace(/\|/g, "\\|").replace(/\n/g, " ");
+  return String(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .replace(/\n/g, " ");
 }
 
 function pairMarkers(records) {
