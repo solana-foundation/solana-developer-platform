@@ -208,9 +208,13 @@ function vaultPosition(id: string, provider = "kamino"): EarnVaultPosition {
 
 describe("fetchEarnVaultPositions", () => {
   it("follows every live keyset page without filtering un-surfaced providers", async () => {
+    // Pages that report more must be full, so the first page carries a whole
+    // page of rows and only the final one is short.
     const pages = [
       {
-        positions: [vaultPosition("vault_1", "upshift")],
+        positions: Array.from({ length: 100 }, (_, index) =>
+          vaultPosition(`vault_${index}`, "upshift")
+        ),
         hasMore: true,
         nextCursor: "cursor_1",
       },
@@ -230,7 +234,10 @@ describe("fetchEarnVaultPositions", () => {
 
     const positions = await fetchEarnVaultPositions();
 
-    expect(positions.map((position) => position.provider)).toEqual(["upshift", "kamino"]);
+    expect(positions).toHaveLength(101);
+    expect(new Set(positions.map((position) => position.provider))).toEqual(
+      new Set(["upshift", "kamino"])
+    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/dashboard/markets/earn/vault-positions?limit=100"
@@ -277,7 +284,11 @@ function externalWalletPosition(id: string): EarnExternalWalletPosition {
 describe("external-wallet position reads", () => {
   it("pages one wallet to the end", async () => {
     const pages = [
-      { positions: [externalWalletPosition("p1")], hasMore: true, nextCursor: "cursor_1" },
+      {
+        positions: Array.from({ length: 100 }, () => externalWalletPosition("p1")),
+        hasMore: true,
+        nextCursor: "cursor_1",
+      },
       { positions: [externalWalletPosition("p2")], hasMore: false, nextCursor: null },
     ];
     const fetchMock = vi.fn(
@@ -290,7 +301,7 @@ describe("external-wallet position reads", () => {
 
     await expect(
       fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
-    ).resolves.toHaveLength(2);
+    ).resolves.toHaveLength(101);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -302,7 +313,7 @@ describe("external-wallet position reads", () => {
       return new Response(
         JSON.stringify({
           data: {
-            positions: [externalWalletPosition(`p${current}`)],
+            positions: Array.from({ length: 100 }, () => externalWalletPosition(`p${current}`)),
             hasMore: true,
             nextCursor: `cursor_${current}`,
           },
@@ -329,7 +340,7 @@ describe("external-wallet position reads", () => {
       return new Response(
         JSON.stringify({
           data: {
-            positions: [externalWalletPosition(`p${current}`)],
+            positions: Array.from({ length: 100 }, () => externalWalletPosition(`p${current}`)),
             hasMore: current < 19,
             nextCursor: current < 19 ? `cursor_${current}` : null,
           },
@@ -341,7 +352,7 @@ describe("external-wallet position reads", () => {
 
     await expect(
       fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
-    ).resolves.toHaveLength(20);
+    ).resolves.toHaveLength(20 * 100);
     expect(fetchMock).toHaveBeenCalledTimes(20);
   });
 
@@ -351,7 +362,7 @@ describe("external-wallet position reads", () => {
         new Response(
           JSON.stringify({
             data: {
-              positions: [externalWalletPosition("p1")],
+              positions: Array.from({ length: 100 }, () => externalWalletPosition("p1")),
               hasMore: true,
               nextCursor: "same_cursor",
             },
@@ -848,7 +859,9 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
       return new Response(
         JSON.stringify({
           data: {
-            withdrawalRequests: [queuedWithdrawalRequest(before ? "request_2" : "request_1")],
+            withdrawalRequests: before
+              ? [queuedWithdrawalRequest("request_2")]
+              : Array.from({ length: 100 }, () => queuedWithdrawalRequest("request_1")),
             hasMore: before === null,
             nextCursor: before === null ? "cursor_2" : null,
           },
@@ -860,14 +873,39 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
 
     const requests = await fetchEarnVaultWithdrawalRequests({ settled: false });
 
-    expect(requests.map((request) => request.withdrawalRequestId)).toEqual([
-      "request_1",
-      "request_2",
-    ]);
+    expect(requests).toHaveLength(101);
+    expect(new Set(requests.map((request) => request.withdrawalRequestId))).toEqual(
+      new Set(["request_1", "request_2"])
+    );
     expect(calls).toEqual([
       "/api/dashboard/markets/earn/vault-withdrawal-requests?limit=100&settled=false",
       "/api/dashboard/markets/earn/vault-withdrawal-requests?limit=100&before=cursor_2&settled=false",
     ]);
+  });
+
+  it("throws when a hasMore page arrives short instead of trusting the prefix", async () => {
+    // The consistency check the shared pager adds: a page that reports more
+    // rows than it returned contradicts itself, and returning the prefix
+    // would hide whatever the missing rows held.
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              withdrawalRequests: [queuedWithdrawalRequest("request_1")],
+              hasMore: true,
+              nextCursor: "cursor_1",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchEarnVaultWithdrawalRequests({ settled: false })).rejects.toThrow(
+      "Queued withdrawal requests pagination returned a short page while reporting more"
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes a policy-held request into an approval-pending outcome", async () => {
