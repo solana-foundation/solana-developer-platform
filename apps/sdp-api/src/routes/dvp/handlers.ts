@@ -407,17 +407,51 @@ async function readTradeLegTransfers(env: Env, tradeId: string): Promise<DvpTrad
   return legTransfersFor(await readLegTransfers(env, [tradeId]), tradeId);
 }
 
+/** One trade's funding claims, keyed by side. */
+function claimsBySide(
+  claims: readonly DvpLegFundingClaim[]
+): Map<DvpTradeSide, DvpLegFundingClaim> {
+  return new Map(claims.map((claim) => [claim.side, claim]));
+}
+
 /**
- * The funding claims on one trade, keyed by side. One query per trade (N for
- * a page, acceptable at the documented limit of 100); not widened into a batch
- * because claim rows are RLS-scoped to the funding org, and unseen means null.
+ * The funding claims on one trade, keyed by side. One query; the single-trade
+ * read behind the trade detail and the party fallback.
  */
 async function readFundingClaims(
   env: Env,
   tradeId: string
 ): Promise<Map<DvpTradeSide, DvpLegFundingClaim>> {
   const claims = await createPostgresDvpLegFundingClaimRepository(getDb(env)).listForTrade(tradeId);
-  return new Map(claims.map((claim) => [claim.side, claim]));
+  return claimsBySide(claims);
+}
+
+/**
+ * Every page's funding claims in one query, keyed by trade. Claim rows are
+ * RLS-scoped per row — a funding org reads its own, and a trade's owner reads
+ * every organization's claims on its trades (0110) — so one `trade_id IN`
+ * read answers exactly what the per-trade reads answered: unseen means null.
+ */
+async function readFundingClaimsForTrades(
+  env: Env,
+  tradeIds: readonly string[]
+): Promise<Map<string, Map<DvpTradeSide, DvpLegFundingClaim>>> {
+  const claimsByTrade = await createPostgresDvpLegFundingClaimRepository(getDb(env)).listForTrades(
+    tradeIds
+  );
+  return new Map([...claimsByTrade].map(([tradeId, claims]) => [tradeId, claimsBySide(claims)]));
+}
+
+/** One trade's entry in a page's funding-claims read, which answers for every id it was asked. */
+function fundingClaimsFor(
+  fundingClaimsByTrade: ReadonlyMap<string, Map<DvpTradeSide, DvpLegFundingClaim>>,
+  tradeId: string
+): Map<DvpTradeSide, DvpLegFundingClaim> {
+  const claims = fundingClaimsByTrade.get(tradeId);
+  if (claims === undefined) {
+    throw new Error(`funding claim read did not answer for trade ${tradeId}`);
+  }
+  return claims;
 }
 
 /**
@@ -821,12 +855,15 @@ export const listTrades = async (c: AppContext) => {
     query.data.limit
   );
 
-  // Resolved once for the page; claims stay index-aligned with the trades.
+  // Resolved once for the page, one query per collection.
   const [callerAddresses, counterpartyLabels, fundingClaimsByTrade, mintImages, legTransfers] =
     await Promise.all([
       callerPartyAddresses(c.env, { organizationId: auth.organizationId, projectId, auth }),
       readCounterpartyLabels(c.env, auth.organizationId, projectId, trades),
-      Promise.all(trades.map((trade) => readFundingClaims(c.env, trade.id))),
+      readFundingClaimsForTrades(
+        c.env,
+        trades.map((trade) => trade.id)
+      ),
       readMintImages(
         c.env,
         auth.organizationId,
@@ -839,11 +876,11 @@ export const listTrades = async (c: AppContext) => {
       ),
     ]);
   return success(c, {
-    trades: trades.map((trade, index) =>
+    trades: trades.map((trade) =>
       toTradeResponse(trade, {
         callerAddresses,
         counterpartyLabels,
-        fundingClaims: fundingClaimsByTrade[index],
+        fundingClaims: fundingClaimsFor(fundingClaimsByTrade, trade.id),
         mintImages,
         legTransfers: legTransfersFor(legTransfers, trade.id),
       })
