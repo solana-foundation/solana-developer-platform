@@ -526,7 +526,13 @@ export interface EarnMovementsRepository {
     sourceAddress?: string;
     destinationAddress?: string;
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
-  /** Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease. */
+  /**
+   * Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease.
+   *
+   * Provider-order rows parked at `confirmed` are NOT in the queue: no chain
+   * read can advance them until a Connect completion reconciler exists, so
+   * scheduling them would be permanent work for a fact the wire already gave.
+   */
   claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
   /**
    * Backlog telemetry over the SAME predicate the claim uses (PRO-1863): how
@@ -539,7 +545,9 @@ export interface EarnMovementsRepository {
    * neither expire nor rebroadcast it), so a total-only age would latch and
    * page forever. `blockhashBound` is the actionable subset the sweep can
    * still act on, and the withdrawal split keeps the exit path visible on its
-   * own (ADR 0002).
+   * own (ADR 0002). Provider-order rows parked at `confirmed` are excluded
+   * here exactly as they are from the claim — they are awaiting-provider
+   * surface, not sweep backlog.
    */
   getUnsettledVaultMovementStats(): Promise<{
     backlog: number;
@@ -936,6 +944,42 @@ const ATOMIC_SETTLED_STATUSES_BY_DIRECTION = {
   deposit: ["confirmed", "finalized"],
   withdrawal: ["finalized"],
 } as const satisfies Record<EarnMovementDirection, readonly EarnMovementStatus[]>;
+
+/**
+ * Providers whose settlement a chain observation can never complete: the
+ * provider strikes and delivers shares later, and until a Connect completion
+ * reconciler lands there is NO wire fact that can advance a row past
+ * `confirmed` for them. The sweep therefore must not schedule those parked
+ * rows (PRO-1593 review): every pass would re-read the same finalized
+ * signature and write nothing, forever, with the backlog growing by every
+ * successful order. Kept as a static table — the same source the `?settled=`
+ * filter and the dashboard read — so a drift test can pin the reconciler's
+ * client capability against it. Unknown historical providers stay OUT of this
+ * map on purpose: fail-closed keeps them non-terminal and still scheduled,
+ * because atomicity is a positive settlement claim and registry drift must
+ * never close one of their rows by omission.
+ */
+const PROVIDER_ORDER_VAULT_PROVIDERS_BY_DIRECTION = {
+  deposit: Object.entries(EARN_PROVIDER_DEPOSIT_SETTLEMENT)
+    .filter(([, settlement]) => settlement === "provider_order")
+    .map(([provider]) => provider),
+  withdrawal: Object.entries(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT)
+    .filter(([, settlement]) => settlement === "provider_order")
+    .map(([provider]) => provider),
+} as const satisfies Record<EarnMovementDirection, readonly string[]>;
+
+/**
+ * The NOT-parked clause shared by the sweep's claim and its backlog telemetry:
+ * a provider-order row at `confirmed` is the strongest fact the wire can
+ * express and can never be advanced by another chain read, so it stops being
+ * scheduled the moment it parks. Surfacing is a different concern and keeps
+ * such a row discoverable (`vaultSettlementFilter` does not use this).
+ */
+const PARKED_PROVIDER_ORDER_EXCLUSION_SQL = `AND NOT (
+                 status = 'confirmed'
+                 AND ((direction = 'deposit' AND provider = ANY (?::text[]))
+                   OR (direction = 'withdrawal' AND provider = ANY (?::text[])))
+               )`;
 
 /**
  * A failed movement is terminal for every provider. Success is terminal only
@@ -1903,6 +1947,13 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // it because a broadcast timeout or crash leaves a row unsubmitted WITH a
       // signature, which is precisely the ambiguous case reconciliation is for.
       //
+      // The one exception is a provider-order row already parked at `confirmed`
+      // (the exclusion clause below): no chain read can ever advance it, so
+      // re-claiming it would only re-observe the same finalized signature and
+      // write nothing, on every tick, forever. It keeps its awaiting-provider
+      // surface through `vaultSettlementFilter`; the sweep just stops paying
+      // for it. Unknown historical providers fail closed and stay scheduled.
+      //
       // Blockhash-bound work gets most of the batch, but never all of it once the
       // caller can process at least two rows. A confirmed signature can fall out
       // of RPC history and remain confirmed forever, while a sustained stream of
@@ -1930,6 +1981,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
                 AND status = 'confirmed'
+                ${PARKED_PROVIDER_ORDER_EXCLUSION_SQL}
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
                        id ASC
@@ -1944,6 +1996,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                FROM earn_movements movement
               WHERE movement.execution_model = 'vault_direct'
                 AND movement.status IN ('requested', 'submitted', 'confirmed')
+                ${PARKED_PROVIDER_ORDER_EXCLUSION_SQL}
                 AND NOT EXISTS (
                   SELECT 1 FROM reserved WHERE reserved.id = movement.id
                 )
@@ -1967,7 +2020,15 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
            SELECT * FROM touched
            ORDER BY (status = 'confirmed') ASC, created_at ASC, id ASC`
         )
-        .bind(blockhashBoundQuota, confirmedQuota, limit)
+        .bind(
+          blockhashBoundQuota,
+          [...PROVIDER_ORDER_VAULT_PROVIDERS_BY_DIRECTION.deposit],
+          [...PROVIDER_ORDER_VAULT_PROVIDERS_BY_DIRECTION.withdrawal],
+          confirmedQuota,
+          [...PROVIDER_ORDER_VAULT_PROVIDERS_BY_DIRECTION.deposit],
+          [...PROVIDER_ORDER_VAULT_PROVIDERS_BY_DIRECTION.withdrawal],
+          limit
+        )
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
     },
@@ -1993,7 +2054,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                     AS oldest_withdrawal_created_at
              FROM earn_movements
             WHERE execution_model = 'vault_direct'
-              AND status IN ('requested', 'submitted', 'confirmed')`
+              AND status IN ('requested', 'submitted', 'confirmed')
+              ${PARKED_PROVIDER_ORDER_EXCLUSION_SQL}`
+        )
+        .bind(
+          [...PROVIDER_ORDER_VAULT_PROVIDERS_BY_DIRECTION.deposit],
+          [...PROVIDER_ORDER_VAULT_PROVIDERS_BY_DIRECTION.withdrawal]
         )
         .first<{
           backlog: number | string;

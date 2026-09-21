@@ -530,18 +530,21 @@ describe("provider-order settlement boundary", () => {
       settled_at: null,
       token_amount_settled: null,
     });
+    // Parking takes the row OUT of the sweep queue at the same moment: no
+    // chain read can ever advance it, so claiming it would re-read the same
+    // finalized signature and write nothing, on every tick, forever. It
+    // stays discoverable through the settled=false list and detail reads.
     const claimable = await createPostgresEarnMovementsRepository(
       getDb(env)
     ).claimUnsettledVaultMovements(256);
-    expect(claimable.map((movement) => movement.id)).toContain(seeded.movement.id);
+    expect(claimable.map((movement) => movement.id)).not.toContain(seeded.movement.id);
     expect(getTransaction).not.toHaveBeenCalled();
     expect(readVaultPositions).not.toHaveBeenCalled();
 
-    // Every sweep re-reads the same finalized chain status, and every row
-    // WisdomTree ever wrote sits parked here until a Connect reconciler
-    // exists. The parked row must therefore be IDEMPOTENT under re-sweeps:
-    // no refused confirmed -> confirmed write, stable confirmed_at, still no
-    // settled_at, and still unsettled work.
+    // Every WisdomTree row sits parked here until a Connect reconciler
+    // exists, and the sweep must treat the parked state as inert: no
+    // refused confirmed -> confirmed write, stable confirmed_at, and still
+    // no settled_at — now with the row no longer scheduled at all.
     const parked = await ledgerRow(seeded.movement.id);
     await reconcileEarnVaultMovements(env);
 
@@ -554,7 +557,7 @@ describe("provider-order settlement boundary", () => {
     const stillClaimable = await createPostgresEarnMovementsRepository(
       getDb(env)
     ).claimUnsettledVaultMovements(256);
-    expect(stillClaimable.map((movement) => movement.id)).toContain(seeded.movement.id);
+    expect(stillClaimable.map((movement) => movement.id)).not.toContain(seeded.movement.id);
   });
 
   it("does not value or close a provider-order redemption when only its share leg finalized", async () => {

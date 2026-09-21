@@ -352,6 +352,12 @@ async function reconcileMovement(
       // ledger has no `awaiting_provider` state, so preserve the strongest
       // honest non-terminal fact it can express. In particular, never stamp
       // settled_at/token_amount_settled or close the position from this leg.
+      // Parking also takes the row OUT of the sweep's claim set: no chain
+      // read can advance it past `confirmed`, so re-reading it every tick
+      // would be permanent reconciliation work for a fact the wire already
+      // gave. A future Connect order reconciler must correlate and
+      // authenticate provider completion before it advances one of these
+      // rows beyond `confirmed`, and will bring its own scheduling.
       if (movement.status === "confirmed") return "unchanged";
       await advanceTransaction(ledger, movement, {
         toStatus: "confirmed",
