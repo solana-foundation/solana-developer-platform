@@ -2,7 +2,7 @@ import type { SdpEnvironment } from "./api-keys";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
 import { EARN_EXECUTION_MODELS, type EarnPortfolioToken } from "./earn";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
-import { KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
+import { KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT, KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
 import { ONDO_DEPLOYMENTS } from "./ondo-programs";
 import {
   normalizeOrganizationTier,
@@ -242,9 +242,13 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   veda: { defaultToleranceBps: 10 },
   upshift: null,
   perena: null,
-  // Kamino deposits require a caller-chosen minSharesOut in every environment.
-  // Kamino exposes a live deposit quote, so every consumer can derive the floor
-  // from quoted shares instead of guessing from the token amount.
+  // Kamino deposits carry a caller-chosen minSharesOut wherever the vault
+  // program can enforce one. Kamino exposes a live deposit quote, so every
+  // consumer derives the floor from quoted shares instead of guessing from the
+  // token amount. Enforcement is per CLUSTER, not per provider: the devnet
+  // program lacks the floor instruction (`KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`),
+  // and `earnDepositSlippagePolicy` answers null there rather than publishing a
+  // floor the build would be rejected for.
   kamino: { defaultToleranceBps: 10 },
   jupiter_lend: { defaultToleranceBps: 10 },
   // The deposit is a market swap, so its builder REQUIRES an explicit floor
@@ -277,17 +281,29 @@ export const EARN_PRODUCTION_DEPOSIT_DEFAULT_TOLERANCE_BPS = 10;
  * (`assertDepositFloorPresent`), and the dashboard reads the published field,
  * so none of them can disagree with the others.
  *
- * Provider first: a builder that refuses an implicit floor requires one in
- * every environment. Then the environment: every production deposit carries a
- * caller-chosen share floor derived from the live quote, because without one a
- * vault deposit accepts any number of shares (the pinned Kamino SDK builds the
- * legacy instruction). Only a sandbox deposit into a provider with no policy
- * of its own takes the live rate.
+ * Cluster first: a floor the row's program cannot enforce is no floor, so a
+ * Kamino row hosted on a cluster whose kvault build lacks
+ * `deposit_with_min_shares_out` (devnet, per `KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`)
+ * answers null and the build takes the legacy instruction. Then the provider: a
+ * builder that refuses an implicit floor requires one in every environment.
+ * Then the environment: every production deposit carries a caller-chosen share
+ * floor derived from the live quote, because without one a vault deposit
+ * accepts any number of shares (the pinned Kamino SDK builds the legacy
+ * instruction). Only a sandbox deposit into a provider with no policy of its
+ * own takes the live rate.
+ *
+ * `hostCluster` is the cluster the row's vault lives on. Callers holding the
+ * catalogue row pass `host_cluster`; when omitted, the environment's own
+ * cluster (`CLUSTER_BY_SDP_ENVIRONMENT`) stands in, which is the cluster a
+ * deposit from that environment executes on.
  */
 export function earnDepositSlippagePolicy(
   provider: string,
-  environment: SdpEnvironment
+  environment: SdpEnvironment,
+  hostCluster?: SolanaCluster
 ): { defaultToleranceBps: number } | null {
+  const cluster = hostCluster ?? CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  if (provider === "kamino" && !KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT[cluster]) return null;
   const declared = earnDepositSlippageFloor(provider);
   if (declared) return declared;
   return environment === "production"

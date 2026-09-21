@@ -502,8 +502,11 @@ describe("Earn routes — environment scoping", () => {
   });
 
   it("publishes depositSlippage for the caller's environment, the same answer the build gates on", async () => {
-    // Kamino declares a floor in every environment. The row must say so, or a
-    // caller who follows the catalogue builds without one and meets a 400.
+    // Kamino declares a floor wherever its program can enforce one. The DEVNET
+    // kvault build lacks `deposit_with_min_shares_out`, so the sandbox row must
+    // read null, or a caller who follows the catalogue sends a floor the chain
+    // rejects with Anchor 101; the mainnet row must say 10 bps, or a caller
+    // builds without one and meets a 400.
     await seedAuth();
     await seedSessionAuth();
     const sandbox = await seedStrategy();
@@ -519,7 +522,7 @@ describe("Earn routes — environment scoping", () => {
     };
     expect(sandboxBody.data.strategy).toMatchObject({
       provider: "kamino",
-      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
+      depositSlippage: null,
     });
 
     const productionRow = await getEarnAsSession(

@@ -189,8 +189,22 @@ crank funds.
 - **`minSharesOut` stays optional at the package boundary.** Computing a real
   floor needs the live exchange rate. Passing `"0"` would be the appearance of
   slippage protection without the substance, so the builder never invents it.
-  SDP's Kamino policy is an explicit 10 bps in every environment; the caller
-  derives the exact floor from the live quote and supplies it.
+  SDP's Kamino policy is an explicit 10 bps wherever the program can enforce
+  one; the caller derives the exact floor from the live quote and supplies it.
+- **Devnet's kvault program cannot enforce a floor.** klend-sdk turns any
+  `minSharesOut` into `deposit_with_min_shares_out`, and Kamino's DEVNET build
+  (`devkRng…`, IDL 2.0.1, 20 instructions; measured from the on-chain IDL
+  2026-09-18) does not implement it, only mainnet's (IDL 2.2.2, 26) does. The
+  chain answers Anchor 101 `InstructionFallbackNotFound`, after the caller has
+  been shown a floor. Three layers, mirroring the program-id trap:
+  `KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT` (@sdp/types) is the measurement;
+  `buildKaminoDepositPlan` refuses a floor for such a cluster BEFORE any read
+  (`DEPOSIT_REFUSED`, the API's 400); `assertPlanInstructionsSupported`
+  (guards.ts, run inside `assertPlanTargetsCluster`) re-checks the OUTPUT by
+  discriminator so an SDK that started emitting the variant unasked fails here.
+  `earnDepositSlippagePolicy` reads the same table, so a devnet Kamino row
+  publishes `depositSlippage: null` and no consumer asks for a floor there.
+  When Kamino upgrades devnet, re-read the IDL and flip the table entry.
 - **Withdrawals do not unstake farm-staked shares.** The withdraw builder
   passes no farm state, matching the deposit builder (which never stakes), so
   an SDP-managed position has nothing staked and nothing to unstake. Shares

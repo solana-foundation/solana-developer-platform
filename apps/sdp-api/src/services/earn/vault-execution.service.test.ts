@@ -441,7 +441,9 @@ describe("vault execution validation", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected a failed simulation");
     expect(result.error).toContain("the wallet holds no SOL");
-    expect(result.error).toContain("AccountNotFound");
+    // The chain's variant rides beside the prose for operators, never inside it.
+    expect(result.error).not.toContain("AccountNotFound");
+    expect(result.raw).toBe('"AccountNotFound"');
     expect(result.fault).toBe("caller");
   });
 

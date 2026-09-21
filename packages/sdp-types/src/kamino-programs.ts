@@ -92,6 +92,31 @@ export const KAMINO_SLOT_DURATION_MS = {
 } as const satisfies Record<SolanaCluster, number>;
 
 /**
+ * Whether the cluster's kvault program implements `deposit_with_min_shares_out`,
+ * the deposit variant that enforces a caller-chosen share floor on chain.
+ *
+ * KAMINO'S DEVNET PROGRAM IS AN OLDER BUILD THAN MAINNET'S. Measured 2026-09-18
+ * from each program's on-chain Anchor IDL account:
+ *
+ *   mainnet-beta  KvauGM…   IDL 2.2.2, 26 instructions, `deposit` AND
+ *                           `deposit_with_min_shares_out`
+ *   devnet        devkRng…  IDL 2.0.1, 20 instructions, `deposit` ONLY
+ *
+ * klend-sdk emits `deposit_with_min_shares_out` whenever a `minSharesOut` is
+ * supplied, so a floored deposit sent to devnet fails simulation with Anchor
+ * framework error 101 (`InstructionFallbackNotFound`: the discriminator matches
+ * no instruction) — the confident, unhelpful failure this table exists to name.
+ * `earnDepositSlippagePolicy` (provider-access.ts) reads it to publish no floor
+ * for a row whose program cannot enforce one, and `@sdp/kamino` refuses to build
+ * a floored deposit against such a program. A measurement, not a protocol fact:
+ * when Kamino upgrades devnet, re-read the IDL and flip the entry.
+ */
+export const KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT = {
+  "mainnet-beta": true,
+  devnet: false,
+} as const satisfies Record<SolanaCluster, boolean>;
+
+/**
  * The devnet kvault program id, kept as a NAMED export because
  * `@sdp/earn/providers/kamino/devnet.ts` reads it directly for its
  * `getProgramAccounts` size filter and reads nothing else from this module.
