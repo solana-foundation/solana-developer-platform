@@ -993,8 +993,7 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     status: row.status as EarnMovementStatus,
     failure_reason: row.failure_reason as string | null,
     confirmed_at: row.confirmed_at as string | null,
-    chain_finalized_at:
-      row.chain_finalized_at == null ? null : String(row.chain_finalized_at),
+    chain_finalized_at: row.chain_finalized_at == null ? null : String(row.chain_finalized_at),
     settled_at: row.settled_at as string | null,
     denomination: row.denomination as string,
     amount_requested: row.amount_requested as string,
