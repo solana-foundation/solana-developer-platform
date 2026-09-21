@@ -53,6 +53,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.flowDetails": "Details",
   "DashboardEarn.deposit.flowReview": "Review",
   "DashboardEarn.deposit.flowProcessing": "Processing",
+  "DashboardEarn.deposit.flowProviderSettlement": "Provider settlement",
   "DashboardEarn.deposit.flowComplete": "Complete",
   "DashboardEarn.deposit.progressLabel": "Progress",
   "DashboardEarn.deposit.progressReview": "Review",
@@ -99,6 +100,18 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.vaultConfirmedStatus": "Deposited",
   "DashboardEarn.deposit.vaultConfirmedNote":
     "Your live vault position will refresh automatically.",
+  "DashboardEarn.deposit.providerOrderConfirmedTitle": "Subscription sent",
+  "DashboardEarn.deposit.providerOrderConfirmedBody":
+    "Solana confirmation has been observed for the USDC transfer. The provider still needs to strike NAV and deliver the fund shares; this is not a completed position yet.",
+  "DashboardEarn.deposit.providerOrderConfirmedStatus": "Processing at the provider",
+  "DashboardEarn.deposit.providerOrderConfirmedNote":
+    "The position appears after the provider delivers shares to this wallet.",
+  "DashboardEarn.deposit.vaultFailedTitle": "Deposit failed",
+  "DashboardEarn.deposit.vaultFailedBody":
+    "The deposit transaction failed on Solana. No position balance was credited from this movement.",
+  "DashboardEarn.deposit.vaultFailedStatus": "Failed",
+  "DashboardEarn.deposit.vaultFailedNote":
+    "The dashboard did not project a balance from this failed movement.",
   "DashboardEarn.deposit.vaultTransaction": "Transaction",
   "DashboardEarn.deposit.vaultPendingTitle": "Deposit pending",
   "DashboardEarn.deposit.vaultPendingBody": "The transaction is waiting to be submitted.",
@@ -199,7 +212,10 @@ function fundingWallet(balances: EarnFundingWallet["balances"]): EarnFundingWall
   };
 }
 
-function vaultDeposit(status: EarnVaultMovementStatus): EarnVaultDeposit {
+function vaultDeposit(
+  status: EarnVaultMovementStatus,
+  provider: string = strategy.provider
+): EarnVaultDeposit {
   return {
     positionId: "position_1",
     movementId: "movement_1",
@@ -210,7 +226,7 @@ function vaultDeposit(status: EarnVaultMovementStatus): EarnVaultDeposit {
     strategy: {
       id: strategy.id,
       name: strategy.name,
-      provider: strategy.provider,
+      provider,
       providerReference: strategy.providerReference,
       hostCluster: strategy.hostCluster,
     },
@@ -230,6 +246,7 @@ async function enterDepositAmount(amount = "1.000000") {
 beforeEach(() => {
   mocks.canManageCustody = true;
   mocks.createEarnVaultDeposit.mockReset();
+  mocks.useEarnVaultDepositOutcome.mockReset();
   mocks.fetchEarnVaultDepositByRequestId.mockReset();
   mocks.fetchEarnVaultDepositPreview.mockReset();
   // Upshift declares no floor policy, so most tests never quote; the
@@ -846,6 +863,63 @@ describe("EarnVaultDepositModal", () => {
       });
     }
   );
+
+  it("keeps a confirmed provider-order subscription pending until shares arrive", async () => {
+    const deposit = vaultDeposit("confirmed", "wisdomtree");
+    const onDeposited = vi.fn();
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", deposit },
+    });
+
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{ ...strategy, provider: "wisdomtree" }}
+        onClose={vi.fn()}
+        onDeposited={onDeposited}
+      />
+    );
+    await enterDepositAmount();
+
+    expect(await screen.findByText("Subscription sent")).toBeTruthy();
+    expect(screen.getByText("Processing at the provider")).toBeTruthy();
+    expect(screen.getByText(/this is not a completed position yet/)).toBeTruthy();
+    expect(screen.queryByText("Active")).toBeNull();
+    expect(screen.getByText("Provider settlement").getAttribute("aria-current")).toBe("step");
+    expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeNull();
+    expect(onDeposited).toHaveBeenCalledWith(deposit, {
+      amount: "1",
+      custodyWalletId: "wallet_1",
+      projectBalance: false,
+    });
+  });
+
+  it("renders a deposit that fails after submission as failed", async () => {
+    const submitted = vaultDeposit("submitted", "wisdomtree");
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", deposit: submitted },
+    });
+    mocks.useEarnVaultDepositOutcome.mockReturnValue(vaultDeposit("failed", "wisdomtree"));
+
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={{ ...strategy, provider: "wisdomtree" }}
+        onClose={vi.fn()}
+        onDeposited={vi.fn()}
+      />
+    );
+    await enterDepositAmount();
+
+    expect(await screen.findByText("Deposit failed")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.getByText(/No position balance was credited/)).toBeTruthy();
+    expect(screen.queryByText("Processing at the provider")).toBeNull();
+  });
 
   it("keeps a failed deposit on the form and reports the provider reason", async () => {
     const onDeposited = vi.fn();

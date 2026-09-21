@@ -9,6 +9,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
+import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
 import type { AppContext } from "../context";
 import { resolveSdpEnvironment } from "../context";
 import { earnMovementsQuerySchema } from "../schemas";
@@ -83,7 +84,9 @@ export async function listEarnMovements(c: AppContext) {
 
 /**
  * The ledger row as the wire sees it, in the ledger's own vocabulary — no status
- * translation, because this contract has no existing client to keep compatible.
+ * translation beyond the provider-order one (`movementStatusOnWire`: a
+ * provider-order row's durable chain-finality evidence must not read as
+ * terminal settlement on a public surface).
  *
  * Absent rather than null for every optional field, matching the rest of the Earn
  * surface. Four columns are deliberately never exposed: the signed transaction
@@ -96,10 +99,11 @@ function toEarnMovementRecord(
   tokenMints: ReadonlyMap<string, string>
 ): EarnMovementRecord {
   const tokenMint = tokenMints.get(row.position_id);
+  const { status, settledAt } = movementStatusOnWire(row);
   const valuedVaultWithdrawal =
     row.execution_model === "vault_direct" &&
     row.direction === "withdrawal" &&
-    row.status === "finalized" &&
+    status === "finalized" &&
     row.token_amount_settled !== null &&
     tokenMint !== undefined;
   return {
@@ -107,7 +111,7 @@ function toEarnMovementRecord(
     provider: row.provider,
     executionModel: row.execution_model,
     direction: row.direction,
-    status: row.status,
+    status,
     positionId: row.position_id,
     denomination: row.denomination,
     amountRequested: row.amount_requested,
@@ -129,7 +133,7 @@ function toEarnMovementRecord(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     confirmedAt: row.confirmed_at ?? undefined,
-    settledAt: row.settled_at ?? undefined,
+    settledAt: settledAt ?? undefined,
   };
 }
 

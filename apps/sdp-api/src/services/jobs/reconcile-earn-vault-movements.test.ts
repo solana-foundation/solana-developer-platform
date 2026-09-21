@@ -89,12 +89,12 @@ beforeEach(async () => {
   reconcileEarnVaultQueuedWithdrawals.mockResolvedValue(undefined);
 });
 
-async function seedMovement(lastValidBlockHeight = "100") {
+async function seedMovement(lastValidBlockHeight = "100", provider = "kamino") {
   return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: ORG,
     projectId: PROJECT,
     environment: "sandbox",
-    provider: "kamino",
+    provider,
     vaultAddress: `vault_${crypto.randomUUID()}`,
     custodyWalletId: WALLET,
     shareMint: "So11111111111111111111111111111111111111112",
@@ -110,9 +110,9 @@ async function seedMovement(lastValidBlockHeight = "100") {
   });
 }
 
-async function seedWithdrawal(lastValidBlockHeight = "100") {
+async function seedWithdrawal(lastValidBlockHeight = "100", provider = "kamino") {
   const repository = createPostgresEarnMovementsRepository(getDb(env));
-  const deposit = await seedMovement();
+  const deposit = await seedMovement("100", provider);
   await repository.advanceVaultMovement({
     movementId: deposit.movement.id,
     organizationId: ORG,
@@ -124,7 +124,7 @@ async function seedWithdrawal(lastValidBlockHeight = "100") {
     organizationId: ORG,
     projectId: PROJECT,
     environment: "sandbox",
-    provider: "kamino",
+    provider,
     positionId: deposit.position.id,
     vaultAddress: deposit.position.vault_address as string,
     custodyWalletId: WALLET,
@@ -511,6 +511,131 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     });
     expect(getTransaction).not.toHaveBeenCalled();
     expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+});
+
+describe("provider-order settlement boundary", () => {
+  it("records chain finality for a provider-order deposit without claiming settlement", async () => {
+    const seeded = await seedMovement("100", "wisdomtree");
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    await reconcileEarnVaultMovements(env);
+
+    // The payment leg is irreversible, and recording that fact IS the sweep's
+    // duty: until the row says `finalized` it stays claimable, so a fork could
+    // drop a merely-confirmed transaction and the sweep would never notice.
+    // The stamp is durable finalization evidence (0062: settled_at on a vault
+    // row means the CHAIN leg landed), not settlement — no payout is observed
+    // and the position is untouched. The legacy deposit wire maps this row
+    // down to `confirmed`, so the surface still shows awaiting-provider.
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "finalized",
+      amount_settled: "1",
+      token_amount_settled: "1",
+    });
+    const finalizedRow = await ledgerRow(seeded.movement.id);
+    expect(finalizedRow?.settled_at).not.toBeNull();
+
+    // Finality takes the row OUT of the sweep queue at the same moment: the
+    // durable evidence exists, so no tick re-reads the signature again. It
+    // stays discoverable through the settled=false list and detail reads,
+    // which the provider-aware settlement filter keeps open for this provider.
+    const claimable = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).claimUnsettledVaultMovements(256);
+    expect(claimable.map((movement) => movement.id)).not.toContain(seeded.movement.id);
+    expect(getTransaction).not.toHaveBeenCalled();
+    expect(readVaultPositions).not.toHaveBeenCalled();
+
+    // Re-sweeping is inert: the row left the claim set with the evidence
+    // stamped, and a second pass writes nothing.
+    await reconcileEarnVaultMovements(env);
+
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "finalized",
+      settled_at: finalizedRow?.settled_at,
+    });
+    const stillClaimable = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).claimUnsettledVaultMovements(256);
+    expect(stillClaimable.map((movement) => movement.id)).not.toContain(seeded.movement.id);
+  });
+
+  it("does not value or close a provider-order redemption when only its share leg finalized", async () => {
+    const seeded = await seedWithdrawal("100", "wisdomtree");
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    // These would make the generic atomic path value and close the position if
+    // the provider-order guard were ever bypassed.
+    getTransaction.mockResolvedValue(landedPayout(seeded.position.owner_address ?? "", "1000000"));
+    readVaultPositions.mockResolvedValue(
+      liveSnapshot(seeded.position, seeded.position.owner_address ?? "", "0")
+    );
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({
+      status: "finalized",
+      // Exact shares left the wallet; cash settlement is still provider truth.
+      amount_settled: "1",
+      token_amount_settled: null,
+    });
+    expect(movement?.settled_at).not.toBeNull();
+    // The sweep closed nothing: finalization is a chain fact, and closing (or
+    // valuing) a provider-order redemption waits for the provider. The live
+    // balance and the landed payout were never even read.
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({ closed_at: null });
+    expect(getTransaction).not.toHaveBeenCalled();
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a historical provider is absent from the execution registry", async () => {
+    const deposit = await seedMovement("100", "retired_provider");
+    const withdrawal = await seedWithdrawal("100", "retired_provider");
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+
+    await reconcileEarnVaultMovementReadThrough(env, deposit.movement);
+    await reconcileEarnVaultMovementReadThrough(env, withdrawal.movement);
+
+    await expect(ledgerRow(deposit.movement.id)).resolves.toMatchObject({
+      status: "confirmed",
+      settled_at: null,
+      token_amount_settled: null,
+    });
+    await expect(ledgerRow(withdrawal.movement.id)).resolves.toMatchObject({
+      status: "confirmed",
+      settled_at: null,
+      token_amount_settled: null,
+    });
+    await expect(positionRow(withdrawal.position.id)).resolves.toMatchObject({ closed_at: null });
+    expect(getTransaction).not.toHaveBeenCalled();
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("leaves atomic provider finalization and position closing unchanged", async () => {
+    const seeded = await seedWithdrawal();
+    const receiver = seeded.movement.destination_address ?? seeded.movement.owner_address ?? "";
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockResolvedValue(landedPayout(receiver, "1000000"));
+    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, receiver, "0"));
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({
+      status: "finalized",
+      settled_at: expect.any(String),
+      token_amount_settled: "1",
+    });
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({
+      closed_at: expect.any(String),
+    });
   });
 });
 

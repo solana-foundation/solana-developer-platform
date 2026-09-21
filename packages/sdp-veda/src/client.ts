@@ -453,6 +453,7 @@ export class VedaVaultDirectClient
     );
     return {
       instant: options.instant,
+      providerOrder: false,
       queued: options.queued,
       withdrawAuthority: String(options.withdrawAuthority),
       queueState: options.queueState === null ? null : String(options.queueState),

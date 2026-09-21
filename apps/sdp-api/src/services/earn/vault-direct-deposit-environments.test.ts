@@ -1,6 +1,8 @@
 import {
   EARN_PROVIDER_DEPLOYED_CLUSTERS,
   EARN_PROVIDERS,
+  earnDepositFloorSupport,
+  earnDepositSlippagePolicy,
   isVaultDirectDepositEnabled,
 } from "@sdp/types";
 import { describe, expect, it } from "vitest";
@@ -23,6 +25,7 @@ describe("EARN_PROVIDER_DEPLOYED_CLUSTERS", () => {
       perena: [],
       jupiter_lend: ["mainnet-beta"],
       ondo: ["mainnet-beta"],
+      wisdomtree: [],
     });
   });
 
@@ -40,11 +43,26 @@ describe("EARN_PROVIDER_DEPLOYED_CLUSTERS", () => {
     expect(isVaultDirectDepositEnabled("production", "jupiter_lend")).toBe(true);
     expect(isVaultDirectDepositEnabled("sandbox", "ondo")).toBe(false);
     expect(isVaultDirectDepositEnabled("production", "ondo")).toBe(true);
+    expect(isVaultDirectDepositEnabled("sandbox", "wisdomtree")).toBe(false);
+    expect(isVaultDirectDepositEnabled("production", "wisdomtree")).toBe(false);
     expect(isVaultDirectDepositEnabled("sandbox", "upshift")).toBe(false);
   });
 
   it("fails closed on an unknown provider or environment", () => {
     expect(isVaultDirectDepositEnabled("production", "ground")).toBe(false);
     expect(isVaultDirectDepositEnabled("staging", "kamino")).toBe(false);
+  });
+
+  it("does not advertise an unenforceable floor for next-NAV subscriptions", () => {
+    expect(earnDepositFloorSupport("wisdomtree")).toBe("unsupported");
+    expect(earnDepositSlippagePolicy("wisdomtree", "production")).toBeNull();
+    expect(earnDepositSlippagePolicy("wisdomtree", "sandbox")).toBeNull();
+
+    // Null still means the normal production default for a provider capable of
+    // encoding a floor; WisdomTree does not weaken that fail-closed fallback.
+    expect(earnDepositFloorSupport("unknown_provider")).toBe("enforceable");
+    expect(earnDepositSlippagePolicy("kamino", "production")).toEqual({
+      defaultToleranceBps: 10,
+    });
   });
 });

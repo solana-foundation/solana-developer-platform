@@ -30,6 +30,7 @@ import {
   type EarnVaultWithdrawalRequest,
   type EarnVaultWithdrawalRequestRecord,
   type EarnVaultWithdrawalRequestStatus,
+  earnProviderWithdrawalSettlement,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
@@ -948,13 +949,19 @@ function useEarnVaultMovementOutcome<Movement extends WatchableVaultMovement>(in
  * Exported so the recovery filter and the poll's stop condition read the SAME
  * rule. `pending` counts as in flight: it means SDP could not establish that
  * the transaction reached the network, not that it failed.
+ *
+ * No settlement fork: a provider-order deposit parks at `confirmed` on this
+ * legacy wire (the API maps the ledger's `finalized` chain-leg fact down to
+ * `confirmed`), and `confirmed` is already in the legacy terminal set —
+ * watching past it would poll forever while the stepper's "provider
+ * settlement" state lives in presentation, not the wire.
  */
 export function isEarnVaultDepositInFlight(deposit: EarnVaultDepositRecord): boolean {
   return !SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
 }
 
 function isEarnVaultDepositSettled(deposit: EarnVaultDepositRecord): boolean {
-  return SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
+  return !isEarnVaultDepositInFlight(deposit);
 }
 
 /**
@@ -1170,13 +1177,31 @@ const SETTLED_VAULT_WITHDRAWAL_STATUSES: ReadonlySet<EarnVaultDirectMovementStat
   EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct
 );
 
+/**
+ * Watch-terminal statuses for a provider-order withdrawal: the chain leg plus
+ * the unified ledger's terminal set. The reconciler parks a provider-order
+ * withdrawal once its chain leg finalizes — the NAV strike after it has no
+ * wire state to observe — so watching past `confirmed` would keep the modal
+ * open past the last honest transition, with `onSettled` never firing.
+ */
+const PROVIDER_ORDER_WATCH_TERMINAL_STATUSES: ReadonlySet<EarnVaultDirectMovementStatus> = new Set([
+  "confirmed",
+  ...EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct,
+]);
+
 /** Shared by the recovery filter and the poll's stop condition — one rule. */
 export function isEarnVaultWithdrawalInFlight(withdrawal: EarnVaultWithdrawal): boolean {
+  if (earnProviderWithdrawalSettlement(withdrawal.provider) === "provider_order") {
+    // Watch-terminal at `confirmed` — the same fork risk the legacy deposit
+    // poll already accepts — while the "awaiting provider settlement" copy
+    // stays in presentation, which already branches on settlement kind.
+    return !PROVIDER_ORDER_WATCH_TERMINAL_STATUSES.has(withdrawal.status);
+  }
   return !SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
 }
 
 function isEarnVaultWithdrawalSettled(withdrawal: EarnVaultWithdrawal): boolean {
-  return SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
+  return !isEarnVaultWithdrawalInFlight(withdrawal);
 }
 
 /**
@@ -1218,6 +1243,7 @@ const queuedWithdrawalTermsSchema = z.object({
 const earnVaultWithdrawalOptionsSchema: z.ZodType<EarnVaultWithdrawalOptions> = z.object({
   positionId: z.string(),
   instant: z.boolean(),
+  providerOrder: z.boolean(),
   queued: z.boolean(),
   withdrawAuthority: z.string().nullable(),
   queueState: z.string().nullable(),
@@ -1284,7 +1310,7 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
 
 type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
 
-/** Read both routes independently. No client-side provider list chooses one. */
+/** Read settlement routes independently. No client-side provider list chooses one. */
 export async function fetchEarnVaultWithdrawalOptions(
   positionId: string,
   signal?: AbortSignal

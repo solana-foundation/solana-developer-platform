@@ -93,6 +93,7 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     settled: stats.settled,
     failed: stats.failed,
     confirmed: stats.confirmed,
+    finalized: stats.finalized,
     resubmitted: stats.resubmitted,
     unchanged: stats.unchanged,
     movement_errors: stats.movementErrors,
