@@ -96,14 +96,14 @@ describe("EarnVaultExitModal", () => {
 
     renderModal();
 
-    expect(await screen.findByRole("button", { name: /Instant withdrawal/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Asynchronous withdrawal/ })).toBeTruthy();
-    expect(screen.getByText(/approximately 60 seconds/)).toBeTruthy();
-    expect(screen.queryByText(/approximately 0 seconds/)).toBeNull();
+    expect(await screen.findByRole("button", { name: /Withdraw now/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Request withdrawal/ })).toBeTruthy();
+    expect(screen.getByText(/about 1 minute/)).toBeTruthy();
+    expect(screen.queryByText(/about 0 seconds/)).toBeNull();
     expect(screen.queryByText("instant flow")).toBeNull();
     expect(screen.queryByText("async flow")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /Asynchronous withdrawal/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Request withdrawal/ }));
     expect(await screen.findByText("async flow")).toBeTruthy();
   });
 
@@ -186,7 +186,9 @@ describe("EarnVaultExitModal", () => {
     mocks.fetchOptions.mockResolvedValue({ kind: "unavailable" });
     renderModal();
 
-    expect(await screen.findByText(/No route was selected/)).toBeTruthy();
+    expect(
+      await screen.findByText(/couldn't check how this position can be withdrawn/i)
+    ).toBeTruthy();
     expect(screen.queryByText("instant flow")).toBeNull();
     expect(screen.queryByText("async flow")).toBeNull();
   });

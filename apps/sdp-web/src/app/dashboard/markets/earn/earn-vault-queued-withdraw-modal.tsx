@@ -9,19 +9,21 @@ import {
   type EarnVaultWithdrawalRequestRecord,
   type SdpEnvironment,
 } from "@sdp/types";
-import { Loader2Icon } from "lucide-react";
+import { ChevronDownIcon, Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import {
+  formatDurationSeconds,
   formatEpochSeconds,
   formatTokenQuantity,
   formatUsd,
@@ -63,8 +65,46 @@ interface QueuedWithdrawalModalProps {
 
 type FormStep = "details" | "review";
 
+interface QueueDurationUnit {
+  divisor: number;
+  labelKey: MessageKey;
+}
+
+function bpsToPercent(bps: number): string {
+  return (bps / 100).toFixed(2).replace(/\.?0+$/, "");
+}
+
+function percentToBps(value: string): number {
+  const match = /^(\d+)(?:\.(\d{0,2}))?$/.exec(value.trim());
+  if (!match) return Number.NaN;
+  return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+}
+
+function queueDurationUnit(seconds: number): QueueDurationUnit {
+  if (seconds >= 86_400 && seconds % 86_400 === 0) {
+    return { divisor: 86_400, labelKey: "DashboardEarn.queuedWithdraw.durationUnitDays" };
+  }
+  if (seconds >= 3_600 && seconds % 3_600 === 0) {
+    return { divisor: 3_600, labelKey: "DashboardEarn.queuedWithdraw.durationUnitHours" };
+  }
+  if (seconds >= 60 && seconds % 60 === 0) {
+    return { divisor: 60, labelKey: "DashboardEarn.queuedWithdraw.durationUnitMinutes" };
+  }
+  return { divisor: 1, labelKey: "DashboardEarn.queuedWithdraw.durationUnitSeconds" };
+}
+
+function durationValue(seconds: number, unit: QueueDurationUnit): string {
+  return String(seconds / unit.divisor);
+}
+
+function durationToSeconds(value: string, unit: QueueDurationUnit): number {
+  const amount = Number(value.trim());
+  const seconds = amount * unit.divisor;
+  return Number.isFinite(amount) && amount > 0 && Number.isInteger(seconds) ? seconds : Number.NaN;
+}
+
 function epochDate(value: string, locale: string): string {
-  return formatEpochSeconds(value, locale) ?? "—";
+  return formatEpochSeconds(value, locale) ?? "Unavailable";
 }
 
 function queueSharesForAmount(
@@ -346,22 +386,34 @@ function QueuedWithdrawalResult({
             {epochDate(request.deadlineTimestamp, locale)}
           </dd>
         </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.requestAccount")}</dt>
-          <dd className="max-w-56 break-all text-right text-primary">{request.requestAddress}</dd>
-        </div>
-        {request.creationSignature ? (
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
-            <dd className="text-right">
-              <TransactionLink
-                cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
-                signature={request.creationSignature}
-              />
-            </dd>
-          </div>
-        ) : null}
       </dl>
+
+      <details className="group mt-4 border-t border-border-subtle pt-4">
+        <summary className="flex list-none items-center justify-between gap-3 text-sm font-medium text-secondary [&::-webkit-details-marker]:hidden">
+          {t("DashboardEarn.queuedWithdraw.technicalDetails")}
+          <ChevronDownIcon
+            aria-hidden="true"
+            className="size-4 transition-transform group-open:rotate-180"
+          />
+        </summary>
+        <dl className="mt-3 grid gap-3 text-sm">
+          <div className="flex items-start justify-between gap-5">
+            <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.requestAccount")}</dt>
+            <dd className="max-w-56 break-all text-right text-primary">{request.requestAddress}</dd>
+          </div>
+          {request.creationSignature ? (
+            <div className="flex items-baseline justify-between gap-5">
+              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
+              <dd className="text-right">
+                <TransactionLink
+                  cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
+                  signature={request.creationSignature}
+                />
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      </details>
 
       {request.status === "failed" && request.failureReason ? (
         <div
@@ -465,7 +517,7 @@ function QueueReview({
           </div>
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.discount")}</dt>
-            <dd className="text-right text-primary">{preview.discountBps} bps</dd>
+            <dd className="text-right text-primary">{bpsToPercent(preview.discountBps)}%</dd>
           </div>
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.maturity")}</dt>
@@ -529,8 +581,11 @@ function QueueDetails({
   amountError,
   availableAmount,
   deadline,
+  deadlineSeconds,
   detailsValid,
   discount,
+  discountBps,
+  durationUnit,
   locale,
   lockedUntil,
   onAmountChange,
@@ -539,14 +594,18 @@ function QueueDetails({
   onDiscountChange,
   onMax,
   overAvailableAmount,
+  termsValid,
   terms,
 }: {
   amount: string;
   amountError: string | null;
   availableAmount: string | undefined;
   deadline: string;
+  deadlineSeconds: number;
   detailsValid: boolean;
   discount: string;
+  discountBps: number;
+  durationUnit: QueueDurationUnit;
   locale: string;
   lockedUntil: string | undefined;
   onAmountChange: (value: string) => void;
@@ -555,6 +614,7 @@ function QueueDetails({
   onDiscountChange: (value: string) => void;
   onMax: () => void;
   overAvailableAmount: boolean;
+  termsValid: boolean;
   terms: EarnVaultQueuedWithdrawalTerms;
 }) {
   const t = useTranslations();
@@ -607,42 +667,80 @@ function QueueDetails({
             </p>
           ) : null}
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="grid gap-2">
-            <Label htmlFor="earn-queued-withdraw-discount">
-              {t("DashboardEarn.queuedWithdraw.discountBps")}
-            </Label>
-            <Input
-              id="earn-queued-withdraw-discount"
-              inputMode="numeric"
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                onDiscountChange(event.target.value);
-              }}
-              value={discount}
+        <details className="group rounded-xl border border-border-default bg-surface-raised px-4 py-3">
+          <summary className="flex list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-primary">
+                {t("DashboardEarn.queuedWithdraw.settingsTitle")}
+              </span>
+              <span className="mt-0.5 block text-xs leading-5 text-tertiary">
+                {termsValid
+                  ? t("DashboardEarn.queuedWithdraw.settingsSummary", {
+                      discount: bpsToPercent(discountBps),
+                      duration: formatDurationSeconds(deadlineSeconds, locale),
+                    })
+                  : t("DashboardEarn.queuedWithdraw.settingsNeedsAttention")}
+              </span>
+            </span>
+            <ChevronDownIcon
+              aria-hidden="true"
+              className="size-4 shrink-0 text-tertiary transition-transform group-open:rotate-180"
             />
-            <p className="text-xs text-tertiary">
-              {terms.minimumDiscountBps}–{terms.maximumDiscountBps} bps
-            </p>
+          </summary>
+          <div className="mt-4 grid gap-4 border-t border-border-subtle pt-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="earn-queued-withdraw-discount">
+                {t("DashboardEarn.queuedWithdraw.discountPercent")}
+              </Label>
+              <Input
+                id="earn-queued-withdraw-discount"
+                inputMode="decimal"
+                maxDecimals={2}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  onDiscountChange(event.target.value);
+                }}
+                value={discount}
+              />
+              <p className="text-xs text-tertiary">
+                {t("DashboardEarn.queuedWithdraw.discountRange", {
+                  minimum: bpsToPercent(terms.minimumDiscountBps),
+                  maximum: bpsToPercent(terms.maximumDiscountBps),
+                })}
+              </p>
+              <p className="text-xs leading-5 text-tertiary">
+                {t("DashboardEarn.queuedWithdraw.discountHelp")}
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="earn-queued-withdraw-deadline">
+                {t("DashboardEarn.queuedWithdraw.deadlineDuration", {
+                  unit: t(durationUnit.labelKey),
+                })}
+              </Label>
+              <Input
+                id="earn-queued-withdraw-deadline"
+                inputMode="decimal"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  onDeadlineChange(event.target.value);
+                }}
+                value={deadline}
+              />
+              <p className="text-xs text-tertiary">
+                {t("DashboardEarn.queuedWithdraw.deadlineMinimum", {
+                  duration: formatDurationSeconds(terms.minimumSecondsToDeadline, locale),
+                })}
+              </p>
+              <p className="text-xs leading-5 text-tertiary">
+                {t("DashboardEarn.queuedWithdraw.deadlineHelp")}
+              </p>
+            </div>
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="earn-queued-withdraw-deadline">
-              {t("DashboardEarn.queuedWithdraw.deadlineSeconds")}
-            </Label>
-            <Input
-              id="earn-queued-withdraw-deadline"
-              inputMode="numeric"
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                onDeadlineChange(event.target.value);
-              }}
-              value={deadline}
-            />
-            <p className="text-xs text-tertiary">
-              {t("DashboardEarn.queuedWithdraw.deadlineMinimum", {
-                seconds: terms.minimumSecondsToDeadline,
-              })}
+          {!termsValid ? (
+            <p className="mt-3 text-xs text-error" role="alert">
+              {t("DashboardEarn.queuedWithdraw.settingsInvalid")}
             </p>
-          </div>
-        </div>
+          ) : null}
+        </details>
       </div>
       <div className="mt-6">
         <Button className="!w-full" disabled={!detailsValid} onClick={onContinue}>
@@ -664,10 +762,13 @@ export function EarnVaultQueuedWithdrawModal({
 }: QueuedWithdrawalModalProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const durationUnit = queueDurationUnit(terms.minimumSecondsToDeadline);
   const [step, setStep] = useState<FormStep>("details");
   const [amount, setAmount] = useState("");
-  const [discount, setDiscount] = useState(String(terms.minimumDiscountBps));
-  const [deadline, setDeadline] = useState(String(terms.minimumSecondsToDeadline));
+  const [discount, setDiscount] = useState(() => bpsToPercent(terms.minimumDiscountBps));
+  const [deadline, setDeadline] = useState(() =>
+    durationValue(terms.minimumSecondsToDeadline, durationUnit)
+  );
   const amountValidation = validateVaultWithdrawalAmount(amount);
   const availableAmount = vaultWithdrawalAvailableAmount(position);
   const shares = queueSharesForAmount(amountValidation, position);
@@ -678,8 +779,8 @@ export function EarnVaultQueuedWithdrawModal({
     amountValidation.kind === "valid" && availableAmount !== undefined
       ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
       : false;
-  const discountBps = Number(discount);
-  const deadlineSeconds = Number(deadline);
+  const discountBps = percentToBps(discount);
+  const deadlineSeconds = durationToSeconds(deadline, durationUnit);
   const termsValid = isQueueTermsValid(discountBps, deadlineSeconds, terms);
   const detailsValid = shares !== undefined && termsValid;
   const lockedUntil = queueLockedUntil(position, locale);
@@ -733,8 +834,11 @@ export function EarnVaultQueuedWithdrawModal({
                   amountError={amountError}
                   availableAmount={availableAmount}
                   deadline={deadline}
+                  deadlineSeconds={deadlineSeconds}
                   detailsValid={detailsValid}
                   discount={discount}
+                  discountBps={discountBps}
+                  durationUnit={durationUnit}
                   locale={locale}
                   lockedUntil={lockedUntil}
                   onAmountChange={setAmount}
@@ -745,6 +849,7 @@ export function EarnVaultQueuedWithdrawModal({
                     if (availableAmount) setAmount(availableAmount);
                   }}
                   overAvailableAmount={overAvailableAmount}
+                  termsValid={termsValid}
                   terms={terms}
                 />
               ) : (

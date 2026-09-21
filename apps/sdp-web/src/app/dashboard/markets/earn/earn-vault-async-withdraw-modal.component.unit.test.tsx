@@ -80,8 +80,9 @@ const route = {
   summary: {
     titleKey: "DashboardEarn.exitRoute.asyncTitle" as const,
     messageKey: "DashboardEarn.exitRoute.asyncDescription" as const,
-    values: { seconds: 60 },
+    values: {},
   },
+  waitSeconds: 60,
   terms: {
     assetMint: "asset",
     allowWithdrawals: true,
