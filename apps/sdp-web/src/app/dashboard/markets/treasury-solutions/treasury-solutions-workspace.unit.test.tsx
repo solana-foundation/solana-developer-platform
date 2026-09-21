@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => ({
     failureReason?: string | null;
     movementId: string;
     positionId?: string;
+    provider: string;
     status: string;
   }>,
   vaultDepositTrackers: {} as Record<
@@ -242,7 +243,12 @@ vi.mock("../earn/deposit/earn-funding-wallets", () => ({
   }),
 }));
 
-vi.mock("../earn/earn-program-data", () => ({
+vi.mock("../earn/earn-program-data", async (importOriginal) => ({
+  // Everything not overridden below stays REAL — most importantly the
+  // in-flight predicates the recovery filter reads. Hand-copying them here
+  // went stale the moment the provider-order settlement fork (#1959) changed
+  // the withdrawal rule, while this file kept passing against the snapshot.
+  ...(await importOriginal<typeof import("../earn/earn-program-data")>()),
   useEarnStrategies: (options?: { cluster?: "devnet" | "mainnet-beta" }) => {
     mocks.strategiesClusterRequests.push(options?.cluster);
     // The mirrored mainnet shelf (PRO-1742) is the sandbox catalogue's base
@@ -551,15 +557,6 @@ vi.mock("../earn/earn-program-data", () => ({
     isLoading: false,
     refresh: vi.fn(),
   }),
-  // The real predicates, not stubs: each recovery filter and its tracker's
-  // stop condition must agree, and a stub here would let them drift silently.
-  // Note the two vocabularies differ on purpose: the deposit DTO is legacy
-  // (confirmed is terminal), the withdrawal DTO is the unified ledger's
-  // (confirmed is still in flight; finalized is terminal).
-  isEarnVaultDepositInFlight: (deposit: { status: string }) =>
-    deposit.status !== "confirmed" && deposit.status !== "failed",
-  isEarnVaultWithdrawalInFlight: (withdrawal: { status: string }) =>
-    withdrawal.status !== "finalized" && withdrawal.status !== "failed",
 }));
 
 vi.mock("../earn/earn-vault-withdraw-modal", () => ({
@@ -884,6 +881,7 @@ describe("TreasurySolutionsWorkspace", () => {
         failureReason: null,
         movementId: "earn_vault_withdrawal_confirmed",
         positionId: "earn_vault_position_live",
+        provider: "kamino",
         status: "confirmed",
       },
     ];
@@ -913,6 +911,7 @@ describe("TreasurySolutionsWorkspace", () => {
         failureReason: null,
         movementId: "earn_vault_withdrawal_older",
         positionId: "earn_vault_position_live",
+        provider: "kamino",
         status: "confirmed",
       },
     ];
@@ -950,6 +949,7 @@ describe("TreasurySolutionsWorkspace", () => {
         failureReason: null,
         movementId: "earn_vault_withdrawal_just_submitted",
         positionId: "earn_vault_position_live",
+        provider: "kamino",
         status: "confirmed",
       },
       ...mocks.vaultWithdrawals,
@@ -1291,6 +1291,7 @@ describe("TreasurySolutionsWorkspace", () => {
         failureReason: null,
         movementId,
         positionId: "earn_vault_position_live",
+        provider: "kamino",
         status: "confirmed",
       },
     ];
@@ -1329,6 +1330,7 @@ describe("TreasurySolutionsWorkspace", () => {
         failureReason: null,
         movementId,
         positionId: "earn_vault_position_live",
+        provider: "kamino",
         status: "confirmed",
       },
     ];
@@ -2098,15 +2100,17 @@ describe("TreasurySolutionsWorkspace", () => {
 
   it("recovers every in-flight vault withdrawal from the server ledger", async () => {
     mocks.vaultWithdrawals = [
-      { movementId: "earn_movement_requested", status: "requested" },
-      { movementId: "earn_movement_submitted", status: "submitted" },
+      { movementId: "earn_movement_requested", provider: "kamino", status: "requested" },
+      { movementId: "earn_movement_submitted", provider: "kamino", status: "submitted" },
       // The unified ledger's vocabulary: `confirmed` is optimistic commitment,
-      // NOT terminal — a fork can still drop it, so it stays watched.
-      { movementId: "earn_movement_confirmed", status: "confirmed" },
+      // NOT terminal — a fork can still drop it, so it stays watched. (Kamino
+      // settles atomically; a provider-order provider would stop at
+      // `confirmed` and the real predicate says so.)
+      { movementId: "earn_movement_confirmed", provider: "kamino", status: "confirmed" },
       // A repeated ledger result must still mount only one keyed tracker.
-      { movementId: "earn_movement_confirmed", status: "confirmed" },
-      { movementId: "earn_movement_finalized", status: "finalized" },
-      { movementId: "earn_movement_failed", status: "failed" },
+      { movementId: "earn_movement_confirmed", provider: "kamino", status: "confirmed" },
+      { movementId: "earn_movement_finalized", provider: "kamino", status: "finalized" },
+      { movementId: "earn_movement_failed", provider: "kamino", status: "failed" },
     ];
 
     renderWorkspace();
@@ -2124,9 +2128,34 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(document.body.textContent).not.toContain("earn_movement_failed");
   });
 
+  it("stops watching a provider-order withdrawal once its chain leg commits", async () => {
+    // The other half of the settlement fork: wisdomtree's reconciler parks the
+    // withdrawal at `confirmed` (the NAV strike after it has no wire state to
+    // observe), so watching past it would hold the recovery tracker open past
+    // the last honest transition. This only holds through the REAL predicate —
+    // a hand-copied one froze the pre-fork rule and never saw this branch.
+    mocks.vaultWithdrawals = [
+      { movementId: "earn_movement_wt_confirmed", provider: "wisdomtree", status: "confirmed" },
+      // Atomic peers at the same status must stay watched — the fork, not the
+      // status literal, decides.
+      { movementId: "earn_movement_kamino_confirmed", provider: "kamino", status: "confirmed" },
+    ];
+
+    renderWorkspace();
+
+    await waitFor(() => {
+      const trackers = screen
+        .getAllByTestId("vault-withdrawal-outcome-tracker")
+        .map((tracker) => tracker.textContent);
+      expect(trackers).toEqual(["earn_movement_kamino_confirmed"]);
+    });
+  });
+
   it("keeps recovered vault trackers mounted until their detail poll settles", async () => {
     mocks.vaultDeposits = [{ movementId: "earn_deposit_recovered", status: "submitted" }];
-    mocks.vaultWithdrawals = [{ movementId: "earn_withdrawal_recovered", status: "confirmed" }];
+    mocks.vaultWithdrawals = [
+      { movementId: "earn_withdrawal_recovered", provider: "kamino", status: "confirmed" },
+    ];
     const view = renderWorkspace();
 
     await waitFor(() => {
