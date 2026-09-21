@@ -37,9 +37,9 @@
     "clsx": "2.1.1",
     "date-fns": "4.4.0",
     "flags": "4.3.1",
-    "lucide-react": "1.43.0",
+    "lucide-react": "1.45.0",
     "motion": "13.2.0",
-    "next": "16.3.4",
+    "next": "16.3.5",
     "next-themes": "0.4.6",
     "qrcode": "1.5.4",
     "radix-ui": "1.6.7",
@@ -49,8 +49,8 @@
     "shiki": "4.4.3",
     "sonner": "2.0.8",
     "swr": "2.5.1",
-    "tailwind-merge": "3.6.0",
-    "zod": "4.6.1"
+    "tailwind-merge": "3.7.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@clerk/backend": "3.17.2",
@@ -69,7 +69,7 @@
     "@types/react-dom": "19.3.0",
     "@vitest/coverage-istanbul": "4.1.11",
     "eslint": "10.10.0",
-    "eslint-config-next": "16.3.4",
+    "eslint-config-next": "16.3.5",
     "jsdom": "30.0.1",
     "pg": "8.23.0",
     "tailwindcss": "4.3.3",
