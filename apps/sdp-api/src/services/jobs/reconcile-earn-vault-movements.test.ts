@@ -303,9 +303,9 @@ function liveSnapshot(position: { vault_address: string | null }, owner: string,
 
 async function positionRow(positionId: string) {
   return getDb(env)
-    .prepare("SELECT closed_at FROM earn_positions WHERE id = ?")
+    .prepare("SELECT closed_at, updated_at FROM earn_positions WHERE id = ?")
     .bind(positionId)
-    .first<{ closed_at: string | null }>();
+    .first<{ closed_at: string | null; updated_at: string }>();
 }
 
 describe("settlement observations (0103): withdrawal payout and empty-holding close", () => {
@@ -515,52 +515,64 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
 });
 
 describe("provider-order settlement boundary", () => {
-  it("records chain finality for a provider-order deposit without claiming settlement", async () => {
+  it("polls a provider-order deposit through confirmation, then parks its finalized chain leg", async () => {
     const seeded = await seedMovement("100", "wisdomtree");
     getSignatureStatuses.mockResolvedValue([
-      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+      { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
     ]);
 
     await reconcileEarnVaultMovements(env);
 
-    // The payment leg is irreversible, and recording that fact IS the sweep's
-    // duty: until the row says `finalized` it stays claimable, so a fork could
-    // drop a merely-confirmed transaction and the sweep would never notice.
-    // The stamp is durable finalization evidence (0062: settled_at on a vault
-    // row means the CHAIN leg landed), not settlement — no payout is observed
-    // and the position is untouched. The legacy deposit wire maps this row
-    // down to `confirmed`, so the surface still shows awaiting-provider.
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
-      status: "finalized",
-      amount_settled: "1",
-      token_amount_settled: "1",
+      status: "confirmed",
+      chain_finalized_at: null,
+      settled_at: null,
     });
-    const finalizedRow = await ledgerRow(seeded.movement.id);
-    expect(finalizedRow?.settled_at).not.toBeNull();
+    const ledger = createPostgresEarnMovementsRepository(getDb(env));
+    const confirmedClaim = await ledger.claimUnsettledVaultMovements(256);
+    expect(confirmedClaim.map((movement) => movement.id)).toContain(seeded.movement.id);
+    await expect(ledger.getUnsettledVaultMovementStats()).resolves.toMatchObject({
+      backlog: 1,
+      backlogConfirmed: 1,
+    });
 
-    // Finality takes the row OUT of the sweep queue at the same moment: the
-    // durable evidence exists, so no tick re-reads the signature again. It
-    // stays discoverable through the settled=false list and detail reads,
-    // which the provider-aware settlement filter keeps open for this provider.
-    const claimable = await createPostgresEarnMovementsRepository(
-      getDb(env)
-    ).claimUnsettledVaultMovements(256);
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    await reconcileEarnVaultMovements(env);
+
+    // The payment leg is irreversible, but WisdomTree has not delivered shares.
+    // Keep that narrower chain fact separate from the economic lifecycle.
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "confirmed",
+      amount_settled: "1",
+      chain_finalized_at: expect.any(String),
+      settled_at: null,
+      token_amount_settled: null,
+    });
+
+    // Only durable finality takes the row out of the chain queue. It remains
+    // economically unsettled and visible to pending-movement consumers.
+    const claimable = await ledger.claimUnsettledVaultMovements(256);
     expect(claimable.map((movement) => movement.id)).not.toContain(seeded.movement.id);
+    await expect(ledger.getUnsettledVaultMovementStats()).resolves.toMatchObject({
+      backlog: 0,
+      backlogConfirmed: 0,
+    });
     expect(getTransaction).not.toHaveBeenCalled();
     expect(readVaultPositions).not.toHaveBeenCalled();
 
-    // Re-sweeping is inert: the row left the claim set with the evidence
-    // stamped, and a second pass writes nothing.
+    const parked = await ledgerRow(seeded.movement.id);
+    const statusReads = getSignatureStatuses.mock.calls.length;
     await reconcileEarnVaultMovements(env);
 
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
-      status: "finalized",
-      settled_at: finalizedRow?.settled_at,
+      status: "confirmed",
+      confirmed_at: parked?.confirmed_at,
+      chain_finalized_at: parked?.chain_finalized_at,
+      settled_at: null,
     });
-    const stillClaimable = await createPostgresEarnMovementsRepository(
-      getDb(env)
-    ).claimUnsettledVaultMovements(256);
-    expect(stillClaimable.map((movement) => movement.id)).not.toContain(seeded.movement.id);
+    expect(getSignatureStatuses).toHaveBeenCalledTimes(statusReads);
   });
 
   it("does not value or close a provider-order redemption when only its share leg finalized", async () => {
@@ -578,18 +590,39 @@ describe("provider-order settlement boundary", () => {
     const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
 
     expect(movement).toMatchObject({
-      status: "finalized",
+      status: "confirmed",
       // Exact shares left the wallet; cash settlement is still provider truth.
       amount_settled: "1",
+      chain_finalized_at: expect.any(String),
+      settled_at: null,
       token_amount_settled: null,
     });
-    expect(movement?.settled_at).not.toBeNull();
-    // The sweep closed nothing: finalization is a chain fact, and closing (or
-    // valuing) a provider-order redemption waits for the provider. The live
-    // balance and the landed payout were never even read.
+    // A pending provider order blocks every downstream interpretation of
+    // `finalized`: it cannot be claimed for payout repair or allow a zero-share
+    // observation to close the position.
+    const ledger = createPostgresEarnMovementsRepository(getDb(env));
+    await expect(
+      ledger.claimUnvaluedWithdrawalPayouts({
+        limit: 25,
+        settledAfter: new Date(0).toISOString(),
+        retryBefore: new Date().toISOString(),
+      })
+    ).resolves.toEqual([]);
+    const position = await positionRow(seeded.position.id);
+    await expect(
+      ledger.closeVaultPositionIfEmpty({
+        positionId: seeded.position.id,
+        organizationId: ORG,
+        observedUpdatedAt: position?.updated_at ?? "",
+      })
+    ).resolves.toBe(false);
     await expect(positionRow(seeded.position.id)).resolves.toMatchObject({ closed_at: null });
     expect(getTransaction).not.toHaveBeenCalled();
     expect(readVaultPositions).not.toHaveBeenCalled();
+
+    // Read-through sees the durable marker and does not spend another RPC call.
+    await reconcileEarnVaultMovementReadThrough(env, movement);
+    expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed when a historical provider is absent from the execution registry", async () => {

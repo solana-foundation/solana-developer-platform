@@ -67,7 +67,10 @@ export function reconcileEarnVaultMovementReadThrough(
   env: Env,
   movement: EarnMovementRow
 ): Promise<EarnMovementRow> {
-  if (TERMINAL_VAULT_MOVEMENT_STATUSES.has(movement.status)) {
+  if (
+    TERMINAL_VAULT_MOVEMENT_STATUSES.has(movement.status) ||
+    movement.chain_finalized_at !== null
+  ) {
     return Promise.resolve(movement);
   }
 
@@ -358,21 +361,23 @@ async function reconcileMovement(
   }
   if (status?.confirmationStatus === "finalized") {
     if (isKnownProviderOrderSettlement(env, movement)) {
-      // The payment/share leg is irreversible — that is ALL this observation
-      // proves, and recording it is the sweep's duty: until the row says
-      // `finalized`, it stays in the claim queue and every tick re-checks a
-      // chain fact a fork could still have dropped. The stamp is durable
-      // finalization evidence, not settlement: settled_at on a vault row means
-      // the CHAIN leg landed (0062's biconditional), no payout is observed,
-      // and the position is never closed from this leg alone — Connect has
-      // not yet reported that the subscription/redemption order settled, and
-      // the settled surface (`vaultSettlementFilter`) keeps the row
-      // discoverable until an authenticated provider reconciler answers it.
-      if (movement.status === "finalized") return "unchanged";
-      await advanceTransaction(ledger, movement, {
-        toStatus: "finalized",
-        confirmedAt: new Date().toISOString(),
-        settledAt: new Date().toISOString(),
+      // The payment/share leg is irreversible, but Connect has not reported
+      // economic completion. Preserve the movement's honest non-terminal
+      // `confirmed` state and record chain finality as its own durable fact.
+      // That marker removes the row from the chain queue without making the
+      // position closable, scheduling payout repair, recognizing earnings, or
+      // consuming the future confirmed -> finalized provider transition.
+      const observedAt = new Date().toISOString();
+      if (movement.status !== "confirmed") {
+        await advanceTransaction(ledger, movement, {
+          toStatus: "confirmed",
+          confirmedAt: observedAt,
+        });
+      }
+      await ledger.recordVaultMovementChainFinalization({
+        movementId: movement.id,
+        organizationId: movement.organization_id,
+        observedAt,
       });
       return "finalized";
     }
@@ -453,8 +458,8 @@ async function reconcileMovement(
  * order rather than economic settlement, for a provider the CURRENT registry
  * knows: chain finalization is recorded as the durable chain-leg evidence for
  * these rows (never as settlement), so the sweep keeps them claimable until
- * it observes finality and stops scheduling them the moment the row says
- * `finalized`.
+ * it observes finality and stops scheduling them once `chain_finalized_at`
+ * records that irreversible fact.
  *
  * Deposits declare this in the shared provider table. Withdrawals declare it
  * on the executing client capability, so this guard follows the builder that

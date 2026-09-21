@@ -259,6 +259,7 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     status: "submitted",
     failure_reason: null,
     confirmed_at: null,
+    chain_finalized_at: null,
     settled_at: null,
     denomination: SHARE_MINT,
     amount_requested: "10",

@@ -140,6 +140,8 @@ export interface EarnMovementRow {
   failure_reason: string | null;
   /** Optimistic chain commitment (vault only); not settlement. */
   confirmed_at: string | null;
+  /** Irreversible chain commitment for a provider-order leg; not provider settlement. */
+  chain_finalized_at: string | null;
   /** Success-terminal: finalization (vault) or provider completion (custodial). */
   settled_at: string | null;
   /** `usd`, or the token mint — the unit every amount below is denominated in. */
@@ -529,9 +531,9 @@ export interface EarnMovementsRepository {
   /**
    * Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease.
    *
-   * Provider-order rows parked at `confirmed` are NOT in the queue: no chain
-   * read can advance them until a Connect completion reconciler exists, so
-   * scheduling them would be permanent work for a fact the wire already gave.
+   * Provider-order rows remain in the queue through reversible confirmation.
+   * Once `chain_finalized_at` records irreversible finality, another chain read
+   * cannot advance them and they leave this queue until provider reconciliation.
    */
   claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
   /**
@@ -545,9 +547,9 @@ export interface EarnMovementsRepository {
    * neither expire nor rebroadcast it), so a total-only age would latch and
    * page forever. `blockhashBound` is the actionable subset the sweep can
    * still act on, and the withdrawal split keeps the exit path visible on its
-   * own (ADR 0002). Provider-order rows parked at `confirmed` are excluded
-   * here exactly as they are from the claim — they are awaiting-provider
-   * surface, not sweep backlog.
+   * own (ADR 0002). Provider-order rows with durable chain-finality evidence
+   * are excluded here exactly as they are from the claim — they are
+   * awaiting-provider surface, not chain-reconciliation backlog.
    */
   getUnsettledVaultMovementStats(): Promise<{
     backlog: number;
@@ -620,6 +622,16 @@ export interface EarnMovementsRepository {
    * merely discouraged, and a lost race returns null rather than an error.
    */
   advanceVaultMovement(input: AdvanceVaultMovementInput): Promise<EarnMovementRow | null>;
+  /**
+   * Record irreversible Solana finality for a provider-order leg without
+   * claiming that the provider has economically settled it. Guarded to a
+   * confirmed vault row; null means a concurrent transition won first.
+   */
+  recordVaultMovementChainFinalization(input: {
+    movementId: string;
+    organizationId: string;
+    observedAt: string;
+  }): Promise<EarnMovementRow | null>;
   /**
    * The sweep's first piece of evidence that a SUBMITTED vault movement did not
    * land (PRO-1904): its signature came back unknown after the blockhash window
@@ -981,6 +993,8 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     status: row.status as EarnMovementStatus,
     failure_reason: row.failure_reason as string | null,
     confirmed_at: row.confirmed_at as string | null,
+    chain_finalized_at:
+      row.chain_finalized_at == null ? null : String(row.chain_finalized_at),
     settled_at: row.settled_at as string | null,
     denomination: row.denomination as string,
     amount_requested: row.amount_requested as string,
@@ -1044,6 +1058,7 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     status: "finalized",
     failure_reason: null,
     confirmed_at: settledAt,
+    chain_finalized_at: null,
     settled_at: settledAt,
     denomination: String(row.share_mint),
     amount_requested: String(row.shares),
@@ -1911,15 +1926,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // it because a broadcast timeout or crash leaves a row unsubmitted WITH a
       // signature, which is precisely the ambiguous case reconciliation is for.
       //
-      // Provider-order rows follow the SAME lifecycle as every other row: they
-      // stay claimable at `confirmed` so the sweep keeps checking the chain leg
-      // for irreversible finality (a fork can still drop a merely-confirmed
-      // transaction), and the sweep's finality observation is what stamps the
-      // durable evidence (`finalized`) that finally takes the row out of this
-      // queue. Economic settlement stays a provider question the chain cannot
-      // answer; surfacing keeps such a row discoverable through
-      // `vaultSettlementFilter`, which never closes a provider-order row on a
-      // chain fact.
+      // Provider-order rows stay claimable at `confirmed` while their chain leg
+      // is still reversible. The sweep's finality observation stamps a separate
+      // durable fact (`chain_finalized_at`) that takes the row out of this queue
+      // without advancing its economic lifecycle. It remains `confirmed` until
+      // an authenticated provider completion path can truthfully settle it.
       //
       // Blockhash-bound work gets most of the batch, but never all of it once the
       // caller can process at least two rows. A confirmed signature can fall out
@@ -1939,6 +1950,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
                 AND status IN ('requested', 'submitted')
+                AND chain_finalized_at IS NULL
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
                        id ASC
@@ -1948,6 +1960,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
                 AND status = 'confirmed'
+                AND chain_finalized_at IS NULL
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
                        id ASC
@@ -1962,6 +1975,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                FROM earn_movements movement
               WHERE movement.execution_model = 'vault_direct'
                 AND movement.status IN ('requested', 'submitted', 'confirmed')
+                AND movement.chain_finalized_at IS NULL
                 AND NOT EXISTS (
                   SELECT 1 FROM reserved WHERE reserved.id = movement.id
                 )
@@ -2011,7 +2025,8 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                     AS oldest_withdrawal_created_at
              FROM earn_movements
             WHERE execution_model = 'vault_direct'
-              AND status IN ('requested', 'submitted', 'confirmed')`
+              AND status IN ('requested', 'submitted', 'confirmed')
+              AND chain_finalized_at IS NULL`
         )
         .first<{
           backlog: number | string;
@@ -2418,6 +2433,24 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
         return movement;
       });
+    },
+
+    async recordVaultMovementChainFinalization(input) {
+      const row = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET chain_finalized_at = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND execution_model = 'vault_direct'
+              AND status = 'confirmed'
+              AND chain_finalized_at IS NULL
+            RETURNING *`
+        )
+        .bind(input.observedAt, input.movementId, input.organizationId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
     },
 
     async recordUnknownSignatureObservation(input) {

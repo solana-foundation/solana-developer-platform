@@ -40,10 +40,14 @@ Things worth knowing before changing a movement path:
   live only in share-named columns. No read may sum across rows without grouping
   by it.
 - **`confirmed` is not terminal** (PRO-1716). The reconciliation sweep keeps
-  polling a confirmed movement until the chain says `finalized`, and a confirmed
-  row whose signature has aged out of RPC history is left alone rather than
-  expired — the transaction demonstrably landed, and the blockhash rule only ever
-  applied to one that never made it on chain.
+  polling a confirmed movement until the chain says `finalized`. Atomic
+  movements then enter the terminal `finalized` state; provider-order movements
+  remain economically `confirmed` and record the narrower fact in
+  `chain_finalized_at`, which removes them from the chain queue while they await
+  authenticated provider completion. A confirmed row whose signature has aged
+  out of RPC history is left alone rather than expired — the transaction
+  demonstrably landed, and the blockhash rule only ever applied to one that
+  never made it on chain.
 - **The published vault-deposit DTO still speaks the older vocabulary**, through
   `LEGACY_VAULT_DEPOSIT_STATUS` in `handlers/vault.ts`: `requested` goes out as
   `pending`, and `finalized` as `confirmed`. `?settled=` is additionally
@@ -1029,9 +1033,11 @@ movement" describe in the same test file.
     rejected. The row is durable before broadcast and uses the same reconciler
     as a deposit.
   - The wire exposes the movement signature directly for explorer links.
-    `confirmed` remains non-terminal. `finalized` stops polling only for an
-    explicitly atomic provider; provider-order/unknown success stays open until
-    authenticated provider completion. `failed` stops every route.
+    `confirmed` remains non-terminal. Atomic chain finality advances to
+    `finalized`; known provider-order chain finality stamps
+    `chain_finalized_at` without advancing the economic status, so chain polling
+    stops while the movement stays open for authenticated provider completion.
+    `failed` stops every route.
 - `GET /vault-withdrawals` / `GET /vault-withdrawals/:movementId` — the deposit
   reads mirrored: the list is DB discovery and the scoped detail is a fail-soft
   signature read-through. Both have NO provider gate (ADR 0002), the same four
