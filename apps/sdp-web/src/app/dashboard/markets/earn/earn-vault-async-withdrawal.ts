@@ -24,6 +24,7 @@ export type EarnVaultAsyncWithdrawalRoute =
       kind: "queue";
       summary: EarnVaultAsyncWithdrawalSummary;
       terms: EarnVaultQueuedWithdrawalTerms;
+      waitSeconds: number;
     }
   | {
       kind: "provider_order";
@@ -55,9 +56,10 @@ export function earnVaultAsyncWithdrawalRoute(
       summary: {
         titleKey: "DashboardEarn.exitRoute.asyncTitle",
         messageKey: "DashboardEarn.exitRoute.asyncDescription",
-        values: { seconds: queueAsset.secondsToMaturity },
+        values: {},
       },
       terms: queueAsset,
+      waitSeconds: queueAsset.secondsToMaturity,
     };
   }
   if (options.providerOrder) {

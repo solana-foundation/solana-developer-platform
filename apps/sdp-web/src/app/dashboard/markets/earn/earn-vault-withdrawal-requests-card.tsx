@@ -15,8 +15,8 @@ import {
 } from "./earn-program-data";
 import { earnVaultQueuedWithdrawalStatusPresentation } from "./earn-vault-queued-withdrawal-presentation";
 
-function formatEpoch(value: string, locale: string): string {
-  return formatEpochSeconds(value, locale) ?? "—";
+function formatEpoch(value: string, locale: string, unavailable: string): string {
+  return formatEpochSeconds(value, locale) ?? unavailable;
 }
 
 /** Durable recovery surface for queued requests that outlive their create modal. */
@@ -117,12 +117,21 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
                     </div>
                     <p className="mt-1 text-xs leading-5 text-secondary">
                       {t("DashboardEarn.queuedWithdraw.activeSummary", {
-                        // The symbol is its own interpolation, so format the
-                        // quantity alone — same trunc rules as the result modal.
-                        shares: formatProviderAmount(request.shares, locale),
-                        symbol: earnMintAsset(request.shareMint).symbol,
-                        maturity: formatEpoch(request.maturityTimestamp, locale),
-                        deadline: formatEpoch(request.deadlineTimestamp, locale),
+                        amount: formatProviderAmount(
+                          request.quotedAssets,
+                          locale,
+                          earnMintAsset(request.assetMint).symbol
+                        ),
+                        maturity: formatEpoch(
+                          request.maturityTimestamp,
+                          locale,
+                          t("DashboardEarn.unavailable")
+                        ),
+                        deadline: formatEpoch(
+                          request.deadlineTimestamp,
+                          locale,
+                          t("DashboardEarn.unavailable")
+                        ),
                       })}
                     </p>
                     {cancelError[request.withdrawalRequestId] ? (

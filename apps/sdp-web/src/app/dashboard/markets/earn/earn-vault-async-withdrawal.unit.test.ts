@@ -30,8 +30,9 @@ describe("earnVaultAsyncWithdrawalRoute", () => {
       summary: {
         titleKey: "DashboardEarn.exitRoute.asyncTitle",
         messageKey: "DashboardEarn.exitRoute.asyncDescription",
-        values: { seconds: 60 },
+        values: {},
       },
+      waitSeconds: 60,
       terms: queueTerms,
     });
   });
