@@ -3,10 +3,7 @@
  * so it can be tested on its own and the page keeps Fast Refresh.
  */
 
-import type { StatusFilter } from "./dvp-trades-query";
-
-/** A status the URL can carry; `waiting` is client state, never in the URL. */
-type DvpTradesUrlStatus = Exclude<StatusFilter, "waiting">;
+import type { DvpTradesUrlStatus } from "./dvp-trades-query";
 
 /**
  * What the trades card should be: the empty invitation, "nothing matches", or

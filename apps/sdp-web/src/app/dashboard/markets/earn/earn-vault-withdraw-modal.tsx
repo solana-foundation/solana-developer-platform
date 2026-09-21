@@ -41,8 +41,9 @@ import {
 import {
   derivedMinOut,
   floorToReplay,
+  initialSlippageInput,
   isSlippageExceededRefusal,
-  parseSlippageToleranceBps,
+  parseSlippageToleranceState,
   quoteForKey,
   useDebouncedVaultQuote,
   type VaultQuoteState,
@@ -59,8 +60,9 @@ import {
   validateVaultWithdrawalAmount,
   validateVaultWithdrawalShares,
   vaultProviderOrderShares,
+  vaultWithdrawalAmountError,
   vaultWithdrawalAvailableAmount,
-  vaultWithdrawalSharesForAmount,
+  vaultWithdrawalSharesForValidatedAmount,
 } from "./earn-vault-withdraw-amount";
 import {
   forgetVaultWithdrawalFloor,
@@ -206,11 +208,11 @@ function deriveWithdrawalFormState(
       ? position.withdrawableShares
       : vaultWithdrawalAvailableAmount(position);
   const sharesToRedeem =
-    amountValidation.kind === "valid"
-      ? settlement === "provider_order"
+    settlement === "provider_order"
+      ? amountValidation.kind === "valid"
         ? vaultProviderOrderShares(amountValidation.canonicalAmount, position)
-        : vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
-      : undefined;
+        : undefined
+      : vaultWithdrawalSharesForValidatedAmount(amountValidation, position);
   const hasStakedShares =
     position.shares !== undefined &&
     position.withdrawableShares !== undefined &&
@@ -219,10 +221,15 @@ function deriveWithdrawalFormState(
     amountValidation.kind === "valid" && availableAmount !== undefined
       ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
       : false;
-  const amountError =
-    amountInput.trim() === "" || amountValidation.kind === "valid" ? null : invalidAmountMessage;
-  const slippageBps = slippagePolicy ? parseSlippageToleranceBps(slippageInput) : null;
-  const slippageInvalid = slippagePolicy !== null && slippageBps === null;
+  const amountError = vaultWithdrawalAmountError(
+    amountInput,
+    amountValidation,
+    invalidAmountMessage
+  );
+  const { slippageBps, slippageInvalid } = parseSlippageToleranceState(
+    slippagePolicy,
+    slippageInput
+  );
   const quoteShares =
     slippagePolicy !== null && sharesToRedeem !== undefined ? sharesToRedeem : null;
   const quoteKey = quoteShares === null ? null : JSON.stringify([position.id, quoteShares]);
@@ -851,14 +858,14 @@ export function EarnVaultWithdrawModal({
 }: EarnVaultWithdrawModalProps) {
   const t = useTranslations();
   const [amountInput, setAmountInput] = useState("");
-  // A provider order has no cash quote to floor before NAV is struck, even if a
-  // future provider configuration accidentally declares an atomic exit floor.
-  // Atomic routes retain the existing provider policy unchanged.
+  // Declared per provider in @sdp/types: non-null means this provider REQUIRES
+  // an explicit exit floor derived from a live quote. Null renders no slippage
+  // control and sends no floor — Kamino's contract is unchanged. A provider
+  // order has no cash quote to floor before NAV is struck, even if a future
+  // provider configuration accidentally declares an atomic exit floor.
   const slippagePolicy =
     settlement === "provider_order" ? null : earnWithdrawSlippageFloor(position.provider);
-  const [slippageInput, setSlippageInput] = useState(() =>
-    slippagePolicy ? String(slippagePolicy.defaultToleranceBps) : ""
-  );
+  const [slippageInput, setSlippageInput] = useState(() => initialSlippageInput(slippagePolicy));
   const [slippageOpen, setSlippageOpen] = useState(false);
   const [step, setStep] = useState<"details" | "review">("details");
   const [quoteRefreshKey, setQuoteRefreshKey] = useState(0);

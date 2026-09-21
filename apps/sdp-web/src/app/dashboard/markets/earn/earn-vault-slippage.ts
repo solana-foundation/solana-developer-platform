@@ -53,6 +53,30 @@ export function parseSlippageToleranceBps(value: string): number | null {
 }
 
 /**
+ * The customer's tolerance for the CURRENT input, decided once for both vault
+ * modals: a `null` policy (the catalogue declared no floor) leaves the input
+ * inert, a parsed input yields basis points, and an unparsed one under a live
+ * policy flags the field and leaves the floor unset.
+ */
+export function parseSlippageToleranceState(
+  slippagePolicy: { defaultToleranceBps: number } | null,
+  slippageInput: string
+): { slippageBps: number | null; slippageInvalid: boolean } {
+  const slippageBps = slippagePolicy ? parseSlippageToleranceBps(slippageInput) : null;
+  return { slippageBps, slippageInvalid: slippagePolicy !== null && slippageBps === null };
+}
+
+/**
+ * The tolerance field's starting text: the policy's own default, so the
+ * customer reviews and edits a real value instead of an empty field.
+ */
+export function initialSlippageInput(
+  slippagePolicy: { defaultToleranceBps: number } | null
+): string {
+  return slippagePolicy ? String(slippagePolicy.defaultToleranceBps) : "";
+}
+
+/**
  * The floor a tolerance implies over a LIVE quote:
  * `quotedQuantity × (1 − bps/10⁴)`, floored to the quoted mint's own scale so
  * the builder is never handed sub-atomic precision it would rightly refuse.

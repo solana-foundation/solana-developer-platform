@@ -327,11 +327,8 @@ function PortfolioMetric({
         </dd>
       </div>
       <div className="mt-auto pt-4">
-        {kind === "wallets" && ageLabel && agePoints ? (
-          <AgeDistributionChart kind="wallets" label={ageLabel} points={agePoints} />
-        ) : null}
-        {kind === "positions" && ageLabel && agePoints ? (
-          <AgeDistributionChart kind="positions" label={ageLabel} points={agePoints} />
+        {(kind === "wallets" || kind === "positions") && ageLabel && agePoints ? (
+          <AgeDistributionChart kind={kind} label={ageLabel} points={agePoints} />
         ) : null}
         {kind === "assets" ? <AssetMixChart values={chartValues ?? []} /> : null}
       </div>
