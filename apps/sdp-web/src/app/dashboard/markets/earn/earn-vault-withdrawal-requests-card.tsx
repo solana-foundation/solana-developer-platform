@@ -7,17 +7,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { formatEpochSeconds, formatProviderAmount, shortenMarketAddress } from "./earn-format";
+import { formatEpochSecondsOr, formatProviderAmount, shortenMarketAddress } from "./earn-format";
 import { earnMintAsset } from "./earn-market-presentation";
 import {
   cancelEarnVaultWithdrawalRequest,
   useEarnVaultWithdrawalRequests,
 } from "./earn-program-data";
 import { earnVaultQueuedWithdrawalStatusPresentation } from "./earn-vault-queued-withdrawal-presentation";
-
-function formatEpoch(value: string, locale: string, unavailable: string): string {
-  return formatEpochSeconds(value, locale) ?? unavailable;
-}
 
 /** Durable recovery surface for queued requests that outlive their create modal. */
 export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () => void }) {
@@ -122,12 +118,12 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
                           locale,
                           earnMintAsset(request.assetMint).symbol
                         ),
-                        maturity: formatEpoch(
+                        maturity: formatEpochSecondsOr(
                           request.maturityTimestamp,
                           locale,
                           t("DashboardEarn.unavailable")
                         ),
-                        deadline: formatEpoch(
+                        deadline: formatEpochSecondsOr(
                           request.deadlineTimestamp,
                           locale,
                           t("DashboardEarn.unavailable")

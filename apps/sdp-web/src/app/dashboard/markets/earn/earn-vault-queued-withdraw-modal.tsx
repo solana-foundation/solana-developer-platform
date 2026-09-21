@@ -21,10 +21,11 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
+import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import {
   formatDurationSeconds,
-  formatEpochSeconds,
+  formatEpochSecondsOr,
   formatTokenQuantity,
   formatUsd,
   positionDisplayName,
@@ -112,10 +113,6 @@ function durationToSeconds(value: string, unit: QueueDurationUnit): number {
   return seconds > 0n && seconds <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(seconds) : Number.NaN;
 }
 
-function epochDate(value: string, locale: string, unavailable: string): string {
-  return formatEpochSeconds(value, locale) ?? unavailable;
-}
-
 function isQueueTermsValid(
   discountBps: number,
   deadlineSeconds: number,
@@ -147,7 +144,7 @@ function queueLockedUntil(
   unavailable: string
 ): string | undefined {
   return position.unlockTimestamp
-    ? epochDate(position.unlockTimestamp, locale, unavailable)
+    ? formatEpochSecondsOr(position.unlockTimestamp, locale, unavailable)
     : undefined;
 }
 
@@ -369,13 +366,21 @@ function QueuedWithdrawalResult({
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.maturity")}</dt>
           <dd className="text-right text-primary">
-            {epochDate(request.maturityTimestamp, locale, t("DashboardEarn.unavailable"))}
+            {formatEpochSecondsOr(
+              request.maturityTimestamp,
+              locale,
+              t("DashboardEarn.unavailable")
+            )}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.deadline")}</dt>
           <dd className="text-right text-primary">
-            {epochDate(request.deadlineTimestamp, locale, t("DashboardEarn.unavailable"))}
+            {formatEpochSecondsOr(
+              request.deadlineTimestamp,
+              locale,
+              t("DashboardEarn.unavailable")
+            )}
           </dd>
         </div>
       </dl>
@@ -426,14 +431,7 @@ function QueuedWithdrawalResult({
           {t("DashboardEarn.queuedWithdraw.solverNotice")}
         </p>
       ) : null}
-      {cancelError ? (
-        <p
-          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
-          {cancelError}
-        </p>
-      ) : null}
+      {cancelError ? <EarnErrorNote message={cancelError} /> : null}
       <div className="mt-5 flex justify-end gap-2">
         {request.status === "expiredCancelable" ? (
           <Button
@@ -514,13 +512,21 @@ function QueueReview({
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.maturity")}</dt>
             <dd className="text-right text-primary">
-              {epochDate(preview.maturityTimestamp, locale, t("DashboardEarn.unavailable"))}
+              {formatEpochSecondsOr(
+                preview.maturityTimestamp,
+                locale,
+                t("DashboardEarn.unavailable")
+              )}
             </dd>
           </div>
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.deadline")}</dt>
             <dd className="text-right text-primary">
-              {epochDate(preview.deadlineTimestamp, locale, t("DashboardEarn.unavailable"))}
+              {formatEpochSecondsOr(
+                preview.deadlineTimestamp,
+                locale,
+                t("DashboardEarn.unavailable")
+              )}
             </dd>
           </div>
         </dl>
@@ -541,14 +547,7 @@ function QueueReview({
       <p className="mt-4 text-xs leading-5 text-tertiary">
         {t("DashboardEarn.queuedWithdraw.solverNotice")}
       </p>
-      {error ? (
-        <p
-          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
-          {error}
-        </p>
-      ) : null}
+      {error ? <EarnErrorNote message={error} /> : null}
       <div className="mt-6 flex gap-2">
         <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
           {t("DashboardEarn.deposit.back")}

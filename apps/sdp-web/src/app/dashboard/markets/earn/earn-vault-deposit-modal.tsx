@@ -34,7 +34,9 @@ import {
   isPositiveDecimal,
   MAX_AMOUNT_LENGTH,
   parseUnsignedDecimal,
+  sortByOptionalDecimal,
 } from "./earn-decimal";
+import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, shortenMarketAddress, tokenSymbol } from "./earn-format";
 import { sumDecimalStrings, TransactionLink } from "./earn-market-presentation";
@@ -62,6 +64,7 @@ import {
   vaultMovementPanelKey,
   vaultMovementProcessing,
   vaultMovementProgressStep,
+  vaultMovementProgressSteps,
 } from "./earn-vault-movement";
 import {
   atomsToDecimalString,
@@ -784,13 +787,10 @@ function useVaultFundingToken(input: {
   }, [decimals, depositMint, strategy.hostCluster, symbol]);
   const fundingTokens = useMemo(() => {
     if (wallets === undefined) return supportedFundingTokens;
-    const rankedTokens: {
-      balance: string | undefined;
-      index: number;
-      token: EarnSwapSourceToken;
-    }[] = [];
 
-    for (const [index, token] of supportedFundingTokens.entries()) {
+    // Keep every supported stable visible for demo selection. Balance only
+    // controls ranking and the default selection, not visibility.
+    const balanceFor = (token: EarnSwapSourceToken): string | undefined => {
       const knownBalances: string[] = [];
       let hasUnknownBalance = false;
       for (const wallet of wallets) {
@@ -801,25 +801,9 @@ function useVaultFundingToken(input: {
           knownBalances.push(balance);
         }
       }
-      const balance = hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
-      // Keep every supported stable visible for demo selection. Balance only
-      // controls ranking and the default selection, not visibility.
-      rankedTokens.push({ balance, index, token });
-    }
-
-    rankedTokens.sort((left, right) => {
-      if (left.balance === undefined && right.balance === undefined) {
-        return left.index - right.index;
-      }
-      if (left.balance === undefined) return 1;
-      if (right.balance === undefined) return -1;
-      const order = compareUnsignedDecimals(left.balance, right.balance) ?? 0;
-      return order === 0 ? left.index - right.index : -order;
-    });
-
-    const tokens: EarnSwapSourceToken[] = [];
-    for (const { token } of rankedTokens) tokens.push(token);
-    return tokens;
+      return hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
+    };
+    return sortByOptionalDecimal(supportedFundingTokens, balanceFor, "descending");
   }, [supportedFundingTokens, wallets]);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
   // Ranked order already covers "nothing selected": its first row is the
@@ -1231,14 +1215,7 @@ function DepositReviewStep(props: DepositReviewStepProps) {
       ) : null}
 
       <DepositConfirmNote feeSponsored={strategy.feeSponsored} swapActive={swapActive} />
-      {submitError ? (
-        <p
-          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
-          {submitError}
-        </p>
-      ) : null}
+      {submitError ? <EarnErrorNote message={submitError} /> : null}
 
       <div className="mt-6 flex gap-2">
         <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
@@ -1299,20 +1276,16 @@ export function EarnVaultDepositModal({
   const visibleOutcome = mergeObservedVaultMovement(outcome, observedDeposit);
   const progressStep = depositProgressStep(visibleOutcome, step);
   const providerOrder = earnProviderDepositSettlement(strategy.provider) === "provider_order";
-  const progressSteps = providerOrder
-    ? [
-        t("DashboardEarn.deposit.flowDetails"),
-        t("DashboardEarn.deposit.flowReview"),
-        t("DashboardEarn.deposit.flowProcessing"),
-        t("DashboardEarn.deposit.flowProviderSettlement"),
-        t("DashboardEarn.deposit.flowComplete"),
-      ]
-    : [
-        t("DashboardEarn.deposit.flowDetails"),
-        t("DashboardEarn.deposit.flowReview"),
-        t("DashboardEarn.deposit.flowProcessing"),
-        t("DashboardEarn.deposit.flowComplete"),
-      ];
+  const progressSteps = vaultMovementProgressSteps(
+    {
+      complete: t("DashboardEarn.deposit.flowComplete"),
+      details: t("DashboardEarn.deposit.flowDetails"),
+      processing: t("DashboardEarn.deposit.flowProcessing"),
+      providerSettlement: t("DashboardEarn.deposit.flowProviderSettlement"),
+      review: t("DashboardEarn.deposit.flowReview"),
+    },
+    providerOrder
+  );
   const movementProcessing = vaultMovementProcessing(visibleOutcome, ["pending", "submitted"]);
   const panelKey = vaultMovementPanelKey(visibleOutcome, step, "deposit");
   const contentRef = useModalFocus({

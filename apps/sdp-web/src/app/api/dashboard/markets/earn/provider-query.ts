@@ -74,6 +74,40 @@ function validateCursor(
   return undefined;
 }
 
+function validateSettled(
+  incoming: URLSearchParams,
+  title: string,
+  query: URLSearchParams
+): ProxyQueryValidation | undefined {
+  const settled = incoming.get("settled");
+  if (settled === null) return undefined;
+  if (settled !== "true" && settled !== "false") {
+    return { ok: false, message: `${title} settled filter must be true or false` };
+  }
+  query.set("settled", settled);
+  return undefined;
+}
+
+/**
+ * The strict reader's shared opening: the allowlist verdict, then the page
+ * window, each returning the 400 for the first violation it finds. Returns
+ * `undefined` when `query` may be filled in further.
+ */
+function validateCommonParams(
+  incoming: URLSearchParams,
+  allowed: ReadonlySet<string>,
+  resource: string,
+  title: string,
+  query: URLSearchParams
+): ProxyQueryValidation | undefined {
+  return (
+    rejectUnknownParams(incoming, allowed, resource) ??
+    rejectDuplicateParams(incoming, allowed, title) ??
+    validateLimit(incoming, title, query) ??
+    validateCursor(incoming, title, query)
+  );
+}
+
 /**
  * Allowlisted query passthrough for the program proxy routes: every param is
  * opt-in — a known provider id, a bounded opaque cursor, a page window — and
@@ -126,17 +160,10 @@ function positionsProxyQuery(
 ): ProxyQueryValidation {
   const incoming = new URL(request.url).searchParams;
   const allowed = new Set(["limit", "before"]);
-
-  const rejected =
-    rejectUnknownParams(incoming, allowed, labels.resource) ??
-    rejectDuplicateParams(incoming, allowed, labels.title);
-  if (rejected) return rejected;
-
   const query = new URLSearchParams();
-  const limitRejected = validateLimit(incoming, labels.title, query);
-  if (limitRejected) return limitRejected;
-  const cursorRejected = validateCursor(incoming, labels.title, query);
-  if (cursorRejected) return cursorRejected;
+
+  const rejected = validateCommonParams(incoming, allowed, labels.resource, labels.title, query);
+  if (rejected) return rejected;
 
   return { ok: true, query: query.size > 0 ? `?${query}` : "" };
 }
@@ -174,17 +201,10 @@ function vaultMovementsProxyQuery(
   const incoming = new URL(request.url).searchParams;
   const allowed = new Set(["limit", "before", "requestId", "settled"]);
   const label = resource === "deposits" ? "Vault deposits" : "Vault withdrawals";
-
-  const rejected =
-    rejectUnknownParams(incoming, allowed, `vault ${resource}`) ??
-    rejectDuplicateParams(incoming, allowed, label);
-  if (rejected) return rejected;
-
   const query = new URLSearchParams();
-  const limitRejected = validateLimit(incoming, label, query);
-  if (limitRejected) return limitRejected;
-  const cursorRejected = validateCursor(incoming, label, query);
-  if (cursorRejected) return cursorRejected;
+
+  const rejected = validateCommonParams(incoming, allowed, `vault ${resource}`, label, query);
+  if (rejected) return rejected;
 
   const requestId = incoming.get("requestId");
   if (requestId !== null) {
@@ -197,13 +217,8 @@ function vaultMovementsProxyQuery(
     query.set("requestId", requestId);
   }
 
-  const settled = incoming.get("settled");
-  if (settled !== null) {
-    if (settled !== "true" && settled !== "false") {
-      return { ok: false, message: `${label} settled filter must be true or false` };
-    }
-    query.set("settled", settled);
-  }
+  const settledRejected = validateSettled(incoming, label, query);
+  if (settledRejected) return settledRejected;
 
   return { ok: true, query: query.size > 0 ? `?${query}` : "" };
 }
@@ -226,17 +241,16 @@ export function vaultWithdrawalRequestsProxyQuery(request: Request): ProxyQueryV
   const incoming = new URL(request.url).searchParams;
   const allowed = new Set(["limit", "before", "status", "settled"]);
   const label = "Vault withdrawal requests";
-
-  const rejected =
-    rejectUnknownParams(incoming, allowed, "vault withdrawal requests") ??
-    rejectDuplicateParams(incoming, allowed, label);
-  if (rejected) return rejected;
-
   const query = new URLSearchParams();
-  const limitRejected = validateLimit(incoming, label, query);
-  if (limitRejected) return limitRejected;
-  const cursorRejected = validateCursor(incoming, label, query);
-  if (cursorRejected) return cursorRejected;
+
+  const rejected = validateCommonParams(
+    incoming,
+    allowed,
+    "vault withdrawal requests",
+    label,
+    query
+  );
+  if (rejected) return rejected;
 
   const status = incoming.get("status");
   if (status !== null) {
@@ -246,13 +260,8 @@ export function vaultWithdrawalRequestsProxyQuery(request: Request): ProxyQueryV
     query.set("status", status);
   }
 
-  const settled = incoming.get("settled");
-  if (settled !== null) {
-    if (settled !== "true" && settled !== "false") {
-      return { ok: false, message: `${label} settled filter must be true or false` };
-    }
-    query.set("settled", settled);
-  }
+  const settledRejected = validateSettled(incoming, label, query);
+  if (settledRejected) return settledRejected;
 
   return { ok: true, query: query.size > 0 ? `?${query}` : "" };
 }
@@ -282,17 +291,16 @@ export function earnMovementsProxyQuery(request: Request): ProxyQueryValidation 
     "sourceAddress",
     "destinationAddress",
   ]);
-
-  const rejected =
-    rejectUnknownParams(incoming, allowed, "Embedded Yield movements") ??
-    rejectDuplicateParams(incoming, allowed, "Embedded Yield movements");
-  if (rejected) return rejected;
-
   const query = new URLSearchParams();
-  const limitRejected = validateLimit(incoming, "Embedded Yield movements", query);
-  if (limitRejected) return limitRejected;
-  const cursorRejected = validateCursor(incoming, "Embedded Yield movements", query);
-  if (cursorRejected) return cursorRejected;
+
+  const rejected = validateCommonParams(
+    incoming,
+    allowed,
+    "Embedded Yield movements",
+    "Embedded Yield movements",
+    query
+  );
+  if (rejected) return rejected;
 
   const direction = incoming.get("direction");
   if (direction !== null) {

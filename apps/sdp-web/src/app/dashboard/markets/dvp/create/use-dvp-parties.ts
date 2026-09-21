@@ -170,9 +170,7 @@ export function deriveDvpParties(
   return {
     ready,
     sameAddress,
-    request: ready
-      ? { partyA: partyRefFor(values.partyA), partyB: partyRefFor(values.partyB) }
-      : null,
+    request: ready && wire ? { partyA: wire.a.ref, partyB: wire.b.ref } : null,
     wire: ready ? wire : null,
     resolved,
   };

@@ -140,6 +140,15 @@ export function formatEpochSeconds(
   }).format(date);
 }
 
+/** The formatted epoch timestamp, or the caller's placeholder when unrenderable. */
+export function formatEpochSecondsOr(
+  value: string | null | undefined,
+  locale: string,
+  unavailable: string
+): string {
+  return formatEpochSeconds(value, locale) ?? unavailable;
+}
+
 /**
  * Compact human range from two ISO-8601 durations (providers report processing
  * estimates as e.g. "PT21M" / "P2D"). Unparseable inputs render verbatim so a

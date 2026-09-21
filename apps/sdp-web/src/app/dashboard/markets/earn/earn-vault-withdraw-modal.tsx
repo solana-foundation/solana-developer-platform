@@ -18,6 +18,7 @@ import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/ide
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
+import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, positionDisplayName } from "./earn-format";
 import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
@@ -37,6 +38,7 @@ import {
   vaultMovementPanelKey,
   vaultMovementProcessing,
   vaultMovementProgressStep,
+  vaultMovementProgressSteps,
 } from "./earn-vault-movement";
 import {
   derivedMinOut,
@@ -814,14 +816,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
           ? t("DashboardEarn.vaultWithdraw.confirmNoteSponsored")
           : t("DashboardEarn.vaultWithdraw.confirmNote")}
       </p>
-      {submitError ? (
-        <p
-          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
-          {submitError}
-        </p>
-      ) : null}
+      {submitError ? <EarnErrorNote message={submitError} /> : null}
 
       <div className="mt-6 flex gap-2">
         <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
@@ -881,21 +876,16 @@ export function EarnVaultWithdrawModal({
   );
   const visibleOutcome = mergeObservedVaultMovement(outcome, observedWithdrawal);
   const progressStep = withdrawalProgressStep(visibleOutcome, step, settlement);
-  const progressSteps =
+  const progressSteps = vaultMovementProgressSteps(
+    {
+      complete: t("DashboardEarn.vaultWithdraw.flowComplete"),
+      details: t("DashboardEarn.vaultWithdraw.flowDetails"),
+      processing: t("DashboardEarn.vaultWithdraw.flowProcessing"),
+      providerSettlement: t("DashboardEarn.vaultWithdraw.flowProviderSettlement"),
+      review: t("DashboardEarn.vaultWithdraw.flowReview"),
+    },
     settlement === "provider_order"
-      ? [
-          t("DashboardEarn.vaultWithdraw.flowDetails"),
-          t("DashboardEarn.vaultWithdraw.flowReview"),
-          t("DashboardEarn.vaultWithdraw.flowProcessing"),
-          t("DashboardEarn.vaultWithdraw.flowProviderSettlement"),
-          t("DashboardEarn.vaultWithdraw.flowComplete"),
-        ]
-      : [
-          t("DashboardEarn.vaultWithdraw.flowDetails"),
-          t("DashboardEarn.vaultWithdraw.flowReview"),
-          t("DashboardEarn.vaultWithdraw.flowProcessing"),
-          t("DashboardEarn.vaultWithdraw.flowComplete"),
-        ];
+  );
   const movementProcessing = vaultMovementProcessing(visibleOutcome, ["requested", "submitted"]);
   const panelKey = vaultMovementPanelKey(visibleOutcome, step, "withdrawal");
   const contentRef = useModalFocus({
