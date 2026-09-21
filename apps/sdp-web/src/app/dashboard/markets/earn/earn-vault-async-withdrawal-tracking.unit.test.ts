@@ -14,8 +14,21 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
   };
 
   it("is stable for the same asynchronous-withdrawal intent", () => {
-    expect(vaultAsyncWithdrawalRequestFingerprint(intent)).toBe(
-      vaultAsyncWithdrawalRequestFingerprint({ ...intent, route: { ...intent.route } })
+    // A semantically identical intent whose object keys are ordered
+    // differently must not change the fingerprint, so a whole-object
+    // serialization would fail here.
+    const sameIntent = {
+      positionId: intent.positionId,
+      shares: intent.shares,
+      projectId: intent.projectId,
+      route: {
+        deadlineSeconds: intent.route.deadlineSeconds,
+        discountBps: intent.route.discountBps,
+        kind: intent.route.kind,
+      },
+    } satisfies typeof intent;
+    expect(vaultAsyncWithdrawalRequestFingerprint(sameIntent)).toBe(
+      vaultAsyncWithdrawalRequestFingerprint(intent)
     );
   });
 
