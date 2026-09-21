@@ -26,7 +26,11 @@ export default defineConfig({
   testDir: "./playwright/tests",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
-  retries: 0,
+  // One retry: the browser suites ride on external services (Clerk, Surfpool
+  // RPC, Kora warm-up) that occasionally stall a single test; without a retry
+  // one slow first render fails the whole job. External-API projects below
+  // keep their own stricter budgets.
+  retries: 1,
   timeout: 180_000,
   workers: 1,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
