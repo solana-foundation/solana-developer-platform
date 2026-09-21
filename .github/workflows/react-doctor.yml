@@ -23,6 +23,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Timing react-doctor start
+        run: node scripts/ci/timing/mark.mjs "react-doctor:start"
+
       - name: Scan React projects
         uses: millionco/react-doctor@013f7373f91a3b9e68bd1dc7d4d354f4b041b117 # v2
         with:
@@ -33,3 +36,11 @@ jobs:
           # cron code on each push. The example is a standalone workspace, so
           # it is referenced by path instead of project name.
           project: sdp-web,sdp-docs,examples/embedded-yield-bank
+
+      - name: Timing react-doctor end
+        if: always()
+        run: node scripts/ci/timing/mark.mjs "react-doctor:end"
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs

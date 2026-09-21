@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import type { ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
+// ci/timing-benchmarks: superficial change to exercise the full CI/CD matrix.
 type ModalCloseButtonProps = Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
   "aria-label" | "type"

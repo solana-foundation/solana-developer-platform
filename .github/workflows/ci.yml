@@ -36,7 +36,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Require exact direct dependency versions
         run: node scripts/check-pinned-dependency-versions.mjs
@@ -57,7 +57,11 @@ jobs:
           I18N_HEAD_BRANCH: ${{ github.head_ref }}
           I18N_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           I18N_BASE_REPOSITORY: ${{ github.repository }}
-        run: node .github/scripts/check-catalog-change-policy.mjs
+        run: node scripts/ci/timing/timed.mjs "catalog-change-policy" -- node .github/scripts/check-catalog-change-policy.mjs
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   module_boundaries:
     name: Module Boundaries
@@ -77,7 +81,11 @@ jobs:
           node-version: 24
 
       - name: Check module boundaries
-        run: pnpm check:module-boundaries
+        run: node scripts/ci/timing/timed.mjs "module-boundaries" -- pnpm check:module-boundaries
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   lint:
     name: Lint
@@ -100,15 +108,20 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Lint
         run: |
-          git diff --name-only --diff-filter=d -z origin/main...HEAD \
+          TIMEFORMAT="timing lint:biome(changed) %R s"
+          time git diff --name-only --diff-filter=d -z origin/main...HEAD \
             | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
 
       - name: Check pinned dependencies
-        run: pnpm check:pinned-dependencies
+        run: node scripts/ci/timing/timed.mjs "check:pinned-dependencies" -- pnpm check:pinned-dependencies
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   translation_agent:
     name: Translation Agent
@@ -133,10 +146,14 @@ jobs:
           cache-dependency-path: agents/sdp-translation-agent/pnpm-lock.yaml
 
       - name: Install
-        run: pnpm install --frozen-lockfile --ignore-workspace
+        run: node "$GITHUB_WORKSPACE/scripts/ci/timing/timed.mjs" "install:translation-agent" -- pnpm install --frozen-lockfile --ignore-workspace
 
       - name: Typecheck and build
-        run: pnpm typecheck && pnpm build
+        run: node "$GITHUB_WORKSPACE/scripts/ci/timing/timed.mjs" "translation-agent:typecheck-and-build" -- bash -c "pnpm typecheck && pnpm build"
+
+      - name: Timing report
+        if: always()
+        run: node "$GITHUB_WORKSPACE/scripts/ci/timing/report.mjs"
 
   typecheck:
     name: Typecheck
@@ -159,7 +176,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Detect changed packages
         id: changed
@@ -176,7 +193,11 @@ jobs:
           for pkg in $CHANGED_PACKAGES; do
             FILTERS="$FILTERS --filter ./$pkg"
           done
-          pnpm --if-present $FILTERS typecheck
+          node scripts/ci/timing/timed.mjs "typecheck:changed-packages" -- pnpm --if-present $FILTERS typecheck
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   unit_test_scope:
     name: Unit Test Scope
@@ -259,7 +280,7 @@ jobs:
             turbo-${{ github.job }}-shard${{ matrix.shard }}-${{ runner.os }}-
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Validate Doppler OIDC configuration
         if: env.CI_IS_FORK_PULL_REQUEST != 'true'
@@ -284,7 +305,7 @@ jobs:
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_CONFIG: dev_ci
-        run: pnpm test
+        run: node scripts/ci/timing/timed.mjs "unit-tests:shard-${{ matrix.shard }}" -- pnpm test
 
       - name: Save turbo cache
         if: github.ref == 'refs/heads/main'
@@ -297,7 +318,7 @@ jobs:
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
           echo "::notice title=Fork-safe unit tests::Doppler OIDC authentication is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
-          node scripts/run-workspace-tests.mjs unit
+          node scripts/ci/timing/timed.mjs "unit-tests:fork-safe" -- node scripts/run-workspace-tests.mjs unit
 
       - name: Upload vitest shard artifacts
         if: always()
@@ -310,6 +331,10 @@ jobs:
           overwrite: true
           include-hidden-files: true
           if-no-files-found: error
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   test_merge:
     name: Unit Tests
@@ -343,7 +368,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Download shard artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -367,7 +392,11 @@ jobs:
 
       - name: Merge coverage and enforce thresholds
         working-directory: apps/sdp-api
-        run: pnpm exec vitest run --merge-reports --coverage
+        run: node "$GITHUB_WORKSPACE/scripts/ci/timing/timed.mjs" "coverage:merge" -- pnpm exec vitest run --merge-reports --coverage
+
+      - name: Timing report
+        if: always()
+        run: node "$GITHUB_WORKSPACE/scripts/ci/timing/report.mjs"
 
   test_packages:
     name: Unit Tests (packages)
@@ -410,7 +439,7 @@ jobs:
             turbo-${{ github.job }}-${{ runner.os }}-
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Validate Doppler OIDC configuration
         if: env.CI_IS_FORK_PULL_REQUEST != 'true'
@@ -437,7 +466,7 @@ jobs:
         if: env.CI_HAS_DOPPLER_TOKEN == 'true'
         env:
           DOPPLER_CONFIG: dev_ci
-        run: pnpm test
+        run: node scripts/ci/timing/timed.mjs "unit-tests:packages" -- pnpm test
 
       - name: Save turbo cache
         if: github.ref == 'refs/heads/main'
@@ -450,19 +479,23 @@ jobs:
         if: env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
           echo "::notice title=Fork-safe unit tests::Doppler OIDC authentication is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
-          node scripts/run-workspace-tests.mjs unit
+          node scripts/ci/timing/timed.mjs "unit-tests:fork-safe" -- node scripts/run-workspace-tests.mjs unit
 
       - name: Scripts tests
-        run: pnpm test:scripts
+        run: node scripts/ci/timing/timed.mjs "scripts-tests" -- pnpm test:scripts
 
       # Runs here rather than in the Module Boundaries job because it parses
       # TypeScript with the compiler's own parser, and that job installs no
       # dependencies.
       - name: Check SecretRef serialization
-        run: pnpm check:secretref-serialization
+        run: node scripts/ci/timing/timed.mjs "check:secretref-serialization" -- pnpm check:secretref-serialization
 
       - name: Check UI flow matrix
-        run: pnpm check:ui-flow-coverage
+        run: node scripts/ci/timing/timed.mjs "check:ui-flow-coverage" -- pnpm check:ui-flow-coverage
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   build_api:
     name: Build API
@@ -485,10 +518,14 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Build API (Node bundle)
-        run: pnpm --filter ./apps/sdp-api build
+        run: node scripts/ci/timing/timed.mjs "build:api" -- pnpm --filter ./apps/sdp-api build
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   docker_build_api:
     name: Docker Build API
@@ -502,6 +539,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Timing docker build start
+        run: node scripts/ci/timing/mark.mjs "docker:sdp-api:start"
 
       - name: Build sdp-api image (no push)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -518,6 +558,14 @@ jobs:
           cache-from: type=gha,scope=sdp-api
           cache-to: type=gha,scope=sdp-api,mode=max
 
+      - name: Timing docker build end
+        if: always()
+        run: node scripts/ci/timing/mark.mjs "docker:sdp-api:end"
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
+
   docker_build_docs:
     name: Docker Build Docs
     needs: unit_test_scope
@@ -530,6 +578,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Timing docker build start
+        run: node scripts/ci/timing/mark.mjs "docker:sdp-docs:start"
 
       - name: Build sdp-docs image (no push)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -546,6 +597,14 @@ jobs:
           cache-from: type=gha,scope=sdp-docs
           cache-to: type=gha,scope=sdp-docs,mode=max
 
+      - name: Timing docker build end
+        if: always()
+        run: node scripts/ci/timing/mark.mjs "docker:sdp-docs:end"
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
+
   docker_build_web:
     name: Docker Build Web
     needs: unit_test_scope
@@ -558,6 +617,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Timing docker build start
+        run: node scripts/ci/timing/mark.mjs "docker:sdp-web:start"
 
       - name: Build sdp-web image (no push)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -575,6 +637,14 @@ jobs:
             NEXT_PUBLIC_SDP_API_BASE_URL=http://localhost:8787
           cache-from: type=gha,scope=sdp-web
           cache-to: type=gha,scope=sdp-web,mode=max
+
+      - name: Timing docker build end
+        if: always()
+        run: node scripts/ci/timing/mark.mjs "docker:sdp-web:end"
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   docker_compose_smoke:
     name: Docker Compose Smoke
@@ -597,10 +667,10 @@ jobs:
         uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
 
       - name: Build compose stack
-        run: docker compose build
+        run: node scripts/ci/timing/timed.mjs "compose:build" -- docker compose build
 
       - name: Bring up stack and wait for healthy
-        run: docker compose up -d --wait --wait-timeout 240
+        run: node scripts/ci/timing/timed.mjs "compose:up" -- docker compose up -d --wait --wait-timeout 240
 
       - name: Dump compose state
         if: always()
@@ -611,6 +681,10 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   build_docs:
     name: Build Docs
@@ -633,16 +707,20 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Env configurator drift check
-        run: node scripts/check-env-configurator-drift.mjs
+        run: node scripts/ci/timing/timed.mjs "check:env-configurator-drift" -- node scripts/check-env-configurator-drift.mjs
 
       - name: Configurator unit tests
-        run: pnpm --filter @sdp/env-config test
+        run: node scripts/ci/timing/timed.mjs "env-config:tests" -- pnpm --filter @sdp/env-config test
 
       - name: Build docs
-        run: pnpm --filter sdp-docs build
+        run: node scripts/ci/timing/timed.mjs "build:docs" -- pnpm --filter sdp-docs build
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   docs_integrity:
     name: Docs Integrity
@@ -665,18 +743,20 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Generate public docs artifacts
-        run: |
-          pnpm --filter sdp-docs generate:api
-          pnpm --filter sdp-docs generate:ai
+        run: node scripts/ci/timing/timed.mjs "docs:generate" -- bash -c "pnpm --filter sdp-docs generate:api && pnpm --filter sdp-docs generate:ai"
 
       - name: Committed docs artifacts match generated output
-        run: git diff --exit-code apps/sdp-docs/public
+        run: node scripts/ci/timing/timed.mjs "docs:committed-artifacts" -- git diff --exit-code apps/sdp-docs/public
 
       - name: Check docs links
-        run: pnpm --filter sdp-docs check:links
+        run: node scripts/ci/timing/timed.mjs "docs:check-links" -- pnpm --filter sdp-docs check:links
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   integration_tests_shard:
     name: Integration Tests (${{ matrix.name }})
@@ -782,7 +862,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Validate Doppler OIDC configuration
         if: matrix.provider == 'kora' && env.CI_IS_FORK_PULL_REQUEST != 'true'
@@ -829,10 +909,10 @@ jobs:
         run: |
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
           if [ "${CI_HAS_DOPPLER_TOKEN}" = "true" ]; then
-            scripts/doppler/run-with-config.sh pnpm kora:surfpool:integration -- "${test_files[@]}"
+            node scripts/ci/timing/timed.mjs "integration:${{ matrix.name }}" -- scripts/doppler/run-with-config.sh pnpm kora:surfpool:integration -- "${test_files[@]}"
           elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${INTEGRATION_SHARD_NAME}" = "Surfpool / Access" ]; then
             echo "::notice title=Fork-safe Surfpool Access::Running the Surfpool Access shard without managed RPC or hosted custody secrets."
-            SOLANA_RPC_CI_PREFERRED_PROVIDER=default pnpm kora:surfpool:integration -- "${test_files[@]}"
+            node scripts/ci/timing/timed.mjs "integration:fork-safe:${{ matrix.name }}" -- env SOLANA_RPC_CI_PREFERRED_PROVIDER=default pnpm kora:surfpool:integration -- "${test_files[@]}"
           elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ]; then
             echo "::notice title=Fork-safe Surfpool integration skip::Forked pull requests cannot access managed Solana RPC secrets, so this Surfpool shard is skipped."
           else
@@ -846,12 +926,16 @@ jobs:
           DOPPLER_CONFIG: dev_ci
         run: |
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
-          pnpm test:integration -- "${test_files[@]}"
+          node scripts/ci/timing/timed.mjs "integration:${{ matrix.name }}" -- pnpm test:integration -- "${test_files[@]}"
 
       - name: Skip secret-backed integration tests for fork
         if: matrix.provider == 'kora' && env.CI_IS_FORK_PULL_REQUEST == 'true' && env.CI_HAS_DOPPLER_TOKEN != 'true'
         run: |
           echo "::notice title=Fork-safe integration skip::Forked pull requests cannot authenticate to Doppler via OIDC, so Kora/Privy-backed integration tests are skipped. Run this PR from an upstream branch before merge if secret-backed coverage is required."
+
+      - name: Timing report
+        if: always()
+        run: node scripts/ci/timing/report.mjs
 
   integration_tests:
     name: Integration Tests (Surfpool/Kora)
@@ -976,7 +1060,7 @@ jobs:
 
       - name: Install
         if: env.E2E_AFFECTED == 'true'
-        run: pnpm install --frozen-lockfile
+        run: node scripts/ci/timing/timed.mjs "install:pnpm" -- pnpm install --frozen-lockfile
 
       - name: Validate Doppler OIDC configuration
         if: env.E2E_AFFECTED == 'true' && env.CI_IS_FORK_PULL_REQUEST != 'true'
@@ -1037,7 +1121,7 @@ jobs:
 
       - name: Install Playwright browser
         if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
-        run: pnpm --filter sdp-web exec playwright install chromium
+        run: node scripts/ci/timing/timed.mjs "e2e:playwright-install" -- pnpm --filter sdp-web exec playwright install chromium
 
       - name: Build web app for Playwright
         if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
@@ -1046,7 +1130,7 @@ jobs:
           SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
           NEXT_PUBLIC_SDP_API_BASE_URL: ${{ env.PLAYWRIGHT_API_URL }}
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
-        run: scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
+        run: node scripts/ci/timing/timed.mjs "e2e:build-web" -- scripts/doppler/run-with-config.sh node scripts/run-with-healthy-solana-rpc.mjs pnpm --filter sdp-web build
 
       - name: Run browser e2e suite
         if: env.E2E_AFFECTED == 'true' && env.CI_HAS_DOPPLER_TOKEN == 'true'
@@ -1055,9 +1139,9 @@ jobs:
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: |
           if [ -n "${{ matrix.issuance_group }}" ]; then
-            scripts/doppler/run-with-config.sh pnpm kora:surfpool:e2e:issuance ${{ matrix.issuance_group }}
+            node scripts/ci/timing/timed.mjs "e2e:${{ matrix.name }}" -- scripts/doppler/run-with-config.sh pnpm kora:surfpool:e2e:issuance ${{ matrix.issuance_group }}
           else
-            scripts/doppler/run-with-config.sh pnpm kora:surfpool:run -- pnpm --filter sdp-web run ${{ matrix.test_script }}
+            node scripts/ci/timing/timed.mjs "e2e:${{ matrix.name }}" -- scripts/doppler/run-with-config.sh pnpm kora:surfpool:run -- pnpm --filter sdp-web run ${{ matrix.test_script }}
           fi
 
       - name: Skip secret-backed browser e2e for fork
@@ -1074,6 +1158,10 @@ jobs:
             apps/sdp-web/playwright-report
             apps/sdp-web/test-results
           if-no-files-found: ignore
+
+      - name: Timing report
+        if: always() && env.E2E_AFFECTED == 'true'
+        run: node scripts/ci/timing/report.mjs
 
   issuance_e2e:
     name: Issuance E2E (Surfpool Shards)
