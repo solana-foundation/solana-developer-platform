@@ -905,12 +905,14 @@ async function projectLiveRequest(
  */
 export function nextQueuedWithdrawalCheckAt(
   status: EarnVaultWithdrawalRequestRow["status"],
-  maturityTimestamp: string,
+  maturityTimestamp: string | null,
   nowMs = Date.now()
 ): string | null {
   if (status === "fulfilled" || status === "cancelled" || status === "failed") return null;
   const minimumNextMs = nowMs + OPEN_REQUEST_POLL_MS;
-  if (status !== "pending") return new Date(minimumNextMs).toISOString();
+  if (status !== "pending" || maturityTimestamp === null) {
+    return new Date(minimumNextMs).toISOString();
+  }
 
   const nowSeconds = BigInt(Math.floor(nowMs / 1_000));
   const maturitySeconds = BigInt(maturityTimestamp);
