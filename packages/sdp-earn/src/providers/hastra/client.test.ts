@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it, mock } from "node:test";
 import { wellKnownMint } from "@sdp/types";
 import {
   HASTRA_DEPLOYMENTS,
@@ -25,6 +25,23 @@ import { HastraEarnClient } from "./client";
 const client = new HastraEarnClient();
 const MAINNET = HASTRA_DEPLOYMENTS["mainnet-beta"];
 assert.ok(MAINNET, "test premise: Hastra's verified mainnet deployment is registered");
+const MAINNET_PRIME_MINT = MAINNET.primeMint;
+
+function stubMetricsFeed() {
+  return mock.method(globalThis, "fetch", async () =>
+    Response.json({
+      prime_card: {
+        mint_address_by_chain: { solana: MAINNET_PRIME_MINT },
+        vault_balance_by_chain: { solana: "130615211.729093" },
+      },
+      demo_prime_card: {
+        tokens: [{ token: "prime", effective_rate: "6.1336" }],
+      },
+    })
+  );
+}
+
+afterEach(() => mock.restoreAll());
 
 describe("Hastra deployment registry", () => {
   it("pins the verified v0.0.6 programs and token mints on mainnet only", () => {
@@ -74,10 +91,13 @@ describe("Hastra provider policy", () => {
 
 describe("HastraEarnClient", () => {
   it("catalogues no native sandbox strategy", async () => {
+    const fetch = stubMetricsFeed();
     assert.deepEqual(await client.listStrategies({ environment: "sandbox", env: {} }), []);
+    assert.equal(fetch.mock.callCount(), 0);
   });
 
-  it("catalogues exactly one PRIME RWA strategy without fabricating an APY", async () => {
+  it("catalogues exactly one PRIME RWA strategy with issuer-published live figures", async () => {
+    stubMetricsFeed();
     const snapshots = await client.listStrategies({ environment: "production", env: {} });
     assert.equal(snapshots.length, 1);
     const snapshot = snapshots[0];
@@ -91,7 +111,7 @@ describe("HastraEarnClient", () => {
     assert.equal(snapshot.shareMint, MAINNET.primeMint);
     assert.equal(snapshot.hostCluster, "mainnet-beta");
     assert.equal(snapshot.apyType, "variable");
-    assert.equal(snapshot.currentApy, undefined);
+    assert.equal(snapshot.currentApy, "0.061336");
     assert.equal(snapshot.liquidityTerm, "delayed");
     assert.equal(snapshot.redemptionDelayDays, undefined);
     assert.deepEqual(snapshot.riskMetadata, {
@@ -101,10 +121,28 @@ describe("HastraEarnClient", () => {
       wrapperAsset: "wYLDS",
       priceOracle: "Chainlink Data Streams",
       programRelease: "v0.0.6",
+      tvlUsd: 130_615_211.729093,
       parExit: "PRIME to wYLDS atomically, then Hastra operator-mediated redemption",
       optionalDexExit:
         "PRIME to wYLDS to USDC through Jupiter when enabled by the integrating deployment",
     });
     assert.equal(isStrategyWithinDeclaredSupport(client.declaredSupport, snapshot), true);
+  });
+
+  it("refreshes the same APY and Solana TVL without replacing static metadata", async () => {
+    stubMetricsFeed();
+    assert.deepEqual(await client.listStrategyMetrics({ environment: "production", env: {} }), [
+      {
+        providerReference: MAINNET.primeMint,
+        currentApy: "0.061336",
+        riskMetadata: { tvlUsd: 130_615_211.729093 },
+      },
+    ]);
+  });
+
+  it("does not call the mainnet feed for sandbox metrics", async () => {
+    const fetch = stubMetricsFeed();
+    assert.deepEqual(await client.listStrategyMetrics({ environment: "sandbox", env: {} }), []);
+    assert.equal(fetch.mock.callCount(), 0);
   });
 });
