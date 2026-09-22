@@ -276,6 +276,11 @@ as part of the automated deployment. The job is updated to the intended image
 and must succeed before the service rollout proceeds. A manual production image
 redeploy intentionally does not update or execute the migration job.
 
+Merges to `main` deploy stage and then prod, but only stage runs the migration
+job on that path. Prod applies migrations from releases only. While the
+migrations directory differs from the last `v*` tag, the prod merge deploy fails
+at its pending-migrations gate until the release is cut, then resumes.
+
 Do not run a deployed migration directly from a laptop with Doppler credentials.
 For an exceptional manual operation, use the named Cloud Run migration job and
 the environment's GCP deployment identity under the release operations runbook.
