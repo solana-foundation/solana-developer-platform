@@ -210,6 +210,7 @@ export function TransferDialog({
           <TransferDialogFooter
             amount={amount}
             busy={busy}
+            direction={direction}
             queueSettingsValid={queueSettingsValid}
             route={withdrawalRoute}
             selectedRouteAvailable={selectedRouteAvailable}
@@ -533,6 +534,7 @@ function TransferSummary({
 function TransferDialogFooter({
   amount,
   busy,
+  direction,
   queueSettingsValid,
   route,
   selectedRouteAvailable,
@@ -540,6 +542,7 @@ function TransferDialogFooter({
 }: {
   amount: string;
   busy: boolean;
+  direction: TransferDirection;
   queueSettingsValid: boolean;
   route: WithdrawalRoute;
   selectedRouteAvailable: boolean;
@@ -549,7 +552,7 @@ function TransferDialogFooter({
     busy ||
     !amount.trim() ||
     !selectedRouteAvailable ||
-    (route === "queued" && !queueSettingsValid);
+    (direction === "to-checking" && route === "queued" && !queueSettingsValid);
   return (
     <DialogFooter>
       <DialogClose asChild>
