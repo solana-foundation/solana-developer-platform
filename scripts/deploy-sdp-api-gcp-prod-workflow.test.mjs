@@ -193,7 +193,10 @@ test("merge deploys promote signed per-merge images and never migrate", () => {
     /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
   );
   assert.match(workflow, /- name: Gate merge deploys on pending migrations/);
-  assert.match(workflow, /verdict="\$\(\.github\/scripts\/prod-merge-gate\.sh\)" \|\| gate_status=\$\?/);
+  assert.match(
+    workflow,
+    /verdict="\$\(\.github\/scripts\/prod-merge-gate\.sh\)" \|\| gate_status=\$\?/
+  );
 
   // A held merge must cost seconds and leave nothing behind: the gate runs
   // before GCP auth and before any image is promoted into prod Artifact Registry.
@@ -216,7 +219,10 @@ test("the orchestrator holds merge deploys on pending migrations instead of fail
   assert.match(changes, /prod: \$\{\{ steps\.detect\.outputs\.prod \}\}/);
   assert.match(changes, /prod_hold: \$\{\{ steps\.detect\.outputs\.prod_hold \}\}/);
   assert.match(changes, /CONTINUOUS_PROD_DEPLOY: \$\{\{ vars\.CONTINUOUS_PROD_DEPLOY \}\}/);
-  assert.match(changes, /verdict="\$\(\.github\/scripts\/prod-merge-gate\.sh\)" \|\| gate_status=\$\?/);
+  assert.match(
+    changes,
+    /verdict="\$\(\.github\/scripts\/prod-merge-gate\.sh\)" \|\| gate_status=\$\?/
+  );
 
   const prodJob = orchestrator.slice(orchestrator.indexOf("  deploy-api-prod:"));
   assert.match(prodJob, /if: >-\n\s+needs\.changes\.outputs\.prod == 'true' &&/);

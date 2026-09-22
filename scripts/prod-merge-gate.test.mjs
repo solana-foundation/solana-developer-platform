@@ -13,7 +13,11 @@ const gate = path.resolve(here, "../.github/scripts/prod-merge-gate.sh");
 const MIGRATIONS = "apps/sdp-api/src/db/migrations/postgres";
 
 function git(cwd, ...args) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 
 function repo() {
