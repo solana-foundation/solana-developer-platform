@@ -4,7 +4,10 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "../test-i18n";
-import { TreasurySolutionsWorkspace } from "./treasury-solutions-workspace";
+import {
+  EarnTransactionModalLoading,
+  TreasurySolutionsWorkspace,
+} from "./treasury-solutions-workspace";
 
 // jsdom implements no matchMedia, while the workspace's motion components read
 // it through useReducedMotion.
@@ -760,6 +763,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TreasurySolutionsWorkspace", () => {
+  it("shows immediate feedback while a deferred transaction modal loads", () => {
+    render(
+      <EnglishTestI18n>
+        <EarnTransactionModalLoading />
+      </EnglishTestI18n>
+    );
+
+    expect(screen.getByRole("dialog", { name: "Loading…" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Loading…");
+  });
+
   it("guides a treasury with no wallet straight into wallet setup", () => {
     mocks.walletsEmpty = true;
     mocks.positionsEmpty = true;

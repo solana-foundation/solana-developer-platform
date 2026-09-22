@@ -19,6 +19,7 @@ import {
   ArrowUpIcon,
   ArrowUpRightIcon,
   InfoIcon,
+  Loader2Icon,
   RefreshCwIcon,
   WalletCardsIcon,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
+import { Modal } from "@/components/ui/modal";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
   Table,
@@ -121,17 +123,34 @@ import {
 // module graph. They are not needed to inspect a portfolio, so load each only
 // after the corresponding action opens it. Outcome polling stays in the small
 // tracker module above and remains immediate after a reload.
+export function EarnTransactionModalLoading() {
+  const t = useTranslations();
+  const label = t("Shared.SharedComponents.loading");
+  return (
+    <Modal isOpen ariaLabel={label} showCloseButton={false} size="sm">
+      <div
+        aria-live="polite"
+        className="flex min-h-28 items-center justify-center gap-2 p-6 text-sm text-secondary"
+        role="status"
+      >
+        <Loader2Icon aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+        {label}
+      </div>
+    </Modal>
+  );
+}
+
 const EarnVaultDepositModal = dynamic(
   () => import("../earn/earn-vault-deposit-modal").then((module) => module.EarnVaultDepositModal),
-  { ssr: false }
+  { loading: EarnTransactionModalLoading, ssr: false }
 );
 const EarnVaultExitModal = dynamic(
   () => import("../earn/earn-vault-exit-modal").then((module) => module.EarnVaultExitModal),
-  { ssr: false }
+  { loading: EarnTransactionModalLoading, ssr: false }
 );
 const EarnWithdrawModal = dynamic(
   () => import("../earn/earn-withdraw-modal").then((module) => module.EarnWithdrawModal),
-  { ssr: false }
+  { loading: EarnTransactionModalLoading, ssr: false }
 );
 
 interface VaultBalanceProjection {

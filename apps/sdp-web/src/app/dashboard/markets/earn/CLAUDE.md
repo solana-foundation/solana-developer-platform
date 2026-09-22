@@ -230,7 +230,9 @@ nothing else; the program create still sends the body `requestId` form.
   directly and dynamically loads the three large transaction modals only when
   an action opens, so moving a tracker back into a modal would pull that modal's
   client graph into the initial portfolio route. The modal files re-export the
-  trackers only for compatibility; new callers import this module.
+  trackers only for compatibility; new callers import this module. Every
+  deferred surface uses the shared `EarnTransactionModalLoading` fallback so
+  the first click opens an accessible loading modal while its chunk arrives.
 - `earn-withdraw-modal.tsx` — portfolio-level withdrawal: stablecoin, amount,
   Solana destination; preview → confirm → submitted. Every figure it quotes
   comes from the PROVIDER, never a local estimate (PRO-1675) — see

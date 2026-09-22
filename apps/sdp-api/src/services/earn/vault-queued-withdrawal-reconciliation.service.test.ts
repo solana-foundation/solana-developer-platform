@@ -11,6 +11,7 @@ import {
   nextQueuedWithdrawalCheckAt,
   projectClosingEvent,
   reconcileAction,
+  visitOpenRequestsJustInTime,
 } from "./vault-queued-withdrawal-reconciliation.service";
 
 const provider = vi.hoisted(() => ({ client: null as Record<string, unknown> | null }));
@@ -136,6 +137,35 @@ describe("queued withdrawal reconciliation", () => {
     );
     expect(nextQueuedWithdrawalCheckAt("fulfillable", "0", now)).toBe("2026-09-22T12:01:00.000Z");
     expect(nextQueuedWithdrawalCheckAt("fulfilled", "0", now)).toBeNull();
+  });
+
+  it("claims each open request only when the prior request has finished", async () => {
+    const events: string[] = [];
+    const due = [request({ id: "request-1" }), request({ id: "request-2" })];
+    const claimOpenRequests = vi.fn(async () => {
+      events.push("claim");
+      return due.splice(0, 1);
+    });
+
+    await expect(
+      visitOpenRequestsJustInTime({ claimOpenRequests }, 3, async (row) => {
+        events.push(`start:${row.id}`);
+        await Promise.resolve();
+        events.push(`finish:${row.id}`);
+      })
+    ).resolves.toBe(2);
+
+    expect(claimOpenRequests).toHaveBeenCalledTimes(3);
+    expect(claimOpenRequests).toHaveBeenCalledWith(1);
+    expect(events).toEqual([
+      "claim",
+      "start:request-1",
+      "finish:request-1",
+      "claim",
+      "start:request-2",
+      "finish:request-2",
+      "claim",
+    ]);
   });
 
   it("decodes closing history with bounded parallel transaction reads", async () => {

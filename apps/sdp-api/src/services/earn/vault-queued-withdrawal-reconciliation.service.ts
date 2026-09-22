@@ -118,7 +118,6 @@ function emptyStats(actions: number, requests: number): QueueReconciliationStats
  * fulfilled or cancelled; otherwise the durable state remains
  * `closed_or_unknown` and is retried on the next sweep.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the bounded sweep keeps per-environment RPC failure isolation and batch draining explicit.
 export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<void> {
   const ledger = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   await ledger.cleanupExpiredReservations();
@@ -142,8 +141,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
     }
   }
   const actions = await ledger.claimUnsettledActions(ACTION_BATCH_SIZE);
-  const requests = await ledger.claimOpenRequests(REQUEST_BATCH_SIZE);
-  const stats = emptyStats(actions.length, requests.length);
+  const stats = emptyStats(actions.length, 0);
 
   for (const [environment, rows] of groupBy(actions, (row) => row.environment)) {
     const cluster = earnClusterFor(environment);
@@ -204,24 +202,27 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
     }
   }
 
-  for (const request of requests) {
-    try {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- bounded reconciliation pacing protects provider RPC.
-      const outcome = await reconcileRequest(env, ledger, request);
-      if (outcome === "advanced") stats.requestsAdvanced += 1;
-      else if (outcome === "closedUnknown") stats.requestsClosedUnknown += 1;
-    } catch (error) {
-      stats.errors += 1;
-      await ledger.recordIndexError({
-        withdrawalRequestId: request.id,
-        error: describeError(error),
-      });
-      getLogger().error(
-        { requestId: request.id, requestAddress: request.request_address, error },
-        "earn queued withdrawal reconciliation: request remains unresolved"
-      );
+  stats.requestsClaimed = await visitOpenRequestsJustInTime(
+    ledger,
+    REQUEST_BATCH_SIZE,
+    async (request) => {
+      try {
+        const outcome = await reconcileRequest(env, ledger, request);
+        if (outcome === "advanced") stats.requestsAdvanced += 1;
+        else if (outcome === "closedUnknown") stats.requestsClosedUnknown += 1;
+      } catch (error) {
+        stats.errors += 1;
+        await ledger.recordIndexError({
+          withdrawalRequestId: request.id,
+          error: describeError(error),
+        });
+        getLogger().error(
+          { requestId: request.id, requestAddress: request.request_address, error },
+          "earn queued withdrawal reconciliation: request remains unresolved"
+        );
+      }
     }
-  }
+  );
 
   logEvent(stats.errors > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_queued_withdrawal_reconciliation_tick",
@@ -237,6 +238,30 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
   if (stats.errors > 0) {
     throw new Error(`Earn queued withdrawal reconciliation had ${stats.errors} errors`);
   }
+}
+
+/**
+ * Claim each due request only when the worker is ready to reconcile it.
+ *
+ * Pre-claiming the whole tick lets a fixed lease expire while later rows wait
+ * in memory behind action and provider work. One-at-a-time claims keep the
+ * lease attached to active work while the max count still bounds each tick.
+ */
+export async function visitOpenRequestsJustInTime(
+  ledger: Pick<QueueLedger, "claimOpenRequests">,
+  maxRequests: number,
+  visit: (request: EarnVaultWithdrawalRequestRow) => Promise<void>
+): Promise<number> {
+  let claimed = 0;
+  while (claimed < maxRequests) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- claiming immediately before serial provider work keeps the durable lease fresh.
+    const [request] = await ledger.claimOpenRequests(1);
+    if (!request) break;
+    claimed += 1;
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- serial pacing protects provider and RPC capacity.
+    await visit(request);
+  }
+  return claimed;
 }
 
 function groupBy<T, K>(rows: readonly T[], key: (row: T) => K): Map<K, T[]> {
