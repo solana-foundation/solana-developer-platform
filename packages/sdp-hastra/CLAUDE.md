@@ -68,7 +68,11 @@ transaction fee; the separate 50 bps DEX tolerance is only a slippage bound.
   recent-blockhash action from the prior cycle is expired. Ignore arbitrary or
   failed mentions of the PDA. Operator completions must not use durable nonces.
 - `request_redeem` hardcodes the owner as request-account rent payer and rent
-  recipient. Par requests must refuse a different `rentPayer`.
+  recipient — the program has no payer knob. Sponsored par requests therefore
+  charge the builder-controlled creates (idempotent ATAs, the transient redeem
+  account) to the `rentPayer` and pre-fund the owner with exactly the request
+  account's rent, which the program's create consumes in the same transaction;
+  the completion/cancellation refund still goes to the owner.
 - Cancellation is deliberately not pause- or oracle-gated. It releases an
   obligation and Hastra's program permits it while paused, but it can still
   fail when the wYLDS account is frozen and its delegate must be revoked.

@@ -64,6 +64,8 @@ const I128_MODULUS = 1n << 128n;
 const MAX_ADMINISTRATORS = 5;
 const RPC_READ_TIMEOUT_MS = 30_000;
 const CLASSIC_TOKEN_ACCOUNT_BYTES = 165;
+/** Anchor `RedemptionRequest`: discriminator + owner + amount + mint + bump. */
+const REDEMPTION_REQUEST_ACCOUNT_BYTES = 81;
 const SIGNATURE_HISTORY_PAGE_SIZE = 1_000;
 const MAX_SIGNATURE_HISTORY_PAGES = 10;
 
@@ -1031,6 +1033,24 @@ function createAssociatedTokenInstruction(
   };
 }
 
+/**
+ * One System transfer of `lamports` from a sponsored rent payer to the owner:
+ * the prefund a sponsored par request prepends for `request_redeem`, whose
+ * account table hardcodes the owner as the request account's rent payer (see
+ * `buildParRedemptionRequest`). The sponsor signs nothing new — it is already
+ * the transaction fee payer, so compilation covers the transfer's source with
+ * the same fee-payer signature. Same mechanism as Veda's allowed-user prefund.
+ */
+function prefundOwnerRentInstruction(
+  rentPayer: PublicKey,
+  owner: PublicKey,
+  lamports: bigint
+): EarnVaultInstruction {
+  return web3Instruction(
+    SystemProgram.transfer({ fromPubkey: rentPayer, toPubkey: owner, lamports })
+  );
+}
+
 function web3Instruction(instruction: {
   programId: PublicKey;
   keys: readonly { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[];
@@ -1415,7 +1435,7 @@ function decodeRedemptionRequest(
 ): RedemptionRequestState {
   assertOwned(account, config.deployment.vaultMintProgramAddress, "Hastra redemption request");
   assertDiscriminator(account.data, "account", "RedemptionRequest");
-  if (account.data.length < 81) {
+  if (account.data.length < REDEMPTION_REQUEST_ACCOUNT_BYTES) {
     throw new SdpHastraError("REQUEST_UNREADABLE", "Hastra's redemption request is truncated.");
   }
   const request = {
@@ -2120,14 +2140,18 @@ export class HastraVaultDirectClient
     ctx: EarnRuntimeContext,
     input: EarnVaultParRedemptionRequestInput
   ): Promise<EarnVaultParRedemptionRequestPlan> {
-    if (input.rentPayer !== undefined && input.rentPayer !== input.owner) {
-      throw new SdpHastraError(
-        "REDEMPTION_REFUSED",
-        "Hastra's request instruction hardcodes the owner as both request rent payer and rent " +
-          "refund recipient; a different rentPayer cannot be represented honestly."
-      );
-    }
     const owner = publicKey("owner", input.owner, "REDEMPTION_REFUSED");
+    const rentPayer = publicKey("rentPayer", input.rentPayer ?? input.owner, "REDEMPTION_REFUSED");
+    // `request_redeem` hardcodes the owner as the request account's rent payer
+    // and refund recipient — the program has no payer knob, so a foreign
+    // rentPayer cannot take over that one account. Everything else
+    // rent-bearing in this plan is builder-controlled, so a sponsor funds the
+    // idempotent ATA creates and the transient redeem account, and the plan
+    // pre-funds the owner with exactly the request account's rent-exempt
+    // minimum: the program's create consumes the prefund in the same
+    // transaction, the owner nets zero, and the completion/cancellation refund
+    // still lands with the owner. Wallet-pays plans change nothing.
+    const sponsor = rentPayer.equals(owner) ? undefined : rentPayer;
     const shares = canonicalAmount(input.shares, "Share amount");
     return this.withRuntime(
       ctx,
@@ -2162,6 +2186,29 @@ export class HastraVaultDirectClient
           );
         }
         await assertRedemptionRequestReuseSafe(runtime, config, request.toBase58());
+        // The reuse check above proves the request PDA absent at build time,
+        // so a sponsor's prefund is exactly one account's rent and the
+        // program's create consumes it at execution. A PDA created in between
+        // leaves the owner the prefund as dust — the same bounded residual the
+        // Veda allowed-user prefund accepts.
+        let prefund: EarnVaultInstruction | undefined;
+        if (sponsor) {
+          const requestRentLamports = await rpcRequest<number>(
+            runtime,
+            // biome-ignore lint/security/noSecrets: public Solana JSON-RPC method name, not a credential.
+            "getMinimumBalanceForRentExemption",
+            [REDEMPTION_REQUEST_ACCOUNT_BYTES, { commitment: "confirmed" }],
+            "PROGRAM_MISMATCH",
+            "reading redemption-request rent"
+          );
+          if (!nonNegativeSafeInteger(requestRentLamports)) {
+            throw new SdpHastraError(
+              "PROGRAM_MISMATCH",
+              "The Solana RPC returned an invalid redemption-request rent."
+            );
+          }
+          prefund = prefundOwnerRentInstruction(sponsor, owner, BigInt(requestRentLamports));
+        }
         const wylds = new PublicKey(config.deployment.wYldsMint);
         const prime = new PublicKey(config.deployment.primeMint);
         const usdc = new PublicKey(config.depositMint);
@@ -2198,11 +2245,11 @@ export class HastraVaultDirectClient
         const intermediate = formatAtoms(intermediateAtoms);
         const transientWylds = await transientTokenAccountPlan({
           runtime,
-          payer: owner,
+          payer: rentPayer,
           owner,
           mint: wylds,
           destination: userWylds,
-          refundTo: owner,
+          refundTo: rentPayer,
           amount: intermediateAtoms,
         });
 
@@ -2210,9 +2257,10 @@ export class HastraVaultDirectClient
           cluster: runtime.cluster,
           instructions: [
             computeUnitLimitInstruction(HASTRA_NATIVE_COMPUTE_UNIT_LIMIT),
-            createAssociatedTokenInstruction(owner, owner, wylds),
+            ...(prefund ? [prefund] : []),
+            createAssociatedTokenInstruction(rentPayer, owner, wylds),
             // Completion is operator-signed, so prepare the user's canonical USDC destination now.
-            createAssociatedTokenInstruction(owner, owner, usdc),
+            createAssociatedTokenInstruction(rentPayer, owner, usdc),
             ...transientWylds.setupInstructions,
             stakeRedeemInstruction({
               config,

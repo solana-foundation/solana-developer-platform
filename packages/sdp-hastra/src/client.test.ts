@@ -624,15 +624,36 @@ describe("Hastra par redemption", () => {
     expect(plan.instructions[6]?.accounts[1]?.address).toBe(ata(OWNER, DEPLOYMENT.wYldsMint));
   });
 
-  it("refuses a foreign request rent payer because Hastra refunds rent to the owner", async () => {
-    await expect(
-      makeClient().buildParRedemptionRequest(CTX, {
-        providerReference: DEPLOYMENT.primeMint,
-        owner: OWNER,
-        shares: "1600",
-        rentPayer: PAYER,
-      })
-    ).rejects.toMatchObject({ code: "REDEMPTION_REFUSED" });
+  it("charges a sponsored rent payer for the creates and pre-funds the owner's request rent", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.primeMint, OWNER, 2_000_000_000n),
+    });
+    stubRpc(fixture.accounts);
+    const plan = await makeClient().buildParRedemptionRequest(CTX, {
+      providerReference: DEPLOYMENT.primeMint,
+      owner: OWNER,
+      shares: "1600",
+      rentPayer: PAYER,
+    });
+    // One System transfer of the request account's live rent, sponsor -> owner.
+    expect(plan.instructions[1]?.programAddress).toBe("11111111111111111111111111111111");
+    expect(plan.instructions[1]?.accounts).toEqual([
+      { address: PAYER, role: 3 },
+      { address: OWNER, role: 1 },
+    ]);
+    expect(Buffer.from(plan.instructions[1]?.data ?? "", "base64").readBigUInt64LE(4)).toBe(
+      2_039_280n
+    );
+    // The builder-controlled creates and the transient account charge the sponsor...
+    expect(plan.instructions[2]?.accounts[0]).toEqual({ address: PAYER, role: 3 });
+    expect(plan.instructions[3]?.accounts[0]).toEqual({ address: PAYER, role: 3 });
+    expect(plan.instructions[4]?.accounts[0]).toEqual({ address: PAYER, role: 3 });
+    // ...while the program-hardcoded request payer stays the owner.
+    const request = plan.instructions.at(-1);
+    expect(request?.accounts[0]).toEqual({ address: OWNER, role: 3 });
+    expect(instructionAmount(request as EarnVaultInstruction)).toBe(2_000_000_000n);
   });
 
   it("delegates only the isolated live output when canonical wYLDS already exists", async () => {
