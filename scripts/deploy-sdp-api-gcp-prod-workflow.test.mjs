@@ -223,6 +223,12 @@ test("the orchestrator holds merge deploys on pending migrations instead of fail
     changes,
     /verdict="\$\(\.github\/scripts\/prod-merge-gate\.sh\)" \|\| gate_status=\$\?/
   );
+  // A gate that cannot run must fail the job, never masquerade as a hold.
+  assert.match(
+    changes,
+    /\*\)\n\s+echo "::error::Prod merge gate could not be evaluated \(exit \$\{gate_status\}\)\."\n\s+exit 1/
+  );
+
 
   const prodJob = orchestrator.slice(orchestrator.indexOf("  deploy-api-prod:"));
   assert.match(prodJob, /if: >-\n\s+needs\.changes\.outputs\.prod == 'true' &&/);

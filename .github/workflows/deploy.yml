@@ -69,7 +69,9 @@ jobs:
           # that here, before the prod job exists, keeps a hold from failing
           # the run, promoting an unused image into prod Artifact Registry, or
           # posting "[FAILED] stage → prod" for a merge that was never going
-          # to prod. The prod workflow keeps the same gate as its own backstop.
+          # to prod. A gate that cannot run fails this job instead, so a broken
+          # gate never masquerades as a hold and silently suppresses prod. The
+          # prod workflow keeps the same gate as its own backstop.
           prod=false
           prod_hold=""
           if [ "$api" = true ] && [ "$EVENT_NAME" = push ] && [ "$CONTINUOUS_PROD_DEPLOY" = true ] \
@@ -79,7 +81,10 @@ jobs:
             case "$gate_status" in
               0) prod=true ;;
               2) prod_hold="$verdict" ;;
-              *) prod_hold="gate could not be evaluated (exit ${gate_status})" ;;
+              *)
+                echo "::error::Prod merge gate could not be evaluated (exit ${gate_status})."
+                exit 1
+                ;;
             esac
           fi
           if [ -n "$prod_hold" ]; then
