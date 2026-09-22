@@ -60,6 +60,7 @@ const terms: EarnVaultQueuedWithdrawalTerms = {
   allowWithdrawals: true,
   secondsToMaturity: 60,
   minimumSecondsToDeadline: 360,
+  maximumSecondsToDeadline: 7_776_000,
   minimumDiscountBps: 25,
   maximumDiscountBps: 75,
   minimumShares: "1",
@@ -223,6 +224,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     expect((screen.getByLabelText("Accept less (%)") as HTMLInputElement).value).toBe("0.25");
     expect((screen.getByLabelText("Time allowed (minutes)") as HTMLInputElement).value).toBe("6");
     expect(screen.getByText("Allowed: 0.25% to 0.75%")).toBeTruthy();
+    expect(screen.getByText("Allowed: 6 minutes to 90 days")).toBeTruthy();
     expect(
       screen.getByText("A larger reduction can make the request easier to complete.")
     ).toBeTruthy();
@@ -260,6 +262,23 @@ describe("EarnVaultQueuedWithdrawModal", () => {
       expect.objectContaining({ shares: "10" }),
       SECOND_KEY,
     ]);
+  });
+
+  it("refuses a deadline above the provider maximum before previewing", () => {
+    renderModal();
+
+    fireEvent.click(screen.getByText("Payout and timing"));
+    fireEvent.change(screen.getByLabelText("Time allowed (minutes)"), {
+      target: { value: "129601" },
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Use the allowed percentage and time range."
+    );
+    expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    expect(mocks.fetchPreview).not.toHaveBeenCalled();
   });
 
   it("converts plain percentages and minutes back to the provider values", async () => {

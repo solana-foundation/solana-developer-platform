@@ -11,8 +11,16 @@ const strategy: IntegrationStrategy = {
   withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
 };
 
+function transactionWire(message: readonly number[] = [1, 2, 3], signatureByte = 0): string {
+  const bytes = new Uint8Array(1 + 64 + message.length);
+  bytes[0] = 1;
+  bytes[1] = signatureByte;
+  bytes.set(message, 65);
+  return Buffer.from(bytes).toString("base64");
+}
+
 type GeneratedIntegration = {
-  listEarnStrategies(): Promise<Record<string, unknown>>;
+  listEarnStrategies(): Promise<Array<Record<string, unknown>>>;
   previewEarnDeposit(amount: string): Promise<Record<string, unknown>>;
   previewEarnWithdrawal(positionId: string, shares: string): Promise<Record<string, unknown>>;
   buildEarnDepositTransaction(input: {
@@ -43,6 +51,7 @@ type GeneratedIntegration = {
     withdrawalRequestId: string;
     feePayer?: string;
   }): Promise<Record<string, unknown>>;
+  listPendingEarnQueuedWithdrawals(ownerAddress: string): Promise<Array<Record<string, unknown>>>;
   signEarnTransaction(
     built: Record<string, unknown>,
     customerSigner: (transaction: string) => Promise<string>,
@@ -69,6 +78,7 @@ afterEach(() => {
 describe("generated Embedded Yield integration", () => {
   it("executes Veda quote and sponsor-ready build requests with the documented shapes", async () => {
     process.env.SDP_API_KEY = "sk_test_example";
+    const unsignedTransaction = transactionWire();
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
     vi.stubGlobal(
       "fetch",
@@ -91,7 +101,7 @@ describe("generated Embedded Yield integration", () => {
           data: {
             transaction: {
               transactionId: path.includes("deposit") ? "deposit-build" : "withdrawal-build",
-              transaction: "base64-transaction",
+              transaction: unsignedTransaction,
               ...(typeof feePayer === "string" ? { feePayer } : {}),
             },
           },
@@ -109,13 +119,20 @@ describe("generated Embedded Yield integration", () => {
     await expect(
       generated.signEarnTransaction(
         deposit,
-        async (transaction) => `${transaction}:customer`,
-        async (transaction) => `${transaction}:sponsor`
+        async () => transactionWire([1, 2, 3], 1),
+        async () => transactionWire([1, 2, 3], 2)
       )
-    ).resolves.toBe("base64-transaction:customer:sponsor");
+    ).resolves.toBe(transactionWire([1, 2, 3], 2));
     await expect(
-      generated.signEarnTransaction(deposit, async (transaction) => `${transaction}:customer`)
+      generated.signEarnTransaction(deposit, async () => transactionWire([1, 2, 3], 1))
     ).rejects.toThrow("Sponsor signature is required");
+    await expect(
+      generated.signEarnTransaction(
+        deposit,
+        async () => transactionWire([9, 9, 9], 1),
+        async (transaction) => transaction
+      )
+    ).rejects.toThrow("Signer changed the transaction message");
     await expect(
       generated.buildEarnWithdrawalTransaction({
         positionId: "position",
@@ -177,7 +194,7 @@ describe("generated Embedded Yield integration", () => {
           });
         }
         return Response.json({
-          data: { transaction: { transactionId: "build", transaction: "base64-transaction" } },
+          data: { transaction: { transactionId: "build", transaction: transactionWire() } },
         });
       })
     );
@@ -208,7 +225,7 @@ describe("generated Embedded Yield integration", () => {
         const path = new URL(url).pathname;
         requests.push({ path, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
         return Response.json({
-          data: { transaction: { transactionId: "build", transaction: "base64-transaction" } },
+          data: { transaction: { transactionId: "build", transaction: transactionWire() } },
         });
       })
     );
@@ -284,6 +301,34 @@ describe("generated Embedded Yield integration", () => {
     );
   });
 
+  it("loads every strategy page and refuses pagination that makes no progress", async () => {
+    process.env.SDP_API_KEY = "sk_test_example";
+    const completePages = [
+      { strategies: [{ id: "strategy_1" }], total: 2 },
+      { strategies: [{ id: "strategy_2" }], total: 2 },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ data: completePages.shift() }))
+    );
+    const generated = await loadGeneratedIntegration(strategy);
+    await expect(generated.listEarnStrategies()).resolves.toEqual([
+      { id: "strategy_1" },
+      { id: "strategy_2" },
+    ]);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: { strategies: [{ id: "strategy_1" }], total: 2 },
+        })
+      )
+    );
+    const repeated = await loadGeneratedIntegration(strategy);
+    await expect(repeated.listEarnStrategies()).rejects.toThrow("pagination made no progress");
+  });
+
   it("generates explicit queued request and post-deadline recovery calls", async () => {
     process.env.SDP_API_KEY = "sk_test_example";
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
@@ -293,6 +338,24 @@ describe("generated Embedded Yield integration", () => {
         const path = new URL(url).pathname;
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         requests.push({ path, body });
+        if (path.endsWith("withdrawal-options")) {
+          return Response.json({
+            data: {
+              queued: true,
+              queueAsset: {
+                allowWithdrawals: true,
+                minimumShares: "1",
+                minimumDiscountBps: 0,
+                maximumDiscountBps: 100,
+                minimumSecondsToDeadline: 300,
+                maximumSecondsToDeadline: 7_776_000,
+              },
+            },
+          });
+        }
+        if (path.endsWith("queued-withdrawal-previews")) {
+          return Response.json({ data: { blockingIssues: [] } });
+        }
         return Response.json({ data: { transaction: { transactionId: "queue-build" } } });
       })
     );
@@ -312,6 +375,19 @@ describe("generated Embedded Yield integration", () => {
 
     expect(requests).toEqual([
       {
+        path: "/v1/earn/external-wallet/withdrawal-options",
+        body: { positionId: "position" },
+      },
+      {
+        path: "/v1/earn/external-wallet/queued-withdrawal-previews",
+        body: {
+          positionId: "position",
+          shares: "2",
+          discountBps: 25,
+          deadlineSeconds: 600,
+        },
+      },
+      {
         path: "/v1/earn/external-wallet/withdrawal-request-transactions",
         body: {
           positionId: "position",
@@ -326,5 +402,95 @@ describe("generated Embedded Yield integration", () => {
         body: { withdrawalRequestId: "request_1", feePayer: "sponsor" },
       },
     ]);
+  });
+
+  it("refuses queue terms outside the live provider bounds before building", async () => {
+    process.env.SDP_API_KEY = "sk_test_example";
+    const paths: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        paths.push(path);
+        return Response.json({
+          data: {
+            queued: true,
+            queueAsset: {
+              allowWithdrawals: true,
+              minimumShares: "1.5",
+              minimumDiscountBps: 25,
+              maximumDiscountBps: 75,
+              minimumSecondsToDeadline: 300,
+              maximumSecondsToDeadline: 7_776_000,
+            },
+          },
+        });
+      })
+    );
+    const generated = await loadGeneratedIntegration(strategy);
+
+    await expect(
+      generated.buildEarnQueuedWithdrawalRequest({
+        positionId: "position",
+        shares: "1.499999",
+        discountBps: 25,
+        deadlineSeconds: 300,
+      })
+    ).rejects.toThrow("require at least 1.5 shares");
+    await expect(
+      generated.buildEarnQueuedWithdrawalRequest({
+        positionId: "position",
+        shares: "1.5",
+        discountBps: 25,
+        deadlineSeconds: 7_776_001,
+      })
+    ).rejects.toThrow("deadlineSeconds must be between 300 and 7776000");
+    expect(paths).toEqual([
+      "/v1/earn/external-wallet/withdrawal-options",
+      "/v1/earn/external-wallet/withdrawal-options",
+    ]);
+  });
+
+  it("restores every pending queued withdrawal and refuses a repeated cursor", async () => {
+    process.env.SDP_API_KEY = "sk_test_example";
+    const responses = [
+      {
+        withdrawalRequests: [{ withdrawalRequestId: "request_1" }],
+        hasMore: true,
+        nextCursor: "cursor_1",
+      },
+      {
+        withdrawalRequests: [{ withdrawalRequestId: "request_2" }],
+        hasMore: false,
+        nextCursor: null,
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ data: responses.shift() }))
+    );
+    const generated = await loadGeneratedIntegration(strategy);
+    await expect(generated.listPendingEarnQueuedWithdrawals("owner")).resolves.toEqual([
+      { withdrawalRequestId: "request_1" },
+      { withdrawalRequestId: "request_2" },
+    ]);
+
+    const cyclingCursors = ["cursor_1", "cursor_2", "cursor_1"];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: {
+            withdrawalRequests: [],
+            hasMore: true,
+            nextCursor: cyclingCursors.shift(),
+          },
+        })
+      )
+    );
+    const repeated = await loadGeneratedIntegration(strategy);
+    await expect(repeated.listPendingEarnQueuedWithdrawals("owner")).rejects.toThrow(
+      "cursor did not advance"
+    );
   });
 });

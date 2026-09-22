@@ -27,7 +27,10 @@ describe("Northstar transaction signing", () => {
     const unsigned = unsignedTransaction(customer.address, customer.address);
 
     const signed = getTransactionDecoder().decode(
-      Buffer.from(await signTransaction(unsigned, [customer]), "base64")
+      Buffer.from(
+        await signTransaction(unsigned, [customer], customer.address),
+        "base64"
+      )
     );
 
     expect(Object.keys(signed.signatures)).toEqual([customer.address]);
@@ -41,7 +44,11 @@ describe("Northstar transaction signing", () => {
 
     const signed = getTransactionDecoder().decode(
       Buffer.from(
-        await signTransaction(unsigned, [customer, northstar]),
+        await signTransaction(
+          unsigned,
+          [customer, northstar],
+          northstar.address
+        ),
         "base64"
       )
     );
@@ -52,6 +59,16 @@ describe("Northstar transaction signing", () => {
     ]);
     expect(signed.signatures[northstar.address]).not.toBeNull();
     expect(signed.signatures[customer.address]).not.toBeNull();
+  });
+
+  it("refuses to sign when the compiled fee payer differs from configuration", async () => {
+    const customer = await generateKeyPairSigner();
+    const unexpected = await generateKeyPairSigner();
+    const unsigned = unsignedTransaction(customer.address, unexpected.address);
+
+    await expect(
+      signTransaction(unsigned, [customer], customer.address)
+    ).rejects.toThrow("fee payer does not match");
   });
 });
 

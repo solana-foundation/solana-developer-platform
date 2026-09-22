@@ -18,6 +18,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import {
   ApiError,
+  cancelQueuedWithdrawal,
   createDeposit,
   createWithdrawal,
   getDashboard,
@@ -38,11 +39,12 @@ import {
   type SubmittedTransfer,
   startMovementPolling,
 } from "@/lib/movements";
-import type { DashboardData } from "@/types";
+import type { DashboardData, WithdrawalIntent } from "@/types";
 
 // Solana confirmation is the customer-visible finish line. Poll quickly until
 // confirmation, then let SDP track protocol finalization in the background.
 const BACKGROUND_REFRESH_MS = 30_000;
+const QUEUED_WITHDRAWAL_REFRESH_MS = 10_000;
 const RATE_LIMIT_PAUSE_MS = 10_000;
 
 const TRANSFER_COPY: Record<
@@ -276,7 +278,9 @@ export function App() {
     const interval =
       movementPolling || inFlight.length
         ? ACTIVE_MOVEMENT_REFRESH_MS
-        : BACKGROUND_REFRESH_MS;
+        : data?.withdrawalRequests.length
+          ? QUEUED_WITHDRAWAL_REFRESH_MS
+          : BACKGROUND_REFRESH_MS;
     const timer = window.setInterval(() => {
       if (
         document.visibilityState === "visible" &&
@@ -286,7 +290,12 @@ export function App() {
       }
     }, interval);
     return () => window.clearInterval(timer);
-  }, [inFlight.length, movementPolling, refresh]);
+  }, [
+    data?.withdrawalRequests.length,
+    inFlight.length,
+    movementPolling,
+    refresh,
+  ]);
 
   // After the last projection hands back to a reflected balance snapshot, take
   // one more look so the normal background view starts from fresh data.
@@ -301,14 +310,29 @@ export function App() {
     wasSettling.current = settling;
   }, [inFlight.length, movementPolling, refresh]);
 
-  async function transfer(direction: TransferDirection, amount: string) {
+  async function transfer(
+    direction: TransferDirection,
+    input: string | WithdrawalIntent
+  ) {
+    const amount = typeof input === "string" ? input : input.amount;
     const copy = TRANSFER_COPY[direction];
     setBusy(true);
     const toastId = toast.loading(copy.pending);
     try {
-      const { movement } = await (direction === "to-savings"
-        ? createDeposit(amount)
-        : createWithdrawal(amount));
+      const result =
+        direction === "to-savings"
+          ? { kind: "movement" as const, ...(await createDeposit(amount)) }
+          : await createWithdrawal(input as WithdrawalIntent);
+      if (result.kind === "queued") {
+        toast.success("Withdrawal requested", {
+          id: toastId,
+          description:
+            "Shares are escrowed. Northstar will keep checking for payment or recovery.",
+        });
+        void refresh();
+        return;
+      }
+      const { movement } = result;
       if (movement.status === "failed") {
         throw new Error(movement.failureReason ?? copy.failed);
       }
@@ -369,6 +393,28 @@ export function App() {
     }
   }
 
+  async function cancelWithdrawalRequest(withdrawalRequestId: string) {
+    setBusy(true);
+    const toastId = toast.loading("Returning shares");
+    try {
+      await cancelQueuedWithdrawal(withdrawalRequestId);
+      toast.success("Share recovery submitted", {
+        id: toastId,
+        description: "Northstar will keep checking the final queue outcome.",
+      });
+      void refresh();
+    } catch (caught) {
+      toast.error(
+        caught instanceof Error
+          ? caught.message
+          : "Could not return the queued shares",
+        { id: toastId }
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const activity = data
     ? applySubmittedTransfers(data, submittedTransfers)
     : data;
@@ -388,7 +434,8 @@ export function App() {
         onRetry={() => void refresh()}
         onRefresh={() => void refreshWithProgress()}
         onDeposit={(amount) => transfer("to-savings", amount)}
-        onWithdraw={(amount) => transfer("to-checking", amount)}
+        onWithdraw={(input) => transfer("to-checking", input)}
+        onCancelQueuedWithdrawal={cancelWithdrawalRequest}
       />
       <Toaster richColors position="bottom-right" />
     </>
@@ -405,6 +452,7 @@ function BankShell({
   onRefresh,
   onDeposit,
   onWithdraw,
+  onCancelQueuedWithdrawal,
 }: {
   loading: boolean;
   error?: string;
@@ -414,7 +462,8 @@ function BankShell({
   onRetry: () => void;
   onRefresh: () => void;
   onDeposit: (amount: string) => Promise<void>;
-  onWithdraw: (amount: string) => Promise<void>;
+  onWithdraw: (input: WithdrawalIntent) => Promise<void>;
+  onCancelQueuedWithdrawal: (withdrawalRequestId: string) => Promise<void>;
 }) {
   return (
     <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
@@ -432,6 +481,7 @@ function BankShell({
               onRefresh={onRefresh}
               onDeposit={onDeposit}
               onWithdraw={onWithdraw}
+              onCancelQueuedWithdrawal={onCancelQueuedWithdrawal}
             />
           ) : null}
         </main>

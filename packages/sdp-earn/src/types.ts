@@ -573,6 +573,8 @@ export interface EarnVaultQueuedWithdrawalTerms {
   secondsToMaturity: number;
   /** Minimum cancellation window after maturity. */
   minimumSecondsToDeadline: number;
+  /** Maximum cancellation window after maturity accepted by the queue program. */
+  maximumSecondsToDeadline: number;
   minimumDiscountBps: number;
   maximumDiscountBps: number;
   /** Minimum request size, canonical to the vault share mint. */

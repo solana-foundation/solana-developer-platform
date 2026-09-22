@@ -4,6 +4,7 @@ import {
   EARN_LIQUIDITY_TERMS,
   EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
+  EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS,
   EARN_STRATEGY_SOURCE_KINDS,
   EARN_SWAP_MAX_SLIPPAGE_BPS,
   SOLANA_CLUSTERS,
@@ -433,7 +434,7 @@ const earnVaultQueuedWithdrawalTermsShape = {
   shares: earnWithdrawalSharesSchema,
   discountBps: z.number().int().min(0).max(10_000),
   /** Seconds after maturity during which a solver may fulfill the request. */
-  deadlineSeconds: z.number().int().positive().max(31_536_000),
+  deadlineSeconds: z.number().int().positive().max(EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS),
 } as const;
 
 export const earnVaultWithdrawalOptionsSchema = z
@@ -605,7 +606,7 @@ const earnExternalWalletQueuedTermsShape = {
   ...earnVaultQueuedWithdrawalTermsShape,
 } as const;
 
-/** Optional-auth locator shared by queued exit options, previews and builds. */
+/** Optional-auth locator shared by queued exit options and previews. */
 export const earnExternalWalletWithdrawalOptionsSchema = z.union([
   z.object({ positionId: earnWithdrawalPositionIdSchema }).strict(),
   z
@@ -632,40 +633,24 @@ export const earnExternalWalletQueuedWithdrawalPreviewSchema = z.union([
     .strict(),
 ]);
 
-export const earnExternalWalletWithdrawalRequestTransactionSchema = z.union([
-  z
-    .object({
-      positionId: earnWithdrawalPositionIdSchema,
-      ...earnExternalWalletFeePayerShape,
-      ...earnExternalWalletQueuedTermsShape,
-    })
-    .strict(),
-  z
-    .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
-      ...earnExternalWalletFeePayerShape,
-      ...earnExternalWalletQueuedTermsShape,
-    })
-    .strict(),
-]);
+/**
+ * Queue builds are keyed-only because the durable request id, polling and
+ * post-deadline recovery are part of the supported money-out contract.
+ */
+export const earnExternalWalletWithdrawalRequestTransactionSchema = z
+  .object({
+    positionId: earnWithdrawalPositionIdSchema,
+    ...earnExternalWalletFeePayerShape,
+    ...earnExternalWalletQueuedTermsShape,
+  })
+  .strict();
 
-export const earnExternalWalletWithdrawalRequestCancelTransactionSchema = z.union([
-  z
-    .object({
-      withdrawalRequestId: z.string().min(1).max(128),
-      ...earnExternalWalletFeePayerShape,
-    })
-    .strict(),
-  z
-    .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
-      requestAddress: solanaOwnerAddressSchema,
-      ...earnExternalWalletFeePayerShape,
-    })
-    .strict(),
-]);
+export const earnExternalWalletWithdrawalRequestCancelTransactionSchema = z
+  .object({
+    withdrawalRequestId: z.string().min(1).max(128),
+    ...earnExternalWalletFeePayerShape,
+  })
+  .strict();
 
 export const earnExternalWalletWithdrawalRequestsQuerySchema = z
   .object({

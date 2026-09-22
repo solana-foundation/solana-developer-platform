@@ -1,7 +1,9 @@
 import "server-only";
 
 import {
+  bytesEqual,
   getBase64EncodedWireTransaction,
+  getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
   type KeyPairSigner,
   partiallySignTransaction,
@@ -55,15 +57,30 @@ let verifiedRpc: { rpcUrl: string; cluster: SolanaCluster } | undefined;
 
 export async function signTransaction(
   transactionBase64: string,
-  signers: readonly KeyPairSigner[]
+  signers: readonly KeyPairSigner[],
+  expectedFeePayer: string
 ): Promise<string> {
   const transaction = getTransactionDecoder().decode(
     Buffer.from(transactionBase64, "base64")
   );
+  const message = getCompiledTransactionMessageDecoder().decode(
+    transaction.messageBytes
+  );
+  if (message.staticAccounts[0] !== expectedFeePayer) {
+    throw new Error(
+      "SDP transaction fee payer does not match the configured signer"
+    );
+  }
+  if (!signers.some((signer) => signer.address === expectedFeePayer)) {
+    throw new Error("The configured fee payer signer is missing");
+  }
   const signed = await partiallySignTransaction(
     signers.map((signer) => signer.keyPair),
     transaction
   );
+  if (!bytesEqual(transaction.messageBytes, signed.messageBytes)) {
+    throw new Error("Signing changed the transaction message");
+  }
   return getBase64EncodedWireTransaction(signed);
 }
 

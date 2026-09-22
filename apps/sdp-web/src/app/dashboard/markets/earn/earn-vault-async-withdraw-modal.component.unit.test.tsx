@@ -88,6 +88,7 @@ const route = {
     allowWithdrawals: true,
     secondsToMaturity: 60,
     minimumSecondsToDeadline: 300,
+    maximumSecondsToDeadline: 7_776_000,
     minimumDiscountBps: 10,
     maximumDiscountBps: 100,
     minimumShares: "1",

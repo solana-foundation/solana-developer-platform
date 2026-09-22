@@ -6,7 +6,9 @@ import {
   earnExternalWalletMovementsQuerySchema,
   earnExternalWalletPositionSummaryQuerySchema,
   earnExternalWalletPositionsQuerySchema,
+  earnExternalWalletWithdrawalRequestsQuerySchema,
   earnStrategyIdParamsSchema,
+  earnVaultWithdrawalRequestParamsSchema,
   listEarnStrategiesQuerySchema,
 } from "@/routes/earn/schemas";
 import { errorResponseSchema } from "../schemas/base";
@@ -19,9 +21,18 @@ import {
   earnExternalWalletMovementsResponse,
   earnExternalWalletPositionSummaryResponse,
   earnExternalWalletPositionsResponse,
+  earnExternalWalletQueuedWithdrawalPreviewRequest,
+  earnExternalWalletQueuedWithdrawalPreviewResponse,
   earnExternalWalletSubmitRequest,
+  earnExternalWalletWithdrawalOptionsRequest,
+  earnExternalWalletWithdrawalOptionsResponse,
   earnExternalWalletWithdrawalPreviewRequest,
   earnExternalWalletWithdrawalPreviewResponse,
+  earnExternalWalletWithdrawalRequestCancelTransactionRequest,
+  earnExternalWalletWithdrawalRequestResponse,
+  earnExternalWalletWithdrawalRequestsResponse,
+  earnExternalWalletWithdrawalRequestTransactionRequest,
+  earnExternalWalletWithdrawalRequestTransactionResponse,
   earnExternalWalletWithdrawalResponse,
   earnExternalWalletWithdrawalTransactionRequest,
   earnExternalWalletWithdrawalTransactionResponse,
@@ -533,6 +544,220 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       200: {
         description: "Recorded withdrawal movement",
         content: jsonContent(earnExternalWalletWithdrawalResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+    },
+  });
+
+  registerEarnExternalWalletQueuedWithdrawalPaths(registry, security);
+}
+
+function registerEarnExternalWalletQueuedWithdrawalPaths(
+  registry: OpenAPIRegistry,
+  security: EarnSecurityMatrix
+) {
+  registry.registerPath({
+    method: "post",
+    path: "/v1/earn/external-wallet/withdrawal-options",
+    tags: ["Earn"],
+    summary: "Discover external-wallet withdrawal routes",
+    operationId: "getEarnExternalWalletWithdrawalOptions",
+    description:
+      "Reads atomic, provider-order and queued routes independently from live provider state. " +
+      "Call this when the customer starts an exit and let them choose when more than one route " +
+      "is available. Never infer a route from the strategy's liquidity term. Anonymous callers " +
+      "may discover by strategy and owner; authenticated callers use their tenant position.",
+    security: security.optional,
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(earnExternalWalletWithdrawalOptionsRequest),
+      },
+    },
+    responses: {
+      200: {
+        description: "Live withdrawal routes and queue limits",
+        content: jsonContent(earnExternalWalletWithdrawalOptionsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/earn/external-wallet/queued-withdrawal-previews",
+    tags: ["Earn"],
+    summary: "Preview a queued external-wallet withdrawal",
+    operationId: "createEarnExternalWalletQueuedWithdrawalPreview",
+    description:
+      "Quotes the expected discounted payout, maturity and deadline from live queue state. " +
+      "Validate shares, discount and deadline against withdrawal-options first, then refuse " +
+      "any blockingIssues before asking the customer to confirm. Read-only and safe to retry.",
+    security: security.optional,
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(earnExternalWalletQueuedWithdrawalPreviewRequest),
+      },
+    },
+    responses: {
+      200: {
+        description: "Expected queued-withdrawal terms",
+        content: jsonContent(earnExternalWalletQueuedWithdrawalPreviewResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 501, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/earn/external-wallet/withdrawal-request-transactions",
+    tags: ["Earn"],
+    summary: "Build an unsigned queued-withdrawal request",
+    operationId: "createEarnExternalWalletWithdrawalRequestTransaction",
+    description:
+      "Builds a keyed, submit-capable queue request for a tenant position. Landing this " +
+      "transaction transfers the requested shares into provider escrow; it does not pay the " +
+      "customer. Persist the later withdrawalRequestId and track the durable request through " +
+      "fulfilment or post-deadline cancellation.",
+    security: security.required,
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(earnExternalWalletWithdrawalRequestTransactionRequest),
+      },
+    },
+    responses: {
+      200: {
+        description: "Unsigned queued-withdrawal request transaction",
+        content: jsonContent(earnExternalWalletWithdrawalRequestTransactionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 501, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/earn/external-wallet/withdrawal-requests",
+    tags: ["Earn"],
+    summary: "Submit a signed queued-withdrawal request",
+    operationId: "createEarnExternalWalletWithdrawalRequest",
+    description:
+      "Verifies every signature over the exact built message, records the request before " +
+      "broadcast, then sends it. Idempotency-Key is required. A same-key retry returns the " +
+      "original durable request; the build is consumable exactly once.",
+    security: security.required,
+    request: {
+      headers: projectScopeWithRequiredIdempotencyHeaders,
+      body: { required: true, content: jsonContent(earnExternalWalletSubmitRequest) },
+    },
+    responses: {
+      200: {
+        description: "Recorded queued-withdrawal request",
+        content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/withdrawal-requests",
+    tags: ["Earn"],
+    summary: "List an external wallet's queued withdrawals",
+    operationId: "listEarnExternalWalletWithdrawalRequests",
+    description:
+      "Returns one strict keyset page for the required ownerAddress in the active project. " +
+      "Use settled=false on startup and after reconnecting to restore every request that still " +
+      "needs fulfilment, classification or cancellation. Page until hasMore is false.",
+    security: security.required,
+    request: {
+      headers: projectScopeHeaders,
+      query: earnExternalWalletWithdrawalRequestsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Queued-withdrawal request page",
+        content: jsonContent(earnExternalWalletWithdrawalRequestsResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+    tags: ["Earn"],
+    summary: "Get one queued-withdrawal request",
+    operationId: "getEarnExternalWalletWithdrawalRequest",
+    description:
+      "Returns the last durable lifecycle observation. Request creation is share escrow, not " +
+      "payout. Only fulfilled, cancelled and failed are terminal. Keep polling " +
+      "closedOrUnknown because SDP has not yet authenticated whether the closed request paid " +
+      "assets or returned shares.",
+    security: security.required,
+    request: {
+      headers: projectScopeHeaders,
+      params: earnVaultWithdrawalRequestParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Durable queued-withdrawal request",
+        content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 429, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+    tags: ["Earn"],
+    summary: "Build an unsigned queued-withdrawal cancellation",
+    operationId: "createEarnExternalWalletWithdrawalRequestCancelTransaction",
+    description:
+      "Builds the owner-signed recovery transaction after status becomes expiredCancelable. " +
+      "The Solana queue permits fulfilment through the deadline and cancellation only after " +
+      "it, so do not offer recovery while the request is pending or fulfillable.",
+    security: security.required,
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(earnExternalWalletWithdrawalRequestCancelTransactionRequest),
+      },
+    },
+    responses: {
+      200: {
+        description: "Unsigned queued-withdrawal cancellation transaction",
+        content: jsonContent(earnExternalWalletWithdrawalRequestTransactionResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 501, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/earn/external-wallet/withdrawal-request-cancellations",
+    tags: ["Earn"],
+    summary: "Submit a signed queued-withdrawal cancellation",
+    operationId: "createEarnExternalWalletWithdrawalRequestCancellation",
+    description:
+      "Verifies the signed recovery transaction, records it before broadcast and returns the " +
+      "same durable request. Idempotency-Key is required. Keep polling until cancelled, " +
+      "fulfilled or failed because solver fulfilment may race recovery.",
+    security: security.required,
+    request: {
+      headers: projectScopeWithRequiredIdempotencyHeaders,
+      body: { required: true, content: jsonContent(earnExternalWalletSubmitRequest) },
+    },
+    responses: {
+      200: {
+        description: "Recorded queued-withdrawal cancellation",
+        content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
     },

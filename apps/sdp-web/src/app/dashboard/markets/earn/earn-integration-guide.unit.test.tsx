@@ -146,7 +146,7 @@ describe("EarnIntegrationGuide", () => {
 
     // All five concerns stay visible as navigation, while only the active code
     // slice renders. This keeps the whole flow findable without a wizard.
-    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw", "Asynchronous exits"];
+    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw", "Queued withdrawals"];
     const serverFlow = screen.getByLabelText("Server flow");
     expect(within(serverFlow).getAllByRole("button")).toHaveLength(5);
     expect(
@@ -184,7 +184,10 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
     expect(code).not.toContain("crypto.randomUUID()");
     expect(code).toContain('const STRATEGY_ID = "earn_strategy_live"');
-    expect(code).toContain("/v1/earn/strategies?page=1&pageSize=100");
+    expect(code).toContain(
+      "new URLSearchParams({ page: String(page), pageSize: String(pageSize) })"
+    );
+    expect(code).toContain("strategy pagination made no progress before the reported total");
     expect(code).toContain("ownerAddress");
     // The preview helpers ship for every strategy, but a strategy with no
     // slippage contract must not compute or send a floor from one.

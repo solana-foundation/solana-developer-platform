@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
@@ -27,6 +28,12 @@ function getJsonExamples(value: unknown) {
 
 function getWalletResponseSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallet ?? {};
+}
+
+function literalEarnPaths(source: string): string[] {
+  return Array.from(new Set(source.match(/\/v1\/earn\/[A-Za-z0-9{}._/-]+/g) ?? []))
+    .filter((path) => !path.endsWith("/"))
+    .sort();
 }
 
 function getWalletListItemSchema(value: unknown): TestJsonSchema {
@@ -128,6 +135,14 @@ describe("OpenAPI spec", () => {
         "POST /v1/earn/external-wallet/withdrawal-previews",
         "POST /v1/earn/external-wallet/withdrawal-transactions",
         "POST /v1/earn/external-wallet/withdrawals",
+        "POST /v1/earn/external-wallet/withdrawal-options",
+        "POST /v1/earn/external-wallet/queued-withdrawal-previews",
+        "POST /v1/earn/external-wallet/withdrawal-request-transactions",
+        "POST /v1/earn/external-wallet/withdrawal-requests",
+        "GET /v1/earn/external-wallet/withdrawal-requests",
+        "GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+        "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+        "POST /v1/earn/external-wallet/withdrawal-request-cancellations",
       ].sort()
     );
     expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
@@ -154,6 +169,8 @@ describe("OpenAPI spec", () => {
       { method: "post", path: "/v1/earn/external-wallet/deposit-transactions" },
       { method: "post", path: "/v1/earn/external-wallet/withdrawal-previews" },
       { method: "post", path: "/v1/earn/external-wallet/withdrawal-transactions" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-options" },
+      { method: "post", path: "/v1/earn/external-wallet/queued-withdrawal-previews" },
     ] as const;
     const keyedOnlyOperations = [
       { method: "get", path: "/v1/earn/external-wallet/positions/summary" },
@@ -163,6 +180,21 @@ describe("OpenAPI spec", () => {
       { method: "get", path: "/v1/earn/external-wallet/earnings" },
       { method: "post", path: "/v1/earn/external-wallet/deposits" },
       { method: "post", path: "/v1/earn/external-wallet/withdrawals" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-request-transactions" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-requests" },
+      { method: "get", path: "/v1/earn/external-wallet/withdrawal-requests" },
+      {
+        method: "get",
+        path: "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+      },
+      {
+        method: "post",
+        path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+      },
+      {
+        method: "post",
+        path: "/v1/earn/external-wallet/withdrawal-request-cancellations",
+      },
     ] as const;
 
     expect(
@@ -278,6 +310,37 @@ describe("OpenAPI spec", () => {
     expect(Buffer.from(signedTransactionExample as string, "base64").toString("base64")).toBe(
       signedTransactionExample
     );
+  });
+
+  it("keeps every literal Embedded Yield guide route in public OpenAPI", () => {
+    const publicDocument = createPublicOpenApiDocument();
+    const guide = readFileSync(
+      new URL("../../../sdp-docs/content/docs/guides/embedded-yield.mdx", import.meta.url),
+      "utf8"
+    );
+    const generatedModule = readFileSync(
+      new URL(
+        "../../../sdp-web/src/app/dashboard/markets/earn/earn-integration-snippets.ts",
+        import.meta.url
+      ),
+      "utf8"
+    );
+    const referencedPaths = literalEarnPaths(`${guide}\n${generatedModule}`);
+
+    expect(referencedPaths).toEqual(
+      expect.arrayContaining([
+        "/v1/earn/external-wallet/withdrawal-options",
+        "/v1/earn/external-wallet/queued-withdrawal-previews",
+        "/v1/earn/external-wallet/withdrawal-request-transactions",
+        "/v1/earn/external-wallet/withdrawal-requests",
+        "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+        "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+        "/v1/earn/external-wallet/withdrawal-request-cancellations",
+      ])
+    );
+    for (const path of referencedPaths) {
+      expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
+    }
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {

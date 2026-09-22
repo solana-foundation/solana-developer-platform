@@ -914,11 +914,13 @@ All endpoints live under `/v1/earn`. Every code sample uses one Solana SDK, `@so
 | --- | --- | --- |
 | List and inspect strategies | Yes | Yes |
 | Preview deposits and withdrawals | Yes | Yes |
-| Build unsigned external-wallet transactions | Yes, owner pays | Yes, owner or your `feePayer` |
+| Build instant deposit and withdrawal transactions | Yes, owner pays | Yes, owner or your `feePayer` |
+| Discover and preview queued withdrawals | Yes | Yes |
+| Build, submit, track, and recover a queued withdrawal | No | Yes |
 | Submit signed transactions through SDP | No | Yes, `earn:write` |
 | Track movements, positions, balances, and earnings | No | Yes, `earn:read` |
 
-Keyless requests carry no project, so you pick the shelf: `GET /v1/earn/strategies?environment=sandbox` lists devnet strategies, the default `production` lists mainnet ones, and a quote or build follows the strategy you name. They create no record: the response carries no `movementId`, and you sign, broadcast, and track the transaction yourself. A signed production build moves real funds. Keyed requests carry your project's environment (sandbox runs on devnet), can name a `feePayer`, and can be submitted to SDP, which records the movement before broadcast and reconciles it to a terminal state.
+Keyless requests carry no project, so you pick the shelf: `GET /v1/earn/strategies?environment=sandbox` lists devnet strategies, the default `production` lists mainnet ones, and an instant quote or build follows the strategy you name. They create no record: the response carries no `movementId`, and you sign, broadcast, and track the transaction yourself. A signed production build moves real funds. Queued request and cancellation builds are intentionally keyed-only because durable status and post-deadline recovery are part of that money-out contract. Keyed requests carry your project's environment (sandbox runs on devnet), can name a `feePayer`, and can be submitted to SDP, which records the movement or request before broadcast and reconciles it to a terminal state.
 
 **The key.** Create a Developer API key for your project in the dashboard; that role includes `earn:read` and `earn:write`. Start in sandbox, which runs on devnet. A strategy is depositable when `fundable` is `true` and `status` is `active`.
 
@@ -986,6 +988,14 @@ Authenticate with `Authorization: Bearer <SDP_API_KEY>`. The dashboard's **Embed
 | Preview a withdrawal | `POST /v1/earn/external-wallet/withdrawal-previews` |
 | Build a withdrawal | `POST /v1/earn/external-wallet/withdrawal-transactions` |
 | Submit the signed withdrawal | `POST /v1/earn/external-wallet/withdrawals` |
+| Discover available withdrawal routes | `POST /v1/earn/external-wallet/withdrawal-options` |
+| Preview a queued withdrawal | `POST /v1/earn/external-wallet/queued-withdrawal-previews` |
+| Build a queued request | `POST /v1/earn/external-wallet/withdrawal-request-transactions` |
+| Submit a queued request | `POST /v1/earn/external-wallet/withdrawal-requests` |
+| Restore queued requests | `GET /v1/earn/external-wallet/withdrawal-requests?ownerAddress=…&settled=false` |
+| Poll a queued request | `GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` |
+| Build post-deadline recovery | `POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions` |
+| Submit post-deadline recovery | `POST /v1/earn/external-wallet/withdrawal-request-cancellations` |
 
 Every per-owner read addresses the customer's wallet the same way: a required `ownerAddress` query parameter.
 
@@ -1085,8 +1095,10 @@ Statuses are `requested` (SDP recorded the signed transaction but has not yet se
 
 ```ts
   createKeyPairFromBytes,
+  getAddressFromPublicKey,
   getBase64EncodedWireTransaction,
   getBase64Encoder,
+  getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
   partiallySignTransaction,
 } from "@solana/kit";
@@ -1100,15 +1112,30 @@ const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transac
 
 // 2. The customer signs in your app, exactly as before.
 
-// 3. Co-sign with the sponsor's key on your backend, then submit.
+// 3. Verify the customer returned the exact message SDP built.
+const decoder = getTransactionDecoder();
+const original = decoder.decode(getBase64Encoder().encode(transaction.transaction));
+const customerSigned = decoder.decode(getBase64Encoder().encode(customerSignedTransaction));
+if (
+  original.messageBytes.length !== customerSigned.messageBytes.length ||
+  original.messageBytes.some((byte, index) => byte !== customerSigned.messageBytes[index])
+) {
+  throw new Error("Customer signer changed the transaction message");
+}
+
+// 4. Verify the configured sponsor is the compiled fee payer, co-sign, then submit.
 const sponsor = await createKeyPairFromBytes(SPONSOR_SECRET_KEY);
-const decoded = getTransactionDecoder().decode(getBase64Encoder().encode(customerSignedTransaction));
+const sponsorAddress = await getAddressFromPublicKey(sponsor.publicKey);
+const message = getCompiledTransactionMessageDecoder().decode(customerSigned.messageBytes);
+if (sponsorAddress !== SPONSOR_ADDRESS || message.staticAccounts[0] !== SPONSOR_ADDRESS) {
+  throw new Error("Sponsor key or transaction fee payer does not match configuration");
+}
 const signedTransaction = getBase64EncodedWireTransaction(
-  await partiallySignTransaction([sponsor], decoded),
+  await partiallySignTransaction([sponsor], customerSigned),
 );
 ```
 
-The generated module wraps step 3 as `createSponsorSigner(secretKey)`, so `signEarnTransaction(built, customerSigner, sponsorSigner)` collects both signatures whenever the build echoes a `feePayer`.
+The generated module wraps these checks as `createSponsorSigner(secretKey, expectedFeePayer)`. Its `signEarnTransaction(built, customerSigner, sponsorSigner)` verifies that neither signer changed the message before it returns the co-signed bytes.
 
 What to know when sponsoring:
 
@@ -1169,6 +1196,123 @@ const { withdrawal } = await sdpFetch("/v1/earn/external-wallet/withdrawals", {
 });
 ```
 
+## 6. Queued withdrawals
+
+Some vaults offer an on-chain withdrawal queue in addition to, or instead of, an instant exit. Discover the live routes when the customer starts withdrawing. Do not infer them from `liquidityTerm`, and do not silently fall back from the route the customer selected.
+
+```ts
+const options = await sdpFetch("/v1/earn/external-wallet/withdrawal-options", {
+  method: "POST",
+  headers: sdpHeaders(),
+  body: JSON.stringify({ positionId }),
+});
+
+if (!options.queued || !options.queueAsset?.allowWithdrawals) {
+  throw new Error("Queued withdrawals are not currently available");
+}
+```
+
+When both `instant` and `queued` are true, present both choices. An instant withdrawal pays assets atomically. A queued request moves the selected shares into provider escrow and pays nothing yet. Show the customer the queue's live terms before confirmation:
+
+- `minimumShares`
+- `minimumDiscountBps` through `maximumDiscountBps`
+- `minimumSecondsToDeadline` through `maximumSecondsToDeadline`
+- `secondsToMaturity`
+
+Use exact decimal comparison for shares. Do not convert token quantities to JavaScript numbers. The maximum solver window is currently 90 days, but integrations should always honor the live `maximumSecondsToDeadline` rather than copying that value.
+
+Preview the exact request after validating those ranges:
+
+```ts
+const preview = await sdpFetch("/v1/earn/external-wallet/queued-withdrawal-previews", {
+  method: "POST",
+  headers: sdpHeaders(),
+  body: JSON.stringify({ positionId, shares, discountBps, deadlineSeconds }),
+});
+
+if (preview.blockingIssues.length > 0) {
+  throw new Error(preview.blockingIssues.map((issue) => issue.message).join("; "));
+}
+// Show preview.assets, preview.maturityTimestamp and preview.deadlineTimestamp.
+```
+
+Build, sign and submit the request with the same customer and optional sponsor flow used above:
+
+```ts
+const { transaction } = await sdpFetch(
+  "/v1/earn/external-wallet/withdrawal-request-transactions",
+  {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ positionId, shares, discountBps, deadlineSeconds, feePayer }),
+  },
+);
+
+// The customer signs transaction.transaction. If feePayer is present, verify
+// the message and fee payer before adding the sponsor signature.
+const { withdrawalRequest } = await sdpFetch(
+  "/v1/earn/external-wallet/withdrawal-requests",
+  {
+    method: "POST",
+    headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
+    body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),
+  },
+);
+```
+
+Persist `withdrawalRequest.withdrawalRequestId`. Confirmation here means the owner-signed request was recorded and submitted. It does not mean assets were paid.
+
+Poll the durable request and restore outstanding requests after every startup, reconnect or browser refresh:
+
+```ts
+const { withdrawalRequest: current } = await sdpFetch(
+  `/v1/earn/external-wallet/withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}`,
+  { headers: sdpHeaders() },
+);
+
+const query = new URLSearchParams({ ownerAddress, settled: "false" });
+const page = await sdpFetch(`/v1/earn/external-wallet/withdrawal-requests?${query}`, {
+  headers: sdpHeaders(),
+});
+// Follow nextCursor until hasMore is false. Refuse a missing or repeated cursor.
+```
+
+| Status | Customer meaning | Action |
+| --- | --- | --- |
+| `creating` | Signed request recorded; chain outcome unresolved. | Keep polling. Do not credit assets. |
+| `pending` | Shares are escrowed; maturity has not arrived. | Show maturity time. |
+| `fulfillable` | The solver window is open. | Keep polling through the deadline. |
+| `expiredCancelable` | The deadline passed without an authenticated fulfilment. | Offer share recovery. |
+| `cancelling` | Recovery was submitted. | Keep polling because fulfilment may race it. |
+| `closedOrUnknown` | The request account closed, but its finalized close event has not yet proved payout or recovery. | Keep polling. Credit neither assets nor shares. |
+| `fulfilled` | A finalized provider event proved the asset payout. | Terminal. The payout appears once in activity and earnings. |
+| `cancelled` | A finalized provider event proved the shares returned. | Terminal. Refresh the position. |
+| `failed` | Request creation or recovery failed definitively. | Terminal. Show `failureReason`. |
+
+The Solana queue permits solver fulfilment at the deadline. Cancellation is valid only after the deadline, so use `expiredCancelable` rather than a client clock to enable recovery:
+
+```ts
+if (current.status === "expiredCancelable") {
+  const { transaction } = await sdpFetch(
+    "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+    {
+      method: "POST",
+      headers: sdpHeaders(),
+      body: JSON.stringify({ withdrawalRequestId: current.withdrawalRequestId, feePayer }),
+    },
+  );
+
+  // Collect the required signatures, then submit with a new idempotency key.
+  await sdpFetch("/v1/earn/external-wallet/withdrawal-request-cancellations", {
+    method: "POST",
+    headers: sdpHeaders({ "Idempotency-Key": cancelIdempotencyKey }),
+    body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),
+  });
+}
+```
+
+A request transaction and a cancellation transaction are lifecycle actions, not payouts. Never add either to the customer's available asset balance. Only `fulfilled` creates the corresponding withdrawal movement; `cancelled` returns shares instead.
+
 ## Floors and previews
 
 Both previews work for every provider and are the figures to show a customer before they confirm. Whether a build also takes a protection floor depends on the strategy row:
@@ -1195,13 +1339,13 @@ Recovery across that split is yours: persist the swap signature and the `followU
 | Call | Rule |
 | --- | --- |
 | Builds | No `Idempotency-Key`. A build moves no money and expires with its blockhash. |
-| Submits | `Idempotency-Key` header required. Same key on retry returns the original movement (`replayed: true`). |
+| Submits | `Idempotency-Key` header required. Same key on retry returns the original movement or queued request (`replayed: true`). Use a different key for a later cancellation action. |
 
 | Response | Meaning | What to do |
 | --- | --- | --- |
 | `400` | The request or the current vault state must change. | Fix the request or show the message; do not retry unchanged. |
 | `409 TRANSACTION_EXPIRED` | The build's blockhash expired before submit. Nothing was recorded. | Build again and have the customer sign the new transaction. |
-| `409 CONFLICT` (any other message) | The build was already consumed under a different idempotency key, or the key was reused with a different body. | Look up the existing movement; do not rebuild. |
+| `409 CONFLICT` (any other message) | The build was already consumed under a different idempotency key, or the key was reused with a different body. | Look up the existing movement or queued request; do not rebuild blindly. |
 | `422 SIGNING_REJECTED` | A fee sponsor refused the transaction by policy. | The same transaction will be refused again; change it. |
 | `503 PROVIDER_UNAVAILABLE` | Live provider or RPC state could not be read. | Retry the read-only preview or build with bounded backoff. |
 | Timeout or 5xx on a submit | Outcome uncertain. | Retry the exact signed bytes with the same `Idempotency-Key`. |
@@ -6130,7 +6274,15 @@ Source: https://platform.solana.com/docs/reference/api/earn
 | `GET` | `/v1/earn/external-wallet/movements/{movementId}` | Get one external-wallet movement |
 | `GET` | `/v1/earn/external-wallet/positions` | List one external wallet's positions |
 | `GET` | `/v1/earn/external-wallet/positions/summary` | Get external-wallet position totals |
+| `POST` | `/v1/earn/external-wallet/queued-withdrawal-previews` | Preview a queued external-wallet withdrawal |
+| `POST` | `/v1/earn/external-wallet/withdrawal-options` | Discover external-wallet withdrawal routes |
 | `POST` | `/v1/earn/external-wallet/withdrawal-previews` | Preview an external-wallet exit |
+| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancel-transactions` | Build an unsigned queued-withdrawal cancellation |
+| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancellations` | Submit a signed queued-withdrawal cancellation |
+| `POST` | `/v1/earn/external-wallet/withdrawal-request-transactions` | Build an unsigned queued-withdrawal request |
+| `GET` | `/v1/earn/external-wallet/withdrawal-requests` | List an external wallet's queued withdrawals |
+| `POST` | `/v1/earn/external-wallet/withdrawal-requests` | Submit a signed queued-withdrawal request |
+| `GET` | `/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` | Get one queued-withdrawal request |
 | `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | Build an unsigned external-wallet exit transaction |
 | `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
 | `GET` | `/v1/earn/strategies` | List yield strategies |

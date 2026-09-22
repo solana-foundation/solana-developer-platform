@@ -561,12 +561,16 @@ export interface EarnVaultWithdrawalsPage {
   nextCursor: string | null;
 }
 
+/** BoringQueue's hard upper bound for a solver window: 90 days. */
+export const EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS = 90 * 24 * 60 * 60;
+
 /** One asset's live provider queue limits. These are chain state, never UI defaults. */
 export interface EarnVaultQueuedWithdrawalTerms {
   assetMint: string;
   allowWithdrawals: boolean;
   secondsToMaturity: number;
   minimumSecondsToDeadline: number;
+  maximumSecondsToDeadline: number;
   minimumDiscountBps: number;
   maximumDiscountBps: number;
   /** Decimal string in vault-share units. */
@@ -823,16 +827,17 @@ export type EarnExternalWalletWithdrawalRequestAction = "request" | "cancel";
  * builds identify only the already-landed request.
  */
 export interface EarnExternalWalletWithdrawalRequestTransactionResponse {
-  transaction: EarnExternalWalletTransaction &
-    Partial<EarnExternalWalletExitReference> & {
-      action: EarnExternalWalletWithdrawalRequestAction;
-      requestAddress: string;
-      shares?: string;
-      assets?: string;
-      discountBps?: number;
-      maturityTimestamp?: string;
-      deadlineTimestamp?: string;
-    };
+  transaction: EarnExternalWalletTransaction & {
+    /** The durable tenant position being exited. Queue builds are keyed-only. */
+    positionId: string;
+    action: EarnExternalWalletWithdrawalRequestAction;
+    requestAddress: string;
+    shares?: string;
+    assets?: string;
+    discountBps?: number;
+    maturityTimestamp?: string;
+    deadlineTimestamp?: string;
+  };
 }
 
 /** One recorded external-wallet vault movement, either direction. */

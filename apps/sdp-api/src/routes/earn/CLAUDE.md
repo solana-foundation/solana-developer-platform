@@ -117,11 +117,12 @@ balance with a live one.
   sign-off named in the PR (who reviewed, and the threat-model row the route
   lands under), and the threat model's revisit trigger fires. Never widen the
   list just to make the test pass.
-  The current contract pins six optional-auth operations: strategy list/detail,
-  vault deposit preview, external-wallet deposit build, withdrawal preview, and
-  withdrawal build. Public OpenAPI represents each as API-key auth or an empty
-  security requirement; the internal document additionally accepts Clerk and
-  session auth. Every tenant read and signed-transaction submit remains
+  The current contract pins eight optional-auth operations: strategy list/detail,
+  vault deposit preview, external-wallet deposit build, withdrawal preview,
+  withdrawal build, withdrawal-options discovery, and queued-withdrawal preview.
+  Public OpenAPI represents each as API-key auth or an empty security requirement;
+  the internal document additionally accepts Clerk and session auth. Every tenant
+  read, queued request/cancellation build, and signed-transaction submit remains
   authenticated.
 
 ### Queued vault withdrawals (Veda)
@@ -135,14 +136,15 @@ reads, using the solver transaction's closing signature and payout; request and
 cancel transactions remain request history and must never be labelled payouts.
 
 The custody options/preview/create/list/detail/cancel routes are keyed. External
-wallet options, preview, unsigned request build, and unsigned cancel build use
-the optional-auth contract: anonymous calls are per-IP RPC-metered and persist
-nothing; valid keyed calls retain tenant/permission checks and durable builds.
-External submits and request history are keyed. A presented invalid credential
-always returns 401 rather than falling back to anonymous. Cancellation is an
-exit-recovery path: policy gates do not strand it, and a caller with write access
-to the exact org-owned custody wallet may recover a request whose initiating
-project was deleted; list/detail history remains exact-project scoped.
+wallet options and previews use the optional-auth contract: anonymous calls are
+per-IP RPC-metered and persist nothing. External request/cancellation builds,
+submits, and request history are keyed so every share escrow has the durable
+status and recovery surface the public contract promises. A presented invalid
+credential always returns 401 rather than falling back to anonymous.
+Cancellation is an exit-recovery path: policy gates do not strand it, and a
+caller with write access to the exact org-owned custody wallet may recover a
+request whose initiating project was deleted; list/detail history remains
+exact-project scoped.
 
 The scheduled reconciler independently advances both signed-action finality and
 provider PDA state. Landed request terms and terminal quantities come from Veda
@@ -152,10 +154,10 @@ matching finalized close event stays `closed_or_unknown`; missing signature
 history never proves that a live escrow failed. See ADR 0003 for the full state
 machine and recovery rationale.
 
-These runtime routes are intentionally absent from public OpenAPI. Promotion is
-an EARN-027 security-scope change and requires named security sign-off plus the
-pinned public-operation update; do not add generated docs or OpenAPI paths as a
-side effect of implementation.
+The external-wallet queue routes are part of the supported Embedded Yield public
+contract. Any future route or security-declaration change remains an EARN-027
+security-scope change and requires named security sign-off plus the pinned
+public-operation update; do not widen the surface just to make a test pass.
 
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
@@ -1064,20 +1066,21 @@ to those surfaces. Full contract: ADR 0002 addendum 2026-08-26.
 The router exposes one handler per endpoint through two access tiers. Do not
 fork a keyed and anonymous route with duplicate behavior.
 
-- **Keyless catalogue and builds:** `GET /strategies`, `GET /strategies/:id`,
-  `POST /vault-deposit-previews`, and the external-wallet deposit build,
-  withdrawal preview, and withdrawal build. A valid credential enriches the
-  same request with its existing tenant context. With no credential, the
-  request has no organization, project, entitlement, policy, custody, or
-  persistence context. When a credential is present, the route still enforces
-  its previous `earn:read` or `earn:write` scope.
+- **Keyless catalogue, discovery, and instant builds:** `GET /strategies`,
+  `GET /strategies/:id`, `POST /vault-deposit-previews`, the external-wallet
+  deposit build, direct-withdrawal preview/build, withdrawal-options discovery,
+  and queued-withdrawal preview. A valid credential enriches the same request
+  with its existing tenant context. With no credential, the request has no
+  organization, project, entitlement, policy, custody, or persistence context.
+  When a credential is present, the route still enforces its previous
+  `earn:read` or `earn:write` scope.
 - **No credential downgrade:** a presented credential must resolve completely
   or return 401. That includes an unknown, revoked, or expired API key, a Clerk
   token without organization context, and an invalid or expired session cookie.
   Only a request that presents no supported credential may continue anonymously.
-- **Keyed control plane:** submits, movements, positions, earnings, custody
-  vault routes, programs, and the aggregate feed. These retain the existing
-  permission and project boundaries.
+- **Keyed control plane:** submits, queued request/cancellation builds,
+  movements, positions, earnings, custody vault routes, programs, and the
+  aggregate feed. These retain the existing permission and project boundaries.
 - **Environment:** an authenticated project is authoritative. A keyless call
   has no project, so the caller picks the shelf: `?environment=` on the list
   (production when omitted) and the named strategy's own `environment` on
@@ -1087,8 +1090,11 @@ fork a keyed and anonymous route with duplicate behavior.
   and builds use a tighter per-IP tier plus an independently configurable RPC
   budget. Structured logs carry the tier, normalized route, and decision.
 
-An authenticated direction is BUILD then SUBMIT. An anonymous direction stops
-after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
+An authenticated instant direction is BUILD then SUBMIT. An anonymous instant
+direction stops after BUILD and the caller broadcasts directly. Queued request
+and cancellation directions are always keyed BUILD then SUBMIT so SDP can
+guarantee durable status and recovery (`handlers/external-wallet.ts`,
+`handlers/queued-withdrawals.ts`,
 `services/earn/vault-external-wallet.service.ts`):
 
 - `POST /external-wallet/deposit-transactions`: **build + simulate + compile,

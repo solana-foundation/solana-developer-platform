@@ -11,7 +11,7 @@ import {
   type EarnVaultWithdrawalRequestRow,
   type EarnVaultWithdrawalRequestStatus,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { buildEarnVaultQueuedWithdrawalFingerprint } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
@@ -610,16 +610,8 @@ export async function cancelEarnVaultWithdrawalRequest(
   });
 }
 
-function externalActor(
-  c: AppContext,
-  environment: SdpEnvironment
-):
-  | QueuedWithdrawalActor
-  | {
-      environment: SdpEnvironment;
-    } {
-  const auth = getOptionalAuth(c);
-  if (!auth) return { environment };
+function externalActor(c: AppContext, environment: SdpEnvironment): QueuedWithdrawalActor {
+  const auth = getAuth(c);
   return {
     organizationId: auth.organizationId,
     projectId: requireProjectId(c),
@@ -674,6 +666,9 @@ export async function createEarnExternalWalletWithdrawalRequestTransaction(
 ) {
   const body: ExternalRequestBuildBody = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
+  if (!target.positionId) {
+    throw internalError("Authenticated queued-withdrawal build resolved without a position");
+  }
   const built = await buildExternalQueuedWithdrawalRequest(c.env, {
     actor: externalActor(c, target.environment),
     position: externalPosition(target),
@@ -683,9 +678,7 @@ export async function createEarnExternalWalletWithdrawalRequestTransaction(
   return success(c, {
     transaction: {
       ...builtTransactionWire(built),
-      ...(target.positionId
-        ? { positionId: target.positionId }
-        : { strategyId: target.strategyId }),
+      positionId: target.positionId,
     },
   });
 }
@@ -694,52 +687,33 @@ export async function createEarnExternalWalletWithdrawalRequestCancelTransaction
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalRequestCancelTransactionSchema>
 ) {
   const body: ExternalCancelBuildBody = c.req.valid("json");
-  const auth = getOptionalAuth(c);
-  if (auth) {
-    const environment = resolveSdpEnvironment(c);
-    if (!("withdrawalRequestId" in body)) {
-      throw badRequest("withdrawalRequestId is required for an authenticated cancellation build");
-    }
-    const projectId = requireProjectId(c);
-    const request = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).getById(
-      {
-        organizationId: auth.organizationId,
-        environment,
-        withdrawalRequestId: body.withdrawalRequestId,
-      }
-    );
-    if (!request || request.custody_wallet_id !== null || request.project_id !== projectId) {
-      throw notFound("Earn external-wallet withdrawal request");
-    }
-    const target = await resolveExternalWalletExit(c, { positionId: request.position_id });
-    if (target.ownerAddress !== request.owner_address) {
-      throw notFound("Earn external-wallet withdrawal request");
-    }
-    const built = await buildExternalQueuedWithdrawalCancel(c.env, {
-      actor: externalActor(c, environment),
-      position: externalPosition(target),
-      request,
-      requestAddress: request.request_address,
-      ...(body.feePayer ? { feePayer: body.feePayer } : {}),
-    });
-    return success(c, {
-      transaction: { ...builtTransactionWire(built), positionId: target.positionId },
-    });
+  const auth = getAuth(c);
+  const environment = resolveSdpEnvironment(c);
+  const projectId = requireProjectId(c);
+  const request = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).getById({
+    organizationId: auth.organizationId,
+    environment,
+    withdrawalRequestId: body.withdrawalRequestId,
+  });
+  if (!request || request.custody_wallet_id !== null || request.project_id !== projectId) {
+    throw notFound("Earn external-wallet withdrawal request");
   }
-
-  if (!("strategyId" in body)) {
-    throw badRequest("strategyId, ownerAddress and requestAddress are required anonymously");
+  const target = await resolveExternalWalletExit(c, { positionId: request.position_id });
+  if (!target.positionId) {
+    throw internalError("Authenticated queued-withdrawal cancellation resolved without a position");
   }
-  const target = await resolveExternalWalletExit(c, body);
+  if (target.ownerAddress !== request.owner_address) {
+    throw notFound("Earn external-wallet withdrawal request");
+  }
   const built = await buildExternalQueuedWithdrawalCancel(c.env, {
-    actor: { environment: target.environment },
+    actor: externalActor(c, environment),
     position: externalPosition(target),
-    request: null,
-    requestAddress: body.requestAddress,
+    request,
+    requestAddress: request.request_address,
     ...(body.feePayer ? { feePayer: body.feePayer } : {}),
   });
   return success(c, {
-    transaction: { ...builtTransactionWire(built), strategyId: target.strategyId },
+    transaction: { ...builtTransactionWire(built), positionId: target.positionId },
   });
 }
 

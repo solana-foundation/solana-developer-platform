@@ -36,6 +36,80 @@ export interface YieldPosition {
   tokenValue?: string;
 }
 
+export interface YieldQueuedWithdrawalTerms {
+  assetMint: string;
+  allowWithdrawals: boolean;
+  secondsToMaturity: number;
+  minimumSecondsToDeadline: number;
+  maximumSecondsToDeadline: number;
+  minimumDiscountBps: number;
+  maximumDiscountBps: number;
+  minimumShares: string;
+  shareDecimals: number;
+}
+
+export interface YieldWithdrawalOptions {
+  positionId: string;
+  instant: boolean;
+  providerOrder: boolean;
+  queued: boolean;
+  withdrawAuthority: string | null;
+  queueState: string | null;
+  queueAsset: YieldQueuedWithdrawalTerms | null;
+}
+
+export type YieldWithdrawalRequestStatus =
+  | "creating"
+  | "pending"
+  | "fulfillable"
+  | "expiredCancelable"
+  | "cancelling"
+  | "fulfilled"
+  | "cancelled"
+  | "closedOrUnknown"
+  | "failed";
+
+/** A durable queued exit. Request creation escrows shares and pays no assets. */
+export interface YieldWithdrawalRequest {
+  withdrawalRequestId: string;
+  positionId: string;
+  provider: string;
+  providerReference: string;
+  ownerAddress: string;
+  requestAddress: string;
+  status: YieldWithdrawalRequestStatus;
+  assetMint: string;
+  shareMint: string;
+  shares: string;
+  quotedAssets: string;
+  shareDecimals: number;
+  assetDecimals: number;
+  discountBps: number;
+  nonce: string | null;
+  creationTimestamp: string | null;
+  maturityTimestamp: string;
+  deadlineTimestamp: string;
+  creationSignature: string | null;
+  cancelSignature: string | null;
+  closingSignature: string | null;
+  assetsPaid: string | null;
+  failureReason: string | null;
+  fulfilledAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  replayed?: boolean;
+}
+
+export type WithdrawalIntent =
+  | { amount: string; route: "direct" }
+  | {
+      amount: string;
+      route: "queued";
+      discountBps: number;
+      deadlineSeconds: number;
+    };
+
 export type MovementStatus =
   | "requested"
   | "submitted"
@@ -93,10 +167,14 @@ export interface DashboardData {
     /** Value that can move back to checking right now. */
     withdrawable?: string;
     earned?: string;
+    /** Live routes for the current position. Null when absent or unavailable. */
+    withdrawalOptions: YieldWithdrawalOptions | null;
   };
   /** Checking plus savings. Undefined while the savings valuation is unavailable. */
   total?: string;
   movements: YieldMovement[];
+  /** Every non-terminal queued exit, restored on every dashboard load. */
+  withdrawalRequests: YieldWithdrawalRequest[];
   connection: {
     apiLabel: string;
     checkedAt: string;
@@ -105,6 +183,14 @@ export interface DashboardData {
 
 export interface TransferResult {
   movement: YieldMovement;
+}
+
+export type WithdrawalResult =
+  | { kind: "movement"; movement: YieldMovement }
+  | { kind: "queued"; withdrawalRequest: YieldWithdrawalRequest };
+
+export interface WithdrawalCancellationResult {
+  withdrawalRequest: YieldWithdrawalRequest;
 }
 
 export interface ApiErrorBody {
