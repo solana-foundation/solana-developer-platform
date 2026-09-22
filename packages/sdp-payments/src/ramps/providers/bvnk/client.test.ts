@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import { SdpPaymentsError } from "../../../errors";
 import type { RampRuntimeContext } from "../../types";
 import { BvnkPayRequestError, BvnkRampClient } from "./client";
 import { type BvnkOnrampPayoutInput, bvnkChannelResponseSchema } from "./schemas";
 import {
+  BVNK_CHANNEL_CREATED_WEBHOOK,
   bvnkAgreementSession,
   bvnkCustomer,
   bvnkCustomerCreated,
@@ -239,11 +238,11 @@ describe("BvnkRampClient pay family", () => {
   const payoutUuid = "01a0b3f2-ad2d-7a55-95dc-98d85d4def2f";
 
   const payoutInput: BvnkOnrampPayoutInput = {
-    walletId: "a:26091832492051:YVPgmfq:1",
+    walletId: "a:10000000000001:TESTWLT:1",
     amount: 1.2,
     currency: "USD",
     reference: "xfr_7acd66cc-7364-4423-86e4-cfd3552fe8f3",
-    customerId: "2acdd3e5-7166-4b04-8115-6ad3ccd66477",
+    customerId: "00000000-0000-4000-8000-00000000c057",
     payOutDetails: {
       code: "crypto",
       currency: "USDC",
@@ -700,23 +699,16 @@ describe("BvnkRampClient off-ramp channel surfaces", () => {
    * Shape source of truth for `bvnkChannelResponseSchema`: the probe channel
    * create payload captured in the repo devlog.
    */
-  const channelCreatedUrl = new URL(
-    "../../../../../../docs/_devlog/HOO-1710/payloads/channel-created.json",
-    import.meta.url
-  );
-
   function readChannelCreatedPayload(): { data: Record<string, unknown> } {
-    return JSON.parse(readFileSync(fileURLToPath(channelCreatedUrl), "utf8")) as {
-      data: Record<string, unknown>;
-    };
+    return BVNK_CHANNEL_CREATED_WEBHOOK;
   }
 
   it("parses the channel-created payload with the extended channel response schema", () => {
     const channel = bvnkChannelResponseSchema.parse(readChannelCreatedPayload().data);
 
-    assert.equal(channel.uuid, "01a0c720-c60f-7304-80c3-eb98d2ef351d");
-    assert.equal(channel.walletId, "a:26091832492051:YVPgmfq:1");
-    assert.equal(channel.reference, "xfr_f311ea1b-6e5b-4ab2-8ffd-0c3df94b64df");
+    assert.equal(channel.uuid, "01000000-0000-7000-8000-00000000c001");
+    assert.equal(channel.walletId, "a:10000000000001:TESTWLT:1");
+    assert.equal(channel.reference, "xfr_00000000-0000-4000-8000-0000000000f1");
     assert.equal(channel.status, "OPEN");
     assert.equal(channel.payCurrency, "USDC");
     assert.equal(channel.displayCurrency, "USD");
@@ -724,9 +716,9 @@ describe("BvnkRampClient off-ramp channel surfaces", () => {
     assert.equal(channel.protocol, "ERC20");
     assert.equal(channel.network, "ETHEREUM");
     assert.ok(channel.embeddedCustomerDetails);
-    assert.equal(channel.embeddedCustomerDetails.reference, "2acdd3e5-7166-4b04-8115-6ad3ccd66477");
+    assert.equal(channel.embeddedCustomerDetails.reference, "00000000-0000-4000-8000-00000000c057");
     assert.ok(channel.contact);
-    assert.equal(channel.contact.externalId, "2acdd3e5-7166-4b04-8115-6ad3ccd66477");
+    assert.equal(channel.contact.externalId, "00000000-0000-4000-8000-00000000c057");
   });
 
   it("reads a channel back from GET /api/v2/channel/<id>", async () => {

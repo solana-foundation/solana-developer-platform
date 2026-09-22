@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import type {
   BvnkChannelTransactionConfirmedData,
   BvnkCompletedPayoutObservation,
@@ -12,6 +10,7 @@ import {
   bvnkPayoutObservationMismatches,
   bvnkTerminalObservationsEqual,
 } from "./settlement";
+import { BVNK_CHANNEL_TRANSACTION_CONFIRMED_WEBHOOK } from "./test-fixtures";
 
 /** One canonical completed observation; every field is caller-written. */
 function completedObservation(
@@ -143,15 +142,7 @@ describe("bvnkTerminalObservationsEqual", () => {
 describe("bvnkOfframpChannelSettlementFromEvent", () => {
   /** The observed confirmed payload's data with every money field as a decimal string. */
   function parsedConfirmedPayload(): BvnkChannelTransactionConfirmedData {
-    const payloadUrl = new URL(
-      "../../../../../../docs/_devlog/HOO-1710/payloads/channel-transaction-confirmed.json",
-      import.meta.url
-    );
-    const data = (
-      JSON.parse(readFileSync(fileURLToPath(payloadUrl), "utf8")) as {
-        data: Record<string, unknown>;
-      }
-    ).data;
+    const data: Record<string, unknown> = BVNK_CHANNEL_TRANSACTION_CONFIRMED_WEBHOOK.data;
     const exchangeRate = data.exchangeRate as { rate: number };
     const networkFee = data.networkFee as { paidCurrency: string; paidAmount: number };
     return {
@@ -206,8 +197,6 @@ describe("bvnkOfframpChannelSettlementFromEvent", () => {
     const parsed = parsedConfirmedPayload();
     const settlement = bvnkOfframpChannelSettlementFromEvent(parsed);
 
-    // 10 USDC in, 9.9 USD credited, 0.09 USD fee, 0.99 rate, 0.00001 SOL
-    // network fee, per the observed payload.
     assert.equal(settlement.cryptoAmount, "10");
     assert.equal(settlement.fiatAmount, "9.9");
     assert.equal(settlement.feeAmount, "0.09");

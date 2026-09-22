@@ -3228,6 +3228,7 @@ describe("Counterparties Routes", () => {
     });
 
     it("omits balance and reference on a provisioning funding-wallet row", async () => {
+      const walletSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2");
       const created = await createCounterparty({
         externalId: "provider_accounts_funding_provisioning",
       });
@@ -3265,7 +3266,8 @@ describe("Counterparties Routes", () => {
           createdAt: expect.any(String),
         },
       ]);
-      expect(RAMP_PROVIDER_CLIENTS.bvnk.getLedgerWalletV2).not.toHaveBeenCalled();
+      expect(walletSpy).not.toHaveBeenCalled();
+      walletSpy.mockRestore();
     });
 
     it("attaches the customer link to funding-wallet rows instead of a standalone account", async () => {

@@ -187,7 +187,7 @@ const bvnkLedgersSchema = z
 
 /**
  * Confirmed channel-transaction data, shaped exactly by the observed payload
- * in `docs/_devlog/HOO-1710/payloads/channel-transaction-confirmed.json`:
+ * as `BVNK_CHANNEL_TRANSACTION_CONFIRMED_WEBHOOK` in `@sdp/payments/ramps/providers/bvnk/test-fixtures`:
  * 10 USDC paid in, 9.9 USD credited to the funding wallet, 0.09 USD fee,
  * 0.99 exchange rate, 0.00001 SOL network fee. Every money field is a
  * decimal string on the parsed event; unknown keys are allowed and dropped,

@@ -66,7 +66,7 @@ const bvnkChannelAddressSchema = z.object({
 /**
  * A BVNK v2 payment channel as returned by `POST /api/v2/channel` and the
  * `GET /api/v2/channel/{uuid}` read-back. Shape source of truth:
- * `docs/_devlog/HOO-1710/payloads/channel-created.json` (`data` object). The
+ * `BVNK_CHANNEL_CREATED_WEBHOOK` in `./test-fixtures` (`data` object). The
  * confirmed-channel webhook handler asserts `reference`, `walletId`, and
  * `embeddedCustomerDetails.reference` against SDP-persisted facts before
  * settling an off-ramp transfer.

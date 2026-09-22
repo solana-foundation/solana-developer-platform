@@ -2219,7 +2219,7 @@ describe("BVNK ramp webhook", () => {
     await seedBvnkOfframpTransfer(productionTransferId, {
       projectId: `${PROJECT_ID}_production`,
       counterpartyId: COUNTERPARTY_ID,
-      providerReference: channelId,
+      providerReference: "019f0ce4-98ab-7424-a968-fc323266b8ff",
       channelWalletId: FUNDING_WALLET_ID,
       channelCustomerReference: CUSTOMER_REFERENCE,
     });
@@ -2273,7 +2273,7 @@ describe("BVNK ramp webhook", () => {
       protocol: "SOL",
       network: "SOLANA",
       contact: {
-        id: "33fa1b49-12bb-46ea-ad2c-40034fcdb91d",
+        id: "00000000-0000-4000-8000-0000000000c7",
         externalId: COUNTERPARTY_ID,
         relationshipType: "THIRD_PARTY",
         entityType: "INDIVIDUAL",
@@ -2328,8 +2328,6 @@ describe("BVNK ramp webhook", () => {
       }>();
     expect(transfer?.status).toBe("completed");
     expect(transfer?.fiat_amount).toBe("4.95");
-    // The seed left the signature null, so the event hash is stored as the
-    // deposit transaction's SDP signature.
     expect(transfer?.signature).toBe(OFFRAMP_CHANNEL_BASE.hash);
     expect(transfer?.provider_data.settlement).toEqual(
       bvnkOfframpChannelSettlementFromEvent(parsedConfirmedEventData(event.data))

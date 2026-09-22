@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { BVNK_CHANNEL_TRANSACTION_CONFIRMED_WEBHOOK } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   BVNK_WEBHOOK_TIMESTAMP,
@@ -90,7 +89,7 @@ describe("BvnkWebhookProcessor.parse", () => {
           name: "sdp:onramp:counterparty_provider_account_402478d1-2f23-4559-b3e1-58a0f693de9b",
           status: "ACTIVE",
           balance: { amount: 0, currency: "USD" },
-          customer: { id: "2acdd3e5-7166-4b04-8115-6ad3ccd66477", name: "Synthetic Customer" },
+          customer: { id: "00000000-0000-4000-8000-00000000c057", name: "Synthetic Customer" },
           createdAt: "2026-09-18T00:00:00.000Z",
           updatedAt: "2026-09-18T01:00:00.000Z",
           paymentInstruments: [
@@ -109,7 +108,7 @@ describe("BvnkWebhookProcessor.parse", () => {
         id: "a:synthetic:wallet:1",
         name: "sdp:onramp:counterparty_provider_account_402478d1-2f23-4559-b3e1-58a0f693de9b",
         status: "ACTIVE",
-        customer: { id: "2acdd3e5-7166-4b04-8115-6ad3ccd66477" },
+        customer: { id: "00000000-0000-4000-8000-00000000c057" },
         bankAccount: { accountNumber: "900473221558", code: "LEADUS49XXX", bankName: "LEAD BANK" },
       },
     });
@@ -220,28 +219,24 @@ describe("BvnkWebhookProcessor.parse", () => {
   });
 
   it("parses the observed confirmed channel-transaction payload in full", () => {
-    const payloadUrl = new URL(
-      "../../../../../../docs/_devlog/HOO-1710/payloads/channel-transaction-confirmed.json",
-      import.meta.url
-    );
-    const payload = JSON.parse(readFileSync(fileURLToPath(payloadUrl), "utf8")) as unknown;
+    const payload: unknown = BVNK_CHANNEL_TRANSACTION_CONFIRMED_WEBHOOK;
     const processor = new BvnkWebhookProcessor();
 
     expect(processor.parse(payload)).toEqual({
       event: "bvnk:payment:channel:transaction-confirmed",
       data: {
-        channelId: "01a0c769-44c1-7064-bea7-522a4c5def00",
-        merchantId: "f40021ec-a48f-4186-b9c5-1abc71f4f4a8",
-        walletId: "a:26091854404227:N4fqg2A:1",
+        channelId: "01000000-0000-7000-8000-00000000c002",
+        merchantId: "00000000-0000-4000-8000-0000000000aa",
+        walletId: "a:10000000000002:TESTWLT:1",
         merchantDisplayName:
-          "sdp:onramp:counterparty_provider_account_2bd4aeca-01d6-4dbb-8471-ff312c6ecd30",
-        reference: "sdp_offramp_xfr_6a78d488-5c32-490d-b620-a70d7784c544",
+          "sdp:onramp:counterparty_provider_account_00000000-0000-4000-8000-0000000000cf",
+        reference: "sdp_offramp_xfr_00000000-0000-4000-8000-0000000000f2",
         dateCreated: 1790051985000,
         lastUpdated: 1790052118171,
         status: "COMPLETE",
-        uuid: "01a0c769-a709-7520-803d-675b49a739f5",
-        hash: "4ep657PdRL8MFuoSrMwSXXqHYycnacQc1JMYSxz9Lan6Yuep7VSLsfB2zfGZcDpAoxNV2Si3u7i3nuScjAUrfDn6",
-        address: "A8sPnzHUS9hEMkKt8Dia3Sy3t95xFMPving6XCFdf5AM",
+        uuid: "01000000-0000-7000-8000-00000000c7a1",
+        hash: "TestDepos1tS1gnature11111111111111111111111111111111111111111111111111111111111111111111",
+        address: "TestChanne1Depos1tAddress111111111111111111",
         tag: null,
         paidCurrency: "USDC",
         displayCurrency: "USD",
@@ -272,8 +267,8 @@ describe("BvnkWebhookProcessor.parse", () => {
           alerts: [],
         },
         sources: [
-          "ETdP97bEd8k2pQbtLLZTSwg1XbZqwFVHd17aBDMyziVw",
-          "6Lwr3tNtTxGfViCqVSzeZpS2ZJxaY9WnUGQDgnDW3Lvs",
+          "TestSourceWa11etOne111111111111111111111111",
+          "TestSourceWa11etTwo111111111111111111111111",
         ],
         networkFee: {
           paidCurrency: "SOL",
@@ -284,7 +279,7 @@ describe("BvnkWebhookProcessor.parse", () => {
         pegged: false,
         metaData: null,
         originator: null,
-        embeddedCustomerDetails: { reference: "b84c506f-3172-4a0a-adad-c399619090d0" },
+        embeddedCustomerDetails: { reference: "00000000-0000-4000-8000-00000000c058" },
       },
     });
   });

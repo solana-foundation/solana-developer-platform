@@ -71,7 +71,6 @@ export function bvnkCustomer(overrides?: Partial<BvnkCustomer>): BvnkCustomer {
     status: "INFO_REQUIRED",
     verification: {
       status: "init",
-      // biome-ignore lint/security/noSecrets: synthetic sandbox Sumsub link, not a credential
       url: "https://in.sumsub.com/websdk/p/sbx_EDHeJPPmWnBSU2Es",
     },
     ...overrides,
@@ -111,3 +110,137 @@ export function bvnkWalletProfilesResponse(
     ...overrides,
   } satisfies BvnkLedgerWalletProfilesV2;
 }
+
+export const BVNK_CHANNEL_CREATED_WEBHOOK = {
+  event: "bvnk:payment:channel:created",
+  eventId: "01000000-0000-7000-8000-00000000e001",
+  timestamp: "2026-09-22T03:20:09.893Z",
+  data: {
+    uuid: "01000000-0000-7000-8000-00000000c001",
+    merchantId: "00000000-0000-4000-8000-0000000000aa",
+    walletId: "a:10000000000001:TESTWLT:1",
+    merchantDisplayName: "test-channel-display-name",
+    reference: "xfr_00000000-0000-4000-8000-0000000000f1",
+    dateCreated: 1790047209799,
+    lastUpdated: 1790047209799,
+    status: "OPEN",
+    payCurrency: "USDC",
+    displayCurrency: "USD",
+    walletCurrency: "USD",
+    address: "0x000000000000000000000000000000000000c0de",
+    protocol: "ERC20",
+    network: "ETHEREUM",
+    uri: "ethereum:0x0000000000000000000000000000000000000001/transfer?address=0x000000000000000000000000000000000000c0de&uint256={amount}",
+    redirectUrl: "https://pay.sandbox.bvnk.com/channel/01000000-0000-7000-8000-00000000c001",
+    alternatives: [
+      {
+        protocol: "SOL",
+        address: "TestSo1anaDepos1tAddress1111111111111111111",
+        network: "SOLANA",
+      },
+      {
+        protocol: "ARBITRUM",
+        address: "0x000000000000000000000000000000000000c0de",
+        network: "ARBITRUM",
+      },
+      {
+        protocol: "POLYGON",
+        address: "0x000000000000000000000000000000000000c0de",
+        network: "POLYGON",
+      },
+      {
+        protocol: "BASE",
+        address: "0x000000000000000000000000000000000000c0de",
+        network: "BASE",
+      },
+      {
+        protocol: "ARC",
+        address: "0x000000000000000000000000000000000000c0de",
+        network: "ARC",
+      },
+      {
+        protocol: "BEP20",
+        address: "0x000000000000000000000000000000000000c0de",
+        network: "BINANCE",
+      },
+    ],
+    contact: {
+      id: "00000000-0000-4000-8000-0000000000c7",
+      name: "[redacted]",
+      externalId: "00000000-0000-4000-8000-00000000c057",
+      relationshipType: "THIRD_PARTY",
+      entityType: "INDIVIDUAL",
+    },
+    pegged: false,
+    accountReference: "00000000-0000-4000-8000-0000000000ac",
+    meshEnabled: false,
+    embeddedCustomerDetails: {
+      reference: "00000000-0000-4000-8000-00000000c057",
+    },
+  },
+} as const;
+
+export const BVNK_CHANNEL_TRANSACTION_CONFIRMED_WEBHOOK = {
+  event: "bvnk:payment:channel:transaction-confirmed",
+  eventId: "01000000-0000-7000-8000-00000000e002",
+  timestamp: "2026-09-22T04:41:58.624Z",
+  data: {
+    channelId: "01000000-0000-7000-8000-00000000c002",
+    merchantId: "00000000-0000-4000-8000-0000000000aa",
+    walletId: "a:10000000000002:TESTWLT:1",
+    merchantDisplayName:
+      "sdp:onramp:counterparty_provider_account_00000000-0000-4000-8000-0000000000cf",
+    reference: "sdp_offramp_xfr_00000000-0000-4000-8000-0000000000f2",
+    dateCreated: 1790051985000,
+    lastUpdated: 1790052118171,
+    status: "COMPLETE",
+    uuid: "01000000-0000-7000-8000-00000000c7a1",
+    hash: "TestDepos1tS1gnature11111111111111111111111111111111111111111111111111111111111111111111",
+    address: "TestChanne1Depos1tAddress111111111111111111",
+    tag: null,
+    paidCurrency: "USDC",
+    displayCurrency: "USD",
+    walletCurrency: "USD",
+    feeCurrency: "USD",
+    paidAmount: 10,
+    displayAmount: 9.9,
+    walletAmount: 9.9,
+    feeAmount: 0.09,
+    exchangeRate: {
+      base: "USDC",
+      counter: "USD",
+      rate: 0.99,
+      baseAmount: 10,
+      counterAmount: 9.9,
+    },
+    displayRate: {
+      base: "USDC",
+      counter: "USD",
+      rate: 0.99,
+      baseAmount: 10,
+      counterAmount: 9.9,
+    },
+    risk: {
+      level: "UNKNOWN",
+      resourceName: "UNKNOWN",
+      resourceCategory: "UNKNOWN",
+      alerts: [],
+    },
+    sources: [
+      "TestSourceWa11etOne111111111111111111111111",
+      "TestSourceWa11etTwo111111111111111111111111",
+    ],
+    networkFee: {
+      paidCurrency: "SOL",
+      paidAmount: 1e-5,
+      displayCurrency: "USD",
+      displayAmount: 0,
+    },
+    pegged: false,
+    metaData: null,
+    originator: null,
+    embeddedCustomerDetails: {
+      reference: "00000000-0000-4000-8000-00000000c058",
+    },
+  },
+} as const;
