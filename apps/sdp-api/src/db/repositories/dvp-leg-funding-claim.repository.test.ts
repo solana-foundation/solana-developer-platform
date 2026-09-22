@@ -526,4 +526,62 @@ describe("DvpLegFundingClaimRepository", () => {
     expect(seenByOther).toHaveLength(0);
     expect(seenByOwner).toHaveLength(1);
   });
+
+  /**
+   * The page read widens `listForTrade` to one query per page. The rows it
+   * answers are filtered per row by the same policies, so the batch sees
+   * exactly what the per-trade reads saw — a trade with no claims reads as an
+   * empty list, and visibility never widens with the query's shape.
+   */
+  describe("listing a page's claims in one query", () => {
+    it("groups claims by trade and answers an empty list for a trade with none", async () => {
+      await insertTrade("dvp_claim_trade_b");
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.claim(claimInput(PARTY_A_ORG, "a", "sig_a"))
+      );
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_B_ORG }, () =>
+        repo.claim(claimInput(PARTY_B_ORG, "b", "sig_b"))
+      );
+
+      const listed = await runWithTenantDatabaseIdentity({ organizationId: AGENT_ORG }, () =>
+        repo.listForTrades([TRADE_ID, "dvp_claim_trade_b"])
+      );
+
+      expect(
+        listed
+          .get(TRADE_ID)
+          ?.map((claim) => claim.signature)
+          .sort()
+      ).toEqual(["sig_a", "sig_b"]);
+      expect(listed.get("dvp_claim_trade_b")).toEqual([]);
+    });
+
+    it("answers an empty list for every trade when asked for none", async () => {
+      await expect(repo.listForTrades([])).resolves.toEqual(new Map());
+    });
+
+    // The owner reads every organization's claim on its trades (0110), the
+    // funder its own row, and an organization that owns neither sees nothing.
+    it("reads under the same visibility the per-trade read gets", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.claim(claimInput(PARTY_A_ORG, "a", "sig_a"))
+      );
+
+      const listedByOwner = await runWithTenantDatabaseIdentity({ organizationId: AGENT_ORG }, () =>
+        repo.listForTrades([TRADE_ID])
+      );
+      const listedByFunder = await runWithTenantDatabaseIdentity(
+        { organizationId: PARTY_A_ORG },
+        () => repo.listForTrades([TRADE_ID])
+      );
+      const listedByOtherParty = await runWithTenantDatabaseIdentity(
+        { organizationId: PARTY_B_ORG },
+        () => repo.listForTrades([TRADE_ID])
+      );
+
+      expect(listedByOwner.get(TRADE_ID)).toHaveLength(1);
+      expect(listedByFunder.get(TRADE_ID)).toHaveLength(1);
+      expect(listedByOtherParty.get(TRADE_ID)).toEqual([]);
+    });
+  });
 });

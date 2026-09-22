@@ -8,7 +8,7 @@ import {
   EARN_VAULT_MOVEMENT_STATUSES,
   type EarnExternalWalletPosition,
   type EarnExternalWalletPositionSummary,
-  type EarnExternalWalletPositionSummaryResponse,
+  type EarnExternalWalletTokenTotal,
   type EarnPortfolioToken,
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
@@ -30,6 +30,7 @@ import {
   type EarnVaultWithdrawalRequest,
   type EarnVaultWithdrawalRequestRecord,
   type EarnVaultWithdrawalRequestStatus,
+  earnProviderWithdrawalSettlement,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
@@ -317,38 +318,75 @@ interface PositionPage<Position> {
 }
 
 /**
- * The cursor-paging loop shared by the two live-position collections. The
- * `seenCursors` guard turns a server that repeats or rewinds its cursor into a
- * thrown error instead of a loop, and the page-limit fallthrough throws rather
- * than returning the prefix collected so far.
+ * The cursor-paging loop every keyset-paged earn read shares. There is one
+ * copy on purpose: the guard ladder here is what stops a bad server from
+ * hurting the customer, and five drifting restatements of it had already
+ * started to diverge.
+ *
+ * - The `seenCursors` guard turns a server that repeats or rewinds its cursor
+ *   into a thrown error instead of a loop.
+ * - A `hasMore` page shorter than the requested page size is refused the same
+ *   way: a server that reports more rows than it returned in one page is
+ *   contradicting itself, and the page-total readers already refuse that.
+ * - The page-limit fallthrough throws rather than returning the prefix
+ *   collected so far — a partial portfolio is worse than an error because it
+ *   can hide money.
  */
-async function fetchAllPositionPages<Position>(
-  path: (query: URLSearchParams) => string,
-  subject: string
-): Promise<Position[]> {
-  const positions: Position[] = [];
+async function fetchAllCursorPages<T>(input: {
+  /** Names the collection in the thrown pagination errors. */
+  subject: string;
+  pageSize: number;
+  fetchPage: (
+    before: string | undefined
+  ) => Promise<{ items: T[]; hasMore: boolean; nextCursor: string | null }>;
+}): Promise<T[]> {
+  const items: T[] = [];
   const seenCursors = new Set<string>();
   let before: string | undefined;
 
-  for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
-    if (before) query.set("before", before);
+  for (let page = 0; page < EARN_PAGE_LIMIT; page += 1) {
+    const result = await input.fetchPage(before);
+    items.push(...result.items);
+    if (!result.hasMore) return items;
 
-    const body = await requestJsonOk<{ data: PositionPage<Position> }>(path(query));
-
-    positions.push(...body.data.positions);
-    if (!body.data.hasMore) return positions;
-
-    const nextCursor = body.data.nextCursor;
+    const nextCursor = result.nextCursor;
     if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error(`${subject} pagination did not advance`);
+      throw new Error(`${input.subject} pagination did not advance`);
+    }
+    if (result.items.length < input.pageSize) {
+      throw new Error(`${input.subject} pagination returned a short page while reporting more`);
     }
     seenCursors.add(nextCursor);
     before = nextCursor;
   }
 
   // A partial portfolio is worse than an error because it can hide money.
-  throw new Error(`${subject} pagination exceeded its safety limit`);
+  throw new Error(`${input.subject} pagination exceeded its safety limit`);
+}
+
+/**
+ * Reads every page of one live-position collection over the shared cursor
+ * pager.
+ */
+async function fetchAllPositionPages<Position>(
+  path: (query: URLSearchParams) => string,
+  subject: string
+): Promise<Position[]> {
+  return fetchAllCursorPages<Position>({
+    subject,
+    pageSize: EARN_PAGE_SIZE,
+    async fetchPage(before) {
+      const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
+      if (before) query.set("before", before);
+
+      const body = await requestJsonOk<{ data: PositionPage<Position> }>(path(query));
+      return {
+        items: body.data.positions,
+        hasMore: body.data.hasMore,
+        nextCursor: body.data.nextCursor,
+      };
+    },
+  });
 }
 
 /**
@@ -387,11 +425,74 @@ export async function fetchEarnExternalWalletPositions(
   );
 }
 
+/** One per-token aggregate; `tokenValue` is absent when any position is unavailable. */
+const earnExternalWalletTokenTotalSchema: z.ZodType<EarnExternalWalletTokenTotal> = z.object({
+  tokenMint: z.string(),
+  walletCount: z.number().int().nonnegative(),
+  positionCount: z.number().int().nonnegative(),
+  unavailablePositionCount: z.number().int().nonnegative(),
+  /** Absent when any contributing position is unavailable; never a partial total. */
+  tokenValue: z.string().optional(),
+});
+
+const earnExternalWalletPositionRecordSchema: z.ZodType<EarnExternalWalletPosition> = z.object({
+  id: z.string(),
+  ownerAddress: z.string(),
+  provider: z.string(),
+  providerReference: z.string(),
+  label: z.string(),
+  tokenMint: z.string(),
+  shareMint: z.string(),
+  createdAt: z.string(),
+  closedAt: z.string().nullable(),
+  /** Absent when the live provider read failed; unavailable is never encoded as zero. */
+  shares: z.string().optional(),
+  withdrawableShares: z.string().optional(),
+  unlockTimestamp: z.string().nullable().optional(),
+  tokenValue: z.string().optional(),
+});
+
+/**
+ * The per-customer portfolio summary, checked at the boundary like every other
+ * seam in this file — the type assert this replaced declared a shape it never
+ * looked at, so a malformed envelope (an older API, a drifted contract) would
+ * reach the Embedded Yield dashboard's render path and crash it on a
+ * non-array `totalsByStrategy` or mis-derive the onboarding/portfolio split
+ * from unvalidated counts.
+ */
+const earnExternalWalletPositionSummarySchema: z.ZodType<EarnExternalWalletPositionSummary> =
+  z.object({
+    walletCount: z.number().int().nonnegative(),
+    positionCount: z.number().int().nonnegative(),
+    unavailablePositionCount: z.number().int().nonnegative(),
+    totalsByStrategy: z.array(
+      z.object({
+        provider: z.string(),
+        providerReference: z.string(),
+        label: z.string(),
+        ownerAddresses: z.array(z.string()).optional(),
+        positions: z.array(earnExternalWalletPositionRecordSchema).optional(),
+        walletCount: z.number().int().nonnegative(),
+        positionCount: z.number().int().nonnegative(),
+        totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
+      })
+    ),
+    totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
+  });
+
+const earnExternalWalletSummaryResponseSchema = z.object({
+  data: z.object({ summary: earnExternalWalletPositionSummarySchema }),
+});
+
 export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
-  const body = await requestJsonOk<{ data: EarnExternalWalletPositionSummaryResponse }>(
+  const body = await requestJsonOk<unknown>(
     "/api/dashboard/markets/earn/external-wallet/positions/summary"
   );
-  return body.data.summary;
+  const parsed = earnExternalWalletSummaryResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new Error("Invalid external-wallet position summary response");
+  }
+  return parsed.data.data.summary;
 }
 
 export function earnExternalWalletSummaryRefreshInterval(
@@ -589,15 +690,6 @@ const earnVaultDepositsPageSchema = z.object({
   }),
 });
 
-const VAULT_MOVEMENTS_PAGE_SIZE = 100;
-
-/**
- * Hard stop on the paging loop, same reason as the other readers: a server that
- * never stops advancing its cursor must not spin forever. 20 pages x 100 is far
- * past any plausible number of simultaneously in-flight vault movements.
- */
-const VAULT_MOVEMENTS_PAGE_LIMIT = 20;
-
 interface VaultMovementPage<T> {
   items: T[];
   hasMore: boolean;
@@ -609,34 +701,23 @@ async function fetchAllVaultMovementPages<T>(input: {
   settled?: boolean;
   parsePage: (value: unknown) => VaultMovementPage<T> | null;
 }): Promise<T[]> {
-  const items: T[] = [];
-  const seenCursors = new Set<string>();
-  let before: string | null = null;
+  return fetchAllCursorPages<T>({
+    subject: `Vault ${input.resource}`,
+    pageSize: EARN_PAGE_SIZE,
+    async fetchPage(before) {
+      const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
+      if (input.settled !== undefined) query.set("settled", String(input.settled));
+      if (before) query.set("before", before);
 
-  for (let page = 0; page < VAULT_MOVEMENTS_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(VAULT_MOVEMENTS_PAGE_SIZE) });
-    if (input.settled !== undefined) query.set("settled", String(input.settled));
-    if (before) query.set("before", before);
-
-    const result = await dashboardFetch<unknown>(
-      `/api/dashboard/markets/earn/vault-${input.resource}?${query.toString()}`
-    );
-    if (!result.ok) throw new Error(result.error);
-    const body = input.parsePage(result.data);
-    if (!body) throw new Error(`Invalid vault ${input.resource} response`);
-
-    items.push(...body.items);
-    if (!body.hasMore) return items;
-
-    const nextCursor = body.nextCursor;
-    if (!nextCursor || nextCursor === before || seenCursors.has(nextCursor)) {
-      throw new Error(`Vault ${input.resource} pagination did not advance`);
-    }
-    seenCursors.add(nextCursor);
-    before = nextCursor;
-  }
-
-  throw new Error(`Vault ${input.resource} pagination exceeded its safety limit`);
+      const result = await dashboardFetch<unknown>(
+        `/api/dashboard/markets/earn/vault-${input.resource}?${query.toString()}`
+      );
+      if (!result.ok) throw new Error(result.error);
+      const body = input.parsePage(result.data);
+      if (!body) throw new Error(`Invalid vault ${input.resource} response`);
+      return body;
+    },
+  });
 }
 
 /**
@@ -931,13 +1012,19 @@ function useEarnVaultMovementOutcome<Movement extends WatchableVaultMovement>(in
  * Exported so the recovery filter and the poll's stop condition read the SAME
  * rule. `pending` counts as in flight: it means SDP could not establish that
  * the transaction reached the network, not that it failed.
+ *
+ * No settlement fork: a provider-order deposit parks at `confirmed` on this
+ * legacy wire (the API maps the ledger's `finalized` chain-leg fact down to
+ * `confirmed`), and `confirmed` is already in the legacy terminal set —
+ * watching past it would poll forever while the stepper's "provider
+ * settlement" state lives in presentation, not the wire.
  */
 export function isEarnVaultDepositInFlight(deposit: EarnVaultDepositRecord): boolean {
   return !SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
 }
 
 function isEarnVaultDepositSettled(deposit: EarnVaultDepositRecord): boolean {
-  return SETTLED_VAULT_MOVEMENT_STATUSES.has(deposit.status);
+  return !isEarnVaultDepositInFlight(deposit);
 }
 
 /**
@@ -1153,13 +1240,31 @@ const SETTLED_VAULT_WITHDRAWAL_STATUSES: ReadonlySet<EarnVaultDirectMovementStat
   EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct
 );
 
+/**
+ * Watch-terminal statuses for a provider-order withdrawal: the chain leg plus
+ * the unified ledger's terminal set. The reconciler parks a provider-order
+ * withdrawal once its chain leg finalizes — the NAV strike after it has no
+ * wire state to observe — so watching past `confirmed` would keep the modal
+ * open past the last honest transition, with `onSettled` never firing.
+ */
+const PROVIDER_ORDER_WATCH_TERMINAL_STATUSES: ReadonlySet<EarnVaultDirectMovementStatus> = new Set([
+  "confirmed",
+  ...EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct,
+]);
+
 /** Shared by the recovery filter and the poll's stop condition — one rule. */
 export function isEarnVaultWithdrawalInFlight(withdrawal: EarnVaultWithdrawal): boolean {
+  if (earnProviderWithdrawalSettlement(withdrawal.provider) === "provider_order") {
+    // Watch-terminal at `confirmed` — the same fork risk the legacy deposit
+    // poll already accepts — while the "awaiting provider settlement" copy
+    // stays in presentation, which already branches on settlement kind.
+    return !PROVIDER_ORDER_WATCH_TERMINAL_STATUSES.has(withdrawal.status);
+  }
   return !SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
 }
 
 function isEarnVaultWithdrawalSettled(withdrawal: EarnVaultWithdrawal): boolean {
-  return SETTLED_VAULT_WITHDRAWAL_STATUSES.has(withdrawal.status);
+  return !isEarnVaultWithdrawalInFlight(withdrawal);
 }
 
 /**
@@ -1201,6 +1306,7 @@ const queuedWithdrawalTermsSchema = z.object({
 const earnVaultWithdrawalOptionsSchema: z.ZodType<EarnVaultWithdrawalOptions> = z.object({
   positionId: z.string(),
   instant: z.boolean(),
+  providerOrder: z.boolean(),
   queued: z.boolean(),
   withdrawAuthority: z.string().nullable(),
   queueState: z.string().nullable(),
@@ -1267,7 +1373,7 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
 
 type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
 
-/** Read both routes independently. No client-side provider list chooses one. */
+/** Read settlement routes independently. No client-side provider list chooses one. */
 export async function fetchEarnVaultWithdrawalOptions(
   positionId: string,
   signal?: AbortSignal
@@ -1393,33 +1499,35 @@ const queuedRequestPageSchema = z.object({
   }),
 });
 
+/**
+ * Pages the durable recovery feed over the shared cursor pager, exactly like
+ * the live-position and vault-movement readers: a silently short read here is
+ * a still-recoverable request that stops being surfaced.
+ */
 export async function fetchEarnVaultWithdrawalRequests(
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultWithdrawalRequestRecord[]> {
-  const requests: EarnVaultWithdrawalRequestRecord[] = [];
-  const seen = new Set<string>();
-  let before: string | undefined;
+  return fetchAllCursorPages<EarnVaultWithdrawalRequestRecord>({
+    subject: "Queued withdrawal requests",
+    pageSize: EARN_PAGE_SIZE,
+    async fetchPage(before) {
+      const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
+      if (before) query.set("before", before);
+      if (options.settled !== undefined) query.set("settled", String(options.settled));
 
-  for (let page = 0; page < EARN_PAGE_LIMIT; page += 1) {
-    const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
-    if (before) query.set("before", before);
-    if (options.settled !== undefined) query.set("settled", String(options.settled));
-    const result = await dashboardFetch<unknown>(
-      `/api/dashboard/markets/earn/vault-withdrawal-requests?${query}`
-    );
-    if (!result.ok) throw new Error(result.error);
-    const parsed = queuedRequestPageSchema.safeParse(result.data);
-    if (!parsed.success) throw new Error("Invalid queued withdrawal request page");
-    requests.push(...parsed.data.data.withdrawalRequests);
-    if (!parsed.data.data.hasMore) return requests;
-    const next = parsed.data.data.nextCursor;
-    if (!next || next === before || seen.has(next)) {
-      throw new Error("Queued withdrawal request pagination did not advance");
-    }
-    seen.add(next);
-    before = next;
-  }
-  throw new Error("Queued withdrawal request pagination exceeded its safety limit");
+      const result = await dashboardFetch<unknown>(
+        `/api/dashboard/markets/earn/vault-withdrawal-requests?${query}`
+      );
+      if (!result.ok) throw new Error(result.error);
+      const parsed = queuedRequestPageSchema.safeParse(result.data);
+      if (!parsed.success) throw new Error("Invalid queued withdrawal request page");
+      return {
+        items: parsed.data.data.withdrawalRequests,
+        hasMore: parsed.data.data.hasMore,
+        nextCursor: parsed.data.data.nextCursor,
+      };
+    },
+  });
 }
 
 export function isEarnVaultWithdrawalRequestInFlight(

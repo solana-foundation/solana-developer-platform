@@ -6,6 +6,7 @@ import {
   type EarnStrategy,
   type EarnStrategySlippagePolicy,
   type EarnSwapSourceToken,
+  earnProviderDepositSettlement,
   earnSwapSourceTokens,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
@@ -33,7 +34,9 @@ import {
   isPositiveDecimal,
   MAX_AMOUNT_LENGTH,
   parseUnsignedDecimal,
+  sortByOptionalDecimal,
 } from "./earn-decimal";
+import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, shortenMarketAddress, tokenSymbol } from "./earn-format";
 import { sumDecimalStrings, TransactionLink } from "./earn-market-presentation";
@@ -58,18 +61,19 @@ import {
   mergeObservedVaultMovement,
   observableVaultMovement,
   vaultApprovalPending,
-  vaultMovementHappened,
   vaultMovementPanelKey,
   vaultMovementProcessing,
   vaultMovementProgressStep,
+  vaultMovementProgressSteps,
 } from "./earn-vault-movement";
 import {
   atomsToDecimalString,
   derivedMinOut,
   floorToReplay,
+  initialSlippageInput,
   isExpiredQuote,
   isSlippageExceededRefusal,
-  parseSlippageToleranceBps,
+  parseSlippageToleranceState,
   quoteForKey,
   useDebouncedVaultQuote,
   type VaultFloorReplay,
@@ -212,6 +216,28 @@ type DepositSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: DepositOutcome; deposited?: EarnVaultDeposit };
 
+function shouldProjectDepositBalance(outcome: DepositOutcome): boolean {
+  const deposit = observableVaultMovement(outcome);
+  return (
+    deposit !== undefined && earnProviderDepositSettlement(deposit.strategy.provider) === "atomic"
+  );
+}
+
+function shouldProjectDepositIntent(outcome: DepositOutcome, swapActive: boolean): boolean {
+  return !swapActive && shouldProjectDepositBalance(outcome);
+}
+
+function depositProgressStep(outcome: DepositOutcome | null, step: "details" | "review"): number {
+  if (
+    outcome?.kind === "deposit" &&
+    earnProviderDepositSettlement(outcome.movement.strategy.provider) === "provider_order" &&
+    outcome.movement.status === "confirmed"
+  ) {
+    return 3;
+  }
+  return vaultMovementProgressStep(outcome, step, earnVaultDepositUiState);
+}
+
 function depositAssetMetadata(strategy: EarnStrategy) {
   const depositMint = strategy.depositMints[0];
   const mintMetadata = depositMint ? WELL_KNOWN_TOKEN_BY_MINT.get(depositMint) : undefined;
@@ -250,8 +276,10 @@ function deriveDepositFormState(input: {
       ? compareUnsignedDecimals(amountValidation.canonicalAmount, selectedWalletBalance) === 1
       : false;
   const amountError = amountValidationMessage(amountInput, amountValidation, t);
-  const slippageBps = slippagePolicy ? parseSlippageToleranceBps(slippageInput) : null;
-  const slippageInvalid = slippagePolicy !== null && slippageBps === null;
+  const { slippageBps, slippageInvalid } = parseSlippageToleranceState(
+    slippagePolicy,
+    slippageInput
+  );
   const quoteAmount =
     slippagePolicy !== null && amountValidation.kind === "valid"
       ? amountValidation.canonicalAmount
@@ -543,6 +571,29 @@ function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
     };
   }
 
+  if (outcome.movement.status === "failed") {
+    return {
+      title: t("DashboardEarn.deposit.vaultFailedTitle"),
+      body: t("DashboardEarn.deposit.vaultFailedBody"),
+      note: t("DashboardEarn.deposit.vaultFailedNote"),
+      status: t("DashboardEarn.deposit.vaultFailedStatus"),
+      statusVariant: "danger" as const,
+    };
+  }
+
+  if (
+    earnProviderDepositSettlement(outcome.movement.strategy.provider) === "provider_order" &&
+    outcome.movement.status === "confirmed"
+  ) {
+    return {
+      title: t("DashboardEarn.deposit.providerOrderConfirmedTitle"),
+      body: t("DashboardEarn.deposit.providerOrderConfirmedBody"),
+      note: t("DashboardEarn.deposit.providerOrderConfirmedNote"),
+      status: t("DashboardEarn.deposit.providerOrderConfirmedStatus"),
+      statusVariant: "info" as const,
+    };
+  }
+
   switch (outcome.movement.status) {
     case "confirmed":
       return {
@@ -589,11 +640,13 @@ function DepositMovementResult({
   const copy = depositMovementCopy(outcome, t);
   const sharedStatus = outcome.absorbedByApproval
     ? null
-    : earnVaultPositionStatusDisplay(
-        earnVaultDepositUiState(deposit.status).positionStatus,
-        t("DashboardMarkets.treasury.positionStatusPending"),
-        t("DashboardMarkets.treasury.positionStatusActive")
-      );
+    : earnProviderDepositSettlement(deposit.strategy.provider) === "provider_order"
+      ? null
+      : earnVaultPositionStatusDisplay(
+          earnVaultDepositUiState(deposit.status).positionStatus,
+          t("DashboardMarkets.treasury.positionStatusPending"),
+          t("DashboardMarkets.treasury.positionStatusActive")
+        );
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
   const processing =
@@ -734,13 +787,10 @@ function useVaultFundingToken(input: {
   }, [decimals, depositMint, strategy.hostCluster, symbol]);
   const fundingTokens = useMemo(() => {
     if (wallets === undefined) return supportedFundingTokens;
-    const rankedTokens: {
-      balance: string | undefined;
-      index: number;
-      token: EarnSwapSourceToken;
-    }[] = [];
 
-    for (const [index, token] of supportedFundingTokens.entries()) {
+    // Keep every supported stable visible for demo selection. Balance only
+    // controls ranking and the default selection, not visibility.
+    const balanceFor = (token: EarnSwapSourceToken): string | undefined => {
       const knownBalances: string[] = [];
       let hasUnknownBalance = false;
       for (const wallet of wallets) {
@@ -751,31 +801,17 @@ function useVaultFundingToken(input: {
           knownBalances.push(balance);
         }
       }
-      const balance = hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
-      // Keep every supported stable visible for demo selection. Balance only
-      // controls ranking and the default selection, not visibility.
-      rankedTokens.push({ balance, index, token });
-    }
-
-    rankedTokens.sort((left, right) => {
-      if (left.balance === undefined && right.balance === undefined) {
-        return left.index - right.index;
-      }
-      if (left.balance === undefined) return 1;
-      if (right.balance === undefined) return -1;
-      const order = compareUnsignedDecimals(left.balance, right.balance) ?? 0;
-      return order === 0 ? left.index - right.index : -order;
-    });
-
-    const tokens: EarnSwapSourceToken[] = [];
-    for (const { token } of rankedTokens) tokens.push(token);
-    return tokens;
+      return hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
+    };
+    return sortByOptionalDecimal(supportedFundingTokens, balanceFor, "descending");
   }, [supportedFundingTokens, wallets]);
   const [fundingMint, setFundingMint] = useState<string | null>(null);
+  // Ranked order already covers "nothing selected": its first row is the
+  // default. With wallets loaded the ranking is a full permutation of the
+  // supported tokens, so the two arrays are the same length and there is no
+  // third fallback behind `fundingTokens[0]`.
   const fundingToken =
-    fundingTokens.find((token) => token.mint === fundingMint) ??
-    fundingTokens[0] ??
-    supportedFundingTokens[0];
+    fundingTokens.find((token) => token.mint === fundingMint) ?? fundingTokens[0];
   const swapActive = fundingToken !== undefined && fundingToken.mint !== depositMint;
 
   return {
@@ -1179,14 +1215,7 @@ function DepositReviewStep(props: DepositReviewStepProps) {
       ) : null}
 
       <DepositConfirmNote feeSponsored={strategy.feeSponsored} swapActive={swapActive} />
-      {submitError ? (
-        <p
-          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
-          {submitError}
-        </p>
-      ) : null}
+      {submitError ? <EarnErrorNote message={submitError} /> : null}
 
       <div className="mt-6 flex gap-2">
         <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
@@ -1226,12 +1255,12 @@ export function EarnVaultDepositModal({
   // The catalogue row's own answer, published per environment by the API
   // (`earnDepositSlippagePolicy` in @sdp/types): non-null means the build
   // REQUIRES an explicit share floor, which the dashboard derives from a LIVE
-  // quote and never from the deposit amount. Every production row is non-null.
-  // Null renders no slippage control at all.
+  // quote and never from the deposit amount. Most production rows are non-null;
+  // a next-NAV provider order publishes null because its later settlement
+  // cannot be bounded by the Solana payment leg. Null renders no slippage
+  // control at all.
   const slippagePolicy = strategy.depositSlippage;
-  const [slippageInput, setSlippageInput] = useState(() =>
-    slippagePolicy ? String(slippagePolicy.defaultToleranceBps) : ""
-  );
+  const [slippageInput, setSlippageInput] = useState(() => initialSlippageInput(slippagePolicy));
   const [slippageOpen, setSlippageOpen] = useState(false);
   const [step, setStep] = useState<"details" | "review">("details");
   const [submitting, setSubmitting] = useState(false);
@@ -1245,13 +1274,18 @@ export function EarnVaultDepositModal({
     onMovementUpdated
   );
   const visibleOutcome = mergeObservedVaultMovement(outcome, observedDeposit);
-  const progressStep = vaultMovementProgressStep(visibleOutcome, step, earnVaultDepositUiState);
-  const progressSteps = [
-    t("DashboardEarn.deposit.flowDetails"),
-    t("DashboardEarn.deposit.flowReview"),
-    t("DashboardEarn.deposit.flowProcessing"),
-    t("DashboardEarn.deposit.flowComplete"),
-  ];
+  const progressStep = depositProgressStep(visibleOutcome, step);
+  const providerOrder = earnProviderDepositSettlement(strategy.provider) === "provider_order";
+  const progressSteps = vaultMovementProgressSteps(
+    {
+      complete: t("DashboardEarn.deposit.flowComplete"),
+      details: t("DashboardEarn.deposit.flowDetails"),
+      processing: t("DashboardEarn.deposit.flowProcessing"),
+      providerSettlement: t("DashboardEarn.deposit.flowProviderSettlement"),
+      review: t("DashboardEarn.deposit.flowReview"),
+    },
+    providerOrder
+  );
   const movementProcessing = vaultMovementProcessing(visibleOutcome, ["pending", "submitted"]);
   const panelKey = vaultMovementPanelKey(visibleOutcome, step, "deposit");
   const contentRef = useModalFocus({
@@ -1492,7 +1526,7 @@ export function EarnVaultDepositModal({
         // A swap request is denominated in the funding token while the
         // position is denominated in the vault token. Wait for the provider
         // value instead of presenting those unlike amounts as one balance.
-        projectBalance: !swapActive && vaultMovementHappened(resolution.outcome),
+        projectBalance: shouldProjectDepositIntent(resolution.outcome, swapActive),
       });
     }
   }

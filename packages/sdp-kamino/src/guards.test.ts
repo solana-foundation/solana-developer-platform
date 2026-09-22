@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import { KAMINO_KVAULT_PROGRAM_IDS } from "@sdp/types";
 import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import {
+  assertPlanInstructionsSupported,
   assertPlanTargetsCluster,
   KaminoProgramMismatchError,
+  KaminoUnsupportedInstructionError,
   planProgramAddresses,
 } from "./guards";
 import { foreignKvaultProgramId, kaminoClusterConfig } from "./programs";
@@ -106,6 +109,107 @@ describe("assertPlanTargetsCluster", () => {
       accepted: {},
     } as KaminoInstructionPlan;
     expect(() => assertPlanTargetsCluster(mixedPrograms)).toThrow(KaminoProgramMismatchError);
+  });
+});
+
+/** Anchor's instruction discriminator: sha256("global:<snake_case_name>")[0..8]. */
+function anchorDiscriminator(name: string): Uint8Array {
+  return new Uint8Array(createHash("sha256").update(`global:${name}`).digest().subarray(0, 8));
+}
+
+function planWithData(
+  cluster: KaminoInstructionPlan["cluster"],
+  instructions: readonly { program: string; data: Uint8Array }[]
+): KaminoInstructionPlan {
+  return {
+    cluster,
+    instructions: instructions.map(({ program, data }) => ({
+      programAddress: address(program),
+      accounts: [],
+      data,
+    })),
+    lookupTables: [],
+    assetIdentity: ASSET_IDENTITY,
+    accepted: {},
+  } as KaminoInstructionPlan;
+}
+
+describe("assertPlanInstructionsSupported", () => {
+  const floorVariant = anchorDiscriminator("deposit_with_min_shares_out");
+  const legacyDeposit = anchorDiscriminator("deposit");
+  const devnet = kaminoClusterConfig("devnet");
+  const mainnet = kaminoClusterConfig("mainnet-beta");
+
+  it("pins the floor variant's discriminator to the bytes klend-sdk 10 emits", () => {
+    // The guard carries the bytes rather than hashing at runtime; this is what
+    // keeps a typo in that constant from silently disabling the check.
+    expect([...floorVariant]).toEqual([74, 127, 128, 80, 4, 221, 193, 91]);
+    expect([...legacyDeposit]).toEqual([242, 35, 198, 137, 82, 225, 242, 182]);
+  });
+
+  /**
+   * THE DEVNET REGRESSION OF 2026-09-18. Kamino's devnet kvault build (IDL 2.0.1)
+   * has no `deposit_with_min_shares_out`; klend-sdk emits it for any
+   * `minSharesOut`; the chain answers Anchor 101 InstructionFallbackNotFound.
+   * `sdk.ts` refuses the floor before building; this catches an SDK that emits
+   * the variant unasked.
+   */
+  it("REJECTS the floor variant addressed to the devnet kvault program", () => {
+    const plan = planWithData("devnet", [
+      { program: devnet.kvaultProgramId, data: new Uint8Array([...floorVariant, 1, 2, 3]) },
+    ]);
+    expect(() => assertPlanInstructionsSupported(plan)).toThrow(KaminoUnsupportedInstructionError);
+    // ...and the cluster assertion every builder already runs includes it.
+    expect(() => assertPlanTargetsCluster(plan)).toThrow(KaminoUnsupportedInstructionError);
+  });
+
+  it("names the instruction and the cluster in the error", () => {
+    try {
+      assertPlanInstructionsSupported(
+        planWithData("devnet", [{ program: devnet.kvaultProgramId, data: floorVariant }])
+      );
+      expect.unreachable("expected an unsupported instruction");
+    } catch (error) {
+      expect(error).toBeInstanceOf(KaminoUnsupportedInstructionError);
+      const unsupported = error as KaminoUnsupportedInstructionError;
+      expect(unsupported.cluster).toBe("devnet");
+      expect(unsupported.instruction).toBe("deposit_with_min_shares_out");
+    }
+  });
+
+  it("accepts the legacy deposit on devnet, which that build does implement", () => {
+    expect(() =>
+      assertPlanTargetsCluster(
+        planWithData("devnet", [{ program: devnet.kvaultProgramId, data: legacyDeposit }])
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts the floor variant on mainnet, whose build implements it", () => {
+    expect(() =>
+      assertPlanTargetsCluster(
+        planWithData("mainnet-beta", [{ program: mainnet.kvaultProgramId, data: floorVariant }])
+      )
+    ).not.toThrow();
+  });
+
+  it("only reads the kvault program's own instructions", () => {
+    // The same eight bytes in an ATA-program instruction mean nothing here.
+    expect(() =>
+      assertPlanTargetsCluster(
+        planWithData("devnet", [{ program: ATA_PROGRAM, data: floorVariant }])
+      )
+    ).not.toThrow();
+  });
+
+  it("ignores instructions too short to carry a discriminator", () => {
+    expect(() =>
+      assertPlanTargetsCluster(
+        planWithData("devnet", [
+          { program: devnet.kvaultProgramId, data: new Uint8Array([74, 127]) },
+        ])
+      )
+    ).not.toThrow();
   });
 });
 

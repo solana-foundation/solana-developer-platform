@@ -197,6 +197,24 @@ describe("oracle-free Kamino SDK execution", () => {
     expect(mocks.stateOnlyOracles[0]?.valid).toBe(false);
   });
 
+  /**
+   * Kamino's devnet kvault build has no `deposit_with_min_shares_out`, and the
+   * SDK emits exactly that for any `minSharesOut`. The refusal must land before
+   * a single read: the chain's own answer (Anchor 101) would arrive only after
+   * the caller had been shown a floor, and as a 400 the API can relay verbatim.
+   */
+  it("refuses a share floor on devnet before touching the RPC", async () => {
+    await expect(
+      buildKaminoDepositPlan(runtime, { amount: "1", owner, vault: VAULT, minSharesOut: "0.9" })
+    ).rejects.toMatchObject({
+      name: "SdpKaminoError",
+      code: "DEPOSIT_REFUSED",
+      message: expect.stringContaining("devnet vault program cannot enforce a share floor"),
+    });
+    expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
+    expect(mocks.getState).not.toHaveBeenCalled();
+  });
+
   it("executes the pinned SDK withdrawal builder with state-only reserves", async () => {
     const plan = await buildKaminoWithdrawPlan(runtime, {
       owner,

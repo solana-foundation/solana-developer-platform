@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   earnProviderLabel,
+  formatDurationSeconds,
   formatEpochSeconds,
   formatProviderAmount,
   formatTokenQuantity,
@@ -48,5 +49,13 @@ describe("Earn display formatting", () => {
     );
     expect(formatEpochSeconds("not-an-epoch", "en-US")).toBeUndefined();
     expect(formatEpochSeconds("99999999999999999999", "en-US")).toBeUndefined();
+  });
+
+  it("formats provider delays as short human durations", () => {
+    expect(formatDurationSeconds(45, "en-US")).toBe("45 seconds");
+    expect(formatDurationSeconds(90, "en-US")).toBe("1.5 minutes");
+    expect(formatDurationSeconds(7_200, "en-US")).toBe("2 hours");
+    expect(formatDurationSeconds(172_800, "en-US")).toBe("2 days");
+    expect(formatDurationSeconds(Number.NaN, "en-US")).toBeUndefined();
   });
 });

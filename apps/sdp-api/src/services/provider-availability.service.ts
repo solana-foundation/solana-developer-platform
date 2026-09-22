@@ -351,6 +351,12 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       credentialEnvKeys: ["JUPITER_SWAP_API_KEY"],
       isConfigured: (env) => hasEnv(env, "JUPITER_SWAP_API_KEY"),
     },
+    // One packed JSON credential per environment (OAuth2 password-grant quad —
+    // clientId/clientSecret/username/password); format documented on
+    // `EarnRuntimeEnvironment` in @sdp/earn. Configured means "the key is set",
+    // not "the JSON parses" — the provider client validates the shape and
+    // fails closed with PROVIDER_NOT_CONFIGURED on malformed content.
+    wisdomtree: keyPairCredentialDefinition("WisdomTree", "WISDOMTREE"),
   },
 } as const satisfies ProviderAvailabilityDefinitions;
 

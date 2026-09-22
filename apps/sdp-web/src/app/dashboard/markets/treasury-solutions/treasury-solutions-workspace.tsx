@@ -50,7 +50,7 @@ import {
   type EarnFundingWallet,
   useEarnFundingWallets,
 } from "../earn/deposit/earn-funding-wallets";
-import { compareUnsignedDecimals } from "../earn/earn-decimal";
+import { compareUnsignedDecimals, sortByOptionalDecimal } from "../earn/earn-decimal";
 import {
   type EarnDepositAvailabilityLabels,
   earnProviderLabel,
@@ -165,30 +165,15 @@ type NumericSortDirection = "ascending" | "descending";
 type NumericSortState = NumericSortDirection | "none";
 type StrategySortField = "apy" | "tvl";
 
-function sortByOptionalDecimal<Item>(
-  items: readonly Item[],
-  valueFor: (item: Item) => string | undefined,
-  direction: NumericSortDirection
-): Item[] {
-  return items
-    .map((item, index) => {
-      const candidate = valueFor(item);
-      const value =
-        candidate !== undefined && compareUnsignedDecimals(candidate, "0") !== undefined
-          ? candidate
-          : undefined;
-      return { index, item, value };
-    })
-    .sort((left, right) => {
-      if (left.value === undefined && right.value === undefined) return left.index - right.index;
-      if (left.value === undefined) return 1;
-      if (right.value === undefined) return -1;
-
-      const order = compareUnsignedDecimals(left.value, right.value) ?? 0;
-      if (order === 0) return left.index - right.index;
-      return direction === "ascending" ? order : -order;
-    })
-    .map(({ item }) => item);
+/**
+ * A wire decimal that can be compared. Strategy rows are provider-supplied,
+ * so an unparseable value ranks as unknown (last) rather than being trusted
+ * to compare.
+ */
+function knownWireDecimal(value: string | undefined): string | undefined {
+  return value !== undefined && compareUnsignedDecimals(value, "0") !== undefined
+    ? value
+    : undefined;
 }
 
 function SortableNumericTableHead({
@@ -997,7 +982,9 @@ function StrategyTable({
   const sortedStrategies = useMemo(() => {
     const sortedByMetric = sortByOptionalDecimal(
       strategies,
-      strategySort.field === "apy" ? (strategy) => strategy.currentApy : strategyTvlUsd,
+      strategySort.field === "apy"
+        ? (strategy) => knownWireDecimal(strategy.currentApy)
+        : (strategy) => knownWireDecimal(strategyTvlUsd(strategy)),
       strategySort.direction
     );
     return sortedByMetric.sort(
@@ -1160,7 +1147,9 @@ function ActiveVaultPositionsCard({
       sortByOptionalDecimal(
         positionsWithProvisionalDeposits.filter(isOpenVaultPosition),
         (position) =>
-          visibleProjectedVaultBalance(position, deposits, withdrawals) ?? position.tokenValue,
+          knownWireDecimal(
+            visibleProjectedVaultBalance(position, deposits, withdrawals) ?? position.tokenValue
+          ),
         balanceSortDirection
       ),
     [balanceSortDirection, deposits, positionsWithProvisionalDeposits, withdrawals]

@@ -137,7 +137,7 @@ async function openReview(amount = "5") {
   fireEvent.change(screen.getByLabelText("Amount"), { target: { value: amount } });
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   await waitFor(() => expect(mocks.fetchPreview).toHaveBeenCalled());
-  await screen.findByRole("button", { name: "Escrow shares and request" });
+  await screen.findByRole("button", { name: "Request withdrawal" });
 }
 
 beforeEach(() => {
@@ -174,13 +174,37 @@ describe("EarnVaultQueuedWithdrawModal", () => {
       },
     });
 
-    expect(
-      screen.getByText(/These shares are locked until .*request is disabled until/i)
-    ).toBeTruthy();
+    expect(screen.getByText(/These funds are locked until .*after they unlock/i)).toBeTruthy();
     expect(screen.queryByText("$0.00 available")).toBeNull();
     expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(
       true
     );
+  });
+
+  it("explains an over-available amount instead of silently disabling Continue", () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "11" } });
+
+    expect(
+      screen.getByText("That exceeds the amount currently available to withdraw.")
+    ).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+  });
+
+  it("caps typed amounts at the withdrawal decimal scale like the instant modal", () => {
+    renderModal();
+    const input = screen.getByLabelText("Amount") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "0.123456" } });
+    expect(input.value).toBe("0.123456");
+
+    // A seventh decimal never reaches the state — the change is discarded at
+    // the source instead of being rejected after the fact.
+    fireEvent.change(input, { target: { value: "0.1234567" } });
+    expect(input.value).toBe("0.123456");
   });
 
   it("uses live queue terms and keeps one idempotency key until the intent changes", async () => {
@@ -192,11 +216,18 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     });
     renderModal();
 
-    expect((screen.getByLabelText("Discount (basis points)") as HTMLInputElement).value).toBe("25");
-    expect((screen.getByLabelText("Solver window (seconds)") as HTMLInputElement).value).toBe(
-      "360"
-    );
-    expect(screen.getByText("25–75 bps")).toBeTruthy();
+    const settings = screen.getByText("Payout and timing").closest("details");
+    expect(settings?.open).toBe(false);
+    expect(screen.getByText("0.25% less · 6 minutes to complete")).toBeTruthy();
+    fireEvent.click(screen.getByText("Payout and timing"));
+    expect(settings?.open).toBe(true);
+    expect((screen.getByLabelText("Accept less (%)") as HTMLInputElement).value).toBe("0.25");
+    expect((screen.getByLabelText("Time allowed (minutes)") as HTMLInputElement).value).toBe("6");
+    expect(screen.getByText("Allowed: 0.25% to 0.75%")).toBeTruthy();
+    expect(
+      screen.getByText("A larger reduction can make the request easier to complete.")
+    ).toBeTruthy();
+    expect(screen.getByText("More time can make the request easier to complete.")).toBeTruthy();
 
     await openReview();
     expect(mocks.fetchPreview).toHaveBeenLastCalledWith(
@@ -209,14 +240,14 @@ describe("EarnVaultQueuedWithdrawModal", () => {
       expect.any(AbortSignal)
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
     expect(mocks.createRequest).toHaveBeenLastCalledWith(
       expect.objectContaining({ shares: "5" }),
       FIRST_KEY
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
     expect(mocks.createRequest.mock.calls[1]?.[1]).toBe(FIRST_KEY);
 
@@ -224,12 +255,55 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Max" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(mocks.fetchPreview).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(3));
     expect(mocks.createRequest.mock.calls[2]).toEqual([
       expect.objectContaining({ shares: "10" }),
       SECOND_KEY,
     ]);
+  });
+
+  it("converts plain percentages and minutes back to the provider values", async () => {
+    renderModal();
+
+    fireEvent.click(screen.getByText("Payout and timing"));
+    fireEvent.change(screen.getByLabelText("Accept less (%)"), { target: { value: "0.5" } });
+    fireEvent.change(screen.getByLabelText("Time allowed (minutes)"), {
+      target: { value: "7.5" },
+    });
+
+    await openReview();
+
+    expect(mocks.fetchPreview).toHaveBeenLastCalledWith(
+      {
+        positionId: position.id,
+        shares: "5",
+        discountBps: 50,
+        deadlineSeconds: 450,
+      },
+      expect.any(AbortSignal)
+    );
+  });
+
+  it("converts fractional hours without floating-point validation failures", async () => {
+    renderModal({
+      terms: {
+        ...terms,
+        minimumSecondsToDeadline: 3_600,
+      },
+    });
+
+    fireEvent.click(screen.getByText("Payout and timing"));
+    fireEvent.change(screen.getByLabelText("Time allowed (hours)"), {
+      target: { value: "1.1" },
+    });
+
+    await openReview();
+
+    expect(mocks.fetchPreview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deadlineSeconds: 3_960 }),
+      expect.any(AbortSignal)
+    );
   });
 
   it("explains provider preview blockers instead of silently disabling submission", async () => {
@@ -245,11 +319,10 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     await openReview();
 
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("The provider cannot accept this request:");
+    expect(alert.textContent).toContain("This request isn't available:");
     expect(alert.textContent).toContain("Request at least one vault share.");
     expect(
-      (screen.getByRole("button", { name: "Escrow shares and request" }) as HTMLButtonElement)
-        .disabled
+      (screen.getByRole("button", { name: "Request withdrawal" }) as HTMLButtonElement).disabled
     ).toBe(true);
     expect(mocks.createRequest).not.toHaveBeenCalled();
   });
@@ -268,17 +341,42 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     renderModal({ onRequested, onSettled });
 
     await openReview();
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
 
-    expect(await screen.findByText("Recovery available")).toBeTruthy();
+    expect(await screen.findByText("Shares ready")).toBeTruthy();
     expect(mocks.createRequest).toHaveBeenCalledWith(expect.any(Object), FIRST_KEY);
     expect(mocks.useRequestOutcome).toHaveBeenCalledWith(submitted.withdrawalRequestId, onSettled);
     expect(onRequested).toHaveBeenCalledWith(submitted);
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel and recover shares" }));
+    fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     await waitFor(() =>
       expect(mocks.cancelRequest).toHaveBeenCalledWith(submitted.withdrawalRequestId, SECOND_KEY)
     );
+  });
+
+  it("keeps a confirmed cancel ahead of a stale poll whose timestamps sort differently", async () => {
+    const submitted = request("pending");
+    const recoverable = request("expiredCancelable");
+    const cancelling = request("cancelling");
+    // Half a second AFTER the poll's observation, yet lexicographically
+    // BEFORE it: mixed fractional-seconds formatting inverts string order.
+    cancelling.updatedAt = "2026-09-18T00:00:00.500000Z";
+    recoverable.updatedAt = "2026-09-18T00:00:00Z";
+    mocks.createRequest.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", withdrawalRequest: submitted },
+    });
+    mocks.cancelRequest.mockResolvedValue({ ok: true, status: 200, data: cancelling });
+    mocks.useRequestOutcome.mockReturnValue(recoverable);
+    renderModal();
+
+    await openReview();
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await screen.findByText("Shares ready");
+
+    fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
+    expect(await screen.findByText("Returning shares")).toBeTruthy();
   });
 
   it("forwards server-observed solver fulfillment to the settlement callback", async () => {
@@ -296,9 +394,9 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     renderModal({ onSettled });
 
     await openReview();
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
 
-    expect(await screen.findByText("Fulfilled")).toBeTruthy();
+    expect(await screen.findByText("Complete")).toBeTruthy();
     const observedSettlement = mocks.useRequestOutcome.mock.calls.at(-1)?.[1];
     expect(observedSettlement).toBe(onSettled);
     observedSettlement?.(fulfilled);
@@ -307,25 +405,21 @@ describe("EarnVaultQueuedWithdrawModal", () => {
   });
 
   it.each([
-    [
-      "creating" as const,
-      "Confirming request",
-      "Submission is still being confirmed. SDP has not yet confirmed that the request is on chain.",
-    ],
+    ["creating" as const, "Confirming", "We're confirming your request."],
     [
       "closedOrUnknown" as const,
-      "Checking close event",
-      "The request account is closed. SDP is checking its close event to determine the final outcome.",
+      "Checking final status",
+      "The request is closed. We're checking whether funds were paid or shares were returned.",
     ],
     [
       "failed" as const,
       "Failed",
-      "The queued withdrawal did not complete. Review the recorded reason before trying again.",
+      "The withdrawal did not complete. Check the reason before trying again.",
     ],
     [
       "cancelling" as const,
-      "Recovering shares",
-      "The request is on chain. SDP will keep observing it after this window closes.",
+      "Returning shares",
+      "Your shares are set aside. We'll keep checking for payment.",
     ],
   ])("renders honest %s status copy", async (status, label, body) => {
     const submitted = request(status);
@@ -338,20 +432,18 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     renderModal();
 
     await openReview();
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
 
     expect(await screen.findByText(label)).toBeTruthy();
     expect(screen.getByText(body)).toBeTruthy();
     expect(
       screen.queryByText(
-        "The provider's solver, not SDP, controls fulfilment. If it does not fulfil before the deadline, the shares remain recoverable through Cancel and recover shares."
+        "Your shares are set aside while the provider completes the withdrawal. If it doesn't, you can get your shares back after the date shown."
       )
     ).toBeNull();
     if (status !== "cancelling") {
       expect(
-        screen.queryByText(
-          "The request is on chain. SDP will keep observing it after this window closes."
-        )
+        screen.queryByText("Your shares are set aside. We'll keep checking for payment.")
       ).toBeNull();
     }
     if (status === "failed") {
@@ -380,19 +472,19 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     const view = renderModal();
 
     await openReview();
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
-    await screen.findByText("Recovery available");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel and recover shares" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await screen.findByText("Shares ready");
+    fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(1));
     expect(mocks.cancelRequest.mock.calls[0]?.[1]).toBe(SECOND_KEY);
-    expect(await screen.findByText("Recovering shares")).toBeTruthy();
+    expect(await screen.findByText("Returning shares")).toBeTruthy();
 
     mocks.useRequestOutcome.mockReturnValue(reopened);
     view.rerender(view.renderUi());
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Cancel and recover shares" })).toBeTruthy()
+      expect(screen.getByRole("button", { name: "Get shares back" })).toBeTruthy()
     );
-    fireEvent.click(screen.getByRole("button", { name: "Cancel and recover shares" }));
+    fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(2));
     expect(mocks.cancelRequest.mock.calls[1]?.[1]).toBe(THIRD_KEY);
   });
@@ -412,7 +504,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     renderModal({ onRequested });
 
     await openReview();
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
 
     expect(await screen.findByText("Withdrawal pending approval")).toBeTruthy();
     expect(screen.getByText("approval_request_1")).toBeTruthy();
@@ -434,13 +526,13 @@ describe("EarnVaultQueuedWithdrawModal", () => {
 
     const first = renderModal();
     await openReview();
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await screen.findByText("Withdrawal pending approval");
     first.unmount();
 
     renderModal();
     await openReview();
-    fireEvent.click(screen.getByRole("button", { name: "Escrow shares and request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
 
     expect(mocks.createRequest.mock.calls[0]?.[1]).toBe(FIRST_KEY);

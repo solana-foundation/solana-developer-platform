@@ -7,7 +7,7 @@
  * stays out of the code that decides whether it can be sent at all.
  */
 
-import { type SolanaCluster, SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -18,9 +18,8 @@ import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { dvpToastAction } from "../dvp-action-toast";
 import { freshDvpIdempotencyKey } from "../dvp-idempotency-key";
 import { dvpErrorEnvelopeSchema } from "../dvp-trade";
+import { TOKEN_2022_PROGRAM } from "./dvp-create.data";
 import type { DvpPartyWire } from "./use-dvp-parties";
-
-const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 
 export interface DvpCreateRequest {
   parties: { a: DvpPartyWire; b: DvpPartyWire };
@@ -98,8 +97,8 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
           // refuses and names the mismatch rather than publishing an escrow
           // derived under the wrong program, which is the failure the form
           // cannot detect itself.
-          tokenProgramA: request.tokenProgramA ?? TOKEN_2022,
-          tokenProgramB: request.tokenProgramB ?? TOKEN_2022,
+          tokenProgramA: request.tokenProgramA ?? TOKEN_2022_PROGRAM,
+          tokenProgramB: request.tokenProgramB ?? TOKEN_2022_PROGRAM,
           amountA: request.amountA,
           amountB: request.amountB,
           // Local wall clock, deliberately: the person picked a time off

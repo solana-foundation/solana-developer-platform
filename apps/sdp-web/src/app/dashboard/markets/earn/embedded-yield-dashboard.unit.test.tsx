@@ -287,6 +287,45 @@ describe("EmbeddedYieldDashboard", () => {
     expect(within(details).queryByText(/Locked shares unlock/)).toBeNull();
   });
 
+  it("treats an absent withdrawable share read as unavailable, not locked", () => {
+    // The type contract says an absent read is a FAILED read, never zero —
+    // coercing it would show an unlock date the data never claimed.
+    mocks.summary = {
+      walletCount: 1,
+      positionCount: 1,
+      unavailablePositionCount: 0,
+      totalsByToken: [],
+      totalsByStrategy: [
+        {
+          provider: "veda",
+          providerReference: "vault_1",
+          label: "Veda USDC",
+          ownerAddresses: ["11111111111111111111111111111111"],
+          positions: [
+            positionFixture({
+              provider: "veda",
+              label: "Veda USDC",
+              shares: "5.9",
+              withdrawableShares: undefined,
+              unlockTimestamp: "1756684800",
+            }),
+          ],
+          walletCount: 1,
+          positionCount: 1,
+          totalsByToken: [],
+        },
+      ],
+    };
+
+    renderWithEnglish(
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    );
+    fireEvent.click(screen.getByRole("row", { name: "View customer wallets for Veda USDC" }));
+
+    const details = screen.getByRole("region", { name: "Veda USDC" });
+    expect(within(details).queryByText(/Locked shares unlock/)).toBeNull();
+  });
+
   it("withholds a strategy total when its live value is unavailable", () => {
     mocks.summary = {
       walletCount: 1,

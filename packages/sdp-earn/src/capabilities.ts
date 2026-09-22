@@ -1,9 +1,11 @@
 import type {
+  EarnDepositEligibilityProvider,
   EarnLiveMetricsProvider,
   EarnPortfolioWalletProvider,
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultProvider,
+  EarnVaultProviderOrderWithdrawProvider,
   EarnVaultQueuedWithdrawProvider,
   EarnVaultWithdrawProvider,
   EarnVaultWithdrawQuoteProvider,
@@ -121,6 +123,21 @@ export function supportsVaultWithdraw(
   return VAULT_WITHDRAW_METHODS.every((method) => typeof candidate[method] === "function");
 }
 
+/**
+ * Distinguish a provider-managed redemption order from an atomic payout.
+ * Requires the ordinary withdrawal builder first: the declaration describes
+ * how that builder settles, and cannot advertise a route on its own.
+ */
+export function supportsVaultProviderOrderWithdraw(
+  client: EarnVaultProvider
+): client is EarnVaultProviderOrderWithdrawProvider {
+  if (!supportsVaultWithdraw(client)) return false;
+  return (
+    (client as Partial<EarnVaultProviderOrderWithdrawProvider>).vaultWithdrawalSettlement ===
+    "provider_order"
+  );
+}
+
 const VAULT_DEPOSIT_QUOTE_METHODS = ["quoteVaultDeposit"] as const satisfies readonly Exclude<
   keyof EarnVaultDepositQuoteProvider,
   keyof EarnVaultDirectProvider
@@ -190,6 +207,26 @@ export function supportsVaultQueuedWithdraw(
     Record<(typeof VAULT_QUEUED_WITHDRAW_METHODS)[number], unknown>
   >;
   return VAULT_QUEUED_WITHDRAW_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const DEPOSIT_ELIGIBILITY_METHODS = ["checkDepositEligibility"] as const satisfies readonly Exclude<
+  keyof EarnDepositEligibilityProvider,
+  keyof EarnVaultProvider
+>[];
+
+/**
+ * Capability discovery for the optional deposit-eligibility contract — same
+ * method-presence rule as the guards above. Consulted by MONEY-IN paths only
+ * (ADR 0002: an exit must never inherit this gate); a provider without the
+ * capability is simply not eligibility-gated.
+ */
+export function supportsDepositEligibility(
+  client: EarnVaultProvider
+): client is EarnDepositEligibilityProvider {
+  const candidate = client as Partial<
+    Record<(typeof DEPOSIT_ELIGIBILITY_METHODS)[number], unknown>
+  >;
+  return DEPOSIT_ELIGIBILITY_METHODS.every((method) => typeof candidate[method] === "function");
 }
 
 const LIVE_METRICS_METHODS = ["listStrategyMetrics"] as const satisfies readonly Exclude<

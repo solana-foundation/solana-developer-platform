@@ -70,9 +70,15 @@ function renderCard(onChanged = vi.fn()) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
-    IDEMPOTENCY_KEY as ReturnType<typeof crypto.randomUUID>
-  );
+  // Each mint returns a DISTINCT value, otherwise "the retry reused the key"
+  // would pass against a constant mock that proves nothing.
+  let minted = 0;
+  vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => {
+    minted += 1;
+    return (
+      minted === 1 ? IDEMPOTENCY_KEY : `22222222-2222-4222-8222-22222222222${minted}`
+    ) as ReturnType<typeof crypto.randomUUID>;
+  });
 });
 
 afterEach(() => {
@@ -105,13 +111,13 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
       });
     const view = renderCard();
 
-    expect(screen.getByRole("heading", { name: "Queued withdrawals" })).toBeTruthy();
-    expect(screen.getByText("Waiting for solver")).toBeTruthy();
-    expect(screen.getByText("Recovery available")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Withdrawal requests" })).toBeTruthy();
+    expect(screen.getByText("Waiting for payment")).toBeTruthy();
+    expect(screen.getByText("Shares ready")).toBeTruthy();
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: "Cancel and recover shares" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Get shares back" })).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel and recover shares" }));
+    fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Recovery temporarily unavailable"
     );
@@ -121,8 +127,10 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
     );
     expect(refresh).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel and recover shares" }));
+    fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(2));
+    // The UUID source now mints a fresh value for every call, so a retry can
+    // only arrive under the SAME key if the card memoized the original one.
     expect(mocks.cancelRequest.mock.calls[1]).toEqual([
       recoverable.withdrawalRequestId,
       IDEMPOTENCY_KEY,
@@ -184,9 +192,13 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
 
     renderCard();
 
-    expect(screen.getByText("Confirming request")).toBeTruthy();
-    expect(screen.queryByText("Waiting for solver")).toBeNull();
-    expect(screen.getByText(/solver eligible — · recoverable after —/)).toBeTruthy();
+    expect(screen.getByText("Confirming")).toBeTruthy();
+    expect(screen.queryByText("Waiting for payment")).toBeNull();
+    expect(
+      screen.getByText(
+        /4.9875 USDC expected · payment can start after Unavailable · get shares back after Unavailable/
+      )
+    ).toBeTruthy();
   });
 
   it("renders nothing once the server-side open feed is empty", () => {

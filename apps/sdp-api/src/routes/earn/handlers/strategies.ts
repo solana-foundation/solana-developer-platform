@@ -74,16 +74,19 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
  * never sponsored (there is no movement to sponsor), so the two agree.
  *
  * `depositSlippage` is derived per request too: every production deposit
- * carries a share floor, so the field answers for the caller's environment
- * exactly as the deposit routes gate (`earnDepositSlippagePolicy`). A row that
- * reads null never meets a build that demands `minSharesOut`.
+ * carries a share floor, so the field answers for the caller's environment and
+ * the row's own cluster exactly as the deposit routes gate
+ * (`earnDepositSlippagePolicy`). A row that reads null never meets a build that
+ * demands `minSharesOut` — including a devnet Kamino row, whose program cannot
+ * enforce one, and an asynchronous next-NAV provider whose on-chain leg
+ * deliberately cannot.
  */
 export function mapToEarnStrategy(
   row: EarnStrategyRow,
   environment: SdpEnvironment,
   env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED">
 ): EarnStrategy {
-  const depositSlippage = earnDepositSlippagePolicy(row.provider, environment);
+  const depositSlippage = earnDepositSlippagePolicy(row.provider, environment, row.host_cluster);
   const withdrawalSlippage = earnWithdrawSlippageFloor(row.provider);
   const fundable = isClusterFundableInEnvironment(row.host_cluster, environment);
   return {

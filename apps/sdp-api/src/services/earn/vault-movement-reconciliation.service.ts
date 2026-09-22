@@ -1,3 +1,4 @@
+import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
 import {
   createRpc,
   getSignatureStatuses,
@@ -8,7 +9,9 @@ import {
 } from "@sdp/rpc/solana";
 import { compareDecimalAmounts, formatDecimalAmount, isDecimalString } from "@sdp/solana/amount";
 import {
+  EARN_PROVIDER_DEPOSIT_SETTLEMENT,
   EARN_TERMINAL_MOVEMENT_STATUSES,
+  earnProviderDepositSettlement,
   type SdpEnvironment,
   type SolanaCluster,
 } from "@sdp/types";
@@ -26,6 +29,7 @@ import {
   earnClusterFor,
   resolveClusterRpcUrl,
   resolveVaultDirectClient,
+  resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
@@ -63,7 +67,10 @@ export function reconcileEarnVaultMovementReadThrough(
   env: Env,
   movement: EarnMovementRow
 ): Promise<EarnMovementRow> {
-  if (TERMINAL_VAULT_MOVEMENT_STATUSES.has(movement.status)) {
+  if (
+    TERMINAL_VAULT_MOVEMENT_STATUSES.has(movement.status) ||
+    movement.chain_finalized_at !== null
+  ) {
     return Promise.resolve(movement);
   }
 
@@ -161,6 +168,8 @@ export interface EarnVaultReconciliationStats {
   settled: number;
   failed: number;
   confirmed: number;
+  /** Provider-order rows whose chain leg was recorded as finalized this tick. */
+  finalized: number;
   resubmitted: number;
   unchanged: number;
   movementErrors: number;
@@ -168,7 +177,13 @@ export interface EarnVaultReconciliationStats {
   blockHeightReadFailures: number;
 }
 
-type MovementOutcome = "settled" | "failed" | "confirmed" | "resubmitted" | "unchanged";
+type MovementOutcome =
+  | "settled"
+  | "failed"
+  | "confirmed"
+  | "finalized"
+  | "resubmitted"
+  | "unchanged";
 
 function errorMessage(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 300);
@@ -180,6 +195,7 @@ function emptyStats(claimed: number): EarnVaultReconciliationStats {
     settled: 0,
     failed: 0,
     confirmed: 0,
+    finalized: 0,
     resubmitted: 0,
     unchanged: 0,
     movementErrors: 0,
@@ -304,6 +320,7 @@ async function reconcileEnvironment(
       if (outcome === "settled") stats.settled += 1;
       else if (outcome === "failed") stats.failed += 1;
       else if (outcome === "confirmed") stats.confirmed += 1;
+      else if (outcome === "finalized") stats.finalized += 1;
       else if (outcome === "resubmitted") stats.resubmitted += 1;
       else stats.unchanged += 1;
     } catch (error) {
@@ -332,10 +349,50 @@ async function reconcileMovement(
   chain: ChainObservation
 ): Promise<MovementOutcome> {
   if (status?.err) {
-    await failMovement(ledger, movement, describeVaultSimulationError(status.err).message);
+    // The ledger keeps the readable sentence (it reaches the dashboard); the
+    // chain's own variant goes to the log, where operators grep for it.
+    const verdict = describeVaultSimulationError(status.err);
+    getLogger().warn(
+      { movementId: movement.id, signature: movement.signature, raw: verdict.raw },
+      "earn movement failed on chain"
+    );
+    await failMovement(ledger, movement, verdict.message);
     return "failed";
   }
   if (status?.confirmationStatus === "finalized") {
+    if (isKnownProviderOrderSettlement(env, movement)) {
+      // The payment/share leg is irreversible, but Connect has not reported
+      // economic completion. Preserve the movement's honest non-terminal
+      // `confirmed` state and record chain finality as its own durable fact.
+      // That marker removes the row from the chain queue without making the
+      // position closable, scheduling payout repair, recognizing earnings, or
+      // consuming the future confirmed -> finalized provider transition.
+      const observedAt = new Date().toISOString();
+      if (movement.status !== "confirmed") {
+        await advanceTransaction(ledger, movement, {
+          toStatus: "confirmed",
+          confirmedAt: observedAt,
+        });
+      }
+      await ledger.recordVaultMovementChainFinalization({
+        movementId: movement.id,
+        organizationId: movement.organization_id,
+        observedAt,
+      });
+      return "finalized";
+    }
+    if (usesProviderOrderSettlement(env, movement)) {
+      // An UNRECOGNIZED historical provider (or a clientless registry row):
+      // its settlement semantics are unmeasurable, so fail closed — record
+      // the commitment, never finality, and keep the row scheduled rather
+      // than guess a settlement claim from registry drift.
+      if (movement.status === "confirmed") return "unchanged";
+      await advanceTransaction(ledger, movement, {
+        toStatus: "confirmed",
+        confirmedAt: new Date().toISOString(),
+      });
+      return "confirmed";
+    }
     await settleMovement(env, ledger, movement, chain);
     return "settled";
   }
@@ -394,6 +451,51 @@ async function reconcileMovement(
   });
   await markSubmitted(ledger, movement);
   return "resubmitted";
+}
+
+/**
+ * Whether Solana finality records only the opening leg of a provider-managed
+ * order rather than economic settlement, for a provider the CURRENT registry
+ * knows: chain finalization is recorded as the durable chain-leg evidence for
+ * these rows (never as settlement), so the sweep keeps them claimable until
+ * it observes finality and stops scheduling them once `chain_finalized_at`
+ * records that irreversible fact.
+ *
+ * Deposits declare this in the shared provider table. Withdrawals declare it
+ * on the executing client capability, so this guard follows the builder that
+ * actually produced the transaction instead of inferring semantics from an id.
+ * A future Connect order reconciler must correlate and authenticate provider
+ * completion before the settled surface can close one of these rows — chain
+ * finalization never does.
+ */
+function isKnownProviderOrderSettlement(env: Env, movement: EarnMovementRow): boolean {
+  if (movement.direction === "deposit") {
+    return (
+      Object.hasOwn(EARN_PROVIDER_DEPOSIT_SETTLEMENT, movement.provider) &&
+      earnProviderDepositSettlement(movement.provider) === "provider_order"
+    );
+  }
+  const client = resolveVaultWithdrawClient(env, movement.provider, createVaultDeadline());
+  return client !== null && supportsVaultProviderOrderWithdraw(client);
+}
+
+/**
+ * Whether Solana finality records only the opening leg of a provider-managed
+ * order rather than economic settlement — INCLUDING the fail-closed answer for
+ * a provider the registry does not recognize.
+ *
+ * Deposits declare this in the shared provider table. Withdrawals declare it
+ * on the executing client capability, so this guard follows the builder that
+ * actually produced the transaction instead of inferring semantics from an id.
+ * An unrecognized historical provider also stays non-terminal: atomicity is a
+ * positive settlement claim and must never be inferred from registry drift.
+ */
+function usesProviderOrderSettlement(env: Env, movement: EarnMovementRow): boolean {
+  if (movement.direction === "deposit") {
+    return earnProviderDepositSettlement(movement.provider) === "provider_order";
+  }
+  const client = resolveVaultWithdrawClient(env, movement.provider, createVaultDeadline());
+  return client === null || supportsVaultProviderOrderWithdraw(client);
 }
 
 async function markSubmitted(

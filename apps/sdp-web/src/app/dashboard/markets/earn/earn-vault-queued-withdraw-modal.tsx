@@ -9,23 +9,26 @@ import {
   type EarnVaultWithdrawalRequestRecord,
   type SdpEnvironment,
 } from "@sdp/types";
-import { Loader2Icon } from "lucide-react";
+import { ChevronDownIcon, Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { isPositiveDecimal } from "./earn-decimal";
+import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
+import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import {
-  formatEpochSeconds,
+  formatDurationSeconds,
+  formatEpochSecondsOr,
   formatTokenQuantity,
   formatUsd,
-  shortenMarketAddress,
+  positionDisplayName,
 } from "./earn-format";
 import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
 import {
@@ -45,9 +48,11 @@ import {
   isEarnVaultQueuedWithdrawalTerminal,
 } from "./earn-vault-queued-withdrawal-presentation";
 import {
+  VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   validateVaultWithdrawalAmount,
+  vaultWithdrawalAmountError,
   vaultWithdrawalAvailableAmount,
-  vaultWithdrawalSharesForAmount,
+  vaultWithdrawalSharesForValidatedAmount,
 } from "./earn-vault-withdraw-amount";
 
 interface QueuedWithdrawalModalProps {
@@ -62,17 +67,50 @@ interface QueuedWithdrawalModalProps {
 
 type FormStep = "details" | "review";
 
-function epochDate(value: string, locale: string): string {
-  return formatEpochSeconds(value, locale) ?? "—";
+interface QueueDurationUnit {
+  divisor: number;
+  labelKey: MessageKey;
 }
 
-function queueSharesForAmount(
-  amountValidation: ReturnType<typeof validateVaultWithdrawalAmount>,
-  position: EarnVaultPosition
-): string | undefined {
-  return amountValidation.kind === "valid"
-    ? vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
-    : undefined;
+function bpsToPercent(bps: number): string {
+  return (bps / 100).toFixed(2).replace(/\.?0+$/, "");
+}
+
+function percentToBps(value: string): number {
+  const match = /^(\d+)(?:\.(\d{0,2}))?$/.exec(value.trim());
+  if (!match) return Number.NaN;
+  return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+}
+
+function queueDurationUnit(seconds: number): QueueDurationUnit {
+  if (seconds >= 86_400 && seconds % 86_400 === 0) {
+    return { divisor: 86_400, labelKey: "DashboardEarn.queuedWithdraw.durationUnitDays" };
+  }
+  if (seconds >= 3_600 && seconds % 3_600 === 0) {
+    return { divisor: 3_600, labelKey: "DashboardEarn.queuedWithdraw.durationUnitHours" };
+  }
+  if (seconds >= 60 && seconds % 60 === 0) {
+    return { divisor: 60, labelKey: "DashboardEarn.queuedWithdraw.durationUnitMinutes" };
+  }
+  return { divisor: 1, labelKey: "DashboardEarn.queuedWithdraw.durationUnitSeconds" };
+}
+
+function durationValue(seconds: number, unit: QueueDurationUnit): string {
+  return String(seconds / unit.divisor);
+}
+
+function durationToSeconds(value: string, unit: QueueDurationUnit): number {
+  const amount = parseUnsignedDecimal(value, { maxLength: 128 });
+  if (!amount) return Number.NaN;
+
+  const scale = amount.fraction.length;
+  const denominator = 10n ** BigInt(scale);
+  const scaledAmount = BigInt(`${amount.whole}${amount.fraction}`);
+  const scaledSeconds = scaledAmount * BigInt(unit.divisor);
+  if (scaledSeconds % denominator !== 0n) return Number.NaN;
+
+  const seconds = scaledSeconds / denominator;
+  return seconds > 0n && seconds <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(seconds) : Number.NaN;
 }
 
 function isQueueTermsValid(
@@ -100,22 +138,14 @@ function queuePreviewInput(
   return { positionId: position.id, shares, discountBps, deadlineSeconds };
 }
 
-function queueLockedUntil(position: EarnVaultPosition, locale: string): string | undefined {
-  return position.unlockTimestamp ? epochDate(position.unlockTimestamp, locale) : undefined;
-}
-
-function queuePositionName(position: EarnVaultPosition): string {
-  return position.label || shortenMarketAddress(position.providerReference);
-}
-
-function queueAmountError(
-  amount: string,
-  amountValidation: ReturnType<typeof validateVaultWithdrawalAmount>,
-  t: ReturnType<typeof useTranslations>
-): string | null {
-  return amount.trim() === "" || amountValidation.kind === "valid"
-    ? null
-    : t("DashboardEarn.vaultWithdraw.amountInvalid");
+function queueLockedUntil(
+  position: EarnVaultPosition,
+  locale: string,
+  unavailable: string
+): string | undefined {
+  return position.unlockTimestamp
+    ? formatEpochSecondsOr(position.unlockTimestamp, locale, unavailable)
+    : undefined;
 }
 
 function queuedWithdrawalSteps(
@@ -244,10 +274,15 @@ function useQueuedWithdrawalRequestView(
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const cancelKey = useRef<string | null>(null);
-  const request =
-    cancelResult && (!observed || cancelResult.updatedAt >= observed.updatedAt)
-      ? cancelResult
-      : (observed ?? submitted);
+  // Compare freshness as instants, not raw strings: the record schema only
+  // types `updatedAt` as a string, so mixed fractional-seconds formatting
+  // could order two ISO strings lexicographically against their true order
+  // and let a stale poll override a just-confirmed cancel. An unparseable
+  // timestamp makes the comparison false, so the server-observed record wins.
+  const cancelIsFresh =
+    cancelResult !== null &&
+    (!observed || Date.parse(cancelResult.updatedAt) >= Date.parse(observed.updatedAt));
+  const request = cancelIsFresh ? cancelResult : (observed ?? submitted);
 
   async function cancel() {
     if (cancelling || request.status !== "expiredCancelable") return;
@@ -331,31 +366,51 @@ function QueuedWithdrawalResult({
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.maturity")}</dt>
           <dd className="text-right text-primary">
-            {epochDate(request.maturityTimestamp, locale)}
+            {formatEpochSecondsOr(
+              request.maturityTimestamp,
+              locale,
+              t("DashboardEarn.unavailable")
+            )}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.deadline")}</dt>
           <dd className="text-right text-primary">
-            {epochDate(request.deadlineTimestamp, locale)}
+            {formatEpochSecondsOr(
+              request.deadlineTimestamp,
+              locale,
+              t("DashboardEarn.unavailable")
+            )}
           </dd>
         </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.requestAccount")}</dt>
-          <dd className="max-w-56 break-all text-right text-primary">{request.requestAddress}</dd>
-        </div>
-        {request.creationSignature ? (
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
-            <dd className="text-right">
-              <TransactionLink
-                cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
-                signature={request.creationSignature}
-              />
-            </dd>
-          </div>
-        ) : null}
       </dl>
+
+      <details className="group mt-4 border-t border-border-subtle pt-4">
+        <summary className="flex list-none items-center justify-between gap-3 text-sm font-medium text-secondary [&::-webkit-details-marker]:hidden">
+          {t("DashboardEarn.queuedWithdraw.technicalDetails")}
+          <ChevronDownIcon
+            aria-hidden="true"
+            className="size-4 transition-transform group-open:rotate-180"
+          />
+        </summary>
+        <dl className="mt-3 grid gap-3 text-sm">
+          <div className="flex items-start justify-between gap-5">
+            <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.requestAccount")}</dt>
+            <dd className="max-w-56 break-all text-right text-primary">{request.requestAddress}</dd>
+          </div>
+          {request.creationSignature ? (
+            <div className="flex items-baseline justify-between gap-5">
+              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
+              <dd className="text-right">
+                <TransactionLink
+                  cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
+                  signature={request.creationSignature}
+                />
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      </details>
 
       {request.status === "failed" && request.failureReason ? (
         <div
@@ -376,14 +431,7 @@ function QueuedWithdrawalResult({
           {t("DashboardEarn.queuedWithdraw.solverNotice")}
         </p>
       ) : null}
-      {cancelError ? (
-        <p
-          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
-          {cancelError}
-        </p>
-      ) : null}
+      {cancelError ? <EarnErrorNote message={cancelError} /> : null}
       <div className="mt-5 flex justify-end gap-2">
         {request.status === "expiredCancelable" ? (
           <Button
@@ -459,18 +507,26 @@ function QueueReview({
           </div>
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.discount")}</dt>
-            <dd className="text-right text-primary">{preview.discountBps} bps</dd>
+            <dd className="text-right text-primary">{bpsToPercent(preview.discountBps)}%</dd>
           </div>
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.maturity")}</dt>
             <dd className="text-right text-primary">
-              {epochDate(preview.maturityTimestamp, locale)}
+              {formatEpochSecondsOr(
+                preview.maturityTimestamp,
+                locale,
+                t("DashboardEarn.unavailable")
+              )}
             </dd>
           </div>
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.deadline")}</dt>
             <dd className="text-right text-primary">
-              {epochDate(preview.deadlineTimestamp, locale)}
+              {formatEpochSecondsOr(
+                preview.deadlineTimestamp,
+                locale,
+                t("DashboardEarn.unavailable")
+              )}
             </dd>
           </div>
         </dl>
@@ -491,14 +547,7 @@ function QueueReview({
       <p className="mt-4 text-xs leading-5 text-tertiary">
         {t("DashboardEarn.queuedWithdraw.solverNotice")}
       </p>
-      {error ? (
-        <p
-          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
-          {error}
-        </p>
-      ) : null}
+      {error ? <EarnErrorNote message={error} /> : null}
       <div className="mt-6 flex gap-2">
         <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
           {t("DashboardEarn.deposit.back")}
@@ -523,8 +572,11 @@ function QueueDetails({
   amountError,
   availableAmount,
   deadline,
+  deadlineSeconds,
   detailsValid,
   discount,
+  discountBps,
+  durationUnit,
   locale,
   lockedUntil,
   onAmountChange,
@@ -532,14 +584,19 @@ function QueueDetails({
   onDeadlineChange,
   onDiscountChange,
   onMax,
+  overAvailableAmount,
+  termsValid,
   terms,
 }: {
   amount: string;
   amountError: string | null;
   availableAmount: string | undefined;
   deadline: string;
+  deadlineSeconds: number;
   detailsValid: boolean;
   discount: string;
+  discountBps: number;
+  durationUnit: QueueDurationUnit;
   locale: string;
   lockedUntil: string | undefined;
   onAmountChange: (value: string) => void;
@@ -547,6 +604,8 @@ function QueueDetails({
   onDeadlineChange: (value: string) => void;
   onDiscountChange: (value: string) => void;
   onMax: () => void;
+  overAvailableAmount: boolean;
+  termsValid: boolean;
   terms: EarnVaultQueuedWithdrawalTerms;
 }) {
   const t = useTranslations();
@@ -572,6 +631,7 @@ function QueueDetails({
             id="earn-queued-withdraw-amount"
             inputMode="decimal"
             leadingAddon={<span aria-hidden="true">$</span>}
+            maxDecimals={VAULT_WITHDRAWAL_AMOUNT_DECIMALS}
             onChange={(event: ChangeEvent<HTMLInputElement>) => {
               onAmountChange(event.target.value);
             }}
@@ -592,43 +652,90 @@ function QueueDetails({
               {amountError}
             </p>
           ) : null}
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="grid gap-2">
-            <Label htmlFor="earn-queued-withdraw-discount">
-              {t("DashboardEarn.queuedWithdraw.discountBps")}
-            </Label>
-            <Input
-              id="earn-queued-withdraw-discount"
-              inputMode="numeric"
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                onDiscountChange(event.target.value);
-              }}
-              value={discount}
-            />
-            <p className="text-xs text-tertiary">
-              {terms.minimumDiscountBps}–{terms.maximumDiscountBps} bps
+          {overAvailableAmount ? (
+            <p className="text-xs text-warning" role="status">
+              {t("DashboardEarn.vaultWithdraw.overAmount")}
             </p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="earn-queued-withdraw-deadline">
-              {t("DashboardEarn.queuedWithdraw.deadlineSeconds")}
-            </Label>
-            <Input
-              id="earn-queued-withdraw-deadline"
-              inputMode="numeric"
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                onDeadlineChange(event.target.value);
-              }}
-              value={deadline}
-            />
-            <p className="text-xs text-tertiary">
-              {t("DashboardEarn.queuedWithdraw.deadlineMinimum", {
-                seconds: terms.minimumSecondsToDeadline,
-              })}
-            </p>
-          </div>
+          ) : null}
         </div>
+        <details className="group rounded-xl border border-border-default bg-surface-raised px-4 py-3">
+          <summary className="flex list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-primary">
+                {t("DashboardEarn.queuedWithdraw.settingsTitle")}
+              </span>
+              <span className="mt-0.5 block text-xs leading-5 text-tertiary">
+                {termsValid
+                  ? t("DashboardEarn.queuedWithdraw.settingsSummary", {
+                      discount: bpsToPercent(discountBps),
+                      duration:
+                        formatDurationSeconds(deadlineSeconds, locale) ??
+                        t("DashboardEarn.unavailable"),
+                    })
+                  : t("DashboardEarn.queuedWithdraw.settingsNeedsAttention")}
+              </span>
+            </span>
+            <ChevronDownIcon
+              aria-hidden="true"
+              className="size-4 shrink-0 text-tertiary transition-transform group-open:rotate-180"
+            />
+          </summary>
+          <div className="mt-4 grid gap-4 border-t border-border-subtle pt-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="earn-queued-withdraw-discount">
+                {t("DashboardEarn.queuedWithdraw.discountPercent")}
+              </Label>
+              <Input
+                id="earn-queued-withdraw-discount"
+                inputMode="decimal"
+                maxDecimals={2}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  onDiscountChange(event.target.value);
+                }}
+                value={discount}
+              />
+              <p className="text-xs text-tertiary">
+                {t("DashboardEarn.queuedWithdraw.discountRange", {
+                  minimum: bpsToPercent(terms.minimumDiscountBps),
+                  maximum: bpsToPercent(terms.maximumDiscountBps),
+                })}
+              </p>
+              <p className="text-xs leading-5 text-tertiary">
+                {t("DashboardEarn.queuedWithdraw.discountHelp")}
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="earn-queued-withdraw-deadline">
+                {t("DashboardEarn.queuedWithdraw.deadlineDuration", {
+                  unit: t(durationUnit.labelKey),
+                })}
+              </Label>
+              <Input
+                id="earn-queued-withdraw-deadline"
+                inputMode="decimal"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  onDeadlineChange(event.target.value);
+                }}
+                value={deadline}
+              />
+              <p className="text-xs text-tertiary">
+                {t("DashboardEarn.queuedWithdraw.deadlineMinimum", {
+                  duration:
+                    formatDurationSeconds(terms.minimumSecondsToDeadline, locale) ??
+                    t("DashboardEarn.unavailable"),
+                })}
+              </p>
+              <p className="text-xs leading-5 text-tertiary">
+                {t("DashboardEarn.queuedWithdraw.deadlineHelp")}
+              </p>
+            </div>
+          </div>
+          {!termsValid ? (
+            <p className="mt-3 text-xs text-error" role="alert">
+              {t("DashboardEarn.queuedWithdraw.settingsInvalid")}
+            </p>
+          ) : null}
+        </details>
       </div>
       <div className="mt-6">
         <Button className="!w-full" disabled={!detailsValid} onClick={onContinue}>
@@ -650,18 +757,28 @@ export function EarnVaultQueuedWithdrawModal({
 }: QueuedWithdrawalModalProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const durationUnit = queueDurationUnit(terms.minimumSecondsToDeadline);
   const [step, setStep] = useState<FormStep>("details");
   const [amount, setAmount] = useState("");
-  const [discount, setDiscount] = useState(String(terms.minimumDiscountBps));
-  const [deadline, setDeadline] = useState(String(terms.minimumSecondsToDeadline));
+  const [discount, setDiscount] = useState(() => bpsToPercent(terms.minimumDiscountBps));
+  const [deadline, setDeadline] = useState(() =>
+    durationValue(terms.minimumSecondsToDeadline, durationUnit)
+  );
   const amountValidation = validateVaultWithdrawalAmount(amount);
   const availableAmount = vaultWithdrawalAvailableAmount(position);
-  const shares = queueSharesForAmount(amountValidation, position);
-  const discountBps = Number(discount);
-  const deadlineSeconds = Number(deadline);
+  const shares = vaultWithdrawalSharesForValidatedAmount(amountValidation, position);
+  // Same derivation as the instant exit modal: without it, an over-available
+  // amount disables Continue with no explanation, because the shares
+  // conversion silently answers undefined for an amount above the ceiling.
+  const overAvailableAmount =
+    amountValidation.kind === "valid" && availableAmount !== undefined
+      ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
+      : false;
+  const discountBps = percentToBps(discount);
+  const deadlineSeconds = durationToSeconds(deadline, durationUnit);
   const termsValid = isQueueTermsValid(discountBps, deadlineSeconds, terms);
   const detailsValid = shares !== undefined && termsValid;
-  const lockedUntil = queueLockedUntil(position, locale);
+  const lockedUntil = queueLockedUntil(position, locale, t("DashboardEarn.unavailable"));
   const previewInput = useMemo(
     () => queuePreviewInput(position, shares, discountBps, deadlineSeconds, termsValid),
     [deadlineSeconds, discountBps, position, shares, termsValid]
@@ -676,9 +793,13 @@ export function EarnVaultQueuedWithdrawModal({
     setError,
   });
 
-  const positionName = queuePositionName(position);
+  const positionName = positionDisplayName(position);
   const modalLabel = t("DashboardEarn.queuedWithdraw.title", { position: positionName });
-  const amountError = queueAmountError(amount, amountValidation, t);
+  const amountError = vaultWithdrawalAmountError(
+    amount,
+    amountValidation,
+    t("DashboardEarn.vaultWithdraw.amountInvalid")
+  );
 
   return (
     <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
@@ -712,8 +833,11 @@ export function EarnVaultQueuedWithdrawModal({
                   amountError={amountError}
                   availableAmount={availableAmount}
                   deadline={deadline}
+                  deadlineSeconds={deadlineSeconds}
                   detailsValid={detailsValid}
                   discount={discount}
+                  discountBps={discountBps}
+                  durationUnit={durationUnit}
                   locale={locale}
                   lockedUntil={lockedUntil}
                   onAmountChange={setAmount}
@@ -723,6 +847,8 @@ export function EarnVaultQueuedWithdrawModal({
                   onMax={() => {
                     if (availableAmount) setAmount(availableAmount);
                   }}
+                  overAvailableAmount={overAvailableAmount}
+                  termsValid={termsValid}
                   terms={terms}
                 />
               ) : (

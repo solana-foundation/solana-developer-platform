@@ -4,7 +4,11 @@ import type {
   EarnMovementStatus,
   SdpEnvironment,
 } from "@sdp/types";
-import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types";
+import {
+  EARN_MOVEMENT_TRANSITIONS,
+  EARN_PROVIDER_DEPOSIT_SETTLEMENT,
+  EARN_PROVIDER_WITHDRAWAL_SETTLEMENT,
+} from "@sdp/types";
 import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
 import { conflict } from "@/lib/errors";
 
@@ -136,6 +140,8 @@ export interface EarnMovementRow {
   failure_reason: string | null;
   /** Optimistic chain commitment (vault only); not settlement. */
   confirmed_at: string | null;
+  /** Irreversible chain commitment for a provider-order leg; not provider settlement. */
+  chain_finalized_at: string | null;
   /** Success-terminal: finalization (vault) or provider completion (custodial). */
   settled_at: string | null;
   /** `usd`, or the token mint — the unit every amount below is denominated in. */
@@ -522,7 +528,13 @@ export interface EarnMovementsRepository {
     sourceAddress?: string;
     destinationAddress?: string;
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
-  /** Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease. */
+  /**
+   * Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease.
+   *
+   * Provider-order rows remain in the queue through reversible confirmation.
+   * Once `chain_finalized_at` records irreversible finality, another chain read
+   * cannot advance them and they leave this queue until provider reconciliation.
+   */
   claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
   /**
    * Backlog telemetry over the SAME predicate the claim uses (PRO-1863): how
@@ -535,7 +547,9 @@ export interface EarnMovementsRepository {
    * neither expire nor rebroadcast it), so a total-only age would latch and
    * page forever. `blockhashBound` is the actionable subset the sweep can
    * still act on, and the withdrawal split keeps the exit path visible on its
-   * own (ADR 0002).
+   * own (ADR 0002). Provider-order rows with durable chain-finality evidence
+   * are excluded here exactly as they are from the claim — they are
+   * awaiting-provider surface, not chain-reconciliation backlog.
    */
   getUnsettledVaultMovementStats(): Promise<{
     backlog: number;
@@ -608,6 +622,16 @@ export interface EarnMovementsRepository {
    * merely discouraged, and a lost race returns null rather than an error.
    */
   advanceVaultMovement(input: AdvanceVaultMovementInput): Promise<EarnMovementRow | null>;
+  /**
+   * Record irreversible Solana finality for a provider-order leg without
+   * claiming that the provider has economically settled it. Guarded to a
+   * confirmed vault row; null means a concurrent transition won first.
+   */
+  recordVaultMovementChainFinalization(input: {
+    movementId: string;
+    organizationId: string;
+    observedAt: string;
+  }): Promise<EarnMovementRow | null>;
   /**
    * The sweep's first piece of evidence that a SUBMITTED vault movement did not
    * land (PRO-1904): its signature came back unknown after the blockhash window
@@ -917,18 +941,44 @@ function allowedSourceStatuses(model: EarnExecutionModel, toStatus: string): rea
 const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
 const NON_ZERO_DIGIT = /[1-9]/;
 
-/**
- * Deposit and withdrawal routes expose different status vocabularies.
- *
- * The legacy deposit DTO ends at `confirmed`, while withdrawals expose the
- * unified ledger where `confirmed` is optimistic and only `finalized` or
- * `failed` is terminal. Keep this direction-aware or recovery can silently
- * drop a confirmed withdrawal before finalization.
- */
-const SETTLED_VAULT_STATUSES_BY_DIRECTION = {
-  deposit: ["confirmed", "finalized", "failed"],
-  withdrawal: ["finalized", "failed"],
+const ATOMIC_VAULT_PROVIDERS_BY_DIRECTION = {
+  deposit: Object.entries(EARN_PROVIDER_DEPOSIT_SETTLEMENT)
+    .filter(([, settlement]) => settlement === "atomic")
+    .map(([provider]) => provider),
+  withdrawal: Object.entries(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT)
+    .filter(([, settlement]) => settlement === "atomic")
+    .map(([provider]) => provider),
+} as const satisfies Record<EarnMovementDirection, readonly string[]>;
+
+const ATOMIC_SETTLED_STATUSES_BY_DIRECTION = {
+  // The legacy deposit DTO has no finality state and has always stopped at
+  // confirmed for atomic providers. Keep that compatibility boundary here.
+  deposit: ["confirmed", "finalized"],
+  withdrawal: ["finalized"],
 } as const satisfies Record<EarnMovementDirection, readonly EarnMovementStatus[]>;
+
+/**
+ * A failed movement is terminal for every provider. Success is terminal only
+ * for a provider whose Solana leg is itself atomic. Provider orders (and
+ * unknown historical providers) remain discoverable even if a legacy row says
+ * finalized; a future authenticated provider reconciler must introduce its
+ * own durable completion fact before this predicate can close those rows.
+ */
+function vaultSettlementFilter(
+  direction: EarnMovementDirection,
+  settled: boolean | undefined
+): { clause: string; values: readonly unknown[] } {
+  if (settled === undefined) return { clause: "", values: [] };
+  const predicate =
+    "(status = 'failed' OR (provider = ANY (?::text[]) AND status = ANY (?::text[])))";
+  return {
+    clause: settled ? `AND ${predicate}` : `AND NOT ${predicate}`,
+    values: [
+      [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION[direction]],
+      [...ATOMIC_SETTLED_STATUSES_BY_DIRECTION[direction]],
+    ],
+  };
+}
 
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   return {
@@ -943,6 +993,7 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     status: row.status as EarnMovementStatus,
     failure_reason: row.failure_reason as string | null,
     confirmed_at: row.confirmed_at as string | null,
+    chain_finalized_at: row.chain_finalized_at == null ? null : String(row.chain_finalized_at),
     settled_at: row.settled_at as string | null,
     denomination: row.denomination as string,
     amount_requested: row.amount_requested as string,
@@ -1006,6 +1057,7 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     status: "finalized",
     failure_reason: null,
     confirmed_at: settledAt,
+    chain_finalized_at: null,
     settled_at: settledAt,
     denomination: String(row.share_mint),
     amount_requested: String(row.shares),
@@ -1173,16 +1225,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       }
       const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
       const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
-      const settledClause =
-        params.settled === undefined
-          ? ""
-          : params.settled
-            ? "AND status = ANY (?::text[])"
-            : "AND NOT (status = ANY (?::text[]))";
-      const settledValues =
-        params.settled === undefined
-          ? []
-          : [[...SETTLED_VAULT_STATUSES_BY_DIRECTION[params.direction]]];
+      const settledFilter = vaultSettlementFilter(params.direction, params.settled);
       const result = await db
         .prepare(
           // An EXACT project match. `project_id` is nullable only through
@@ -1196,7 +1239,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                AND direction = ?
                AND custody_wallet_id = ANY (?::text[])
                AND project_id = ?
-               ${settledClause}
+               ${settledFilter.clause}
                ${beforeClause}
              ORDER BY created_at DESC, id DESC
              LIMIT ?`
@@ -1207,7 +1250,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           params.direction,
           params.custodyWalletIds,
           params.projectId,
-          ...settledValues,
+          ...settledFilter.values,
           ...beforeValues,
           params.limit + 1
         )
@@ -1882,6 +1925,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // it because a broadcast timeout or crash leaves a row unsubmitted WITH a
       // signature, which is precisely the ambiguous case reconciliation is for.
       //
+      // Provider-order rows stay claimable at `confirmed` while their chain leg
+      // is still reversible. The sweep's finality observation stamps a separate
+      // durable fact (`chain_finalized_at`) that takes the row out of this queue
+      // without advancing its economic lifecycle. It remains `confirmed` until
+      // an authenticated provider completion path can truthfully settle it.
+      //
       // Blockhash-bound work gets most of the batch, but never all of it once the
       // caller can process at least two rows. A confirmed signature can fall out
       // of RPC history and remain confirmed forever, while a sustained stream of
@@ -1900,6 +1949,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
                 AND status IN ('requested', 'submitted')
+                AND chain_finalized_at IS NULL
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
                        id ASC
@@ -1909,6 +1959,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
                 AND status = 'confirmed'
+                AND chain_finalized_at IS NULL
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
                        id ASC
@@ -1923,6 +1974,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                FROM earn_movements movement
               WHERE movement.execution_model = 'vault_direct'
                 AND movement.status IN ('requested', 'submitted', 'confirmed')
+                AND movement.chain_finalized_at IS NULL
                 AND NOT EXISTS (
                   SELECT 1 FROM reserved WHERE reserved.id = movement.id
                 )
@@ -1941,7 +1993,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 SET reconciliation_attempted_at = sdp_iso_now()
                FROM claimed
               WHERE movement.id = claimed.id
-             RETURNING movement.*
+              RETURNING movement.*
            )
            SELECT * FROM touched
            ORDER BY (status = 'confirmed') ASC, created_at ASC, id ASC`
@@ -1972,7 +2024,8 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                     AS oldest_withdrawal_created_at
              FROM earn_movements
             WHERE execution_model = 'vault_direct'
-              AND status IN ('requested', 'submitted', 'confirmed')`
+              AND status IN ('requested', 'submitted', 'confirmed')
+              AND chain_finalized_at IS NULL`
         )
         .first<{
           backlog: number | string;
@@ -2379,6 +2432,24 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
         return movement;
       });
+    },
+
+    async recordVaultMovementChainFinalization(input) {
+      const row = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET chain_finalized_at = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND execution_model = 'vault_direct'
+              AND status = 'confirmed'
+              AND chain_finalized_at IS NULL
+            RETURNING *`
+        )
+        .bind(input.observedAt, input.movementId, input.organizationId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
     },
 
     async recordUnknownSignatureObservation(input) {

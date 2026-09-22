@@ -7,17 +7,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { formatEpochSeconds, shortenMarketAddress } from "./earn-format";
+import { formatEpochSecondsOr, formatProviderAmount, shortenMarketAddress } from "./earn-format";
 import { earnMintAsset } from "./earn-market-presentation";
 import {
   cancelEarnVaultWithdrawalRequest,
   useEarnVaultWithdrawalRequests,
 } from "./earn-program-data";
 import { earnVaultQueuedWithdrawalStatusPresentation } from "./earn-vault-queued-withdrawal-presentation";
-
-function formatEpoch(value: string, locale: string): string {
-  return formatEpochSeconds(value, locale) ?? "—";
-}
 
 /** Durable recovery surface for queued requests that outlive their create modal. */
 export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () => void }) {
@@ -117,10 +113,21 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
                     </div>
                     <p className="mt-1 text-xs leading-5 text-secondary">
                       {t("DashboardEarn.queuedWithdraw.activeSummary", {
-                        shares: request.shares,
-                        symbol: earnMintAsset(request.shareMint).symbol,
-                        maturity: formatEpoch(request.maturityTimestamp, locale),
-                        deadline: formatEpoch(request.deadlineTimestamp, locale),
+                        amount: formatProviderAmount(
+                          request.quotedAssets,
+                          locale,
+                          earnMintAsset(request.assetMint).symbol
+                        ),
+                        maturity: formatEpochSecondsOr(
+                          request.maturityTimestamp,
+                          locale,
+                          t("DashboardEarn.unavailable")
+                        ),
+                        deadline: formatEpochSecondsOr(
+                          request.deadlineTimestamp,
+                          locale,
+                          t("DashboardEarn.unavailable")
+                        ),
                       })}
                     </p>
                     {cancelError[request.withdrawalRequestId] ? (

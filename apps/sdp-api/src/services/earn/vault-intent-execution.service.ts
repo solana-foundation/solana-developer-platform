@@ -19,7 +19,7 @@ import {
   signVaultPlan,
   simulateVaultPlan,
 } from "./vault-execution.service";
-import { isBlockhashNotFoundError } from "./vault-simulation-error";
+import { isBlockhashNotFoundError, rawSimulationDetails } from "./vault-simulation-error";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
 /**
@@ -117,6 +117,7 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
       getLogger().error(
         {
           error: simulation.error,
+          raw: simulation.raw,
           fault: simulation.fault,
           ...(simulation.sponsorCause === undefined
             ? {}
@@ -156,7 +157,10 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
           { reason: "slippage_exceeded" }
         );
       }
-      throw badRequest(`Vault ${operation} simulation failed: ${simulation.error}`);
+      throw badRequest(
+        `Vault ${operation} simulation failed: ${simulation.error}`,
+        rawSimulationDetails(simulation.raw)
+      );
     }
     prepared = simulation.prepared;
   } catch (error) {

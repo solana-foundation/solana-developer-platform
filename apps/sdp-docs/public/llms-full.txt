@@ -924,7 +924,7 @@ Keyless requests carry no project, so you pick the shelf: `GET /v1/earn/strategi
 
 ## Without an API key
 
-List the sandbox shelf, quote the deposit, and build it with nothing but a strategy id and the customer's funded devnet wallet. Drop `?environment=sandbox` for the production shelf, where every deposit carries a share floor: set `<MIN_SHARES_OUT>` to the quote's `sharesOut` less the tolerance your customer accepts (`depositSlippage.defaultToleranceBps` is the suggested start; see [Floors and previews](#floors-and-previews)).
+List the sandbox shelf, inspect `depositSlippage`, and build with nothing but a strategy id and the customer's funded devnet wallet. Drop `?environment=sandbox` for the production shelf. When `depositSlippage` is non-null, quote first and set `<MIN_SHARES_OUT>` to the quote's `sharesOut` less the tolerance your customer accepts (`defaultToleranceBps` is the suggested start; see [Floors and previews](#floors-and-previews)). A next-NAV subscription may publish null because its later share settlement has no enforceable on-chain floor.
 
 ```bash
 export SDP_API_URL=https://api.solana.com
@@ -998,7 +998,7 @@ Two fields gate what you may offer:
 - **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive: the row is browse-only (a mainnet strategy seen from sandbox, for example).
 - **`status`** is the catalogue lifecycle; only `active` strategies accept new deposits. Positions in a strategy that later pauses stay fully withdrawable: money out is never gated by money-in rules.
 
-`depositSlippage` and `withdrawalSlippage` say whether that direction needs a quote-derived floor in your environment; every production row's `depositSlippage` is non-null. See [Floors and previews](#floors-and-previews). `feeSponsored` describes SDP's own Treasury paymaster and has no effect on Embedded Yield builds: your customer pays unless you name a `feePayer`.
+`depositSlippage` and `withdrawalSlippage` say whether that direction needs a quote-derived floor in your environment. Most production deposits do; an asynchronous next-NAV subscription can answer null when its Solana transaction cannot enforce the later share price. See [Floors and previews](#floors-and-previews). `feeSponsored` describes SDP's own Treasury paymaster and has no effect on Embedded Yield builds: your customer pays unless you name a `feePayer`.
 
 Jupiter Lend contributes its mainnet USDT Earn market (deposits mint jlUSDT receipt tokens; withdrawals redeem them when protocol liquidity allows). Ondo contributes USDY on mainnet with no vault program: a deposit is a USDC to USDY swap through Jupiter, the position is the wallet's USDY balance, a withdrawal is the reverse swap, and both directions require a live quote. Both are mainnet-only and appear in sandbox as browse-only rows.
 
@@ -1040,7 +1040,7 @@ const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transac
 // { transactionId, transaction, lastValidBlockHeight, feePayer?, ... }
 ```
 
-Add `minSharesOut` whenever the strategy's `depositSlippage` is non-null; on production that is every strategy ([Floors and previews](#floors-and-previews)).
+Add `minSharesOut` whenever the strategy's `depositSlippage` is non-null ([Floors and previews](#floors-and-previews)). Omit it when the field is null; for next-NAV subscriptions a floor cannot be encoded in the on-chain leg.
 
 **Sign.** Hand the base64 `transaction.transaction` to the customer's wallet and get signed bytes back. With a kit wallet signer (for example `useWalletAccountTransactionSigner` from `@solana/react`):
 
@@ -1075,7 +1075,7 @@ const { movement } = await sdpFetch(
 );
 ```
 
-Statuses are `requested` (SDP recorded the signed transaction but has not yet seen it on the network), `submitted`, `confirmed`, `finalized`, `failed`. Treat `confirmed` as **Done** in customer-facing UI: stop the foreground spinner, show the updated balance, and let the customer continue. SDP keeps reconciling the movement to the durable ledger outcome, `finalized` or `failed`, in the background. Use `finalized` only when your own backend needs an irreversible signal for accounting or another high-stakes side effect. A `failed` movement carries a `failureReason`.
+Statuses are `requested` (SDP recorded the signed transaction but has not yet seen it on the network), `submitted`, `confirmed`, `finalized`, `failed`. Do not treat `confirmed` as universal economic settlement: it is a Solana observation, and for a provider-order strategy it proves only that the payment or share leg landed. Keep polling until `finalized` or `failed` before accounting for settlement. An atomic strategy's UI may present chain confirmation sooner if it clearly keeps finality distinct and continues the durable poll. A `failed` movement carries a `failureReason`.
 
 ## 3. Who pays fees and rent
 
@@ -1175,10 +1175,10 @@ Both previews work for every provider and are the figures to show a customer bef
 
 | Field | Non-null | Null |
 | --- | --- | --- |
-| `depositSlippage` | The build requires `minSharesOut`. Preview first and derive the floor from `sharesOut` minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). | `minSharesOut` is optional; the deposit takes the live rate. Only a sandbox row answers null. |
+| `depositSlippage` | The build requires `minSharesOut`. Preview first and derive the floor from `sharesOut` minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). | The build does not accept a share floor. This can mean a sandbox live-rate deposit or a next-NAV subscription whose later settlement cannot be bounded by its on-chain leg. |
 | `withdrawalSlippage` | The build requires `minAmountOut`, derived from `assetsOut` the same way. | The vault's withdraw instruction takes only a share amount, so no floor can be enforced on chain. Do not pass `minAmountOut`; the build refuses it with a 400. |
 
-`depositSlippage` is answered for your environment, like `fundable`: every production deposit requires `minSharesOut`, whatever the provider, and a provider whose builder refuses an implicit floor requires one in sandbox too. `withdrawalSlippage` depends on the provider alone. A build that omits a floor its row said it needs fails with a 400 that names the preview endpoint.
+`depositSlippage` is answered for your environment, like `fundable`: most production deposits require `minSharesOut`, and a provider whose builder refuses an implicit floor requires one in sandbox too. A next-NAV provider can explicitly publish null because no instruction can enforce the price of later transfer-agent settlement. `withdrawalSlippage` depends on the provider alone. A build that omits a floor its row said it needs fails with a 400 that names the preview endpoint.
 
 Derive a floor from the live quote, never from the amount you sent; the tolerance covers only the state moving between the quote and the transaction landing. The generated module includes `floorForTolerance`, an exact decimal floor without a JavaScript number round-trip, and applies it only for strategies that require one.
 
@@ -1211,7 +1211,7 @@ Recovery across that split is yours: persist the swap signature and the `followU
 Work through this in sandbox before you go live. Each item is something SDP cannot check for you.
 
 - Your submit path retries an uncertain response with the same signed bytes and the same `Idempotency-Key`, rebuilds on `409 TRANSACTION_EXPIRED`, and looks up the movement on any other `409`.
-- Your UI treats `confirmed` as Done and leaves foreground loading immediately. Any backend workflow that needs irreversible finality keeps tracking `finalized` or `failed` without blocking the customer.
+- Your UI does not equate `confirmed` with provider settlement. It keeps provider-order payment/share legs pending, and any workflow that accounts for settlement tracks `finalized` or `failed`.
 - Absent fields render as absent (a dash, never `$0`), and you handle every status in the vocabulary rather than collapsing unknown ones.
 - If you accept swap-funded deposits, you have run one small split-swap recovery drill on mainnet: a swap broadcast, a simulated crash, and the follow-up deposit rebuilt from persisted state. Sandbox cannot exercise it.
 - If you sponsor fees, the sponsor key meets every point in [Protect the sponsor key](#protect-the-sponsor-key), and the spend alerts have fired at least once in a drill.

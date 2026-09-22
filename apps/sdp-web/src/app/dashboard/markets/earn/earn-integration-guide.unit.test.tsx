@@ -225,8 +225,9 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-cancel-transactions");
     expect(code).toContain("waitForEarnMovement");
     expect(code).toContain("intervalMs = 1_000");
-    expect(code).toContain('movement.status === "confirmed"');
+    expect(code).not.toContain('movement.status === "confirmed"');
     expect(code).toContain('movement.status === "finalized"');
+    expect(code).toContain("not economic settlement");
     expect(code).not.toContain("Buffer.from");
     expect(code).toContain("earnedUnavailableReason");
     // A non-JSON error body (gateway 502 HTML) must still throw with the

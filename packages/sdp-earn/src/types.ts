@@ -26,6 +26,16 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
  * @sdp/payments, but named `environment` to match the rest of Earn.
  */
 export interface EarnRuntimeEnvironment {
+  /**
+   * WisdomTree Connect credentials, PACKED as one JSON value per environment:
+   * `{"clientId","clientSecret","username","password"}` — the OAuth2 password
+   * grant needs all four, and the env-key vocabulary is one `<PROVIDER>_API_KEY`
+   * per environment (see the drift test in apps/sdp-api). Parsed and validated
+   * in providers/wisdomtree/connect.ts; a missing or malformed value throws
+   * PROVIDER_NOT_CONFIGURED before any network call.
+   */
+  WISDOMTREE_API_KEY?: string;
+  WISDOMTREE_SANDBOX_API_KEY?: string;
   SOLANA_RPC_URL?: string;
   /**
    * Per-cluster overrides for on-chain catalogue reads, same keys the API's
@@ -550,7 +560,7 @@ export interface EarnVaultWithdrawQuote {
   blockingIssues: readonly EarnVaultDepositQuoteIssue[];
 }
 
-/** The vault whose independently available instant/queued exit routes are read. */
+/** The vault whose independently available exit routes are read. */
 export interface EarnVaultWithdrawalOptionsInput {
   providerReference: string;
 }
@@ -572,9 +582,21 @@ export interface EarnVaultQueuedWithdrawalTerms {
 
 /** Independently reported exit routes. The provider never chooses one for the caller. */
 export interface EarnVaultWithdrawalOptions {
+  /**
+   * The direct withdrawal builder pays assets atomically with the share
+   * redemption. Mutually exclusive with `providerOrder`: the latter only opens
+   * a provider order whose payout settles later.
+   */
   instant: boolean;
+  /**
+   * The direct withdrawal builder transfers shares into a provider-managed
+   * redemption order, and the provider pays assets later in a separate
+   * settlement. This is not the cancellable on-chain queue described by
+   * `queued`/`queueAsset`.
+   */
+  providerOrder: boolean;
   queued: boolean;
-  /** Queue authority when the provider exposes a queued exit; null for instant-only providers. */
+  /** Queue authority when the provider exposes a queued exit; null for direct-only providers. */
   withdrawAuthority: string | null;
   queueState: string | null;
   /** Null when the SDP-facing asset has no queue configuration. */
@@ -868,6 +890,57 @@ export interface EarnVaultWithdrawProvider extends EarnVaultDirectProvider {
     ctx: EarnRuntimeContext,
     input: EarnVaultWithdrawInput
   ): Promise<EarnVaultTransactionPlan>;
+}
+
+/**
+ * Optional declaration for a direct withdrawal whose landed transaction opens
+ * a provider-managed redemption order instead of paying assets atomically.
+ *
+ * The literal is intentionally a static property: route discovery can classify
+ * the already-resolved client without provider I/O, and a provider cannot be
+ * mistaken for instant merely because it shares the ordinary withdrawal
+ * builder shape.
+ */
+export interface EarnVaultProviderOrderWithdrawProvider extends EarnVaultWithdrawProvider {
+  readonly vaultWithdrawalSettlement: "provider_order";
+}
+
+export interface EarnDepositEligibilityInput {
+  /** The strategy's `providerReference` (for WisdomTree, the fund's mint). */
+  providerReference: string;
+  /** The wallet whose deposit would settle — the address the provider must have verified. */
+  owner: string;
+}
+
+export interface EarnDepositEligibility {
+  eligible: boolean;
+  /** The provider's stated reason when ineligible — customer-renderable prose. */
+  reason?: string;
+}
+
+/**
+ * Optional capability: a provider-side eligibility check that must pass before
+ * money moves IN.
+ *
+ * Exists for regulated instruments (WisdomTree's tokenized funds): settlement
+ * pays out fund tokens whose Token-2022 transfer hook refuses any wallet the
+ * issuer has not KYC-verified, so a deposit from an unverified wallet is USDC
+ * sent to the issuer with nothing able to come back. The on-chain hook is the
+ * backstop; this check is what turns that failure mode into a refusal BEFORE
+ * the transfer, with the provider's own reason attached.
+ *
+ * MONEY-IN ONLY, by ADR 0002: exits never consult it — a wallet that already
+ * holds the instrument proved its eligibility on-chain, and money out must
+ * never inherit a money-in gate. Discovered via `supportsDepositEligibility`
+ * (capabilities.ts), never provider-id checks. A provider without the
+ * capability is simply not eligibility-gated, which is today's behavior for
+ * every permissionless vault.
+ */
+export interface EarnDepositEligibilityProvider extends EarnVaultProvider {
+  checkDepositEligibility(
+    ctx: EarnRuntimeContext,
+    input: EarnDepositEligibilityInput
+  ): Promise<EarnDepositEligibility>;
 }
 
 /**

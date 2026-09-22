@@ -1,3 +1,4 @@
+import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnVaultQueuedWithdrawalQuote, EarnVaultWithdrawalOptions } from "@sdp/earn/types";
 import type { SdpEnvironment } from "@sdp/types";
@@ -310,12 +311,16 @@ export async function readOptions(
   Omit<EarnVaultWithdrawalOptions, "withdrawAuthority"> & { withdrawAuthority: string | null }
 > {
   const deadline = createVaultDeadline();
-  const instant = Boolean(resolveVaultWithdrawClient(c.env, position.provider, deadline));
+  const withdrawalClient = resolveVaultWithdrawClient(c.env, position.provider, deadline);
+  const providerOrder =
+    withdrawalClient !== null && supportsVaultProviderOrderWithdraw(withdrawalClient);
+  const instant = withdrawalClient !== null && !providerOrder;
   const client = resolveVaultQueuedWithdrawClient(c.env, position.provider, deadline);
   if (!client) {
-    if (!instant) throw notImplemented(position.provider, "vault withdrawals");
+    if (!withdrawalClient) throw notImplemented(position.provider, "vault withdrawals");
     return {
-      instant: true,
+      instant,
+      providerOrder,
       queued: false,
       withdrawAuthority: null,
       queueState: null,
@@ -327,7 +332,7 @@ export async function readOptions(
       { env: c.env, environment },
       { providerReference: position.vaultAddress }
     );
-    return { ...options, instant: instant && options.instant };
+    return { ...options, instant: instant && options.instant, providerOrder };
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }

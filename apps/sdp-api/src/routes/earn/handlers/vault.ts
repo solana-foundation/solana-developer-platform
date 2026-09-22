@@ -46,6 +46,7 @@ import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -406,8 +407,15 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // The share floor the catalogue promised (`depositSlippage`) is the one the
   // build enforces: every production deposit carries one, derived by the
   // dashboard from a live quote and rejected when stale (PRO-1691); the
-  // provider builder enforces the exact value on-chain.
-  assertDepositFloorPresent(strategy.provider, environment, body.minSharesOut);
+  // provider builder enforces the exact value on-chain. A next-NAV provider
+  // order publishes null because no on-chain instruction can bound its later
+  // settlement.
+  assertDepositFloorPresent(
+    strategy.provider,
+    environment,
+    body.minSharesOut,
+    strategy.host_cluster
+  );
 
   const tokenMint = strategy.deposit_mints[0];
   if (!tokenMint) {
@@ -1552,27 +1560,30 @@ function buildEarnVaultWithdrawalResponse(input: {
 
 /**
  * Shared row to wire mapping for withdrawal reads. Speaks the ledger's own
- * status vocabulary. This surface postdates
- * the unified ledger, so there is no legacy client to translate for, and
- * `finalized` finally has its own name on the wire.
+ * status vocabulary — with one translation: a provider-order row the ledger
+ * holds at `finalized` (durable chain-leg evidence) reads as `confirmed` with
+ * no `settledAt`, because the public contract defines `finalized` as terminal
+ * settlement and the provider has not reported completion yet. See
+ * `movementStatusOnWire`.
  */
 function toEarnVaultWithdrawal(movement: EarnMovementRow, replayed?: boolean): EarnVaultWithdrawal {
   if (!movement.vault_address || !movement.signature) {
     throw internalError(`Earn vault withdrawal ${movement.id} is missing execution details`);
   }
+  const { status, settledAt } = movementStatusOnWire(movement);
   return {
     movementId: movement.id,
     positionId: movement.position_id,
     provider: movement.provider,
     providerReference: movement.vault_address,
-    status: movement.status as EarnVaultWithdrawal["status"],
+    status: status as EarnVaultWithdrawal["status"],
     signature: movement.signature,
     shares: movement.amount_requested,
     shareMint: movement.denomination,
     failureReason: movement.failure_reason,
     createdAt: movement.created_at,
     confirmedAt: movement.confirmed_at,
-    settledAt: movement.settled_at,
+    settledAt,
     ...(replayed === undefined ? {} : { replayed }),
   };
 }

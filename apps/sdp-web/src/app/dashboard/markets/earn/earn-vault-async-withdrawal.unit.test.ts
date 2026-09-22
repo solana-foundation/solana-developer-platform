@@ -18,6 +18,7 @@ describe("earnVaultAsyncWithdrawalRoute", () => {
     const options: EarnVaultWithdrawalOptions = {
       positionId: "position_1",
       instant: true,
+      providerOrder: false,
       queued: true,
       withdrawAuthority: "authority",
       queueState: "queue",
@@ -27,9 +28,11 @@ describe("earnVaultAsyncWithdrawalRoute", () => {
     expect(earnVaultAsyncWithdrawalRoute(options)).toEqual({
       kind: "queue",
       summary: {
+        titleKey: "DashboardEarn.exitRoute.asyncTitle",
         messageKey: "DashboardEarn.exitRoute.asyncDescription",
-        values: { seconds: 60 },
+        values: {},
       },
+      waitSeconds: 60,
       terms: queueTerms,
     });
   });
@@ -39,7 +42,43 @@ describe("earnVaultAsyncWithdrawalRoute", () => {
       earnVaultAsyncWithdrawalRoute({
         positionId: "position_1",
         instant: true,
+        providerOrder: false,
         queued: false,
+        withdrawAuthority: "authority",
+        queueState: "queue",
+        queueAsset: queueTerms,
+      })
+    ).toBeNull();
+  });
+
+  it("maps a delayed provider order without advertising an instant payout", () => {
+    expect(
+      earnVaultAsyncWithdrawalRoute({
+        positionId: "position_1",
+        instant: false,
+        providerOrder: true,
+        queued: false,
+        withdrawAuthority: null,
+        queueState: null,
+        queueAsset: null,
+      })
+    ).toEqual({
+      kind: "provider_order",
+      summary: {
+        titleKey: "DashboardEarn.exitRoute.providerOrderTitle",
+        messageKey: "DashboardEarn.exitRoute.providerOrderDescription",
+        values: {},
+      },
+    });
+  });
+
+  it("fails closed instead of silently preferring one of two delayed mechanisms", () => {
+    expect(
+      earnVaultAsyncWithdrawalRoute({
+        positionId: "position_1",
+        instant: false,
+        providerOrder: true,
+        queued: true,
         withdrawAuthority: "authority",
         queueState: "queue",
         queueAsset: queueTerms,

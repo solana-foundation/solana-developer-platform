@@ -4,6 +4,10 @@ import type { EarnVaultPosition, EarnVaultWithdrawalRequestRecord } from "@sdp/t
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  withdrawProps: undefined as Record<string, unknown> | undefined,
+}));
+
 const request: EarnVaultWithdrawalRequestRecord = {
   withdrawalRequestId: "request_1",
   positionId: "position_1",
@@ -49,6 +53,12 @@ vi.mock("./earn-vault-queued-withdraw-modal", () => ({
     </>
   ),
 }));
+vi.mock("./earn-vault-withdraw-modal", () => ({
+  EarnVaultWithdrawModal: (props: Record<string, unknown>) => {
+    mocks.withdrawProps = props;
+    return <div>provider order flow</div>;
+  },
+}));
 
 import { EarnVaultAsyncWithdrawModal } from "./earn-vault-async-withdraw-modal";
 
@@ -68,9 +78,11 @@ const position: EarnVaultPosition = {
 const route = {
   kind: "queue" as const,
   summary: {
+    titleKey: "DashboardEarn.exitRoute.asyncTitle" as const,
     messageKey: "DashboardEarn.exitRoute.asyncDescription" as const,
-    values: { seconds: 60 },
+    values: {},
   },
+  waitSeconds: 60,
   terms: {
     assetMint: "asset",
     allowWithdrawals: true,
@@ -83,7 +95,10 @@ const route = {
   },
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  mocks.withdrawProps = undefined;
+  cleanup();
+});
 
 describe("EarnVaultAsyncWithdrawModal", () => {
   it("wraps queue records in mechanism-discriminated product events", () => {
@@ -106,5 +121,35 @@ describe("EarnVaultAsyncWithdrawModal", () => {
 
     expect(onRequested).toHaveBeenCalledWith({ kind: "queue", request });
     expect(onSettled).toHaveBeenCalledWith({ kind: "queue", request });
+  });
+
+  it("renders a provider order with the standard redemption form in delayed mode", () => {
+    const onMovementUpdated = vi.fn();
+    const onWithdrawn = vi.fn();
+    render(
+      <EarnVaultAsyncWithdrawModal
+        environment="production"
+        onClose={vi.fn()}
+        onMovementUpdated={onMovementUpdated}
+        onWithdrawn={onWithdrawn}
+        position={position}
+        projectId="project_1"
+        route={{
+          kind: "provider_order",
+          summary: {
+            titleKey: "DashboardEarn.exitRoute.providerOrderTitle",
+            messageKey: "DashboardEarn.exitRoute.providerOrderDescription",
+            values: {},
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("provider order flow")).toBeTruthy();
+    expect(mocks.withdrawProps).toMatchObject({
+      settlement: "provider_order",
+      onMovementUpdated,
+      onWithdrawn,
+    });
   });
 });

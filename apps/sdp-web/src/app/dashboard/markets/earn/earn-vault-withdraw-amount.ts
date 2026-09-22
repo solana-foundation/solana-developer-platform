@@ -8,7 +8,8 @@ import {
 } from "./earn-decimal";
 
 export const VAULT_WITHDRAWAL_AMOUNT_DECIMALS = 6;
-const MAX_SOLANA_MINT_DECIMALS = 9;
+export const VAULT_WITHDRAWAL_SHARE_DECIMALS = 9;
+const MAX_EARN_SHARE_DECIMALS = VAULT_WITHDRAWAL_SHARE_DECIMALS;
 
 export type VaultWithdrawalAmountValidation =
   | { kind: "valid"; canonicalAmount: string }
@@ -24,6 +25,67 @@ export function validateVaultWithdrawalAmount(value: string): VaultWithdrawalAmo
     return { kind: "invalid" };
   }
   return { kind: "valid", canonicalAmount: amount.canonical };
+}
+
+/**
+ * Validate a share-denominated redemption without inventing a cash value.
+ * This Earn share-entry surface supports the nine-decimal scale used by the
+ * current provider contracts; the provider builder remains the authority for
+ * the selected fund's exact mint scale.
+ */
+export function validateVaultWithdrawalShares(value: string): VaultWithdrawalAmountValidation {
+  const shares = parseUnsignedDecimal(value, { maxLength: MAX_AMOUNT_LENGTH });
+  if (
+    !shares ||
+    shares.fraction.length > VAULT_WITHDRAWAL_SHARE_DECIMALS ||
+    !isPositiveDecimal(shares.canonical)
+  ) {
+    return { kind: "invalid" };
+  }
+  return { kind: "valid", canonicalAmount: shares.canonical };
+}
+
+/** Exact share intent for a provider-settled redemption, capped by live holdings. */
+export function vaultProviderOrderShares(
+  value: string,
+  position: Pick<EarnVaultPosition, "withdrawableShares">
+): string | undefined {
+  const validation = validateVaultWithdrawalShares(value);
+  if (validation.kind !== "valid" || position.withdrawableShares === undefined) {
+    return undefined;
+  }
+  const comparison = compareUnsignedDecimals(
+    validation.canonicalAmount,
+    position.withdrawableShares
+  );
+  return comparison === undefined || comparison === 1 ? undefined : validation.canonicalAmount;
+}
+
+/**
+ * The share intent for an amount that has already passed
+ * `validateVaultWithdrawalAmount`: `undefined` unless the amount is valid.
+ * The instant and queued exits both name their shares this way, so they
+ * cannot drift into minting an intent for an invalid amount.
+ */
+export function vaultWithdrawalSharesForValidatedAmount(
+  amountValidation: VaultWithdrawalAmountValidation,
+  position: Pick<EarnVaultPosition, "shares" | "withdrawableShares" | "tokenValue">
+): string | undefined {
+  return amountValidation.kind === "valid"
+    ? vaultWithdrawalSharesForAmount(amountValidation.canonicalAmount, position)
+    : undefined;
+}
+
+/**
+ * The amount field's error, decided once for both exits: an empty or valid
+ * field is no error, anything else reads the caller's invalid-amount copy.
+ */
+export function vaultWithdrawalAmountError(
+  amount: string,
+  amountValidation: VaultWithdrawalAmountValidation,
+  invalidMessage: string
+): string | null {
+  return amount.trim() === "" || amountValidation.kind === "valid" ? null : invalidMessage;
 }
 
 function multiplyDivideDecimal(
@@ -80,8 +142,8 @@ export function vaultWithdrawalAvailableAmount(
 
 /**
  * Convert the user's stablecoin amount to the exact share intent the API needs.
- * All current vault integrations use six-decimal shares. Preserve any finer
- * scale observed in the live balance, up to Solana's mint-decimal ceiling.
+ * Most current vault integrations use six-decimal shares. Preserve any finer
+ * scale observed in the live balance, up to this Earn UI's supported ceiling.
  */
 export function vaultWithdrawalSharesForAmount(
   amount: string,
@@ -104,7 +166,7 @@ export function vaultWithdrawalSharesForAmount(
   }
 
   const shareDecimals = Math.min(
-    MAX_SOLANA_MINT_DECIMALS,
+    MAX_EARN_SHARE_DECIMALS,
     Math.max(6, decimalScale(position.shares), decimalScale(position.withdrawableShares))
   );
   const shares = multiplyDivideDecimal(

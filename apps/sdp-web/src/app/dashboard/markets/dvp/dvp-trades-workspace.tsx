@@ -63,7 +63,11 @@ import {
 } from "./dvp-trade";
 import { DVP_TRADES_PAGE_SIZE, type DvpInboundTrade } from "./dvp-trades.data";
 import { resolveTradesListState } from "./dvp-trades-list-state";
-import { type StatusFilter, serializeDvpTradesFilters } from "./dvp-trades-query";
+import {
+  type DvpTradesUrlStatus,
+  type StatusFilter,
+  serializeDvpTradesFilters,
+} from "./dvp-trades-query";
 
 /** Their labels, in the order the dropdown shows them — which is the order a
  * trade moves through, so the control reads as a lifecycle rather than as an
@@ -79,11 +83,8 @@ const STATUS_FILTER_LABELS = {
 
 const STATUS_FILTER_ORDER = Object.keys(STATUS_FILTER_LABELS) as StatusFilter[];
 
-/** The trades status groups that ride the URL. */
-type UrlStatusFilter = Exclude<StatusFilter, "waiting">;
-
 interface DvpTradesUrlState {
-  status: UrlStatusFilter;
+  status: DvpTradesUrlStatus;
   query: string;
 }
 
@@ -470,7 +471,7 @@ function useTradesPagination(trades: DvpTrade[], resultKey: string) {
  * endpoint the URL has no reason to name. A browser navigation that changes the
  * URL group lands back on the trades segment.
  */
-function useWaitingSegment(initialStatus: UrlStatusFilter, urlStatus: UrlStatusFilter) {
+function useWaitingSegment(initialStatus: DvpTradesUrlStatus, urlStatus: DvpTradesUrlStatus) {
   const [selection, setSelection] = useState({ status: initialStatus, active: false });
   if (selection.status !== urlStatus) {
     setSelection({ status: urlStatus, active: false });
@@ -478,7 +479,7 @@ function useWaitingSegment(initialStatus: UrlStatusFilter, urlStatus: UrlStatusF
   return {
     showingInbound: selection.status === urlStatus ? selection.active : false,
     showWaiting: () => setSelection({ status: urlStatus, active: true }),
-    showTrades: (status: UrlStatusFilter) => setSelection({ status, active: false }),
+    showTrades: (status: DvpTradesUrlStatus) => setSelection({ status, active: false }),
   };
 }
 
@@ -554,7 +555,7 @@ export function DvpTradesWorkspace({
   /** The active URL search text ("" when none), not the live input value. */
   searchQuery: string;
   /** The active URL status group for the trades list. */
-  statusFilter: UrlStatusFilter;
+  statusFilter: DvpTradesUrlStatus;
 }) {
   const t = useTranslations();
   const {

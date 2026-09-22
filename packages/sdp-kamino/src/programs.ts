@@ -1,6 +1,7 @@
 import {
   KAMINO_FARMS_PROGRAM_IDS,
   KAMINO_KLEND_PROGRAM_IDS,
+  KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT,
   KAMINO_KVAULT_PROGRAM_IDS,
   KAMINO_SLOT_DURATION_MS,
   type SolanaCluster,
@@ -28,6 +29,12 @@ export interface KaminoClusterConfig {
    * value fails silently rather than loudly.
    */
   slotDurationMs: number;
+  /**
+   * Whether this cluster's kvault build implements `deposit_with_min_shares_out`.
+   * False on devnet (`KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`): a floored deposit
+   * there is refused at build time instead of failing simulation with Anchor 101.
+   */
+  depositFloorSupported: boolean;
 }
 
 const CONFIG_BY_CLUSTER: Readonly<Record<SolanaCluster, KaminoClusterConfig>> = {
@@ -37,6 +44,7 @@ const CONFIG_BY_CLUSTER: Readonly<Record<SolanaCluster, KaminoClusterConfig>> = 
     klendProgramId: address(KAMINO_KLEND_PROGRAM_IDS["mainnet-beta"]),
     farmsProgramId: address(KAMINO_FARMS_PROGRAM_IDS["mainnet-beta"]),
     slotDurationMs: KAMINO_SLOT_DURATION_MS["mainnet-beta"],
+    depositFloorSupported: KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT["mainnet-beta"],
   },
   devnet: {
     cluster: "devnet",
@@ -44,6 +52,7 @@ const CONFIG_BY_CLUSTER: Readonly<Record<SolanaCluster, KaminoClusterConfig>> = 
     klendProgramId: address(KAMINO_KLEND_PROGRAM_IDS.devnet),
     farmsProgramId: address(KAMINO_FARMS_PROGRAM_IDS.devnet),
     slotDurationMs: KAMINO_SLOT_DURATION_MS.devnet,
+    depositFloorSupported: KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT.devnet,
   },
 };
 

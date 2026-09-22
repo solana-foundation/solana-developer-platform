@@ -157,6 +157,10 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   superstate: "Superstate",
   maple: "Maple",
   centrifuge: "Centrifuge",
+  // Issuer-curated tokenized funds (WTGXX et al.) — the id the WisdomTree
+  // catalogue client writes, establishable from the mint's issuer-controlled
+  // on-chain metadata.
+  wisdomtree: "WisdomTree",
   // Ids providers report when a protocol or fund curates its own vaults. Some
   // stored rows (Aave/Morpho) are hidden by strategy API policy, but inventory
   // tooling still renders their metadata.
@@ -573,9 +577,16 @@ export interface EarnVaultQueuedWithdrawalTerms {
 /** Independently available exit routes for one owned vault position. */
 export interface EarnVaultWithdrawalOptions {
   positionId: string;
+  /** Redeem shares and receive assets atomically in the same transaction. */
   instant: boolean;
+  /**
+   * Transfer shares into a provider-managed redemption order whose asset payout
+   * settles later. Mutually exclusive with `instant`; distinct from `queued`,
+   * which is an on-chain request with its own lifecycle and cancellation path.
+   */
+  providerOrder: boolean;
   queued: boolean;
-  /** Queue authority when the provider exposes a queued exit; null for instant-only providers. */
+  /** Queue authority when the provider exposes a queued exit; null for direct-only providers. */
   withdrawAuthority: string | null;
   queueState: string | null;
   queueAsset: EarnVaultQueuedWithdrawalTerms | null;

@@ -346,6 +346,11 @@ export interface Env {
   UPSHIFT_SANDBOX_API_KEY?: string;
   PERENA_API_KEY?: string;
   PERENA_SANDBOX_API_KEY?: string;
+  // Packed JSON: {"clientId","clientSecret","username","password"} — the
+  // OAuth2 password-grant quad WisdomTree Connect provisions. One value per
+  // environment; format documented on EarnRuntimeEnvironment in @sdp/earn.
+  WISDOMTREE_API_KEY?: string;
+  WISDOMTREE_SANDBOX_API_KEY?: string;
 }
 
 // Extend Hono's context with our bindings

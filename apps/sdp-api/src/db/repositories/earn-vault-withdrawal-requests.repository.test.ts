@@ -448,7 +448,10 @@ describe("Earn queued withdrawal repository", () => {
     expect(winner.status).toBe("fulfilled");
     expect(contender.status).toBe("rejected");
     if (contender.status === "rejected") {
-      expect(String(contender.reason)).toMatch(/provider nonce/i);
+      // Which duplicate guard rejects first depends on statement interleaving:
+      // the provider-nonce check or the request-address uniqueness check. Both
+      // mean the contender lost the race to the promoted lease.
+      expect(String(contender.reason)).toMatch(/provider nonce|provider request address/i);
     }
     const occupancy = await getDb(env)
       .prepare(

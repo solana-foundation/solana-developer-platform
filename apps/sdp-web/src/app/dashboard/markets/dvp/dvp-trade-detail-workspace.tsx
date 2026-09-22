@@ -52,6 +52,7 @@ import {
   type DvpTradeLeg,
   dvpTimestampToIso,
   formatLegAmount,
+  formatLegAmountWithSymbol,
   frozenLegs,
   isDvpPartyView,
   isDvpTradeClosed,
@@ -258,15 +259,10 @@ function ExchangeSummary({ trade }: { trade: DvpTrade }) {
       : [trade.legs.a, trade.legs.b];
   return (
     <span className="text-secondary text-sm">
-      {t(labels.given)} {legAmountWithSymbol(given)} · {t(labels.taken)}{" "}
-      {legAmountWithSymbol(taken)}
+      {t(labels.given)} {formatLegAmountWithSymbol(given.amount, given.decimals, given.symbol)} ·{" "}
+      {t(labels.taken)} {formatLegAmountWithSymbol(taken.amount, taken.decimals, taken.symbol)}
     </span>
   );
-}
-
-/** "100 USDC", or just "100" for a mint without a symbol. */
-function legAmountWithSymbol(leg: DvpTradeLeg): string {
-  return `${formatLegAmount(leg.amount, leg.decimals)}${leg.symbol ? ` ${leg.symbol}` : ""}`;
 }
 
 /** The line under the amount: progress while open, the outcome once closed. */
@@ -359,8 +355,7 @@ function LegTransferRow({
           {t(TRANSFER_KIND_KEYS[transfer.kind])}
         </span>
         <span className="whitespace-nowrap text-secondary tabular-nums">
-          {formatLegAmount(transfer.amount, leg.decimals)}
-          {leg.symbol ? ` ${leg.symbol}` : ""}
+          {formatLegAmountWithSymbol(transfer.amount, leg.decimals, leg.symbol)}
         </span>
       </span>
       <span className="inline-flex items-center gap-1.5 text-tertiary tabular-nums">

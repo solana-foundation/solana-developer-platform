@@ -699,6 +699,7 @@ describe("queued withdrawal capability", () => {
       client.getWithdrawalOptions(sandbox, { providerReference: VAULT_A })
     ).resolves.toEqual({
       instant: false,
+      providerOrder: false,
       queued: true,
       withdrawAuthority: QUEUE_PROGRAM,
       queueState: SPONSOR,

@@ -276,6 +276,13 @@ export async function fetchDvpCreateContext(
   }
 }
 
+/**
+ * The Token-2022 program id, spelled once for the create flow: every
+ * SDP-issued asset is minted under it, and a pasted mint with no known
+ * program assumes it.
+ */
+export const TOKEN_2022_PROGRAM = SPL_TOKEN_PROGRAMS["token-2022"];
+
 function toTokenOption(token: TokenRow) {
   return token.mintAddress
     ? [
@@ -285,7 +292,7 @@ function toTokenOption(token: TokenRow) {
           name: token.name ? token.name : null,
           decimals: typeof token.decimals === "number" ? token.decimals : null,
           // Every SDP-issued asset is minted under Token-2022.
-          tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+          tokenProgram: TOKEN_2022_PROGRAM,
         },
       ]
     : [];

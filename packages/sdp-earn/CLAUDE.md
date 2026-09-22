@@ -483,12 +483,14 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
   `resolveEarnProviderClient` — DB provider ids are open strings and MUST be
   resolved through this, never direct-indexed.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, live
-  metrics, vault-direct (deposit + read), vault-withdraw, and the two live
-  quotes (deposit and withdrawal previews). All are method-presence guards in
-  capabilities.ts and a provider may implement any subset. Kamino has live
-  metrics, vault-direct, vault-withdraw (PRO-1702) and both quotes
-  (`@sdp/kamino`); Veda has vault-direct and vault-withdraw (instant redemption
-  only — the queued exit waits on its own capability, see
+  metrics, vault-direct (deposit + read), vault-withdraw,
+  vault-queued-withdraw, deposit eligibility, and the two live quotes (deposit
+  and withdrawal previews). All are method-presence guards in capabilities.ts,
+  and a provider may implement any subset. `supportsDepositEligibility` is a
+  provider-side KYC check MONEY-IN paths consult, never exits; WisdomTree
+  implements it over its Connect wallet registry. Kamino has live metrics,
+  vault-direct, vault-withdraw (PRO-1702), and both quotes (`@sdp/kamino`);
+  Veda implements both instant and queued vault exits (see
   `docs/decisions/0003-veda-vault-withdrawals.md`). A deposit-only provider's
   exit route answers 501, which is a statement about SDP's plumbing rather
   than about anyone's right to their money.

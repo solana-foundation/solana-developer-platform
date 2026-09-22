@@ -761,7 +761,11 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       expect(body.data.followUp.feePayer).toBe(feePayer);
     });
 
-    it("requires a floor for a sandbox Kamino split build", async () => {
+    it("builds a sandbox Kamino split without a floor: the devnet program cannot enforce one", async () => {
+      // Kamino's DEVNET kvault build lacks `deposit_with_min_shares_out`, so the
+      // catalogue publishes `depositSlippage: null` for this row and the gate
+      // must not demand what the chain would reject with Anchor 101. A caller
+      // who follows the row omits the floor and the build proceeds floorless.
       await seedAuth();
       const strategy = await seedStrategy();
       buildExternalWalletDepositTransaction.mockResolvedValue({
@@ -781,8 +785,15 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         minSharesOut: undefined,
       });
 
-      expect(res.status).toBe(400);
-      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ minSharesOut: expect.anything() })
+      );
+      const body = (await res.json()) as {
+        data: { followUp: { strategyId: string; amount: string; minSharesOut?: string } };
+      };
+      expect(body.data.followUp.minSharesOut).toBeUndefined();
     });
   });
 

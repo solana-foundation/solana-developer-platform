@@ -66,7 +66,7 @@ export function buildEarnIntegrationSections(
     throw new Error(quote.blockingIssues.map((issue: { message: string }) => issue.message).join("; "));
   }
   const minSharesOut = floorForTolerance(quote.sharesOut, quote.shareDecimals, slippageBps);`
-    : "  // This strategy declares no deposit floor (depositSlippage is null): the\n  // deposit takes the live rate. Preview with previewEarnDeposit to show it.\n  const minSharesOut = undefined;";
+    : "  // This strategy accepts no on-chain deposit floor (depositSlippage is\n  // null). That can mean a live-rate deposit or a next-NAV provider order; a\n  // preview is informational and cannot bound later provider settlement.\n  const minSharesOut = undefined;";
   const withdrawalFloor = requiresWithdrawalFloor
     ? `  // This strategy requires a quote-derived floor: preview, then take the
   // customer's tolerance off the live figure.
@@ -75,7 +75,7 @@ export function buildEarnIntegrationSections(
     throw new Error(quote.blockingIssues.map((issue: { message: string }) => issue.message).join("; "));
   }
   const minAmountOut = floorForTolerance(quote.assetsOut, quote.assetDecimals, slippageBps);`
-    : "  // This strategy enforces no exit floor on chain (withdrawalSlippage is\n  // null), so minAmountOut is not accepted. Preview with previewEarnWithdrawal\n  // to show the expected payout.\n  const minAmountOut = undefined;";
+    : "  // This strategy accepts no on-chain exit floor (withdrawalSlippage is\n  // null), so minAmountOut is not accepted. A preview may be informational;\n  // for a provider order it cannot promise the later NAV-struck payout.\n  const minAmountOut = undefined;";
   const floorHelper =
     requiresDepositFloor || requiresWithdrawalFloor
       ? `
@@ -86,10 +86,17 @@ function floorForTolerance(quote: string, decimals: number, toleranceBps: number
     throw new Error("slippage tolerance must be 1-1000 basis points");
   }
   const [whole, fraction = ""] = quote.split(".");
-  if (!/^\\d+$/.test(whole ?? "") || !/^\\d*$/.test(fraction) || fraction.length > decimals) {
+  // Providers do not canonicalize scale: a trailing-zero-PADDED fraction
+  // ("1.2000000" at scale 6) is not finer precision, so the padding is
+  // stripped before the scale check and the value still parses. A quote with
+  // more SIGNIFICANT fractional digits than the mint has atoms is malformed —
+  // padEnd would silently over-count its atoms ("1.234" at scale 2 reads as
+  // 1234) — so that stays a thrown error.
+  const significant = fraction.replace(/0+$/, "");
+  if (!/^\\d+$/.test(whole ?? "") || !/^\\d*$/.test(fraction) || significant.length > decimals) {
     throw new Error("provider quote is not a valid decimal at the reported mint scale");
   }
-  const atoms = BigInt((whole ?? "0") + fraction.padEnd(decimals, "0"));
+  const atoms = BigInt((whole ?? "0") + significant.padEnd(decimals, "0"));
   if (atoms === 0n) throw new Error("provider quote returned zero output");
   const floored = (atoms * BigInt(10_000 - toleranceBps)) / 10_000n || 1n;
   const digits = floored.toString().padStart(decimals + 1, "0");
@@ -245,8 +252,10 @@ export async function submitEarnDeposit({
 
 /**
  * One movement. Statuses: requested (recorded, not yet seen on the network),
- * submitted, confirmed, finalized, failed. Treat confirmed as Done in the UI;
- * SDP continues tracking finalized or failed as the durable ledger outcome.
+ * submitted, confirmed, finalized, failed. Confirmed proves only a Solana
+ * observation, not economic settlement. Wait for finalized or failed; a
+ * provider order remains confirmed until authenticated provider completion is
+ * correlated to the movement.
  */
 export async function getEarnMovement(movementId: string) {
   const data = await sdpFetch(
@@ -264,11 +273,7 @@ export async function waitForEarnMovement(
   while (true) {
     signal?.throwIfAborted();
     const movement = await getEarnMovement(movementId);
-    if (
-      movement.status === "confirmed" ||
-      movement.status === "finalized" ||
-      movement.status === "failed"
-    ) return movement;
+    if (movement.status === "finalized" || movement.status === "failed") return movement;
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, intervalMs);
       signal?.addEventListener("abort", () => {
@@ -381,8 +386,9 @@ export async function submitEarnWithdrawal({
 }`;
 
   const asyncWithdraw = `/**
- * Read instant and queued routes independently. Never auto-select: an instant
- * redemption pays now, while a queued request escrows shares for the provider.
+ * Read atomic, provider-order, and queued routes independently. Atomic exits
+ * pay in one transaction; provider orders settle later; queued requests escrow
+ * shares under the provider's on-chain queue terms.
  */
 export async function getEarnWithdrawalOptions(positionId: string) {
   return sdpFetch("/v1/earn/external-wallet/withdrawal-options", {

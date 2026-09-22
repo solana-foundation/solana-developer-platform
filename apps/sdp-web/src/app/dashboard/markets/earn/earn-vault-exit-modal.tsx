@@ -1,12 +1,12 @@
 "use client";
 
 import type { EarnVaultPosition, EarnVaultWithdrawal, SdpEnvironment } from "@sdp/types";
-import { Clock3Icon, Loader2Icon, type LucideIcon, ZapIcon } from "lucide-react";
+import { ArrowRightIcon, Clock3Icon, Loader2Icon, type LucideIcon, ZapIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { useTranslations } from "@/i18n/provider";
-import { shortenMarketAddress } from "./earn-format";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { formatDurationSeconds, positionDisplayName } from "./earn-format";
 import { fetchEarnVaultWithdrawalOptions } from "./earn-program-data";
 import { EarnVaultAsyncWithdrawModal } from "./earn-vault-async-withdraw-modal";
 import {
@@ -49,10 +49,19 @@ function autoRouteChoice(
   return null;
 }
 
-/** Reads provider withdrawal capabilities once per position, with manual retry. */
+/**
+ * Reads provider withdrawal capabilities once per position, with manual retry.
+ * A retry reruns this same effect instead of issuing its own unguarded fetch,
+ * so every attempt — initial or retried — owns one AbortController: the
+ * cleanup aborts the attempt a retry or unmount supersedes, and the abort
+ * guard discards its late answer rather than letting it win by outliving
+ * newer state.
+ */
 function useEarnVaultExitOptions(positionId: string) {
   const [options, setOptions] = useState<ExitOptions>(undefined);
+  const [attempt, setAttempt] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt is a trigger-only dep — a retry bumps it to re-run this effect, whose cleanup aborts the attempt it supersedes.
   useEffect(() => {
     const controller = new AbortController();
     void fetchEarnVaultWithdrawalOptions(positionId, controller.signal).then((result) => {
@@ -60,11 +69,11 @@ function useEarnVaultExitOptions(positionId: string) {
       setOptions(result);
     });
     return () => controller.abort();
-  }, [positionId]);
+  }, [positionId, attempt]);
 
   const retry = () => {
     setOptions(undefined);
-    void fetchEarnVaultWithdrawalOptions(positionId).then(setOptions);
+    setAttempt((current) => current + 1);
   };
 
   return { options, retry };
@@ -83,15 +92,23 @@ function RouteOption({
 }) {
   return (
     <button
-      className="rounded-xl border border-border-default bg-surface-raised p-4 text-left transition-colors hover:border-border-strong hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="group w-full rounded-2xl border border-border-default bg-surface-raised px-5 py-4 text-left transition-colors hover:border-border-strong hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       onClick={onClick}
       type="button"
     >
-      <span className="flex items-center gap-2 font-medium text-primary">
-        <Icon aria-hidden="true" className="size-4" />
-        {title}
+      <span className="flex items-center gap-4">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary transition-colors group-hover:bg-fill-strong">
+          <Icon aria-hidden="true" className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-primary">{title}</span>
+          <span className="mt-0.5 block text-sm leading-5 text-secondary">{description}</span>
+        </span>
+        <ArrowRightIcon
+          aria-hidden="true"
+          className="size-4 shrink-0 text-tertiary transition-transform group-hover:translate-x-0.5"
+        />
       </span>
-      <span className="mt-1 block text-sm leading-5 text-secondary">{description}</span>
     </button>
   );
 }
@@ -106,6 +123,7 @@ function ExitRouteOptions({
   ready: ExitOptionsValue | null;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   return (
     <>
       <p className="mt-2 text-sm leading-5 text-secondary">
@@ -122,10 +140,19 @@ function ExitRouteOptions({
         ) : null}
         {asyncRoute ? (
           <RouteOption
-            description={t(asyncRoute.summary.messageKey, asyncRoute.summary.values)}
+            description={t(
+              asyncRoute.summary.messageKey,
+              asyncRoute.kind === "queue"
+                ? {
+                    duration:
+                      formatDurationSeconds(asyncRoute.waitSeconds, locale) ??
+                      t("DashboardEarn.unavailable"),
+                  }
+                : asyncRoute.summary.values
+            )}
             icon={Clock3Icon}
             onClick={() => onChoose("async")}
-            title={t("DashboardEarn.exitRoute.asyncTitle")}
+            title={t(asyncRoute.summary.titleKey)}
           />
         ) : null}
       </div>
@@ -150,7 +177,7 @@ function ExitRouteChooser({
 }) {
   const t = useTranslations();
   const ready = options?.kind === "ready" ? options.value : null;
-  const positionName = position.label || shortenMarketAddress(position.providerReference);
+  const positionName = positionDisplayName(position);
   const modalLabel = t("DashboardEarn.exitRoute.title", { position: positionName });
 
   let body: ReactNode;
@@ -193,10 +220,10 @@ function ExitRouteChooser({
 }
 
 /**
- * Resolves provider capabilities first and makes the user choose when both
- * routes exist. A long-lived request and an instant payout are never
- * interchangeable outcomes, so this component never applies a preference or
- * fallback. Mechanism dispatch is isolated from this provider-neutral chooser.
+ * Resolves provider capabilities first and makes the user choose when multiple
+ * routes exist. Atomic payout, provider-settled redemption, and a long-lived
+ * queue request are never interchangeable outcomes, so this component never
+ * applies a preference or fallback. Mechanism dispatch stays provider-neutral.
  */
 export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
   const { position } = props;
@@ -224,8 +251,10 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
       <EarnVaultAsyncWithdrawModal
         environment={props.environment}
         onClose={props.onClose}
+        onMovementUpdated={props.onMovementUpdated}
         onRequested={props.onAsyncRequest}
         onSettled={props.onAsyncRequestSettled}
+        onWithdrawn={props.onWithdrawn}
         position={position}
         projectId={props.projectId}
         route={asyncRoute}

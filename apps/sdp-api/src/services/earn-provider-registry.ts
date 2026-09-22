@@ -18,6 +18,7 @@ import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
 } from "@sdp/veda";
+import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint, resolveClusterRpcUrl } from "./earn/execution-registry";
 import { createOndoSwapPort } from "./earn/ondo-swap-port";
@@ -56,6 +57,8 @@ assertJupiterLendNotPortfolioProvider(jupiterLend);
 
 const veda = new VedaVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
 assertVedaNotPortfolioProvider(veda);
+const wisdomtree = new WisdomTreeVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
+assertWisdomTreeNotPortfolioProvider(wisdomtree);
 
 // The swap port is resolved per request from the runtime context (the API
 // constructs `ctx.env` from `Env`), because these are process singletons and
@@ -80,6 +83,7 @@ export const EARN_PROVIDER_CLIENTS = {
   jupiter_lend: jupiterLend,
   veda,
   ondo,
+  wisdomtree,
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 
 export function resolveEarnProviderClient(provider: string): EarnVaultProvider {

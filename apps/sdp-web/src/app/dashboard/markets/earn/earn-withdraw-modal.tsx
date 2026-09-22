@@ -28,13 +28,6 @@ import {
   useEarnWithdrawalOutcomeToast,
 } from "./earn-program-data";
 
-/**
- * Exact ordering for provider money decimals. JavaScript numbers cannot
- * distinguish every six-decimal value once balances exceed 2^53, while the
- * API deliberately carries these amounts as strings.
- */
-const compareUsdDecimals = compareUnsignedDecimals;
-
 export function isPositiveUsdAmount(value: string): boolean {
   const amount = parseUnsignedDecimal(value, { trim: false });
   return amount !== undefined && decimalScale(value) <= 6 && isPositiveDecimal(amount.canonical);
@@ -475,7 +468,7 @@ function AmountField({
             disabled={
               submitting ||
               maxFillAmount === undefined ||
-              compareUsdDecimals(maxFillAmount, "0") !== 1
+              compareUnsignedDecimals(maxFillAmount, "0") !== 1
             }
             onClick={() => {
               if (maxFillAmount !== undefined) onAmountInputChange(maxFillAmount);
@@ -635,7 +628,7 @@ export function EarnWithdrawModal({
   const amountValid =
     token !== undefined &&
     amountFormatValid &&
-    (laneCeiling === undefined || compareUsdDecimals(amount, laneCeiling) !== 1);
+    (laneCeiling === undefined || compareUnsignedDecimals(amount, laneCeiling) !== 1);
   const destination = destinationInput.trim();
   const destinationValid = BASE58_ADDRESS_PATTERN.test(destination);
 

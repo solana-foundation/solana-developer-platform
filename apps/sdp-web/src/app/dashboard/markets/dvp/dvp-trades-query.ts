@@ -39,6 +39,11 @@ export const STATUS_FILTERS = {
 export type StatusFilter = keyof typeof STATUS_FILTERS;
 
 /**
+ * A status the URL can carry; `waiting` is client state, never in the URL.
+ */
+export type DvpTradesUrlStatus = Exclude<StatusFilter, "waiting">;
+
+/**
  * The groups that also narrow by settlement availability. "Ready to settle" is
  * a funded trade the program will settle now, so a funded trade whose earliest
  * settlement time is still ahead is not in it. Judged server-side by the cluster
@@ -95,10 +100,7 @@ export function parseDvpTradesFilters(
  * @param q - The trimmed search text, or null for none.
  * @returns The query string with its leading `?`, or "" for the unfiltered URL.
  */
-export function serializeDvpTradesFilters(
-  status: "all" | "waiting" | Exclude<keyof typeof STATUS_FILTERS, "all" | "waiting">,
-  q: string | null
-): string {
+export function serializeDvpTradesFilters(status: StatusFilter, q: string | null): string {
   const query = new URLSearchParams();
   if (status !== "all" && status !== "waiting") {
     query.set("status", status);

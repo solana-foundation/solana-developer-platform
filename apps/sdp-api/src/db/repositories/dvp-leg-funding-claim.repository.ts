@@ -81,6 +81,12 @@ export interface DvpLegFundingClaimRepository {
   /** Every claim on a trade, for rendering who has paid and who has not. */
   listForTrade(tradeId: string): Promise<DvpLegFundingClaim[]>;
   /**
+   * Every page's claims in one query, keyed by trade. A trade with no claims
+   * maps to an empty list, and one the caller cannot read maps the same, which
+   * the caller could not have asked about in the first place.
+   */
+  listForTrades(tradeIds: readonly string[]): Promise<Map<string, DvpLegFundingClaim[]>>;
+  /**
    * Releases claims whose signed transaction can no longer be accepted.
    *
    * A claim is deliberately KEPT through an ambiguous broadcast failure,
@@ -264,6 +270,28 @@ export function createPostgresDvpLegFundingClaimRepository(
         .bind(tradeId)
         .all<Record<string, unknown>>();
       return result.results.map(toDvpLegFundingClaim);
+    },
+
+    async listForTrades(tradeIds) {
+      const byTrade = new Map<string, DvpLegFundingClaim[]>(tradeIds.map((id) => [id, []]));
+      if (tradeIds.length === 0) {
+        return byTrade;
+      }
+      const placeholders = tradeIds.map(() => "?").join(", ");
+      const result = await db
+        .prepare(
+          `SELECT trade_id, side, organization_id, project_id, custody_wallet_id,
+                  signature, expiry_height, funding_tx
+             FROM dvp_leg_funding_claims
+            WHERE trade_id IN (${placeholders})`
+        )
+        .bind(...tradeIds)
+        .all<Record<string, unknown>>();
+      for (const row of result.results) {
+        const claim = toDvpLegFundingClaim(row);
+        byTrade.get(claim.tradeId)?.push(claim);
+      }
+      return byTrade;
     },
 
     async listExpiredBroadcast(blockHeight) {

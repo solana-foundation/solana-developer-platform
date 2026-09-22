@@ -2,7 +2,7 @@ import type { SdpEnvironment } from "./api-keys";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
 import { EARN_EXECUTION_MODELS, type EarnPortfolioToken } from "./earn";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
-import { KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
+import { KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT, KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
 import { ONDO_DEPLOYMENTS } from "./ondo-programs";
 import {
   normalizeOrganizationTier,
@@ -51,6 +51,7 @@ export const EARN_PROVIDERS = [
   "kamino",
   "jupiter_lend",
   "ondo",
+  "wisdomtree",
 ] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
 
@@ -69,6 +70,9 @@ export const EARN_PROGRAM_SOLANA_PAYOUT_TOKENS = {
   kamino: [],
   jupiter_lend: [],
   ondo: [],
+  // Redemptions pay USDC back, but through the vault-direct model (the org's
+  // own wallet sends fund tokens), never through a program-style payout rail.
+  wisdomtree: [],
 } as const satisfies Record<EarnProviderId, readonly EarnPortfolioToken[]>;
 
 /** Fail closed for provider ids from open database read models. */
@@ -139,6 +143,12 @@ export const EARN_PROVIDER_SURFACING = {
   // through the PRO-1742 mirror, browse-only. No `currentApy` until a rate
   // source lands (PRO-1833) — the row renders "—" rather than a derived figure.
   ondo: true,
+  // Registered ahead of launch: catalogue, execution client and eligibility
+  // checks are integrated, but the go-live gate (playbook §4: flip LAST, in its
+  // own PR, after an end-to-end deposit works) has not been passed — WisdomTree
+  // is Solana-mainnet-only, so that E2E is blocked on production vault deposits
+  // opening (PRO-1703) and on real WisdomTree Connect credentials.
+  wisdomtree: false,
 } as const satisfies Record<EarnProviderId, boolean>;
 
 /**
@@ -203,7 +213,60 @@ export const EARN_PROVIDER_DEPOSIT_STYLE = {
   // USDY balance in the organization's own wallet. There is no address to
   // fund, so `vault_direct` is the truthful shape here too.
   ondo: "vault_direct",
+  // WisdomTree's on-receipt deposit wallet LOOKS like a fundable address, but
+  // presenting it as one would strand money: attribution runs through the
+  // SENDING wallet's KYC registration, so USDC from an unregistered wallet is
+  // not a subscription. Money moves only when SDP builds the transfer for an
+  // eligibility-checked owner and that owner signs — the vault_direct shape.
+  wisdomtree: "vault_direct",
 } as const satisfies Record<EarnProviderId, EarnDepositStyle>;
+
+/**
+ * What Solana finality proves for a deposit.
+ *
+ * `atomic` means the transaction itself delivers the position asset.
+ * `provider_order` means it submits only the provider-facing payment leg; the
+ * provider strikes and delivers shares later.
+ */
+export const EARN_PROVIDER_DEPOSIT_SETTLEMENT = {
+  veda: "atomic",
+  upshift: "atomic",
+  perena: "atomic",
+  kamino: "atomic",
+  jupiter_lend: "atomic",
+  ondo: "atomic",
+  wisdomtree: "provider_order",
+} as const satisfies Record<EarnProviderId, "atomic" | "provider_order">;
+
+/**
+ * What Solana finality proves for a withdrawal.
+ *
+ * Kept separate from the deposit table even though today's values match: a
+ * provider can add an atomic exit without changing how subscriptions settle.
+ */
+export const EARN_PROVIDER_WITHDRAWAL_SETTLEMENT = {
+  veda: "atomic",
+  upshift: "atomic",
+  perena: "atomic",
+  kamino: "atomic",
+  jupiter_lend: "atomic",
+  ondo: "atomic",
+  wisdomtree: "provider_order",
+} as const satisfies Record<EarnProviderId, "atomic" | "provider_order">;
+
+/** Unknown providers fail closed because atomicity is a positive settlement claim. */
+export function earnProviderDepositSettlement(provider: string): "atomic" | "provider_order" {
+  return Object.hasOwn(EARN_PROVIDER_DEPOSIT_SETTLEMENT, provider)
+    ? EARN_PROVIDER_DEPOSIT_SETTLEMENT[provider as EarnProviderId]
+    : "provider_order";
+}
+
+/** Unknown providers fail closed because atomicity is a positive settlement claim. */
+export function earnProviderWithdrawalSettlement(provider: string): "atomic" | "provider_order" {
+  return Object.hasOwn(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT, provider)
+    ? EARN_PROVIDER_WITHDRAWAL_SETTLEMENT[provider as EarnProviderId]
+    : "provider_order";
+}
 
 /**
  * Deposit shape for an OPEN provider string, defaulting to `vault_direct`.
@@ -231,20 +294,23 @@ export function earnDepositStyle(provider: string): EarnDepositStyle {
  * tolerance covers exactly what it can: the rate moving between the quote and
  * the transaction landing.
  *
- * `null` means the PROVIDER declares no floor of its own; the provider keeps
- * whatever floor semantics its API contract has. It is not the whole answer:
- * every production deposit still carries a floor, and
- * `earnDepositSlippagePolicy` folds the environment in. Read that, never this
- * map, to decide whether a build needs `minSharesOut`.
+ * `null` means the PROVIDER declares no tolerance of its own. It is not the
+ * whole answer: `earnDepositSlippagePolicy` also folds in environment and
+ * whether the provider can encode a floor at all. Read that function, never
+ * this map, to decide whether a build needs `minSharesOut`.
  * Exhaustive over `EarnProviderId` so a new provider must state its policy.
  */
 export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   veda: { defaultToleranceBps: 10 },
   upshift: null,
   perena: null,
-  // Kamino deposits require a caller-chosen minSharesOut in every environment.
-  // Kamino exposes a live deposit quote, so every consumer can derive the floor
-  // from quoted shares instead of guessing from the token amount.
+  // Kamino deposits carry a caller-chosen minSharesOut wherever the vault
+  // program can enforce one. Kamino exposes a live deposit quote, so every
+  // consumer derives the floor from quoted shares instead of guessing from the
+  // token amount. Enforcement is per CLUSTER, not per provider: the devnet
+  // program lacks the floor instruction (`KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`),
+  // and `earnDepositSlippagePolicy` answers null there rather than publishing a
+  // floor the build would be rejected for.
   kamino: { defaultToleranceBps: 10 },
   jupiter_lend: { defaultToleranceBps: 10 },
   // The deposit is a market swap, so its builder REQUIRES an explicit floor
@@ -253,7 +319,30 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   // so an ordinary spread move between quote and landing does not fail the
   // deposit, still tight enough to bound what a route can take.
   ondo: { defaultToleranceBps: 50 },
+  wisdomtree: null,
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
+
+/**
+ * Whether a provider can encode a deposit share floor at all. WisdomTree's
+ * subscription transaction sends USDC before the transfer agent strikes NAV,
+ * so no Solana instruction can enforce `minSharesOut` for that later event.
+ */
+export const EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT = {
+  veda: "enforceable",
+  upshift: "enforceable",
+  perena: "enforceable",
+  kamino: "enforceable",
+  jupiter_lend: "enforceable",
+  ondo: "enforceable",
+  wisdomtree: "unsupported",
+} as const satisfies Record<EarnProviderId, "enforceable" | "unsupported">;
+
+/** Unknown providers fail closed to the ordinary enforceable-floor policy. */
+export function earnDepositFloorSupport(provider: string): "enforceable" | "unsupported" {
+  return Object.hasOwn(EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT, provider)
+    ? EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT[provider as EarnProviderId]
+    : "enforceable";
+}
 
 /** Slippage-floor policy for an OPEN provider string — fails closed to none. */
 export function earnDepositSlippageFloor(provider: string): { defaultToleranceBps: number } | null {
@@ -277,17 +366,32 @@ export const EARN_PRODUCTION_DEPOSIT_DEFAULT_TOLERANCE_BPS = 10;
  * (`assertDepositFloorPresent`), and the dashboard reads the published field,
  * so none of them can disagree with the others.
  *
- * Provider first: a builder that refuses an implicit floor requires one in
- * every environment. Then the environment: every production deposit carries a
- * caller-chosen share floor derived from the live quote, because without one a
- * vault deposit accepts any number of shares (the pinned Kamino SDK builds the
- * legacy instruction). Only a sandbox deposit into a provider with no policy
- * of its own takes the live rate.
+ * Cluster first: a floor the row's program cannot enforce is no floor, so a
+ * Kamino row hosted on a cluster whose kvault build lacks
+ * `deposit_with_min_shares_out` (devnet, per `KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`)
+ * answers null and the build takes the legacy instruction. Then capability: an
+ * asynchronous next-NAV subscription that cannot encode a floor returns null
+ * rather than advertising protection it cannot enforce. Then the provider: a
+ * builder that refuses an implicit floor requires one in every environment.
+ * Then the environment: every production deposit carries a caller-chosen share
+ * floor derived from the live quote, because without one a vault deposit
+ * accepts any number of shares (the pinned Kamino SDK builds the legacy
+ * instruction). Only a sandbox deposit into a provider with no policy of its
+ * own takes the live rate.
+ *
+ * `hostCluster` is the cluster the row's vault lives on. Callers holding the
+ * catalogue row pass `host_cluster`; when omitted, the environment's own
+ * cluster (`CLUSTER_BY_SDP_ENVIRONMENT`) stands in, which is the cluster a
+ * deposit from that environment executes on.
  */
 export function earnDepositSlippagePolicy(
   provider: string,
-  environment: SdpEnvironment
+  environment: SdpEnvironment,
+  hostCluster?: SolanaCluster
 ): { defaultToleranceBps: number } | null {
+  const cluster = hostCluster ?? CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  if (provider === "kamino" && !KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT[cluster]) return null;
+  if (earnDepositFloorSupport(provider) === "unsupported") return null;
   const declared = earnDepositSlippageFloor(provider);
   if (declared) return declared;
   return environment === "production"
@@ -313,6 +417,7 @@ export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
   jupiter_lend: { defaultToleranceBps: 10 },
   // The exit is the reverse market swap; same floor contract as the deposit.
   ondo: { defaultToleranceBps: 50 },
+  wisdomtree: null,
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Exit slippage-floor policy for an OPEN provider string — fails closed to none. */
@@ -356,6 +461,10 @@ export const EARN_PROVIDER_DEPLOYED_CLUSTERS = {
   kamino: deployedClusters(KAMINO_KVAULT_PROGRAM_IDS),
   jupiter_lend: deployedClusters(JUPITER_LEND_EARN_PROGRAM_IDS),
   ondo: deployedClusters(ONDO_DEPLOYMENTS),
+  // Registered but deliberately not depositable until the organization model
+  // and provider-order settlement are release-ready. Mainnet identities live
+  // in `wisdomtree-programs.ts`; this is the money-in admission gate.
+  wisdomtree: [],
 } as const satisfies Record<EarnProviderId, readonly SolanaCluster[]>;
 
 /**

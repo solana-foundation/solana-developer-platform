@@ -103,6 +103,27 @@ export function formatTokenQuantity(
   return formatProviderAmount(value, locale, symbol, 6);
 }
 
+/** Turn a provider duration into one short, human unit for product copy. */
+export function formatDurationSeconds(seconds: number, locale: string): string | undefined {
+  if (!Number.isFinite(seconds) || seconds < 0) return undefined;
+
+  const units =
+    seconds < 60
+      ? ({ divisor: 1, unit: "second" } as const)
+      : seconds < 3_600
+        ? ({ divisor: 60, unit: "minute" } as const)
+        : seconds < 86_400
+          ? ({ divisor: 3_600, unit: "hour" } as const)
+          : ({ divisor: 86_400, unit: "day" } as const);
+
+  return new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 1,
+    style: "unit",
+    unit: units.unit,
+    unitDisplay: "long",
+  }).format(seconds / units.divisor);
+}
+
 /** Format Unix epoch seconds only when JavaScript can represent the resulting date. */
 export function formatEpochSeconds(
   value: string | null | undefined,
@@ -117,6 +138,15 @@ export function formatEpochSeconds(
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+/** The formatted epoch timestamp, or the caller's placeholder when unrenderable. */
+export function formatEpochSecondsOr(
+  value: string | null | undefined,
+  locale: string,
+  unavailable: string
+): string {
+  return formatEpochSeconds(value, locale) ?? unavailable;
 }
 
 /**
@@ -161,6 +191,7 @@ const EARN_PROVIDER_LABELS = {
   perena: "Perena",
   upshift: "Upshift",
   veda: "Veda",
+  wisdomtree: "WisdomTree",
 } as const satisfies Record<EarnProviderId, string>;
 
 export function earnProviderLabel(provider: string): string {
