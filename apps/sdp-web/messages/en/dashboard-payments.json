@@ -612,7 +612,6 @@
       "providerAccountWalletProvisioning": "Provisioning",
       "customerIdLabel": "Customer ID",
       "walletIdLabel": "Wallet ID",
-      "agreementsToggle": "Agreements ({count})",
       "agreementSigned": "Signed",
       "agreementAwaitingSignature": "Awaiting signature",
       "viewAgreement": "Agreement",

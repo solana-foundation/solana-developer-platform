@@ -295,38 +295,6 @@ function CustomerLinkAgreements({
   );
 }
 
-/**
- * Collapsed disclosure for a BVNK customer link's agreements: one toggle row
- * naming the count, the agreement rows only once opened.
- *
- * @param agreements - Signed or pending agreements from the customer link.
- * @returns The toggle row plus, when open, the agreement rows.
- */
-function CustomerLinkAgreementsAccordion({
-  agreements,
-}: {
-  agreements: CounterpartyProviderCustomerLinkAgreement[];
-}) {
-  const t = useTranslations();
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="border-t border-border-default">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs text-secondary"
-      >
-        <ChevronDownIcon
-          className={cn("size-4 shrink-0 transition-transform", !open && "-rotate-90")}
-        />
-        {t("DashboardPayments.counterparty.agreementsToggle", { count: agreements.length })}
-      </button>
-      {open ? <CustomerLinkAgreements agreements={agreements} /> : null}
-    </div>
-  );
-}
-
 /** Provider logo, label, "Customer" tag, status badge, and BVNK residence flag. */
 function ProviderCustomerHeader({
   provider,
@@ -423,11 +391,12 @@ export function ProviderWalletBalanceCell({
 
 function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
   const t = useTranslations();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const { provider, customerLink, payoutAccounts, fundingWallets } = group;
   const expandable =
     payoutAccounts.length > 0 ||
     fundingWallets.length > 0 ||
+    (customerLink !== undefined && customerLink.provider === "bvnk") ||
     RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
   const headers = [
     t("DashboardPayments.counterparty.providerAccountCorridor"),
@@ -569,10 +538,10 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
               </table>
             </div>
           )}
+          {customerLink !== undefined && customerLink.provider === "bvnk" ? (
+            <CustomerLinkAgreements agreements={customerLink.agreements} />
+          ) : null}
         </>
-      ) : null}
-      {customerLink !== undefined && customerLink.provider === "bvnk" ? (
-        <CustomerLinkAgreementsAccordion agreements={customerLink.agreements} />
       ) : null}
     </div>
   );
