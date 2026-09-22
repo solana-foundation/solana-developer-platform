@@ -3162,6 +3162,71 @@ describe("Counterparties Routes", () => {
       });
     });
 
+    it("keeps the funding-wallet row with an unavailable balance when the wallet read carries no balance", async () => {
+      const created = await createCounterparty({
+        externalId: "provider_accounts_funding_no_balance",
+      });
+      const owner = (await created.json()).data.counterparty;
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+      await seedProviderAccount({
+        id: "provider_account_usd_no_balance",
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:no_balance",
+        externalAccountReference: "ExternalAccount:no_balance",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "PENDING",
+        status: "active",
+        createdAt: "2026-03-01T00:00:00.000Z",
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2").mockResolvedValue(
+        bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID })
+      );
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ data: [], hasMore: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      expect(body.data.accounts).toHaveLength(2);
+      const walletRow = body.data.accounts.find((account) => account.kind === "funding_wallet");
+      expect(walletRow).toMatchObject({
+        provider: "bvnk",
+        kind: "funding_wallet",
+        providerAccountReference: TEST_BVNK_WALLET_ID,
+        balance: { state: "unavailable" },
+      });
+      const payoutRow = body.data.accounts.find(
+        (account) => account.id === "provider_account_usd_no_balance"
+      );
+      expect(payoutRow).toMatchObject({
+        provider: "lightspark",
+        kind: "payout_account",
+        providerStatus: "PENDING",
+      });
+    });
+
     it("omits balance and reference on a provisioning funding-wallet row", async () => {
       const created = await createCounterparty({
         externalId: "provider_accounts_funding_provisioning",

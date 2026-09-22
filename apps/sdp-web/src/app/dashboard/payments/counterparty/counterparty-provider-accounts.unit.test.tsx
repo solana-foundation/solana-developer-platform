@@ -74,6 +74,18 @@ describe("groupProviderAccounts", () => {
     expect(lightspark?.payoutAccounts.map((account) => account.id)).toEqual(["cpa_payout"]);
     expect(lightspark?.fundingWallets).toEqual([]);
   });
+
+  it("throws when a funding-wallet account carries no fiat currency, naming the account", () => {
+    expect(() =>
+      groupProviderAccounts([
+        providerAccount({
+          id: "cpa_funding_null_fiat",
+          kind: "funding_wallet",
+          fiatCurrency: null,
+        }),
+      ])
+    ).toThrow("Funding wallet cpa_funding_null_fiat has no fiat currency");
+  });
 });
 
 describe("ProviderWalletBalanceCell", () => {
