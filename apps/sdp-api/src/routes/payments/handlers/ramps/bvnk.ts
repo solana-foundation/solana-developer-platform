@@ -70,6 +70,7 @@ import { type AuditIntent, AuditService } from "@/services/audit.service";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
+import { rampQuoteCryptoDepositProviderData } from "./quote-binding";
 
 const BVNK_UNRESOLVED_CONSENT_IP = "0.0.0.0";
 
@@ -137,7 +138,7 @@ export async function createPendingBvnkOfframpTransfer(
   return created;
 }
 
-/** Stamps the pending BVNK off-ramp transfer with the quote's reference, delivery mode, and status. */
+/** Stamps the pending BVNK off-ramp transfer with the quote's reference, delivery mode, crypto deposit, and status. */
 export async function completePendingBvnkOfframpTransfer(
   c: AppContext,
   input: {
@@ -145,6 +146,7 @@ export async function completePendingBvnkOfframpTransfer(
     projectId: string;
     transferId: string;
     quote: PaymentRampQuote;
+    cryptoAmount: string;
     status: PaymentTransferStatus;
   }
 ): Promise<void> {
@@ -156,6 +158,7 @@ export async function completePendingBvnkOfframpTransfer(
     status: input.status,
     providerReference: input.quote.id,
     deliveryMode: input.quote.deliveryMode,
+    providerData: rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
     updatedAt: new Date().toISOString(),
   });
   if (!updated) {

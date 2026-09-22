@@ -1123,12 +1123,19 @@ describe("Payments routes — ramps", () => {
 
       const transfer = await getDb(env)
         .prepare(
-          "SELECT status, provider_reference FROM payment_transfers WHERE counterparty_id = ?"
+          "SELECT status, provider_reference, provider_data FROM payment_transfers WHERE counterparty_id = ?"
         )
         .bind(counterpartyId)
-        .first<{ status: string; provider_reference: string | null }>();
+        .first<{
+          status: string;
+          provider_reference: string | null;
+          provider_data: Record<string, unknown>;
+        }>();
       expect(transfer?.status).toBe("awaiting_payment");
       expect(transfer?.provider_reference).toBe("channel_offramp_test_1");
+      expect(transfer?.provider_data).toEqual({
+        cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "75.25" },
+      });
 
       getCustomerSpy.mockRestore();
       channelSpy.mockRestore();

@@ -34,7 +34,6 @@ import {
   isCancelableRampTransferStatus,
   isCountryCode,
   type PaymentRampEstimate,
-  type PaymentRampInstruction,
   type PaymentRampQuote,
   type RampProviderEstimateResult,
   type SdpEnvironment,
@@ -152,6 +151,7 @@ import {
   assertRampQuoteBindingMatches,
   isRampQuoteBindingExpired,
   type RampQuoteBinding,
+  rampQuoteCryptoDepositProviderData,
   rampQuoteExpiryProviderData,
 } from "./ramps/quote-binding";
 import { stripeOnrampQuote } from "./ramps/stripe";
@@ -434,39 +434,6 @@ function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus
   return quote.status;
 }
 
-function isCryptoDepositInstruction(
-  instruction: PaymentRampInstruction
-): instruction is Extract<PaymentRampInstruction, { kind: "crypto_deposit" }> {
-  return "kind" in instruction && instruction.kind === "crypto_deposit";
-}
-
-/**
- * Persists the quote's crypto deposit instruction alongside the transfer so
- * the in-app send validates against it — the same contract hosted providers
- * fill via their awaiting_payment webhook.
- *
- * @param input - Quote persistence input.
- * @returns providerData fragment carrying the cryptoDeposit, or empty when
- * the quote has no crypto deposit instruction.
- */
-function rampQuoteCryptoDepositProviderData(
-  input: PersistRampQuoteTransferInput
-): Record<string, unknown> {
-  if (input.direction !== "offramp" || input.quote.deliveryMode !== "manual_instructions") {
-    return {};
-  }
-  const instruction = input.quote.paymentInstructions?.find(isCryptoDepositInstruction);
-  if (instruction === undefined || input.cryptoAmount === null) {
-    return {};
-  }
-  return {
-    cryptoDeposit: {
-      destinationAddress: instruction.destinationAddress,
-      amount: input.cryptoAmount,
-    },
-  };
-}
-
 async function persistRampQuoteTransfer(
   c: AppContext,
   input: PersistRampQuoteTransferInput
@@ -531,7 +498,7 @@ async function persistRampQuoteTransfer(
       providerData: {
         ...(input.providerData ?? {}),
         ...rampQuoteExpiryProviderData(input.quote),
-        ...rampQuoteCryptoDepositProviderData(input),
+        ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
       },
       serializedTx: null,
       signature: null,
@@ -1418,6 +1385,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       projectId,
       transferId: pendingTransfer.id,
       quote,
+      cryptoAmount: input.cryptoAmount,
       status: rampQuoteTransferStatus(quote),
     });
     transferId = pendingTransfer.id;
