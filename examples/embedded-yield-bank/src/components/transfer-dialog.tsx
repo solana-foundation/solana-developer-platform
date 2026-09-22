@@ -1,4 +1,4 @@
-import { LoaderCircleIcon } from "lucide-react";
+import { ChevronDownIcon, Clock3Icon, LoaderCircleIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -164,10 +164,14 @@ export function TransferDialog({
         variant={variant}
       />
       <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-md">
-        <form className="flex flex-col gap-6" onSubmit={submit}>
+        <form className="flex flex-col gap-5" onSubmit={submit}>
           <DialogHeader>
             <DialogTitle>{copy.title}</DialogTitle>
-            <DialogDescription>{copy.description}</DialogDescription>
+            <DialogDescription>
+              {direction === "to-checking"
+                ? `From ${strategy.name} to checking.`
+                : copy.description}
+            </DialogDescription>
           </DialogHeader>
 
           <TransferAmountField
@@ -197,7 +201,6 @@ export function TransferDialog({
           />
           <TransferSummary
             direction={direction}
-            discountPercent={discountPercent}
             feesPaidBy={feesPaidBy}
             options={withdrawalOptions}
             queueTerms={queueTerms}
@@ -210,7 +213,11 @@ export function TransferDialog({
             queueSettingsValid={queueSettingsValid}
             route={withdrawalRoute}
             selectedRouteAvailable={selectedRouteAvailable}
-            title={copy.title}
+            title={
+              direction === "to-checking" && withdrawalRoute === "queued"
+                ? "Request withdrawal"
+                : copy.title
+            }
           />
         </form>
       </DialogContent>
@@ -329,20 +336,22 @@ function WithdrawalRouteChooser({
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="text-sm font-medium">How to withdraw</legend>
-      <WithdrawalRouteOption
-        checked={route === "direct"}
-        description={directRouteDescription(options)}
-        label={options?.instant ? "Withdraw now" : "Provider redemption"}
-        onChange={() => onRouteChange("direct")}
-        value="direct"
-      />
-      <WithdrawalRouteOption
-        checked={route === "queued"}
-        description="Escrow shares now, then wait for a solver payment or recover them after the deadline."
-        label="Queued withdrawal"
-        onChange={() => onRouteChange("queued")}
-        value="queued"
-      />
+      <div className="grid grid-cols-2 gap-2">
+        <WithdrawalRouteOption
+          checked={route === "direct"}
+          description={directRouteDescription(options)}
+          label={options?.instant ? "Withdraw now" : "Provider redemption"}
+          onChange={() => onRouteChange("direct")}
+          value="direct"
+        />
+        <WithdrawalRouteOption
+          checked={route === "queued"}
+          description="Pays after maturity"
+          label="Queued"
+          onChange={() => onRouteChange("queued")}
+          value="queued"
+        />
+      </div>
     </fieldset>
   );
 }
@@ -366,53 +375,111 @@ function QueuedWithdrawalFields({
   onDeadlineChange: (value: string) => void;
   onDiscountChange: (value: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
   if (!active || !queueTerms) return null;
+  const expanded = open || !queueSettingsValid;
+  const window = formatEnteredDuration(deadline, durationUnit);
   return (
-    <div className="grid gap-4 rounded-xl border p-4">
-      <p className="text-sm leading-5 text-muted-foreground">
-        This request locks shares and pays later. It is not a completed transfer
-        until SDP reports fulfillment.
-      </p>
-      <Field>
-        <FieldLabel htmlFor="queued-discount">Accept less (%)</FieldLabel>
-        <Input
-          id="queued-discount"
-          inputMode="decimal"
-          value={discountPercent}
-          onChange={(event) => onDiscountChange(event.target.value)}
+    <section className="overflow-hidden rounded-xl border bg-muted/20">
+      <div className="flex items-start gap-3 px-4 pt-4">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Clock3Icon aria-hidden="true" className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Payout comes later</p>
+          <p className="text-xs leading-5 text-muted-foreground">
+            Shares lock now. A solver pays after maturity; otherwise recover
+            them after the window.
+          </p>
+        </div>
+      </div>
+
+      <dl className="mx-4 mt-3 grid grid-cols-3 divide-x rounded-lg bg-muted/70 py-2.5">
+        <QueueTerm
+          label="Matures"
+          value={`~${formatDuration(queueTerms.secondsToMaturity)}`}
         />
-        <FieldDescription>
-          Allowed: {formatBasisPoints(queueTerms.minimumDiscountBps)}% to{" "}
-          {formatBasisPoints(queueTerms.maximumDiscountBps)}%.
-        </FieldDescription>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor="queued-deadline">
-          Solver window ({durationUnit.label})
-        </FieldLabel>
-        <Input
-          id="queued-deadline"
-          inputMode="decimal"
-          value={deadline}
-          onChange={(event) => onDeadlineChange(event.target.value)}
+        <QueueTerm
+          label="Max discount"
+          value={discountPercent ? `${discountPercent}%` : "Set"}
         />
-        <FieldDescription>
-          Allowed: {formatDuration(queueTerms.minimumSecondsToDeadline)} to{" "}
-          {formatDuration(queueTerms.maximumSecondsToDeadline)} after maturity.
-        </FieldDescription>
-      </Field>
-      {!queueSettingsValid ? (
-        <p className="text-sm text-destructive" role="alert">
-          Use the allowed discount and solver window.
-        </p>
+        <QueueTerm label="Window" value={window} />
+      </dl>
+
+      <button
+        aria-controls="queued-terms-fields"
+        aria-expanded={expanded}
+        className="mt-2 flex w-full items-center justify-between px-4 py-2.5 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        Adjust terms
+        <ChevronDownIcon
+          aria-hidden="true"
+          className={cn(
+            "size-4 transition-transform",
+            expanded && "rotate-180"
+          )}
+        />
+      </button>
+
+      {expanded ? (
+        <div
+          className="grid gap-3 border-t px-4 py-4 sm:grid-cols-2"
+          id="queued-terms-fields"
+        >
+          <Field>
+            <FieldLabel htmlFor="queued-discount">Max discount (%)</FieldLabel>
+            <Input
+              id="queued-discount"
+              inputMode="decimal"
+              value={discountPercent}
+              onChange={(event) => onDiscountChange(event.target.value)}
+            />
+            <FieldDescription>
+              {formatBasisPoints(queueTerms.minimumDiscountBps)}% to{" "}
+              {formatBasisPoints(queueTerms.maximumDiscountBps)}%
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="queued-deadline">
+              Window ({durationUnit.label})
+            </FieldLabel>
+            <Input
+              id="queued-deadline"
+              inputMode="decimal"
+              value={deadline}
+              onChange={(event) => onDeadlineChange(event.target.value)}
+            />
+            <FieldDescription>
+              {formatDuration(queueTerms.minimumSecondsToDeadline)} to{" "}
+              {formatDuration(queueTerms.maximumSecondsToDeadline)}
+            </FieldDescription>
+          </Field>
+          {!queueSettingsValid ? (
+            <p className="text-sm text-destructive sm:col-span-2" role="alert">
+              Use the allowed discount and solver window.
+            </p>
+          ) : null}
+        </div>
       ) : null}
+    </section>
+  );
+}
+
+function QueueTerm({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 px-2 text-center">
+      <dt className="text-[11px] leading-4 text-muted-foreground">{label}</dt>
+      <dd className="truncate text-xs font-medium" title={value}>
+        {value}
+      </dd>
     </div>
   );
 }
 
 function TransferSummary({
   direction,
-  discountPercent,
   feesPaidBy,
   options,
   queueTerms,
@@ -420,30 +487,31 @@ function TransferSummary({
   strategy,
 }: {
   direction: TransferDirection;
-  discountPercent: string;
   feesPaidBy: FeePayer;
   options: YieldWithdrawalOptions | null | undefined;
   queueTerms: YieldWithdrawalOptions["queueAsset"];
   route: WithdrawalRoute;
   strategy: YieldStrategy;
 }) {
+  if (direction === "to-checking" && route === "queued" && queueTerms) {
+    return (
+      <dl className="rounded-lg bg-muted/60 px-3 py-2.5 text-xs">
+        <SummaryRow
+          label="Network fee"
+          value={
+            feesPaidBy === "northstar"
+              ? "Paid by Northstar"
+              : "Paid from your wallet"
+          }
+        />
+      </dl>
+    );
+  }
   return (
     <dl className="flex flex-col gap-2.5 rounded-xl bg-muted/60 p-4 text-sm">
       <SummaryRow label="Savings account" value={strategy.name} />
       {direction === "to-savings" ? (
         <SummaryRow label="Rate" value={formatApy(strategy.currentApy)} />
-      ) : route === "queued" && queueTerms ? (
-        <>
-          <SummaryRow label="Route" value="Queued withdrawal" />
-          <SummaryRow
-            label="Matures"
-            value={`In about ${formatDuration(queueTerms.secondsToMaturity)}`}
-          />
-          <SummaryRow
-            label="Accept less"
-            value={`${discountPercent || "0"}%`}
-          />
-        </>
       ) : (
         <SummaryRow
           label="Arrives"
@@ -513,18 +581,17 @@ function WithdrawalRouteOption({
   value: WithdrawalRoute;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 has-checked:border-foreground/30 has-checked:bg-muted/50">
+    <label className="flex min-h-16 cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 has-checked:border-foreground/30 has-checked:bg-muted/50">
       <input
-        className="mt-1"
         type="radio"
         name="withdrawal-route"
         value={value}
         checked={checked}
         onChange={onChange}
       />
-      <span className="flex flex-col gap-0.5">
+      <span className="flex min-w-0 flex-col gap-0.5">
         <span className="text-sm font-medium">{label}</span>
-        <span className="text-xs leading-5 text-muted-foreground">
+        <span className="text-xs leading-4 text-muted-foreground">
           {description}
         </span>
       </span>
@@ -610,8 +677,8 @@ function transferIntent({
 function directRouteDescription(
   options: YieldWithdrawalOptions | null | undefined
 ): string {
-  if (options?.instant) return "Assets arrive in the same transaction.";
-  return "The provider settles the redemption after it receives your shares.";
+  if (options?.instant) return "Right away";
+  return "Provider settles later";
 }
 
 function defaultWithdrawalRoute(
@@ -652,6 +719,11 @@ function parseDurationSeconds(value: string, unit: DurationUnit): number {
   return seconds > 0n && seconds <= BigInt(Number.MAX_SAFE_INTEGER)
     ? Number(seconds)
     : Number.NaN;
+}
+
+function formatEnteredDuration(value: string, unit: DurationUnit): string {
+  const seconds = parseDurationSeconds(value, unit);
+  return Number.isInteger(seconds) ? formatDuration(seconds) : "Set";
 }
 
 function formatDuration(seconds: number): string {
