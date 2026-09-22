@@ -104,6 +104,18 @@ export interface ListCounterpartyAccountsResponse {
   pageSize: number;
 }
 
+/** Availability of a provider wallet's live balance; `unavailable` keeps the row visible when the provider read fails. */
+export const PROVIDER_WALLET_BALANCE_STATES = ["available", "unavailable"] as const;
+export type ProviderWalletBalanceState = (typeof PROVIDER_WALLET_BALANCE_STATES)[number];
+
+/**
+ * Live provider-wallet balance, fetched just in time and never persisted
+ * or cached. `amount` is a decimal string in the wallet's `currency`.
+ */
+export type ProviderWalletBalance =
+  | { state: "available"; amount: string; currency: string }
+  | { state: "unavailable" };
+
 export interface CounterpartyProviderAccount {
   id: string;
   provider: RampProviderId;
@@ -118,6 +130,10 @@ export interface CounterpartyProviderAccount {
   accountNumberLast4?: string;
   paymentRails?: string[];
   customerLink?: CounterpartyProviderCustomerLink;
+  /** The provider's own wallet/account id; present on wallet kinds whose provider reference exists. */
+  providerAccountReference?: string;
+  /** Live balance, present only on wallet kinds whose reference exists. */
+  balance?: ProviderWalletBalance;
 }
 
 /** SDP-owned lifecycle of a BVNK customer link before BVNK's own customer status exists. */
