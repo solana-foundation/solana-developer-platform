@@ -712,7 +712,8 @@ export async function readBvnkCustomerLink(
  * @param env - Request environment used for repository access.
  * @param ctx - Ramp runtime context used for provider access.
  * @param input - Tenant scope, row id, and the v1 customer reference.
- * @returns The refreshed customer resolution and its verification link.
+ * @returns The refreshed customer resolution, its verification link, and the
+ * fetched customer record for callers that build party details from it.
  */
 export async function refreshBvnkCustomerAccount(
   env: Env,
@@ -723,7 +724,11 @@ export async function refreshBvnkCustomerAccount(
     providerAccountId: string;
     customerReference: string;
   }
-): Promise<{ customer: BvnkCustomerResolution; verificationUrl: string | undefined }> {
+): Promise<{
+  customer: BvnkCustomerResolution;
+  verificationUrl: string | undefined;
+  latest: BvnkCustomer;
+}> {
   const latest = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomer(ctx, {
     reference: input.customerReference,
   });
@@ -749,6 +754,7 @@ export async function refreshBvnkCustomerAccount(
       ...(verificationStatus === undefined ? {} : { verificationStatus }),
     },
     verificationUrl: latest.verification?.url,
+    latest,
   };
 }
 

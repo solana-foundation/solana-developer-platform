@@ -1302,17 +1302,28 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           fundingWalletStatus: fundingRow === null ? null : fundingRow.provider_status,
         });
       }
-      const customerResolution = await readBvnkCustomerLink(c.env, counterparty);
-      if (
-        customerResolution === null ||
-        customerResolution.customerReference === undefined ||
-        !isBvnkCustomerVerified(customerResolution.status)
-      ) {
+      const customerLinkRow = await accounts.getProviderAccount({
+        organizationId: scope.auth.organizationId,
+        projectId,
+        counterpartyId: counterparty.id,
+        provider: "bvnk",
+      });
+      if (customerLinkRow === null) {
         throw counterpartyNotProvisioned("bvnk", "offramp");
       }
-      const bvnkCustomer = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomer(rampRuntime(c), {
-        reference: customerResolution.customerReference,
+      const refreshedCustomer = await refreshBvnkCustomerAccount(c.env, rampRuntime(c), {
+        counterparty,
+        projectId,
+        providerAccountId: customerLinkRow.id,
+        customerReference: customerLinkRow.provider_customer_reference,
       });
+      if (!isBvnkCustomerVerified(refreshedCustomer.customer.status)) {
+        throw counterpartyNotProvisioned("bvnk", "offramp", {
+          customerStatus: refreshedCustomer.customer.status,
+        });
+      }
+      const customerReference = customerLinkRow.provider_customer_reference;
+      const bvnkCustomer = refreshedCustomer.latest;
       const pendingTransfer = await createPendingBvnkOfframpTransfer(c, {
         transferId: reservedTransferId,
         organizationId: scope.auth.organizationId,
@@ -1334,7 +1345,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           cryptoAmount: input.cryptoAmount,
           sourceWalletAddress,
           paymentTransferId: pendingTransfer.id,
-          externalCustomerId: customerResolution.customerReference,
+          externalCustomerId: customerReference,
           bvnkCompliance: {
             partyDetails: [bvnkPayoutPartyDetailsFromCustomer(bvnkCustomer, "ORIGINATOR")],
           },
@@ -1361,7 +1372,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         status: rampQuoteTransferStatus(bvnkQuote),
         channel: {
           walletId: fundingRow.external_account_reference,
-          customerReference: customerResolution.customerReference,
+          customerReference: customerReference,
         },
       });
       quote = bvnkQuote;

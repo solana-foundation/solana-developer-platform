@@ -1148,6 +1148,50 @@ describe("Payments routes — ramps", () => {
       channelSpy.mockRestore();
     });
 
+    it("rejects the off-ramp quote when the fresh BVNK customer status is no longer verified, patches the link, and writes no transfer", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_fresh_rejected"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+      const getCustomerSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer")
+        .mockResolvedValue({ ...mockBvnkOfframpCustomer(), status: "REJECTED" });
+      const channelSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote");
+
+      const res = await bvnkOfframpQuoteRequest(counterpartyId);
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as {
+        error: { code: string; details: { customerStatus: string } };
+      };
+      expect(body.error.code).toBe("CONFLICT");
+      expect(body.error.details.customerStatus).toBe("REJECTED");
+      expect(channelSpy).not.toHaveBeenCalled();
+      const transfers = await getDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .first<{ count: number }>();
+      expect(transfers?.count).toBe(0);
+      const link = await getDb(env)
+        .prepare(
+          "SELECT metadata->>'status' AS status FROM counterparty_provider_accounts WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'"
+        )
+        .bind(counterpartyId)
+        .first<{ status: string }>();
+      expect(link?.status).toBe("REJECTED");
+
+      getCustomerSpy.mockRestore();
+      channelSpy.mockRestore();
+    });
+
     it("marks the prebooked transfer failed when the channel call errors", async () => {
       const counterpartyId = await seedProvisionedOfframpCounterparty(
         "customer_offramp_channel_error"
