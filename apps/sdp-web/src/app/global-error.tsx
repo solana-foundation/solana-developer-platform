@@ -33,17 +33,23 @@ export default function GlobalError({
   const [locale, setLocale] = useState<AppLocale>(defaultLocale);
   // English paints first, exactly as before (locale state starts at the
   // default). Localized catalogs live in their own async chunks rather than
-  // the main bundle, so the resolved locale's catalog swaps in once loaded.
+  // the main bundle, so the resolved locale's catalog swaps in once loaded —
+  // and `locale` (the rendered lang) flips only together with it, so the
+  // document never claims a language the rendered copy doesn't speak, even
+  // while loading or if the catalog fails to load.
   const [messages, setMessages] = useState<Messages>(englishSourceMessages);
 
   useEffect(() => {
     const id = Sentry.captureException(error);
     setEventId(id);
-    setLocale(resolveClientLocale());
+    const resolvedLocale = resolveClientLocale();
     let cancelled = false;
-    loadMessages(resolveClientLocale())
+    loadMessages(resolvedLocale)
       .then((localized) => {
-        if (!cancelled) setMessages(localized);
+        if (!cancelled) {
+          setLocale(resolvedLocale);
+          setMessages(localized);
+        }
       })
       .catch(() => {});
     return () => {
