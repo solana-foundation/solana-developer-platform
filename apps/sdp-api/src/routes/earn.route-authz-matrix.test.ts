@@ -1,5 +1,6 @@
 import type { Permission } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getDb } from "@/db";
 import app from "@/index";
 import earnRoutes from "@/routes/earn";
 import { type EarnAuthzTenant, seedEarnApiKey, seedEarnAuthzTenant } from "@/test/helpers/earn";
@@ -369,6 +370,36 @@ describe("session callers are membership-checked, per route (EARN-027)", () => {
         body.error.message,
         `${route} answered the membership 403 for a project the user belongs to`
       ).not.toContain("not accessible");
+    }
+  });
+
+  it("a session user outside the project gets the membership 403, per route", async () => {
+    // Same organization, but never added to the project's members: the
+    // membership JOIN must refuse them even though the session is valid.
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind("usr_matrix_outsider", "outsider@earn-authz.example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'member', 'active')`
+        )
+        .bind("om_matrix_outsider", tenant.org.id, "usr_matrix_outsider"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', '2099-01-01T00:00:00.000Z')`
+        )
+        .bind("sess_matrix_outsider", "usr_matrix_outsider", tenant.org.id),
+    ]);
+
+    for (const route of KEYED_ROUTES) {
+      const res = await requestAsSession(route, "sess_matrix_outsider", tenant.project.id);
+      expect(res.status, route).toBe(403);
+      const body = (await res.json()) as ErrorBody;
+      expect(body.error.code, route).toBe("FORBIDDEN");
+      expect(body.error.message, route).toContain("not accessible");
     }
   });
 });

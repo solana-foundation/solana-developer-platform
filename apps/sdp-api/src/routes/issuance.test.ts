@@ -57,9 +57,6 @@ vi.mock("@solana/token-acl-sdk", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana/token-acl-sdk")>()),
 }));
 
-// Check if running in mock mode (no RPC access)
-const isMockMode = (env as { SOLANA_MOCK?: string }).SOLANA_MOCK === "true";
-
 /**
  * A syntactically valid transaction signature for a named case. `confirmDeploy`
  * parses the signature at the boundary, so a placeholder string is refused
@@ -5550,32 +5547,50 @@ describe("Issuance Routes", () => {
       activeTokenId = TEST_ACTIVE_TOKEN.id;
     });
 
-    // Skip in mock mode - Mosaic SDK requires RPC to fetch mint details
-    it.skipIf(isMockMode)("prepares mint transaction", async () => {
-      const res = await app.request(
-        `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            mint: {
-              destination: TEST_SOLANA_ADDRESSES.wallet1,
-              amount: "1",
-            },
-          }),
-        },
-        env
-      );
+    it("prepares mint transaction", async () => {
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
+      const prepareMintToSpy = vi
+        .spyOn(MosaicService.prototype, "prepareMintTo")
+        .mockResolvedValueOnce({
+          serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+          requiredSigners: [],
+          tokenAccount: TEST_SOLANA_ADDRESSES.wallet1,
+        } as never);
 
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.data.transaction).toBeDefined();
-      expect(body.data.transaction.id).toMatch(/^ttx_/);
-      expect(body.data.transaction.type).toBe("mint");
-      expect(body.data.transaction.status).toBe("pending");
+      try {
+        const res = await app.request(
+          `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: {
+                destination: TEST_SOLANA_ADDRESSES.wallet1,
+                amount: "1",
+              },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data.transaction).toBeDefined();
+        expect(body.data.transaction.id).toMatch(/^ttx_/);
+        expect(body.data.transaction.type).toBe("mint");
+        expect(body.data.transaction.status).toBe("pending");
+        expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        createOrgSignerSpy.mockRestore();
+        prepareMintToSpy.mockRestore();
+      }
     });
 
     it("returns 400 for inactive token", async () => {
@@ -6796,7 +6811,11 @@ describe("Issuance Routes", () => {
   // Freeze/Unfreeze Tests
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe.skipIf(isMockMode)("Freeze/Unfreeze Operations", () => {
+  // The on-chain freeze/thaw effect is mocked at the MosaicService seam; the
+  // handler's authority resolution, idempotency, DB state transitions and error
+  // mapping all run for real.
+  describe("Freeze/Unfreeze Operations", () => {
+    afterEach(() => vi.restoreAllMocks());
     const seedFreezableToken = async (): Promise<string> => {
       const db = getDb(env);
 
@@ -6821,78 +6840,108 @@ describe("Issuance Routes", () => {
       return TEST_ACTIVE_TOKEN.id;
     };
 
-    const mockResolvedTokenAccount = () =>
-      vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+    const mockResolvedTokenAccount = () => {
+      // resolveFreezeOperationAuthority reads the live mint's freeze authority
+      // off the chain; pin it to the seeded token's authority.
+      vi.spyOn(TokenAclSdk, "getTokenAclMintConfig").mockResolvedValue({
+        exists: true,
+        data: { freezeAuthority: TEST_ACTIVE_TOKEN.freezeAuthority },
+      } as Awaited<ReturnType<typeof TokenAclSdk.getTokenAclMintConfig>>);
+      return vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
         tokenAccount: TEST_SOLANA_ADDRESSES.wallet2,
         isInitialized: true,
         isFrozen: false,
         balance: 0n,
         uiBalance: 0,
       } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
+    };
+
+    const mockOnChainFreeze = () =>
+      vi.spyOn(MosaicService.prototype, "freezeAccount").mockResolvedValue({
+        signature: "sig_freeze_unit",
+        slot: 100n,
+      });
 
     describe("POST /v1/issuance/tokens/:tokenId/freeze", () => {
       it("freezes an account", async () => {
         const activeTokenId = await seedFreezableToken();
         mockResolvedTokenAccount();
+        const freezeSpy = mockOnChainFreeze();
 
-        const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/freeze`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                accountAddress: TEST_SOLANA_ADDRESSES.wallet1,
+                reason: "Suspicious activity",
+              }),
             },
-            body: JSON.stringify({
-              accountAddress: TEST_SOLANA_ADDRESSES.wallet1,
-              reason: "Suspicious activity",
-            }),
-          },
-          env
-        );
+            env
+          );
 
-        expect(res.status).toBe(201);
-        const body = await res.json();
-        expect(body.data.frozenAccount.id).toMatch(/^frz_/);
-        expect(body.data.frozenAccount.accountAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
-        expect(body.data.frozenAccount.reason).toBe("Suspicious activity");
+          expect(res.status).toBe(201);
+          const body = await res.json();
+          expect(body.data.frozenAccount.id).toMatch(/^frz_/);
+          expect(body.data.frozenAccount.accountAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+          expect(body.data.frozenAccount.reason).toBe("Suspicious activity");
+          expect(freezeSpy).toHaveBeenCalledTimes(1);
+        } finally {
+          freezeSpy.mockRestore();
+        }
       });
 
       it("returns 400 for already frozen account", async () => {
         const activeTokenId = await seedFreezableToken();
         mockResolvedTokenAccount();
 
-        // Freeze first
-        await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/freeze`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-            },
-            body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
-          },
-          env
-        );
+        // The chain refuses a second freeze on an already-frozen account; the
+        // second call rejects the way the real Mosaic SDK does.
+        const freezeSpy = vi
+          .spyOn(MosaicService.prototype, "freezeAccount")
+          .mockResolvedValueOnce({ signature: "sig_freeze_first", slot: 100n })
+          .mockRejectedValueOnce(new Error("ACCOUNT_ALREADY_FROZEN"));
 
-        // Try to freeze again
-        const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/freeze`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+        try {
+          // Freeze first
+          await app.request(
+            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
             },
-            body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
-          },
-          env
-        );
+            env
+          );
 
-        expect(res.status).toBe(400);
-        const body = await res.json();
-        expect(body.error.code).toBe("ACCOUNT_FROZEN");
+          // Try to freeze again
+          const res = await app.request(
+            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.error.code).toBe("ACCOUNT_FROZEN");
+        } finally {
+          freezeSpy.mockRestore();
+        }
       });
 
       it("returns a structured token-account error when the wallet does not hold this mint", async () => {
@@ -6976,10 +7025,18 @@ describe("Issuance Routes", () => {
         const db = getDb(env);
         mockResolvedTokenAccount();
 
-        const freezeSpy = vi.spyOn(MosaicService.prototype, "freezeAccount").mockResolvedValue({
-          signature: "sig_freeze_refreeze",
-          slot: 123n,
-        });
+        // Distinct signatures per call: the transaction ledger enforces a
+        // unique on-chain signature, so a re-freeze settles under a new one.
+        const freezeSpy = vi
+          .spyOn(MosaicService.prototype, "freezeAccount")
+          .mockResolvedValueOnce({
+            signature: "sig_freeze_refreeze_first",
+            slot: 123n,
+          })
+          .mockResolvedValueOnce({
+            signature: "sig_freeze_refreeze_second",
+            slot: 125n,
+          });
         const thawSpy = vi.spyOn(MosaicService.prototype, "thawAccount").mockResolvedValue({
           signature: "sig_thaw_refreeze",
           slot: 124n,
@@ -7066,38 +7123,49 @@ describe("Issuance Routes", () => {
       it("unfreezes an account", async () => {
         const activeTokenId = await seedFreezableToken();
         mockResolvedTokenAccount();
+        const freezeSpy = mockOnChainFreeze();
+        const thawSpy = vi.spyOn(MosaicService.prototype, "thawAccount").mockResolvedValue({
+          signature: "sig_thaw_unit",
+          slot: 101n,
+        });
 
-        // Freeze first
-        await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/freeze`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+        try {
+          // Freeze first
+          await app.request(
+            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
             },
-            body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
-          },
-          env
-        );
+            env
+          );
 
-        // Unfreeze
-        const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          // Unfreeze
+          const res = await app.request(
+            `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
             },
-            body: JSON.stringify({ accountAddress: TEST_SOLANA_ADDRESSES.wallet1 }),
-          },
-          env
-        );
+            env
+          );
 
-        expect(res.status).toBe(200);
-        const body = await res.json();
-        expect(body.data.frozenAccount.unfrozenAt).toBeDefined();
+          expect(res.status).toBe(200);
+          const body = await res.json();
+          expect(body.data.frozenAccount.unfrozenAt).toBeDefined();
+          expect(thawSpy).toHaveBeenCalledTimes(1);
+        } finally {
+          freezeSpy.mockRestore();
+          thawSpy.mockRestore();
+        }
       });
 
       it("returns 400 for non-frozen account", async () => {
@@ -7239,42 +7307,60 @@ describe("Issuance Routes", () => {
       expect(body.error.code).toBe("NOT_ON_TOKEN_ALLOWLIST");
     });
 
-    // Skip in mock mode - Mosaic SDK requires RPC to fetch mint details
-    it.skipIf(isMockMode)("allows mint to allowlisted address", async () => {
-      // Add to allowlist first
-      await app.request(
-        `/v1/issuance/tokens/${allowlistTokenId}/allowlist`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
-        },
-        env
-      );
+    it("allows mint to allowlisted address", async () => {
+      const createOrgSignerSpy = vi
+        .spyOn(SolanaServices, "createOrgSigner")
+        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
+      const prepareMintToSpy = vi
+        .spyOn(MosaicService.prototype, "prepareMintTo")
+        .mockResolvedValueOnce({
+          serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+          requiredSigners: [],
+          tokenAccount: TEST_SOLANA_ADDRESSES.wallet1,
+        } as never);
 
-      // Now mint should work
-      const res = await app.request(
-        `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            mint: {
-              destination: TEST_SOLANA_ADDRESSES.wallet1,
-              amount: "1",
+      try {
+        // Add to allowlist first
+        await app.request(
+          `/v1/issuance/tokens/${allowlistTokenId}/allowlist`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
             },
-          }),
-        },
-        env
-      );
+            body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
+          },
+          env
+        );
 
-      expect(res.status).toBe(200);
+        // Now mint should work
+        const res = await app.request(
+          `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              mint: {
+                destination: TEST_SOLANA_ADDRESSES.wallet1,
+                amount: "1",
+              },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        createOrgSignerSpy.mockRestore();
+        prepareMintToSpy.mockRestore();
+      }
     });
 
     // The execute route may auto-add a destination to an on-chain ABL after

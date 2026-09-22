@@ -142,4 +142,34 @@ describe("projectContextMiddleware", () => {
 
     expect(res.status).toBe(401);
   });
+
+  it("rejects a session user who is not a member of the requested project", async () => {
+    // Same organization, but the membership JOIN's `pm.user_id = ?` filter must
+    // refuse a user who was never added to the project.
+    const db = getDb(env);
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+      )
+      .bind("usr_project_context_outsider", "project-context-outsider@example.com")
+      .run();
+
+    const app = buildApp((c) =>
+      c.set("session", {
+        userId: "usr_project_context_outsider",
+        organizationId: ORG_ID,
+      } as CachedSession)
+    );
+
+    const res = await app.request(
+      "/probe",
+      { headers: { "x-project-id": MEMBER_PROJECT_ID } },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.message).toBe("Requested project is not accessible");
+  });
 });
