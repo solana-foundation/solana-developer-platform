@@ -34,7 +34,7 @@ import {
   notFound,
   walletNotFound,
 } from "@/lib/errors";
-import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
+import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import {
   buildEarnVaultDepositFingerprint,
   buildEarnVaultWithdrawalFingerprint,
@@ -1331,13 +1331,17 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
  * new work.
  */
 export async function assertEarnVaultWithdrawalFloor(
-  _c: AppContext,
+  c: AppContext,
   extraction: PolicyGateExtraction
 ): Promise<void> {
   // SAFETY: wired only beside extractEarnVaultWithdrawalPolicyCandidate in index.ts.
   const { position } = extraction.resolved as EarnVaultWithdrawalResolved;
   const body = extraction.body as EarnVaultWithdrawalBody;
-  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(position.provider) !== null) {
+  const floor =
+    position.provider === "hastra" && !isEarnHastraDexExitConfigured(c.env)
+      ? null
+      : earnWithdrawSlippageFloor(position.provider);
+  if (body.minAmountOut === undefined && floor !== null) {
     throw badRequest(
       `minAmountOut is required for this vault withdrawal because ${position.provider} declares a withdrawal slippage policy.`
     );

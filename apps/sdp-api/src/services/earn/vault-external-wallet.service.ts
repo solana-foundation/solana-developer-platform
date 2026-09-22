@@ -49,7 +49,7 @@ import {
   MAX_COMPUTE_UNIT_LIMIT,
   prependSwapLegToVaultPlan,
   RETRY_SWAP_MAX_ACCOUNTS,
-  requireWellKnownMintDecimals,
+  requireEarnSwapMintMetadata,
   withComputeUnitLimit,
 } from "./jupiter-swap.service";
 import { readOwnerMintBalance } from "./owner-token-balance";
@@ -482,7 +482,10 @@ export async function buildExternalWalletDepositTransaction(
     // caller.
     const swapLeg = attempt.swapLeg;
     const sourceTokenMint = input.swap?.sourceTokenMint ?? input.tokenMint;
-    const depositTokenDecimals = requireWellKnownMintDecimals(input.tokenMint, "deposit token");
+    const depositTokenDecimals = requireEarnSwapMintMetadata(
+      input.tokenMint,
+      "deposit token"
+    ).decimals;
     const hasTenant = hasExternalWalletBuildTenant(input);
     // Compile and read the keyed-only baseline concurrently, preserving the
     // partner's blockhash window. The baseline fails closed alongside the

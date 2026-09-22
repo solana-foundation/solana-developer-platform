@@ -186,6 +186,7 @@ function formatIsoDuration(duration: string): string {
  */
 const EARN_PROVIDER_LABELS = {
   kamino: "Kamino",
+  hastra: "Hastra / Figure",
   jupiter_lend: "Jupiter Lend",
   ondo: "Ondo",
   perena: "Perena",

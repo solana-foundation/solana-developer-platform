@@ -26,6 +26,7 @@ const MODULE_METADATA = [
       "@sdp/env-config",
       "@sdp/helius-rings",
       "@sdp/helius-rings-sdk",
+      "@sdp/hastra",
       "@sdp/issuance",
       "@sdp/kamino",
       "@sdp/jupiter-lend",
@@ -112,6 +113,16 @@ const MODULE_METADATA = [
     directory: "packages/sdp-env-config",
     purpose: "Runtime environment configuration and validation.",
     allowedDependencies: [],
+  },
+  {
+    name: "@sdp/hastra",
+    directory: "packages/sdp-hastra",
+    purpose:
+      "Hastra PRIME mint/stake, Jupiter DEX exit, par-redemption lifecycle, and position plans.",
+    // Same inward-only execution-package edge as @sdp/ondo. Jupiter remains an
+    // injected API-owned port, while provider identities live in @sdp/types so
+    // the lightweight @sdp/earn catalogue never imports this execution code.
+    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/issuance",

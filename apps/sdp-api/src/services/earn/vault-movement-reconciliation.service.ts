@@ -28,8 +28,8 @@ import {
   assertClusterEndpoint,
   earnClusterFor,
   resolveClusterRpcUrl,
+  resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
-  resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
@@ -457,14 +457,10 @@ async function reconcileMovement(
 /**
  * Whether Solana finality records only the opening leg of a provider-managed
  * order rather than economic settlement, for a provider the CURRENT registry
- * knows: chain finalization is recorded as the durable chain-leg evidence for
- * these rows (never as settlement), so the sweep keeps them claimable until
- * it observes finality and stops scheduling them once `chain_finalized_at`
- * records that irreversible fact.
+ * knows. These are durable transaction semantics, not live route availability:
+ * the historical resolver bypasses only rollout admission, so disabling new
+ * Hastra DEX builds cannot change how an already-recorded withdrawal settles.
  *
- * Deposits declare this in the shared provider table. Withdrawals declare it
- * on the executing client capability, so this guard follows the builder that
- * actually produced the transaction instead of inferring semantics from an id.
  * A future Connect order reconciler must correlate and authenticate provider
  * completion before the settled surface can close one of these rows — chain
  * finalization never does.
@@ -476,7 +472,7 @@ function isKnownProviderOrderSettlement(env: Env, movement: EarnMovementRow): bo
       earnProviderDepositSettlement(movement.provider) === "provider_order"
     );
   }
-  const client = resolveVaultWithdrawClient(env, movement.provider, createVaultDeadline());
+  const client = resolveRecordedVaultWithdrawClient(env, movement.provider, createVaultDeadline());
   return client !== null && supportsVaultProviderOrderWithdraw(client);
 }
 
@@ -485,17 +481,16 @@ function isKnownProviderOrderSettlement(env: Env, movement: EarnMovementRow): bo
  * order rather than economic settlement — INCLUDING the fail-closed answer for
  * a provider the registry does not recognize.
  *
- * Deposits declare this in the shared provider table. Withdrawals declare it
- * on the executing client capability, so this guard follows the builder that
- * actually produced the transaction instead of inferring semantics from an id.
- * An unrecognized historical provider also stays non-terminal: atomicity is a
- * positive settlement claim and must never be inferred from registry drift.
+ * Withdrawals follow the ungated builder capability that produced their
+ * transaction. An unrecognized or catalogue-only historical provider stays
+ * non-terminal: atomicity is a positive settlement claim and must never be
+ * inferred from registry or feature-flag drift.
  */
 function usesProviderOrderSettlement(env: Env, movement: EarnMovementRow): boolean {
   if (movement.direction === "deposit") {
     return earnProviderDepositSettlement(movement.provider) === "provider_order";
   }
-  const client = resolveVaultWithdrawClient(env, movement.provider, createVaultDeadline());
+  const client = resolveRecordedVaultWithdrawClient(env, movement.provider, createVaultDeadline());
   return client === null || supportsVaultProviderOrderWithdraw(client);
 }
 

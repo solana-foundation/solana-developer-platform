@@ -21,13 +21,13 @@ flowchart LR
 
     subgraph SDP["sdp-api  /v1/earn"]
         ROUTES["earn routes<br/>optional auth for catalogue/previews/instant builds<br/>required auth for queued actions and tenant control plane"]
-        SVC["@sdp/earn provider clients<br/>(Kamino/Veda/Jupiter Lend/Ondo; WisdomTree pre-launch; Upshift/Perena stubs)"]
+        SVC["@sdp/earn provider clients<br/>(Kamino/Veda/Jupiter Lend/Ondo/Hastra; WisdomTree pre-launch;<br/>Upshift/Perena stubs)"]
         DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions<br/>earn_vault_withdrawal_requests + actions")]
         CRON["cron: catalogue sync · metrics refresh<br/>movement + queued-withdrawal reconciliation"]
     end
 
     subgraph External
-        VAULT["Provider APIs and chain state<br/>Kamino · Jupiter Lend · Jupiter swap (Ondo)<br/>Veda · WisdomTree Connect/Token-2022"]
+        VAULT["Provider APIs and chain state<br/>Kamino · Jupiter Lend · Jupiter swap (Ondo; Hastra opt-in)<br/>Veda · Hastra · WisdomTree Connect/Token-2022"]
         CHAIN["Solana<br/>(provider-managed wallet or owner-signed transaction)"]
         CURATOR["Curator risk frameworks<br/>Gauntlet · Steakhouse · Sentora<br/>(via vault-infra metadata)"]
     end
@@ -49,8 +49,11 @@ treasury flow signs with an organization custody wallet. Embedded Yield returns
 an unsigned transaction for an end-user wallet and, on keyed builds, an
 optional partner fee payer to co-sign. Authenticated submits are recorded before
 SDP broadcasts and converge through the vault-movement reconciler. Queued exits
-use a separate durable request/action lifecycle and reconciler because the
-request transaction only escrows shares; only a verified solver fulfilment
+use a separate durable request/action lifecycle and reconciler because their
+request transactions create provider obligations rather than payouts. Veda
+escrows shares until a verified solver fulfilment or owner cancellation;
+Hastra's par path redeems PRIME to wYLDS and delegates the wYLDS until a verified
+administrator completion or owner cancellation. Only verified completion
 becomes a payout movement. Anonymous instant builds are never persisted; the
 caller broadcasts and tracks them.
 
@@ -71,7 +74,7 @@ caller broadcasts and tracks them.
 | Vault holdings | `earn_positions` (**DB claim index**, never a balance) **hydrated live from chain** — `GET /vault-positions` | Claim written with the first durable signed intent; shares and value read live per request | Claim = immediate; value = real-time |
 | Embedded Yield holdings + earnings | `earn_positions` scoped by org, project, environment, and owner, then hydrated live from chain; `GET /external-wallet/positions`, `/positions/summary`, `/earnings` | Claim written on the first submitted caller-signed movement; balances read from the owner's real on-chain shares | Claim = immediate; value = real-time |
 | Embedded Yield activity | `earn_movements`; `GET /external-wallet/movements` + `/:movementId` | Caller-signed deposit and withdrawal submits, recorded before SDP broadcasts | Intent = immediate; detail polls chain finality and the background sweep recovers unattended rows |
-| Queued withdrawal lifecycle | `earn_vault_withdrawal_requests` plus signed action/build rows; external-wallet list/detail and custody request routes | Owner-signed request/cancellation actions, persisted before broadcast; provider PDA/event reads prove maturity, fulfilment, or returned shares | Durable immediately; due-queue reconciliation continues until terminal |
+| Queued withdrawal lifecycle | `earn_vault_withdrawal_requests` plus signed action/build rows; external-wallet list/detail and custody request routes | Owner-signed request/cancellation actions, persisted before broadcast; provider PDA/event reads prove Veda maturity and solver fulfilment or Hastra administrator completion, cancellation, and intermediate wYLDS terms | Durable immediately; due-queue reconciliation continues until terminal |
 | Movement history, ALL providers | `earn_movements` (**DB ledger** — `GET /v1/earn/movements`) | Every movement above, one chronological feed across both execution models; no provider gate (ADR 0002 exit safety) | Same as the rows it serves |
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
@@ -79,9 +82,10 @@ caller broadcasts and tracks them.
 > **Ledger vs live.** SDP ledgers every movement it signs or accepts through a
 > keyed external-wallet submit, while balances remain live provider or
 > on-chain reads. A queued request or cancellation is an action, not a payout;
-> only a verified fulfilment projects one withdrawal movement. Anonymous builds
-> are not SDP movements and create no ledger row. A ledger row proves SDP's
-> movement lifecycle, never the current balance.
+> only a provider-authenticated solver or operator fulfilment projects one
+> withdrawal movement. Anonymous builds are not SDP movements and create no
+> ledger row. A ledger row proves SDP's movement lifecycle, never the current
+> balance.
 
 > **Catalogue vs figures — split by how fast the thing moves (2026-08-13).**
 > The catalogue row and the numbers on it now have different cadences and
@@ -153,11 +157,22 @@ the treasury dashboard's exit action drives it. The shared vault reconciliation
 sweep finishes an ambiguous or interrupted submission. Vault deposits open
 where the provider is DEPLOYED (`EARN_PROVIDER_DEPLOYED_CLUSTERS` in
 `@sdp/types`, derived from each provider's program table and mapped through
-`CLUSTER_BY_SDP_ENVIRONMENT`): Kamino from sandbox and production, Jupiter Lend
-and Ondo from production only, and Veda from sandbox until PRO-1777 fills its
-mainnet deployment. WisdomTree is registered but deposit-disabled until its
+`CLUSTER_BY_SDP_ENVIRONMENT`): Kamino from sandbox and production; Jupiter Lend,
+Ondo, and Hastra from production only; Veda from sandbox until PRO-1777 fills
+its mainnet deployment. WisdomTree is registered but deposit-disabled until its
 launch gates pass. The exit route itself takes no environment gate because money
 out beats money off.
+
+Hastra exposes two exit contracts without collapsing their settlement
+semantics. Its default `operator_redemption` path is asynchronous: the request
+redeems PRIME to wYLDS and delegates that wYLDS; a Hastra administrator later
+burns it and pays USDC, or the owner cancels and keeps wYLDS rather than
+recreating PRIME. It therefore has no solver discount, maturity, or deadline.
+The optional atomic PRIME → wYLDS → Jupiter → USDC exit is admitted only behind
+the default-off `EARN_HASTRA_DEX_EXIT_ENABLED` flag. Turning that flag off blocks
+new DEX quotes/builds but never stops reconciliation of movements admitted while
+it was enabled. The par lifecycle stays in the durable withdrawal request/action
+ledger and reconciler.
 
 The removed pre-PRO-1634 execution sketch is not a contract. New providers must
 implement today's `EarnVaultDirectProvider` plan and quote capabilities, then
@@ -185,19 +200,20 @@ per-provider movement endpoints or status polling types from git history.
 | OpenAPI to docs pipeline | `openapi/spec.ts` to sdp-docs | 21 public Earn operations with exactly eight optional-auth operations; queued action builds, submits, and tenant reads stay keyed | ✅ source and generated artifacts aligned |
 
 **Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
-(Kamino, Veda, Jupiter Lend, Ondo, and pre-launch WisdomTree carry real catalogue
-implementations; Upshift/Perena remain `StubEarnClient` subclasses carrying
-`provider` + `declaredSupport`, filled in method-by-method), the vault-direct
-execution packages `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`, `@sdp/ondo`,
-and `@sdp/wisdomtree`, the
+(Kamino, Veda, Jupiter Lend, Ondo, Hastra, and pre-launch WisdomTree carry real
+catalogue implementations; Upshift/Perena remain `StubEarnClient` subclasses
+carrying `provider` + `declaredSupport`, filled in method-by-method), the
+vault-direct execution packages `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`,
+`@sdp/ondo`, `@sdp/hastra`, and `@sdp/wisdomtree`, the
 portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
 `earn_provider_wallets` table (migration `0049`; migration `0056` lifted its
 one-per-org cap so an org may hold N programs per environment+provider, and
 moved uniqueness onto the provider wallet itself), the unified movement ledger
 (`earn_movements`) and holdings table (`earn_positions`), the separate queued
-withdrawal request/action/build tables introduced by migration 0113, and the
-catalogue and reconciliation jobs.
+withdrawal request/action/build tables introduced by migration 0113 and
+generalized for operator redemption by migration 0116, and the catalogue and
+reconciliation jobs.
 
 ## The custodial portfolio-wallet flow (retired)
 

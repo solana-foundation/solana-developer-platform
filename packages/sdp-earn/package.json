@@ -69,6 +69,11 @@
       "import": "./src/providers/ondo/client.ts",
       "default": "./src/providers/ondo/client.ts"
     },
+    "./providers/hastra/client": {
+      "types": "./src/providers/hastra/client.ts",
+      "import": "./src/providers/hastra/client.ts",
+      "default": "./src/providers/hastra/client.ts"
+    },
     "./providers/wisdomtree/client": {
       "types": "./src/providers/wisdomtree/client.ts",
       "import": "./src/providers/wisdomtree/client.ts",

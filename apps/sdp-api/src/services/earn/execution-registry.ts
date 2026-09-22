@@ -1,5 +1,6 @@
 import {
   supportsVaultDirect,
+  supportsVaultParRedemption,
   supportsVaultQueuedWithdraw,
   supportsVaultWithdraw,
 } from "@sdp/earn/capabilities";
@@ -7,10 +8,15 @@ import { providerNotConfigured } from "@sdp/earn/errors";
 import type {
   EarnRuntimeContext,
   EarnVaultDirectProvider,
+  EarnVaultParRedemptionProvider,
   EarnVaultProvider,
   EarnVaultQueuedWithdrawProvider,
   EarnVaultWithdrawProvider,
 } from "@sdp/earn/types";
+import {
+  assertNotPortfolioProvider as assertHastraNotPortfolioProvider,
+  HastraVaultDirectClient,
+} from "@sdp/hastra";
 import {
   assertJupiterLendNotPortfolioProvider,
   JupiterLendVaultDirectClient,
@@ -33,8 +39,10 @@ import {
   VedaVaultDirectClient,
 } from "@sdp/veda";
 import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
+import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
+import { createHastraSwapPort } from "./hastra-swap-port";
 import { createOndoSwapPort } from "./ondo-swap-port";
 import type { VaultDeadline } from "./vault-deadline";
 
@@ -205,6 +213,13 @@ export function resolveEarnExecutionClient(
     assertOndoNotPortfolioProvider(client);
     return instrumentVendorPort("ondo", client);
   }
+  if (provider === "hastra") {
+    const client = new HastraVaultDirectClient(provenRpcUrl, runOperation, () =>
+      createHastraSwapPort(env)
+    );
+    assertHastraNotPortfolioProvider(client);
+    return instrumentVendorPort("hastra", client);
+  }
   if (provider === "wisdomtree") {
     const client = new WisdomTreeVaultDirectClient(provenRpcUrl, runOperation);
     assertWisdomTreeNotPortfolioProvider(client);
@@ -227,11 +242,36 @@ export function resolveVaultDirectClient(
 /**
  * The executing client narrowed to the vault-WITHDRAW capability, or null.
  *
- * Null means "SDP cannot build this provider's exit" (501 at the route) — a
- * statement about our plumbing, never a permission gate: ADR 0002 forbids
- * money-out inheriting any money-in gate, and this narrows on capability alone.
+ * Null means "SDP cannot build this provider's instant exit" (501 at the
+ * route), never that the caller lacks permission to withdraw. Most providers
+ * narrow on capability alone. Hastra additionally applies its dedicated DEX
+ * rollout gate while the independent par-redemption escape hatch remains on.
+ * No money-in availability, surfacing, or entitlement gate reaches this path.
  */
 export function resolveVaultWithdrawClient(
+  env: Env,
+  provider: string,
+  deadline: VaultDeadline
+): EarnVaultWithdrawProvider | null {
+  // Hastra always retains its separate operator-redemption capability below.
+  // This opt-in controls only admission to NEW Jupiter quote/build work; it is
+  // deliberately checked here so every custody and external-wallet entry
+  // point, plus withdrawal-options discovery, agrees on the default par-only
+  // posture.
+  if (provider === "hastra" && !isEarnHastraDexExitConfigured(env)) return null;
+
+  return resolveRecordedVaultWithdrawClient(env, provider, deadline);
+}
+
+/**
+ * Resolve the builder capability that produced an already-recorded withdrawal.
+ *
+ * This deliberately bypasses only live rollout admission. Reconciliation must
+ * preserve the settlement semantics of durable Hastra DEX rows after an
+ * operator disables new quotes/builds; unknown and catalogue-only providers
+ * still return null and therefore retain the reconciler's fail-closed path.
+ */
+export function resolveRecordedVaultWithdrawClient(
   env: Env,
   provider: string,
   deadline: VaultDeadline
@@ -250,4 +290,15 @@ export function resolveVaultQueuedWithdrawClient(
   const client = resolveEarnExecutionClient(env, provider, deadline);
   if (!client) return null;
   return supportsVaultQueuedWithdraw(client) ? client : null;
+}
+
+/** The executing client narrowed to Hastra-style operator par redemption. */
+export function resolveVaultParRedemptionClient(
+  env: Env,
+  provider: string,
+  deadline: VaultDeadline
+): EarnVaultParRedemptionProvider | null {
+  const client = resolveEarnExecutionClient(env, provider, deadline);
+  if (!client) return null;
+  return supportsVaultParRedemption(client) ? client : null;
 }

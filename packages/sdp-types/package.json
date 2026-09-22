@@ -39,6 +39,11 @@
       "import": "./src/earn.ts",
       "default": "./src/earn.ts"
     },
+    "./hastra-programs": {
+      "types": "./src/hastra-programs.ts",
+      "import": "./src/hastra-programs.ts",
+      "default": "./src/hastra-programs.ts"
+    },
     "./kamino-programs": {
       "types": "./src/kamino-programs.ts",
       "import": "./src/kamino-programs.ts",

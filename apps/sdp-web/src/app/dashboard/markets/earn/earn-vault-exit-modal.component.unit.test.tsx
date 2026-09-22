@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   asyncModal: undefined as
     | {
         onSettled?: (event: { kind: "queue"; request: { withdrawalRequestId: string } }) => void;
-        route?: { kind: "queue" | "provider_order" };
+        route?: { kind: "queue" | "provider_order" | "operator_redemption" };
       }
     | undefined,
 }));
@@ -24,7 +24,7 @@ vi.mock("./earn-vault-withdraw-modal", () => ({
 vi.mock("./earn-vault-async-withdraw-modal", () => ({
   EarnVaultAsyncWithdrawModal: (props: {
     onSettled?: (event: { kind: "queue"; request: { withdrawalRequestId: string } }) => void;
-    route: { kind: "queue" | "provider_order" };
+    route: { kind: "queue" | "provider_order" | "operator_redemption" };
   }) => {
     mocks.asyncModal = props;
     return <div>async flow</div>;
@@ -181,6 +181,68 @@ describe("EarnVaultExitModal", () => {
     expect(screen.queryByText("instant flow")).toBeNull();
     expect(screen.queryByRole("button", { name: /Instant withdrawal/ })).toBeNull();
     expect(screen.queryByText(/same transaction/i)).toBeNull();
+  });
+
+  it("auto-selects the default par-redemption route when Jupiter is unavailable", async () => {
+    mocks.fetchOptions.mockResolvedValue({
+      kind: "ready",
+      value: {
+        positionId: position.id,
+        instant: false,
+        providerOrder: false,
+        queued: false,
+        withdrawAuthority: null,
+        queueState: null,
+        queueAsset: null,
+        parRedemption: {
+          intermediateMint: "wylds",
+          assetMint: position.tokenMint,
+          minimumShares: "2000",
+          shareDecimals: 6,
+          assetDecimals: 6,
+          cancelable: true,
+          operatorSettled: true,
+        },
+      },
+    });
+
+    renderModal({ position: { ...position, provider: "hastra", label: "Hastra PRIME" } });
+
+    expect(await screen.findByText("async flow")).toBeTruthy();
+    expect(mocks.asyncModal?.route?.kind).toBe("operator_redemption");
+    expect(screen.queryByText("instant flow")).toBeNull();
+  });
+
+  it("offers par redemption beside the opt-in Jupiter route", async () => {
+    mocks.fetchOptions.mockResolvedValue({
+      kind: "ready",
+      value: {
+        positionId: position.id,
+        instant: true,
+        providerOrder: false,
+        queued: false,
+        withdrawAuthority: null,
+        queueState: null,
+        queueAsset: null,
+        parRedemption: {
+          intermediateMint: "wylds",
+          assetMint: position.tokenMint,
+          minimumShares: "2000",
+          shareDecimals: 6,
+          assetDecimals: 6,
+          cancelable: true,
+          operatorSettled: true,
+        },
+      },
+    });
+
+    renderModal({ position: { ...position, provider: "hastra", label: "Hastra PRIME" } });
+
+    expect(await screen.findByRole("button", { name: /Withdraw now/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Redeem at par/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Redeem at par/ }));
+    expect(await screen.findByText("async flow")).toBeTruthy();
+    expect(mocks.asyncModal?.route?.kind).toBe("operator_redemption");
   });
 
   it("fails closed when route discovery is unavailable", async () => {

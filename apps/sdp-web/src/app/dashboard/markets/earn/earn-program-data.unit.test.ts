@@ -21,6 +21,7 @@ import {
   fetchEarnProgramsState,
   fetchEarnProgramWithdrawals,
   fetchEarnStrategies,
+  fetchEarnVaultParRedemptionPreview,
   fetchEarnVaultPositions,
   fetchEarnVaultWithdrawalRequests,
   isEarnVaultDepositInFlight,
@@ -1082,6 +1083,63 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
         walletOperationId: "operation_1",
       },
     });
+  });
+
+  it("preserves the operator-redemption discriminant in preview and request bodies", async () => {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (_input: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      const isPreview = bodies.length === 1;
+      return new Response(
+        JSON.stringify(
+          isPreview
+            ? {
+                data: {
+                  positionId: "position_1",
+                  mechanism: "operatorRedemption",
+                  shares: "2500",
+                  shareDecimals: 6,
+                  intermediateMint: "wylds",
+                  intermediateAmount: "2501.25",
+                  assetMint: USDC,
+                  assets: "2501.25",
+                  assetDecimals: 6,
+                  blockingIssues: [],
+                },
+              }
+            : {
+                data: {
+                  withdrawalRequest: {
+                    ...queuedWithdrawalRequest("par_request"),
+                    mechanism: "operatorRedemption",
+                    intermediateMint: "wylds",
+                    intermediateAmount: "2501.25",
+                    discountBps: null,
+                    maturityTimestamp: null,
+                    deadlineTimestamp: null,
+                  },
+                },
+              }
+        ),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      positionId: "position_1",
+      shares: "2500",
+      mechanism: "operatorRedemption" as const,
+    };
+
+    const preview = await fetchEarnVaultParRedemptionPreview(input);
+    const created = await createEarnVaultWithdrawalRequest(input, "par-request-key");
+
+    expect(preview).toMatchObject({
+      kind: "ready",
+      value: { mechanism: "operatorRedemption", intermediateMint: "wylds" },
+    });
+    expect(created.ok).toBe(true);
+    expect(bodies).toEqual([input, input]);
   });
 
   it("refuses an approval hold returned with a success status other than 202", async () => {

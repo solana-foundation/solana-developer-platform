@@ -323,6 +323,30 @@ export const buildEarnVaultQueuedWithdrawalFingerprint = (
     })
   );
 
+export interface EarnVaultParRedemptionFingerprintInput {
+  environment: string;
+  provider: string;
+  positionId: string;
+  shares: string;
+  /** Exact unsigned build consumed by an external-wallet submit. */
+  transactionId?: string;
+}
+
+/** Intent identity for an operator-completed par-redemption request. */
+export const buildEarnVaultParRedemptionFingerprint = (
+  input: EarnVaultParRedemptionFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_vault_par_redemption_request",
+      environment: input.environment,
+      provider: input.provider,
+      positionId: input.positionId,
+      shares: normalizeDecimalString(input.shares),
+      transactionId: input.transactionId ?? null,
+    })
+  );
+
 export interface EarnVaultQueuedWithdrawalCancelFingerprintInput {
   environment: string;
   withdrawalRequestId: string;

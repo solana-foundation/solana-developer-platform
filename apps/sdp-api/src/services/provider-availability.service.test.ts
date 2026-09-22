@@ -64,6 +64,7 @@ const providerEnvKeys = [
   "UPSHIFT_SANDBOX_API_KEY",
   "PERENA_API_KEY",
   "PERENA_SANDBOX_API_KEY",
+  "EARN_HASTRA_DEX_EXIT_ENABLED",
   "JUPITER_SWAP_API_KEY",
   "WISDOMTREE_API_KEY",
   "WISDOMTREE_SANDBOX_API_KEY",
@@ -709,6 +710,7 @@ describe("provider-availability.service", () => {
       kamino: false,
       jupiter_lend: false,
       ondo: false,
+      hastra: false,
       wisdomtree: false,
     });
   });
@@ -787,6 +789,33 @@ describe("provider-availability.service", () => {
     });
     // One key serves both modes: Jupiter has no sandbox tenant to select.
     expect(() => assertEarnProviderConfigured(env, "ondo", true)).not.toThrow();
+  });
+
+  it("keeps Hastra configured for keyless deposits and par redemption", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(JSON.stringify({ providerOverrides: { earn: { hastra: true } } }), TEST_ORG_ID)
+      .run();
+
+    env.JUPITER_SWAP_API_KEY = undefined;
+    env.EARN_HASTRA_DEX_EXIT_ENABLED = undefined;
+    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(without.providers.earn.hastra).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+    expect(() => assertEarnProviderConfigured(env, "hastra", false)).not.toThrow();
+
+    // Enabling the optional DEX rail without its Jupiter prerequisite must not
+    // disable the native provider. The rail's resolver fails closed instead.
+    env.EARN_HASTRA_DEX_EXIT_ENABLED = "true";
+    const dexMisconfigured = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(dexMisconfigured.providers.earn.hastra).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
   });
 
   it("re-checks earn credentials for the requested mode like ramps", async () => {
