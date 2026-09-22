@@ -73,6 +73,72 @@ function parPreviewInput(
   return { positionId: position.id, shares, mechanism: "operatorRedemption" };
 }
 
+function isClientErrorStatus(status: number | null): boolean {
+  return status !== null && status >= 400 && status < 500;
+}
+
+function parRedemptionAmountState(
+  position: EarnVaultPosition,
+  amount: string,
+  availableAmount: string | undefined,
+  terms: EarnVaultParRedemptionTerms
+) {
+  const validation = validateVaultWithdrawalAmount(amount);
+  const shares =
+    validation.kind === "valid"
+      ? vaultWithdrawalSharesForAmount(validation.canonicalAmount, position)
+      : undefined;
+  return {
+    belowBatchMinimum:
+      validation.kind === "valid" &&
+      compareUnsignedDecimals(validation.canonicalAmount, HASTRA_OPERATOR_BATCH_MINIMUM_USDC) ===
+        -1,
+    belowMinimum: !!shares && compareUnsignedDecimals(shares, terms.minimumShares) === -1,
+    overAvailableAmount:
+      validation.kind === "valid" && availableAmount !== undefined
+        ? compareUnsignedDecimals(validation.canonicalAmount, availableAmount) === 1
+        : false,
+    shares,
+  };
+}
+
+function parRedemptionSteps(
+  outcome: EarnVaultQueuedWithdrawalOutcome | null,
+  t: ReturnType<typeof useTranslations>
+): string[] {
+  return [
+    t("DashboardEarn.vaultWithdraw.flowDetails"),
+    t("DashboardEarn.vaultWithdraw.flowReview"),
+    outcome?.kind === "approval_pending"
+      ? t("DashboardEarn.queuedWithdraw.flowApproval")
+      : t("DashboardEarn.parRedemption.flowRequested"),
+  ];
+}
+
+function parRedemptionStepIndex(
+  outcome: EarnVaultQueuedWithdrawalOutcome | null,
+  step: FormStep
+): number {
+  if (outcome) return 2;
+  return step === "review" ? 1 : 0;
+}
+
+function parRedemptionStepKey(outcome: EarnVaultQueuedWithdrawalOutcome | null, step: FormStep) {
+  return outcome ? `result:${outcome.kind}` : step;
+}
+
+function freshCancelRecord(
+  cancelResult: EarnVaultWithdrawalRequestRecord | null,
+  observed: EarnVaultWithdrawalRequestRecord | undefined,
+  submitted: EarnVaultWithdrawalRequestRecord
+): EarnVaultWithdrawalRequestRecord {
+  if (cancelResult === null) return observed ?? submitted;
+  if (!observed || Date.parse(cancelResult.updatedAt) >= Date.parse(observed.updatedAt)) {
+    return cancelResult;
+  }
+  return observed;
+}
+
 function useParRedemptionPreview(
   input: EarnVaultParRedemptionTermsRequest | null,
   active: boolean
@@ -144,32 +210,22 @@ function useParRedemptionSubmission(options: {
   return { submitting, outcome, submit };
 }
 
-function ParRedemptionResult({
-  environment,
-  onClose,
-  onSettled,
-  submitted,
-  terms,
-}: {
-  environment: SdpEnvironment;
-  onClose: () => void;
-  onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
-  submitted: EarnVaultWithdrawalRequestRecord;
-  terms: EarnVaultParRedemptionTerms;
-}) {
-  const t = useTranslations();
-  const locale = useLocale();
-  const observed = useEarnVaultWithdrawalRequestOutcome(submitted.withdrawalRequestId, onSettled);
+/**
+ * Owns the settled-request view model: local cancellation state wins only
+ * until server polling reports a record at least as fresh, and the recovery
+ * cancel action reuses one idempotency key per ambiguous transport attempt.
+ */
+function useParRedemptionRequestView(
+  submitted: EarnVaultWithdrawalRequestRecord,
+  observed: EarnVaultWithdrawalRequestRecord | undefined,
+  cancelAllowed: boolean
+) {
   const [cancelResult, setCancelResult] = useState<EarnVaultWithdrawalRequestRecord | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const cancelKey = useRef<string | null>(null);
-  const cancelIsFresh =
-    cancelResult !== null &&
-    (!observed || Date.parse(cancelResult.updatedAt) >= Date.parse(observed.updatedAt));
-  const request = cancelIsFresh ? cancelResult : (observed ?? submitted);
-  const presentation = earnVaultParRedemptionStatusPresentation(request.status);
-  const cancelable = terms.cancelable && isEarnVaultParRedemptionCancelable(request);
+  const request = freshCancelRecord(cancelResult, observed, submitted);
+  const cancelable = cancelAllowed && isEarnVaultParRedemptionCancelable(request);
 
   async function cancel() {
     if (!cancelable || cancelling) return;
@@ -185,7 +241,7 @@ function ParRedemptionResult({
         cancelKey.current = null;
         setCancelResult(result.data);
       } else {
-        if (result.status !== null && result.status >= 400 && result.status < 500) {
+        if (isClientErrorStatus(result.status)) {
           cancelKey.current = null;
         }
         setCancelError(result.error);
@@ -195,11 +251,83 @@ function ParRedemptionResult({
     }
   }
 
+  return { cancel, cancelError, cancelable, cancelling, request };
+}
+
+function ParRedemptionResultDetails({
+  environment,
+  request,
+}: {
+  environment: SdpEnvironment;
+  request: EarnVaultWithdrawalRequestRecord;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  return (
+    <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+      <div className="flex items-baseline justify-between gap-5">
+        <dt className="text-tertiary">{t("DashboardEarn.parRedemption.quotedAmount")}</dt>
+        <dd className="text-right tabular-nums text-primary">
+          {formatProviderAmount(
+            request.quotedAssets,
+            locale,
+            earnMintAsset(request.assetMint).symbol
+          )}
+        </dd>
+      </div>
+      {request.intermediateAmount && request.intermediateMint ? (
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.parRedemption.intermediateAmount")}</dt>
+          <dd className="text-right tabular-nums text-primary">
+            {formatProviderAmount(
+              request.intermediateAmount,
+              locale,
+              earnMintAsset(request.intermediateMint).symbol
+            )}
+          </dd>
+        </div>
+      ) : null}
+      {request.creationSignature ? (
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
+          <dd className="text-right">
+            <TransactionLink
+              cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
+              signature={request.creationSignature}
+            />
+          </dd>
+        </div>
+      ) : null}
+    </dl>
+  );
+}
+
+function ParRedemptionResult({
+  environment,
+  onClose,
+  onSettled,
+  submitted,
+  terms,
+}: {
+  environment: SdpEnvironment;
+  onClose: () => void;
+  onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  submitted: EarnVaultWithdrawalRequestRecord;
+  terms: EarnVaultParRedemptionTerms;
+}) {
+  const t = useTranslations();
+  const observed = useEarnVaultWithdrawalRequestOutcome(submitted.withdrawalRequestId, onSettled);
+  const { cancel, cancelError, cancelable, cancelling, request } = useParRedemptionRequestView(
+    submitted,
+    observed,
+    terms.cancelable
+  );
+  const presentation = earnVaultParRedemptionStatusPresentation(request.status);
+  const terminal = isEarnVaultParRedemptionTerminal(request.status);
+
   return (
     <>
-      {isEarnVaultParRedemptionTerminal(request.status) ? (
-        <EarnOutcomeMark tone={presentation.tone} />
-      ) : null}
+      {terminal ? <EarnOutcomeMark tone={presentation.tone} /> : null}
       <div className="flex items-center gap-2 pr-8">
         <h2 className="text-base font-medium text-primary">
           {t("DashboardEarn.parRedemption.resultTitle")}
@@ -207,41 +335,7 @@ function ParRedemptionResult({
         <Badge variant={presentation.variant}>{t(presentation.labelKey)}</Badge>
       </div>
       <p className="mt-2 text-sm leading-5 text-secondary">{t(presentation.bodyKey)}</p>
-      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.parRedemption.quotedAmount")}</dt>
-          <dd className="text-right tabular-nums text-primary">
-            {formatProviderAmount(
-              request.quotedAssets,
-              locale,
-              earnMintAsset(request.assetMint).symbol
-            )}
-          </dd>
-        </div>
-        {request.intermediateAmount && request.intermediateMint ? (
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.parRedemption.intermediateAmount")}</dt>
-            <dd className="text-right tabular-nums text-primary">
-              {formatProviderAmount(
-                request.intermediateAmount,
-                locale,
-                earnMintAsset(request.intermediateMint).symbol
-              )}
-            </dd>
-          </div>
-        ) : null}
-        {request.creationSignature ? (
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
-            <dd className="text-right">
-              <TransactionLink
-                cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
-                signature={request.creationSignature}
-              />
-            </dd>
-          </div>
-        ) : null}
-      </dl>
+      <ParRedemptionResultDetails environment={environment} request={request} />
       {request.status === "failed" && request.failureReason ? (
         <div
           className="mt-4 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
@@ -486,6 +580,97 @@ function ParRedemptionReview({
   );
 }
 
+function ParRedemptionApprovalResult({
+  onClose,
+  outcome,
+}: {
+  onClose: () => void;
+  outcome: Extract<EarnVaultQueuedWithdrawalOutcome, { kind: "approval_pending" }>;
+}) {
+  return (
+    <EarnVaultApprovalResult
+      approvalRequestId={outcome.approvalRequestId}
+      onClose={onClose}
+      walletOperationId={outcome.walletOperationId}
+    />
+  );
+}
+
+function ParRedemptionForm({
+  amount,
+  availableAmount,
+  belowBatchMinimum,
+  belowMinimum,
+  detailsValid,
+  error,
+  loading,
+  modalLabel,
+  onAmountChange,
+  onBack,
+  onContinue,
+  onMax,
+  onSubmit,
+  overAvailableAmount,
+  preview,
+  step,
+  submitting,
+  terms,
+}: {
+  amount: string;
+  availableAmount: string | undefined;
+  belowBatchMinimum: boolean;
+  belowMinimum: boolean;
+  detailsValid: boolean;
+  error: string | null;
+  loading: boolean;
+  modalLabel: string;
+  onAmountChange: (value: string) => void;
+  onBack: () => void;
+  onContinue: () => void;
+  onMax: () => void;
+  onSubmit: () => void;
+  overAvailableAmount: boolean;
+  preview: EarnVaultParRedemptionPreview | null;
+  step: FormStep;
+  submitting: boolean;
+  terms: EarnVaultParRedemptionTerms;
+}) {
+  return (
+    <>
+      <h2
+        className="pr-8 text-lg font-medium leading-6 text-primary"
+        data-modal-focus-target
+        tabIndex={-1}
+      >
+        {modalLabel}
+      </h2>
+      {step === "details" ? (
+        <ParRedemptionDetails
+          amount={amount}
+          availableAmount={availableAmount}
+          belowBatchMinimum={belowBatchMinimum}
+          belowMinimum={belowMinimum}
+          detailsValid={detailsValid}
+          onAmountChange={onAmountChange}
+          onContinue={onContinue}
+          onMax={onMax}
+          overAvailableAmount={overAvailableAmount}
+          terms={terms}
+        />
+      ) : (
+        <ParRedemptionReview
+          error={error}
+          loading={loading}
+          onBack={onBack}
+          onSubmit={onSubmit}
+          preview={preview}
+          submitting={submitting}
+        />
+      )}
+    </>
+  );
+}
+
 export function EarnVaultParRedemptionModal({
   environment,
   onClose,
@@ -498,21 +683,12 @@ export function EarnVaultParRedemptionModal({
   const t = useTranslations();
   const [step, setStep] = useState<FormStep>("details");
   const [amount, setAmount] = useState("");
-  const validation = validateVaultWithdrawalAmount(amount);
   const availableAmount = vaultWithdrawalAvailableAmount(position);
-  const shares =
-    validation.kind === "valid"
-      ? vaultWithdrawalSharesForAmount(validation.canonicalAmount, position)
-      : undefined;
-  const belowMinimum = !!shares && compareUnsignedDecimals(shares, terms.minimumShares) === -1;
-  const belowBatchMinimum =
-    validation.kind === "valid" &&
-    compareUnsignedDecimals(validation.canonicalAmount, HASTRA_OPERATOR_BATCH_MINIMUM_USDC) === -1;
-  const overAvailableAmount =
-    validation.kind === "valid" && availableAmount !== undefined
-      ? compareUnsignedDecimals(validation.canonicalAmount, availableAmount) === 1
-      : false;
-  const input = useMemo(() => parPreviewInput(position, shares, terms), [position, shares, terms]);
+  const amountState = parRedemptionAmountState(position, amount, availableAmount, terms);
+  const input = useMemo(
+    () => parPreviewInput(position, amountState.shares, terms),
+    [position, amountState.shares, terms]
+  );
   const { preview, loading, error, setError } = useParRedemptionPreview(input, step === "review");
   const { submitting, outcome, submit } = useParRedemptionSubmission({
     onRequested,
@@ -521,26 +697,17 @@ export function EarnVaultParRedemptionModal({
   });
   const positionName = position.label || shortenMarketAddress(position.providerReference);
   const modalLabel = t("DashboardEarn.parRedemption.title", { position: positionName });
-  const steps = [
-    t("DashboardEarn.vaultWithdraw.flowDetails"),
-    t("DashboardEarn.vaultWithdraw.flowReview"),
-    outcome?.kind === "approval_pending"
-      ? t("DashboardEarn.queuedWithdraw.flowApproval")
-      : t("DashboardEarn.parRedemption.flowRequested"),
-  ];
-  const currentStep = outcome ? 2 : step === "review" ? 1 : 0;
 
   return (
     <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
       <div className="p-6">
-        <EarnFlowStepper currentStep={currentStep} steps={steps} />
-        <EarnFlowTransition stepKey={outcome ? `result:${outcome.kind}` : step}>
+        <EarnFlowStepper
+          currentStep={parRedemptionStepIndex(outcome, step)}
+          steps={parRedemptionSteps(outcome, t)}
+        />
+        <EarnFlowTransition stepKey={parRedemptionStepKey(outcome, step)}>
           {outcome?.kind === "approval_pending" ? (
-            <EarnVaultApprovalResult
-              approvalRequestId={outcome.approvalRequestId}
-              onClose={onClose}
-              walletOperationId={outcome.walletOperationId}
-            />
+            <ParRedemptionApprovalResult onClose={onClose} outcome={outcome} />
           ) : outcome?.kind === "submitted" ? (
             <ParRedemptionResult
               environment={environment}
@@ -550,40 +717,28 @@ export function EarnVaultParRedemptionModal({
               terms={terms}
             />
           ) : (
-            <>
-              <h2
-                className="pr-8 text-lg font-medium leading-6 text-primary"
-                data-modal-focus-target
-                tabIndex={-1}
-              >
-                {modalLabel}
-              </h2>
-              {step === "details" ? (
-                <ParRedemptionDetails
-                  amount={amount}
-                  availableAmount={availableAmount}
-                  belowBatchMinimum={belowBatchMinimum}
-                  belowMinimum={belowMinimum}
-                  detailsValid={input !== null}
-                  onAmountChange={setAmount}
-                  onContinue={() => setStep("review")}
-                  onMax={() => {
-                    if (availableAmount) setAmount(availableAmount);
-                  }}
-                  overAvailableAmount={overAvailableAmount}
-                  terms={terms}
-                />
-              ) : (
-                <ParRedemptionReview
-                  error={error}
-                  loading={loading}
-                  onBack={() => setStep("details")}
-                  onSubmit={() => void submit(input, preview)}
-                  preview={preview}
-                  submitting={submitting}
-                />
-              )}
-            </>
+            <ParRedemptionForm
+              amount={amount}
+              availableAmount={availableAmount}
+              belowBatchMinimum={amountState.belowBatchMinimum}
+              belowMinimum={amountState.belowMinimum}
+              detailsValid={input !== null}
+              error={error}
+              loading={loading}
+              modalLabel={modalLabel}
+              onAmountChange={setAmount}
+              onBack={() => setStep("details")}
+              onContinue={() => setStep("review")}
+              onMax={() => {
+                if (availableAmount) setAmount(availableAmount);
+              }}
+              onSubmit={() => void submit(input, preview)}
+              overAvailableAmount={amountState.overAvailableAmount}
+              preview={preview}
+              step={step}
+              submitting={submitting}
+              terms={terms}
+            />
           )}
         </EarnFlowTransition>
       </div>
