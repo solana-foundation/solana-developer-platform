@@ -614,6 +614,8 @@
       "providerAccountWalletProvisioning": "Provisioning",
       "customerIdLabel": "Customer ID",
       "walletIdLabel": "Wallet ID",
+      "copyCustomerId": "Copy customer ID",
+      "customerIdCopied": "Customer ID copied",
       "taxResidence": "Tax residence",
       "agreementSigned": "Signed",
       "agreementAwaitingSignature": "Awaiting signature",

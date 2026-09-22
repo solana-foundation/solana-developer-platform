@@ -1,9 +1,12 @@
 import type { PaymentTransferSummary } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TEST_SOLANA_ADDRESSES } from "../../../../../../../sdp-api/src/test/fixtures/tokens";
 import { postMoneygramRampEvent, type Translate } from "../../payments-workspace.data";
 import { sendTransferUnderKey } from "../../transfer-idempotency";
 import { fundMoneygramDeposit, type MoneygramFundingContext } from "./moneygram-sign-transaction";
+
+const SOURCE_WALLET = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
+const DEPOSIT_WALLET = "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 vi.mock("../../payments-workspace.data", () => ({ postMoneygramRampEvent: vi.fn() }));
 vi.mock("../../transfer-idempotency", () => ({ sendTransferUnderKey: vi.fn() }));
@@ -11,7 +14,7 @@ vi.mock("../../transfer-idempotency", () => ({ sendTransferUnderKey: vi.fn() }))
 const DEPOSIT = {
   chain: "solana",
   asset: "USDC",
-  address: TEST_SOLANA_ADDRESSES.wallet3,
+  address: SOURCE_WALLET,
   amount: "250",
   memo: "mg_widget_memo_1",
 };
@@ -24,7 +27,7 @@ const RAMP: PaymentTransferSummary = {
   signature: null,
   rampsMemo: {},
   moneygram: {
-    depositAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    depositAddress: DEPOSIT_WALLET,
     sendAmount: "25",
     depositMemo: "mg_memo_1",
   },
@@ -44,7 +47,7 @@ function context(overrides: Partial<MoneygramFundingContext>): MoneygramFundingC
     cryptoAsset: "USDC",
     sessionId: "mg_session_1",
     sourceWalletId: "cwlt_mg_1",
-    sourceTokenMint: TEST_SOLANA_ADDRESSES.mint,
+    sourceTokenMint: USDC_MINT,
     onSigned: vi.fn(),
     t: ((key) => key) satisfies Translate,
     ...overrides,
@@ -83,8 +86,8 @@ describe("fundMoneygramDeposit", () => {
     expect(sendTransferUnderKey).toHaveBeenCalledExactlyOnceWith(
       {
         sourceCustodyWalletId: "cwlt_mg_1",
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: TEST_SOLANA_ADDRESSES.mint,
+        destination: DEPOSIT_WALLET,
+        token: USDC_MINT,
         amount: "25",
         memo: "mg_memo_1",
       },
