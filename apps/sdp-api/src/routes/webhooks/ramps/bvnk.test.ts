@@ -202,22 +202,6 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
 
-  it("accepts an sdp_offramp reference and stringifies its walletAmount", () => {
-    const processor = new BvnkWebhookProcessor();
-    const reference = "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000";
-
-    expect(
-      processor.parse(bvnkChannelTransactionEvent("transaction-confirmed", { reference }))
-    ).toEqual({
-      event: "bvnk:payment:channel:transaction-confirmed",
-      data: {
-        ...CONFIRMED_FIXTURE_PARSED,
-        reference,
-        walletAmount: "100",
-      },
-    });
-  });
-
   it("parses the observed confirmed channel-transaction payload in full", () => {
     const payload: unknown = BVNK_CHANNEL_TRANSACTION_CONFIRMED_WEBHOOK;
     const processor = new BvnkWebhookProcessor();

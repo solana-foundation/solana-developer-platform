@@ -2216,9 +2216,10 @@ describe("BVNK ramp webhook", () => {
     expect(transfer).toEqual({ status: "settling", fiat_amount: null });
 
     const productionTransferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7be7";
+    const productionCounterpartyId = await seedProductionCounterparty();
     await seedBvnkOfframpTransfer(productionTransferId, {
       projectId: `${PROJECT_ID}_production`,
-      counterpartyId: COUNTERPARTY_ID,
+      counterpartyId: productionCounterpartyId,
       providerReference: "019f0ce4-98ab-7424-a968-fc323266b8ff",
       channelWalletId: FUNDING_WALLET_ID,
       channelCustomerReference: CUSTOMER_REFERENCE,
