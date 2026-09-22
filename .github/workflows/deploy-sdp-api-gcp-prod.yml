@@ -186,7 +186,11 @@ jobs:
 
       - name: Log in to GHCR
         if: ${{ env.BUILD_IMAGE == 'true' }}
-        run: crane auth login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --password-stdin keeps the token off the command line, where it would
+        # be visible in the process table and in any error echo-back.
+        run: printf '%s' "$GHCR_TOKEN" | crane auth login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       # The release image was scanned, built with SLSA provenance + SBOM
       # attestations, and keyless-signed by release-images.yml. Verify that
