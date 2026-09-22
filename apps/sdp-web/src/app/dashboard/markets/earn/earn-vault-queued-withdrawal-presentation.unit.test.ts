@@ -7,7 +7,7 @@ import {
 
 // The lifecycle states a queued withdrawal can be seen in. Kept explicit so a
 // newly added status fails here until its presentation is chosen on purpose.
-const ALL_STATUSES: EarnVaultWithdrawalRequestStatus[] = [
+const ALL_STATUSES = [
   "creating",
   "pending",
   "fulfillable",
@@ -17,9 +17,22 @@ const ALL_STATUSES: EarnVaultWithdrawalRequestStatus[] = [
   "cancelled",
   "closedOrUnknown",
   "failed",
-];
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+// Type-level exhaustiveness guard: this tuple only stays empty (and therefore
+// typechecks as never[]) while every member of the union is listed above. A
+// status added to EarnVaultWithdrawalRequestStatus without being added to
+// ALL_STATUSES surfaces here as a type error, not a silent skip.
+const UNCOVERED_STATUSES: Exclude<
+  EarnVaultWithdrawalRequestStatus,
+  (typeof ALL_STATUSES)[number]
+>[] = [];
 
 describe("queued withdrawal lifecycle presentation", () => {
+  it("lists every status in the union", () => {
+    expect(UNCOVERED_STATUSES).toEqual([]);
+  });
+
   it("shares terminal truth across every queue surface", () => {
     const terminal = ALL_STATUSES.filter((status) => isEarnVaultQueuedWithdrawalTerminal(status));
     // Only the three outcomes end the request; everything else is in flight
