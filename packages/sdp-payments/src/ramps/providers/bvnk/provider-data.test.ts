@@ -9,6 +9,7 @@ import {
   parseBvnkFundingWalletName,
   parseBvnkTransferIdFromRemittance,
   parseBvnkWalletName,
+  readBvnkOfframpTransferData,
 } from "./provider-data";
 import { bvnkCustomer } from "./test-fixtures";
 
@@ -209,6 +210,53 @@ describe("parseBvnkFundingWalletName", () => {
       kind: "unrecognised",
       name: "a:foreign:wallet:1",
     });
+  });
+});
+
+describe("readBvnkOfframpTransferData", () => {
+  it("parses a recorded channel payload", () => {
+    const providerData = {
+      bvnk: {
+        channel: {
+          id: "019f0ce4-98ab-7424-a968-fc323266b8ed",
+          walletId: "a:funding:wallet:1",
+          customerReference: "965a5ef5-77f3-482e-917f-194c30143810",
+        },
+      },
+    };
+    assert.deepEqual(readBvnkOfframpTransferData(providerData), {
+      channel: {
+        id: "019f0ce4-98ab-7424-a968-fc323266b8ed",
+        walletId: "a:funding:wallet:1",
+        customerReference: "965a5ef5-77f3-482e-917f-194c30143810",
+      },
+    });
+  });
+
+  it("parses a prebook payload with no channel yet", () => {
+    assert.deepEqual(readBvnkOfframpTransferData({ bvnk: {} }), {});
+  });
+
+  it("throws INTERNAL_ERROR when the bvnk key is missing", () => {
+    assert.throws(() => readBvnkOfframpTransferData({}), {
+      message: /BVNK off-ramp transfer provider_data has no bvnk object/,
+    });
+  });
+
+  it("throws INTERNAL_ERROR on an unknown key inside bvnk", () => {
+    assert.throws(
+      () => readBvnkOfframpTransferData({ bvnk: { channel: { id: "c1" }, stray: true } }),
+      { message: /BVNK off-ramp transfer provider_data\.bvnk is malformed/ }
+    );
+    assert.throws(
+      () =>
+        readBvnkOfframpTransferData({
+          bvnk: {
+            channel: { id: "c1", walletId: "w1", customerReference: "x1", stray: true },
+          },
+        }),
+      { message: /BVNK off-ramp transfer provider_data\.bvnk is malformed/ }
+    );
   });
 });
 

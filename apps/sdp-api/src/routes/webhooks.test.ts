@@ -968,7 +968,6 @@ describe("BVNK ramp webhook", () => {
   const USER_ID = "usr_bvnk_webhook";
   const WALLET_ID = "a:1:wallet:1";
   const FUNDING_WALLET_ID = "a:funding:wallet:1";
-  const PRODUCTION_CUSTOMER_REFERENCE = "58097c98-77f3-482e-917f-194c30143810";
   const walletName = buildBvnkFundingWalletName(`cpa_${COUNTERPARTY_ID}`);
 
   async function seedVerifiableCounterparty() {
@@ -1260,6 +1259,8 @@ describe("BVNK ramp webhook", () => {
       projectId: string;
       counterpartyId: string;
       providerReference: string;
+      channelWalletId: string;
+      channelCustomerReference: string;
     }
   ): Promise<void> {
     await getDb(env)
@@ -1292,7 +1293,17 @@ describe("BVNK ramp webhook", () => {
         "manual_instructions",
         "USD",
         null,
-        {},
+        // Recorded by the quote completion once, on this transfer — the
+        // webhook proves the channel against exactly these facts.
+        {
+          bvnk: {
+            channel: {
+              id: options.providerReference,
+              walletId: options.channelWalletId,
+              customerReference: options.channelCustomerReference,
+            },
+          },
+        },
         null,
         null,
         null,
@@ -2165,11 +2176,17 @@ describe("BVNK ramp webhook", () => {
 
   it("moves a BVNK off-ramp transfer to settling when a channel transaction is detected", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
+    const channelId = OFFRAMP_CHANNEL_BASE.channelId;
     await seedBvnkOfframpTransfer(transferId, {
       projectId: PROJECT_ID,
       counterpartyId: COUNTERPARTY_ID,
-      providerReference: buildBvnkOfframpReference(transferId),
+      providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
+    const getChannel = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2")
+      .mockResolvedValue(matchingOfframpChannel(transferId, channelId));
 
     await sendBvnkWebhook(
       bvnkChannelTransactionEvent("transaction-detected", {
@@ -2182,6 +2199,7 @@ describe("BVNK ramp webhook", () => {
       })
     );
 
+    expect(getChannel).toHaveBeenCalledWith(expect.anything(), { channelId });
     const transfer = await getDb(env)
       .prepare("SELECT status, fiat_amount FROM payment_transfers WHERE id = ?")
       .bind(transferId)
@@ -2192,7 +2210,9 @@ describe("BVNK ramp webhook", () => {
     await seedBvnkOfframpTransfer(productionTransferId, {
       projectId: `${PROJECT_ID}_production`,
       counterpartyId: COUNTERPARTY_ID,
-      providerReference: buildBvnkOfframpReference(productionTransferId),
+      providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
     const mismatched = await sendBvnkWebhook(
       bvnkChannelTransactionEvent("transaction-detected", {
@@ -2206,51 +2226,7 @@ describe("BVNK ramp webhook", () => {
     await expectNoBvnkWebhookEvents();
   });
 
-  /** Seeds the counterparty's active funding-wallet row the off-ramp channel is opened on. */
-  function seedOfframpFundingWallet(rowId: string) {
-    return seedFundingWalletRow({
-      id: rowId,
-      providerCustomerReference: CUSTOMER_REFERENCE,
-      externalAccountReference: FUNDING_WALLET_ID,
-      providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
-      projectId: PROJECT_ID,
-      counterpartyId: COUNTERPARTY_ID,
-    });
-  }
-
-  async function seedProductionOfframpCounterparty(): Promise<string> {
-    const counterpartyId = await seedProductionCounterparty();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO counterparty_provider_accounts (
-           id, organization_id, project_id, counterparty_id, provider,
-           provider_customer_reference, kind, metadata
-         ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', ?)`
-      )
-      .bind(
-        `cpa_${counterpartyId}`,
-        ORG_ID,
-        `${PROJECT_ID}_production`,
-        counterpartyId,
-        PRODUCTION_CUSTOMER_REFERENCE,
-        { status: "PENDING" }
-      )
-      .run();
-    return counterpartyId;
-  }
-
-  function seedProductionOfframpFundingWallet(rowId: string, counterpartyId: string) {
-    return seedFundingWalletRow({
-      id: rowId,
-      providerCustomerReference: CUSTOMER_REFERENCE,
-      externalAccountReference: FUNDING_WALLET_ID,
-      providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
-      projectId: `${PROJECT_ID}_production`,
-      counterpartyId,
-    });
-  }
-
-  /** A BVNK channel read-back matching the seeded transfer, funding wallet, and customer link. */
+  /** A BVNK channel read-back matching the transfer's own recorded channel facts. */
   function matchingOfframpChannel(transferId: string, channelId: string) {
     return {
       uuid: channelId,
@@ -2276,11 +2252,12 @@ describe("BVNK ramp webhook", () => {
   it("completes a BVNK off-ramp transfer from a confirmed channel transaction", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd7";
     const channelId = OFFRAMP_CHANNEL_BASE.channelId;
-    await seedOfframpFundingWallet("cpa_bvnk_funding_offramp_confirmed");
     await seedBvnkOfframpTransfer(transferId, {
       projectId: PROJECT_ID,
       counterpartyId: COUNTERPARTY_ID,
       providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
     const getChannel = vi
       .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2")
@@ -2316,11 +2293,12 @@ describe("BVNK ramp webhook", () => {
   it("parks a confirmed BVNK channel transaction whose read-back names a different wallet as terminal", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bc7";
     const channelId = "019f0ce5-28a6-7000-8000-000000000011";
-    await seedOfframpFundingWallet("cpa_bvnk_funding_offramp_wallet_mismatch");
     await seedBvnkOfframpTransfer(transferId, {
       projectId: PROJECT_ID,
       counterpartyId: COUNTERPARTY_ID,
       providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
     vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2").mockResolvedValue({
       ...matchingOfframpChannel(transferId, channelId),
@@ -2343,11 +2321,12 @@ describe("BVNK ramp webhook", () => {
   it("parks a confirmed BVNK channel transaction whose read-back names a different customer as terminal", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bf7";
     const channelId = "019f0ce5-28a6-7000-8000-000000000021";
-    await seedOfframpFundingWallet("cpa_bvnk_funding_offramp_customer_mismatch");
     await seedBvnkOfframpTransfer(transferId, {
       projectId: PROJECT_ID,
       counterpartyId: COUNTERPARTY_ID,
       providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
     vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2").mockResolvedValue({
       ...matchingOfframpChannel(transferId, channelId),
@@ -2370,11 +2349,12 @@ describe("BVNK ramp webhook", () => {
   it("retries a confirmed BVNK channel transaction when the channel read-back fails", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a8bd7";
     const channelId = "019f0ce5-28a6-7000-8000-000000000031";
-    await seedOfframpFundingWallet("cpa_bvnk_funding_offramp_read_failure");
     await seedBvnkOfframpTransfer(transferId, {
       projectId: PROJECT_ID,
       counterpartyId: COUNTERPARTY_ID,
       providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
     vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2").mockRejectedValue(
       new Error("BVNK channel read failed")
@@ -2399,15 +2379,13 @@ describe("BVNK ramp webhook", () => {
   it("parks a confirmed BVNK channel transaction whose read-back reference names another transfer as terminal", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a8bd1";
     const channelId = "019f0ce5-28a6-7000-8000-000000000041";
-    const counterpartyId = await seedProductionOfframpCounterparty();
-    await seedProductionOfframpFundingWallet(
-      "cpa_bvnk_funding_offramp_reference_mismatch",
-      counterpartyId
-    );
+    const counterpartyId = await seedProductionCounterparty();
     await seedBvnkOfframpTransfer(transferId, {
       projectId: `${PROJECT_ID}_production`,
       counterpartyId,
       providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
     vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2").mockResolvedValue({
       ...matchingOfframpChannel(transferId, channelId),
@@ -2432,15 +2410,13 @@ describe("BVNK ramp webhook", () => {
   it("parks a confirmed BVNK channel transaction whose read-back carries no embedded customer as terminal", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a8bd2";
     const channelId = "019f0ce5-28a6-7000-8000-000000000043";
-    const counterpartyId = await seedProductionOfframpCounterparty();
-    await seedProductionOfframpFundingWallet(
-      "cpa_bvnk_funding_offramp_customer_absent",
-      counterpartyId
-    );
+    const counterpartyId = await seedProductionCounterparty();
     await seedBvnkOfframpTransfer(transferId, {
       projectId: `${PROJECT_ID}_production`,
       counterpartyId,
       providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
     const { embeddedCustomerDetails: _absent, ...channel } = matchingOfframpChannel(
       transferId,
@@ -2463,7 +2439,7 @@ describe("BVNK ramp webhook", () => {
     expect((await readTransferStatus(transferId))?.status).toBe("awaiting_payment");
   });
 
-  it("parks a confirmed BVNK channel transaction whose transfer has no channel reference as terminal", async () => {
+  it("parks a confirmed BVNK channel transaction whose transfer has a null channel reference as terminal", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a8bd3";
     const channelId = "019f0ce5-28a6-7000-8000-000000000045";
     const counterpartyId = await seedProductionCounterparty();
@@ -2471,6 +2447,8 @@ describe("BVNK ramp webhook", () => {
       projectId: `${PROJECT_ID}_production`,
       counterpartyId,
       providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
     await getDb(env)
       .prepare("UPDATE payment_transfers SET provider_reference = NULL WHERE id = ?")
@@ -2489,20 +2467,25 @@ describe("BVNK ramp webhook", () => {
       "production"
     );
 
-    await expectTerminalWebhookEvent("production", "transfer has no BVNK channel reference");
+    await expectTerminalWebhookEvent("production", "transfer has no recorded channel");
     expect(getChannel).not.toHaveBeenCalled();
     expect((await readTransferStatus(transferId))?.status).toBe("awaiting_payment");
   });
 
-  it("parks a confirmed BVNK channel transaction whose counterparty has no funding wallet as terminal", async () => {
+  it("parks a confirmed BVNK channel transaction whose provider_data.bvnk has no channel as terminal", async () => {
     const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a8bd4";
     const channelId = "019f0ce5-28a6-7000-8000-000000000047";
-    const counterpartyId = await seedProductionCounterparty();
     await seedBvnkOfframpTransfer(transferId, {
-      projectId: `${PROJECT_ID}_production`,
-      counterpartyId,
+      projectId: PROJECT_ID,
+      counterpartyId: COUNTERPARTY_ID,
       providerReference: channelId,
+      channelWalletId: FUNDING_WALLET_ID,
+      channelCustomerReference: CUSTOMER_REFERENCE,
     });
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET provider_data = ?::jsonb WHERE id = ?")
+      .bind({ bvnk: {} }, transferId)
+      .run();
     const getChannel = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2");
 
     await sendBvnkWebhook(
@@ -2511,49 +2494,10 @@ describe("BVNK ramp webhook", () => {
         eventId: "019f0ce5-28a6-7000-8000-000000000048",
         reference: buildBvnkOfframpReference(transferId),
         walletAmount: 4.95,
-      }),
-      undefined,
-      "production"
+      })
     );
 
-    await expectTerminalWebhookEvent(
-      "production",
-      "transfer counterparty has no BVNK funding wallet"
-    );
-    expect(getChannel).not.toHaveBeenCalled();
-    expect((await readTransferStatus(transferId))?.status).toBe("awaiting_payment");
-  });
-
-  it("parks a confirmed BVNK channel transaction whose counterparty has no customer link as terminal", async () => {
-    const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a8bd5";
-    const channelId = "019f0ce5-28a6-7000-8000-000000000049";
-    const counterpartyId = await seedProductionCounterparty();
-    await seedProductionOfframpFundingWallet(
-      "cpa_bvnk_funding_offramp_customer_link_missing",
-      counterpartyId
-    );
-    await seedBvnkOfframpTransfer(transferId, {
-      projectId: `${PROJECT_ID}_production`,
-      counterpartyId,
-      providerReference: channelId,
-    });
-    const getChannel = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2");
-
-    await sendBvnkWebhook(
-      bvnkChannelTransactionEvent("transaction-confirmed", {
-        ...OFFRAMP_CHANNEL_BASE,
-        eventId: "019f0ce5-28a6-7000-8000-00000000004a",
-        reference: buildBvnkOfframpReference(transferId),
-        walletAmount: 4.95,
-      }),
-      undefined,
-      "production"
-    );
-
-    await expectTerminalWebhookEvent(
-      "production",
-      "transfer counterparty has no BVNK customer link"
-    );
+    await expectNoBvnkWebhookEvents();
     expect(getChannel).not.toHaveBeenCalled();
     expect((await readTransferStatus(transferId))?.status).toBe("awaiting_payment");
   });

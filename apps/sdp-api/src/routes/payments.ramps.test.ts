@@ -1135,6 +1135,13 @@ describe("Payments routes — ramps", () => {
       expect(transfer?.provider_reference).toBe("channel_offramp_test_1");
       expect(transfer?.provider_data).toEqual({
         cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "75.25" },
+        bvnk: {
+          channel: {
+            id: "channel_offramp_test_1",
+            walletId: TEST_BVNK_WALLET_ID,
+            customerReference: BVNK_OFFRAMP_CUSTOMER,
+          },
+        },
       });
 
       getCustomerSpy.mockRestore();
