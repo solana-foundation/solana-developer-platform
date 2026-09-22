@@ -1,6 +1,6 @@
 import { SOL_MINT } from "@sdp/types";
 import { address, createNoopSigner } from "@solana/kit";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
@@ -44,6 +44,17 @@ import {
   seedSelectedApiKeyWalletBindings,
   seedWalletControlProfile,
 } from "@/test/helpers/payments-transfers";
+
+const { verifyClerkJwtForRequest } = vi.hoisted(() => ({
+  verifyClerkJwtForRequest: vi.fn(),
+}));
+
+// Only the external JWT verification is stubbed; identity mapping and
+// authorization run through the normal Clerk middleware and database.
+vi.mock("@/lib/clerk-token", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/clerk-token")>()),
+  verifyClerkJwtForRequest,
+}));
 
 const TEST_DUPLICATE_CUSTODY_WALLET_ID = "cwlt_payments_duplicate_test";
 
@@ -564,6 +575,243 @@ describe("Payments routes — transfer policy", () => {
     ]);
 
     expect(response.status).toBe(400);
+  });
+
+  describe("approved dashboard transfers", () => {
+    const requesterSessionId = "ses_approval_requester";
+    const approverUserId = "usr_approval_replay_approver";
+    const approverHeaders = {
+      Cookie: "sdp_session=ses_approval_replay_approver",
+      "x-project-id": TEST_PROJECT.id,
+    };
+
+    beforeEach(async () => {
+      verifyClerkJwtForRequest.mockReset();
+      verifyClerkJwtForRequest.mockResolvedValue({
+        sub: "clerk_approval_requester",
+        org_id: "clerk_approval_org",
+        org_role: "org:admin",
+        email: TEST_USER.email,
+      });
+      const db = getDb(env);
+      await db.batch([
+        db
+          .prepare(
+            `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+           VALUES ('aui_approval_requester', 'clerk', 'clerk_approval_requester', ?, ?)`
+          )
+          .bind(TEST_USER.id, TEST_USER.email),
+        db
+          .prepare(
+            `INSERT INTO auth_organization_identities
+             (id, provider, provider_org_id, organization_id, slug)
+           VALUES ('aoi_approval_org', 'clerk', 'clerk_approval_org', ?, ?)`
+          )
+          .bind(TEST_ORG.id, TEST_ORG.slug),
+        db
+          .prepare(
+            `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('om_approval_requester', ?, ?, 'admin', 'active')`
+          )
+          .bind(TEST_ORG.id, TEST_USER.id),
+        db
+          .prepare(
+            `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', '2099-01-01T00:00:00.000Z')`
+          )
+          .bind(requesterSessionId, TEST_USER.id, TEST_ORG.id),
+        db
+          .prepare(
+            `INSERT INTO users (id, email, email_verified, status)
+           VALUES (?, 'approval-replay-approver@example.com', 1, 'active')`
+          )
+          .bind(approverUserId),
+        db
+          .prepare(
+            `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('om_approval_replay_approver', ?, ?, 'admin', 'active')`
+          )
+          .bind(TEST_ORG.id, approverUserId),
+        db
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES ('pm_approval_replay_approver', ?, ?, 'admin')`
+          )
+          .bind(TEST_PROJECT.id, approverUserId),
+        db
+          .prepare(
+            `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES ('ses_approval_replay_approver', ?, ?, 'session', '2099-01-01T00:00:00.000Z')`
+          )
+          .bind(approverUserId, TEST_ORG.id),
+      ]);
+      await seedWalletControlProfile({
+        rules: [
+          {
+            id: "approve-dashboard-transfer",
+            kind: "approval",
+            operationTypes: ["payment_transfer_execute"],
+          },
+        ],
+      });
+    });
+
+    async function requestTransfer(authType: "clerk" | "session") {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-project-id": TEST_PROJECT.id,
+        "Idempotency-Key": "approved-dashboard-transfer",
+        // Client hints cannot supply the trusted replay author type.
+        "x-sdp-approved-wallet-operation-actor-type": "clerk",
+      };
+      if (authType === "clerk") headers.Authorization = "Bearer clerk.approval.signature";
+      else headers.Cookie = `sdp_session=${requesterSessionId}`;
+      const response = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "0.1",
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(202);
+      return approvalErrorDetailsSchema.parse((await readErrorResponse(response)).error.details);
+    }
+
+    const approve = (approvalRequestId: string) =>
+      app.request(
+        `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+        { method: "POST", headers: approverHeaders },
+        env
+      );
+
+    it.each(["clerk", "session"] as const)(
+      "executes a %s request once without changing its saved author or action",
+      async (authType) => {
+        const { approvalRequestId, walletOperationId } = await requestTransfer(authType);
+        const repository = createPostgresPolicyRepository(
+          getDb(env),
+          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+        );
+        const original = await repository.getWalletOperationById(walletOperationId);
+        expect(original?.raw_payload.actor).toEqual({
+          type: authType,
+          id: TEST_USER.id,
+          userId: TEST_USER.id,
+        });
+
+        // Approval must not depend on retaining the original Clerk credential.
+        verifyClerkJwtForRequest.mockRejectedValue(new Error("Original token expired"));
+        const approved = await approve(approvalRequestId);
+        expect(approved.status).toBe(200);
+        expect(
+          walletApprovalHttpResponseSchema.parse(await approved.json()).data.approvalRequest
+        ).toMatchObject({
+          requestedBy: TEST_USER.id,
+          resolvedBy: approverUserId,
+          status: "approved",
+          operation: { status: "completed", executionError: null },
+        });
+        const repeated = await approve(approvalRequestId);
+        expect(repeated.status).toBe(200);
+        const transfers = await app.request(
+          "/v1/payments/transfers",
+          { headers: approverHeaders },
+          env
+        );
+        expect(transfers.status).toBe(200);
+        expect(await transfers.json()).toMatchObject({
+          data: [expect.objectContaining({ status: "confirmed" })],
+        });
+        const executed = await repository.getWalletOperationById(walletOperationId);
+        expect(executed?.raw_payload).toEqual(original?.raw_payload);
+      }
+    );
+
+    it.each(["membership", "user"] as const)(
+      "refuses a Clerk approval after the original %s is deactivated",
+      async (revoked) => {
+        const { approvalRequestId } = await requestTransfer("clerk");
+        const db = getDb(env);
+        if (revoked === "membership") {
+          await db
+            .prepare(
+              "UPDATE organization_members SET status = 'inactive' WHERE id = 'om_approval_requester'"
+            )
+            .run();
+        } else {
+          await db
+            .prepare("UPDATE users SET status = 'inactive' WHERE id = ?")
+            .bind(TEST_USER.id)
+            .run();
+        }
+        const response = await approve(approvalRequestId);
+        expect(response.status).toBe(200);
+        expect(
+          walletApprovalHttpResponseSchema.parse(await response.json()).data.approvalRequest
+            .operation
+        ).toMatchObject({
+          status: "failed",
+          executionError: "Original wallet-operation actor is no longer authorized",
+        });
+        // Restoring access or repeating Approve must not restart a failed action.
+        await db
+          .prepare(
+            "UPDATE organization_members SET status = 'active' WHERE id = 'om_approval_requester'"
+          )
+          .run();
+        await db
+          .prepare("UPDATE users SET status = 'active' WHERE id = ?")
+          .bind(TEST_USER.id)
+          .run();
+        const repeated = await approve(approvalRequestId);
+        expect(
+          walletApprovalHttpResponseSchema.parse(await repeated.json()).data.approvalRequest
+            .operation.status
+        ).toBe("failed");
+        const transfers = await app.request(
+          "/v1/payments/transfers",
+          { headers: approverHeaders },
+          env
+        );
+        expect(await transfers.json()).toMatchObject({ data: [] });
+      }
+    );
+
+    it.each([
+      ["unsupported type", { type: "unknown", id: TEST_USER.id, userId: TEST_USER.id }],
+      ["conflicting identities", { type: "clerk", id: approverUserId, userId: TEST_USER.id }],
+      ["missing userId", { type: "clerk", id: TEST_USER.id }],
+      ["blank identity", { type: "clerk", id: "", userId: "" }],
+    ])("refuses a saved actor with %s", async (_label, actor) => {
+      const { approvalRequestId, walletOperationId } = await requestTransfer("clerk");
+      await getDb(env)
+        .prepare(
+          "UPDATE wallet_operations SET raw_payload = jsonb_set(raw_payload, '{actor}', ?::jsonb) WHERE id = ?"
+        )
+        .bind(JSON.stringify(actor), walletOperationId)
+        .run();
+      const response = await approve(approvalRequestId);
+      expect(response.status).toBe(200);
+      expect(
+        walletApprovalHttpResponseSchema.parse(await response.json()).data.approvalRequest.operation
+      ).toMatchObject({
+        status: "failed",
+        executionError: "Original wallet-operation actor is unavailable",
+      });
+      const transfers = await app.request(
+        "/v1/payments/transfers",
+        { headers: approverHeaders },
+        env
+      );
+      expect(await transfers.json()).toMatchObject({ data: [] });
+    });
   });
 
   it("replays a selected-wallet API key approval exactly once", async () => {

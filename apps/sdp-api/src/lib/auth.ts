@@ -33,7 +33,13 @@ interface AuthContextBase {
 export type ApiKeyContext = AuthContextBase &
   (
     | { authType: "api_key"; apiKeyId: string; userId: null }
-    | { authType: "clerk" | "session"; apiKeyId: null; userId: string }
+    | {
+        authType: "clerk" | "session";
+        apiKeyId: null;
+        userId: string;
+        /** Original author type, set only by authenticated approved-operation replay. */
+        approvedWalletOperationActorType?: "clerk" | "session";
+      }
   );
 
 export interface ClerkAuthContext {
@@ -116,6 +122,7 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       signingWalletIds: [],
       walletBindings: [],
       authType: "session",
+      approvedWalletOperationActorType: c.get("approvedWalletOperationActorType"),
       userId: session.userId,
       apiKeyId: null,
     };

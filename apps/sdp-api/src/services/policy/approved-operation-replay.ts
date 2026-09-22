@@ -208,15 +208,16 @@ export async function tryApprovedOperationReplayAuth(
     const apiKey = await loadActiveApiKey(db, apiKeyId, organizationId, projectId);
     c.set("apiKey", apiKey);
   } else {
-    const userId =
-      actor && typeof actor.userId === "string"
-        ? actor.userId
-        : actor && typeof actor.id === "string"
-          ? actor.id
-          : null;
-    if (!userId) {
+    if (
+      !actor ||
+      (actor.type !== "clerk" && actor.type !== "session") ||
+      typeof actor.userId !== "string" ||
+      !actor.userId.trim() ||
+      actor.id !== actor.userId
+    ) {
       throw new AppError("FORBIDDEN", "Original wallet-operation actor is unavailable");
     }
+    const userId = actor.userId;
     const membership = await db
       .prepare(
         `SELECT om.role
@@ -239,6 +240,9 @@ export async function tryApprovedOperationReplayAuth(
       permissions: getPermissionsForOrgRole(membership.role),
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
+    // The internal Session authenticates execution; it must not replace
+    // the original author's authentication type in the approved operation.
+    c.set("approvedWalletOperationActorType", actor.type);
   }
 
   c.set("approvedWalletOperationId", capability.operationId);

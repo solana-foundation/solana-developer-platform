@@ -351,6 +351,7 @@ declare module "hono" {
     projectEnvironment?: ApiKeyEnvironment;
     approvedWalletOperationId?: string;
     approvedWalletOperationAttemptId?: string;
+    approvedWalletOperationActorType?: "clerk" | "session";
     // Set by policyGate middleware for gated routes
     policyGate?: PolicyGateContext<unknown, unknown, WalletOperationPolicyEnforcement | null>;
     apiKey?: {
