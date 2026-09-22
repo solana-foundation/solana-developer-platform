@@ -16,14 +16,14 @@ Source: https://platform.solana.com/docs/introduction
 
 > One API for tokenization, custody, payments, embedded yield, and compliance on Solana.
 
-SDP provides tokenization, custody, payments, embedded yield, and compliance through one stable API in front of interchangeable providers. Most operations use project-scoped authentication. Embedded Yield also offers a keyless strategy, quote, and unsigned external-wallet build tier for self-custodial integrations.
+SDP provides tokenization, custody, payments, embedded yield, and compliance through one stable API in front of interchangeable providers. Most operations use project-scoped authentication. Embedded Yield also offers keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned external-wallet builds for self-custodial integrations.
 
 | Module | What it does |
 | --- | --- |
 | **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
 | **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
-| **Embedded Yield** | Discover curated strategies and build self-custodial deposit or withdrawal transactions, [with or without an API key](/docs/guides/embedded-yield) |
+| **Embedded Yield** | Discover curated strategies and build self-custodial instant deposits or direct withdrawals [with or without an API key](/docs/guides/embedded-yield); use an API key for submission, tracking, and queued actions |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
@@ -255,14 +255,14 @@ Everything the dashboard does is available through the API. Build against the AP
 
 ## Environments
 
-Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment. Keyless Earn requests instead use the API deployment's operator-configured environment.
+Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment. A keyless Earn strategy list instead chooses its shelf with `?environment=sandbox|production` (production by default); a preview or instant build follows the environment of the strategy it names.
 
 | Environment  | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
 | `sandbox`    | devnet       | `sk_test_`     |
 | `production` | mainnet-beta | `sk_live_`     |
 
-Both environments expose identical APIs. Develop and test against a sandbox project, then switch authenticated integrations to production by swapping your API key. Keyless integrations switch only when the API operator changes the deployment environment.
+Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key. A keyless integration selects the sandbox shelf explicitly while testing and must treat a production build as a real-funds transaction.
 
 ## Response conventions
 
@@ -353,7 +353,7 @@ curl https://api.solana.com/v1/wallets \
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
 
-The Embedded Yield strategy catalogue, quote routes, and unsigned external-wallet transaction builders also support [keyless access](/docs/guides/embedded-yield#without-an-api-key). Those requests have no organization or project identity and cannot submit transactions or read tenant state.
+Embedded Yield strategy reads, deposit and withdrawal previews, withdrawal-route discovery, and instant deposit or direct-withdrawal builders also support [keyless access](/docs/guides/embedded-yield#without-an-api-key). Those requests have no organization or project identity and cannot submit transactions, build queued request or cancellation actions, or read tenant state.
 
 ## Key scope
 
@@ -899,12 +899,12 @@ Source: https://platform.solana.com/docs/guides/embedded-yield
 
 {/* Keep this guide and the dashboard integration module (apps/sdp-web/src/app/dashboard/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
 
-Embedded Yield lets your platform offer vault yield without SDP ever holding your users' funds. Your backend asks SDP to **build** an unsigned Solana transaction for the customer's own wallet, the customer signs it in your app, and your backend **submits** the signed bytes back. SDP verifies the signatures, records the movement, then broadcasts it. Withdrawals work the same way in reverse.
+Embedded Yield lets your platform offer vault yield without SDP ever holding your users' funds. SDP **builds** an unsigned Solana transaction for the customer's own wallet and the customer signs it in your app. With an API key, your backend **submits** the signed bytes to SDP for verification, durable tracking, and broadcast. Without a key, you broadcast and track the signed transaction yourself. Withdrawals work the same way in reverse.
 
 Two properties define the surface:
 
 - **Non-custodial.** SDP holds no key for your customers' wallets. The customer's signature is the authorization, every time.
-- **Server-side.** Your SDP API key stays on your backend. The browser or mobile app only ever sees unsigned transaction bytes and returns signed ones.
+- **Backend-safe.** If you use an SDP API key, it stays on your backend. The browser or mobile app only ever sees unsigned transaction bytes and returns signed ones; the keyless tier needs no secret.
 
 All endpoints live under `/v1/earn`. Every code sample uses one Solana SDK, `@solana/kit`; nothing here needs `@solana/web3.js`.
 
@@ -5986,6 +5986,7 @@ Use this page when you need the public AI-facing entry points for Solana Develop
 - Token issuance and lifecycle operations
 - Payments, transfers, and ramps
 - Compliance screening
+- Embedded Yield strategy discovery, caller-signed transactions, and queued withdrawals
 
 ---
 
@@ -6011,11 +6012,12 @@ When you import the collection into Postman, set:
 - `baseUrl` to the SDP API environment you want to target
 - `sdpApiKey` to your bearer API key
 
-The six keyless Earn catalogue, quote, and unsigned-build requests import with
-**No Auth**, so they work without changing the placeholder API key. To exercise
-their authenticated behavior, switch the individual request to **Inherit auth
-from parent**. Tenant reads and transaction submissions always inherit the
-collection API key.
+The eight optional-auth Earn requests import with **No Auth**: strategy list and
+detail, deposit preview and build, direct-withdrawal preview and build,
+withdrawal-route discovery, and queued-withdrawal preview. To exercise their
+authenticated behavior, switch the individual request to **Inherit auth from
+parent**. Queued request or cancellation builds, tenant reads, and transaction
+submissions always inherit the collection API key.
 
 ---
 
@@ -6263,7 +6265,7 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 ### Earn
 Source: https://platform.solana.com/docs/reference/api/earn
 
-> Keyless Earn catalogue, quotes, and unsigned external-wallet builds plus authenticated submission and tenant tracking.
+> Keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned builds, plus authenticated submission, queued actions, and tenant tracking.
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |

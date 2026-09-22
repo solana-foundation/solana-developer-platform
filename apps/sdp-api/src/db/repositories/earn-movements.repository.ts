@@ -97,7 +97,7 @@ export interface EarnPositionRow {
    * `custody_wallet_id` is set on a vault row; SDP holds no key for it.
    */
   owner_address: string | null;
-  /** vault_direct only — the vault's on-chain address. */
+  /** vault_direct only: provider reference for the vault, market, or yield token. */
   vault_address: string | null;
   share_mint: string | null;
   token_mint: string | null;

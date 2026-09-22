@@ -7,8 +7,8 @@ Status: Accepted — implemented on `main` (`earn-initial` merged as
 ## Context
 
 Solana Earn (SDP Markets V1) fronts yield strategies through external
-vault-infra providers (Veda, Upshift, Perena, Kamino, Jupiter Lend, Ondo today;
-the Ground integration was removed 2026-09 — see the final addendum) and
+vault-infra providers (Veda, Upshift, Perena, Kamino, Jupiter Lend, Ondo, and
+pre-launch WisdomTree today; the Ground integration was removed 2026-09) and
 surfaces curator risk frameworks (Gauntlet, Steakhouse, Sentora today). Both lists are
 expected to churn: new partners must be insertable with minimal lift, and
 existing ones must be enable/disable-able — per environment and per
@@ -1284,3 +1284,43 @@ The OpenAPI document, generated API reference, Embedded Yield guide, and AI
 discovery files are one public contract. Changing an operation's OpenAPI
 `security` declaration still requires the named security review mandated by
 PRO-1872 before those generated artifacts are published.
+
+## Addendum: 2026-09-22 Queued withdrawals enter the Embedded Yield contract
+
+PR #1987 completed the PRO-1872 / EARN-027 security gate at exact head
+`b2d313803`, with named approval from `cutbow7`, and published the
+external-wallet queued-withdrawal lifecycle. The public Earn document now pins
+21 operations. Exactly eight are optional-auth:
+
+- `GET /v1/earn/strategies`
+- `GET /v1/earn/strategies/{strategyId}`
+- `POST /v1/earn/vault-deposit-previews`
+- `POST /v1/earn/external-wallet/deposit-transactions`
+- `POST /v1/earn/external-wallet/withdrawal-previews`
+- `POST /v1/earn/external-wallet/withdrawal-transactions`
+- `POST /v1/earn/external-wallet/withdrawal-options`
+- `POST /v1/earn/external-wallet/queued-withdrawal-previews`
+
+This supersedes two details in the 2026-09-14 addendum. Anonymous strategy
+lists accept `?environment=sandbox|production` and default to production;
+preview and build requests inherit the environment from the named strategy.
+For authenticated requests, the API-key project environment remains
+authoritative. The optional-auth list also grew from six to the eight
+operations pinned above.
+
+Queued request and cancellation builds, submits, list/detail history, movement
+and position reads, and earnings remain API-keyed. Anonymous callers can inspect
+live route and queue terms but cannot create a durable escrow lifecycle. A
+presented invalid credential still fails with 401 rather than falling back to
+anonymous access.
+
+A queued request transaction escrows shares and is not a payout. A cancellation
+returns shares and is not a payout. Only a verified provider fulfilment projects
+one withdrawal movement, using the solver transaction and observed assets paid.
+Clients restore non-terminal requests through the cursor-paginated history,
+poll until a terminal state, and expose recovery only when server state is
+`expiredCancelable`; a client clock does not authorize cancellation.
+
+Custody queue routes remain internal. Any future operation-list or OpenAPI
+security change is another EARN-027 scope change and requires a new named
+security approval.

@@ -2,21 +2,22 @@
 
 `@sdp/earn` is the provider-integration layer for SDP Embedded Yield: curated
 stablecoin yield for organization treasuries and partner-owned end-user wallet
-experiences, fronted by vault-infrastructure providers. The architecture is
-deliberately multi-provider: provider-specific details live behind capability
-seams so adding a provider, curator, or vault stays checklist-driven.
+experiences, fronted by on-chain vaults and yield-bearing tokens. The
+architecture is deliberately multi-provider: provider-specific details live
+behind capability seams so adding a provider, curator, or vault stays
+checklist-driven.
 
 Two provider SHAPES live here, and the difference decides which seams a new
 integration touches:
 
-| | **Custodial portfolio** (no shipped provider — Ground, the one integration, was removed) | **Vault-direct** (Kamino, Veda) |
+| | **Custodial portfolio** (no shipped provider; Ground, the one integration, was removed) | **Vault-direct** (Kamino, Veda, Jupiter Lend, Ondo; WisdomTree registered pre-launch) |
 |---|---|---|
-| Money model | SDP provisions an omnibus wallet; the provider spreads funds across sources | Non-custodial — the customer's own wallet deposits into an on-chain vault |
+| Money model | SDP provisions an omnibus wallet; the provider spreads funds across sources | Non-custodial; the owner signs a provider-built transaction and keeps the resulting vault shares or yield token |
 | Contract | `EarnVaultProvider` + `EarnPortfolioWalletProvider` (+ approvals) | Catalogue client in `@sdp/earn`; execution client implements `EarnVaultDirectProvider` in its own package |
 | `/v1/earn/programs` | the whole flow | **501** by capability detection |
-| Credential | `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY` | none today; public API or on-chain state |
-| Clusters | catalogued per environment's own cluster | deployment registry per cluster; Kamino has devnet and mainnet, Veda is devnet-only until a production vault is approved |
-| Dashboard | treasury program flow | treasury vault flow plus an authenticated integration guide; public docs also cover keyless external-wallet builds |
+| Upstream readiness | `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY` | Kamino, Veda, and Jupiter Lend are credential-free; Ondo needs the platform Jupiter key; WisdomTree needs Connect credentials |
+| Clusters | catalogued per environment's own cluster | provider deployment registries: Kamino on devnet/mainnet, Veda on devnet, Jupiter Lend and Ondo on mainnet; WisdomTree remains deposit-disabled |
+| Dashboard | treasury program flow | treasury vault flow plus an authenticated integration guide; public docs also cover the optional-auth instant-build and queued-preview tier |
 
 A vault-direct provider is a complete integration without a portfolio wallet:
 `supportsPortfolioWallets` returning false is the answer, not a TODO. Its
@@ -82,16 +83,17 @@ Companion docs:
 
 ## Vault-direct money paths: who signs decides the surface
 
-A `vault_direct` provider (Kamino or Veda) custodies nothing: the vault is a program
-account, and money moves only when a signed transaction lands on chain. SDP
-ships TWO signers over one runtime, and the signer decides which routes serve
-the flow:
+A `vault_direct` integration custodies nothing: the position is an on-chain
+vault or yield-bearing token, and money moves only when a signed transaction
+lands on chain. SDP ships TWO signers over one runtime, and the signer decides
+which routes serve the flow:
 
 | | Treasury (SDP signs) | B2B2C external wallet (the customer signs) |
 | -- | -- | -- |
 | Who holds the funds | an org custody wallet | the end user's own wallet; SDP holds no key |
 | Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` (keyless or keyed build); a keyed caller may then submit to `/external-wallet/deposits` |
-| Exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-previews` and `/withdrawal-transactions` (keyless or keyed); a keyed caller may then submit to `/external-wallet/withdrawals` |
+| Direct exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-previews` and `/withdrawal-transactions` (keyless or keyed); a keyed caller may then submit to `/external-wallet/withdrawals` |
+| Queued exit | options, preview, create/list/detail, and post-deadline cancel routes on the custody surface | options and preview are keyless or keyed; request/cancellation builds, submits, and history require a key |
 | Movement reads | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements` | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772) |
 | Holdings + earnings | `GET /v1/earn/vault-positions` | `GET /v1/earn/external-wallet/positions?ownerAddress=…`, `/positions/summary`, `/earnings?ownerAddress=…` |
 | Authorization | wallet policy, then `createOrgSigner` | the owner's own ed25519 signature |
@@ -129,6 +131,11 @@ The external-wallet flow in one pass (PRO-1722):
    original movement (`replayed: true`); each durable build is consumable once.
 5. **Settle.** SDP drives a submitted movement to `finalized` or `failed`. The
    exit mirrors the deposit and retains its money-out safety rules.
+
+A queued exit is deliberately separate. Its first signed transaction escrows
+shares and creates a durable request, not a payout movement. SDP persists request
+and cancellation actions before broadcast, reconciles provider state and lifecycle
+events, and projects a withdrawal movement only after verified fulfilment.
 
 The public Embedded Yield guide documents both access tiers. The dashboard's
 configuration snippets intentionally emit the authenticated end-to-end flow
@@ -181,20 +188,23 @@ packages/sdp-earn/src/
                                    drift, not data.
   providers/stub.ts                StubEarnClient — every method NOT_IMPLEMENTED;
                                    a new provider starts as a ~10-line subclass.
-  providers/veda/                  Live devnet Veda catalogue from on-chain
-                                   state; execution lives in @sdp/veda.
+  providers/{kamino,veda,jupiter-lend,ondo,wisdomtree}/
+                                   Live catalogue implementations. WisdomTree is
+                                   registered but not surfaced; Upshift/Perena
+                                   below remain scaffolds.
   providers/{upshift,perena}/      Registered scaffolds awaiting integrations.
 
-packages/sdp-{kamino,veda}/        Provider SDK adapters implementing the
-                                   vault-direct plan, quote, withdrawal, and
-                                   sponsored-program capabilities.
+packages/sdp-{kamino,veda,jupiter-lend,ondo,wisdomtree}/
+                                   Provider execution adapters implementing
+                                   vault-direct plans and their supported quote,
+                                   withdrawal, and sponsorship capabilities.
 
 apps/sdp-api/src/
   routes/earn/                     /v1/earn HTTP surface. handlers/program.ts is
                                    the programs family (list/create/re-target,
                                    live provider reads + the withdrawal
                                    ledger); strategies is the catalogue family.
-  db/migrations/postgres/0048–0065 earn_strategies (0048);
+  db/migrations/postgres/0048+     earn_strategies (0048);
                                    earn_provider_wallets (0049, the program
                                    link); earn_program_withdrawals (0055, the
                                    withdrawal ledger — 0055 also dropped the
@@ -217,9 +227,12 @@ apps/sdp-api/src/
                                    earn_split_swap_advisories (PRO-1864, the
                                    orphan-detection record for split swaps:
                                    advisory state, never a movement).
-                                   The mechanism-split tables above take no
-                                   reads and no writes any more; a later
-                                   migration drops them.
+                                   Migration 0068 verifies the unified projection
+                                   and drops the mechanism-split movement and
+                                   position tables. Migration 0113 adds queued
+                                   withdrawal requests, signed actions, and build
+                                   rows; 0114 projects verified fulfilments into
+                                   earn_movements; 0118 adds the durable due queue.
                                    earn_provider_wallets stays — it is an
                                    ACCOUNT at a provider, not a holding.
   services/earn-withdrawal-ledger.service.ts
@@ -273,11 +286,11 @@ refresh is update-only.
   TTL (~59 min). Running the unslotted half first means a provider stall happens
   before any slot exists to burn.
 - **What it cannot do**, and this is the whole safety argument:
-  - **Insert.** `updateStrategyMetrics` matches on
-    (provider, provider_reference, environment) and no-ops otherwise, so a
-    provider reporting figures for a vault the catalogue refused cannot admit
-    it. Every admission gate stays in the hourly sync below. Kamino reports 173
-    vaults each pass and 21 rows update — that gap is expected, not a warning.
+  - **Insert.** The normal path uses one `updateStrategyMetricsBatch` per
+    provider/environment and falls back to `updateStrategyMetrics` per row only
+    to isolate malformed data. Both match existing catalogue identity and
+    no-op otherwise, so a provider reporting figures for a vault the catalogue
+    refused cannot admit it. Every admission gate stays in the hourly sync below.
   - **Change what a strategy IS.** Its input carries the rate and volatile
     metadata only; the metadata is MERGED, so `curator` survives.
 - **Why not read live at request time:** `GET /strategies` reads exactly one

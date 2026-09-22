@@ -313,7 +313,7 @@ export class VedaVaultDirectClient
    * every build path: with no deployment, every build on this client fails
    * closed before emitting a single instruction, so there is truthfully nothing
    * to sponsor — and the paymaster-allowlist assertions must stay answerable
-   * while `VEDA_DEPLOYMENTS` is empty.
+   * while one or more entries in `VEDA_DEPLOYMENTS` remain unconfigured.
    */
   sponsoredPrograms(cluster: SolanaCluster): readonly string[] {
     const deployment = vedaDeployment(cluster);

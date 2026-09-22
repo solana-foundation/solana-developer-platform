@@ -24,7 +24,7 @@ import { registerRpcPaths } from "./paths/rpc";
 import { registerTransactionsPaths } from "./paths/transactions";
 
 const EARN_TAG_DESCRIPTION =
-  "Keyless Earn catalogue, quotes, and unsigned external-wallet builds plus authenticated submission and tenant tracking.";
+  "Keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned builds, plus authenticated submission, queued actions, and tenant tracking.";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },

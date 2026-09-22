@@ -14,15 +14,17 @@ handler per operation:
 | Capability | Without an API key | With an API key |
 | --- | --- | --- |
 | List and inspect strategies | Yes | Yes |
-| Quote deposits and withdrawals | Yes | Yes |
-| Build unsigned external-wallet transactions | Yes, owner pays | Yes, owner or caller-provided fee payer |
+| Preview deposits and direct withdrawals | Yes | Yes |
+| Build instant deposit and direct-withdrawal transactions | Yes, owner pays | Yes, owner or caller-provided fee payer |
+| Discover and preview queued withdrawals | Yes | Yes |
+| Build, submit, track, or cancel a queued withdrawal | No | Yes |
 | Submit signed transactions | No | Yes |
 | Record movements and positions | No | Yes |
 | Read positions, activity, and earnings | No | Yes |
 
-Anonymous requests have no organization or project identity. They read only
-the deployment's global catalogue and write no build, advisory, movement, or
-position rows. The caller signs, broadcasts, and tracks an anonymous build.
+Anonymous requests have no organization or project identity. They read the
+caller-selected global catalogue shelf and write no build, advisory, movement,
+or position rows. The caller signs, broadcasts, and tracks an anonymous build.
 
 Authenticated requests preserve the established project boundary. A keyed
 build is durable and may be submitted through SDP, which verifies signatures,
@@ -34,8 +36,9 @@ An authenticated project determines its own environment, and every deployment
 serves both clusters by project. A keyless request has no project, so the
 caller picks the shelf: `GET /v1/earn/strategies?environment=` names it
 (production when omitted), and a quote or build follows the environment of the
-strategy it names. A key that names another environment is refused with 400.
-The deployment's own `ENVIRONMENT` never selects a cluster. This revisits the
+strategy it names. On an authenticated strategy list, an `?environment=` value
+that disagrees with the API-key project is refused with 400. The deployment's
+own `ENVIRONMENT` never selects a cluster. This revisits the
 earlier "request input never selects production" rule: an anonymous production
 build moves no funds, and its RPC spend is metered per client address.
 

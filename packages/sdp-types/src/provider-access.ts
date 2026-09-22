@@ -34,15 +34,17 @@ export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 /**
  * Vault-infra partners fronting Earn yield strategies.
  *
- * All current providers are **vault-direct providers** (Kamino, Veda): they
- * front on-chain vaults that an
- *   organization custody wallet or an end user's external wallet deposits
- *   into. Their catalogue client implements the base `EarnVaultProvider`
- *   contract; a separate execution package implements `EarnVaultDirectProvider`.
+ * Every executing provider currently uses the **vault-direct** model: Kamino,
+ * Veda, Jupiter Lend, Ondo, and the pre-launch WisdomTree integration. They
+ * front an on-chain vault or yield-bearing token that an organization custody
+ * wallet or an end user's external wallet deposits into. Their catalogue client
+ * implements the base `EarnVaultProvider` contract; a separate execution
+ * package implements `EarnVaultDirectProvider`.
  *
- * Kamino and Veda are keyless today: their catalogue and execution paths read
- * public on-chain state, so the API availability service excludes them rather
- * than demanding keys that nothing reads.
+ * Kamino, Veda, and Jupiter Lend use public APIs or on-chain state. Ondo's
+ * execution readiness depends on the platform Jupiter key. WisdomTree uses
+ * environment-specific Connect credentials. The availability registry owns
+ * those distinctions; do not infer credentials from the deposit style.
  */
 export const EARN_PROVIDERS = [
   "veda",
@@ -140,8 +142,9 @@ export const EARN_PROVIDER_SURFACING = {
   // Mainnet-only like Jupiter Lend: the production catalogue carries the USDY
   // row and production projects may execute against it (the deposit is a
   // Jupiter-routed USDC→USDY swap, `@sdp/ondo`); the sandbox copy arrives
-  // through the PRO-1742 mirror, browse-only. No `currentApy` until a rate
-  // source lands (PRO-1833) — the row renders "—" rather than a derived figure.
+  // through the PRO-1742 mirror, browse-only. The `currentApy` source is the
+  // issuer's public assets API (PRO-1833); no figure is derived from token price
+  // or wallet balances.
   ondo: true,
   // Registered ahead of launch: catalogue, execution client and eligibility
   // checks are integrated, but the go-live gate (playbook §4: flip LAST, in its
@@ -158,17 +161,19 @@ export const EARN_PROVIDER_SURFACING = {
  * - `custodial` — SDP provisions a provider-managed portfolio wallet and the
  *   customer funds THAT address. SDP never signs; it watches the address and the
  *   provider deploys on its own rebalance. (No current provider uses this.)
- * - `vault_direct`: the vault is non-custodial and takes an on-chain program
- *   instruction signed by the organization's selected custody wallet or an end
- *   user's external wallet. There is no provider deposit address to fund; SDP
- *   builds the transaction and either submits the custody-signed form or
- *   verifies and submits the caller-signed form. Kamino and Veda.
+ * - `vault_direct`: the position is non-custodial and reached through an
+ *   on-chain transaction signed by the organization's selected custody wallet
+ *   or an end user's external wallet. There is no generic provider deposit
+ *   address to fund; SDP builds the transaction and either submits the
+ *   custody-signed form or verifies and submits the caller-signed form. Every
+ *   current provider uses this shape, including the registered but pre-launch
+ *   WisdomTree integration.
  *
  * **The difference is load-bearing in the UI and is not cosmetic.** A custodial
- * program has a real deposit ADDRESS a customer can send USDC to. A K-Vault does
- * not: its `providerReference` is the vault's program account, and presenting it
- * as a send target would destroy funds. Any surface that says "send funds to X"
- * must branch on this.
+ * program has a real deposit ADDRESS a customer can fund without a provider-built
+ * transaction. A vault-direct `providerReference` may be a vault, market, or mint,
+ * and presenting it as a send target can destroy or strand funds. Any surface
+ * that says "send funds to X" must branch on this.
  *
  * Declared here rather than derived from a provider id at each call site, and
  * exhaustive over `EarnProviderId` so a new provider must state its shape. It

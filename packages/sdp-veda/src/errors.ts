@@ -87,9 +87,9 @@ export function amountOutOfRange(field: string, value: string): SdpVedaError {
 /**
  * SDP has no confirmed Veda deployment for this cluster.
  *
- * Not an outage and not a bug: `VEDA_DEPLOYMENTS` in `@sdp/types` is empty
- * until Veda confirms its program and vault-state addresses per cluster, and
- * building against an unverified address is the failure this refuses to risk.
+ * Not an outage and not a bug: `VEDA_DEPLOYMENTS` in `@sdp/types` has a devnet
+ * deployment but no approved mainnet deployment. Building against an
+ * unverified address is the failure this refuses to risk.
  */
 export function deploymentNotConfigured(cluster: SolanaCluster): SdpVedaError {
   return new SdpVedaError(

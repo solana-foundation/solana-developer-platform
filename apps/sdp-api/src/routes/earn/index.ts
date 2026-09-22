@@ -188,7 +188,7 @@ async function observeEarnAccessTier(c: Context<{ Bindings: Env }>, next: Next) 
 }
 
 // Hono flattens sub-app `use("*")` middleware into the parent at mount time.
-// Keep this tuple on the six optional-auth declarations so it can never run on
+// Keep this tuple on the eight optional-auth declarations so it can never run on
 // the keyed router that shares the same mount point.
 const OPTIONAL_EARN_ACCESS_MIDDLEWARE = [
   optionalEarnAuth,
