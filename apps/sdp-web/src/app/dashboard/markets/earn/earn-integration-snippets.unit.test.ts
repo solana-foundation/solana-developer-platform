@@ -502,6 +502,19 @@ describe("generated Embedded Yield integration", () => {
         },
       },
       {
+        path: "/v1/earn/external-wallet/withdrawal-options",
+        body: { positionId: "position" },
+      },
+      {
+        path: "/v1/earn/external-wallet/queued-withdrawal-previews",
+        body: {
+          positionId: "position",
+          shares: "2",
+          discountBps: 25,
+          deadlineSeconds: 600,
+        },
+      },
+      {
         path: "/v1/earn/external-wallet/withdrawal-request-transactions",
         body: {
           positionId: "position",
