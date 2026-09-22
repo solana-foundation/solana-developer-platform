@@ -3,12 +3,10 @@ import { describe, it } from "node:test";
 import {
   buildBvnkCustomerExternalReference,
   buildBvnkFundingWalletName,
-  buildBvnkOfframpWalletName,
   buildBvnkWalletIdempotencyKey,
   bvnkCustomerStatusRequirements,
   bvnkPayoutPartyDetailsFromCustomer,
   parseBvnkFundingWalletName,
-  parseBvnkOfframpWalletName,
   parseBvnkTransferIdFromRemittance,
   parseBvnkWalletName,
 } from "./provider-data";
@@ -128,8 +126,17 @@ describe("bvnkPayoutPartyDetailsFromCustomer", () => {
       individual: { person },
     });
 
-    assert.deepEqual(bvnkPayoutPartyDetailsFromCustomer(customer), {
+    assert.deepEqual(bvnkPayoutPartyDetailsFromCustomer(customer, "BENEFICIARY"), {
       type: "BENEFICIARY",
+      entityType: "INDIVIDUAL",
+      firstName: "Zach",
+      lastName: "Khong",
+      dateOfBirth: "2001-04-01",
+      relationshipType: "THIRD_PARTY",
+      countryCode: "US",
+    });
+    assert.deepEqual(bvnkPayoutPartyDetailsFromCustomer(customer, "ORIGINATOR"), {
+      type: "ORIGINATOR",
       entityType: "INDIVIDUAL",
       firstName: "Zach",
       lastName: "Khong",
@@ -143,7 +150,7 @@ describe("bvnkPayoutPartyDetailsFromCustomer", () => {
       reference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
       status: "VERIFIED",
     });
-    assert.throws(() => bvnkPayoutPartyDetailsFromCustomer(withoutDetails), {
+    assert.throws(() => bvnkPayoutPartyDetailsFromCustomer(withoutDetails, "BENEFICIARY"), {
       message: /BVNK customer 2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3 has no individual details/,
     });
   });
@@ -171,31 +178,6 @@ describe("buildBvnkCustomerExternalReference", () => {
   });
 });
 
-describe("parseBvnkOfframpWalletName", () => {
-  it("round-trips an SDP off-ramp wallet name", () => {
-    assert.deepEqual(parseBvnkOfframpWalletName(buildBvnkOfframpWalletName("USD", "cpty_123")), {
-      namespace: "sdp",
-      kind: "merchant_offramp",
-      fiatCurrency: "USD",
-      counterpartyId: "cpty_123",
-    });
-
-    // Malformed names never parse as an off-ramp wallet.
-    assert.throws(() => parseBvnkOfframpWalletName("sdp:onramp:USD:cpty_123"), {
-      message: /Malformed BVNK off-ramp wallet name/,
-    });
-    assert.throws(() => parseBvnkOfframpWalletName("sdp:sideways:USD:cpty_123"), {
-      message: /Malformed BVNK off-ramp wallet name/,
-    });
-    assert.throws(() => parseBvnkOfframpWalletName("sdp:offramp:NOTFIAT:cpty_123"), {
-      message: /Malformed BVNK off-ramp wallet name/,
-    });
-    assert.throws(() => parseBvnkOfframpWalletName("sdp:offramp:USD:cpty_123:extra"), {
-      message: /Malformed BVNK off-ramp wallet name/,
-    });
-  });
-});
-
 describe("parseBvnkFundingWalletName", () => {
   it("parses a customer funding wallet name into its provider-account id", () => {
     assert.equal(buildBvnkFundingWalletName("cpa_123"), "sdp:onramp:cpa_123");
@@ -215,25 +197,19 @@ describe("parseBvnkFundingWalletName", () => {
       message: /Malformed BVNK funding wallet name/,
     });
 
-    // Other names never parse as funding wallets: unrecognised.
+    // Other names never parse as funding wallets, including the retired
+    // merchant off-ramp shape: unrecognised.
     assert.deepEqual(parseBvnkWalletName("sdp:sideways:USD:cpty_123"), {
       kind: "unrecognised",
       name: "sdp:sideways:USD:cpty_123",
     });
+    assert.deepEqual(parseBvnkWalletName("sdp:offramp:USD:cpty_123"), {
+      kind: "unrecognised",
+      name: "sdp:offramp:USD:cpty_123",
+    });
     assert.deepEqual(parseBvnkWalletName("a:foreign:wallet:1"), {
       kind: "unrecognised",
       name: "a:foreign:wallet:1",
-    });
-  });
-});
-
-describe("parseBvnkWalletName", () => {
-  it("round-trips the merchant off-ramp wallet name", () => {
-    assert.deepEqual(parseBvnkWalletName(buildBvnkOfframpWalletName("USD", "cpty_123")), {
-      namespace: "sdp",
-      kind: "merchant_offramp",
-      fiatCurrency: "USD",
-      counterpartyId: "cpty_123",
     });
   });
 });

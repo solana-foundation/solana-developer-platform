@@ -154,7 +154,7 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
 
-  it("accepts an sdp_offramp reference and stringifies its walletAmount", () => {
+  it("accepts an sdp_offramp reference and stringifies its walletAmount and wallet id", () => {
     const processor = new BvnkWebhookProcessor();
 
     expect(
@@ -162,6 +162,7 @@ describe("BvnkWebhookProcessor.parse", () => {
         bvnkChannelTransactionEvent("transaction-confirmed", {
           reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",
           walletAmount: 100,
+          walletId: "a:funding:wallet:channel:1",
         })
       )
     ).toEqual({
@@ -169,6 +170,7 @@ describe("BvnkWebhookProcessor.parse", () => {
       data: {
         reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",
         walletAmount: "100",
+        walletId: "a:funding:wallet:channel:1",
       },
     });
   });

@@ -303,6 +303,7 @@ interface BvnkChannelTransactionData {
   displayAmount?: number;
   walletAmount?: number;
   feeAmount?: number;
+  walletId?: string;
   sources?: string[] | null;
 }
 

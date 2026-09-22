@@ -1281,6 +1281,14 @@ describe("Counterparties Routes", () => {
       );
     }
 
+    function bvnkOfframpRequirementsRequest(counterpartyId: string, fiatCurrency = "USD") {
+      return app.request(
+        `/v1/counterparties/${counterpartyId}/requirements?provider=bvnk&direction=offramp&assetRail=usdc.solana&fiatCurrency=${fiatCurrency}`,
+        { headers: { "Content-Type": "application/json", Authorization: authHeader } },
+        env
+      );
+    }
+
     function bvnkOnrampAdvanceRequest(counterpartyId: string) {
       return app.request(
         `/v1/counterparties/${counterpartyId}/requirements`,
@@ -1458,6 +1466,74 @@ describe("Counterparties Routes", () => {
       });
 
       getCustomerSpy.mockRestore();
+    });
+
+    it("gates an off-ramp requirements read on the funding wallet exactly like on-ramp when no funding row exists", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_offramp_no_funding",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await bvnkOfframpRequirementsRequest(counterparty.id);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "offramp",
+        status: "customer_funding_account_provisioning",
+      });
+
+      getCustomerSpy.mockRestore();
+    });
+
+    it("answers ready for an off-ramp requirements read once the funding wallet is provisioned", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_offramp_ready",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedFundingWallet(counterparty.id, {
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await bvnkOfframpRequirementsRequest(counterparty.id);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "offramp",
+        status: "ready",
+      });
+
+      getCustomerSpy.mockRestore();
+    });
+
+    it("rejects a non-USD off-ramp fiat before any BVNK call", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_offramp_eur",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await bvnkOfframpRequirementsRequest(counterparty.id, "EUR");
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "offramp",
+        status: "unsupported",
+        reason: "BVNK supports USD only.",
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      fetchSpy.mockRestore();
     });
 
     async function seedAssignedStaleProvisioningFundingWallet(

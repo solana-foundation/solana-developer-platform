@@ -1255,21 +1255,50 @@ describe("BVNK ramp webhook", () => {
 
   async function seedBvnkOfframpTransfer(
     transferId: string,
-    projectId = PROJECT_ID
+    projectId = PROJECT_ID,
+    fundingWalletReference = "a:funding:wallet:channel:1"
   ): Promise<void> {
+    const counterpartyId = `cpty_offramp_${transferId}`;
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparties (
+           id, organization_id, project_id, entity_type, display_name,
+           provider_data, status, created_by
+         ) VALUES (?, ?, ?, 'individual', 'Offramp Channel Buyer', '{}', 'active', ?)`
+      )
+      .bind(counterpartyId, ORG_ID, projectId, USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_provider_accounts (
+           id, organization_id, project_id, counterparty_id, provider,
+           provider_customer_reference, kind, fiat_currency,
+           external_account_reference, provider_status, metadata
+         ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'funding_wallet', 'USD', ?, 'provisioned_funding_wallet', '{}'::jsonb)`
+      )
+      .bind(
+        `cpa_offramp_${transferId}`,
+        ORG_ID,
+        projectId,
+        counterpartyId,
+        `bvnk_customer_${transferId}`,
+        fundingWalletReference
+      )
+      .run();
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers (
-           id, organization_id, project_id, wallet_id, source_address, destination_address,
+           id, organization_id, project_id, counterparty_id, wallet_id, source_address, destination_address,
            token, amount, memo, type, direction, status, provider, provider_reference,
            delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
            initiated_by_key_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         transferId,
         ORG_ID,
         projectId,
+        counterpartyId,
         "wallet_bvnk_webhook",
         "source_address",
         null,
@@ -1603,32 +1632,28 @@ describe("BVNK ramp webhook", () => {
     expect(account?.metadata.status).toBe("PENDING");
   });
 
-  it("activates the off-ramp wallet on a wallet status-change webhook with no customer", async () => {
+  it("parks a legacy merchant off-ramp wallet event as terminal without writing rows", async () => {
     const OFFRAMP_WALLET_ID = "a:offramp:wallet:1";
+    const before = { bvnk: { offramp: { wallets: { USD: { id: OFFRAMP_WALLET_ID } } } } };
     await getDb(env)
       .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
-      .bind(
-        { bvnk: { offramp: { wallets: { USD: { id: OFFRAMP_WALLET_ID, status: "PENDING" } } } } },
-        COUNTERPARTY_ID
-      )
+      .bind(before, COUNTERPARTY_ID)
       .run();
 
     await sendBvnkWebhook(
       bvnkWalletStatusChangeEvent({
         name: `sdp:offramp:USD:${COUNTERPARTY_ID}`,
-        paymentInstruments: undefined,
-      })
+      }),
+      undefined,
+      "production"
     );
 
+    await expectTerminalWebhookEvent("production", "SDP no longer manages");
     const row = await getDb(env)
       .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
       .bind(COUNTERPARTY_ID)
-      .first<{
-        provider_data: {
-          bvnk?: { offramp?: { wallets?: Record<string, { id?: string; status?: string }> } };
-        };
-      }>();
-    expect(row?.provider_data.bvnk?.offramp?.wallets?.USD?.status).toBe("ACTIVE");
+      .first<{ provider_data: Record<string, unknown> }>();
+    expect(row?.provider_data).toEqual(before);
   });
 
   it("settles an awaiting BVNK on-ramp transfer from a v1 COMPLETED pay-in matched by its remittance", async () => {
@@ -2212,6 +2237,7 @@ describe("BVNK ramp webhook", () => {
         paidAmount: 5,
         displayAmount: 4.95,
         walletAmount: 4.95,
+        walletId: "a:funding:wallet:channel:1",
         feeAmount: 0.04,
         sources: [
           "GSDYH3kHc4iAVHSCrTxxhXLsoQfMLo6eYLPbA3HLgvzg",
@@ -2225,6 +2251,29 @@ describe("BVNK ramp webhook", () => {
       .bind(transferId)
       .first<{ status: string; fiat_amount: string | null }>();
     expect(transfer).toEqual({ status: "completed", fiat_amount: "4.95" });
+  });
+
+  it("parks a confirmed channel event crediting a different wallet as terminal and leaves the transfer untouched", async () => {
+    const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7bd9";
+    await seedBvnkOfframpTransfer(transferId, PROJECT_ID, "a:funding:wallet:channel:1");
+
+    await sendBvnkWebhook(
+      bvnkChannelTransactionEvent("transaction-confirmed", {
+        ...OFFRAMP_CHANNEL_BASE,
+        eventId: "019f0ce5-28a6-7000-8000-000000000001",
+        reference: buildBvnkOfframpReference(transferId),
+        status: "COMPLETE",
+        walletAmount: 4.95,
+        walletId: "a:other:wallet:mismatch:1",
+      })
+    );
+
+    await expectNoBvnkWebhookEvents();
+    const transfer = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: string }>();
+    expect(transfer?.status).toBe("awaiting_payment");
   });
 
   it("rejects a webhook with an invalid signature", async () => {
