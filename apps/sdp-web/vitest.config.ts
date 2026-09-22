@@ -9,12 +9,14 @@ export default defineConfig({
     coverage: {
       provider: "istanbul",
       reporter: ["text-summary"],
+      // Coarse round-downs of current coverage so ordinary drift does not
+      // trip them; move them deliberately, never automatically (no
+      // autoUpdate — it rewrote this file after every local run).
       thresholds: {
-        statements: 70.53,
-        branches: 63.77,
-        functions: 67.43,
-        lines: 71.35,
-        autoUpdate: true,
+        statements: 69,
+        branches: 62,
+        functions: 65,
+        lines: 70,
       },
     },
   },
