@@ -20,6 +20,10 @@ function settings(
 // families, so splitting it changes no deployed behaviour: these mints still get
 // the pausable extension AND a base freeze authority.
 const STABLECOIN_SETTINGS = settings({
+  // Custom template only: a mint-burn mint has no plaintext supply to mint or
+  // burn through the ordinary endpoints, which is the whole shape of a regulated
+  // stablecoin or security here.
+  confidentialMintBurn: "unsupported",
   pauseTransfers: "locked",
   freezeAccounts: "locked",
   permanentDelegate: "locked",
@@ -31,6 +35,10 @@ const STABLECOIN_SETTINGS = settings({
 });
 
 const SECURITY_SETTINGS = settings({
+  // Custom template only: a mint-burn mint has no plaintext supply to mint or
+  // burn through the ordinary endpoints, which is the whole shape of a regulated
+  // stablecoin or security here.
+  confidentialMintBurn: "unsupported",
   pauseTransfers: "locked",
   freezeAccounts: "locked",
   permanentDelegate: "locked",

@@ -709,6 +709,14 @@ jobs:
             test_files: src/tests/issuance-execute.test.ts
             rpc_provider: alchemy
             custody_provider: local
+          # Confidential transfers need two distinct holders, and local custody
+          # hands every wallet the same signing key — so this shard runs on
+          # privy custody. The two-holder transfer case self-skips elsewhere.
+          - name: Surfpool / Confidential Transfers
+            provider: surfpool
+            test_files: src/tests/confidential.test.ts
+            rpc_provider: alchemy
+            custody_provider: privy
           - name: Surfpool / Mosaic
             provider: surfpool
             test_files: src/tests/mosaic-token-acl.test.ts src/tests/mosaic-token-acl-constraints.test.ts src/tests/mosaic-abl.test.ts src/tests/mosaic-templates.test.ts

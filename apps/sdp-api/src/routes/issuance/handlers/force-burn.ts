@@ -6,6 +6,7 @@ import { success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import { assertTokenNotConfidentialMintBurn } from "@/services/issuance/confidential-support";
 import {
   approvedWalletOperationId,
   assertApprovedWalletOperationCustodyWallet,
@@ -55,6 +56,10 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   if (!token) {
     throw notFound("Token");
   }
+
+  // A mint whose supply exists only as an ElGamal ciphertext has no plaintext
+  // side: Token-2022 refuses this outright, so say so before any RPC work.
+  assertTokenNotConfidentialMintBurn(token, "force-burning");
 
   assertTokenAllowsOperation(token, "force_burn");
   assertTokenIsDeployed(token);
@@ -157,6 +162,10 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   if (!token) {
     throw notFound("Token");
   }
+
+  // A mint whose supply exists only as an ElGamal ciphertext has no plaintext
+  // side: Token-2022 refuses this outright, so say so before any RPC work.
+  assertTokenNotConfidentialMintBurn(token, "force-burning");
 
   const idempotencyForWallet = (custodyWalletId: string) =>
     buildIdempotencyMetadata(c.req.header("Idempotency-Key"), {
@@ -353,6 +362,10 @@ export async function extractForceBurnPolicyCandidate(
   if (!token) {
     throw notFound("Token");
   }
+
+  // A mint whose supply exists only as an ElGamal ciphertext has no plaintext
+  // side: Token-2022 refuses this outright, so say so before any RPC work.
+  assertTokenNotConfidentialMintBurn(token, "force-burning");
 
   const emptyExtraction = {
     legs: [],

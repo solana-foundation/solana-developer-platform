@@ -3,22 +3,41 @@ packages:
   - packages/*
 
 catalog:
-  # Kit 7: what kora, subscriptions, surfpool and the @solana-program clients already peer; @solana/pay is the holdout, covered by peerDependencyRules.
+  # Kit 8: what the @solana-program clients peer (token / token-2022 / system already
+  # declare ^8) and what @solana/mosaic-sdk builds its confidential transaction-v1
+  # planner on. The holdouts are @solana/pay (^6) and @solana/kora, subscriptions,
+  # surfpool and the kit plugins (^7) — all covered by peerDependencyRules, and kora
+  # is only ever handed encoded wire bytes, never a kit object.
   '@solana-program/system': 0.14.1
   '@solana-program/token': 0.16.1
+  # Held at 0.16.1, not moved to the 0.18.0 that @solana/mosaic-sdk pins: 0.18.0
+  # published 2026-09-16 and is still inside this workspace's 7-day release cooldown,
+  # and nothing here needs it — SDP uses only stable core exports (decodeMint,
+  # getMintSize, the metadata instruction, the program address), and every confidential
+  # helper is reached through mosaic, which carries its own 0.18.0. Move this to 0.18.0
+  # when the mosaic override below is swapped for the published release, so the tree
+  # settles on one copy.
   '@solana-program/token-2022': 0.16.1
-  '@solana/addresses': 7.1.1
-  '@solana/codecs': 7.1.1
-  '@solana/instructions': 7.1.1
-  '@solana/keys': 7.1.1
-  '@solana/kit': 7.1.1
+  '@solana/addresses': 8.3.0
+  '@solana/codecs': 8.3.0
+  '@solana/instruction-plans': 8.3.0
+  '@solana/instructions': 8.3.0
+  '@solana/keys': 8.3.0
+  '@solana/kit': 8.3.0
+  # TEMPORARY: the confidential surface this repo compiles against is not published
+  # yet. solana-foundation/mosaic#85 (Kit v8, token-2022 0.18, wallet-only key
+  # derivation, transaction-v1 planning, confidential mint/burn) carries `major`
+  # changesets, so it will publish as 1.0.0 — 0.2.0 below is only what the pin check
+  # reads. What actually resolves is the `@solana/mosaic-sdk` override in the root
+  # package.json, pointing at the packed branch build in vendor/. See
+  # vendor/README.md; removing it is a four-line change once the release lands.
   '@solana/mosaic-sdk': 0.2.0
-  '@solana/programs': 7.1.1
-  '@solana/rpc': 7.1.1
-  '@solana/signers': 7.1.1
-  '@solana/sysvars': 7.1.1
+  '@solana/programs': 8.3.0
+  '@solana/rpc': 8.3.0
+  '@solana/signers': 8.3.0
+  '@solana/sysvars': 8.3.0
   '@solana/token-acl-sdk': 0.4.0
-  '@solana/transactions': 7.1.1
+  '@solana/transactions': 8.3.0
 
 # A strict resolve fails on peer ranges this repo does not control (typescript ^5 vs 6, kora's kit-plugin-* peers, klend's kit ^3); flipping it needs its own PR.
 strictPeerDependencies: false

@@ -6,6 +6,12 @@ import {
   addTokenAllowlistRequestSchema,
   allowlistEntryIdParamSchema,
   burnRequestSchema,
+  confidentialAccountRequestSchema,
+  confidentialAmountRequestSchema,
+  confidentialApplyBurnRequestSchema,
+  confidentialApproveRequestSchema,
+  confidentialMintRequestSchema,
+  confidentialTransferRequestSchema,
   confirmDeployRequestSchema,
   createTokenRequestSchema,
   custodyWalletIdParamSchema,
@@ -37,6 +43,8 @@ import {
 } from "./helpers";
 import {
   assetAuditListResponse,
+  confidentialBalanceResponse,
+  confidentialOperationResponse,
   executeBurnResponse,
   executeForceBurnResponse,
   executeMintResponse,
@@ -861,6 +869,354 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         content: jsonContent(frozenAccountResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/configure",
+    tags: ["Issuance"],
+    summary: "Configure confidential account",
+    operationId: "configureConfidentialAccount",
+    description:
+      "Configures a holder's token account for confidential transfers. Must run before any other confidential operation on that account. Spans several transactions; settles on the last. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialAccountRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Configure confidential account completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/approve",
+    tags: ["Issuance"],
+    summary: "Approve confidential account",
+    operationId: "approveConfidentialAccount",
+    description:
+      "Approves a configured account so it can transact confidentially. Only required when the mint uses the whitelist policy; signed by the mint's confidential transfer authority. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialApproveRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Approve confidential account completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/deposit",
+    tags: ["Issuance"],
+    summary: "Deposit to confidential balance",
+    operationId: "depositConfidential",
+    description:
+      "Moves tokens from the account's public balance into its confidential pending balance. Run apply-pending afterwards to make them spendable. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialAmountRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Deposit to confidential balance completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/apply-pending",
+    tags: ["Issuance"],
+    summary: "Apply pending confidential balance",
+    operationId: "applyPendingConfidentialBalance",
+    description:
+      "Rolls the confidential pending balance into the available balance. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialAccountRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Apply pending confidential balance completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/transfer",
+    tags: ["Issuance"],
+    summary: "Confidential transfer",
+    operationId: "confidentialTransfer",
+    description:
+      "Transfers an encrypted amount to another account's confidential balance. The amount is not visible on-chain. Spans several transactions; settles on the last. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialTransferRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Confidential transfer completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/withdraw",
+    tags: ["Issuance"],
+    summary: "Withdraw from confidential balance",
+    operationId: "withdrawConfidential",
+    description:
+      "Moves tokens from the confidential available balance back to the account's public balance. Spans several transactions; settles on the last. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialAmountRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Withdraw from confidential balance completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/empty",
+    tags: ["Issuance"],
+    summary: "Empty confidential account",
+    operationId: "emptyConfidentialAccount",
+    description:
+      "Closes out a confidential account's encrypted balances once they have been withdrawn to zero. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialAccountRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Empty confidential account completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  // Confidential mint/burn: only on a mint created with an encrypted supply.
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/mint",
+    tags: ["Issuance"],
+    summary: "Confidential mint",
+    operationId: "confidentialMint",
+    description:
+      "Mints new supply straight into a holder's confidential balance, with the amount encrypted — not a plaintext mint followed by a deposit. The minted amount lands in the holder's pending balance; they apply it before it is spendable. Signed by the mint authority; the proofs are built from the supply authority's keys. Devnet only. Requires the ConfidentialMintBurn extension, which can only be set when the mint is created.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialMintRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Confidential mint completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/burn",
+    tags: ["Issuance"],
+    summary: "Confidential burn",
+    operationId: "confidentialBurn",
+    description:
+      "Burns from a holder's confidential balance, reducing the mint's encrypted supply. Signed by the holder. The burned amount lands in the mint's pending burn; the mint authority then applies it, which is what actually reduces the supply.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialAmountRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Confidential burn completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/apply-pending-burn",
+    tags: ["Issuance"],
+    summary: "Apply confidential pending burn",
+    operationId: "applyConfidentialPendingBurn",
+    description:
+      "Rolls the mint's pending burns into its encrypted supply and re-asserts the decryptable supply in the same operation. The re-assertion is not optional: applying a pending burn otherwise leaves the cheap-to-decrypt supply describing the old total, and every later confidential mint proves against that value. Run this after confidential burns, before the next confidential mint.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialApplyBurnRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Apply confidential pending burn completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/supply",
+    tags: ["Issuance"],
+    summary: "Repair confidential supply",
+    operationId: "updateConfidentialSupply",
+    description:
+      "Re-encrypts the mint's decryptable supply to the total its ciphertext actually holds — the repair path for an apply-pending-burn whose re-assertion was missed, which otherwise leaves the mint unable to accept a confidential mint.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      headers: projectScopeWithIdempotencyHeaders,
+      body: {
+        required: true,
+        content: jsonContent(confidentialApplyBurnRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Confidential supply repair completed",
+        content: jsonContent(confidentialOperationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/issuance/tokens/{tokenId}/confidential/balance",
+    tags: ["Issuance"],
+    summary: "Get confidential balance",
+    operationId: "getConfidentialBalance",
+    description:
+      "Reads and decrypts a holder's confidential balances. Decryption keys are derived from the holder's custody wallet for the duration of the request and are never stored or returned. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        tokenId: tokenIdParamSchema,
+      }),
+      query: z.object({
+        walletAddress: z.string().openapi({
+          description: "Holder wallet that owns the confidential token account.",
+          example: "So11111111111111111111111111111111111111112",
+        }),
+        signingCustodyWalletId: z.string().optional().openapi({
+          description: "Optional custody wallet id for the holder.",
+          example: "privy_wallet_123",
+        }),
+        decryptPendingBalance: z.enum(["true", "false"]).optional().openapi({
+          description:
+            "Also decrypt the pending balance. This is an ElGamal discrete-log search and can be slow, so it is opt-in.",
+          example: "false",
+        }),
+      }),
+      headers: projectScopeHeaders,
+    },
+    responses: {
+      200: {
+        description: "Confidential balance",
+        content: jsonContent(confidentialBalanceResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
     },
   });
 

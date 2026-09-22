@@ -1197,6 +1197,279 @@
           }
         },
         {
+          "name": "Configure confidential account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/configure",
+            "description": "Configures a holder's token account for confidential transfers. Must run before any other confidential operation on that account. Spans several transactions; settles on the last. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Approve confidential account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/approve",
+            "description": "Approves a configured account so it can transact confidentially. Only required when the mint uses the whitelist policy; signed by the mint's confidential transfer authority. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Deposit to confidential balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/deposit",
+            "description": "Moves tokens from the account's public balance into its confidential pending balance. Run apply-pending afterwards to make them spendable. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"amount\": \"100\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Apply pending confidential balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/apply-pending",
+            "description": "Rolls the confidential pending balance into the available balance. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Confidential transfer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/transfer",
+            "description": "Transfers an encrypted amount to another account's confidential balance. The amount is not visible on-chain. Spans several transactions; settles on the last. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"amount\": \"25\",\n  \"destination\": \"So11111111111111111111111111111111111111112\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Withdraw from confidential balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/withdraw",
+            "description": "Moves tokens from the confidential available balance back to the account's public balance. Spans several transactions; settles on the last. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"amount\": \"100\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Empty confidential account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/empty",
+            "description": "Closes out a confidential account's encrypted balances once they have been withdrawn to zero. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Confidential mint",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/mint",
+            "description": "Mints new supply straight into a holder's confidential balance, with the amount encrypted — not a plaintext mint followed by a deposit. The minted amount lands in the holder's pending balance; they apply it before it is spendable. Signed by the mint authority; the proofs are built from the supply authority's keys. Devnet only. Requires the ConfidentialMintBurn extension, which can only be set when the mint is created.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"So11111111111111111111111111111111111111112\",\n  \"amount\": \"100\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"supplyCustodyWalletId\": \"privy_wallet_456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Confidential burn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/burn",
+            "description": "Burns from a holder's confidential balance, reducing the mint's encrypted supply. Signed by the holder. The burned amount lands in the mint's pending burn; the mint authority then applies it, which is what actually reduces the supply.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"amount\": \"100\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Apply confidential pending burn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/apply-pending-burn",
+            "description": "Rolls the mint's pending burns into its encrypted supply and re-asserts the decryptable supply in the same operation. The re-assertion is not optional: applying a pending burn otherwise leaves the cheap-to-decrypt supply describing the old total, and every later confidential mint proves against that value. Run this after confidential burns, before the next confidential mint.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"supplyCustodyWalletId\": \"privy_wallet_456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Repair confidential supply",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/supply",
+            "description": "Re-encrypts the mint's decryptable supply to the total its ciphertext actually holds — the repair path for an apply-pending-burn whose re-assertion was missed, which otherwise leaves the mint unable to accept a confidential mint.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingCustodyWalletId\": \"privy_wallet_123\",\n  \"supplyCustodyWalletId\": \"privy_wallet_456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get confidential balance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/confidential/balance",
+            "description": "Reads and decrypts a holder's confidential balances. Decryption keys are derived from the holder's custody wallet for the duration of the request and are never stored or returned. Devnet only. Confidential balances must be enabled when the mint is created; they cannot be added afterwards."
+          }
+        },
+        {
           "name": "Unfreeze account",
           "request": {
             "method": "POST",

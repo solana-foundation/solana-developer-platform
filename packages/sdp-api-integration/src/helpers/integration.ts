@@ -778,8 +778,20 @@ async function createFundedLocalWallet(input: {
   return wallet;
 }
 
+/**
+ * Whether this run is against a network that serves SIMD-0385 transaction-v1
+ * messages and the confidential mint/burn proofs.
+ *
+ * Surfpool is a simnet built on an older Agave than the >= 4.2.2 transaction v1
+ * needs, so the confidential shard runs there at version 0 and skips the
+ * mint/burn lifecycle entirely. A real devnet RPC runs all of it.
+ */
+const CONFIDENTIAL_MINT_BURN_SUPPORTED =
+  SOLANA_CONFIGURED && (env as { KORA_SURFPOOL_SHIM?: string }).KORA_SURFPOOL_SHIM !== "true";
+
 export {
   app,
+  CONFIDENTIAL_MINT_BURN_SUPPORTED,
   createMosaicService,
   ensurePrivyCustodyAddress,
   env,

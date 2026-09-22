@@ -6003,6 +6003,18 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | Prepare authority update |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Execute burn |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | Prepare burn transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/apply-pending` | Apply pending confidential balance |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/apply-pending-burn` | Apply confidential pending burn |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/approve` | Approve confidential account |
+| `GET` | `/v1/issuance/tokens/{tokenId}/confidential/balance` | Get confidential balance |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/burn` | Confidential burn |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/configure` | Configure confidential account |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/deposit` | Deposit to confidential balance |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/empty` | Empty confidential account |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/mint` | Confidential mint |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/supply` | Repair confidential supply |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/transfer` | Confidential transfer |
+| `POST` | `/v1/issuance/tokens/{tokenId}/confidential/withdraw` | Withdraw from confidential balance |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy token |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | Confirm non-custodial deploy |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | Prepare token deploy transaction |

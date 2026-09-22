@@ -31,7 +31,7 @@
     "@sdp/types": "workspace:*",
     "@sentry/nextjs": "10.74.0",
     "@solana/design-system": "1.0.1",
-    "@solana/fixed-points": "7.1.1",
+    "@solana/fixed-points": "8.3.0",
     "@solana/qr-code-styling": "1.6.0",
     "@vercel/flags-core": "1.8.1",
     "clsx": "2.1.1",

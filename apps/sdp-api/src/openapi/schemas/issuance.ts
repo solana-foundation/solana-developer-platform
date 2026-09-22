@@ -8,6 +8,12 @@ import {
 import {
   addAllowlistSchema as addTokenAllowlistSchemaBase,
   burnSchema as burnSchemaBase,
+  confidentialAccountSchema as confidentialAccountSchemaBase,
+  confidentialAmountSchema as confidentialAmountSchemaBase,
+  confidentialApplyBurnSchema as confidentialApplyBurnSchemaBase,
+  confidentialApproveSchema as confidentialApproveSchemaBase,
+  confidentialMintSchema as confidentialMintSchemaBase,
+  confidentialTransferSchema as confidentialTransferSchemaBase,
   confirmDeploySchema as confirmDeploySchemaBase,
   createTokenSchema as createTokenSchemaBase,
   deployTokenSchema as deployTokenSchemaBase,
@@ -134,6 +140,41 @@ export const tokenExtensionsConfigSchema = z
       })
       .optional()
       .openapi({ description: "Transfer hook configuration." }),
+    confidentialTransfers: z
+      .object({
+        policy: z.enum(["opt-in", "whitelist"]).openapi({
+          description:
+            "Whether holders can configure their own confidential account (opt-in) or the authority must approve each one (whitelist).",
+          example: "whitelist",
+        }),
+        authority: solanaAddressSchema.optional().openapi({
+          description:
+            "Authority that can update the confidential configuration and approve accounts.",
+          example: "So11111111111111111111111111111111111111112",
+        }),
+        auditorElgamalPubkey: solanaAddressSchema.optional().openapi({
+          description:
+            "Auditor ElGamal public key able to decode every confidential transfer amount.",
+          example: "So11111111111111111111111111111111111111112",
+        }),
+      })
+      .optional()
+      .openapi({ description: "Confidential balances configuration. Devnet only." }),
+    confidentialMintBurn: z
+      .object({
+        supplyAuthority: solanaAddressSchema.openapi({
+          description:
+            "Dedicated wallet whose own confidential keys protect the encrypted supply. Key derivation is wallet-only, so these are also that wallet's account keys for every mint it holds — it must hold no confidential balances of its own.",
+          example: "So11111111111111111111111111111111111111112",
+        }),
+        supplyElgamalPubkey: solanaAddressSchema.optional().openapi({
+          description:
+            "Supply ElGamal public key baked into the mint at creation, recorded once the mint lands.",
+          example: "So11111111111111111111111111111111111111112",
+        }),
+      })
+      .optional()
+      .openapi({ description: "Encrypted-supply configuration. Devnet only." }),
   })
   .strict()
   .openapi({ description: "Token-2022 extensions configuration." });
@@ -717,6 +758,48 @@ const extensionOverridesOpenApiSchema = z
       ])
       .optional()
       .openapi({ description: "Transfer hook configuration or false to disable." }),
+    confidentialTransfers: z
+      .union([
+        z.literal(false),
+        z.object({
+          policy: z.enum(["opt-in", "whitelist"]).optional().openapi({
+            description:
+              "Whether holders can configure their own confidential account (opt-in) or the authority must approve each one (whitelist). Defaults to whitelist.",
+            example: "opt-in",
+          }),
+          authority: z.string().optional().openapi({
+            description:
+              "Authority that can update the confidential configuration and approve accounts. Defaults to the mint authority.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+          auditorElgamalPubkey: z.string().optional().openapi({
+            description:
+              "Auditor ElGamal public key able to decode every confidential transfer amount.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+        }),
+      ])
+      .optional()
+      .openapi({
+        description:
+          "Confidential balances configuration or false to disable. Devnet only; cannot be added after the mint is deployed.",
+      }),
+    confidentialMintBurn: z
+      .union([
+        z.literal(false),
+        z.object({
+          supplyAuthority: z.string().openapi({
+            description:
+              "Dedicated wallet whose own confidential keys protect the encrypted supply. Key derivation is wallet-only, so these are also that wallet's account keys for every mint it holds — it must hold no confidential balances of its own.",
+            example: "So11111111111111111111111111111111111111112",
+          }),
+        }),
+      ])
+      .optional()
+      .openapi({
+        description:
+          "Confidential mint/burn configuration or false to disable. Requires confidential balances on the same token, and removes the plaintext supply entirely: plaintext mint, burn and force-burn, and confidential deposit and withdraw, all stop working on the mint. Devnet only; cannot be added after the mint is deployed.",
+      }),
   })
   .openapi({ description: "Extension overrides to customize template defaults." });
 
@@ -1254,6 +1337,8 @@ const tokenTemplateExtensionSchema = z
     "defaultAccountState",
     "scaledUiAmount",
     "transferHook",
+    "confidentialTransfers",
+    "confidentialMintBurn",
   ])
   .openapi({
     description: "Token-2022 extension name.",
@@ -1322,3 +1407,168 @@ export const templateIdParamSchema = z.string().openapi({
   description: "Template identifier.",
   example: "stablecoin",
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Confidential Transfers
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CONFIDENTIAL_WALLET_NOTE =
+  "Holder wallet that owns the confidential token account. SDP derives the associated token account for this mint.";
+
+export const confidentialAccountRequestSchema = confidentialAccountSchemaBase
+  .extend({
+    walletAddress: withOpenApi(confidentialAccountSchemaBase.shape.walletAddress, {
+      description: CONFIDENTIAL_WALLET_NOTE,
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    signingCustodyWalletId: withOpenApi(
+      confidentialAccountSchemaBase.shape.signingCustodyWalletId,
+      {
+        description:
+          "Optional custody wallet id for the holder. Must resolve to walletAddress; the confidential keys are derived from its signature.",
+        example: "privy_wallet_123",
+      }
+    ),
+  })
+  .openapi({ description: "Confidential account operation request body." });
+
+export const confidentialAmountRequestSchema = confidentialAmountSchemaBase
+  .extend({
+    walletAddress: withOpenApi(confidentialAmountSchemaBase.shape.walletAddress, {
+      description: CONFIDENTIAL_WALLET_NOTE,
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    amount: withOpenApi(confidentialAmountSchemaBase.shape.amount, {
+      description: "Decimal token amount, resolved against the mint's decimals.",
+      example: "100",
+    }),
+    signingCustodyWalletId: withOpenApi(confidentialAmountSchemaBase.shape.signingCustodyWalletId, {
+      description: "Optional custody wallet id for the holder.",
+      example: "privy_wallet_123",
+    }),
+  })
+  .openapi({ description: "Confidential deposit or withdrawal request body." });
+
+export const confidentialApproveRequestSchema = confidentialApproveSchemaBase
+  .extend({
+    accountAddress: withOpenApi(confidentialApproveSchemaBase.shape.accountAddress, {
+      description:
+        "Wallet or token account to approve. Only required when the mint uses the whitelist policy.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    signingCustodyWalletId: withOpenApi(
+      confidentialApproveSchemaBase.shape.signingCustodyWalletId,
+      {
+        description: "Optional custody wallet id for the mint's confidential transfer authority.",
+        example: "privy_wallet_123",
+      }
+    ),
+  })
+  .openapi({ description: "Confidential account approval request body." });
+
+export const confidentialTransferRequestSchema = confidentialTransferSchemaBase
+  .extend({
+    walletAddress: withOpenApi(confidentialTransferSchemaBase.shape.walletAddress, {
+      description: `Source holder wallet. ${CONFIDENTIAL_WALLET_NOTE.split(". ")[1]}`,
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    destination: withOpenApi(confidentialTransferSchemaBase.shape.destination, {
+      description:
+        "Destination wallet or token account. It must already be configured for confidential transfers.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    amount: withOpenApi(confidentialTransferSchemaBase.shape.amount, {
+      description: "Decimal token amount. Encrypted on-chain; not visible after the fact.",
+      example: "25",
+    }),
+    signingCustodyWalletId: withOpenApi(
+      confidentialTransferSchemaBase.shape.signingCustodyWalletId,
+      {
+        description: "Optional custody wallet id for the source holder.",
+        example: "privy_wallet_123",
+      }
+    ),
+  })
+  .openapi({ description: "Confidential transfer request body." });
+
+export const confidentialMintRequestSchema = confidentialMintSchemaBase
+  .extend({
+    destination: withOpenApi(confidentialMintSchemaBase.shape.destination, {
+      description:
+        "Holder wallet or token account the new supply is minted into. It must already be configured for confidential transfers.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
+    amount: withOpenApi(confidentialMintSchemaBase.shape.amount, {
+      description: "Decimal token amount. Encrypted on-chain; not visible after the fact.",
+      example: "100",
+    }),
+    signingCustodyWalletId: withOpenApi(confidentialMintSchemaBase.shape.signingCustodyWalletId, {
+      description: "Optional custody wallet id for the mint authority.",
+      example: "privy_wallet_123",
+    }),
+    supplyCustodyWalletId: withOpenApi(confidentialMintSchemaBase.shape.supplyCustodyWalletId, {
+      description:
+        "Optional custody wallet id for the supply authority — the dedicated wallet whose keys protect the encrypted supply. It signs a key-derivation message, never the transaction.",
+      example: "privy_wallet_456",
+    }),
+  })
+  .openapi({ description: "Confidential mint request body." });
+
+export const confidentialApplyBurnRequestSchema = confidentialApplyBurnSchemaBase
+  .extend({
+    signingCustodyWalletId: withOpenApi(
+      confidentialApplyBurnSchemaBase.shape.signingCustodyWalletId,
+      {
+        description: "Optional custody wallet id for the mint authority.",
+        example: "privy_wallet_123",
+      }
+    ),
+    supplyCustodyWalletId: withOpenApi(
+      confidentialApplyBurnSchemaBase.shape.supplyCustodyWalletId,
+      {
+        description: "Optional custody wallet id for the supply authority.",
+        example: "privy_wallet_456",
+      }
+    ),
+  })
+  .openapi({ description: "Confidential supply maintenance request body." });
+
+export const confidentialOperationResponseSchema = z
+  .object({
+    transaction: tokenTransactionSchema.openapi({
+      description:
+        "Confidential operation transaction record. Settles on the last transaction that confirmed. An operation that needed more than one transaction lists every signature, in order, under params.planSignatures; otherwise the field is omitted.",
+    }),
+  })
+  .openapi({ description: "Confidential operation response payload." });
+
+export const confidentialBalanceResponseSchema = z
+  .object({
+    confidentialBalance: z
+      .object({
+        tokenAccount: solanaAddressSchema.openapi({
+          description: "Confidential token account address.",
+          example: "So11111111111111111111111111111111111111112",
+        }),
+        walletAddress: solanaAddressSchema.openapi({
+          description: "Holder wallet that owns the account.",
+          example: "So11111111111111111111111111111111111111112",
+        }),
+        approved: z.boolean().openapi({
+          description:
+            "Whether the account is approved to transact confidentially. Always true under the opt-in policy.",
+          example: true,
+        }),
+        availableBalance: z.string().nullable().openapi({
+          description: "Decrypted available balance in base units.",
+          example: "400",
+        }),
+        pendingBalance: z.string().nullable().openapi({
+          description:
+            "Decrypted pending balance in base units. Null unless decryptPendingBalance was requested.",
+          example: "0",
+        }),
+      })
+      .openapi({ description: "Decrypted confidential balances for one account." }),
+  })
+  .openapi({ description: "Confidential balance response payload." });

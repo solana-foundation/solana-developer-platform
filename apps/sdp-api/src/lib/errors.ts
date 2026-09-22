@@ -41,6 +41,10 @@ export type ErrorCode =
   | "INSUFFICIENT_TOKEN_BALANCE"
   | "ACCOUNT_FROZEN"
   | "ACCOUNT_NOT_FROZEN"
+  | "CONFIDENTIAL_NOT_ENABLED"
+  | "CONFIDENTIAL_KEYS_MISMATCH"
+  | "CONFIDENTIAL_SUPPLY_KEYS_MISMATCH"
+  | "CONFIDENTIAL_MINT_BURN_CONVERSION"
   | "MAX_SUPPLY_EXCEEDED"
   | "SOLANA_RPC_ERROR"
   | "SOLANA_RPC_TIMEOUT"
@@ -103,6 +107,12 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   INSUFFICIENT_TOKEN_BALANCE: 400,
   ACCOUNT_FROZEN: 400,
   ACCOUNT_NOT_FROZEN: 400,
+  CONFIDENTIAL_NOT_ENABLED: 400,
+  // 409, not 400: the request is well formed and the caller is authorized — it is
+  // the account that is in a state the current key scheme cannot serve.
+  CONFIDENTIAL_KEYS_MISMATCH: 409,
+  CONFIDENTIAL_SUPPLY_KEYS_MISMATCH: 409,
+  CONFIDENTIAL_MINT_BURN_CONVERSION: 400,
   MAX_SUPPLY_EXCEEDED: 400,
   SOLANA_RPC_ERROR: 502,
   SOLANA_RPC_TIMEOUT: 504,
@@ -161,6 +171,11 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   INSUFFICIENT_TOKEN_BALANCE: "Token account does not hold enough balance",
   ACCOUNT_FROZEN: "Account is frozen",
   ACCOUNT_NOT_FROZEN: "Account is not frozen",
+  CONFIDENTIAL_NOT_ENABLED: "Token does not have confidential balances enabled",
+  CONFIDENTIAL_KEYS_MISMATCH: "Confidential keys no longer match this account",
+  CONFIDENTIAL_SUPPLY_KEYS_MISMATCH: "Supply keys do not match this mint",
+  CONFIDENTIAL_MINT_BURN_CONVERSION:
+    "This mint keeps its supply encrypted and has no plaintext balance side",
   MAX_SUPPLY_EXCEEDED: "Operation would exceed maximum supply",
   SOLANA_RPC_ERROR: "Error communicating with Solana RPC",
   SOLANA_RPC_TIMEOUT: "The RPC upstream did not answer in time; the request's outcome is unknown",

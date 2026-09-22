@@ -215,6 +215,7 @@ try {
   });
   await run(process.execPath, [tsxCli, "watch", "--clear-screen=false", "src/server.ts"], {
     env: {
+      NODE_OPTIONS: localEnv.NODE_OPTIONS ?? process.env.NODE_OPTIONS,
       ENVIRONMENT: localEnv.ENVIRONMENT ?? process.env.ENVIRONMENT ?? "development",
       API_VERSION: localEnv.API_VERSION ?? process.env.API_VERSION ?? "local",
       SDP_DEPLOYMENT_MODE:

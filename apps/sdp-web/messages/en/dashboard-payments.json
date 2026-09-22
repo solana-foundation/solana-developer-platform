@@ -1076,7 +1076,18 @@
           "update_authority": "Update authority",
           "pause": "Pause",
           "unpause": "Unpause",
-          "deploy": "Deploy"
+          "deploy": "Deploy",
+          "confidential_configure": "Configure confidential account",
+          "confidential_approve": "Approve confidential account",
+          "confidential_deposit": "Confidential deposit",
+          "confidential_apply_pending": "Apply pending balance",
+          "confidential_transfer": "Confidential transfer",
+          "confidential_withdraw": "Confidential withdrawal",
+          "confidential_empty_account": "Empty confidential account",
+          "confidential_mint": "Confidential mint",
+          "confidential_burn": "Confidential burn",
+          "confidential_apply_pending_burn": "Apply pending burn",
+          "confidential_update_supply": "Repair encrypted supply"
         },
         "rings": {
           "shield": "Shield",

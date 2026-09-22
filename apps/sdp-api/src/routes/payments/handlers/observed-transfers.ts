@@ -392,7 +392,9 @@ async function fetchParsedTransactionFromRpc(
       method: "getTransaction",
       params: [
         signature,
-        { encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0 },
+        // See `getTransaction` in @sdp/rpc: 1 so a transaction-v1 signature reads
+        // back as a transaction rather than an error.
+        { encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 1 },
       ],
     }),
   });

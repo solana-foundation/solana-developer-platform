@@ -231,6 +231,18 @@ export interface Env {
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
 
+  /**
+   * Transaction format the confidential planner packs into: "0" or "1".
+   *
+   * Version 1 is SIMD-0385 — 4096-byte messages instead of 1232, which folds a
+   * confidential operation's proof setup, token instruction and cleanup into far
+   * fewer transactions. It needs Agave >= 4.2.2 on the RPC, so this is a
+   * compatibility switch, not a feature flag: unset means 1 against a real
+   * cluster and 0 under the Surfpool shim, which is a simnet that cannot serve
+   * the format.
+   */
+  CONFIDENTIAL_TRANSACTION_VERSION?: string;
+
   // MagicBlock private payments configuration
   MAGICBLOCK_PRIVATE_PAYMENTS_API_BASE_URL?: string;
   MAGICBLOCK_PRIVATE_PAYMENTS_AUTH_TOKEN?: string;
