@@ -775,64 +775,6 @@ async function handleBvnkPaymentChannelTransactionDetected(
   await settleBvnkOfframpChannel(env, environment, transferId, "settling", null);
 }
 
-/**
- * Resolves the funding-wallet reference the confirmed channel event must
- * credit: the transfer's counterparty funding-wallet row in the webhook's
- * project environment.
- *
- * @param env - Process environment used for database access.
- * @param environment - The project environment the event was delivered for.
- * @param transferId - SDP off-ramp transfer identifier.
- * @returns The funding wallet's BVNK ledger-wallet id.
- */
-async function bvnkOfframpFundingWalletReference(
-  env: Env,
-  environment: SdpEnvironment,
-  transferId: string
-): Promise<string> {
-  const transfer = await getDb(env)
-    .prepare(
-      `SELECT pt.organization_id, pt.project_id, pt.counterparty_id
-       FROM payment_transfers pt
-       JOIN projects prj ON prj.id = pt.project_id
-       WHERE pt.id = ?
-         AND pt.provider = 'bvnk'
-         AND pt.type = 'offramp'
-         AND prj.environment = ?`
-    )
-    .bind(transferId, environment)
-    .first<{
-      organization_id: string;
-      project_id: string;
-      counterparty_id: string | null;
-    }>();
-  if (transfer === null) {
-    throw new TerminalRampWebhookError(
-      "stray off-ramp channel event: unknown transfer or environment mismatch"
-    );
-  }
-  if (transfer.counterparty_id === null) {
-    throw new TerminalRampWebhookError(
-      `confirmed off-ramp channel transfer ${transferId} has no counterparty`
-    );
-  }
-  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
-  const row = await accounts.getAccountByKindAndCurrency({
-    organizationId: transfer.organization_id,
-    projectId: transfer.project_id,
-    counterpartyId: transfer.counterparty_id,
-    provider: "bvnk",
-    kind: "funding_wallet",
-    fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
-  });
-  if (row === null || row.external_account_reference === null) {
-    throw new TerminalRampWebhookError(
-      `confirmed off-ramp channel transfer ${transferId} has no funding wallet`
-    );
-  }
-  return row.external_account_reference;
-}
-
 async function handleBvnkPaymentChannelTransactionConfirmed(
   env: Env,
   environment: SdpEnvironment,
@@ -841,18 +783,6 @@ async function handleBvnkPaymentChannelTransactionConfirmed(
   const transferId = bvnkChannelTransferId(event);
   if (transferId === undefined) {
     return;
-  }
-  const walletId = event.data.walletId;
-  if (walletId === undefined) {
-    throw new TerminalRampWebhookError(
-      `confirmed off-ramp channel event for ${transferId} carries no wallet id`
-    );
-  }
-  const fundingReference = await bvnkOfframpFundingWalletReference(env, environment, transferId);
-  if (fundingReference !== walletId) {
-    throw new TerminalRampWebhookError(
-      `confirmed off-ramp channel event wallet ${walletId} does not match funding wallet ${fundingReference} for transfer ${transferId}`
-    );
   }
   await settleBvnkOfframpChannel(
     env,

@@ -251,11 +251,7 @@ export const bvnkWebhookSchema = z.discriminatedUnion("event", [
   }),
   z.object({
     event: z.literal("bvnk:payment:channel:transaction-confirmed"),
-    data: z.object({
-      reference: z.string().optional(),
-      walletId: z.string().optional(),
-      walletAmount: bvnkAmountSchema,
-    }),
+    data: z.object({ reference: z.string().optional(), walletAmount: bvnkAmountSchema }),
   }),
 ]);
 
