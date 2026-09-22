@@ -1687,7 +1687,12 @@
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
               "moneygram": {
+                "customerId": "mg_profile_example",
                 "transactionId": "mgi_tx_example",
+                "mgiTransactionId": "mgi_correlation_example",
+                "depositAddress": "DepositAddressExample11111111111111111111111",
+                "depositMemo": "memo_example",
+                "sendAmount": "25",
                 "referenceNumber": "12345678",
                 "payoutAmount": 25,
                 "payoutStatus": "completed",
@@ -1985,7 +1990,12 @@
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
               "moneygram": {
+                "customerId": "mg_profile_example",
                 "transactionId": "mgi_tx_example",
+                "mgiTransactionId": "mgi_correlation_example",
+                "depositAddress": "DepositAddressExample11111111111111111111111",
+                "depositMemo": "memo_example",
+                "sendAmount": "25",
                 "referenceNumber": "12345678",
                 "payoutAmount": 25,
                 "payoutStatus": "completed",
@@ -2078,7 +2088,12 @@
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
               "moneygram": {
+                "customerId": "mg_profile_example",
                 "transactionId": "mgi_tx_example",
+                "mgiTransactionId": "mgi_correlation_example",
+                "depositAddress": "DepositAddressExample11111111111111111111111",
+                "depositMemo": "memo_example",
+                "sendAmount": "25",
                 "referenceNumber": "12345678",
                 "payoutAmount": 25,
                 "payoutStatus": "completed",
@@ -2240,7 +2255,12 @@
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
                 },
                 "moneygram": {
+                  "customerId": "mg_profile_example",
                   "transactionId": "mgi_tx_example",
+                  "mgiTransactionId": "mgi_correlation_example",
+                  "depositAddress": "DepositAddressExample11111111111111111111111",
+                  "depositMemo": "memo_example",
+                  "sendAmount": "25",
                   "referenceNumber": "12345678",
                   "payoutAmount": 25,
                   "payoutStatus": "completed",
@@ -2472,7 +2492,12 @@
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
                 },
                 "moneygram": {
+                  "customerId": "mg_profile_example",
                   "transactionId": "mgi_tx_example",
+                  "mgiTransactionId": "mgi_correlation_example",
+                  "depositAddress": "DepositAddressExample11111111111111111111111",
+                  "depositMemo": "memo_example",
+                  "sendAmount": "25",
                   "referenceNumber": "12345678",
                   "payoutAmount": 25,
                   "payoutStatus": "completed",
@@ -3021,7 +3046,12 @@
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
               "moneygram": {
+                "customerId": "mg_profile_example",
                 "transactionId": "mgi_tx_example",
+                "mgiTransactionId": "mgi_correlation_example",
+                "depositAddress": "DepositAddressExample11111111111111111111111",
+                "depositMemo": "memo_example",
+                "sendAmount": "25",
                 "referenceNumber": "12345678",
                 "payoutAmount": 25,
                 "payoutStatus": "completed",

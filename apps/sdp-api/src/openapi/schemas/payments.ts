@@ -565,9 +565,31 @@ export const transferInitiatorSchema = z
 
 export const moneygramTransferDetailsSchema = z
   .object({
+    customerId: z.string().optional().openapi({
+      description:
+        "MoneyGram profile id for the counterparty; matches the MoneyGram customer_link provider account reference.",
+      example: "mg_profile_example",
+    }),
     transactionId: z.string().optional().openapi({
       description: "MoneyGram xRamps transaction identifier.",
       example: "mgi_tx_example",
+    }),
+    mgiTransactionId: z.string().optional().openapi({
+      description: "MoneyGram-side transaction identifier used to correlate status webhooks.",
+      example: "mgi_correlation_example",
+    }),
+    depositAddress: z.string().optional().openapi({
+      description:
+        "Deposit address MoneyGram allocated for the off-ramp, read from the Ramps status API.",
+      example: "DepositAddressExample11111111111111111111111",
+    }),
+    depositMemo: z.string().optional().openapi({
+      description: "Memo MoneyGram requires on the deposit transfer, when present.",
+      example: "memo_example",
+    }),
+    sendAmount: z.string().optional().openapi({
+      description: "USDC amount MoneyGram expects at the deposit address.",
+      example: "25",
     }),
     referenceNumber: z.string().optional().openapi({
       description: "Cash pickup reference number issued by MoneyGram.",

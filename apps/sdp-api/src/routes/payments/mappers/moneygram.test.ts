@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { mapMoneygramTransferDetails } from "./moneygram";
 
-function transferRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransferRow {
+function transferRow(overrides: Partial<PaymentTransferRow>): PaymentTransferRow {
   return {
     id: "xfr_moneygram",
     organization_id: "org_test",
@@ -10,7 +11,7 @@ function transferRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransf
     custody_wallet_id: null,
     wallet_id: "wal_test",
     counterparty_id: "cpty_test",
-    source_address: "8nb762111111111111111111111111111111hnis",
+    source_address: TEST_SOLANA_ADDRESSES.wallet1,
     destination_address: null,
     token: "USDC",
     amount: "25",
@@ -83,4 +84,66 @@ describe("mapMoneygramTransferDetails", () => {
       )
     ).toBeUndefined();
   });
+  it("projects the custodial customer, transaction and deposit fields", () => {
+    expect(
+      mapMoneygramTransferDetails(
+        transferRow({
+          provider_data: {
+            moneygram: {
+              customerId: "mg_profile_1",
+              mgiTransactionId: "mgi_tx_created_1",
+              depositAddress: TEST_SOLANA_ADDRESSES.wallet2,
+              depositMemo: "mg_memo_1",
+              sendAmount: "25",
+            },
+          },
+        })
+      )
+    ).toEqual({
+      customerId: "mg_profile_1",
+      mgiTransactionId: "mgi_tx_created_1",
+      depositAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      depositMemo: "mg_memo_1",
+      sendAmount: "25",
+    });
+  });
+
+  it.each(["", "   "])("drops blank custodial fields (%j)", (value) => {
+    expect(
+      mapMoneygramTransferDetails(
+        transferRow({
+          provider_data: {
+            moneygram: {
+              transactionId: "mg_tx_created_1",
+              mgiTransactionId: value,
+              depositAddress: value,
+              depositMemo: value,
+              sendAmount: value,
+            },
+          },
+        })
+      )
+    ).toEqual({ transactionId: "mg_tx_created_1" });
+  });
+
+  it.each([{ value: 25 }, { value: null }, { value: false }, { value: {} }, { value: [] }])(
+    "drops non-string custodial fields ($value)",
+    ({ value }) => {
+      expect(
+        mapMoneygramTransferDetails(
+          transferRow({
+            provider_data: {
+              moneygram: {
+                transactionId: "mg_tx_created_1",
+                mgiTransactionId: value,
+                depositAddress: value,
+                depositMemo: value,
+                sendAmount: value,
+              },
+            },
+          })
+        )
+      ).toEqual({ transactionId: "mg_tx_created_1" });
+    }
+  );
 });

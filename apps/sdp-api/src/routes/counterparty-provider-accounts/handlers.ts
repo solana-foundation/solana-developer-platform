@@ -111,7 +111,7 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
  * @param customerLink - The provider's customer-link row for the counterparty, when one exists.
  * @returns Public provider-account response row without kind-specific enrichment.
  */
-function baseProviderAccount(
+export function baseProviderAccount(
   row: CounterpartyProviderAccountRow,
   customerLink: CounterpartyProviderAccountRow | undefined
 ): CounterpartyProviderAccount {

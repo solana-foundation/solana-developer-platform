@@ -17,18 +17,9 @@ import {
   buildOnrampTransactionPrefill,
   type MoneygramTransactionPrefill,
 } from "./moneygram-prefill";
-import { signMoneygramTransfer } from "./moneygram-sign-transaction";
+import { fundMoneygramDeposit, type MoneygramDepositAddress } from "./moneygram-sign-transaction";
 
 const SESSION_REFRESH_MS = 50 * 60 * 1000;
-
-interface MoneygramOnChainTransaction {
-  chain: string;
-  to: string;
-  amount: string;
-  asset: string;
-  memo?: string;
-  rawTransaction: unknown;
-}
 
 interface MoneygramTransactionRecord {
   id: string;
@@ -36,6 +27,11 @@ interface MoneygramTransactionRecord {
   status: string;
   amount: number;
   referenceNumber?: string;
+}
+
+interface MoneygramTransactionCreatedRecord {
+  id: string;
+  mgiTransactionId?: string;
 }
 
 interface MoneygramWidgetError {
@@ -51,7 +47,7 @@ interface MoneygramRampsConfig {
     address: string;
     chain: "solana";
     asset: CryptoAssetSymbol;
-    walletType: "custodial" | "non-custodial";
+    walletType: "custodial";
     displayName?: string;
   };
   transaction?: MoneygramTransactionPrefill;
@@ -59,7 +55,8 @@ interface MoneygramRampsConfig {
     apiBaseUrl: string;
     mockMode: boolean;
   };
-  onSignTransaction: (tx: MoneygramOnChainTransaction) => Promise<string>;
+  onDepositAddress: (deposit: MoneygramDepositAddress) => Promise<string>;
+  onTransactionCreated: (transaction: MoneygramTransactionCreatedRecord) => void;
   onComplete?: (transaction: MoneygramTransactionRecord) => void;
   onError?: (error: MoneygramWidgetError) => void;
   onClose?: () => void;
@@ -170,17 +167,36 @@ export function MoneygramRampWidget({
     container.appendChild(mountPoint);
     let cancelled = false;
     let handle: MoneygramRampsHandle | null = null;
+    // The widget fires the deposit callback after the created one, but the created
+    // event's request may still be in flight or have failed; funding waits for it
+    // and re-posts once, because the API needs the transaction id to read the
+    // deposit instruction from MoneyGram before anything is sent.
+    let transactionCreated: Extract<MoneygramRampEvent, { kind: "transaction_created" }> | null =
+      null;
+    let transactionCreatedPosted: Promise<boolean> = Promise.resolve(false);
 
-    const post = (event: MoneygramRampEvent) => {
-      postMoneygramRampEvent(event, t).catch((error) => {
-        toast.error(t("DashboardPayments.ramps.moneygramEventFailed"), {
-          description:
-            error instanceof Error
-              ? error.message
-              : t("DashboardPayments.ramps.eventRequestFailed"),
-          position: "bottom-right",
+    const post = (event: MoneygramRampEvent): Promise<void> =>
+      postMoneygramRampEvent(event, t)
+        .then(() => undefined)
+        .catch((error) => {
+          toast.error(t("DashboardPayments.ramps.moneygramEventFailed"), {
+            description:
+              error instanceof Error
+                ? error.message
+                : t("DashboardPayments.ramps.eventRequestFailed"),
+            position: "bottom-right",
+          });
         });
-      });
+
+    const fundingContext = {
+      cryptoAsset,
+      sessionId,
+      sourceWalletId,
+      sourceTokenMint,
+      onSigned: (transferId: string) => {
+        signedTransferIdRef.current = transferId;
+      },
+      t,
     };
 
     loadRampsSdk(MONEYGRAM_SDK_URL)
@@ -204,20 +220,33 @@ export function MoneygramRampWidget({
             direction === "onramp"
               ? buildOnrampTransactionPrefill(cryptoAmount, cryptoAsset)
               : buildOfframpTransactionPrefill(fiatCurrency, cryptoAsset, cryptoAmount),
-          onSignTransaction: async (tx) =>
-            signMoneygramTransfer(tx, {
-              cryptoAsset,
+          onTransactionCreated: (transaction) => {
+            transactionCreated = {
+              kind: "transaction_created",
               sessionId,
-              sourceWalletId,
-              sourceTokenMint,
-              onSigned: (transferId) => {
-                signedTransferIdRef.current = transferId;
-              },
-              t,
-            }),
+              transactionId: transaction.id,
+              ...(transaction.mgiTransactionId
+                ? { mgiTransactionId: transaction.mgiTransactionId }
+                : {}),
+            };
+            transactionCreatedPosted = postMoneygramRampEvent(transactionCreated, t).then(
+              () => true,
+              () => false
+            );
+          },
+          onDepositAddress: async (deposit) => {
+            const created = transactionCreated;
+            if (!created) {
+              throw new Error(t("DashboardPayments.ramps.moneygramTransactionUnreported"));
+            }
+            if (!(await transactionCreatedPosted)) {
+              await postMoneygramRampEvent(created, t);
+            }
+            return fundMoneygramDeposit(deposit, fundingContext);
+          },
           onComplete: (transaction) => {
             if (direction === "onramp") {
-              post({
+              void post({
                 kind: "onramp_completed",
                 sessionId,
                 transactionId: transaction.id,
@@ -236,7 +265,7 @@ export function MoneygramRampWidget({
               });
               return;
             }
-            post({
+            void post({
               kind: "completed",
               sessionId,
               cryptoTransferId,
@@ -250,7 +279,7 @@ export function MoneygramRampWidget({
           },
           onError: (error) => {
             const cryptoTransferId = signedTransferIdRef.current;
-            post({
+            void post({
               kind: "errored",
               sessionId,
               reason: error.reason,
@@ -259,7 +288,7 @@ export function MoneygramRampWidget({
             });
           },
           onClose: () => {
-            post({ kind: "closed", sessionId });
+            void post({ kind: "closed", sessionId });
           },
         });
         handle.open();

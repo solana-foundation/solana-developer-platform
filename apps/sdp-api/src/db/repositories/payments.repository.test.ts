@@ -1,3 +1,4 @@
+import type { PaymentTransferStatus } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -301,6 +302,127 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         updatedAt: "2026-08-31T10:00:00.000Z",
       })
     ).resolves.toBeNull();
+  });
+
+  describe("claimTransferProviderData", () => {
+    const pending: PaymentTransferStatus = "pending";
+    const processing: PaymentTransferStatus = "processing";
+
+    it("claims an unset path and persists provider data and updated_at", async () => {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "provider-data-claim-unset" }),
+        status: pending,
+        provider: "moneygram",
+        providerData: { moneygram: { a: "1" } },
+      });
+      if (!transfer) throw new Error("Expected transfer creation to succeed");
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+      const providerData = { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } };
+      const updatedAt = "2026-08-31T12:00:00.000Z";
+
+      const updated = await repo.claimTransferProviderData({
+        ...scope,
+        expectedStatus: pending,
+        claimPath: ["moneygram", "transactionId"],
+        providerData,
+        updatedAt,
+      });
+
+      expect(updated).toMatchObject({
+        id: transfer.id,
+        provider_data: providerData,
+        updated_at: updatedAt,
+      });
+      expect(transfer.updated_at).not.toBe(updatedAt);
+      await expect(repo.getTransferById(scope)).resolves.toEqual({
+        ...transfer,
+        provider_data: providerData,
+        updated_at: updatedAt,
+      });
+    });
+
+    it("returns null and leaves the row unchanged when the path is already set", async () => {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "provider-data-claim-occupied" }),
+        status: pending,
+        provider: "moneygram",
+        providerData: { moneygram: { a: "1", transactionId: "mg_tx_existing" } },
+      });
+      if (!transfer) throw new Error("Expected transfer creation to succeed");
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+
+      await expect(
+        repo.claimTransferProviderData({
+          ...scope,
+          expectedStatus: pending,
+          claimPath: ["moneygram", "transactionId"],
+          providerData: { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } },
+          updatedAt: "2026-08-31T12:00:00.000Z",
+        })
+      ).resolves.toBeNull();
+      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
+    });
+
+    it("returns null and leaves the row unchanged when the status differs", async () => {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "provider-data-claim-status" }),
+        status: processing,
+        provider: "moneygram",
+        providerData: { moneygram: { a: "1" } },
+      });
+      if (!transfer) throw new Error("Expected transfer creation to succeed");
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+
+      await expect(
+        repo.claimTransferProviderData({
+          ...scope,
+          expectedStatus: pending,
+          claimPath: ["moneygram", "transactionId"],
+          providerData: { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } },
+          updatedAt: "2026-08-31T12:00:00.000Z",
+        })
+      ).resolves.toBeNull();
+      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
+    });
+
+    it("returns null and leaves the row unchanged for a different organization", async () => {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "provider-data-claim-organization" }),
+        status: pending,
+        provider: "moneygram",
+        providerData: { moneygram: { a: "1" } },
+      });
+      if (!transfer) throw new Error("Expected transfer creation to succeed");
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+
+      await expect(
+        repo.claimTransferProviderData({
+          ...scope,
+          organizationId: "org_someone_else",
+          expectedStatus: pending,
+          claimPath: ["moneygram", "transactionId"],
+          providerData: { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } },
+          updatedAt: "2026-08-31T12:00:00.000Z",
+        })
+      ).resolves.toBeNull();
+      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
+    });
   });
 
   it("sets a provider reference once and permits only an exact replay", async () => {
