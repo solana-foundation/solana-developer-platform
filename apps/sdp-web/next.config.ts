@@ -40,6 +40,32 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    return [
+      {
+        // Baseline hardening for every route. nosniff and the referrer
+        // default are safe universally; HSTS is ignored over plain HTTP, so
+        // self-hosted plain-HTTP deployments are unaffected.
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+        ],
+      },
+      {
+        // Clickjacking protection where the money-movement actions live.
+        // Scoped to the dashboard and the BFF: the public /pay/:token request
+        // page stays embeddable for issuers.
+        source: "/dashboard/:path*",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
+      {
+        source: "/api/:path*",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
+    ];
+  },
 };
 
 // Standalone output ships a minimal node_modules + server.js for the slim

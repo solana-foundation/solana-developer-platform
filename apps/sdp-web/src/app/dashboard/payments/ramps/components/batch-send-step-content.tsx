@@ -533,7 +533,13 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
                 {signature ? (
                   <button
                     type="button"
-                    onClick={() => window.open(explorerTxUrl(signature, cluster), "_blank")}
+                    onClick={() =>
+                      window.open(
+                        explorerTxUrl(signature, cluster),
+                        "_blank",
+                        "noopener,noreferrer"
+                      )
+                    }
                     className="text-tertiary hover:text-primary"
                     aria-label={t("DashboardPayments.batchSend.viewOnExplorer")}
                   >
