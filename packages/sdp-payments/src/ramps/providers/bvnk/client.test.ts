@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { SdpPaymentsError } from "../../../errors";
 import type { RampRuntimeContext } from "../../types";
 import { BvnkPayRequestError, BvnkRampClient } from "./client";
-import type { BvnkOnrampPayoutInput } from "./schemas";
+import { type BvnkOnrampPayoutInput, bvnkChannelResponseSchema } from "./schemas";
 import {
   bvnkAgreementSession,
   bvnkCustomer,
@@ -690,5 +692,54 @@ describe("BvnkRampClient estimate and simulation surfaces", () => {
     assert.equal(body.remittanceInformation, "xfr_9f3b1c2d4e5f");
     assert.equal(body.method, "ACH");
     assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "xfr_9f3b1c2d4e5f");
+  });
+});
+
+describe("BvnkRampClient off-ramp channel surfaces", () => {
+  /**
+   * Shape source of truth for `bvnkChannelResponseSchema`: the probe channel
+   * create payload captured in the repo devlog.
+   */
+  const channelCreatedUrl = new URL(
+    "../../../../../../docs/_devlog/HOO-1710/payloads/channel-created.json",
+    import.meta.url
+  );
+
+  function readChannelCreatedPayload(): { data: Record<string, unknown> } {
+    return JSON.parse(readFileSync(fileURLToPath(channelCreatedUrl), "utf8")) as {
+      data: Record<string, unknown>;
+    };
+  }
+
+  it("parses the channel-created payload with the extended channel response schema", () => {
+    const channel = bvnkChannelResponseSchema.parse(readChannelCreatedPayload().data);
+
+    assert.equal(channel.uuid, "01a0c720-c60f-7304-80c3-eb98d2ef351d");
+    assert.equal(channel.walletId, "a:26091832492051:YVPgmfq:1");
+    assert.equal(channel.reference, "xfr_f311ea1b-6e5b-4ab2-8ffd-0c3df94b64df");
+    assert.equal(channel.status, "OPEN");
+    assert.equal(channel.payCurrency, "USDC");
+    assert.equal(channel.displayCurrency, "USD");
+    assert.equal(channel.walletCurrency, "USD");
+    assert.equal(channel.protocol, "ERC20");
+    assert.equal(channel.network, "ETHEREUM");
+    assert.ok(channel.embeddedCustomerDetails);
+    assert.equal(channel.embeddedCustomerDetails.reference, "2acdd3e5-7166-4b04-8115-6ad3ccd66477");
+    assert.ok(channel.contact);
+    assert.equal(channel.contact.externalId, "2acdd3e5-7166-4b04-8115-6ad3ccd66477");
+  });
+
+  it("reads a channel back from GET /api/v2/channel/<id>", async () => {
+    const payload = readChannelCreatedPayload();
+    const channel = bvnkChannelResponseSchema.parse(payload.data);
+    const { requests } = queueFetch(respond(payload.data));
+
+    const readBack = await new BvnkRampClient().getChannelV2(runtimeContext, {
+      channelId: channel.uuid,
+    });
+
+    assert.equal(requests[0].init.method, "GET");
+    assert.equal(new URL(requests[0].url).pathname, `/api/v2/channel/${channel.uuid}`);
+    assert.deepEqual(readBack, channel);
   });
 });
