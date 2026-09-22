@@ -849,7 +849,7 @@ export class BvnkRampClient implements RampProvider {
     const channelResponse = await this.request(config, "/api/v2/channel", {
       method: "POST",
       body: {
-        walletId: parsed.data.bvnkOfframpWalletId,
+        walletId: parsed.data.bvnkFundingWalletId,
         payCurrency: currency,
         displayCurrency: parsed.data.fiatCurrency,
         reference,
@@ -877,7 +877,7 @@ export class BvnkRampClient implements RampProvider {
           destinationAddress,
           network,
           reference,
-          instructionsNotes: `Send ${currency} on ${network} to the deposit address. BVNK converts it to ${parsed.data.fiatCurrency} and pays out to the registered bank account.`,
+          instructionsNotes: `Send ${currency} on ${network} to the deposit address. BVNK converts it to ${parsed.data.fiatCurrency} and credits the counterparty's BVNK ${parsed.data.fiatCurrency} wallet.`,
         },
       ],
     };

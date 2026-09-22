@@ -330,7 +330,7 @@
       "readyTitle": "Preparing your instructions",
       "readyDescription": "Your funding account is ready — fetching your details now.",
       "onrampProvisioningDetail": "Provisioning a BVNK wallet and fiat conversion account for this quote.",
-      "offrampProvisioningDetail": "Provisioning a dedicated BVNK payout wallet for this currency.",
+      "offrampProvisioningDetail": "Provisioning the counterparty's BVNK USD funding wallet for this withdrawal.",
       "simulateDeposit": "Simulate Deposit",
       "simulating": "Simulating...",
       "depositSimulated": "Deposit Simulated",

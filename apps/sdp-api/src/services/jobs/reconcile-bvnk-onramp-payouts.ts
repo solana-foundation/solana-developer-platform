@@ -173,7 +173,7 @@ async function reconcileUnclaimedPayout(
       },
       complianceDetails: {
         requesterIpAddress: BVNK_PAYOUT_REQUESTER_IP,
-        partyDetails: [bvnkPayoutPartyDetailsFromCustomer(customer)],
+        partyDetails: [bvnkPayoutPartyDetailsFromCustomer(customer, "BENEFICIARY")],
       },
     });
     const spend = bvnkDryRunSpendIntent(

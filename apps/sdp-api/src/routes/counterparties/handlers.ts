@@ -1,6 +1,7 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { BvnkCustomerResolution } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
+  BVNK_FUNDING_WALLET_FIAT,
   bvnkCustomerStatusRequirements,
   isBvnkCustomerVerified,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
@@ -285,6 +286,15 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     );
   }
 
+  if (query.data.provider === "bvnk" && query.data.fiatCurrency !== BVNK_FUNDING_WALLET_FIAT) {
+    return success(c, {
+      provider: "bvnk",
+      direction: query.data.direction,
+      status: "unsupported",
+      reason: "BVNK supports USD only.",
+    });
+  }
+
   const providerAccount = await createPostgresCounterpartyProviderAccountsRepository(
     getDb(c.env)
   ).getProviderAccount({
@@ -371,6 +381,17 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     return success(c, requirements);
   }
 
+  if (query.data.provider === "bvnk" && refreshedBvnkCustomer !== undefined) {
+    const funding = await bvnkFundingWalletRequirements(c, {
+      counterparty,
+      projectId,
+      direction: query.data.direction,
+    });
+    if (funding !== null) {
+      return success(c, funding);
+    }
+    return success(c, readyCounterparty("bvnk", query.data.direction));
+  }
   const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
     mapToCounterparty(counterparty),
     {
