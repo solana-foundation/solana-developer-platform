@@ -669,6 +669,35 @@ export const counterpartyProviderAccountSchema = withOpenApi(
           "The counterparty's provider customer link, present once the provider onboarding has started.",
       }
     ),
+    providerAccountReference: withOpenApi(z.string().optional(), {
+      description:
+        "The provider's own wallet/account id; present on wallet kinds once the provider assigned it.",
+      example: "a:26091815750755:c1aVEgc:1",
+    }),
+    balance: withOpenApi(
+      z
+        .discriminatedUnion("state", [
+          z.object({
+            state: z.literal("available"),
+            amount: withOpenApi(z.string(), {
+              description: "Live wallet balance as a decimal string.",
+              example: "9.90",
+            }),
+            currency: withOpenApi(z.string(), {
+              description: "Balance currency.",
+              example: "USD",
+            }),
+          }),
+          z.object({
+            state: z.literal("unavailable"),
+          }),
+        ])
+        .optional(),
+      {
+        description:
+          "Live provider-wallet balance, fetched just in time; present only on wallet kinds whose reference exists. unavailable keeps the row visible when the provider read fails.",
+      }
+    ),
   }),
   { description: "Counterparty provider-account row with optional JIT provider details." }
 );
