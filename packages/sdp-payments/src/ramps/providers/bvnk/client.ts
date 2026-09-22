@@ -526,6 +526,28 @@ export class BvnkRampClient implements RampProvider {
   }
 
   /**
+   * Retrieves a v2 payment channel by its uuid. This is the read-back an
+   * off-ramp confirmation uses to prove the paid channel is the one SDP
+   * opened: same reference, same funding wallet, same BVNK customer.
+   *
+   * @param ctx - Runtime provider credentials and environment.
+   * @param input - `input.channelId`: the channel uuid stored as the transfer's provider reference.
+   * @returns The typed channel response.
+   */
+  async getChannelV2(
+    { env, mode }: RampRuntimeContext,
+    input: { channelId: string }
+  ): Promise<BvnkChannelResponse> {
+    const config = readBvnkConfig(env, mode);
+    const response = await this.request(
+      config,
+      `/api/v2/channel/${encodeURIComponent(input.channelId)}`,
+      { method: "GET" }
+    );
+    return parseBvnkResponse(bvnkChannelResponseSchema, response);
+  }
+
+  /**
    * Lists v2 ledger wallet profiles and their supported payment rails.
    *
    * @param ctx - Runtime provider credentials and environment.

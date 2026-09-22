@@ -62,11 +62,36 @@ const bvnkChannelAddressSchema = z.object({
   network: z.string().trim().toUpperCase(),
   address: z.string().min(1),
 });
+
+/**
+ * A BVNK v2 payment channel as returned by `POST /api/v2/channel` and the
+ * `GET /api/v2/channel/{uuid}` read-back. Shape source of truth:
+ * `docs/_devlog/HOO-1710/payloads/channel-created.json` (`data` object). The
+ * confirmed-channel webhook handler asserts `reference`, `walletId`, and
+ * `embeddedCustomerDetails.reference` against SDP-persisted facts before
+ * settling an off-ramp transfer.
+ */
 export const bvnkChannelResponseSchema = z.object({
   uuid: z.string().min(1),
+  walletId: z.string().min(1),
+  reference: z.string().min(1),
+  status: z.string().min(1),
+  payCurrency: z.string().min(1),
+  displayCurrency: z.string().min(1),
+  walletCurrency: z.string().min(1),
   address: z.string().min(1),
+  protocol: z.string().min(1),
   network: z.string().trim().toUpperCase(),
   alternatives: z.array(bvnkChannelAddressSchema).optional(),
+  contact: z
+    .object({
+      id: z.string().min(1),
+      externalId: z.string().min(1),
+      relationshipType: z.string().min(1),
+      entityType: z.string().min(1),
+    })
+    .optional(),
+  embeddedCustomerDetails: z.object({ reference: z.string().min(1) }).optional(),
 });
 export type BvnkChannelAddress = z.infer<typeof bvnkChannelAddressSchema>;
 export type BvnkChannelResponse = z.infer<typeof bvnkChannelResponseSchema>;
