@@ -19,12 +19,14 @@ import {
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { BvnkChannelResponse } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import {
+  bvnkOfframpChannelSettlementFromEvent,
   bvnkPayoutObservationFromSource,
   readStoredBvnkSettlement,
 } from "@sdp/payments/ramps/providers/bvnk/settlement";
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import {
   BVNK_FUNDING_WALLET_STATUS,
+  type BvnkOfframpChannelSettlement,
   NON_TERMINAL_RAMP_TRANSFER_STATUSES,
   type SdpEnvironment,
 } from "@sdp/types";
@@ -692,23 +694,28 @@ async function applyBvnkWalletEvent(
 /**
  * Applies an off-ramp channel settlement transition scoped to the webhook's
  * project environment; a sandbox-signed event naming a production off-ramp
- * transfer is terminal.
+ * transfer is terminal. The completed path records the settlement economics
+ * and the deposit transaction hash in the SAME single CAS update: the jsonb
+ * merge is first-write-wins at the settlement key and the signature
+ * COALESCE keeps any stored SDP signature. The settling path writes neither.
  * @param env - Process environment used for database access.
  * @param environment - The project environment the event was delivered for.
  * @param transferId - SDP off-ramp transfer identifier.
  * @param status - Settlement status to apply.
  * @param walletAmount - Confirmed wallet amount, when BVNK has supplied one.
+ * @param settlement - Confirmed settlement economics; null on the settling path.
  */
 async function settleBvnkOfframpChannel(
   env: Env,
   environment: SdpEnvironment,
   transferId: string,
   status: "settling" | "completed",
-  walletAmount: string | null
+  walletAmount: string | null,
+  settlement: BvnkOfframpChannelSettlement | null
 ): Promise<void> {
   const existing = await getDb(env)
     .prepare(
-      `SELECT pt.id
+      `SELECT pt.id, pt.signature
        FROM payment_transfers pt
        JOIN projects prj ON prj.id = pt.project_id
        WHERE pt.id = ?
@@ -717,10 +724,25 @@ async function settleBvnkOfframpChannel(
          AND prj.environment = ?`
     )
     .bind(transferId, environment)
-    .first<{ id: string }>();
+    .first<{ id: string; signature: string | null }>();
   if (existing === null) {
     throw new TerminalRampWebhookError(
       "stray off-ramp channel event: unknown transfer or environment mismatch"
+    );
+  }
+  const eventHash = settlement === null ? null : settlement.txHash;
+  if (
+    settlement !== null &&
+    existing.signature !== null &&
+    existing.signature !== settlement.txHash
+  ) {
+    getLogger().warn(
+      {
+        transfer_id: transferId,
+        stored_signature: existing.signature,
+        event_hash: settlement.txHash,
+      },
+      "[bvnk webhook] off-ramp confirmation event hash differs from the stored signature"
     );
   }
   const placeholders = buildInClause(NON_TERMINAL_RAMP_TRANSFER_STATUSES.length);
@@ -729,6 +751,8 @@ async function settleBvnkOfframpChannel(
       `UPDATE payment_transfers pt
        SET status = ?,
            fiat_amount = CASE WHEN ?::boolean THEN ? ELSE fiat_amount END,
+           provider_data = provider_data || ?::jsonb,
+           signature = COALESCE(signature, ?),
            updated_at = ?
        WHERE pt.id = ?
          AND pt.provider = 'bvnk'
@@ -742,6 +766,8 @@ async function settleBvnkOfframpChannel(
       status,
       walletAmount !== null,
       walletAmount,
+      settlement === null ? {} : { settlement },
+      eventHash,
       new Date().toISOString(),
       transferId,
       ...NON_TERMINAL_RAMP_TRANSFER_STATUSES,
@@ -782,13 +808,16 @@ function bvnkChannelTransferId(
  * @param env - Process environment used for database access.
  * @param environment - The project environment the event was delivered for.
  * @param transferId - SDP off-ramp transfer identifier.
- * @returns The proven BVNK channel read-back.
+ * @returns The proven BVNK channel read-back and the transfer's recorded channel facts.
  */
 async function proveBvnkOfframpChannel(
   env: Env,
   environment: SdpEnvironment,
   transferId: string
-): Promise<BvnkChannelResponse> {
+): Promise<{
+  channel: BvnkChannelResponse;
+  recordedChannel: { id: string; walletId: string; customerReference: string };
+}> {
   const row = await getDb(env)
     .prepare(
       `SELECT pt.provider_reference, pt.provider_data
@@ -854,7 +883,38 @@ async function proveBvnkOfframpChannel(
       })`
     );
   }
-  return channel;
+  return { channel, recordedChannel: recorded.channel };
+}
+
+/**
+ * Asserts the confirmed event's own channel facts against the transfer's
+ * recorded channel facts after the read-back proved the channel: the event
+ * must name the same channel, funding wallet, and embedded customer the
+ * transfer recorded at quote time. A mismatch is terminal — the money cannot
+ * be re-attributed.
+ *
+ * @param data - Parsed confirmed channel-transaction event data.
+ * @param recorded - The transfer's recorded channel facts.
+ */
+function assertBvnkOfframpEventMatchesChannel(
+  data: Extract<BvnkWebhook, { event: "bvnk:payment:channel:transaction-confirmed" }>["data"],
+  recorded: { id: string; walletId: string; customerReference: string }
+): void {
+  if (data.channelId !== recorded.id) {
+    throw new TerminalRampWebhookError(
+      `stray off-ramp channel event: event channel id mismatch (expected ${recorded.id}, got ${data.channelId})`
+    );
+  }
+  if (data.walletId !== recorded.walletId) {
+    throw new TerminalRampWebhookError(
+      `stray off-ramp channel event: event wallet mismatch (expected ${recorded.walletId}, got ${data.walletId})`
+    );
+  }
+  if (data.embeddedCustomerDetails.reference !== recorded.customerReference) {
+    throw new TerminalRampWebhookError(
+      `stray off-ramp channel event: event customer mismatch (expected ${recorded.customerReference}, got ${data.embeddedCustomerDetails.reference})`
+    );
+  }
 }
 
 /**
@@ -876,18 +936,21 @@ async function handleBvnkPaymentChannelTransactionDetected(
     return;
   }
   await proveBvnkOfframpChannel(env, environment, transferId);
-  await settleBvnkOfframpChannel(env, environment, transferId, "settling", null);
+  await settleBvnkOfframpChannel(env, environment, transferId, "settling", null, null);
 }
 
 /**
  * Applies a confirmed off-ramp channel transaction only after proving, from
  * a BVNK channel read-back keyed on the transfer's stored channel uuid, that
  * the paid channel is the channel THIS transfer recorded at quote time: same
- * channel id, same funding wallet, same BVNK customer. The counterparty's
- * current funding-wallet and customer-link rows are never consulted. A
- * missing transfer, a missing recorded channel, or a mismatch on any proven
- * fact is terminal — the payment cannot be re-attributed. A BVNK read failure
- * stays a plain provider error so the inbox replay retries it.
+ * channel id, same funding wallet, same BVNK customer. The event's own
+ * channel, wallet, and embedded-customer facts must then agree with those
+ * recorded facts before the settlement economics are stored. The
+ * counterparty's current funding-wallet and customer-link rows are never
+ * consulted. A missing transfer, a missing recorded channel, or a mismatch
+ * on any proven fact is terminal — the payment cannot be re-attributed. A
+ * BVNK read failure stays a plain provider error so the inbox replay retries
+ * it.
  *
  * @param env - Process environment used for database access.
  * @param environment - The project environment the event was delivered for.
@@ -902,13 +965,16 @@ async function handleBvnkPaymentChannelTransactionConfirmed(
   if (transferId === undefined) {
     return;
   }
-  const channel = await proveBvnkOfframpChannel(env, environment, transferId);
+  const { channel, recordedChannel } = await proveBvnkOfframpChannel(env, environment, transferId);
+  assertBvnkOfframpEventMatchesChannel(event.data, recordedChannel);
+  const settlement = bvnkOfframpChannelSettlementFromEvent(event.data);
   await settleBvnkOfframpChannel(
     env,
     environment,
     transferId,
     "completed",
-    event.data.walletAmount
+    event.data.walletAmount,
+    settlement
   );
   getLogger().info(
     {
