@@ -215,6 +215,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
         await ledger.recordIndexError({
           withdrawalRequestId: request.id,
           error: describeError(error),
+          retryAt: new Date(Date.now() + OPEN_REQUEST_POLL_MS).toISOString(),
         });
         getLogger().error(
           { requestId: request.id, requestAddress: request.request_address, error },

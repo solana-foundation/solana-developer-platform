@@ -160,9 +160,13 @@ it, and only then claims the next, up to 128 per tick. Do not pre-claim that
 whole cap: later rows would spend their lease waiting in memory and could be
 reclaimed by another worker. Pending requests wait until maturity or at most 15
 minutes, subject to the normal one-minute minimum, while every other open state
-stays on the one-minute cadence. Terminal transitions clear the schedule. A
-crashed worker becomes retryable when its lease expires, so do not replace this
-with an in-memory timer or scan every open request on every tick. Closed-PDA
+stays on the one-minute cadence. A failed provider or RPC read records its error
+and moves `next_check_at` forward before the worker claims another row, so an
+expired lease cannot reclaim the same failing request for the rest of the tick.
+That update never shortens a lease another worker may already hold. Terminal
+transitions clear the schedule. A crashed worker becomes retryable when its
+lease expires, so do not replace this with an in-memory timer or scan every open
+request on every tick. Closed-PDA
 history reads fetch transactions in ordered windows of eight, then inspect
 results newest first; the bound protects RPC capacity and the ordered inspection
 preserves the former serial decision and error semantics.

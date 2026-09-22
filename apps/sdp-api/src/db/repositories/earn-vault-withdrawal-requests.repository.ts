@@ -326,7 +326,12 @@ export interface EarnVaultWithdrawalRequestsRepository {
     /** Next useful provider read. Terminal transitions always clear it. */
     nextCheckAt?: string | null;
   }): Promise<EarnVaultWithdrawalRequestRow | null>;
-  recordIndexError(input: { withdrawalRequestId: string; error: string }): Promise<void>;
+  recordIndexError(input: {
+    withdrawalRequestId: string;
+    error: string;
+    /** Earliest time this failed request may be claimed again. */
+    retryAt: string;
+  }): Promise<void>;
   claimUnsettledActions(limit: number): Promise<EarnVaultWithdrawalRequestActionRow[]>;
   claimOpenRequests(limit: number): Promise<EarnVaultWithdrawalRequestRow[]>;
   cleanupExpiredReservations(): Promise<number>;
@@ -1336,10 +1341,15 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
       await db
         .prepare(
           `UPDATE earn_vault_withdrawal_requests
-              SET last_index_error = ?, updated_at = sdp_iso_now()
+              SET last_index_error = ?,
+                  next_check_at = CASE
+                    WHEN next_check_at IS NULL OR next_check_at < ? THEN ?
+                    ELSE next_check_at
+                  END,
+                  updated_at = sdp_iso_now()
             WHERE id = ?`
         )
-        .bind(input.error.slice(0, 500), input.withdrawalRequestId)
+        .bind(input.error.slice(0, 500), input.retryAt, input.retryAt, input.withdrawalRequestId)
         .run();
     },
 
