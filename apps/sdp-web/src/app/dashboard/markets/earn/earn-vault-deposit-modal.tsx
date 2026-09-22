@@ -49,6 +49,9 @@ import {
   fetchEarnVaultDepositPreview,
   useEarnVaultDepositOutcome,
 } from "./earn-program-data";
+
+export { EarnVaultDepositOutcomeTracker } from "./earn-outcome-trackers";
+
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
 import {
   forgetVaultDepositFloor,
@@ -706,39 +709,6 @@ function DepositResult({
     return <DepositApprovalResult onClose={onClose} outcome={outcome} />;
   }
   return <DepositMovementResult onClose={onClose} outcome={outcome} symbol={symbol} />;
-}
-
-interface EarnVaultDepositOutcomeTrackerProps {
-  movementId: string;
-  /** Keep the table's status badge current while the movement advances. */
-  onUpdated?: (deposit: EarnVaultDepositRecord) => void;
-  /** Refresh the balances the deposit changed, then retire the tracker. */
-  onSettled?: (deposit: EarnVaultDepositRecord) => void;
-}
-
-/**
- * Keeps a recorded deposit under observation independently of the dismissible
- * modal, which is the whole point: the modal's success screen is a receipt for
- * a SIGNATURE, and the customer will close it long before the chain has
- * decided. Treasury mounts one of these per in-flight deposit; the canonical
- * hook polls until the movement is `confirmed` or `failed`, reports the result
- * exactly once, and then asks the caller to retire it. Treasury owns the
- * visible status so a long-running chain operation never depends on a toast.
- *
- * Deliberately NOT mounted for an approval-gated deposit: that path throws
- * `SIGNING_PENDING` with an approval id and NO movement id, because no movement
- * row exists until someone approves it. There is nothing to poll by id, and a
- * tracker that pretended otherwise would poll a movement that does not exist
- * and quietly report nothing (PRO-1692 — the approval path needs its own
- * answer, either a wallet-operation poll or a server-side attempt record).
- */
-export function EarnVaultDepositOutcomeTracker({
-  movementId,
-  onSettled,
-  onUpdated,
-}: EarnVaultDepositOutcomeTrackerProps) {
-  useEarnVaultDepositOutcome(movementId, onSettled, onUpdated);
-  return null;
 }
 
 export interface EarnVaultDepositModalProps {

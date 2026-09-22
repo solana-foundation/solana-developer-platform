@@ -22,11 +22,9 @@ import { useModalFocus } from "@/lib/use-modal-focus";
 import { BASE58_ADDRESS_PATTERN } from "../base58-address";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
-import {
-  createEarnWithdrawal,
-  previewEarnWithdrawal,
-  useEarnWithdrawalOutcomeToast,
-} from "./earn-program-data";
+import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
+
+export { EarnWithdrawalOutcomeTracker } from "./earn-outcome-trackers";
 
 export function isPositiveUsdAmount(value: string): boolean {
   const amount = parseUnsignedDecimal(value, { trim: false });
@@ -538,28 +536,6 @@ interface EarnWithdrawModalProps {
    * the wallet returning to idle does not say whether the money arrived.
    */
   onWithdrawalCreated: (withdrawalRef: string) => void;
-}
-
-interface EarnWithdrawalOutcomeTrackerProps {
-  programId: string;
-  withdrawalRef: string;
-  /** Refresh balances and retire the tracker after its terminal announcement. */
-  onSettled?: () => void;
-}
-
-/**
- * Keeps provider-authoritative outcome polling alive independently of the
- * dismissible modal. Treasury mounts one tracker for the accepted withdrawal;
- * the canonical hook waits through `pending_approval`, announces exactly once
- * on a terminal withdrawal status, and then asks the caller to retire it.
- */
-export function EarnWithdrawalOutcomeTracker({
-  programId,
-  withdrawalRef,
-  onSettled,
-}: EarnWithdrawalOutcomeTrackerProps) {
-  useEarnWithdrawalOutcomeToast(programId, withdrawalRef, onSettled);
-  return null;
 }
 
 /**
