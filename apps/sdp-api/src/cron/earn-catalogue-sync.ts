@@ -400,15 +400,29 @@ interface CatalogueLane {
   allowEmptyKeepSet?: true;
 }
 
+function dedupeCatalogueLane(lane: CatalogueLane): CatalogueLane {
+  const snapshotsByProviderReference = new Map<string, ProviderStrategySnapshot>();
+  for (const snapshot of lane.snapshots) {
+    // A provider reference is unique inside one provider/environment lane.
+    // Keep the last accepted snapshot so overlapping provider pages cannot
+    // make one ON CONFLICT statement target the same row twice.
+    snapshotsByProviderReference.set(snapshot.providerReference, snapshot);
+  }
+  return snapshotsByProviderReference.size === lane.snapshots.length
+    ? lane
+    : { ...lane, snapshots: [...snapshotsByProviderReference.values()] };
+}
+
 async function writeCatalogueLane(
   repo: EarnRepository,
   client: EarnVaultProvider,
   lane: CatalogueLane
 ): Promise<void> {
+  const dedupedLane = dedupeCatalogueLane(lane);
   const logContext = {
     provider: client.provider,
-    environment: lane.environment,
-    delist_scope: lane.delistScope ?? "environment",
+    environment: dedupedLane.environment,
+    delist_scope: dedupedLane.delistScope ?? "environment",
   };
 
   // The keep set for the delist pass below: references this lane accepts as
@@ -417,16 +431,16 @@ async function writeCatalogueLane(
   // write failure never reads as a delisting — but any upsert failure still
   // skips the pass entirely (`upsertFailed`), because a half-applied catalogue
   // cannot say what the provider no longer lists.
-  const listedProviderReferences: string[] = [...(lane.keepWithoutUpsert ?? [])];
+  const listedProviderReferences: string[] = [...new Set(dedupedLane.keepWithoutUpsert ?? [])];
   let upsertFailed = false;
 
   // Figure anomaly check (PRO-1867) BEFORE the writes: the stored rows are the
   // "before". Scoped to the lane's sub-shelf, since that is the set this
   // lane's snapshots are the truth for. Read-only and never fatal: a failed
   // read costs this pass its diff, not its write.
-  await reportLaneAnomalies(repo, client, lane, listedProviderReferences.length, logContext);
+  await reportLaneAnomalies(repo, client, dedupedLane, listedProviderReferences.length, logContext);
 
-  const upserts = lane.snapshots.map((snapshot) => {
+  const upserts = dedupedLane.snapshots.map((snapshot) => {
     listedProviderReferences.push(snapshot.providerReference);
     return {
       provider: client.provider,
@@ -446,7 +460,7 @@ async function writeCatalogueLane(
       hostCluster: snapshot.hostCluster,
       // The repository keeps operator pauses/deprecations sticky.
       status: "active" as const,
-      environment: lane.environment,
+      environment: dedupedLane.environment,
     };
   });
 
@@ -455,7 +469,8 @@ async function writeCatalogueLane(
   } catch (batchError) {
     // One bad provider row must not prevent valid rows from refreshing. The
     // batch statement is atomic, so isolated retries are safe and identify the
-    // offending reference. Any failure still suppresses this lane's delist.
+    // offending reference. A failed isolated retry still suppresses this
+    // lane's delist.
     getLogger().warn(
       {
         ...logContext,
@@ -482,7 +497,7 @@ async function writeCatalogueLane(
     }
   }
 
-  await deprecateUnlistedFromCatalogue(repo, client, lane, {
+  await deprecateUnlistedFromCatalogue(repo, client, dedupedLane, {
     listedProviderReferences,
     upsertFailed,
     logContext,

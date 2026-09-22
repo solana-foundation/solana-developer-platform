@@ -370,6 +370,56 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
+  it("deduplicates provider references before each lane's batch upsert", async () => {
+    mocks.upsertStrategies.mockImplementation(
+      async (inputs: Array<{ providerReference: string }>) => {
+        const references = inputs.map(({ providerReference }) => providerReference);
+        if (new Set(references).size !== references.length) {
+          throw new Error("batch contains duplicate provider references");
+        }
+        return inputs.length;
+      }
+    );
+    const listStrategies = vi.fn(async (ctx: EarnRuntimeContext) =>
+      ctx.environment === "production"
+        ? [
+            { ...makeSnapshot("mainnet-vault", "mainnet-beta"), name: "Stale mainnet name" },
+            { ...makeSnapshot("mainnet-vault", "mainnet-beta"), name: "Current mainnet name" },
+          ]
+        : [
+            { ...makeSnapshot("devnet-vault"), name: "Stale devnet name" },
+            { ...makeSnapshot("devnet-vault"), name: "Current devnet name" },
+          ]
+    );
+    installProviders({ upshift: makeProvider("upshift", listStrategies) });
+
+    await expect(runEarnCatalogueSyncIfDue(env)).resolves.toBe("synced");
+
+    expect(mocks.upsertStrategies).toHaveBeenCalledTimes(3);
+    expect(mocks.upsertStrategies).toHaveBeenNthCalledWith(1, [
+      expect.objectContaining({
+        providerReference: "mainnet-vault",
+        environment: "production",
+        name: "Current mainnet name",
+      }),
+    ]);
+    expect(mocks.upsertStrategies).toHaveBeenNthCalledWith(2, [
+      expect.objectContaining({
+        providerReference: "devnet-vault",
+        environment: "sandbox",
+        name: "Current devnet name",
+      }),
+    ]);
+    expect(mocks.upsertStrategies).toHaveBeenNthCalledWith(3, [
+      expect.objectContaining({
+        providerReference: "mainnet-vault",
+        environment: "sandbox",
+        name: "Current mainnet name",
+      }),
+    ]);
+    expect(mocks.upsertStrategy).not.toHaveBeenCalled();
+  });
+
   it("treats stub and un-credentialed providers as steady states, not failures", async () => {
     const notImplemented = vi.fn(async (): Promise<ProviderStrategySnapshot[]> => {
       throw new SdpEarnError("NOT_IMPLEMENTED");
