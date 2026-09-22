@@ -6,20 +6,16 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const inputSchema = z.discriminatedUnion("route", [
-  z
-    .object({
-      amount: z.string().min(1).max(128),
-      route: z.literal("direct"),
-    })
-    .strict(),
-  z
-    .object({
-      amount: z.string().min(1).max(128),
-      route: z.literal("queued"),
-      discountBps: z.number().int().min(0).max(10_000),
-      deadlineSeconds: z.number().int().positive().max(7_776_000),
-    })
-    .strict(),
+  z.strictObject({
+    amount: z.string().min(1).max(128),
+    route: z.literal("direct"),
+  }),
+  z.strictObject({
+    amount: z.string().min(1).max(128),
+    route: z.literal("queued"),
+    discountBps: z.number().int().min(0).max(10_000),
+    deadlineSeconds: z.number().int().positive().max(7_776_000),
+  }),
 ]);
 
 /** Savings to checking. */

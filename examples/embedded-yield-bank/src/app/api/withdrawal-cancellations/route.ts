@@ -5,9 +5,9 @@ import { z } from "zod";
 
 export const runtime = "nodejs";
 
-const inputSchema = z
-  .object({ withdrawalRequestId: z.string().min(1).max(128) })
-  .strict();
+const inputSchema = z.strictObject({
+  withdrawalRequestId: z.string().min(1).max(128),
+});
 
 /** Recover shares from a queued request after its solver deadline. */
 export async function POST(request: Request) {

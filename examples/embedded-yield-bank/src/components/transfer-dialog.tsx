@@ -48,6 +48,11 @@ interface DurationUnit {
   label: "seconds" | "minutes" | "hours" | "days";
 }
 
+interface WithdrawalRouteAvailability {
+  direct: boolean;
+  queued: boolean;
+}
+
 const COPY: Record<
   TransferDirection,
   { title: string; description: string; from: string }
@@ -92,18 +97,16 @@ export function TransferDialog({
     String((queueTerms?.minimumSecondsToDeadline ?? 60) / durationUnit.divisor)
   );
   const copy = COPY[direction];
-  const directAvailable = Boolean(
-    withdrawalOptions?.instant || withdrawalOptions?.providerOrder
+  const availability = withdrawalRouteAvailability(
+    withdrawalOptions,
+    queueTerms
   );
-  const queuedAvailable = Boolean(
-    withdrawalOptions?.queued && queueTerms?.allowWithdrawals
+  const showRouteChoice = shouldShowRouteChoice(direction, availability);
+  const selectedRouteAvailable = isSelectedRouteAvailable(
+    direction,
+    withdrawalRoute,
+    availability
   );
-  const showRouteChoice =
-    direction === "to-checking" && directAvailable && queuedAvailable;
-  const selectedRouteAvailable =
-    direction === "to-savings" ||
-    (withdrawalRoute === "direct" ? directAvailable : queuedAvailable);
-  const canUseMax = available !== undefined && available !== "0";
   const inputId = `${direction}-amount`;
   const prefix = currencyPrefix(symbol);
 
@@ -127,37 +130,105 @@ export function TransferDialog({
 
   const discountBps = parsePercentToBasisPoints(discountPercent);
   const deadlineSeconds = parseDurationSeconds(deadline, durationUnit);
-  const queueSettingsValid =
-    queueTerms !== null &&
-    Number.isInteger(discountBps) &&
-    discountBps >= queueTerms.minimumDiscountBps &&
-    discountBps <= queueTerms.maximumDiscountBps &&
-    Number.isInteger(deadlineSeconds) &&
-    deadlineSeconds >= queueTerms.minimumSecondsToDeadline &&
-    deadlineSeconds <= queueTerms.maximumSecondsToDeadline;
+  const queueSettingsValid = areQueueSettingsValid(
+    queueTerms,
+    discountBps,
+    deadlineSeconds
+  );
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     try {
-      if (direction === "to-savings") {
-        await onSubmit({ amount: amount.trim(), route: "deposit" });
-      } else if (withdrawalRoute === "queued") {
-        if (!queueSettingsValid) return;
-        await onSubmit({
-          amount: amount.trim(),
-          route: "queued",
-          discountBps,
-          deadlineSeconds,
-        });
-      } else {
-        await onSubmit({ amount: amount.trim(), route: "direct" });
-      }
+      const input = transferIntent({
+        amount,
+        direction,
+        withdrawalRoute,
+        queueSettingsValid,
+        discountBps,
+        deadlineSeconds,
+      });
+      if (!input) return;
+      await onSubmit(input);
       handleOpenChange(false);
     } catch {
       // App owns the toast. Keep the dialog open so the customer can adjust.
     }
   }
 
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <TransferDialogTrigger
+        busy={busy}
+        disabledReason={disabledReason}
+        title={copy.title}
+        variant={variant}
+      />
+      <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-md">
+        <form className="flex flex-col gap-6" onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>{copy.title}</DialogTitle>
+            <DialogDescription>{copy.description}</DialogDescription>
+          </DialogHeader>
+
+          <TransferAmountField
+            amount={amount}
+            available={available}
+            from={copy.from}
+            inputId={inputId}
+            onAmountChange={setAmount}
+            prefix={prefix}
+            symbol={symbol}
+          />
+          <WithdrawalRouteChooser
+            options={withdrawalOptions}
+            route={withdrawalRoute}
+            show={showRouteChoice}
+            onRouteChange={setWithdrawalRoute}
+          />
+          <QueuedWithdrawalFields
+            active={direction === "to-checking" && withdrawalRoute === "queued"}
+            deadline={deadline}
+            discountPercent={discountPercent}
+            durationUnit={durationUnit}
+            queueSettingsValid={queueSettingsValid}
+            queueTerms={queueTerms}
+            onDeadlineChange={setDeadline}
+            onDiscountChange={setDiscountPercent}
+          />
+          <TransferSummary
+            direction={direction}
+            discountPercent={discountPercent}
+            feesPaidBy={feesPaidBy}
+            options={withdrawalOptions}
+            queueTerms={queueTerms}
+            route={withdrawalRoute}
+            strategy={strategy}
+          />
+          <TransferDialogFooter
+            amount={amount}
+            busy={busy}
+            queueSettingsValid={queueSettingsValid}
+            route={withdrawalRoute}
+            selectedRouteAvailable={selectedRouteAvailable}
+            title={copy.title}
+          />
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TransferDialogTrigger({
+  busy,
+  disabledReason,
+  title,
+  variant,
+}: {
+  busy: boolean;
+  disabledReason?: string;
+  title: string;
+  variant: "default" | "outline";
+}) {
   const trigger = (
     <Button
       type="button"
@@ -166,202 +237,265 @@ export function TransferDialog({
       className="px-4"
       disabled={Boolean(disabledReason) || busy}
     >
-      {copy.title}
+      {title}
     </Button>
   );
 
+  if (disabledReason) {
+    return (
+      <span className="inline-flex" title={disabledReason}>
+        {trigger}
+      </span>
+    );
+  }
+  return <DialogTrigger asChild>{trigger}</DialogTrigger>;
+}
+
+function TransferAmountField({
+  amount,
+  available,
+  from,
+  inputId,
+  onAmountChange,
+  prefix,
+  symbol,
+}: {
+  amount: string;
+  available: string | undefined;
+  from: string;
+  inputId: string;
+  onAmountChange: (value: string) => void;
+  prefix: string;
+  symbol: string;
+}) {
+  const canUseMax = available !== undefined && available !== "0";
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      {disabledReason ? (
-        <span className="inline-flex" title={disabledReason}>
-          {trigger}
-        </span>
+    <Field>
+      <FieldLabel htmlFor={inputId}>Amount</FieldLabel>
+      <div className="relative">
+        {prefix ? (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-lg text-muted-foreground"
+          >
+            {prefix}
+          </span>
+        ) : null}
+        <Input
+          id={inputId}
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder="0.00"
+          value={amount}
+          onChange={(event) => onAmountChange(event.target.value)}
+          className={cn(
+            "h-12 pr-16 text-lg tabular-nums md:text-lg",
+            prefix && "pl-7"
+          )}
+          required
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground"
+          disabled={!canUseMax}
+          onClick={() => available && onAmountChange(available)}
+        >
+          Max
+        </Button>
+      </div>
+      <FieldDescription>
+        {available === undefined
+          ? `Your ${from} balance is still updating.`
+          : `${formatAmount(available, symbol)} available in ${from}.`}
+      </FieldDescription>
+    </Field>
+  );
+}
+
+function WithdrawalRouteChooser({
+  options,
+  route,
+  show,
+  onRouteChange,
+}: {
+  options: YieldWithdrawalOptions | null | undefined;
+  route: WithdrawalRoute;
+  show: boolean;
+  onRouteChange: (route: WithdrawalRoute) => void;
+}) {
+  if (!show) return null;
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="text-sm font-medium">How to withdraw</legend>
+      <WithdrawalRouteOption
+        checked={route === "direct"}
+        description={directRouteDescription(options)}
+        label={options?.instant ? "Withdraw now" : "Provider redemption"}
+        onChange={() => onRouteChange("direct")}
+        value="direct"
+      />
+      <WithdrawalRouteOption
+        checked={route === "queued"}
+        description="Escrow shares now, then wait for a solver payment or recover them after the deadline."
+        label="Queued withdrawal"
+        onChange={() => onRouteChange("queued")}
+        value="queued"
+      />
+    </fieldset>
+  );
+}
+
+function QueuedWithdrawalFields({
+  active,
+  deadline,
+  discountPercent,
+  durationUnit,
+  queueSettingsValid,
+  queueTerms,
+  onDeadlineChange,
+  onDiscountChange,
+}: {
+  active: boolean;
+  deadline: string;
+  discountPercent: string;
+  durationUnit: DurationUnit;
+  queueSettingsValid: boolean;
+  queueTerms: YieldWithdrawalOptions["queueAsset"];
+  onDeadlineChange: (value: string) => void;
+  onDiscountChange: (value: string) => void;
+}) {
+  if (!active || !queueTerms) return null;
+  return (
+    <div className="grid gap-4 rounded-xl border p-4">
+      <p className="text-sm leading-5 text-muted-foreground">
+        This request locks shares and pays later. It is not a completed transfer
+        until SDP reports fulfillment.
+      </p>
+      <Field>
+        <FieldLabel htmlFor="queued-discount">Accept less (%)</FieldLabel>
+        <Input
+          id="queued-discount"
+          inputMode="decimal"
+          value={discountPercent}
+          onChange={(event) => onDiscountChange(event.target.value)}
+        />
+        <FieldDescription>
+          Allowed: {formatBasisPoints(queueTerms.minimumDiscountBps)}% to{" "}
+          {formatBasisPoints(queueTerms.maximumDiscountBps)}%.
+        </FieldDescription>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="queued-deadline">
+          Solver window ({durationUnit.label})
+        </FieldLabel>
+        <Input
+          id="queued-deadline"
+          inputMode="decimal"
+          value={deadline}
+          onChange={(event) => onDeadlineChange(event.target.value)}
+        />
+        <FieldDescription>
+          Allowed: {formatDuration(queueTerms.minimumSecondsToDeadline)} to{" "}
+          {formatDuration(queueTerms.maximumSecondsToDeadline)} after maturity.
+        </FieldDescription>
+      </Field>
+      {!queueSettingsValid ? (
+        <p className="text-sm text-destructive" role="alert">
+          Use the allowed discount and solver window.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function TransferSummary({
+  direction,
+  discountPercent,
+  feesPaidBy,
+  options,
+  queueTerms,
+  route,
+  strategy,
+}: {
+  direction: TransferDirection;
+  discountPercent: string;
+  feesPaidBy: FeePayer;
+  options: YieldWithdrawalOptions | null | undefined;
+  queueTerms: YieldWithdrawalOptions["queueAsset"];
+  route: WithdrawalRoute;
+  strategy: YieldStrategy;
+}) {
+  return (
+    <dl className="flex flex-col gap-2.5 rounded-xl bg-muted/60 p-4 text-sm">
+      <SummaryRow label="Savings account" value={strategy.name} />
+      {direction === "to-savings" ? (
+        <SummaryRow label="Rate" value={formatApy(strategy.currentApy)} />
+      ) : route === "queued" && queueTerms ? (
+        <>
+          <SummaryRow label="Route" value="Queued withdrawal" />
+          <SummaryRow
+            label="Matures"
+            value={`In about ${formatDuration(queueTerms.secondsToMaturity)}`}
+          />
+          <SummaryRow
+            label="Accept less"
+            value={`${discountPercent || "0"}%`}
+          />
+        </>
       ) : (
-        <DialogTrigger asChild>{trigger}</DialogTrigger>
+        <SummaryRow
+          label="Arrives"
+          value={options?.instant ? "Right away" : arrivalCopy(strategy)}
+        />
       )}
-      <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-md">
-        <form className="flex flex-col gap-6" onSubmit={submit}>
-          <DialogHeader>
-            <DialogTitle>{copy.title}</DialogTitle>
-            <DialogDescription>{copy.description}</DialogDescription>
-          </DialogHeader>
+      <SummaryRow
+        label="Network fees"
+        value={
+          feesPaidBy === "northstar"
+            ? "Paid by Northstar"
+            : "Paid from your wallet"
+        }
+      />
+    </dl>
+  );
+}
 
-          <Field>
-            <FieldLabel htmlFor={inputId}>Amount</FieldLabel>
-            <div className="relative">
-              {prefix ? (
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-lg text-muted-foreground"
-                >
-                  {prefix}
-                </span>
-              ) : null}
-              <Input
-                id={inputId}
-                inputMode="decimal"
-                autoComplete="off"
-                placeholder="0.00"
-                value={amount}
-                onChange={(event) => setAmount(event.target.value)}
-                className={cn(
-                  "h-12 pr-16 text-lg tabular-nums md:text-lg",
-                  prefix && "pl-7"
-                )}
-                required
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground"
-                disabled={!canUseMax}
-                onClick={() => available && setAmount(available)}
-              >
-                Max
-              </Button>
-            </div>
-            <FieldDescription>
-              {available === undefined
-                ? `Your ${copy.from} balance is still updating.`
-                : `${formatAmount(available, symbol)} available in ${copy.from}.`}
-            </FieldDescription>
-          </Field>
-
-          {showRouteChoice ? (
-            <fieldset className="flex flex-col gap-2">
-              <legend className="text-sm font-medium">How to withdraw</legend>
-              <WithdrawalRouteOption
-                checked={withdrawalRoute === "direct"}
-                description={directRouteDescription(withdrawalOptions)}
-                label={
-                  withdrawalOptions?.instant
-                    ? "Withdraw now"
-                    : "Provider redemption"
-                }
-                onChange={() => setWithdrawalRoute("direct")}
-                value="direct"
-              />
-              <WithdrawalRouteOption
-                checked={withdrawalRoute === "queued"}
-                description="Escrow shares now, then wait for a solver payment or recover them after the deadline."
-                label="Queued withdrawal"
-                onChange={() => setWithdrawalRoute("queued")}
-                value="queued"
-              />
-            </fieldset>
-          ) : null}
-
-          {direction === "to-checking" &&
-          withdrawalRoute === "queued" &&
-          queueTerms ? (
-            <div className="grid gap-4 rounded-xl border p-4">
-              <p className="text-sm leading-5 text-muted-foreground">
-                This request locks shares and pays later. It is not a completed
-                transfer until SDP reports fulfillment.
-              </p>
-              <Field>
-                <FieldLabel htmlFor="queued-discount">
-                  Accept less (%)
-                </FieldLabel>
-                <Input
-                  id="queued-discount"
-                  inputMode="decimal"
-                  value={discountPercent}
-                  onChange={(event) => setDiscountPercent(event.target.value)}
-                />
-                <FieldDescription>
-                  Allowed: {formatBasisPoints(queueTerms.minimumDiscountBps)}%
-                  to {formatBasisPoints(queueTerms.maximumDiscountBps)}%.
-                </FieldDescription>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="queued-deadline">
-                  Solver window ({durationUnit.label})
-                </FieldLabel>
-                <Input
-                  id="queued-deadline"
-                  inputMode="decimal"
-                  value={deadline}
-                  onChange={(event) => setDeadline(event.target.value)}
-                />
-                <FieldDescription>
-                  Allowed: {formatDuration(queueTerms.minimumSecondsToDeadline)}{" "}
-                  to {formatDuration(queueTerms.maximumSecondsToDeadline)} after
-                  maturity.
-                </FieldDescription>
-              </Field>
-              {!queueSettingsValid ? (
-                <p className="text-sm text-destructive" role="alert">
-                  Use the allowed discount and solver window.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          <dl className="flex flex-col gap-2.5 rounded-xl bg-muted/60 p-4 text-sm">
-            <SummaryRow label="Savings account" value={strategy.name} />
-            {direction === "to-savings" ? (
-              <SummaryRow label="Rate" value={formatApy(strategy.currentApy)} />
-            ) : withdrawalRoute === "queued" && queueTerms ? (
-              <>
-                <SummaryRow label="Route" value="Queued withdrawal" />
-                <SummaryRow
-                  label="Matures"
-                  value={`In about ${formatDuration(queueTerms.secondsToMaturity)}`}
-                />
-                <SummaryRow
-                  label="Accept less"
-                  value={`${discountPercent || "0"}%`}
-                />
-              </>
-            ) : (
-              <SummaryRow
-                label="Arrives"
-                value={
-                  withdrawalOptions?.instant
-                    ? "Right away"
-                    : arrivalCopy(strategy)
-                }
-              />
-            )}
-            <SummaryRow
-              label="Network fees"
-              value={
-                feesPaidBy === "northstar"
-                  ? "Paid by Northstar"
-                  : "Paid from your wallet"
-              }
-            />
-          </dl>
-
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline" disabled={busy}>
-                Cancel
-              </Button>
-            </DialogClose>
-            <Button
-              type="submit"
-              disabled={
-                busy ||
-                !amount.trim() ||
-                !selectedRouteAvailable ||
-                (withdrawalRoute === "queued" && !queueSettingsValid)
-              }
-            >
-              {busy ? (
-                <LoaderCircleIcon
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
-              ) : null}
-              {copy.title}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+function TransferDialogFooter({
+  amount,
+  busy,
+  queueSettingsValid,
+  route,
+  selectedRouteAvailable,
+  title,
+}: {
+  amount: string;
+  busy: boolean;
+  queueSettingsValid: boolean;
+  route: WithdrawalRoute;
+  selectedRouteAvailable: boolean;
+  title: string;
+}) {
+  const disabled =
+    busy ||
+    !amount.trim() ||
+    !selectedRouteAvailable ||
+    (route === "queued" && !queueSettingsValid);
+  return (
+    <DialogFooter>
+      <DialogClose asChild>
+        <Button type="button" variant="outline" disabled={busy}>
+          Cancel
+        </Button>
+      </DialogClose>
+      <Button type="submit" disabled={disabled}>
+        {busy ? (
+          <LoaderCircleIcon className="animate-spin" data-icon="inline-start" />
+        ) : null}
+        {title}
+      </Button>
+    </DialogFooter>
   );
 }
 
@@ -396,6 +530,81 @@ function WithdrawalRouteOption({
       </span>
     </label>
   );
+}
+
+function withdrawalRouteAvailability(
+  options: YieldWithdrawalOptions | null | undefined,
+  queueTerms: YieldWithdrawalOptions["queueAsset"]
+): WithdrawalRouteAvailability {
+  return {
+    direct: Boolean(options?.instant || options?.providerOrder),
+    queued: Boolean(options?.queued && queueTerms?.allowWithdrawals),
+  };
+}
+
+function shouldShowRouteChoice(
+  direction: TransferDirection,
+  availability: WithdrawalRouteAvailability
+): boolean {
+  return (
+    direction === "to-checking" && availability.direct && availability.queued
+  );
+}
+
+function isSelectedRouteAvailable(
+  direction: TransferDirection,
+  route: WithdrawalRoute,
+  availability: WithdrawalRouteAvailability
+): boolean {
+  if (direction === "to-savings") return true;
+  return route === "direct" ? availability.direct : availability.queued;
+}
+
+function areQueueSettingsValid(
+  queueTerms: YieldWithdrawalOptions["queueAsset"],
+  discountBps: number,
+  deadlineSeconds: number
+): boolean {
+  return Boolean(
+    queueTerms &&
+      Number.isInteger(discountBps) &&
+      discountBps >= queueTerms.minimumDiscountBps &&
+      discountBps <= queueTerms.maximumDiscountBps &&
+      Number.isInteger(deadlineSeconds) &&
+      deadlineSeconds >= queueTerms.minimumSecondsToDeadline &&
+      deadlineSeconds <= queueTerms.maximumSecondsToDeadline
+  );
+}
+
+function transferIntent({
+  amount,
+  direction,
+  withdrawalRoute,
+  queueSettingsValid,
+  discountBps,
+  deadlineSeconds,
+}: {
+  amount: string;
+  direction: TransferDirection;
+  withdrawalRoute: WithdrawalRoute;
+  queueSettingsValid: boolean;
+  discountBps: number;
+  deadlineSeconds: number;
+}): WithdrawalIntent | { amount: string; route: "deposit" } | null {
+  const normalizedAmount = amount.trim();
+  if (direction === "to-savings") {
+    return { amount: normalizedAmount, route: "deposit" };
+  }
+  if (withdrawalRoute === "queued") {
+    if (!queueSettingsValid) return null;
+    return {
+      amount: normalizedAmount,
+      route: "queued",
+      discountBps,
+      deadlineSeconds,
+    };
+  }
+  return { amount: normalizedAmount, route: "direct" };
 }
 
 function directRouteDescription(
