@@ -346,6 +346,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     payoutAccounts = mapPayoutRequirementAccounts(rows, enriched);
   }
 
+  let destinationWalletAddress: string | undefined;
   if (query.data.direction === "onramp") {
     const scope = await resolveScope(c);
     const destinationWallet = resolveWalletByCustodyWalletId(
@@ -353,32 +354,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       query.data.destinationCustodyWalletId
     );
     assertPaymentWalletExactAccess(c, destinationWallet.id, []);
-    const destinationWalletAddress = destinationWallet.publicKey;
-    if (query.data.provider === "bvnk" && refreshedBvnkCustomer !== undefined) {
-      const funding = await bvnkFundingWalletRequirements(c, {
-        counterparty,
-        projectId,
-        direction: query.data.direction,
-      });
-      if (funding !== null) {
-        return success(c, funding);
-      }
-      return success(c, readyCounterparty("bvnk", query.data.direction));
-    }
-    const requirements = RAMP_PROVIDER_CLIENTS[query.data.provider].validateCounterparty(
-      mapToCounterparty(counterparty),
-      {
-        direction: query.data.direction,
-        providerData: counterparty.provider_data,
-        cryptoToken: getCryptoRailAssetLabel(query.data.assetRail),
-        fiatCurrency: query.data.fiatCurrency,
-        destinationWalletAddress,
-        ...(providerAccount === null
-          ? {}
-          : { providerCustomerReference: providerAccount.provider_customer_reference }),
-      }
-    );
-    return success(c, requirements);
+    destinationWalletAddress = destinationWallet.publicKey;
   }
 
   if (query.data.provider === "bvnk" && refreshedBvnkCustomer !== undefined) {
@@ -399,7 +375,8 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       providerData: counterparty.provider_data,
       cryptoToken: getCryptoRailAssetLabel(query.data.assetRail),
       fiatCurrency: query.data.fiatCurrency,
-      ...(query.data.provider === "lightspark"
+      ...(destinationWalletAddress === undefined ? {} : { destinationWalletAddress }),
+      ...(query.data.provider === "lightspark" && query.data.direction === "offramp"
         ? {
             cryptoRail: query.data.assetRail,
             payoutAccounts,

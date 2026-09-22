@@ -200,6 +200,13 @@ export type CounterpartyProviderAccountKind =
   | "funding_wallet"
   | "merchant_wallet";
 
+/** Row kinds the counterparty provider-accounts list endpoint returns. */
+export const COUNTERPARTY_PROVIDER_ACCOUNT_LISTED_KINDS = [
+  "payout_account",
+  "customer_link",
+  "funding_wallet",
+] as const satisfies readonly CounterpartyProviderAccountKind[];
+
 export interface ListCounterpartyProviderAccountsResponse {
   accounts: CounterpartyProviderAccount[];
 }

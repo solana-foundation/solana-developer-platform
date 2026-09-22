@@ -510,13 +510,6 @@ export function isBvnkWalletActive(status: string | undefined): boolean {
   return status !== undefined && BVNK_WALLET_ACTIVE_STATUSES.has(status.toUpperCase());
 }
 
-export function readBvnkData(
-  providerData: CounterpartyRow["provider_data"]
-): Record<string, unknown> {
-  const bvnk = providerData.bvnk;
-  return bvnk && typeof bvnk === "object" ? (bvnk as Record<string, unknown>) : {};
-}
-
 /** Fiat currency SDP provisions BVNK customer funding wallets for (the US-only residence list this slice). */
 export const BVNK_FUNDING_WALLET_FIAT = "USD" as const satisfies RampFiatCurrency;
 

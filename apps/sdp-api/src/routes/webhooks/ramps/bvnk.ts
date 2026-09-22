@@ -691,46 +691,30 @@ async function applyBvnkWalletEvent(
   }
 }
 
+type BvnkOfframpChannelOutcome =
+  | { status: "settling" }
+  | { status: "completed"; walletAmount: string; settlement: BvnkOfframpChannelSettlement };
+
 /**
- * Applies an off-ramp channel settlement transition scoped to the webhook's
- * project environment; a sandbox-signed event naming a production off-ramp
- * transfer is terminal. The completed path records the settlement economics
- * (deposit hash included as `txHash`) in the SAME single CAS update; the
- * `signature` column stays owned by the SDP send that funded the deposit,
- * because a deposit funded by an external send is a separate transfer row and
- * the column is globally unique. The settling path writes no settlement.
+ * Applies a proven off-ramp channel outcome with one status-guarded CAS
+ * update keyed by the transfer id and the webhook's project environment. The
+ * completed outcome also records the credited fiat and the settlement
+ * economics (deposit hash included as `txHash`); the `signature` column stays
+ * owned by the SDP send that funded the deposit, because an externally funded
+ * deposit is a separate transfer row and the column is globally unique. A
+ * terminal transfer matches no row and the replay is acknowledged as a no-op.
+ *
  * @param env - Process environment used for database access.
  * @param environment - The project environment the event was delivered for.
- * @param transferId - SDP off-ramp transfer identifier.
- * @param status - Settlement status to apply.
- * @param walletAmount - Confirmed wallet amount, when BVNK has supplied one.
- * @param settlement - Confirmed settlement economics; null on the settling path.
+ * @param transferId - SDP off-ramp transfer identifier, already proven against its recorded channel.
+ * @param outcome - The status to apply and, when completed, the credited fiat and settlement blob.
  */
 async function settleBvnkOfframpChannel(
   env: Env,
   environment: SdpEnvironment,
   transferId: string,
-  status: "settling" | "completed",
-  walletAmount: string | null,
-  settlement: BvnkOfframpChannelSettlement | null
+  outcome: BvnkOfframpChannelOutcome
 ): Promise<void> {
-  const existing = await getDb(env)
-    .prepare(
-      `SELECT pt.id
-       FROM payment_transfers pt
-       JOIN projects prj ON prj.id = pt.project_id
-       WHERE pt.id = ?
-         AND pt.provider = 'bvnk'
-         AND pt.type = 'offramp'
-         AND prj.environment = ?`
-    )
-    .bind(transferId, environment)
-    .first<{ id: string }>();
-  if (existing === null) {
-    throw new TerminalRampWebhookError(
-      "stray off-ramp channel event: unknown transfer or environment mismatch"
-    );
-  }
   const placeholders = buildInClause(NON_TERMINAL_RAMP_TRANSFER_STATUSES.length);
   await getDb(env)
     .prepare(
@@ -748,10 +732,10 @@ async function settleBvnkOfframpChannel(
          )`
     )
     .bind(
-      status,
-      walletAmount !== null,
-      walletAmount,
-      settlement === null ? {} : { settlement },
+      outcome.status,
+      outcome.status === "completed",
+      outcome.status === "completed" ? outcome.walletAmount : null,
+      outcome.status === "completed" ? { settlement: outcome.settlement } : {},
       new Date().toISOString(),
       transferId,
       ...NON_TERMINAL_RAMP_TRANSFER_STATUSES,
@@ -920,7 +904,7 @@ async function handleBvnkPaymentChannelTransactionDetected(
     return;
   }
   await proveBvnkOfframpChannel(env, environment, transferId);
-  await settleBvnkOfframpChannel(env, environment, transferId, "settling", null, null);
+  await settleBvnkOfframpChannel(env, environment, transferId, { status: "settling" });
 }
 
 /**
@@ -952,14 +936,11 @@ async function handleBvnkPaymentChannelTransactionConfirmed(
   const { channel, recordedChannel } = await proveBvnkOfframpChannel(env, environment, transferId);
   assertBvnkOfframpEventMatchesChannel(event.data, recordedChannel);
   const settlement = bvnkOfframpChannelSettlementFromEvent(event.data);
-  await settleBvnkOfframpChannel(
-    env,
-    environment,
-    transferId,
-    "completed",
-    event.data.walletAmount,
-    settlement
-  );
+  await settleBvnkOfframpChannel(env, environment, transferId, {
+    status: "completed",
+    walletAmount: event.data.walletAmount,
+    settlement,
+  });
   getLogger().info(
     {
       transfer_id: transferId,

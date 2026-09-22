@@ -157,6 +157,10 @@ export async function completePendingBvnkOfframpTransfer(
     channel: { walletId: string; customerReference: string };
   }
 ): Promise<void> {
+  const cryptoDeposit = rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount);
+  if (!("cryptoDeposit" in cryptoDeposit)) {
+    throw internalError("BVNK off-ramp quote carries no crypto deposit instruction.");
+  }
   const updated = await getPaymentsRepository(c).updateTransfer({
     transferId: input.transferId,
     organizationId: input.organizationId,
@@ -166,7 +170,7 @@ export async function completePendingBvnkOfframpTransfer(
     providerReference: input.quote.id,
     deliveryMode: input.quote.deliveryMode,
     providerData: {
-      ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
+      ...cryptoDeposit,
       bvnk: {
         channel: {
           id: input.quote.id,

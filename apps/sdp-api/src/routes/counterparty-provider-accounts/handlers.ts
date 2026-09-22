@@ -89,7 +89,7 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     const payoutRows = providerRows.filter((row) => row.kind === "payout_account");
     const fundingWalletRows = providerRows.filter((row) => row.kind === "funding_wallet");
     if (payoutRows.length === 0 && fundingWalletRows.length === 0 && customerLink !== undefined) {
-      accounts.push(mapCustomerLinkAccount(customerLink));
+      accounts.push(baseProviderAccount(customerLink, customerLink));
     }
     for (const row of payoutRows) {
       accounts.push(mapProviderAccount(row, enriched, customerLink));
@@ -104,16 +104,17 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
 };
 
 /**
- * Maps a customer-link row into a top-level provider-account response row.
- * Used only when the provider has no payout accounts to attach the link to,
- * so the provider customer stays visible. Carries its own customer-link
- * object so consumers read customer details from one place regardless of
- * row kind.
+ * Projects the columns every provider-account row shares into the public
+ * shape, attaching the provider's customer link when one exists.
  *
- * @param row - Parent-scoped customer-link row.
- * @returns Public provider-account response row without corridor data.
+ * @param row - Parent-scoped provider-account row.
+ * @param customerLink - The provider's customer-link row for the counterparty, when one exists.
+ * @returns Public provider-account response row without kind-specific enrichment.
  */
-function mapCustomerLinkAccount(row: CounterpartyProviderAccountRow): CounterpartyProviderAccount {
+function baseProviderAccount(
+  row: CounterpartyProviderAccountRow,
+  customerLink: CounterpartyProviderAccountRow | undefined
+): CounterpartyProviderAccount {
   return {
     id: row.id,
     provider: row.provider,
@@ -124,12 +125,13 @@ function mapCustomerLinkAccount(row: CounterpartyProviderAccountRow): Counterpar
     status: row.status,
     providerStatus: row.provider_status,
     createdAt: row.created_at,
-    customerLink: mapCustomerLink(row),
+    ...(customerLink === undefined ? {} : { customerLink: mapCustomerLink(customerLink) }),
   };
 }
 
 /**
- * Maps a database row and optional JIT details into the public provider-account shape.
+ * Projects a payout-account row with its JIT provider details: the provider's
+ * own status replaces the stored one and the bank facts ride along.
  *
  * @param row - Parent-scoped payout-account row.
  * @param enriched - Sanitized provider details indexed by row id.
@@ -144,20 +146,8 @@ function mapProviderAccount(
   if (row.fiat_currency === null || row.destination_country === null) {
     throw internalError("External provider-account row is missing corridor data.");
   }
-
+  const result = baseProviderAccount(row, customerLink);
   const detail = enriched.get(row.id);
-  const result: CounterpartyProviderAccount = {
-    id: row.id,
-    provider: row.provider,
-    kind: row.kind,
-    fiatCurrency: row.fiat_currency,
-    destinationCountry: row.destination_country,
-    paymentRail: row.payment_rail,
-    status: row.status,
-    providerStatus: row.provider_status,
-    createdAt: row.created_at,
-  };
-
   if (detail !== undefined) {
     result.providerStatus = detail.providerStatus;
     if (detail.bankName !== undefined) {
@@ -168,20 +158,13 @@ function mapProviderAccount(
     }
     result.paymentRails = detail.paymentRails;
   }
-
-  if (customerLink !== undefined) {
-    result.customerLink = mapCustomerLink(customerLink);
-  }
-
   return result;
 }
 
 /**
- * Maps a funding-wallet row into the public provider-account shape with its
- * just-in-time balance. Funding wallets carry no corridor, so the destination
- * country and payment rail stay null; the provider status is the wallet
- * lifecycle value. The reference and balance appear only once the provider
- * assigned a wallet to the row.
+ * Projects a funding-wallet row with the provider's wallet id and its
+ * just-in-time balance; both appear only once the provider assigned a wallet
+ * to the row.
  *
  * @param row - Parent-scoped funding-wallet row.
  * @param balances - Live BVNK balances keyed by row id for referenced rows.
@@ -193,18 +176,7 @@ function mapFundingWalletAccount(
   balances: ReadonlyMap<string, ProviderWalletBalance>,
   customerLink: CounterpartyProviderAccountRow | undefined
 ): CounterpartyProviderAccount {
-  const result: CounterpartyProviderAccount = {
-    id: row.id,
-    provider: row.provider,
-    kind: row.kind,
-    fiatCurrency: row.fiat_currency,
-    destinationCountry: null,
-    paymentRail: null,
-    status: row.status,
-    providerStatus: row.provider_status,
-    createdAt: row.created_at,
-  };
-
+  const result = baseProviderAccount(row, customerLink);
   if (row.external_account_reference !== null) {
     result.providerAccountReference = row.external_account_reference;
     const balance = balances.get(row.id);
@@ -213,11 +185,6 @@ function mapFundingWalletAccount(
     }
     result.balance = balance;
   }
-
-  if (customerLink !== undefined) {
-    result.customerLink = mapCustomerLink(customerLink);
-  }
-
   return result;
 }
 

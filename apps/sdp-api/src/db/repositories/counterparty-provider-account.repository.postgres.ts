@@ -1,4 +1,6 @@
+import { COUNTERPARTY_PROVIDER_ACCOUNT_LISTED_KINDS } from "@sdp/types";
 import type { AppDb } from "@/db";
+import { buildInClause } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import type {
   ArchiveExternalAccountInput,
@@ -626,9 +628,14 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         "organization_id = ?",
         "project_id = ?",
         "counterparty_id = ?",
-        "kind IN ('payout_account', 'customer_link', 'funding_wallet')",
+        `kind IN (${buildInClause(COUNTERPARTY_PROVIDER_ACCOUNT_LISTED_KINDS.length)})`,
       ];
-      const bindings: string[] = [input.organizationId, input.projectId, input.counterpartyId];
+      const bindings: string[] = [
+        input.organizationId,
+        input.projectId,
+        input.counterpartyId,
+        ...COUNTERPARTY_PROVIDER_ACCOUNT_LISTED_KINDS,
+      ];
 
       if (input.provider !== undefined) {
         conditions.push("provider = ?");

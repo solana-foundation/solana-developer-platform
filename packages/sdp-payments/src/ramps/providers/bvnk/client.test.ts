@@ -709,16 +709,9 @@ describe("BvnkRampClient off-ramp channel surfaces", () => {
     assert.equal(channel.uuid, "01000000-0000-7000-8000-00000000c001");
     assert.equal(channel.walletId, "a:10000000000001:TESTWLT:1");
     assert.equal(channel.reference, "xfr_00000000-0000-4000-8000-0000000000f1");
-    assert.equal(channel.status, "OPEN");
-    assert.equal(channel.payCurrency, "USDC");
-    assert.equal(channel.displayCurrency, "USD");
-    assert.equal(channel.walletCurrency, "USD");
-    assert.equal(channel.protocol, "ERC20");
     assert.equal(channel.network, "ETHEREUM");
     assert.ok(channel.embeddedCustomerDetails);
     assert.equal(channel.embeddedCustomerDetails.reference, "00000000-0000-4000-8000-00000000c057");
-    assert.ok(channel.contact);
-    assert.equal(channel.contact.externalId, "00000000-0000-4000-8000-00000000c057");
   });
 
   it("reads a channel back from GET /api/v2/channel/<id>", async () => {

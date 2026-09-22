@@ -1,3 +1,4 @@
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type {
   BvnkOfframpChannelSettlement,
   BvnkRampSettlement,
@@ -174,7 +175,7 @@ const BVNK_FIELDS: readonly TransferDetailFieldSpec<BvnkRampSettlement>[] = [
     kind: "text",
     labelKey: "DashboardPayments.transferDetails.networkFee",
     text: (settlement) =>
-      Number(settlement.networkFeeAmount) > 0
+      compareDecimalAmounts(settlement.networkFeeAmount, "0") > 0
         ? formatDisplayAmount(settlement.networkFeeAmount, settlement.networkFeeCurrency)
         : null,
   },
@@ -209,7 +210,7 @@ const BVNK_OFFRAMP_FIELDS: readonly TransferDetailFieldSpec<BvnkOfframpChannelSe
     kind: "text",
     labelKey: "DashboardPayments.transferDetails.networkFee",
     text: (settlement) =>
-      Number(settlement.networkFeeAmount) > 0
+      compareDecimalAmounts(settlement.networkFeeAmount, "0") > 0
         ? formatDisplayAmount(settlement.networkFeeAmount, settlement.networkFeeCurrency)
         : null,
   },

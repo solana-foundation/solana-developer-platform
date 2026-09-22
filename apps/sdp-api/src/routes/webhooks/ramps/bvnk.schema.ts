@@ -195,17 +195,11 @@ const bvnkLedgersSchema = z
  */
 const bvnkChannelTransactionConfirmedDataSchema = z.object({
   channelId: z.string().min(1),
-  merchantId: z.string().min(1),
   walletId: z.string().min(1),
-  merchantDisplayName: z.string().min(1),
   reference: z.string().min(1),
-  dateCreated: z.number(),
-  lastUpdated: z.number(),
-  status: z.string().min(1),
   uuid: z.string().min(1),
   hash: z.string().min(1),
   address: z.string().min(1),
-  tag: z.string().nullable(),
   paidCurrency: z.string().min(1),
   displayCurrency: z.string().min(1),
   walletCurrency: z.string().min(1),
@@ -214,39 +208,10 @@ const bvnkChannelTransactionConfirmedDataSchema = z.object({
   displayAmount: bvnkAmountSchema,
   walletAmount: bvnkAmountSchema,
   feeAmount: bvnkAmountSchema,
-  exchangeRate: z.object({
-    base: z.string().min(1),
-    counter: z.string().min(1),
-    rate: bvnkAmountSchema,
-    baseAmount: bvnkAmountSchema,
-    counterAmount: bvnkAmountSchema,
-  }),
-  displayRate: z.object({
-    base: z.string().min(1),
-    counter: z.string().min(1),
-    rate: bvnkAmountSchema,
-    baseAmount: bvnkAmountSchema,
-    counterAmount: bvnkAmountSchema,
-  }),
-  risk: z.object({
-    level: z.string().min(1),
-    resourceName: z.string().min(1),
-    resourceCategory: z.string().min(1),
-    alerts: z.array(z.string().min(1)),
-  }),
+  exchangeRate: z.object({ rate: bvnkAmountSchema }),
+  networkFee: z.object({ paidCurrency: z.string().min(1), paidAmount: bvnkAmountSchema }),
   sources: z.array(z.string().min(1)),
-  networkFee: z.object({
-    paidCurrency: z.string().min(1),
-    paidAmount: bvnkAmountSchema,
-    displayCurrency: z.string().min(1),
-    displayAmount: bvnkAmountSchema,
-  }),
-  pegged: z.boolean(),
-  metaData: z.unknown().nullable(),
-  originator: z.unknown().nullable(),
-  embeddedCustomerDetails: z.object({
-    reference: z.string().min(1),
-  }),
+  embeddedCustomerDetails: z.object({ reference: z.string().min(1) }),
 });
 
 export const bvnkWebhookSchema = z.discriminatedUnion("event", [

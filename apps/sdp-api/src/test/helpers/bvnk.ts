@@ -23,8 +23,6 @@ export const TEST_BVNK_HAWK_SECRET_KEY = "bvnk_hawk_secret_key";
 
 export const TEST_BVNK_WALLET_ID = "a:24122329329347:HsdJVhW:1";
 
-export const TEST_BVNK_OFFRAMP_WALLET_ID = "a:99887766554433:OffRmpW:1";
-
 export interface BvnkSandboxEnvValues {
   BVNK_SANDBOX_HAWK_AUTH_ID?: string;
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
