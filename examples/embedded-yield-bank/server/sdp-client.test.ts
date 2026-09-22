@@ -66,4 +66,24 @@ describe("EmbeddedYieldClient", () => {
       "http://127.0.0.1:8787/v1/earn/external-wallet/movements/movement%2Fwith%20space"
     );
   });
+
+  it("stops paging a ledger whose cursor never stops advancing", async () => {
+    let page = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Response.json({
+          data: {
+            movements: [{ movementId: `movement-${page}` }],
+            hasMore: true,
+            nextCursor: `cursor-${++page}`,
+          },
+        })
+      )
+    );
+
+    await expect(
+      new EmbeddedYieldClient(config).listMovements("customer")
+    ).rejects.toThrow("pagination exceeded its safety limit");
+  });
 });

@@ -66,11 +66,22 @@ export function floorForTolerance(
   if (!DECIMAL_PATTERN.test(quote)) {
     throw new Error("Provider quote is not a positive decimal");
   }
-  if (decimalScale(quote) > decimals) {
+
+  // Providers do not canonicalize scale: a trailing-zero-PADDED fraction
+  // ("1.2000000" at scale 6) is not finer precision, so the padding is
+  // stripped before the scale check and the value still parses. A quote with
+  // more SIGNIFICANT fractional digits than the mint has atoms is malformed —
+  // padEnd would silently over-count its atoms ("1.234" at scale 2 reads as
+  // 1234) — so that stays a thrown error. This is the same rule the published
+  // integration module ships (earn-integration-snippets.ts).
+  const [whole, fraction = ""] = quote.split(".");
+  const significant = fraction.replace(/0+$/, "");
+  if (significant.length > decimals) {
     throw new Error("Provider quote exceeds its reported decimal scale");
   }
+  const canonical = significant ? `${whole}.${significant}` : whole;
 
-  const atoms = toAtoms(quote, decimals);
+  const atoms = toAtoms(canonical, decimals);
   if (atoms === 0n) throw new Error("Provider quote returned zero output");
 
   const floored = (atoms * BigInt(10_000 - toleranceBps)) / 10_000n || 1n;

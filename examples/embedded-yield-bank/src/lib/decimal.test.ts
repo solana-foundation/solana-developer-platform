@@ -33,4 +33,9 @@ describe("Embedded Yield decimal helpers", () => {
       "reported decimal scale"
     );
   });
+
+  it("strips trailing-zero quote padding before the scale check", () => {
+    expect(floorForTolerance("25.1200000", 6, 50)).toBe("24.9944");
+    expect(floorForTolerance("1.0000000", 6, 50)).toBe("0.995");
+  });
 });

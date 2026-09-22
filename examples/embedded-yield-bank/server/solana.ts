@@ -60,11 +60,39 @@ export async function signTransaction(
   const transaction = getTransactionDecoder().decode(
     Buffer.from(transactionBase64, "base64")
   );
+  assertRequiredSigners(transaction, signers);
   const signed = await partiallySignTransaction(
     signers.map((signer) => signer.keyPair),
     transaction
   );
   return getBase64EncodedWireTransaction(signed);
+}
+
+/**
+ * The demo signs whatever bytes SDP built, so the bytes are checked against
+ * the signer set before any key touches them. The fee-payer echo in the build
+ * JSON (`assertBuiltFeePayer`) is not a check over the transaction itself: a
+ * malicious build response can echo it correctly while swapping the wire
+ * bytes, and both demo keys would then sign a transaction that drains one
+ * wallet while requiring only the other key's signature. The decoded
+ * signature slots are the authority — the fee payer takes slot zero and every
+ * further required signer follows — so the exact-set check refuses a build
+ * that does not require exactly the configured signers, and nothing else.
+ */
+function assertRequiredSigners(
+  transaction: ReturnType<ReturnType<typeof getTransactionDecoder>["decode"]>,
+  signers: readonly KeyPairSigner[]
+): void {
+  const required = new Set(Object.keys(transaction.signatures));
+  const provided = new Set<string>(signers.map((signer) => signer.address));
+  if (
+    required.size !== provided.size ||
+    [...required].some((address) => !provided.has(address))
+  ) {
+    throw new Error(
+      "SDP returned a transaction that does not require exactly the configured signer set"
+    );
+  }
 }
 
 /** The customer's balance of the savings token: one RPC call per refresh. */

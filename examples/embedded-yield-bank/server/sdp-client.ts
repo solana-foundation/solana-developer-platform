@@ -10,6 +10,9 @@ interface SdpErrorEnvelope {
   };
 }
 
+/** Longest walk over a paginated feed before it is a loop, not a ledger. */
+const MAX_SDP_PAGES = 20;
+
 interface Page {
   hasMore: boolean;
   nextCursor: string | null;
@@ -214,8 +217,15 @@ export class EmbeddedYieldClient {
   ): Promise<T[]> {
     const items: T[] = [];
     let cursor: string | undefined;
+    let page = 0;
 
     while (true) {
+      // A cursor that always advances would page a serverless handler forever;
+      // the dashboard's own reader stops at the same 20-page safety limit.
+      if (page >= MAX_SDP_PAGES) {
+        throw new Error(`SDP ${key} pagination exceeded its safety limit`);
+      }
+      page += 1;
       const query = new URLSearchParams({ ownerAddress, limit: "100" });
       if (cursor) query.set("before", cursor);
       const data = await this.request<Page & Record<typeof key, T[]>>(

@@ -53,6 +53,77 @@ describe("Northstar transaction signing", () => {
     expect(signed.signatures[northstar.address]).not.toBeNull();
     expect(signed.signatures[customer.address]).not.toBeNull();
   });
+
+  it("refuses a transaction that does not require every configured signer", async () => {
+    const customer = await generateKeyPairSigner();
+    const northstar = await generateKeyPairSigner();
+    // Fee payer echo only checks the build JSON; the bytes are what gets
+    // signed. A build whose instructions require the sponsor's signature
+    // alone (a plain SOL drain, here) would otherwise take the sponsor's
+    // signature while the customer's key signed along unrequired.
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (current) => setTransactionMessageFeePayer(northstar.address, current),
+      (current) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          { blockhash, lastValidBlockHeight: 100n },
+          current
+        ),
+      (current) =>
+        appendTransactionMessageInstruction(
+          {
+            programAddress: address("11111111111111111111111111111111"),
+            accounts: [
+              { address: northstar.address, role: AccountRole.WRITABLE },
+              { address: customer.address, role: AccountRole.WRITABLE },
+            ],
+          },
+          current
+        ),
+      compileTransaction
+    );
+
+    await expect(
+      signTransaction(getBase64EncodedWireTransaction(message), [
+        customer,
+        northstar,
+      ])
+    ).rejects.toThrow("does not require exactly the configured signer set");
+  });
+
+  it("refuses a transaction that requires an unconfigured signer", async () => {
+    const customer = await generateKeyPairSigner();
+    const northstar = await generateKeyPairSigner();
+    const stranger = await generateKeyPairSigner();
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (current) => setTransactionMessageFeePayer(northstar.address, current),
+      (current) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          { blockhash, lastValidBlockHeight: 100n },
+          current
+        ),
+      (current) =>
+        appendTransactionMessageInstruction(
+          {
+            programAddress: address("11111111111111111111111111111111"),
+            accounts: [
+              { address: customer.address, role: AccountRole.READONLY_SIGNER },
+              { address: stranger.address, role: AccountRole.READONLY_SIGNER },
+            ],
+          },
+          current
+        ),
+      compileTransaction
+    );
+
+    await expect(
+      signTransaction(getBase64EncodedWireTransaction(message), [
+        customer,
+        northstar,
+      ])
+    ).rejects.toThrow("does not require exactly the configured signer set");
+  });
 });
 
 describe("Northstar RPC cluster guard", () => {
