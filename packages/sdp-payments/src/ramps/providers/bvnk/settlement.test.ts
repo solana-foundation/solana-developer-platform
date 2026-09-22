@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import type { BvnkCompletedPayoutObservation, BvnkFailedPayoutObservation } from "./settlement";
-import { bvnkPayoutObservationMismatches, bvnkTerminalObservationsEqual } from "./settlement";
+import { fileURLToPath } from "node:url";
+import type {
+  BvnkChannelTransactionConfirmedData,
+  BvnkCompletedPayoutObservation,
+  BvnkFailedPayoutObservation,
+} from "./settlement";
+import {
+  bvnkOfframpChannelSettlementFromEvent,
+  bvnkPayoutObservationMismatches,
+  bvnkTerminalObservationsEqual,
+} from "./settlement";
 
 /** One canonical completed observation; every field is caller-written. */
 function completedObservation(
@@ -127,6 +137,83 @@ describe("bvnkTerminalObservationsEqual", () => {
       ),
       false
     );
+  });
+});
+
+describe("bvnkOfframpChannelSettlementFromEvent", () => {
+  /** The observed confirmed payload's data with every money field as a decimal string. */
+  function parsedConfirmedPayload(): BvnkChannelTransactionConfirmedData {
+    const payloadUrl = new URL(
+      "../../../../../../docs/_devlog/HOO-1710/payloads/channel-transaction-confirmed.json",
+      import.meta.url
+    );
+    const data = (
+      JSON.parse(readFileSync(fileURLToPath(payloadUrl), "utf8")) as {
+        data: Record<string, unknown>;
+      }
+    ).data;
+    const exchangeRate = data.exchangeRate as { rate: number };
+    const networkFee = data.networkFee as { paidCurrency: string; paidAmount: number };
+    return {
+      channelId: data.channelId as string,
+      uuid: data.uuid as string,
+      hash: data.hash as string,
+      address: data.address as string,
+      paidCurrency: data.paidCurrency as string,
+      paidAmount: String(data.paidAmount),
+      displayCurrency: data.displayCurrency as string,
+      displayAmount: String(data.displayAmount),
+      walletCurrency: data.walletCurrency as string,
+      walletAmount: String(data.walletAmount),
+      feeCurrency: data.feeCurrency as string,
+      feeAmount: String(data.feeAmount),
+      exchangeRate: { rate: String(exchangeRate.rate) },
+      networkFee: {
+        paidCurrency: networkFee.paidCurrency,
+        paidAmount: String(networkFee.paidAmount),
+      },
+      sources: data.sources as string[],
+    };
+  }
+
+  it("maps_the_observed_confirmed_payload_to_the_settlement_object_exactly", () => {
+    const parsed = parsedConfirmedPayload();
+
+    assert.deepEqual(bvnkOfframpChannelSettlementFromEvent(parsed), {
+      provider: "bvnk",
+      kind: "offramp_channel",
+      status: "COMPLETE",
+      channelId: parsed.channelId,
+      transactionId: parsed.uuid,
+      txHash: parsed.hash,
+      depositAddress: parsed.address,
+      cryptoCurrency: parsed.paidCurrency,
+      cryptoAmount: parsed.paidAmount,
+      fiatCurrency: parsed.walletCurrency,
+      fiatAmount: parsed.walletAmount,
+      displayCurrency: parsed.displayCurrency,
+      displayAmount: parsed.displayAmount,
+      feeCurrency: parsed.feeCurrency,
+      feeAmount: parsed.feeAmount,
+      networkFeeCurrency: parsed.networkFee.paidCurrency,
+      networkFeeAmount: parsed.networkFee.paidAmount,
+      exchangeRate: parsed.exchangeRate.rate,
+      sources: parsed.sources,
+    });
+  });
+
+  it("records_the_observed_confirmed_economics_as_decimal_strings", () => {
+    const parsed = parsedConfirmedPayload();
+    const settlement = bvnkOfframpChannelSettlementFromEvent(parsed);
+
+    // 10 USDC in, 9.9 USD credited, 0.09 USD fee, 0.99 rate, 0.00001 SOL
+    // network fee, per the observed payload.
+    assert.equal(settlement.cryptoAmount, "10");
+    assert.equal(settlement.fiatAmount, "9.9");
+    assert.equal(settlement.feeAmount, "0.09");
+    assert.equal(settlement.exchangeRate, "0.99");
+    assert.equal(settlement.networkFeeCurrency, "SOL");
+    assert.equal(settlement.networkFeeAmount, "0.00001");
   });
 });
 
