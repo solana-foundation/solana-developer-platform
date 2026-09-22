@@ -240,6 +240,30 @@ export interface PaymentsRepository {
     error?: string | null;
   }): Promise<PaymentTransferRow | null>;
   /**
+   * Sets the destination and memo of a transfer only while its destination is
+   * still unset and the status is unchanged, so a provider-allocated deposit
+   * address is written exactly once: a concurrent second write matches zero
+   * rows and gets null.
+   *
+   * @param input.transferId - The transfer being claimed.
+   * @param input.organizationId - Tenant scope.
+   * @param input.projectId - Tenant scope.
+   * @param input.expectedStatus - The status the claim was computed from.
+   * @param input.destinationAddress - The provider's deposit address.
+   * @param input.memo - The memo the provider requires on the deposit, or null.
+   * @param input.updatedAt - Timestamp written on success.
+   * @returns The updated row, or null when the destination was already set or the row moved.
+   */
+  claimTransferDestination(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    expectedStatus: PaymentTransferStatus;
+    destinationAddress: string;
+    memo: string | null;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
    * Merges `providerData` into the row only while `claimPath` inside
    * provider_data is still unset and the status is unchanged, so concurrent
    * claims of the same field are decided by the row: exactly one writer

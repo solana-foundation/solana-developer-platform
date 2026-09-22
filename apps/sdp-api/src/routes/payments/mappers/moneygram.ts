@@ -37,9 +37,6 @@ export function mapMoneygramTransferDetails(
   const customerId = readString(moneygram, "customerId");
   const transactionId = readString(moneygram, "transactionId");
   const mgiTransactionId = readString(moneygram, "mgiTransactionId");
-  const depositAddress = readString(moneygram, "depositAddress");
-  const depositMemo = readString(moneygram, "depositMemo");
-  const sendAmount = readString(moneygram, "sendAmount");
   const referenceNumber = readString(moneygram, "referenceNumber");
   const payoutAmount = readNumber(moneygram, "payoutAmount");
   const payoutStatus = readString(moneygram, "payoutStatus");
@@ -50,9 +47,6 @@ export function mapMoneygramTransferDetails(
     ...(customerId ? { customerId } : {}),
     ...(transactionId ? { transactionId } : {}),
     ...(mgiTransactionId ? { mgiTransactionId } : {}),
-    ...(depositAddress ? { depositAddress } : {}),
-    ...(depositMemo ? { depositMemo } : {}),
-    ...(sendAmount ? { sendAmount } : {}),
     ...(referenceNumber ? { referenceNumber } : {}),
     ...(payoutAmount !== undefined ? { payoutAmount } : {}),
     ...(payoutStatus ? { payoutStatus } : {}),

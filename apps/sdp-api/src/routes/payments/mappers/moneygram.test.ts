@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { mapMoneygramTransferDetails } from "./moneygram";
+
+const MG_SOURCE_WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
 
 function transferRow(overrides: Partial<PaymentTransferRow>): PaymentTransferRow {
   return {
@@ -11,7 +12,7 @@ function transferRow(overrides: Partial<PaymentTransferRow>): PaymentTransferRow
     custody_wallet_id: null,
     wallet_id: "wal_test",
     counterparty_id: "cpty_test",
-    source_address: TEST_SOLANA_ADDRESSES.wallet1,
+    source_address: MG_SOURCE_WALLET,
     destination_address: null,
     token: "USDC",
     amount: "25",
@@ -84,7 +85,7 @@ describe("mapMoneygramTransferDetails", () => {
       )
     ).toBeUndefined();
   });
-  it("projects the custodial customer, transaction and deposit fields", () => {
+  it("projects the custodial customer and transaction fields", () => {
     expect(
       mapMoneygramTransferDetails(
         transferRow({
@@ -92,9 +93,6 @@ describe("mapMoneygramTransferDetails", () => {
             moneygram: {
               customerId: "mg_profile_1",
               mgiTransactionId: "mgi_tx_created_1",
-              depositAddress: TEST_SOLANA_ADDRESSES.wallet2,
-              depositMemo: "mg_memo_1",
-              sendAmount: "25",
             },
           },
         })
@@ -102,9 +100,6 @@ describe("mapMoneygramTransferDetails", () => {
     ).toEqual({
       customerId: "mg_profile_1",
       mgiTransactionId: "mgi_tx_created_1",
-      depositAddress: TEST_SOLANA_ADDRESSES.wallet2,
-      depositMemo: "mg_memo_1",
-      sendAmount: "25",
     });
   });
 
@@ -116,9 +111,6 @@ describe("mapMoneygramTransferDetails", () => {
             moneygram: {
               transactionId: "mg_tx_created_1",
               mgiTransactionId: value,
-              depositAddress: value,
-              depositMemo: value,
-              sendAmount: value,
             },
           },
         })
@@ -136,9 +128,6 @@ describe("mapMoneygramTransferDetails", () => {
               moneygram: {
                 transactionId: "mg_tx_created_1",
                 mgiTransactionId: value,
-                depositAddress: value,
-                depositMemo: value,
-                sendAmount: value,
               },
             },
           })

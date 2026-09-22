@@ -110,6 +110,7 @@ function loadRampsSdk(sdkUrl: string): Promise<NonNullable<Window["RampsSDK"]>> 
 export interface MoneygramRampWidgetProps {
   direction: "onramp" | "offramp";
   quote: Extract<PaymentRampQuote, { provider: "moneygram" }>;
+  transferId: string;
   sourceWalletId: string;
   sourceWalletName: string;
   sourceWalletAddress: string;
@@ -123,6 +124,7 @@ export interface MoneygramRampWidgetProps {
 export function MoneygramRampWidget({
   direction,
   quote,
+  transferId,
   sourceWalletId,
   sourceWalletName,
   sourceWalletAddress,
@@ -176,21 +178,20 @@ export function MoneygramRampWidget({
     let transactionCreatedPosted: Promise<boolean> = Promise.resolve(false);
 
     const post = (event: MoneygramRampEvent): Promise<void> =>
-      postMoneygramRampEvent(event, t)
-        .then(() => undefined)
-        .catch((error) => {
-          toast.error(t("DashboardPayments.ramps.moneygramEventFailed"), {
-            description:
-              error instanceof Error
-                ? error.message
-                : t("DashboardPayments.ramps.eventRequestFailed"),
-            position: "bottom-right",
-          });
+      postMoneygramRampEvent(event, t).catch((error) => {
+        toast.error(t("DashboardPayments.ramps.moneygramEventFailed"), {
+          description:
+            error instanceof Error
+              ? error.message
+              : t("DashboardPayments.ramps.eventRequestFailed"),
+          position: "bottom-right",
         });
+      });
 
     const fundingContext = {
       cryptoAsset,
       sessionId,
+      transferId,
       sourceWalletId,
       sourceTokenMint,
       onSigned: (transferId: string) => {
@@ -310,6 +311,7 @@ export function MoneygramRampWidget({
     };
   }, [
     quote,
+    transferId,
     direction,
     fiatCurrency,
     cryptoAsset,

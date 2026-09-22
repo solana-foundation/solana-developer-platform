@@ -1970,8 +1970,8 @@ describe("Payments routes — ramps", () => {
       env
     );
 
-    expect(coinbase.status).toBe(200);
-    expect(moneygram.status).toBe(200);
+    expect(coinbase.status).toBe(204);
+    expect(moneygram.status).toBe(204);
     const rows = await getDb(env)
       .prepare(
         `SELECT id, status, provider_data
@@ -1988,6 +1988,8 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("MoneyGram custodial events", () => {
+    const MG_DEPOSIT_WALLET = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
+    const MG_OTHER_WALLET = "8mSiNWTeu59yy4EzchXDwb8j3XoQsVmVdp4QMjEo6wvX";
     const sessionId = "mg_session_deposit_1";
     const transferId = "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
     const activeStatus = "active" satisfies CounterpartyProviderAccount["status"];
@@ -1996,7 +1998,7 @@ describe("Payments routes — ramps", () => {
     const confirmedStatus = "confirmed" satisfies PaymentTransferStatus;
     let counterpartyId: string;
     const deposit = {
-      depositAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      depositAddress: MG_DEPOSIT_WALLET,
       sendAmount: "25",
       depositMemo: "mg_memo_1",
     };
@@ -2055,8 +2057,8 @@ describe("Payments routes — ramps", () => {
     }
 
     async function pinDeposit(): Promise<void> {
-      expect((await postEvent(transactionEvent)).status).toBe(200);
-      expect((await postEvent({ kind: "deposit_address", sessionId })).status).toBe(200);
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      expect((await postEvent({ kind: "deposit_address", sessionId })).status).toBe(204);
     }
 
     async function readMoneygramProviderAccounts(): Promise<CounterpartyProviderAccountRow[]> {
@@ -2076,7 +2078,7 @@ describe("Payments routes — ramps", () => {
 
       const response = await postEvent(transactionEvent);
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(204);
       expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ mode: "sandbox" }),
         {
@@ -2084,10 +2086,6 @@ describe("Payments routes — ramps", () => {
           customerIdentifier: counterpartyId,
         }
       );
-      const body: { data: { customerLink: CounterpartyProviderAccount } } = await response.json();
-      expect(body).toMatchObject({
-        data: { transfer: { moneygram: { customerId: "mg_profile_1" } } },
-      });
       const transfer = await readTransfer(transferId);
       expect(transfer.counterparty_id).toBe(counterpartyId);
       expect(transfer.provider_data).toMatchObject({ moneygram: { customerId: "mg_profile_1" } });
@@ -2127,11 +2125,10 @@ describe("Payments routes — ramps", () => {
           })),
         },
       });
-      expect(body.data.customerLink).toEqual(listedBody.data.accounts[0]);
     });
 
     it("verifies ownership for a second transfer and reuses the same MoneyGram customer_link", async () => {
-      expect((await postEvent(transactionEvent)).status).toBe(200);
+      expect((await postEvent(transactionEvent)).status).toBe(204);
       expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ mode: "sandbox" }),
         {
@@ -2173,7 +2170,7 @@ describe("Payments routes — ramps", () => {
         transactionId: "mg_tx_created_2",
       });
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(204);
       expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledTimes(2);
       expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenNthCalledWith(
         2,
@@ -2187,16 +2184,6 @@ describe("Payments routes — ramps", () => {
         customerId: link.provider_customer_reference,
         transactionId: "mg_tx_created_2",
       };
-      expect(await response.json()).toMatchObject({
-        data: {
-          transfer: {
-            id: "xfr_1f2e3d4c-5b6a-4d7c-8f9e-0a1b2c3d4e5f",
-            status: pendingStatus,
-            moneygram,
-          },
-          customerLink: { id: link.id },
-        },
-      });
       expect(await readTransfer("xfr_1f2e3d4c-5b6a-4d7c-8f9e-0a1b2c3d4e5f")).toMatchObject({
         counterparty_id: counterpartyId,
         status: pendingStatus,
@@ -2267,7 +2254,7 @@ describe("Payments routes — ramps", () => {
     });
 
     it("keeps one unchanged MoneyGram customer_link when transaction_created is replayed", async () => {
-      expect((await postEvent(transactionEvent)).status).toBe(200);
+      expect((await postEvent(transactionEvent)).status).toBe(204);
       const before = await readMoneygramProviderAccounts();
       expect(before).toHaveLength(1);
       expect(before).toMatchObject([
@@ -2276,17 +2263,14 @@ describe("Payments routes — ramps", () => {
 
       const response = await postEvent(transactionEvent);
 
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        data: { customerLink: { customerLink: { providerCustomerReference: "mg_profile_1" } } },
-      });
+      expect(response.status).toBe(204);
       const after = await readMoneygramProviderAccounts();
       expect(after).toHaveLength(1);
       expect(after).toEqual(before);
     });
 
     it("keeps the existing MoneyGram customer_link unchanged when transaction_created conflicts", async () => {
-      expect((await postEvent(transactionEvent)).status).toBe(200);
+      expect((await postEvent(transactionEvent)).status).toBe(204);
       const before = await readMoneygramProviderAccounts();
       expect(before).toHaveLength(1);
       expect(before).toMatchObject([
@@ -2304,15 +2288,12 @@ describe("Payments routes — ramps", () => {
     it("pins transaction_created identifiers without advancing a pending off-ramp", async () => {
       const response = await postEvent(transactionEvent);
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(204);
       const moneygram = {
         customerId: "mg_profile_1",
         transactionId: "mg_tx_created_1",
         mgiTransactionId: "mgi_tx_created_1",
       };
-      expect(await response.json()).toMatchObject({
-        data: { transfer: { status: pendingStatus, moneygram } },
-      });
       expect(await readTransfer(transferId)).toMatchObject({
         status: pendingStatus,
         provider_data: { moneygram },
@@ -2320,17 +2301,17 @@ describe("Payments routes — ramps", () => {
     });
 
     it("replays transaction_created with the same id without changing the row", async () => {
-      expect((await postEvent(transactionEvent)).status).toBe(200);
+      expect((await postEvent(transactionEvent)).status).toBe(204);
       const before = await readTransfer(transferId);
 
       const response = await postEvent(transactionEvent);
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(204);
       expect(await readTransfer(transferId)).toEqual(before);
     });
 
     it("rejects a different transaction id for an already bound session", async () => {
-      expect((await postEvent(transactionEvent)).status).toBe(200);
+      expect((await postEvent(transactionEvent)).status).toBe(204);
       const before = await readTransfer(transferId);
 
       const response = await postEvent({ ...transactionEvent, transactionId: "mg_tx_created_2" });
@@ -2358,7 +2339,7 @@ describe("Payments routes — ramps", () => {
         sessionId: "mg_session_onramp_created_1",
       });
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(204);
       expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ mode: "sandbox" }),
         {
@@ -2371,9 +2352,6 @@ describe("Payments routes — ramps", () => {
         transactionId: "mg_tx_created_1",
         mgiTransactionId: "mgi_tx_created_1",
       };
-      expect(await response.json()).toMatchObject({
-        data: { transfer: { status: pendingStatus, moneygram } },
-      });
       expect(await readTransfer("xfr_2f3e4d5c-6b7a-4e8d-9f0e-1a2b3c4d5e6f")).toMatchObject({
         status: pendingStatus,
         provider_data: { moneygram },
@@ -2381,24 +2359,24 @@ describe("Payments routes — ramps", () => {
     });
 
     it("pins deposit_address from the provider using the committed transaction id", async () => {
-      expect((await postEvent(transactionEvent)).status).toBe(200);
+      expect((await postEvent(transactionEvent)).status).toBe(204);
 
       const response = await postEvent({ kind: "deposit_address", sessionId });
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(204);
       expect(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ mode: "sandbox" }),
         "mg_tx_created_1"
       );
       const moneygram = {
-        ...deposit,
+        customerId: "mg_profile_1",
         transactionId: "mg_tx_created_1",
         mgiTransactionId: "mgi_tx_created_1",
       };
-      expect(await response.json()).toMatchObject({
-        data: { transfer: { status: pendingStatus, moneygram } },
-      });
-      expect(await readTransfer(transferId)).toMatchObject({
+      const row = await readTransfer(transferId);
+      expect(row).toMatchObject({
+        destination_address: MG_DEPOSIT_WALLET,
+        memo: "mg_memo_1",
         status: pendingStatus,
         provider_data: { moneygram },
       });
@@ -2415,7 +2393,7 @@ describe("Payments routes — ramps", () => {
     });
 
     it("rejects a provider deposit amount that differs from the quoted amount", async () => {
-      expect((await postEvent(transactionEvent)).status).toBe(200);
+      expect((await postEvent(transactionEvent)).status).toBe(204);
       vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).mockResolvedValue({
         ...deposit,
         sendAmount: "24",
@@ -2427,20 +2405,23 @@ describe("Payments routes — ramps", () => {
       expect(response.status).toBe(409);
       const row = await readTransfer(transferId);
       expect(row).toEqual(before);
-      expect(row.provider_data.moneygram).not.toHaveProperty("depositAddress");
+      expect(row.destination_address).toBeNull();
+      expect(row.memo).toBeNull();
     });
 
     it("replays deposit_address without calling MoneyGram again", async () => {
-      await pinDeposit();
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET destination_address = ?, memo = ? WHERE id = ?")
+        .bind(MG_DEPOSIT_WALLET, "mg_memo_1", transferId)
+        .run();
       const before = await readTransfer(transferId);
-      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).mockClear();
 
       const response = await postEvent({ kind: "deposit_address", sessionId });
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(204);
       expect(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).not.toHaveBeenCalled();
       expect(await readTransfer(transferId)).toEqual(before);
-      expect(await response.json()).toMatchObject({ data: { transfer: { moneygram: deposit } } });
     });
 
     it("rejects deposit_address on an on-ramp", async () => {
@@ -2458,7 +2439,7 @@ describe("Payments routes — ramps", () => {
       });
       expect(
         (await postEvent({ ...transactionEvent, sessionId: "mg_session_onramp_deposit_1" })).status
-      ).toBe(200);
+      ).toBe(204);
       const before = await readTransfer("xfr_3f4e5d6c-7b8a-4f9e-8a1f-2b3c4d5e6f7a");
 
       const response = await postEvent({
@@ -2472,7 +2453,7 @@ describe("Payments routes — ramps", () => {
     });
 
     it("rejects signed without a pinned deposit address and keeps the ramp pending", async () => {
-      expect((await postEvent(transactionEvent)).status).toBe(200);
+      expect((await postEvent(transactionEvent)).status).toBe(204);
       const before = await readTransfer(transferId);
 
       const response = await postEvent({
@@ -2487,19 +2468,20 @@ describe("Payments routes — ramps", () => {
       });
       expect(await readTransfer(transferId)).toEqual(before);
       expect(before.status).toBe(pendingStatus);
+      expect(before.destination_address).toBeNull();
     });
 
     it.each([
       {
         name: "rejects a crypto leg sent to a different deposit address",
-        destination: TEST_SOLANA_ADDRESSES.wallet3,
+        destination: MG_OTHER_WALLET,
         responseStatus: 400,
         status: pendingStatus,
       },
       {
         name: "starts settlement for a signed crypto leg sent to the pinned deposit address",
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        responseStatus: 200,
+        destination: MG_DEPOSIT_WALLET,
+        responseStatus: 204,
         status: settlingStatus,
       },
     ] satisfies {
@@ -2544,14 +2526,12 @@ describe("Payments routes — ramps", () => {
       expect(response.status).toBe(responseStatus);
       const row = await readTransfer(transferId);
       expect(row.status).toBe(status);
-      if (responseStatus === 200) {
+      expect(row.destination_address).toBe(MG_DEPOSIT_WALLET);
+      expect(row.memo).toBe("mg_memo_1");
+      if (responseStatus === 204) {
         expect(row.provider_data.moneygram).toMatchObject({
-          ...deposit,
           cryptoTransferId: "xfr_mg_deposit_leg",
           solanaTxSignature: "sig_mg_deposit_1",
-        });
-        expect(await response.json()).toMatchObject({
-          data: { transfer: { status: settlingStatus } },
         });
       } else {
         expect(await response.json()).toMatchObject({
@@ -2576,11 +2556,14 @@ describe("Payments routes — ramps", () => {
       providerData: {
         moneygram: {
           transactionId: "mg_tx_amount_guard",
-          depositAddress: TEST_SOLANA_ADDRESSES.wallet2,
-          sendAmount: "25",
         },
       },
     });
+    const depositWallet = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET destination_address = ? WHERE id = ?")
+      .bind(depositWallet, "xfr_moneygram_amount_guard")
+      .run();
     const now = new Date().toISOString();
     await getDb(env)
       .prepare(
@@ -2595,12 +2578,12 @@ describe("Payments routes — ramps", () => {
         TEST_PROJECT.id,
         TEST_WALLET_ID,
         TEST_SOLANA_ADDRESSES.wallet1,
-        TEST_SOLANA_ADDRESSES.wallet2,
+        depositWallet,
         "USDC",
         "24",
         "transfer",
         "outbound",
-        "confirmed",
+        "confirmed" satisfies PaymentTransferStatus,
         "moneygram-wrong-amount-signature",
         now,
         now
@@ -2629,7 +2612,7 @@ describe("Payments routes — ramps", () => {
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind("xfr_moneygram_amount_guard")
       .first<{ status: PaymentTransferStatus }>();
-    expect(transfer).toMatchObject({ status: "pending" });
+    expect(transfer).toMatchObject({ status: "pending" satisfies PaymentTransferStatus });
   });
 
   describe("metered quotas", () => {
@@ -2753,6 +2736,7 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("ramp session and destination binding", () => {
+    const MG_DEPOSIT_WALLET = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
     const MONEYGRAM_WIDGET_URL = "https://playground.xramps.moneygram.com/widget?intent=transfer";
 
     function moneygramSessionJwt(expSeconds: number): string {
@@ -2991,7 +2975,7 @@ describe("Payments routes — ramps", () => {
           "xfr_moneygram_foreign_tenant",
           "org_other_tenant",
           "wallet_other_tenant",
-          TEST_SOLANA_ADDRESSES.wallet2,
+          MG_DEPOSIT_WALLET,
           "mg_sess_foreign_1",
           {},
           now,
@@ -3024,12 +3008,15 @@ describe("Payments routes — ramps", () => {
           rampQuote: { expiresAt: "2020-01-01T00:00:00.000Z" },
           moneygram: {
             transactionId: "mg_tx_expired_1",
-            depositAddress: TEST_SOLANA_ADDRESSES.wallet2,
-            sendAmount: "25",
           },
         },
         amount: "25",
       });
+
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET destination_address = ? WHERE id = ?")
+        .bind(MG_DEPOSIT_WALLET, "xfr_moneygram_expired_session")
+        .run();
 
       const res = await app.request(
         "/v1/payments/ramps/moneygram/events",

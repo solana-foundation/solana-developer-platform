@@ -475,11 +475,6 @@ export interface MoneygramTransferDetails {
   transactionId?: string;
   /** MoneyGram-side transaction id; the correlation key for MoneyGram status webhooks. */
   mgiTransactionId?: string;
-  /** Deposit address MoneyGram allocated for the off-ramp, read server-side from the Ramps status API. */
-  depositAddress?: string;
-  depositMemo?: string;
-  /** USDC amount MoneyGram expects at the deposit address, read server-side from the Ramps status API. */
-  sendAmount?: string;
   referenceNumber?: string;
   payoutAmount?: number;
   payoutStatus?: string;

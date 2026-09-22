@@ -173,13 +173,14 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   }
 
   if (currentStepId === "PROVIDER" && quote?.provider === "moneygram") {
-    if (!selectedWallet) {
+    if (!selectedWallet || wizard.quoteTransferId === null) {
       return <RampQuoteSkeleton />;
     }
     return (
       <MoneygramRampWidget
         direction="onramp"
         quote={quote}
+        transferId={wizard.quoteTransferId}
         sourceWalletId={selectedWallet.id}
         sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
         sourceWalletAddress={selectedWallet.publicKey}

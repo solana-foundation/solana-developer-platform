@@ -1,4 +1,4 @@
-import type { MoneygramRampEvent, PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types";
+import type { MoneygramRampEvent, PaymentTransferStatus } from "@sdp/types";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { builtinEnvironments, type EnvironmentReturn } from "vitest/environments";
@@ -18,17 +18,9 @@ const DEPOSIT_WALLET = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
 const USDC_MINT = "8mSiNWTeu59yy4EzchXDwb8j3XoQsVmVdp4QMjEo6wvX";
 const messages = getMessages("en");
 const pendingStatus = "pending" satisfies PaymentTransferStatus;
-const ramp: PaymentTransferSummary = {
-  id: "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f",
-  custodyWalletId: "cwlt_mg_1",
-  providerWalletId: "wal_mg_1",
-  status: pendingStatus,
-  signature: null,
-  rampsMemo: {},
-  moneygram: { transactionId: "mg_tx_owned_1", customerId: "mg_profile_1" },
-};
 const props: MoneygramRampWidgetProps = {
   direction: "offramp",
+  transferId: "xfr_mg_test_1",
   quote: {
     provider: "moneygram",
     id: "mg_session_1",
@@ -78,7 +70,7 @@ afterAll(async () => {
 beforeEach(() => {
   captured = undefined;
   window.RampsSDK = { createRamps };
-  vi.mocked(postMoneygramRampEvent).mockResolvedValue(ramp);
+  vi.mocked(postMoneygramRampEvent).mockResolvedValue(undefined);
   vi.mocked(fundMoneygramDeposit).mockResolvedValue("sig_mg_deposit_1");
 });
 
@@ -124,20 +116,21 @@ describe("MoneygramRampWidget", () => {
   });
 
   it("waits for a successful created post before funding without posting again", async () => {
-    const posted = Promise.withResolvers<PaymentTransferSummary>();
+    const posted = Promise.withResolvers<void>();
     vi.mocked(postMoneygramRampEvent).mockReturnValueOnce(posted.promise);
     const config = await renderWidget();
     config.onTransactionCreated(created);
 
     const funding = config.onDepositAddress(deposit);
     expect(fundMoneygramDeposit).not.toHaveBeenCalled();
-    posted.resolve(ramp);
+    posted.resolve(undefined);
 
     await expect(funding).resolves.toBe("sig_mg_deposit_1");
     expect(fundMoneygramDeposit).toHaveBeenCalledExactlyOnceWith(
       deposit,
       expect.objectContaining({
         sessionId: "mg_session_1",
+        transferId: props.transferId,
         sourceWalletId: "cwlt_mg_1",
         sourceTokenMint: USDC_MINT,
         cryptoAsset: "USDC",
@@ -147,7 +140,7 @@ describe("MoneygramRampWidget", () => {
   });
 
   it("re-posts a failed created event once and waits for it before funding", async () => {
-    const retried = Promise.withResolvers<PaymentTransferSummary>();
+    const retried = Promise.withResolvers<void>();
     vi.mocked(postMoneygramRampEvent)
       .mockRejectedValueOnce(new Error("Created event request failed"))
       .mockReturnValueOnce(retried.promise);
@@ -161,7 +154,7 @@ describe("MoneygramRampWidget", () => {
       vi.mocked(postMoneygramRampEvent).mock.calls[0]
     );
     expect(fundMoneygramDeposit).not.toHaveBeenCalled();
-    retried.resolve(ramp);
+    retried.resolve(undefined);
 
     await expect(funding).resolves.toBe("sig_mg_deposit_1");
     expect(fundMoneygramDeposit).toHaveBeenCalledTimes(1);

@@ -1,6 +1,11 @@
 import type { PaymentTransferSummary } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { postMoneygramRampEvent, type Translate } from "../../payments-workspace.data";
+import { getMessages, translate } from "@/i18n/messages";
+import {
+  fetchTransferById,
+  postMoneygramRampEvent,
+  type Translate,
+} from "../../payments-workspace.data";
 import { sendTransferUnderKey } from "../../transfer-idempotency";
 import { fundMoneygramDeposit, type MoneygramFundingContext } from "./moneygram-sign-transaction";
 
@@ -8,7 +13,10 @@ const SOURCE_WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
 const DEPOSIT_WALLET = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
 const USDC_MINT = "8mSiNWTeu59yy4EzchXDwb8j3XoQsVmVdp4QMjEo6wvX";
 
-vi.mock("../../payments-workspace.data", () => ({ postMoneygramRampEvent: vi.fn() }));
+vi.mock("../../payments-workspace.data", () => ({
+  fetchTransferById: vi.fn(),
+  postMoneygramRampEvent: vi.fn(),
+}));
 vi.mock("../../transfer-idempotency", () => ({ sendTransferUnderKey: vi.fn() }));
 
 const DEPOSIT = {
@@ -20,17 +28,15 @@ const DEPOSIT = {
 };
 
 const RAMP: PaymentTransferSummary = {
-  id: "xfr_mg_ramp_1",
+  id: "xfr_mg_test_1",
   custodyWalletId: "cwlt_mg_1",
   providerWalletId: "wal_mg_1",
   status: "pending",
   signature: null,
   rampsMemo: {},
-  moneygram: {
-    depositAddress: DEPOSIT_WALLET,
-    sendAmount: "25",
-    depositMemo: "mg_memo_1",
-  },
+  destination: DEPOSIT_WALLET,
+  amount: "25",
+  memo: "mg_memo_1",
 };
 
 const CRYPTO_LEG: PaymentTransferSummary = {
@@ -46,6 +52,7 @@ function context(overrides: Partial<MoneygramFundingContext>): MoneygramFundingC
   return {
     cryptoAsset: "USDC",
     sessionId: "mg_session_1",
+    transferId: "xfr_mg_test_1",
     sourceWalletId: "cwlt_mg_1",
     sourceTokenMint: USDC_MINT,
     onSigned: vi.fn(),
@@ -55,7 +62,8 @@ function context(overrides: Partial<MoneygramFundingContext>): MoneygramFundingC
 }
 
 beforeEach(() => {
-  vi.mocked(postMoneygramRampEvent).mockResolvedValue(RAMP);
+  vi.mocked(fetchTransferById).mockResolvedValue(RAMP);
+  vi.mocked(postMoneygramRampEvent).mockResolvedValue(undefined);
   vi.mocked(sendTransferUnderKey).mockResolvedValue({
     outcome: { kind: "submitted", transfer: CRYPTO_LEG },
     fingerprint: "mg_fingerprint_1",
@@ -70,7 +78,18 @@ afterEach(() => {
 describe("fundMoneygramDeposit", () => {
   it("funds the API deposit instruction instead of the widget payload and posts signed", async () => {
     const ctx = context({});
+    vi.mocked(fetchTransferById).mockImplementation(async () => {
+      expect(postMoneygramRampEvent).toHaveBeenCalledExactlyOnceWith(
+        { kind: "deposit_address", sessionId: ctx.sessionId },
+        ctx.t
+      );
+      return RAMP;
+    });
     vi.mocked(sendTransferUnderKey).mockImplementation(async () => {
+      expect(fetchTransferById).toHaveBeenCalledExactlyOnceWith(
+        { transferId: "xfr_mg_test_1" },
+        ctx.t
+      );
       expect(postMoneygramRampEvent).toHaveBeenCalledExactlyOnceWith(
         { kind: "deposit_address", sessionId: ctx.sessionId },
         ctx.t
@@ -105,7 +124,7 @@ describe("fundMoneygramDeposit", () => {
 
   it("reuses the session payment key after a lost signed-event response", async () => {
     vi.mocked(postMoneygramRampEvent)
-      .mockResolvedValueOnce(RAMP)
+      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new TypeError("connection lost"));
     const ctx = context({});
 
@@ -169,20 +188,25 @@ describe("fundMoneygramDeposit", () => {
     expect(postMoneygramRampEvent).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses an API response without a confirmed deposit address", async () => {
-    vi.mocked(postMoneygramRampEvent).mockResolvedValue({
-      ...RAMP,
-      moneygram: { sendAmount: "25" },
-    });
-    const ctx = context({});
+  it.each([
+    { name: "destination", transfer: { ...RAMP, destination: undefined } },
+    { name: "amount", transfer: { ...RAMP, amount: undefined } },
+  ])("refuses a transfer without a confirmed $name", async ({ transfer }) => {
+    vi.mocked(fetchTransferById).mockResolvedValue(transfer);
+    const messages = getMessages("en");
+    const ctx = context({ t: (key, values) => translate(messages, key, values) });
 
     await expect(fundMoneygramDeposit(DEPOSIT, ctx)).rejects.toThrow(
-      "DashboardPayments.ramps.moneygramDepositUnconfirmed"
+      translate(messages, "DashboardPayments.ramps.moneygramDepositUnconfirmed")
     );
     expect(sendTransferUnderKey).not.toHaveBeenCalled();
     expect(ctx.onSigned).not.toHaveBeenCalled();
     expect(postMoneygramRampEvent).toHaveBeenCalledExactlyOnceWith(
       { kind: "deposit_address", sessionId: ctx.sessionId },
+      ctx.t
+    );
+    expect(fetchTransferById).toHaveBeenCalledExactlyOnceWith(
+      { transferId: "xfr_mg_test_1" },
       ctx.t
     );
   });

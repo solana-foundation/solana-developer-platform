@@ -13,6 +13,7 @@
 
 import { address } from "@solana/kit";
 import {
+  fetchTransferById,
   postMoneygramRampEvent,
   type Translate,
 } from "@/app/dashboard/payments/payments-workspace.data";
@@ -38,6 +39,8 @@ export interface MoneygramDepositAddress {
 export interface MoneygramFundingContext {
   cryptoAsset: string;
   sessionId: string;
+  /** The off-ramp transfer row; its destination and memo are MoneyGram's deposit instruction once pinned. */
+  transferId: string;
   sourceWalletId: string;
   /** The wallet's mint for the asset, or null when it holds none of it. */
   sourceTokenMint: string | null;
@@ -95,32 +98,32 @@ async function sendMoneygramTransfer(
 
 /**
  * Funds a custodial off-ramp. The widget payload only says a deposit address exists;
- * the address and amount actually sent to are the ones our API read from MoneyGram
- * under the secret key, so a tampered callback cannot redirect the transfer.
+ * the API reads the real instruction from MoneyGram under the secret key and writes
+ * it onto the off-ramp transfer row, so what gets sent is the row's destination,
+ * amount and memo, never anything the widget supplied.
  *
  * @param deposit - What the widget reported; only its chain and asset are used.
- * @param context - The session's wallet, asset and translator.
+ * @param context - The session's transfer, wallet, asset and translator.
  * @returns The signature the widget waits on.
- * @throws When the API has no deposit instruction for the session, or nothing was sent.
+ * @throws When the transfer row carries no deposit instruction, or nothing was sent.
  */
 export async function fundMoneygramDeposit(
   deposit: MoneygramDepositAddress,
   context: MoneygramFundingContext
 ): Promise<string> {
-  const { sessionId, t } = context;
-  const transfer = await postMoneygramRampEvent({ kind: "deposit_address", sessionId }, t);
-  const depositAddress = transfer.moneygram?.depositAddress;
-  const sendAmount = transfer.moneygram?.sendAmount;
-  if (!depositAddress || !sendAmount) {
+  const { sessionId, transferId, t } = context;
+  await postMoneygramRampEvent({ kind: "deposit_address", sessionId }, t);
+  const transfer = await fetchTransferById({ transferId }, t);
+  if (transfer.destination === undefined || transfer.amount === undefined) {
     throw new Error(t("DashboardPayments.ramps.moneygramDepositUnconfirmed"));
   }
   return sendMoneygramTransfer(
     {
       chain: deposit.chain,
       asset: deposit.asset,
-      to: depositAddress,
-      amount: sendAmount,
-      memo: transfer.moneygram?.depositMemo,
+      to: transfer.destination,
+      amount: transfer.amount,
+      memo: transfer.memo,
     },
     context
   );

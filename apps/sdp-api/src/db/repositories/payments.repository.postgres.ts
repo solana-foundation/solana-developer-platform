@@ -611,6 +611,31 @@ export function createPostgresPaymentsRepository(
       return row ? mapTransferRow(row) : null;
     },
 
+    async claimTransferDestination(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: ["id = ?", "status = ?", "destination_address IS NULL"],
+        extraValues: [input.transferId, input.expectedStatus],
+      });
+      const row = await db
+        .prepare(
+          `WITH pt AS (
+           UPDATE payment_transfers
+           SET destination_address = ?, memo = ?, updated_at = ?
+           WHERE ${scope.where}
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
+        )
+        .bind(input.destinationAddress, input.memo, input.updatedAt, ...scope.values)
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
     async claimTransferProviderData(input) {
       assertScope(input);
       const scope = buildTransferScopeWhere({

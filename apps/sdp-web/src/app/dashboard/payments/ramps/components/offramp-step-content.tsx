@@ -271,7 +271,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   }
 
   if (currentStepId === "COMPLETE" && quote?.provider === "moneygram") {
-    if (!selectedWallet) {
+    if (!selectedWallet || wizard.quoteTransferId === null) {
       return <RampQuoteSkeleton />;
     }
     return (
@@ -279,6 +279,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         <MoneygramRampWidget
           direction="offramp"
           quote={quote}
+          transferId={wizard.quoteTransferId}
           sourceWalletId={selectedWallet.id}
           sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
           sourceWalletAddress={selectedWallet.publicKey}
