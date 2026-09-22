@@ -7,6 +7,7 @@ import {
   type CounterpartyAccount,
   type CounterpartyProviderAccount,
   type CounterpartyProviderCustomerLink,
+  type CounterpartyProviderCustomerLinkAgreement,
   PAYMENT_TRANSFER_STATUS_TONE,
   type PaymentTransferStatus,
   type PaymentTransferSummary,
@@ -18,8 +19,10 @@ import {
   BanknoteArrowDownIcon,
   BanknoteArrowUpIcon,
   CalendarIcon,
+  CheckCircle2Icon,
   CheckIcon,
   ChevronDownIcon,
+  ClockIcon,
   CopyIcon,
   ExternalLinkIcon,
   HashIcon,
@@ -37,8 +40,8 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { MemoJsonView } from "@/app/dashboard/payments/wizard-summary-list";
-import { CopyIdButton } from "@/components/copy-id-button";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,6 +59,7 @@ import {
   RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS,
   RAMP_PROVIDER_LOGOS,
 } from "@/lib/ramps";
+import { openBvnkCustomerLink } from "@/lib/trusted-ramp-destinations";
 import { useCopy } from "@/lib/use-copy";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
@@ -236,6 +240,93 @@ export function groupProviderAccounts(
   return [...groups.values()];
 }
 
+/**
+ * Renders the agreement session rows for a BVNK customer link: one row per
+ * agreement with its signing state on the left and the document links.
+ *
+ * @param agreements - Signed or pending agreements from the customer link.
+ * @returns The agreement rows.
+ */
+function CustomerLinkAgreements({
+  agreements,
+}: {
+  agreements: CounterpartyProviderCustomerLinkAgreement[];
+}) {
+  const t = useTranslations();
+  return (
+    <>
+      {agreements.map((agreement) => (
+        <div
+          key={agreement.name}
+          className="flex min-w-0 items-center gap-2 border-t border-border-default px-4 py-2 text-sm"
+        >
+          {agreement.signedAt !== null ? (
+            <span
+              className="flex shrink-0 items-center gap-1 text-success"
+              title={formatTimestamp(agreement.signedAt, t)}
+            >
+              <CheckCircle2Icon className="size-4" />
+              {t("DashboardPayments.counterparty.agreementSigned")}
+            </span>
+          ) : (
+            <span className="flex shrink-0 items-center gap-1 text-tertiary">
+              <ClockIcon className="size-4" />
+              {t("DashboardPayments.counterparty.agreementAwaitingSignature")}
+            </span>
+          )}
+          <span className="truncate text-primary">{agreement.displayName}</span>
+          <button
+            type="button"
+            className="underline underline-offset-2 text-tertiary hover:text-primary"
+            onClick={() => openBvnkCustomerLink(agreement.url)}
+          >
+            {t("DashboardPayments.counterparty.viewAgreement")}
+          </button>
+          <button
+            type="button"
+            className="underline underline-offset-2 text-tertiary hover:text-primary"
+            onClick={() => openBvnkCustomerLink(agreement.privacyPolicyUrl)}
+          >
+            {t("DashboardPayments.counterparty.viewPrivacyPolicy")}
+          </button>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Collapsed disclosure for a BVNK customer link's agreements: one toggle row
+ * naming the count, the agreement rows only once opened.
+ *
+ * @param agreements - Signed or pending agreements from the customer link.
+ * @returns The toggle row plus, when open, the agreement rows.
+ */
+function CustomerLinkAgreementsAccordion({
+  agreements,
+}: {
+  agreements: CounterpartyProviderCustomerLinkAgreement[];
+}) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-border-default">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs text-secondary"
+      >
+        <ChevronDownIcon
+          className={cn("size-4 shrink-0 transition-transform", !open && "-rotate-90")}
+        />
+        {t("DashboardPayments.counterparty.agreementsToggle", { count: agreements.length })}
+      </button>
+      {open ? <CustomerLinkAgreements agreements={agreements} /> : null}
+    </div>
+  );
+}
+
 /** Provider logo, label, "Customer" tag, status badge, and BVNK residence flag. */
 function ProviderCustomerHeader({
   provider,
@@ -283,10 +374,10 @@ function CustomerLinkMeta({ customerLink }: { customerLink: CounterpartyProvider
   return (
     <div className="flex min-w-0 items-center gap-1">
       {customerReference !== null ? (
-        <CopyIdButton
+        <WalletMetadataCopyButton
           value={customerReference}
-          label={t("DashboardPayments.counterparty.copyCustomerId")}
-          copiedMessage={t("DashboardPayments.counterparty.customerIdCopied")}
+          label={t("DashboardPayments.counterparty.customerIdLabel")}
+          tooltip={customerReference}
         />
       ) : null}
       <span
@@ -388,10 +479,10 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
                       })}
                     </span>
                     {account.providerAccountReference !== undefined ? (
-                      <CopyIdButton
+                      <WalletMetadataCopyButton
                         value={account.providerAccountReference}
-                        label={t("DashboardPayments.counterparty.copyWalletId")}
-                        copiedMessage={t("DashboardPayments.counterparty.walletIdCopied")}
+                        label={t("DashboardPayments.counterparty.walletIdLabel")}
+                        tooltip={account.providerAccountReference}
                       />
                     ) : null}
                     <span className="ml-auto">
@@ -479,6 +570,9 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
             </div>
           )}
         </>
+      ) : null}
+      {customerLink !== undefined && customerLink.provider === "bvnk" ? (
+        <CustomerLinkAgreementsAccordion agreements={customerLink.agreements} />
       ) : null}
     </div>
   );
