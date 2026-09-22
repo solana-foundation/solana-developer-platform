@@ -28,7 +28,7 @@ import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
-import { dvpToastAction } from "./dvp-action-toast";
+import { DVP_TOAST_POSITION, dvpToastAction } from "./dvp-action-toast";
 import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
 import { dvpErrorEnvelopeSchema } from "./dvp-trade";
 
@@ -246,7 +246,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
         (call[0] === "fund" || call[0] === "reclaim") &&
         (typeof call[1].walletId !== "string" || !call[1].walletId.trim())
       ) {
-        toast.error(t("DashboardCustody.unavailable"), { position: "bottom-right" });
+        toast.error(t("DashboardCustody.unavailable"), DVP_TOAST_POSITION);
         return;
       }
       const response = await fetch(
@@ -259,8 +259,8 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       const heldMessage = HELD_MESSAGE[action];
       if (response.status === 202 && heldMessage !== undefined) {
         toast.info(t(heldMessage), {
+          ...DVP_TOAST_POSITION,
           description: t("DashboardMarkets.dvp.approvalPendingDescription"),
-          position: "bottom-right",
         });
         router.refresh();
         return;
@@ -270,9 +270,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       if (!response.ok) {
         const symbol = leg === null ? null : leg.symbol;
         const failure: unknown = await response.json().catch(() => null);
-        toast.error(refusalMessage(failure, response.status, symbol), {
-          position: "bottom-right",
-        });
+        toast.error(refusalMessage(failure, response.status, symbol), DVP_TOAST_POSITION);
         return;
       }
       // A success answer that cannot be read is not a success to report: nothing
@@ -281,7 +279,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       const body: unknown = await response.json().catch(() => null);
       const success = successOf(action, body);
       if (success === null) {
-        toast.error(t("DashboardMarkets.dvp.actionUnconfirmed"), { position: "bottom-right" });
+        toast.error(t("DashboardMarkets.dvp.actionUnconfirmed"), DVP_TOAST_POSITION);
         router.refresh();
         return;
       }
@@ -290,13 +288,13 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       // reconciler's next sweep. A refresh is not an answer. A close that went
       // out but has not confirmed says sent, not done.
       toast.success(t(success.message), {
-        position: "bottom-right",
+        ...DVP_TOAST_POSITION,
         action: dvpToastAction(t, success.signature, cluster),
       });
       router.refresh();
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Request failed.";
-      toast.error(message, { position: "bottom-right" });
+      toast.error(message, DVP_TOAST_POSITION);
     } finally {
       setPending((current) => {
         const next = new Set(current);

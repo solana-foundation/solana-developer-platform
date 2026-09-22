@@ -3,8 +3,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import { TreasurySolutionsWorkspace } from "./treasury-solutions-workspace";
 
 // jsdom implements no matchMedia, while the workspace's motion components read
@@ -699,13 +698,13 @@ vi.mock("../earn/earn-withdraw-modal", () => ({
 
 function renderWorkspace() {
   return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <TreasurySolutionsWorkspace
         providerAccess={{
           kamino: { entitled: true, configured: true, enabled: true },
         }}
       />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
 }
 
@@ -955,11 +954,11 @@ describe("TreasurySolutionsWorkspace", () => {
       ...mocks.vaultWithdrawals,
     ];
     view.rerender(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <TreasurySolutionsWorkspace
           providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     await waitFor(() => {
@@ -1091,11 +1090,11 @@ describe("TreasurySolutionsWorkspace", () => {
 
     mocks.livePositionTokenValue = "135.25";
     view.rerender(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <TreasurySolutionsWorkspace
           providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     await waitFor(() =>
@@ -1162,11 +1161,11 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsEmpty = false;
     mocks.livePositionTokenValue = "10";
     view.rerender(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <TreasurySolutionsWorkspace
           providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     await waitFor(() =>
@@ -2168,11 +2167,11 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.vaultDeposits = [];
     mocks.vaultWithdrawals = [];
     view.rerender(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <TreasurySolutionsWorkspace
           providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     expect(screen.getByText("earn_deposit_recovered")).toBeTruthy();

@@ -1,7 +1,6 @@
-import { NextResponse } from "next/server";
 import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
-import { vaultDepositsProxyQuery } from "../provider-query";
+import { proxyQueryErrorResponse, vaultDepositsProxyQuery } from "../provider-query";
 
 export async function POST(request: Request) {
   return proxyToSdpApi({
@@ -22,9 +21,7 @@ export async function POST(request: Request) {
  */
 export async function GET(request: Request) {
   const validated = vaultDepositsProxyQuery(request);
-  if (!validated.ok) {
-    return NextResponse.json({ error: { message: validated.message } }, { status: 400 });
-  }
+  if (!validated.ok) return proxyQueryErrorResponse(validated);
 
   return proxyToSdpApi({
     request,
