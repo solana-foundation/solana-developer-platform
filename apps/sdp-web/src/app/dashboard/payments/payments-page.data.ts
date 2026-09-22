@@ -323,29 +323,46 @@ export async function fetchDashboardPaymentTransfers(
   pageSize = 20,
   options: DashboardPaymentTransfersOptions = {}
 ): Promise<DashboardPaymentTransfersResult> {
+  // The persisted history does not read the wallet list, so it starts
+  // alongside it rather than behind it. Only the per-wallet observed reads
+  // need wallet ids, and those still wait for the list.
+  const persistedTransfers = fetchPaymentTransfers(request, pageSize);
   const walletsResult = await fetchPaymentsWallets(request, { view: "summary" });
-  return fetchDashboardPaymentTransfersForWallets(request, walletsResult, pageSize, options);
+  return fetchDashboardPaymentTransfersForWallets(
+    request,
+    walletsResult,
+    pageSize,
+    options,
+    persistedTransfers
+  );
 }
 
 export async function fetchDashboardPaymentTransfersForWallets(
   request: SdpApiClient["request"],
   walletsResult: FetchResult<PaymentsDashboardWallet[]>,
   pageSize = 20,
-  options: DashboardPaymentTransfersOptions = {}
+  options: DashboardPaymentTransfersOptions = {},
+  /**
+   * Persisted-history read already started by the caller, so it can overlap
+   * the wallet list. One is started here when not handed one, keeping every
+   * entry point on the same reads.
+   */
+  persistedTransfers?: Promise<FetchResult<PaymentTransferSummary[]>>
 ): Promise<DashboardPaymentTransfersResult> {
+  const persisted = persistedTransfers ?? fetchPaymentTransfers(request, pageSize);
   if (!walletsResult.ok || (walletsResult.data?.length ?? 0) === 0) {
     // Without the wallet list this is only the persisted history: the observed
     // transfers are read per wallet, so a failed wallet read leaves a list
     // whose completeness is unknown rather than a complete one.
     return {
-      ...(await fetchPaymentTransfers(request, pageSize)),
+      ...(await persisted),
       walletsNotLoaded: walletsResult.ok ? 0 : null,
     };
   }
 
   const observedAddresses = new Set<string>();
   const [persistedResult, settledTransfers] = await Promise.all([
-    fetchPaymentTransfers(request, pageSize),
+    persisted,
     Promise.allSettled(
       (walletsResult.data ?? []).map((wallet) => {
         const address = wallet.publicKey.trim();
