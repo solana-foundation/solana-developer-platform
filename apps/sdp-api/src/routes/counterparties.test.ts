@@ -3049,6 +3049,219 @@ describe("Counterparties Routes", () => {
 
       expect(response.status).toBe(503);
     });
+
+    it("lists provisioned funding-wallet rows with a live available balance", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_funding_balance" });
+      const owner = (await created.json()).data.counterparty;
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2").mockResolvedValue(
+        bvnkLedgerWallet({
+          id: TEST_BVNK_WALLET_ID,
+          balance: { amount: 9.9, currency: "USD" },
+        })
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      expect(body.data.accounts).toEqual([
+        {
+          id: expect.any(String),
+          provider: "bvnk",
+          kind: "funding_wallet",
+          fiatCurrency: "USD",
+          destinationCountry: null,
+          paymentRail: null,
+          status: "active",
+          providerStatus: "provisioned_funding_wallet",
+          createdAt: expect.any(String),
+          providerAccountReference: TEST_BVNK_WALLET_ID,
+          balance: { state: "available", amount: "9.9", currency: "USD" },
+        },
+      ]);
+      expect(RAMP_PROVIDER_CLIENTS.bvnk.getLedgerWalletV2).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "sandbox" }),
+        { walletId: TEST_BVNK_WALLET_ID }
+      );
+    });
+
+    it("keeps the funding-wallet row with an unavailable balance when the BVNK read fails", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_funding_failure" });
+      const owner = (await created.json()).data.counterparty;
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+      await seedProviderAccount({
+        id: "provider_account_usd_funding_failure",
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:failure",
+        externalAccountReference: "ExternalAccount:failure",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "PENDING",
+        status: "active",
+        createdAt: "2026-03-01T00:00:00.000Z",
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2").mockRejectedValue(
+        new Error("wallet read exploded")
+      );
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ data: [], hasMore: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      const walletRow = body.data.accounts.find((account) => account.kind === "funding_wallet");
+      expect(walletRow).toMatchObject({
+        provider: "bvnk",
+        kind: "funding_wallet",
+        providerAccountReference: TEST_BVNK_WALLET_ID,
+        balance: { state: "unavailable" },
+      });
+      const payoutRow = body.data.accounts.find(
+        (account) => account.id === "provider_account_usd_funding_failure"
+      );
+      expect(payoutRow).toMatchObject({
+        provider: "lightspark",
+        kind: "payout_account",
+        providerStatus: "PENDING",
+      });
+    });
+
+    it("omits balance and reference on a provisioning funding-wallet row", async () => {
+      const created = await createCounterparty({
+        externalId: "provider_accounts_funding_provisioning",
+      });
+      const owner = (await created.json()).data.counterparty;
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
+        metadata: {},
+      });
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      expect(body.data.accounts).toEqual([
+        {
+          id: expect.any(String),
+          provider: "bvnk",
+          kind: "funding_wallet",
+          fiatCurrency: "USD",
+          destinationCountry: null,
+          paymentRail: null,
+          status: "active",
+          providerStatus: "provisioning_funding_wallet",
+          createdAt: expect.any(String),
+        },
+      ]);
+      expect(RAMP_PROVIDER_CLIENTS.bvnk.getLedgerWalletV2).not.toHaveBeenCalled();
+    });
+
+    it("attaches the customer link to funding-wallet rows instead of a standalone account", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_funding_link" });
+      const owner = (await created.json()).data.counterparty;
+      const customerLink = await createPostgresCounterpartyProviderAccountsRepository(
+        getDb(env)
+      ).upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        provider: "bvnk",
+        providerCustomerReference: "Customer:bvnk_funding",
+      });
+      await getDb(env)
+        .prepare("UPDATE counterparty_provider_accounts SET metadata = ? WHERE id = ?")
+        .bind({ residenceCountryCode: "US" }, customerLink.id)
+        .run();
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        metadata: {},
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2").mockResolvedValue(
+        bvnkLedgerWallet({
+          id: TEST_BVNK_WALLET_ID,
+          balance: { amount: 9.9, currency: "USD" },
+        })
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      expect(body.data.accounts).toHaveLength(1);
+      expect(body.data.accounts[0]).toMatchObject({
+        provider: "bvnk",
+        kind: "funding_wallet",
+        providerAccountReference: TEST_BVNK_WALLET_ID,
+      });
+      expect(body.data.accounts[0].customerLink).toEqual({
+        provider: "bvnk",
+        id: customerLink.id,
+        providerCustomerReference: null,
+        status: "active",
+        providerStatus: "PENDING_AGREEMENT",
+        createdAt: customerLink.created_at,
+        residenceCountryCode: "US",
+        agreements: [],
+      });
+    });
   });
 
   describe("PATCH /v1/counterparties/:counterpartyId", () => {
