@@ -124,6 +124,43 @@ describe("createRequestScopedSdpApiClients", () => {
     expect(projectHeaders.get("x-project-id")).toBe("project_test");
   });
 
+  it("logs a query-bearing request without the query string", async () => {
+    mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+    const fetchMock = apiFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const infoMock = vi.mocked(console.info);
+
+    const { projectClient } = await createRequestScopedSdpApiClients({
+      getToken: vi.fn().mockResolvedValue("token_test"),
+    });
+    await projectClient?.request("/v1/payments/transfers?secret=sk_pasted_credential", {
+      method: "POST",
+    });
+
+    // The upstream request keeps the caller's query; the log event must not.
+    const upstreamCalls = fetchMock.mock.calls.filter(([input]) =>
+      requestUrl(input).includes("secret=sk_pasted_credential")
+    );
+    expect(upstreamCalls).toHaveLength(1);
+    expect(requestUrl(upstreamCalls[0]?.[0])).toBe(
+      "https://api.example.test/v1/payments/transfers?secret=sk_pasted_credential"
+    );
+
+    const loggedEvents = infoMock.mock.calls
+      .map(([payload]) => payload)
+      .filter((payload): payload is string => typeof payload === "string")
+      .map((payload) => JSON.parse(payload) as { event: string; path: string })
+      .filter((event) => event.event === "sdp_web_api_request");
+    const transferEvents = loggedEvents.filter((event) =>
+      event.path.startsWith("/v1/payments/transfers")
+    );
+    expect(transferEvents).toHaveLength(1);
+    expect(transferEvents[0]?.path).toBe("/v1/payments/transfers");
+    expect(infoMock.mock.calls.map(([payload]) => String(payload)).join("\n")).not.toContain(
+      "sk_pasted_credential"
+    );
+  });
+
   it("still returns an org client when no project is selected", async () => {
     mocks.cookies.mockResolvedValue(cookieJar());
     const getToken = vi.fn().mockResolvedValue("token_test");
