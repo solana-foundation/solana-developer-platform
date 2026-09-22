@@ -229,7 +229,6 @@ test("the orchestrator holds merge deploys on pending migrations instead of fail
     /\*\)\n\s+echo "::error::Prod merge gate could not be evaluated \(exit \$\{gate_status\}\)\."\n\s+exit 1/
   );
 
-
   const prodJob = orchestrator.slice(orchestrator.indexOf("  deploy-api-prod:"));
   assert.match(prodJob, /if: >-\n\s+needs\.changes\.outputs\.prod == 'true' &&/);
   assert.match(prodJob, /vars\.CONTINUOUS_PROD_DEPLOY == 'true'/);
