@@ -357,12 +357,14 @@ export async function seedBvnkFundingWallet(
   if (row === null) {
     throw new Error("BVNK funding wallet claim produced no row.");
   }
-  if (input.id !== undefined || input.updatedAt !== undefined) {
+  const id = input.id === undefined ? row.id : input.id;
+  const updatedAt = input.updatedAt === undefined ? row.updated_at : input.updatedAt;
+  if (id !== row.id || updatedAt !== row.updated_at) {
     await db
       .prepare("UPDATE counterparty_provider_accounts SET id = ?, updated_at = ? WHERE id = ?")
-      .bind(input.id ?? row.id, input.updatedAt ?? row.updated_at, row.id)
+      .bind(id, updatedAt, row.id)
       .run();
-    row = { ...row, id: input.id ?? row.id, updated_at: input.updatedAt ?? row.updated_at };
+    row = { ...row, id, updated_at: updatedAt };
   }
   let current = row;
   if (input.stage !== "claimed" && current.external_account_reference === null) {
