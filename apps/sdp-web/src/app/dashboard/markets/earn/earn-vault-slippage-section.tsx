@@ -41,30 +41,40 @@ export function VaultSlippageSection({
 }: VaultSlippageSectionProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const expanded = open || invalid;
   const percent =
     toleranceBps === null
       ? "—"
       : `${(toleranceBps / 100).toLocaleString(locale, { maximumFractionDigits: 2 })}%`;
+  const title = t("DashboardEarn.deposit.vaultSlippageTitle");
+  const summary = t("DashboardEarn.deposit.vaultSlippageToggle", { percent });
 
   return (
-    <div className="mt-3">
+    <section className="mt-3 overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
       <button
         aria-controls={`${idPrefix}-slippage-section`}
-        aria-expanded={open}
-        className="inline-flex items-center gap-1 text-xs text-secondary transition-colors hover:text-primary"
+        aria-expanded={expanded}
+        aria-label={`${title}. ${summary}`}
+        className="flex min-h-20 w-full items-center justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-2 focus-visible:outline-border-strong focus-visible:outline-offset-[-2px] disabled:cursor-not-allowed disabled:opacity-50"
         disabled={submitting}
         onClick={onToggle}
         type="button"
       >
+        <span className="flex min-w-0 flex-col gap-1">
+          <span className="text-sm font-semibold text-primary">{title}</span>
+          <span className="text-sm text-secondary">{summary}</span>
+        </span>
         <ChevronDownIcon
           aria-hidden="true"
-          className={cn("size-3.5 transition-transform", open && "rotate-180")}
+          className={cn(
+            "size-4 shrink-0 text-secondary transition-transform",
+            expanded && "rotate-180"
+          )}
         />
-        {t("DashboardEarn.deposit.vaultSlippageToggle", { percent })}
       </button>
-      {open || invalid ? (
+      {expanded ? (
         <div
-          className="mt-2 space-y-2 rounded-lg border border-border-default p-3"
+          className="space-y-2 border-t border-border-subtle px-4 pt-4 pb-4"
           id={`${idPrefix}-slippage-section`}
         >
           <Label htmlFor={`${idPrefix}-slippage`}>
@@ -90,7 +100,7 @@ export function VaultSlippageSection({
           )}
         </div>
       ) : null}
-    </div>
+    </section>
   );
 }
 

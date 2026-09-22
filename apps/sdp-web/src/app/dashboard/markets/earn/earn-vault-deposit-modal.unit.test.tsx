@@ -137,7 +137,8 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
     "The live share quote is unavailable right now, so this deposit cannot be sized safely. Try again in a moment.",
   "DashboardEarn.deposit.vaultQuoteBlocked":
     "The vault is not accepting this deposit right now: {message}",
-  "DashboardEarn.deposit.vaultSlippageToggle": "Slippage tolerance: {percent}",
+  "DashboardEarn.deposit.vaultSlippageTitle": "Slippage tolerance",
+  "DashboardEarn.deposit.vaultSlippageToggle": "Up to {percent} less than quoted",
   "DashboardEarn.deposit.vaultSlippageLabel": "Slippage tolerance (basis points)",
   "DashboardEarn.deposit.vaultSlippageHelp":
     "The deposit refuses to execute if the vault would mint fewer shares than this tolerance allows.",
