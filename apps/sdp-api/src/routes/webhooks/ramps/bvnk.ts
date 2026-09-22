@@ -4,6 +4,7 @@ import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   BVNK_FUNDING_WALLET_FIAT,
   type BVNKWallet,
+  type BvnkOfframpTransferData,
   type BvnkOnrampTransferData,
   type BvnkUnrecognisedWalletName,
   buildBvnkOfframpReference,
@@ -13,8 +14,10 @@ import {
   parseBvnkTransferIdFromRemittance,
   parseBvnkWalletName,
   readBvnkOfframpReference,
+  readBvnkOfframpTransferData,
   readBvnkOnrampTransferData,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import type { BvnkChannelResponse } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import {
   bvnkPayoutObservationFromSource,
   readStoredBvnkSettlement,
@@ -765,43 +768,30 @@ function bvnkChannelTransferId(
   return transferId;
 }
 
-async function handleBvnkPaymentChannelTransactionDetected(
-  env: Env,
-  environment: SdpEnvironment,
-  event: Extract<BvnkWebhook, { event: "bvnk:payment:channel:transaction-detected" }>
-): Promise<void> {
-  const transferId = bvnkChannelTransferId(event);
-  if (transferId === undefined) {
-    return;
-  }
-  await settleBvnkOfframpChannel(env, environment, transferId, "settling", null);
-}
-
 /**
- * Loads the transfer facts a confirmed off-ramp channel read-back is proven
- * against, scoped to the webhook's project environment: the channel uuid
- * stored as the provider reference and the tenant scope owning the transfer.
- * A missing transfer, a null channel reference, or a transfer without a
- * counterparty is terminal.
+ * Proves a paying off-ramp channel transaction against the transfer's OWN
+ * recorded channel facts, scoped to the webhook's project environment: the
+ * channel uuid stored as the provider reference and the `bvnk.channel` block
+ * written into `provider_data` at quote completion. The counterparty's current
+ * funding-wallet and customer-link rows are never consulted, so a later change
+ * to those rows can neither re-attribute nor block settlement of this
+ * transfer. A missing transfer, a missing recorded channel, or a mismatch on
+ * any proven fact is terminal — the payment cannot be re-attributed. A BVNK
+ * read failure stays a plain provider error so the inbox replay retries it.
  *
  * @param env - Process environment used for database access.
  * @param environment - The project environment the event was delivered for.
  * @param transferId - SDP off-ramp transfer identifier.
- * @returns The channel uuid and tenant scope of the transfer.
+ * @returns The proven BVNK channel read-back.
  */
-async function loadBvnkOfframpChannelFacts(
+async function proveBvnkOfframpChannel(
   env: Env,
   environment: SdpEnvironment,
   transferId: string
-): Promise<{
-  providerReference: string;
-  counterpartyId: string;
-  organizationId: string;
-  projectId: string;
-}> {
+): Promise<BvnkChannelResponse> {
   const row = await getDb(env)
     .prepare(
-      `SELECT pt.provider_reference, pt.counterparty_id, pt.organization_id, pt.project_id
+      `SELECT pt.provider_reference, pt.provider_data
        FROM payment_transfers pt
        JOIN projects prj ON prj.id = pt.project_id
        WHERE pt.id = ?
@@ -812,43 +802,92 @@ async function loadBvnkOfframpChannelFacts(
     .bind(transferId, environment)
     .first<{
       provider_reference: string | null;
-      counterparty_id: string | null;
-      organization_id: string;
-      project_id: string;
+      provider_data: PaymentTransferRow["provider_data"];
     }>();
   if (row === null) {
     throw new TerminalRampWebhookError(
       "stray off-ramp channel event: unknown transfer or environment mismatch"
     );
   }
-  if (row.provider_reference === null) {
+  let recorded: BvnkOfframpTransferData;
+  try {
+    recorded = readBvnkOfframpTransferData(row.provider_data);
+  } catch {
     throw new TerminalRampWebhookError(
-      "stray off-ramp channel event: transfer has no BVNK channel reference"
+      "stray off-ramp channel event: transfer provider_data has no usable bvnk channel facts"
     );
   }
-  if (row.counterparty_id === null) {
+  if (recorded.channel === undefined || row.provider_reference === null) {
     throw new TerminalRampWebhookError(
-      "stray off-ramp channel event: transfer has no counterparty"
+      "stray off-ramp channel event: transfer has no recorded channel"
     );
   }
-  return {
-    providerReference: row.provider_reference,
-    counterpartyId: row.counterparty_id,
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-  };
+  if (recorded.channel.id !== row.provider_reference) {
+    throw new TerminalRampWebhookError(
+      `stray off-ramp channel event: recorded channel id mismatch (expected ${row.provider_reference}, got ${recorded.channel.id})`
+    );
+  }
+  const channel = await RAMP_PROVIDER_CLIENTS.bvnk.getChannelV2(
+    webhookRampContext(env, environment),
+    { channelId: row.provider_reference }
+  );
+  const expectedReference = buildBvnkOfframpReference(transferId);
+  if (channel.reference !== expectedReference) {
+    throw new TerminalRampWebhookError(
+      `stray off-ramp channel event: channel reference mismatch (expected ${expectedReference}, got ${channel.reference})`
+    );
+  }
+  if (channel.walletId !== recorded.channel.walletId) {
+    throw new TerminalRampWebhookError(
+      `stray off-ramp channel event: channel wallet mismatch (expected ${recorded.channel.walletId}, got ${channel.walletId})`
+    );
+  }
+  if (
+    channel.embeddedCustomerDetails === undefined ||
+    channel.embeddedCustomerDetails.reference !== recorded.channel.customerReference
+  ) {
+    throw new TerminalRampWebhookError(
+      `stray off-ramp channel event: channel customer mismatch (expected ${recorded.channel.customerReference}, got ${
+        channel.embeddedCustomerDetails === undefined
+          ? "absent"
+          : channel.embeddedCustomerDetails.reference
+      })`
+    );
+  }
+  return channel;
+}
+
+/**
+ * Moves an off-ramp transfer to `settling` only after proving the paying
+ * channel against the transfer's own recorded channel facts; a terminal proof
+ * failure parks the event, a BVNK read failure stays retryable.
+ *
+ * @param env - Process environment used for database access.
+ * @param environment - The project environment the event was delivered for.
+ * @param event - Parsed detected channel transaction event.
+ */
+async function handleBvnkPaymentChannelTransactionDetected(
+  env: Env,
+  environment: SdpEnvironment,
+  event: Extract<BvnkWebhook, { event: "bvnk:payment:channel:transaction-detected" }>
+): Promise<void> {
+  const transferId = bvnkChannelTransferId(event);
+  if (transferId === undefined) {
+    return;
+  }
+  await proveBvnkOfframpChannel(env, environment, transferId);
+  await settleBvnkOfframpChannel(env, environment, transferId, "settling", null);
 }
 
 /**
  * Applies a confirmed off-ramp channel transaction only after proving, from
  * a BVNK channel read-back keyed on the transfer's stored channel uuid, that
- * the paid channel is the one SDP opened for that transfer: same reference,
- * same funding wallet, same BVNK customer. Missing transfer, channel
- * reference, funding-wallet row, or customer-link row is terminal, as is a
- * mismatch on any proven fact — the payment cannot be re-attributed. A BVNK
- * read failure stays a plain provider error so the inbox replay retries it.
- * The `detected` handler stays as is: it only advances the transfer to
- * `settling` with no read-back.
+ * the paid channel is the channel THIS transfer recorded at quote time: same
+ * channel id, same funding wallet, same BVNK customer. The counterparty's
+ * current funding-wallet and customer-link rows are never consulted. A
+ * missing transfer, a missing recorded channel, or a mismatch on any proven
+ * fact is terminal — the payment cannot be re-attributed. A BVNK read failure
+ * stays a plain provider error so the inbox replay retries it.
  *
  * @param env - Process environment used for database access.
  * @param environment - The project environment the event was delivered for.
@@ -863,59 +902,7 @@ async function handleBvnkPaymentChannelTransactionConfirmed(
   if (transferId === undefined) {
     return;
   }
-  const facts = await loadBvnkOfframpChannelFacts(env, environment, transferId);
-  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
-  const fundingWallet = await accounts.getAccountByKindAndCurrency({
-    organizationId: facts.organizationId,
-    projectId: facts.projectId,
-    counterpartyId: facts.counterpartyId,
-    provider: "bvnk",
-    kind: "funding_wallet",
-    fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
-  });
-  if (fundingWallet === null || fundingWallet.external_account_reference === null) {
-    throw new TerminalRampWebhookError(
-      "stray off-ramp channel event: transfer counterparty has no BVNK funding wallet"
-    );
-  }
-  const customerLink = await accounts.getProviderAccount({
-    organizationId: facts.organizationId,
-    projectId: facts.projectId,
-    counterpartyId: facts.counterpartyId,
-    provider: "bvnk",
-  });
-  if (customerLink === null) {
-    throw new TerminalRampWebhookError(
-      "stray off-ramp channel event: transfer counterparty has no BVNK customer link"
-    );
-  }
-  const channel = await RAMP_PROVIDER_CLIENTS.bvnk.getChannelV2(
-    webhookRampContext(env, environment),
-    { channelId: facts.providerReference }
-  );
-  const expectedReference = buildBvnkOfframpReference(transferId);
-  if (channel.reference !== expectedReference) {
-    throw new TerminalRampWebhookError(
-      `stray off-ramp channel event: channel reference mismatch (expected ${expectedReference}, got ${channel.reference})`
-    );
-  }
-  if (channel.walletId !== fundingWallet.external_account_reference) {
-    throw new TerminalRampWebhookError(
-      `stray off-ramp channel event: channel wallet mismatch (expected ${fundingWallet.external_account_reference}, got ${channel.walletId})`
-    );
-  }
-  if (
-    channel.embeddedCustomerDetails === undefined ||
-    channel.embeddedCustomerDetails.reference !== customerLink.provider_customer_reference
-  ) {
-    throw new TerminalRampWebhookError(
-      `stray off-ramp channel event: channel customer mismatch (expected ${customerLink.provider_customer_reference}, got ${
-        channel.embeddedCustomerDetails === undefined
-          ? "absent"
-          : channel.embeddedCustomerDetails.reference
-      })`
-    );
-  }
+  const channel = await proveBvnkOfframpChannel(env, environment, transferId);
   await settleBvnkOfframpChannel(
     env,
     environment,
