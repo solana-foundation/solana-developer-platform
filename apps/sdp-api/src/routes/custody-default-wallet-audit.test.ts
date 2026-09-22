@@ -44,6 +44,26 @@ async function readDefault(owner: "connection" | "config") {
   );
 }
 
+/**
+ * Resolve once another backend is queued behind the default wallet row lock.
+ * The attribution the concurrency test guards is only reachable when the
+ * second request reads the owner through a lock it actually had to wait for.
+ * Scoped to this worker's database so a parallel worker's unrelated lock wait
+ * cannot release the barrier before our own rival is queued.
+ */
+async function waitForLockWaiter(db: ReturnType<typeof getDb>) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const waiting = await db.queryMany(
+      `SELECT 1 FROM pg_stat_activity
+       WHERE datname = current_database() AND wait_event_type = 'Lock'
+         AND query ILIKE '%FOR UPDATE%'`
+    );
+    if (waiting.length > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Concurrent request never queued behind the default wallet row lock");
+}
+
 describe("default wallet audit admission", () => {
   beforeEach(async () => {
     env.PRIVY_BYOK_ENABLED = "true";
@@ -229,15 +249,54 @@ describe("default wallet audit admission", () => {
   it.each(["connection", "config"] as const)(
     "does not attribute the same %s transition to concurrent requests twice",
     async (owner) => {
-      const responses = await Promise.all([changeDefault(owner), changeDefault(owner)]);
+      const db = getDb(env);
+      const transact = db.transaction.bind(db);
+      let admitRival: () => void = () => {};
+      const rivalAdmitted = new Promise<void>((resolve) => {
+        admitRival = resolve;
+      });
+      let releaseLock: () => void = () => {};
+      const lockReleased = new Promise<void>((resolve) => {
+        releaseLock = resolve;
+      });
+
+      // Hold the winner's transaction open past its UPDATE so the rival has to
+      // queue behind the row lock, which is the only ordering that can misread
+      // the previous default and attribute the transition a second time.
+      vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) =>
+        transact(async (tx) => {
+          const result = await callback(tx);
+          admitRival();
+          await lockReleased;
+          return result;
+        })
+      );
+
+      const winner = changeDefault(owner);
+      await rivalAdmitted;
+      const rival = changeDefault(owner);
+      try {
+        await waitForLockWaiter(db);
+      } finally {
+        releaseLock();
+      }
+      const responses = await Promise.all([winner, rival]);
 
       expect(responses.map((response) => response.status)).toEqual([200, 200]);
-      const events = await getDb(env).queryMany<{ event: string }>(
-        "SELECT metadata::jsonb->>'event' AS event FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'outcome' ORDER BY ledger_sequence"
+      const events = await db.queryMany<{ event: string; previous: string | null }>(
+        `SELECT metadata::jsonb->>'event' AS event,
+                metadata::jsonb->>'previousCustodyWalletId' AS previous
+         FROM audit_logs WHERE metadata::jsonb->>'auditPhase' = 'outcome' ORDER BY ledger_sequence`
       );
       expect(events.map((row) => row.event).sort()).toEqual([
         "default_wallet_changed",
         "default_wallet_selection_unchanged",
+      ]);
+      // Each outcome must name the default it actually superseded: the loser
+      // supersedes the winner's selection, never an unresolved pointer.
+      expect(events.map((row) => row.previous).sort()).toEqual([
+        `cwlt_${owner}_a`,
+        `cwlt_${owner}_b`,
       ]);
     }
   );
