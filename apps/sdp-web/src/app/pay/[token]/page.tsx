@@ -60,6 +60,20 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+// The pay URL comes from the upstream API response and lands in an anchor href
+// and the QR code, so it is scheme-checked before rendering: a genuine Solana
+// Pay link is a `solana:` URI (an https URL is accepted for wallet deep links),
+// anything else — `javascript:`, `data:`, custom handlers — renders nothing.
+const SAFE_PAY_URL_PROTOCOLS = new Set(["solana:", "https:"]);
+
+function isSafePayUrl(url: string): boolean {
+  try {
+    return SAFE_PAY_URL_PROTOCOLS.has(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
 export default async function PayPage({ params }: { params: Promise<{ token: string }> }) {
   const t = await getTranslations();
   const locale = await getRequestLocale();
@@ -77,7 +91,10 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
   }
   const request = (await response.json()) as PayRequest;
 
-  const payUrl = request.solanaPayUrl;
+  const payUrl =
+    request.solanaPayUrl !== null && isSafePayUrl(request.solanaPayUrl)
+      ? request.solanaPayUrl
+      : null;
   const statusPanel =
     request.status === "awaiting_payment" ? null : getStatusPanels(t)[request.status];
 
