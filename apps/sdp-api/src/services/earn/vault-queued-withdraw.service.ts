@@ -261,6 +261,10 @@ async function quoteAndBuildRequest(
           providerReference: input.position.vaultAddress,
           owner: input.position.ownerAddress,
           shares: input.terms.shares,
+          // Same sponsorship hand-off as the queued-withdrawal branch below:
+          // the provider charges what it can to the sponsor and pre-funds the
+          // owner for the rents its program hardcodes.
+          ...(input.rentPayer === undefined ? {} : { rentPayer: input.rentPayer }),
         }
       );
       if (
