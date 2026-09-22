@@ -292,7 +292,7 @@ export async function seedBvnkCustomerLink(
     projectId: string;
     counterpartyId: string;
     customerReference: string;
-    status: string;
+    status?: string;
     id?: string;
     metadata?: Record<string, unknown>;
     archived?: boolean;
@@ -304,19 +304,20 @@ export async function seedBvnkCustomerLink(
     counterpartyId: input.counterpartyId,
     provider: "bvnk",
     providerCustomerReference: input.customerReference,
-    metadata: { status: input.status, ...input.metadata },
+    metadata: {
+      ...(input.status === undefined ? {} : { status: input.status }),
+      ...input.metadata,
+    },
   });
-  if (input.id !== undefined || input.archived === true) {
+  const id = input.id === undefined ? row.id : input.id;
+  const status = input.archived === true ? "archived" : row.status;
+  if (id !== row.id || status !== row.status) {
     await db
       .prepare("UPDATE counterparty_provider_accounts SET id = ?, status = ? WHERE id = ?")
-      .bind(input.id ?? row.id, input.archived === true ? "archived" : "active", row.id)
+      .bind(id, status, row.id)
       .run();
   }
-  return {
-    ...row,
-    id: input.id ?? row.id,
-    status: input.archived === true ? "archived" : row.status,
-  };
+  return { ...row, id, status };
 }
 export async function seedBvnkFundingWallet(
   db: AppDb,

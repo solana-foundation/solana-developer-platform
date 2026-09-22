@@ -1068,7 +1068,6 @@ describe("Counterparties Routes", () => {
           projectId: TEST_PROJECT_ID,
           counterpartyId: counterparty.id,
           customerReference: buildBvnkCustomerExternalReference(counterparty.id),
-          status: "PENDING",
           archived: true,
           metadata: { residenceCountryCode: "US" },
         });
