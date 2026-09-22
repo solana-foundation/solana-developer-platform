@@ -40,6 +40,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, internalError, notFound } from "@/lib/errors";
+import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
@@ -953,7 +954,11 @@ export async function createEarnExternalWalletWithdrawalTransaction(
   // Same provider-policy exit floor as the custody withdrawal: a non-null
   // `withdrawalSlippage` refuses a floor-less build (caller-fixable 400,
   // derived from the withdrawal preview — never an admission gate).
-  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(target.provider) !== null) {
+  const withdrawalFloor =
+    target.provider === "hastra" && !isEarnHastraDexExitConfigured(c.env)
+      ? null
+      : earnWithdrawSlippageFloor(target.provider);
+  if (body.minAmountOut === undefined && withdrawalFloor !== null) {
     throw badRequest(
       `minAmountOut is required for this withdrawal because ${target.provider} declares a withdrawal slippage policy.`
     );

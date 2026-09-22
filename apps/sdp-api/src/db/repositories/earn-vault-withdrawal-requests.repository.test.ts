@@ -22,6 +22,7 @@ const OWNER = "7YfVedaQueueOwner111111111111111111111111111";
 const VAULT = "8VfVedaQueueVault111111111111111111111111111";
 const TOKEN_MINT = "9VfVedaQueueToken111111111111111111111111111";
 const SHARE_MINT = "AVfVedaQueueShare111111111111111111111111111";
+const INTERMEDIATE_MINT = "BVfHastraWylds1111111111111111111111111111";
 const POSITION = "earn_position_queued_withdrawal_repo";
 const EXTERNAL_POSITION = "earn_position_queued_withdrawal_repo_external";
 const OTHER_EXTERNAL_POSITION = "earn_position_queued_withdrawal_repo_other_external";
@@ -163,6 +164,7 @@ describe("Earn queued withdrawal repository", () => {
       tokenMint: TOKEN_MINT,
       shareMint: SHARE_MINT,
       requestAddress: `QueueRequestAddress${String(sequence).padStart(20, "1")}`,
+      mechanism: "solver_queue",
       shares: "10",
       quotedAssets: "9.9",
       shareDecimals: 6,
@@ -196,6 +198,7 @@ describe("Earn queued withdrawal repository", () => {
       clientRequestId: input.clientRequestId,
       idempotencyFingerprint: input.idempotencyFingerprint,
       expiresAt: "2099-01-01T00:00:00.000Z",
+      mechanism: input.mechanism,
     });
     return input;
   }
@@ -724,6 +727,117 @@ describe("Earn queued withdrawal repository", () => {
       .first<{ closed_at: string | null; updated_at: string }>();
     expect(position?.closed_at).toBeNull();
     expect(position?.updated_at).not.toBe("2026-09-18T00:00:00.000Z");
+  });
+
+  it("retries operator cancellation, preserves shares, and embargoes terminal PDA reuse", async () => {
+    const requestAddress = "ParRequestAddress11111111111111111111111";
+    const created = await createRequest({
+      mechanism: "operator_redemption",
+      requestAddress,
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "10.25",
+      quotedAssets: "10.25",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "pending",
+      creationTimestamp: "1800000000",
+    });
+
+    const firstCancel = await repository.createSignedCancel({
+      actionId: "earn_vault_withdrawal_action_par_cancel_failed",
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      withdrawalRequestId: created.request.id,
+      signature: "par-cancel-signature-failed",
+      signedTransaction: "AQ==",
+      lastValidBlockHeight: "12346",
+      clientRequestId: "par-cancel-key-failed",
+      idempotencyFingerprint: "par-cancel-fingerprint-failed",
+      createdBy: USER,
+    });
+    const recovered = await repository.failActionAndRecoverRequest({
+      actionId: firstCancel.action.id,
+      organizationId: ORG,
+      failureReason: "blockhash expired",
+    });
+    expect(recovered).toMatchObject({
+      action: { status: "failed" },
+      request: { status: "pending", mechanism: "operator_redemption" },
+    });
+
+    const secondCancel = await repository.createSignedCancel({
+      actionId: "earn_vault_withdrawal_action_par_cancel_final",
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      withdrawalRequestId: created.request.id,
+      signature: "par-cancel-signature-final",
+      signedTransaction: "AQ==",
+      lastValidBlockHeight: "12347",
+      clientRequestId: "par-cancel-key-final",
+      idempotencyFingerprint: "par-cancel-fingerprint-final",
+      createdBy: USER,
+    });
+    expect(secondCancel.request.status).toBe("cancelling");
+
+    await getDb(env)
+      .prepare(
+        `UPDATE earn_positions
+            SET closed_at = '2026-09-18T00:00:00.000Z',
+                updated_at = '2026-09-18T00:00:00.000Z'
+          WHERE id = ?`
+      )
+      .bind(POSITION)
+      .run();
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "cancelled",
+      closingSignature: "par-cancel-signature-final",
+      cancelledAt: "2026-09-18T01:00:00.000Z",
+    });
+    const position = await getDb(env)
+      .prepare("SELECT closed_at FROM earn_positions WHERE id = ?")
+      .bind(POSITION)
+      .first<{ closed_at: string | null }>();
+    expect(position?.closed_at).toBe("2026-09-18T00:00:00.000Z");
+
+    const reuseTerms = {
+      mechanism: "operator_redemption" as const,
+      requestAddress,
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "5.1",
+      quotedAssets: "5.1",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+    };
+    await expect(createRequest(reuseTerms)).rejects.toThrow(/reserving this provider nonce/i);
+    await getDb(env)
+      .prepare(
+        `UPDATE earn_vault_withdrawal_request_pda_leases
+            SET expires_at = '2000-01-01T00:00:00.000Z',
+                reuse_not_before = '2000-01-01T00:00:00.000Z'
+          WHERE environment = 'sandbox' AND request_address = ?`
+      )
+      .bind(requestAddress)
+      .run();
+
+    const reused = await createRequest(reuseTerms);
+    expect(reused.request.id).not.toBe(created.request.id);
+    await expect(
+      repository.getByAddress({
+        environment: "sandbox",
+        provider: "veda",
+        requestAddress,
+      })
+    ).resolves.toMatchObject({ id: reused.request.id, status: "creating" });
   });
 
   it("rolls back the action when failed-cancel request recovery cannot commit", async () => {

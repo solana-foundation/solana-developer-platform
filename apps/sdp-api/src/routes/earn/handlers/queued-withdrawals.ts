@@ -1,6 +1,10 @@
 import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
-import type { EarnVaultQueuedWithdrawalQuote, EarnVaultWithdrawalOptions } from "@sdp/earn/types";
+import type {
+  EarnVaultParRedemptionQuote,
+  EarnVaultQueuedWithdrawalQuote,
+  EarnVaultWithdrawalOptions,
+} from "@sdp/earn/types";
 import type { SdpEnvironment } from "@sdp/types";
 import type { z } from "zod";
 import { getDb } from "@/db";
@@ -13,7 +17,10 @@ import {
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
-import { buildEarnVaultQueuedWithdrawalFingerprint } from "@/lib/idempotency";
+import {
+  buildEarnVaultParRedemptionFingerprint,
+  buildEarnVaultQueuedWithdrawalFingerprint,
+} from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
@@ -28,11 +35,13 @@ import {
   type CustodyRuntimeWalletProjection,
 } from "@/services/domain/signing/custody-runtime-target";
 import {
+  resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
   resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import {
+  type AsyncWithdrawalTermsInput,
   buildExternalQueuedWithdrawalCancel,
   buildExternalQueuedWithdrawalRequest,
   type CustodyQueuedWithdrawalActor,
@@ -42,7 +51,6 @@ import {
   type QueuedWithdrawalActor,
   type QueuedWithdrawalMutationResult,
   type QueuedWithdrawalPosition,
-  type QueuedWithdrawalTermsInput,
   submitExternalQueuedWithdrawalAction,
 } from "@/services/earn/vault-queued-withdraw.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
@@ -126,8 +134,11 @@ function withdrawalRequestWire(row: EarnVaultWithdrawalRequestRow, replayed?: bo
     ownerAddress: row.owner_address,
     requestAddress: row.request_address,
     status: STATUS_TO_WIRE[row.status],
+    mechanism: row.mechanism === "operator_redemption" ? "operatorRedemption" : "solverQueue",
     assetMint: row.token_mint,
     shareMint: row.share_mint,
+    intermediateMint: row.intermediate_mint,
+    intermediateAmount: row.intermediate_amount,
     shares: row.shares,
     quotedAssets: row.quoted_assets,
     shareDecimals: row.share_decimals,
@@ -215,6 +226,7 @@ export function builtTransactionWire(built: ExternalQueuedWithdrawalBuiltTransac
     tokenMint: built.token_mint,
     shareMint: built.share_mint,
     action: built.action,
+    mechanism: built.mechanism === "operator_redemption" ? "operatorRedemption" : "solverQueue",
     requestAddress: built.request_address,
     ...(built.position_id ? { positionId: built.position_id } : {}),
     ...(built.withdrawal_request_id ? { withdrawalRequestId: built.withdrawal_request_id } : {}),
@@ -223,20 +235,41 @@ export function builtTransactionWire(built: ExternalQueuedWithdrawalBuiltTransac
       : {
           shares: built.shares,
           assets: built.quoted_assets,
-          discountBps: built.discount_bps,
-          maturityTimestamp: built.maturity_timestamp,
-          deadlineTimestamp: built.deadline_timestamp,
+          ...(built.mechanism === "operator_redemption"
+            ? built.intermediate_mint === null || built.intermediate_amount === null
+              ? {}
+              : {
+                  intermediateMint: built.intermediate_mint,
+                  intermediateAmount: built.intermediate_amount,
+                }
+            : built.discount_bps === null ||
+                built.maturity_timestamp === null ||
+                built.deadline_timestamp === null
+              ? {}
+              : {
+                  discountBps: built.discount_bps,
+                  maturityTimestamp: built.maturity_timestamp,
+                  deadlineTimestamp: built.deadline_timestamp,
+                }),
         }),
   };
 }
 
 function queuedTerms(body: {
   shares: string;
-  discountBps: number;
-  deadlineSeconds: number;
-}): QueuedWithdrawalTermsInput {
+  mechanism?: "solverQueue" | "operatorRedemption";
+  discountBps?: number;
+  deadlineSeconds?: number;
+}): AsyncWithdrawalTermsInput {
+  if (body.mechanism === "operatorRedemption") {
+    return { shares: body.shares, mechanism: "operator_redemption" };
+  }
+  if (body.discountBps === undefined || body.deadlineSeconds === undefined) {
+    throw badRequest("discountBps and deadlineSeconds are required for a solver queue");
+  }
   return {
     shares: body.shares,
+    mechanism: "solver_queue",
     discountBps: body.discountBps,
     deadlineSeconds: body.deadlineSeconds,
   };
@@ -316,7 +349,8 @@ export async function readOptions(
     withdrawalClient !== null && supportsVaultProviderOrderWithdraw(withdrawalClient);
   const instant = withdrawalClient !== null && !providerOrder;
   const client = resolveVaultQueuedWithdrawClient(c.env, position.provider, deadline);
-  if (!client) {
+  const parClient = resolveVaultParRedemptionClient(c.env, position.provider, deadline);
+  if (!client && !parClient) {
     if (!withdrawalClient) throw notImplemented(position.provider, "vault withdrawals");
     return {
       instant,
@@ -325,14 +359,25 @@ export async function readOptions(
       withdrawAuthority: null,
       queueState: null,
       queueAsset: null,
+      parRedemption: null,
     };
   }
   try {
-    const options = await client.getWithdrawalOptions(
-      { env: c.env, environment },
-      { providerReference: position.vaultAddress }
-    );
-    return { ...options, instant: instant && options.instant, providerOrder };
+    const runtime = { env: c.env, environment };
+    const reference = { providerReference: position.vaultAddress };
+    const [queueOptions, parRedemption] = await Promise.all([
+      client ? client.getWithdrawalOptions(runtime, reference) : Promise.resolve(null),
+      parClient ? parClient.getParRedemptionOptions(runtime, reference) : Promise.resolve(null),
+    ]);
+    return {
+      instant: queueOptions ? instant && queueOptions.instant : instant,
+      providerOrder,
+      queued: queueOptions?.queued ?? false,
+      withdrawAuthority: queueOptions?.withdrawAuthority ?? null,
+      queueState: queueOptions?.queueState ?? null,
+      queueAsset: queueOptions?.queueAsset ?? null,
+      parRedemption,
+    };
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
@@ -342,8 +387,24 @@ async function readPreview(
   c: AppContext,
   environment: SdpEnvironment,
   position: QueuedWithdrawalPosition,
-  terms: QueuedWithdrawalTermsInput
-): Promise<EarnVaultQueuedWithdrawalQuote> {
+  terms: AsyncWithdrawalTermsInput
+): Promise<
+  | EarnVaultQueuedWithdrawalQuote
+  | (EarnVaultParRedemptionQuote & { mechanism: "operatorRedemption" })
+> {
+  if (terms.mechanism === "operator_redemption") {
+    const client = resolveVaultParRedemptionClient(c.env, position.provider, createVaultDeadline());
+    if (!client) throw notImplemented(position.provider, "par redemptions");
+    try {
+      const quote = await client.quoteParRedemption(
+        { env: c.env, environment },
+        { providerReference: position.vaultAddress, shares: terms.shares }
+      );
+      return { ...quote, mechanism: "operatorRedemption" };
+    } catch (error) {
+      rethrowVaultProviderFailure(error);
+    }
+  }
   const client = resolveVaultQueuedWithdrawClient(c.env, position.provider, createVaultDeadline());
   if (!client) throw notImplemented(position.provider, "queued vault withdrawals");
   try {
@@ -381,15 +442,26 @@ export async function extractEarnVaultWithdrawalRequestPolicyCandidate(
   const body = c.req.valid("json");
   const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null;
   if (requestId === null && !isDryRunRequest(c)) {
-    throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for queued vault withdrawals`);
+    throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for asynchronous vault withdrawals`);
   }
   const target = await resolveCustodyQueueTarget(c, body.positionId, "write");
-  const idempotencyFingerprint = buildEarnVaultQueuedWithdrawalFingerprint({
-    environment: target.environment,
-    provider: target.position.provider,
-    positionId: target.position.id,
-    ...queuedTerms(body),
-  });
+  const terms = queuedTerms(body);
+  const idempotencyFingerprint =
+    terms.mechanism === "operator_redemption"
+      ? buildEarnVaultParRedemptionFingerprint({
+          environment: target.environment,
+          provider: target.position.provider,
+          positionId: target.position.id,
+          shares: terms.shares,
+        })
+      : buildEarnVaultQueuedWithdrawalFingerprint({
+          environment: target.environment,
+          provider: target.position.provider,
+          positionId: target.position.id,
+          shares: terms.shares,
+          discountBps: terms.discountBps,
+          deadlineSeconds: terms.deadlineSeconds,
+        });
   const resolved: ResolvedCustodyQueueRequest = {
     ...target,
     requestId,
@@ -415,9 +487,11 @@ export async function extractEarnVaultWithdrawalRequestPolicyCandidate(
         tokenMint: target.position.tokenMint,
         environment: target.environment,
         depositStyle: "vault_direct",
-        withdrawalRoute: "queued",
-        discountBps: body.discountBps,
-        deadlineSeconds: body.deadlineSeconds,
+        withdrawalRoute:
+          terms.mechanism === "operator_redemption" ? "operator_redemption" : "queued",
+        ...(terms.mechanism === "operator_redemption"
+          ? {}
+          : { discountBps: terms.discountBps, deadlineSeconds: terms.deadlineSeconds }),
       },
       providerExtensions: {},
     },
@@ -450,14 +524,14 @@ export async function findEarnVaultWithdrawalRequestIdempotentKeyReplay(
       throw conflict("Idempotency key already used with different request payload");
     }
     if (prior.status === "failed") {
-      throw conflict("The recorded queued vault withdrawal failed and cannot be replayed");
+      throw conflict("The recorded asynchronous vault withdrawal failed and cannot be replayed");
     }
     const action = await createPostgresEarnVaultWithdrawalRequestsRepository(
       getDb(c.env)
     ).getLatestAction({ withdrawalRequestId: prior.id, action: "request" });
     if (!action || action.status === "failed") {
       throw conflict(
-        "Queued vault withdrawal execution is incomplete and requires manual reconciliation"
+        "Asynchronous vault withdrawal execution is incomplete and requires manual reconciliation"
       );
     }
     await recordQueuedWithdrawalActionAudit(c, { request: prior, action, replayed: true });
@@ -481,7 +555,7 @@ export async function createEarnVaultWithdrawalRequest(
   );
   if (!resolved.requestId) {
     throw internalError(
-      "Queued withdrawal execution reached the handler without an idempotency key"
+      "Asynchronous withdrawal execution reached the handler without an idempotency key"
     );
   }
   const result = await createCustodyQueuedWithdrawal(
@@ -500,7 +574,7 @@ export async function createEarnVaultWithdrawalRequest(
     await beginApprovedWalletOperationEffect(c);
     if (result.request.status === "failed" || result.action.status === "failed") {
       throw conflict(
-        "Approved queued vault withdrawal execution is incomplete and requires manual reconciliation"
+        "Approved asynchronous vault withdrawal execution is incomplete and requires manual reconciliation"
       );
     }
   }
@@ -592,7 +666,7 @@ export async function cancelEarnVaultWithdrawalRequest(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalRequestCancelSchema>
 ) {
   const { withdrawalRequestId } = parseParams(c, earnVaultWithdrawalRequestParamsSchema);
-  const clientRequestId = requireIdempotencyKey(c, "queued vault withdrawal cancellations");
+  const clientRequestId = requireIdempotencyKey(c, "asynchronous vault withdrawal cancellations");
   const request = await requireRecoverableCustodyRequest(c, withdrawalRequestId);
   const target = await resolveCustodyQueueTarget(c, request.position_id, "write");
   if (request.custody_wallet_id !== target.actor.custodyWalletId) {

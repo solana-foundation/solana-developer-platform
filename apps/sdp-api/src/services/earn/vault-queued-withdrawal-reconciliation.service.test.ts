@@ -15,11 +15,13 @@ import {
 } from "./vault-queued-withdrawal-reconciliation.service";
 
 const provider = vi.hoisted(() => ({ client: null as Record<string, unknown> | null }));
+const parProvider = vi.hoisted(() => ({ client: null as Record<string, unknown> | null }));
 
 vi.mock("@/services/earn/execution-registry", () => ({
   earnClusterFor: () => "devnet",
   resolveClusterRpcUrl: () => "http://rpc.invalid",
   resolveVaultQueuedWithdrawClient: () => provider.client,
+  resolveVaultParRedemptionClient: () => parProvider.client,
 }));
 
 const OWNER = "7YfVedaQueueOwner111111111111111111111111111";
@@ -27,6 +29,8 @@ const VAULT = "8VfVedaQueueVault111111111111111111111111111";
 const TOKEN_MINT = "9VfVedaQueueToken111111111111111111111111111";
 const SHARE_MINT = "AVfVedaQueueShare111111111111111111111111111";
 const REQUEST_ADDRESS = "QueueRequestAddress11111111111111111111";
+const PAR_REQUEST_ADDRESS = "11111111111111111111111111111111";
+const INTERMEDIATE_MINT = "BVfHastraWylds1111111111111111111111111111";
 
 function request(
   overrides: Partial<EarnVaultWithdrawalRequestRow> = {}
@@ -45,10 +49,13 @@ function request(
     share_mint: SHARE_MINT,
     request_address: REQUEST_ADDRESS,
     status: "creating",
+    mechanism: "solver_queue",
     shares: "10",
     quoted_assets: "9.9",
     share_decimals: 6,
     asset_decimals: 6,
+    intermediate_mint: null,
+    intermediate_amount: null,
     discount_bps: 25,
     nonce: null,
     creation_timestamp: null,
@@ -103,6 +110,23 @@ function action(
   };
 }
 
+function parRequest(
+  overrides: Partial<EarnVaultWithdrawalRequestRow> = {}
+): EarnVaultWithdrawalRequestRow {
+  return request({
+    provider: "hastra",
+    mechanism: "operator_redemption",
+    request_address: PAR_REQUEST_ADDRESS,
+    intermediate_mint: INTERMEDIATE_MINT,
+    intermediate_amount: "10.25",
+    quoted_assets: "10.25",
+    discount_bps: null,
+    maturity_timestamp: null,
+    deadline_timestamp: null,
+    ...overrides,
+  });
+}
+
 function fakeLedger(current: EarnVaultWithdrawalRequestRow) {
   return {
     getById: vi.fn().mockResolvedValue(current),
@@ -122,6 +146,7 @@ describe("queued withdrawal reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     provider.client = null;
+    parProvider.client = null;
   });
 
   it("backs pending provider reads off without adding delay past maturity", () => {
@@ -421,6 +446,146 @@ describe("queued withdrawal reconciliation", () => {
         toStatus: "expired_cancelable",
         nonce: "7",
         quotedAssets: "9.8",
+      })
+    );
+  });
+
+  it("projects a finalized par request without changing its quoted asset amount", async () => {
+    const current = parRequest();
+    const ledger = fakeLedger(current);
+    const decodeParRedemptionLifecycleEvents = vi.fn().mockResolvedValue([
+      {
+        kind: "redemptionRequested",
+        requestAddress: PAR_REQUEST_ADDRESS,
+        owner: OWNER,
+        intermediateMint: INTERMEDIATE_MINT,
+        intermediateAmount: "10.25",
+        occurredAt: "1800000100",
+      },
+    ]);
+    parProvider.client = { decodeParRedemptionLifecycleEvents };
+    const rpc = {
+      getTransaction: vi.fn().mockReturnValue({
+        send: vi.fn().mockResolvedValue({
+          blockTime: 1_800_000_100,
+          meta: { err: null, logMessages: ["authenticated Hastra lifecycle log"] },
+        }),
+      }),
+      getSignaturesForAddress: vi.fn(),
+    };
+
+    await expect(
+      reconcileAction(
+        env,
+        ledger,
+        action(),
+        { err: null, confirmationStatus: "finalized" } as never,
+        { rpc: rpc as never, rpcUrl: "http://rpc.invalid", currentHeight: null }
+      )
+    ).resolves.toBe("advanced");
+
+    expect(decodeParRedemptionLifecycleEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "sandbox" }),
+      expect.objectContaining({
+        providerReference: VAULT,
+        requestAddress: PAR_REQUEST_ADDRESS,
+        blockTime: "1800000100",
+        logs: ["authenticated Hastra lifecycle log"],
+      })
+    );
+    const projection = vi.mocked(ledger.advanceRequest).mock.calls.at(-1)?.[0];
+    expect(projection).toMatchObject({
+      toStatus: "pending",
+      creationTimestamp: "1800000100",
+    });
+    expect(projection).not.toHaveProperty("quotedAssets");
+  });
+
+  it("makes an expired unknown par cancellation retryable when its PDA remains live", async () => {
+    const current = parRequest({ status: "cancelling" });
+    const ledger = fakeLedger(current);
+    parProvider.client = {
+      readParRedemptionRequest: vi.fn().mockResolvedValue({
+        requestAddress: PAR_REQUEST_ADDRESS,
+        status: "pending",
+        request: {
+          requestAddress: PAR_REQUEST_ADDRESS,
+          providerReference: VAULT,
+          owner: OWNER,
+          intermediateMint: INTERMEDIATE_MINT,
+          intermediateAmount: "10.25",
+        },
+      }),
+    };
+
+    await expect(
+      reconcileAction(env, ledger, action({ action: "cancel", status: "submitted" }), null, {
+        rpc: emptyRpc as never,
+        rpcUrl: "http://rpc.invalid",
+        currentHeight: 2n,
+      })
+    ).resolves.toBe("failed");
+    expect(ledger.failActionAndRecoverRequest).toHaveBeenCalledWith({
+      actionId: "earn_vault_withdrawal_action_test",
+      organizationId: "org_test",
+      failureReason: "Cancellation blockhash expired while the par redemption remained open",
+      lastIndexError: null,
+    });
+  });
+
+  it("bounds reusable par-request history at creation and records operator fulfillment", async () => {
+    const current = parRequest({ status: "pending" });
+    const ledger = fakeLedger(current);
+    const decodeParRedemptionLifecycleEvents = vi.fn().mockResolvedValue([
+      {
+        kind: "redemptionFulfilled",
+        requestAddress: PAR_REQUEST_ADDRESS,
+        owner: OWNER,
+        intermediateMint: INTERMEDIATE_MINT,
+        intermediateAmount: "10.25",
+        assetsPaid: "10.25",
+        occurredAt: "1800000200",
+      },
+    ]);
+    parProvider.client = {
+      readParRedemptionRequest: vi.fn().mockResolvedValue({
+        requestAddress: PAR_REQUEST_ADDRESS,
+        status: "closedOrUnknown",
+        request: null,
+      }),
+      decodeParRedemptionLifecycleEvents,
+    };
+    const getSignaturesForAddress = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue([{ signature: "operator-fulfillment", err: null }]),
+    });
+    const rpc = {
+      getSignaturesForAddress,
+      getTransaction: vi.fn().mockReturnValue({
+        send: vi.fn().mockResolvedValue({
+          blockTime: 1_800_000_200,
+          meta: { err: null, logMessages: ["authenticated Hastra completion log"] },
+        }),
+      }),
+    };
+
+    await expect(
+      reconcileAction(env, ledger, action(), null, {
+        rpc: rpc as never,
+        rpcUrl: "http://rpc.invalid",
+        currentHeight: 2n,
+      })
+    ).resolves.toBe("advanced");
+
+    expect(getSignaturesForAddress).toHaveBeenCalledWith(
+      PAR_REQUEST_ADDRESS,
+      expect.objectContaining({ until: "request-signature" })
+    );
+    expect(ledger.advanceRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toStatus: "fulfilled",
+        closingSignature: "operator-fulfillment",
+        assetsPaid: "10.25",
+        fulfilledAt: "2027-01-15T08:03:20.000Z",
       })
     );
   });
