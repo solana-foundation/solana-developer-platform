@@ -1310,10 +1310,7 @@ export class MosaicService {
    * the cheap AES read — worth it for correctness on an operation that otherwise
    * leaves a mint nobody can mint.
    */
-  async getConfidentialSupply(options: {
-    mint: Address;
-    supplyKeys: ConfidentialKeys;
-  }): Promise<{
+  async getConfidentialSupply(options: { mint: Address; supplyKeys: ConfidentialKeys }): Promise<{
     currentSupply: bigint;
     decryptableSupply: bigint;
     pendingBurn: bigint;

@@ -13,7 +13,7 @@ The pending changesets on that branch are `major`, so the release publishes as *
 1. Delete this directory.
 2. Drop the `@solana/mosaic-sdk` override from the root `package.json`.
 3. Set `@solana/mosaic-sdk` to `1.0.0` in `pnpm-workspace.yaml`, and move `@solana-program/token-2022` to `0.18.0` at the same time so the tree settles on one copy — its release cooldown will have passed by then.
-4. Drop `COPY vendor ./vendor` from `apps/sdp-api/Dockerfile` and `apps/sdp-web/Dockerfile` (the docs image has no path to the SDK and never copies it).
+4. Drop `COPY vendor ./vendor` from `apps/sdp-api/Dockerfile`, `apps/sdp-web/Dockerfile` and `apps/sdp-docs/Dockerfile` (the docs image installs `--filter @sdp/api...`, which reaches the SDK through `@sdp/issuance`).
 
 ## Refreshing it
 
