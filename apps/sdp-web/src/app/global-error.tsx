@@ -3,7 +3,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { useEffect, useState } from "react";
 import { type AppLocale, defaultLocale, isAppLocale, localeCookieName } from "@/i18n/config";
-import { getMessages, translate } from "@/i18n/messages";
+import { englishSourceMessages, loadMessages, type Messages, translate } from "@/i18n/messages";
 
 function resolveClientLocale(): AppLocale {
   const cookieLocale = document.cookie
@@ -31,14 +31,25 @@ export default function GlobalError({
 }) {
   const [eventId, setEventId] = useState<string | null>(null);
   const [locale, setLocale] = useState<AppLocale>(defaultLocale);
+  // English paints first, exactly as before (locale state starts at the
+  // default). Localized catalogs live in their own async chunks rather than
+  // the main bundle, so the resolved locale's catalog swaps in once loaded.
+  const [messages, setMessages] = useState<Messages>(englishSourceMessages);
 
   useEffect(() => {
     const id = Sentry.captureException(error);
     setEventId(id);
     setLocale(resolveClientLocale());
+    let cancelled = false;
+    loadMessages(resolveClientLocale())
+      .then((localized) => {
+        if (!cancelled) setMessages(localized);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [error]);
-
-  const messages = getMessages(locale);
 
   return (
     <html lang={locale}>
