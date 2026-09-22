@@ -422,11 +422,44 @@ export const bvnkRampSettlementSchema = z.discriminatedUnion("status", [
 
 export type BvnkRampSettlement = z.infer<typeof bvnkRampSettlementSchema>;
 
+/**
+ * BVNK off-ramp channel settlement economics, recorded once when the
+ * confirmed channel-transaction webhook settles the transfer: the crypto
+ * received (`paidAmount`), the fiat credited to the funding wallet
+ * (`walletAmount`), the fee and network-fee legs, the exchange rate, the
+ * deposit transaction hash, and the source signatures that paid the channel.
+ * Amounts are decimal strings.
+ */
+export const bvnkOfframpChannelSettlementSchema = z.object({
+  provider: z.literal("bvnk"),
+  kind: z.literal("offramp_channel"),
+  status: z.literal("COMPLETE"),
+  channelId: z.string(),
+  transactionId: z.string(),
+  txHash: z.string(),
+  depositAddress: z.string(),
+  cryptoCurrency: z.string(),
+  cryptoAmount: z.string(),
+  fiatCurrency: z.string(),
+  fiatAmount: z.string(),
+  displayCurrency: z.string(),
+  displayAmount: z.string(),
+  feeCurrency: z.string(),
+  feeAmount: z.string(),
+  networkFeeCurrency: z.string(),
+  networkFeeAmount: z.string(),
+  exchangeRate: z.string(),
+  sources: z.array(z.string()),
+});
+
+export type BvnkOfframpChannelSettlement = z.infer<typeof bvnkOfframpChannelSettlementSchema>;
+
 export type RampTransferSettlement =
   | MoonpayRampSettlement
   | LightsparkRampSettlement
   | CoinbaseRampSettlement
-  | BvnkRampSettlement;
+  | BvnkRampSettlement
+  | BvnkOfframpChannelSettlement;
 
 /** Where an off-ramp sale expects the crypto deposit, reported by the provider while awaiting payment. */
 export interface RampCryptoDeposit {
