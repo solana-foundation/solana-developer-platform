@@ -197,8 +197,6 @@ describe("parseBvnkFundingWalletName", () => {
       message: /Malformed BVNK funding wallet name/,
     });
 
-    // Other names never parse as funding wallets, including the retired
-    // merchant off-ramp shape: unrecognised.
     assert.deepEqual(parseBvnkWalletName("sdp:sideways:USD:cpty_123"), {
       kind: "unrecognised",
       name: "sdp:sideways:USD:cpty_123",

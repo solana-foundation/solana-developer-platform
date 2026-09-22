@@ -1281,7 +1281,7 @@ describe("Counterparties Routes", () => {
       );
     }
 
-    function bvnkOfframpRequirementsRequest(counterpartyId: string, fiatCurrency = "USD") {
+    function bvnkOfframpRequirementsRequest(counterpartyId: string, fiatCurrency: string) {
       return app.request(
         `/v1/counterparties/${counterpartyId}/requirements?provider=bvnk&direction=offramp&assetRail=usdc.solana&fiatCurrency=${fiatCurrency}`,
         { headers: { "Content-Type": "application/json", Authorization: authHeader } },
@@ -1477,7 +1477,7 @@ describe("Counterparties Routes", () => {
       await seedVerifiedBvnkCustomerLink(counterparty.id);
       const getCustomerSpy = mockVerifiedBvnkCustomer();
 
-      const res = await bvnkOfframpRequirementsRequest(counterparty.id);
+      const res = await bvnkOfframpRequirementsRequest(counterparty.id, "USD");
 
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({
@@ -1502,7 +1502,7 @@ describe("Counterparties Routes", () => {
       });
       const getCustomerSpy = mockVerifiedBvnkCustomer();
 
-      const res = await bvnkOfframpRequirementsRequest(counterparty.id);
+      const res = await bvnkOfframpRequirementsRequest(counterparty.id, "USD");
 
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({

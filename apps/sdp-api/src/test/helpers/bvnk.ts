@@ -303,7 +303,6 @@ interface BvnkChannelTransactionData {
   displayAmount?: number;
   walletAmount?: number;
   feeAmount?: number;
-  walletId?: string;
   sources?: string[] | null;
 }
 
@@ -793,19 +792,6 @@ export function bvnkProcessingSettlement(transferId: string, payoutId: string): 
     throw new Error("bvnkProcessingSettlement fixture summary lacks the receipt url.");
   }
   return buildProcessingSettlement(`payin_${transferId}`, summary, summary.redirectUrl);
-}
-
-/**
- * The BVNK off-ramp marker stored under
- * `counterparties.provider_data.bvnk.offramp`; no zod schema models
- * provider_data in the API, so the shape stays local.
- */
-export interface BvnkOfframpProviderData {
-  wallets: Record<string, { id: string; status: string }>;
-  beneficiaries?: Record<
-    string,
-    { key: string; fiatCurrency: string; accountType: string; createdAt: string }
-  >;
 }
 
 export function bvnkCustomerLinkSeed(
