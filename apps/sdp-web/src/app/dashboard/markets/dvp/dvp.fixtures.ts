@@ -6,7 +6,13 @@
  * actions and the derivations all build from the pinned response.
  */
 
-import type { DvpPartyRef, DvpTrade, DvpTradeLeg, DvpTradeStatus } from "./dvp-trade";
+import type {
+  DvpLegFunding,
+  DvpPartyRef,
+  DvpTrade,
+  DvpTradeLeg,
+  DvpTradeStatus,
+} from "./dvp-trade";
 
 export const LEG_ESCROW_A = "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU";
 export const LEG_ESCROW_B = "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y";
@@ -35,6 +41,21 @@ export function testParty(overrides: Partial<DvpPartyRef> = {}): DvpPartyRef {
     address: OTHER_ADDRESS,
     counterparty: null,
     wallet: null,
+    ...overrides,
+  };
+}
+
+/**
+ * What the reconciler last saw in an escrow, defaulting to the funded shape —
+ * the one state most suites start from. Hand-typed `DvpLegFunding` literals
+ * are how a new funding field silently misses suites.
+ */
+export function testFunding(overrides: Partial<DvpLegFunding> = {}): DvpLegFunding {
+  return {
+    observedAmount: "1000",
+    funded: true,
+    surplus: null,
+    frozen: false,
     ...overrides,
   };
 }

@@ -20,8 +20,9 @@ import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
+import { walletHref } from "../../payments/transactions/transaction-module-hrefs";
 import { AddressWithCopy } from "./dvp-party-cell";
-import { type DvpPartyRef, dvpTimestampToIso, formatLegAmount } from "./dvp-trade";
+import { type DvpPartyRef, dvpTimestampToIso, dvpWalletLabel, formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -81,10 +82,10 @@ function InboundFundAction({
       {shownWallet ? (
         <Link
           className="max-w-40 truncate text-secondary text-xs hover:underline"
-          href={`/dashboard/wallets/${encodeURIComponent(shownWallet.id)}`}
+          href={walletHref(shownWallet.id)}
           title={party.address}
         >
-          {shownWallet.name ?? t("DashboardMarkets.dvp.partySdpWallet")}
+          {dvpWalletLabel(shownWallet.name, t)}
         </Link>
       ) : null}
       {unavailable ? (

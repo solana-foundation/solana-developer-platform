@@ -3,6 +3,7 @@
 import type { SolanaCluster } from "@sdp/types";
 import useSWR from "swr";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { earnQueryKeys } from "../earn/earn-query-key";
 import {
   type KaminoVaultAllocations,
   kaminoVaultAllocationsSchema,
@@ -38,7 +39,7 @@ export function useKaminoVaultAllocations(
 ) {
   const { data, error, isLoading } = useSWR(
     vaultAddress && cluster === "mainnet-beta"
-      ? ["dashboard-earn-kamino-allocations", vaultAddress]
+      ? earnQueryKeys.kaminoAllocations({ vaultAddress })
       : null,
     async (): Promise<KaminoVaultAllocations> => {
       const result = await dashboardFetch<KaminoVaultAllocations>(

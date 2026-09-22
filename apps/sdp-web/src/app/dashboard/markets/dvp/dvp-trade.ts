@@ -16,6 +16,7 @@ import {
   type DvpTradeStatus,
 } from "@sdp/types";
 import { z } from "zod";
+import type { useTranslations } from "@/i18n/provider";
 
 export type { DvpLegTransferKind, DvpSettlementAvailability, DvpTradeStatus };
 
@@ -193,6 +194,16 @@ export interface DvpLegFunding {
  */
 export function isDvpPartyView(trade: { yourSide?: DvpTradeSide }): boolean {
   return trade.yourSide === "a" || trade.yourSide === "b";
+}
+
+/**
+ * The display label for a custodied party's wallet, wherever a party surfaces
+ * as one: an unnamed wallet reads "SDP Wallet" rather than a blank. Every
+ * party surface — the party cell, the detail page's links, the inbound funding
+ * column, the create form's wallet options — spells the fallback once here.
+ */
+export function dvpWalletLabel(name: string | null, t: ReturnType<typeof useTranslations>): string {
+  return name === null ? t("DashboardMarkets.dvp.partySdpWallet") : name;
 }
 
 /**

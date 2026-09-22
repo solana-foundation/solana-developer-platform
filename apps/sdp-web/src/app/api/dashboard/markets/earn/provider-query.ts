@@ -1,22 +1,10 @@
 import { EARN_PROVIDERS } from "@sdp/types";
-import { NextResponse } from "next/server";
+import type { ProxyQueryValidation } from "../proxy-query";
 
 const PROVIDERS = new Set<string>(EARN_PROVIDERS);
 
 /** Longest cursor we will forward — provider cursors are short opaque tokens. */
 const MAX_CURSOR_LENGTH = 512;
-
-export type ProxyQueryValidation = { ok: true; query: string } | { ok: false; message: string };
-
-/**
- * The 400 every rejected proxy query renders, so the error envelope's shape is
- * spelled once, beside the verdict type that names the rejection.
- */
-export function proxyQueryErrorResponse(
-  validated: Extract<ProxyQueryValidation, { ok: false }>
-): NextResponse {
-  return NextResponse.json({ error: { message: validated.message } }, { status: 400 });
-}
 
 /**
  * Shared legs of the strict readers below. Each returns the 400 verdict for

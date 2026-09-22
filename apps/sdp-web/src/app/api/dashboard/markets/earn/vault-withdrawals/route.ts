@@ -1,6 +1,7 @@
 import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
-import { proxyQueryErrorResponse, vaultWithdrawalsProxyQuery } from "../provider-query";
+import { proxyQueryErrorResponse } from "../../proxy-query";
+import { vaultWithdrawalsProxyQuery } from "../provider-query";
 
 export async function POST(request: Request) {
   return proxyToSdpApi({

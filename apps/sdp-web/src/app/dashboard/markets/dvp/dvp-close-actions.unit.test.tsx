@@ -9,7 +9,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "../test-i18n";
-import { testLeg, testTrade } from "./dvp.fixtures";
+import { testFunding, testLeg, testTrade } from "./dvp.fixtures";
 import { DvpCloseActions } from "./dvp-close-actions";
 import type { DvpSettlementAvailability, DvpTrade, DvpTradeStatus } from "./dvp-trade";
 import type { DvpPendingAction } from "./use-dvp-trade-actions";
@@ -23,12 +23,8 @@ function trade(
   bothFunded: boolean,
   settlementAvailability: DvpSettlementAvailability | null = availabilityFor(status)
 ): DvpTrade {
-  const funding = (funded: boolean) => ({
-    observedAmount: funded ? "1000" : "0",
-    funded,
-    surplus: null,
-    frozen: false,
-  });
+  const funding = (funded: boolean) =>
+    testFunding({ observedAmount: funded ? "1000" : "0", funded });
   return testTrade({
     status,
     settlementAvailability,

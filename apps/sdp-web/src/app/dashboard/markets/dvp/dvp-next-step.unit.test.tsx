@@ -14,7 +14,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { EnglishTestI18n } from "../test-i18n";
-import { OTHER_ADDRESS, ownParty, testLeg, testTrade } from "./dvp.fixtures";
+import { OTHER_ADDRESS, ownParty, testFunding, testLeg, testTrade } from "./dvp.fixtures";
 import { DvpNextStep } from "./dvp-next-step";
 import type { DvpTradeStatus } from "./dvp-trade";
 
@@ -35,11 +35,9 @@ function trade({
   yourSide?: "a" | "b";
 }): ReturnType<typeof testTrade> {
   const fundingFor = (value: boolean | null | "unset") =>
-    value === "unset"
+    value === "unset" || value === null
       ? null
-      : value === null
-        ? null
-        : { observedAmount: value ? "1000" : "0", funded: value, surplus: null, frozen: false };
+      : testFunding({ observedAmount: value ? "1000" : "0", funded: value });
   return testTrade({
     status,
     kind,

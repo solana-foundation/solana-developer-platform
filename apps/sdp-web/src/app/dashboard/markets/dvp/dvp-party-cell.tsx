@@ -13,7 +13,8 @@ import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-
 import { EntityLink } from "@/components/entity-link";
 import { useTranslations } from "@/i18n/provider";
 import { shortenAddress } from "../../payments/payments-overview.utils";
-import type { DvpPartyRef } from "./dvp-trade";
+import { counterpartyHref, walletHref } from "../../payments/transactions/transaction-module-hrefs";
+import { type DvpPartyRef, dvpWalletLabel } from "./dvp-trade";
 
 /** A truncated address with the full value one copy-click away. */
 export function AddressWithCopy({ address }: { address: string }) {
@@ -34,14 +35,12 @@ export function AddressWithCopy({ address }: { address: string }) {
 export function DvpPartyCell({ party }: { party: DvpPartyRef }) {
   const t = useTranslations();
   const label = party.counterparty ? (
-    <EntityLink
-      href={`/dashboard/payments/counterparty/${encodeURIComponent(party.counterparty.id)}`}
-    >
+    <EntityLink href={counterpartyHref(party.counterparty.id)}>
       {party.counterparty.label}
     </EntityLink>
   ) : party.wallet ? (
-    <EntityLink href={`/dashboard/wallets/${encodeURIComponent(party.wallet.id)}`}>
-      {party.wallet.name === null ? t("DashboardMarkets.dvp.partySdpWallet") : party.wallet.name}
+    <EntityLink href={walletHref(party.wallet.id)}>
+      {dvpWalletLabel(party.wallet.name, t)}
     </EntityLink>
   ) : (
     <span className="text-tertiary">{t("DashboardMarkets.dvp.partyExternal")}</span>

@@ -510,7 +510,7 @@ export function useEarnExternalWalletPositionSummary({
   detailsVisible?: boolean;
 } = {}) {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-external-wallet-position-summary",
+    earnQueryKeys.externalWalletPositionSummary(),
     () => fetchEarnExternalWalletPositionSummary(),
     {
       refreshInterval: earnExternalWalletSummaryRefreshInterval(detailsVisible),

@@ -83,6 +83,27 @@ export function isPositiveDecimal(value: string): boolean {
 }
 
 /**
+ * Whether a validated amount is above the ceiling it must respect — the balance
+ * it spends from or the shares it redeems.
+ *
+ * Every vault modal answers the same question to explain a disabled Continue
+ * (an over-ceiling amount must say so, not just sit disabled), so the verdict
+ * is spelled once. Fail-closed like the rest of this module: an invalid amount
+ * or an unavailable ceiling is never "over".
+ */
+export function isAmountOverCeiling(
+  validation: { kind: string; canonicalAmount?: string },
+  ceiling: string | undefined
+): boolean {
+  return (
+    validation.kind === "valid" &&
+    validation.canonicalAmount !== undefined &&
+    ceiling !== undefined &&
+    compareUnsignedDecimals(validation.canonicalAmount, ceiling) === 1
+  );
+}
+
+/**
  * Order items by an optional decimal string: unknown values always sort last,
  * ties resolve by original position, and comparable values order by the
  * requested direction. Returns a new array; the input is not mutated. The

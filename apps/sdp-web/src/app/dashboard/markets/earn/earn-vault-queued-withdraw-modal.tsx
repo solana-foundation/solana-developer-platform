@@ -20,7 +20,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
+import { isAmountOverCeiling, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import {
@@ -771,13 +771,10 @@ export function EarnVaultQueuedWithdrawModal({
   const amountValidation = validateVaultWithdrawalAmount(amount);
   const availableAmount = vaultWithdrawalAvailableAmount(position);
   const shares = vaultWithdrawalSharesForValidatedAmount(amountValidation, position);
-  // Same derivation as the instant exit modal: without it, an over-available
-  // amount disables Continue with no explanation, because the shares
-  // conversion silently answers undefined for an amount above the ceiling.
-  const overAvailableAmount =
-    amountValidation.kind === "valid" && availableAmount !== undefined
-      ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
-      : false;
+  // Without it, an over-available amount disables Continue with no
+  // explanation, because the shares conversion silently answers undefined for
+  // an amount above the ceiling.
+  const overAvailableAmount = isAmountOverCeiling(amountValidation, availableAmount);
   const discountBps = percentToBps(discount);
   const deadlineSeconds = durationToSeconds(deadline, durationUnit);
   const termsValid = isQueueTermsValid(discountBps, deadlineSeconds, terms);

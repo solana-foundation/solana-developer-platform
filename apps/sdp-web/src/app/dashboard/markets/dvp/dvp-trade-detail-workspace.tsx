@@ -40,6 +40,7 @@ import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "../../activity-format-utils";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
+import { counterpartyHref, walletHref } from "../../payments/transactions/transaction-module-hrefs";
 import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
@@ -51,6 +52,7 @@ import {
   type DvpTradeKind,
   type DvpTradeLeg,
   dvpTimestampToIso,
+  dvpWalletLabel,
   formatLegAmount,
   formatLegAmountWithSymbol,
   frozenLegs,
@@ -362,15 +364,10 @@ function LegTransferRow({
         {transfer.blockTime === null ? null : (
           <span suppressHydrationWarning>{formatTimestamp(transfer.blockTime, t)}</span>
         )}
-        <a
-          aria-label={t("DashboardMarkets.dvp.viewTransaction")}
-          className="text-secondary hover:text-primary"
+        <ExplorerAnchor
           href={explorerTxUrl(transfer.signature, cluster)}
-          rel="noreferrer noopener"
-          target="_blank"
-        >
-          <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
-        </a>
+          label={t("DashboardMarkets.dvp.viewTransaction")}
+        />
       </span>
     </li>
   );
@@ -441,15 +438,10 @@ function LegFundingFooter({
             className="px-0 hover:bg-transparent"
             label={t("DashboardMarkets.dvp.escrowLabel")}
           />
-          <a
-            aria-label={t("DashboardMarkets.dvp.escrowLabel")}
-            className="text-secondary hover:text-primary"
+          <ExplorerAnchor
             href={explorerAddressUrl(leg.escrow, cluster)}
-            rel="noreferrer noopener"
-            target="_blank"
-          >
-            <ExternalLinkIcon aria-hidden className="h-3 w-3 shrink-0" />
-          </a>
+            label={t("DashboardMarkets.dvp.escrowLabel")}
+          />
         </span>
         {history}
       </LegFooterFrame>
@@ -625,16 +617,42 @@ function ChainValueCell({ value, href }: { value: string; href: string }) {
         className="px-0 hover:bg-transparent"
         label={t("DashboardMarkets.dvp.detailsAddress")}
       />
-      <a
-        aria-label={t("DashboardMarkets.dvp.viewOnExplorer")}
+      <ExplorerAnchor
         className="text-tertiary hover:text-primary"
         href={href}
-        rel="noreferrer noopener"
-        target="_blank"
-      >
-        <ExternalLinkIcon aria-hidden className="h-3 w-3" />
-      </a>
+        iconClassName="h-3 w-3"
+        label={t("DashboardMarkets.dvp.viewOnExplorer")}
+      />
     </span>
+  );
+}
+
+/**
+ * The quiet external-link mark every chain reference on this page carries: the
+ * anchor speaks to assistive tech and opens a new tab. One spelling of the
+ * target/rel/icon contract, so the security posture cannot drift per site.
+ */
+function ExplorerAnchor({
+  className = "text-secondary hover:text-primary",
+  href,
+  iconClassName = "h-3 w-3 shrink-0",
+  label,
+}: {
+  className?: string;
+  href: string;
+  iconClassName?: string;
+  label: string;
+}) {
+  return (
+    <a
+      aria-label={label}
+      className={className}
+      href={href}
+      rel="noreferrer noopener"
+      target="_blank"
+    >
+      <ExternalLinkIcon aria-hidden className={iconClassName} />
+    </a>
   );
 }
 
@@ -643,17 +661,11 @@ function PartyLink({ party }: { party: DvpPartyRef }) {
   const t = useTranslations();
   const wallet = party.actionWallet ?? party.wallet;
   if (wallet) {
-    return (
-      <EntityLink href={`/dashboard/wallets/${encodeURIComponent(wallet.id)}`}>
-        {wallet.name === null ? t("DashboardMarkets.dvp.partySdpWallet") : wallet.name}
-      </EntityLink>
-    );
+    return <EntityLink href={walletHref(wallet.id)}>{dvpWalletLabel(wallet.name, t)}</EntityLink>;
   }
   if (party.counterparty) {
     return (
-      <EntityLink
-        href={`/dashboard/payments/counterparty/${encodeURIComponent(party.counterparty.id)}`}
-      >
+      <EntityLink href={counterpartyHref(party.counterparty.id)}>
         {party.counterparty.label}
       </EntityLink>
     );

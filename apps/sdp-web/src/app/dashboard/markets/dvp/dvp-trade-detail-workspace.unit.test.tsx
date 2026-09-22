@@ -18,6 +18,7 @@ import {
   OTHER_ADDRESS,
   ownParty,
   THIRD_ADDRESS,
+  testFunding,
   testLeg,
   testParty,
   testTrade,
@@ -56,7 +57,7 @@ function trade(overrides: Partial<DvpTrade> = {}): DvpTrade {
   return testTrade(overrides);
 }
 
-const FUNDED = { observedAmount: "1000", funded: true, surplus: null, frozen: false };
+const FUNDED = testFunding();
 
 function renderDetail(value: DvpTrade): string {
   return renderToStaticMarkup(
@@ -318,12 +319,8 @@ describe("DvpTradeDetailWorkspace", () => {
 
   // Only the leg's own party can sign a reclaim, and only a deposit can come back.
   describe("reclaim", () => {
-    const held = (amount: string) => ({
-      observedAmount: amount,
-      funded: amount === "1000",
-      surplus: null,
-      frozen: false,
-    });
+    const held = (amount: string) =>
+      testFunding({ observedAmount: amount, funded: amount === "1000" });
 
     // Each row is a state the API can produce: the status, and each leg's
     // funding and outcome as the server derives them for that status.
@@ -646,7 +643,7 @@ describe("DvpTradeDetailWorkspace", () => {
   // A transfer into a frozen escrow bounces. Offering the button would spend a
   // signature to learn that.
   it("withdraws the funding action while your escrow is frozen", () => {
-    const frozen = { observedAmount: "0", funded: false, surplus: null, frozen: true };
+    const frozen = testFunding({ observedAmount: "0", funded: false, frozen: true });
     const html = renderDetail(
       trade({
         legs: {
@@ -666,7 +663,7 @@ describe("DvpTradeDetailWorkspace", () => {
   });
 
   it("warns about a surplus that settlement would have to refund", () => {
-    const surplus = { observedAmount: "1500", funded: true, surplus: "500", frozen: false };
+    const surplus = testFunding({ observedAmount: "1500", surplus: "500" });
     const html = renderDetail(
       trade({
         legs: {
@@ -780,7 +777,7 @@ describe("DvpTradeDetailWorkspace", () => {
   // A frozen escrow bounces incoming transfers, so the pay-in address must not
   // be offered even though the leg is not yet funded.
   it("withdraws the deposit address while the escrow is frozen", () => {
-    const frozen = { observedAmount: "0", funded: false, surplus: null, frozen: true };
+    const frozen = testFunding({ observedAmount: "0", funded: false, frozen: true });
     const html = renderDetail(
       trade({
         legs: {

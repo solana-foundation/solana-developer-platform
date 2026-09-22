@@ -1,5 +1,6 @@
 import { proxyToSdpApi } from "@/lib/sdp-api";
-import { proxyQueryErrorResponse, vaultPositionsProxyQuery } from "../provider-query";
+import { proxyQueryErrorResponse } from "../../proxy-query";
+import { vaultPositionsProxyQuery } from "../provider-query";
 
 export async function GET(request: Request) {
   const validated = vaultPositionsProxyQuery(request);

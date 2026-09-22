@@ -39,7 +39,12 @@ export function earnVaultWithdrawalUiState(
   return WITHDRAWAL_UI_STATE[status];
 }
 
-export function earnVaultPositionStatusDisplay(
+/**
+ * The pending/active verdict as { label, variant }, parameterized by the two
+ * labels. Module-private: `earnVaultPositionStatusLabels` is the only reader,
+ * so the raw display shape stays an implementation detail.
+ */
+function earnVaultPositionStatusDisplay(
   status: EarnVaultPositionUiStatus,
   pendingLabel: string,
   activeLabel: string

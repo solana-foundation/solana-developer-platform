@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { OTHER_ADDRESS, OWN_WALLET_ID, ownParty, testLeg, testTrade } from "./dvp.fixtures";
+import {
+  OTHER_ADDRESS,
+  OWN_WALLET_ID,
+  ownParty,
+  testFunding,
+  testLeg,
+  testTrade,
+} from "./dvp.fixtures";
 import {
   canCancelDvpTrade,
   custodiedSidesOf,
@@ -24,7 +31,7 @@ describe("legFundingRatio", () => {
   it("is a fraction of the target while short", () => {
     const ratio = legFundingRatio(
       testLeg({
-        funding: { observedAmount: "250000000", funded: false, surplus: null, frozen: false },
+        funding: testFunding({ observedAmount: "250000000", funded: false }),
       })
     );
     expect(ratio).toBeCloseTo(0.25, 4);
@@ -36,12 +43,7 @@ describe("legFundingRatio", () => {
     expect(
       legFundingRatio(
         testLeg({
-          funding: {
-            observedAmount: "1000000000",
-            funded: true,
-            surplus: "999999000",
-            frozen: false,
-          },
+          funding: testFunding({ observedAmount: "1000000000", surplus: "999999000" }),
         })
       )
     ).toBe(1);
@@ -53,12 +55,7 @@ describe("legFundingRatio", () => {
     const ratio = legFundingRatio(
       testLeg({
         amount: "18446744073709551615",
-        funding: {
-          observedAmount: "9223372036854775807",
-          funded: false,
-          surplus: null,
-          frozen: false,
-        },
+        funding: testFunding({ observedAmount: "9223372036854775807", funded: false }),
       })
     );
     expect(ratio).toBeCloseTo(0.5, 3);
@@ -89,7 +86,7 @@ describe("warnings", () => {
     const over = trade({
       legs: {
         a: testLeg({
-          funding: { observedAmount: "1500", funded: true, surplus: "500", frozen: false },
+          funding: testFunding({ observedAmount: "1500", surplus: "500" }),
         }),
         b: testLeg({ amount: "2000" }),
       },
@@ -103,7 +100,7 @@ describe("warnings", () => {
     const frozen = trade({
       legs: {
         a: testLeg({
-          funding: { observedAmount: "0", funded: false, surplus: null, frozen: true },
+          funding: testFunding({ observedAmount: "0", funded: false, frozen: true }),
         }),
         b: testLeg({ amount: "2000" }),
       },

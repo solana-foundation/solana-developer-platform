@@ -19,6 +19,7 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
 import { BASE58_ADDRESS_PATTERN } from "../../base58-address";
+import { dvpWalletLabel } from "../dvp-trade";
 import { toBaseUnits } from "./dvp-amount";
 import type {
   DvpCreateCounterpartyAccount,
@@ -298,7 +299,7 @@ export function PartySlotPicker({
           onChange={(walletId) => onChange({ mode: "wallet", walletId })}
           options={wallets.map((wallet) => ({
             value: wallet.id,
-            label: wallet.label === null ? t("DashboardMarkets.dvp.partySdpWallet") : wallet.label,
+            label: dvpWalletLabel(wallet.label, t),
             description: shortenAddress(wallet.address),
           }))}
           placeholder={t("DashboardMarkets.dvp.partyWalletPlaceholder")}

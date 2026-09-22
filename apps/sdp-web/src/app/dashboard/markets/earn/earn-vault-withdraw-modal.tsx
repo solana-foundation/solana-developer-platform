@@ -17,7 +17,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
+import { compareUnsignedDecimals, isAmountOverCeiling, isPositiveDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenQuantity, formatUsd, positionDisplayName } from "./earn-format";
@@ -222,10 +222,7 @@ function deriveWithdrawalFormState(
     position.shares !== undefined &&
     position.withdrawableShares !== undefined &&
     compareUnsignedDecimals(position.shares, position.withdrawableShares) === 1;
-  const overAvailableAmount =
-    amountValidation.kind === "valid" && availableAmount !== undefined
-      ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
-      : false;
+  const overAvailableAmount = isAmountOverCeiling(amountValidation, availableAmount);
   const amountError = vaultWithdrawalAmountError(
     amountInput,
     amountValidation,
@@ -280,7 +277,7 @@ interface WithdrawalResultCopy {
   title: string;
 }
 
-export type EarnVaultWithdrawalSettlement = "atomic" | "provider_order";
+type EarnVaultWithdrawalSettlement = "atomic" | "provider_order";
 
 function withdrawalResultCopy(
   outcome: Extract<WithdrawalOutcome, { kind: "withdrawal" }>,

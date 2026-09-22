@@ -1,8 +1,6 @@
 import { proxyToSdpApi } from "@/lib/sdp-api";
-import {
-  externalWalletPositionsProxyQuery,
-  proxyQueryErrorResponse,
-} from "../../../provider-query";
+import { proxyQueryErrorResponse } from "../../../../proxy-query";
+import { externalWalletPositionsProxyQuery } from "../../../provider-query";
 
 export async function GET(
   request: Request,

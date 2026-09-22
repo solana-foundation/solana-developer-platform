@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
 import { proxyToSdpApi } from "@/lib/sdp-api";
+import { proxyQueryErrorResponse } from "../../../../proxy-query";
 
 export async function GET(request: Request) {
   if (new URL(request.url).searchParams.size > 0) {
-    return NextResponse.json(
-      { error: { message: "External-wallet position summary does not accept query parameters" } },
-      { status: 400 }
-    );
+    return proxyQueryErrorResponse({
+      ok: false,
+      message: "External-wallet position summary does not accept query parameters",
+    });
   }
 
   // The dashboard is the one surface that legitimately renders per-customer

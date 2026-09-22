@@ -27,6 +27,7 @@ import {
   OWN_WALLET_ID,
   ownParty,
   THIRD_ADDRESS,
+  testFunding,
   testLeg,
   testTrade,
 } from "./dvp.fixtures";
@@ -384,7 +385,7 @@ describe("DvpTradesWorkspace", () => {
   // two different ways.
   it("shows what a finished trade delivered, not a funding fraction", () => {
     const funded = testLeg({
-      funding: { funded: true, observedAmount: "1000000000", frozen: false, surplus: null },
+      funding: testFunding({ observedAmount: "1000000000" }),
     });
     const html = renderList([trade({ status: "settled", legs: { a: funded, b: funded } })]);
 
@@ -521,7 +522,7 @@ describe("DvpTradesWorkspace", () => {
 
   it("shows observed over target once the escrow has been read", () => {
     const funded = testLeg({
-      funding: { observedAmount: "400000000", funded: false, surplus: null, frozen: false },
+      funding: testFunding({ observedAmount: "400000000", funded: false }),
     });
     const html = renderList([trade({ legs: { a: funded, b: testLeg() } })]);
 
@@ -536,7 +537,7 @@ describe("DvpTradesWorkspace", () => {
   // over-funded is a false statement, not a vague one.
   it("labels a frozen row as frozen, not as over-funded", () => {
     const frozen = testLeg({
-      funding: { observedAmount: "1000", funded: true, surplus: null, frozen: true },
+      funding: testFunding({ frozen: true }),
     });
     const html = renderList([trade({ legs: { a: frozen, b: testLeg() } })]);
 
@@ -546,7 +547,7 @@ describe("DvpTradesWorkspace", () => {
 
   it("labels an over-funded row as over-funded", () => {
     const surplus = testLeg({
-      funding: { observedAmount: "1500", funded: true, surplus: "500", frozen: false },
+      funding: testFunding({ observedAmount: "1500", surplus: "500" }),
     });
     const html = renderList([trade({ legs: { a: surplus, b: testLeg() } })]);
 
@@ -555,7 +556,7 @@ describe("DvpTradesWorkspace", () => {
 
   it("marks nothing on an ordinary row", () => {
     const funded = testLeg({
-      funding: { observedAmount: "1000", funded: true, surplus: null, frozen: false },
+      funding: testFunding(),
     });
     const html = renderList([trade({ legs: { a: funded, b: funded } })]);
 

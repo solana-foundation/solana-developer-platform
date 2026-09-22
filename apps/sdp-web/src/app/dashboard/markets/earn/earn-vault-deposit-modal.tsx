@@ -31,6 +31,7 @@ import {
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import {
   compareUnsignedDecimals,
+  isAmountOverCeiling,
   isPositiveDecimal,
   MAX_AMOUNT_LENGTH,
   parseUnsignedDecimal,
@@ -274,10 +275,7 @@ function deriveDepositFormState(input: {
     t,
   } = input;
   const amountValidation = validateVaultDepositAmount(amountInput, fundingDecimals);
-  const overKnownBalance =
-    amountValidation.kind === "valid" && selectedWalletBalance !== undefined
-      ? compareUnsignedDecimals(amountValidation.canonicalAmount, selectedWalletBalance) === 1
-      : false;
+  const overKnownBalance = isAmountOverCeiling(amountValidation, selectedWalletBalance);
   const amountError = amountValidationMessage(amountInput, amountValidation, t);
   const { slippageBps, slippageInvalid } = parseSlippageToleranceState(
     slippagePolicy,
