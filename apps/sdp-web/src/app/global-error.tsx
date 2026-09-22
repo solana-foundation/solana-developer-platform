@@ -3,7 +3,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { useEffect, useState } from "react";
 import { type AppLocale, defaultLocale, isAppLocale, localeCookieName } from "@/i18n/config";
-import { getMessages, translate } from "@/i18n/messages";
+import { englishSourceMessages, loadMessages, type Messages, translate } from "@/i18n/messages";
 
 function resolveClientLocale(): AppLocale {
   const cookieLocale = document.cookie
@@ -31,14 +31,31 @@ export default function GlobalError({
 }) {
   const [eventId, setEventId] = useState<string | null>(null);
   const [locale, setLocale] = useState<AppLocale>(defaultLocale);
+  // English paints first, exactly as before (locale state starts at the
+  // default). Localized catalogs live in their own async chunks rather than
+  // the main bundle, so the resolved locale's catalog swaps in once loaded —
+  // and `locale` (the rendered lang) flips only together with it, so the
+  // document never claims a language the rendered copy doesn't speak, even
+  // while loading or if the catalog fails to load.
+  const [messages, setMessages] = useState<Messages>(englishSourceMessages);
 
   useEffect(() => {
     const id = Sentry.captureException(error);
     setEventId(id);
-    setLocale(resolveClientLocale());
+    const resolvedLocale = resolveClientLocale();
+    let cancelled = false;
+    loadMessages(resolvedLocale)
+      .then((localized) => {
+        if (!cancelled) {
+          setLocale(resolvedLocale);
+          setMessages(localized);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [error]);
-
-  const messages = getMessages(locale);
 
   return (
     <html lang={locale}>

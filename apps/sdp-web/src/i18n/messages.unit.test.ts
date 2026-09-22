@@ -3,6 +3,7 @@ import { isAppLocale, supportedLocales } from "@/i18n/config";
 import {
   englishSourceMessages,
   getMessages,
+  loadMessages,
   mergeLocalizedMessages,
   mergeLocalizedMessagesWithEmbeddedYieldBrand,
   translate,
@@ -33,22 +34,27 @@ describe("i18n messages", () => {
     expect(isAppLocale("de")).toBe(false);
   });
 
-  it("resolves typed catalog entries", () => {
+  it("resolves typed catalog entries", async () => {
     expect(translate(getMessages("en"), "Home.trySdp")).toBe("Try SDP");
-    expect(translate(getMessages("es"), "Home.contactUs")).toBe("Contáctanos");
-    expect(translate(getMessages("fr"), "Home.contactUs")).toBe("Nous contacter");
-    expect(translate(getMessages("pt"), "Home.contactUs")).toBe("Fale conosco");
-    expect(translate(getMessages("vi"), "Home.contactUs")).toBe("Liên hệ");
+    expect(translate(await loadMessages("es"), "Home.contactUs")).toBe("Contáctanos");
+    expect(translate(await loadMessages("fr"), "Home.contactUs")).toBe("Nous contacter");
+    expect(translate(await loadMessages("pt"), "Home.contactUs")).toBe("Fale conosco");
+    expect(translate(await loadMessages("vi"), "Home.contactUs")).toBe("Liên hệ");
   });
 
-  it("uses Embedded Yield as the product name in every locale", () => {
+  it("keeps the English catalog synchronous and localized catalogs behind loadMessages", () => {
+    expect(getMessages("en")).toBe(englishSourceMessages);
     for (const locale of supportedLocales) {
-      expect(translate(getMessages(locale), "Shared.dashboardShell.earnProgram")).toBe(
-        "Embedded Yield"
-      );
-      expect(translate(getMessages(locale), "DashboardEarn.playground.productName")).toBe(
-        "Embedded Yield"
-      );
+      if (locale === "en") continue;
+      expect(() => getMessages(locale)).toThrow(/loadMessages/);
+    }
+  });
+
+  it("uses Embedded Yield as the product name in every locale", async () => {
+    for (const locale of supportedLocales) {
+      const messages = await loadMessages(locale);
+      expect(translate(messages, "Shared.dashboardShell.earnProgram")).toBe("Embedded Yield");
+      expect(translate(messages, "DashboardEarn.playground.productName")).toBe("Embedded Yield");
     }
   });
 
@@ -75,12 +81,12 @@ describe("i18n messages", () => {
     });
   });
 
-  it("keeps non-English catalogs inventory-matched to English", () => {
+  it("keeps non-English catalogs inventory-matched to English", async () => {
     const englishKeys = flattenKeys(getMessages("en")).sort();
 
     for (const locale of supportedLocales) {
       if (locale === "en") continue;
-      expect(flattenKeys(getMessages(locale)).sort()).toEqual(englishKeys);
+      expect(flattenKeys(await loadMessages(locale)).sort()).toEqual(englishKeys);
     }
   });
 
@@ -107,12 +113,12 @@ describe("i18n messages", () => {
     });
   });
 
-  it("keeps catalogs free of ICU syntax translate cannot render", () => {
+  it("keeps catalogs free of ICU syntax translate cannot render", async () => {
     // translate only substitutes {name}. An ICU construct such as
     // {count, plural, one {#} other {#}} matches nothing, throws nothing, and
     // reaches the user verbatim, so no catalog may contain one.
     for (const locale of supportedLocales) {
-      const messages = getMessages(locale) as unknown;
+      const messages = (await loadMessages(locale)) as unknown;
       const offenders = flattenKeys(messages).filter((key) => {
         const value = key.split(".").reduce<unknown>((carry, segment) => {
           return carry && typeof carry === "object"
