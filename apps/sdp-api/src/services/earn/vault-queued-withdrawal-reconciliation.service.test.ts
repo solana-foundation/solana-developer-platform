@@ -7,6 +7,8 @@ import type {
 import { env } from "@/test/helpers/env";
 import {
   assertClosingIdentity,
+  findClosingEventInHistoryPage,
+  nextQueuedWithdrawalCheckAt,
   projectClosingEvent,
   reconcileAction,
 } from "./vault-queued-withdrawal-reconciliation.service";
@@ -66,6 +68,7 @@ function request(
     created_at: "2026-09-18T00:00:00.000Z",
     updated_at: "2026-09-18T00:00:00.000Z",
     last_checked_at: null,
+    next_check_at: null,
     ...overrides,
   };
 }
@@ -118,6 +121,67 @@ describe("queued withdrawal reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     provider.client = null;
+  });
+
+  it("backs pending provider reads off without adding delay past maturity", () => {
+    const now = Date.parse("2026-09-22T12:00:00.000Z");
+    expect(nextQueuedWithdrawalCheckAt("pending", String(now / 1_000 + 30), now)).toBe(
+      "2026-09-22T12:01:00.000Z"
+    );
+    expect(nextQueuedWithdrawalCheckAt("pending", String(now / 1_000 + 600), now)).toBe(
+      "2026-09-22T12:10:00.000Z"
+    );
+    expect(nextQueuedWithdrawalCheckAt("pending", String(now / 1_000 + 3_600), now)).toBe(
+      "2026-09-22T12:15:00.000Z"
+    );
+    expect(nextQueuedWithdrawalCheckAt("fulfillable", "0", now)).toBe("2026-09-22T12:01:00.000Z");
+    expect(nextQueuedWithdrawalCheckAt("fulfilled", "0", now)).toBeNull();
+  });
+
+  it("decodes closing history with bounded parallel transaction reads", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const rpc = {
+      getTransaction: vi.fn((signature: string) => ({
+        send: async () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          active -= 1;
+          return { meta: { err: null, logMessages: [signature] } };
+        },
+      })),
+      getSignaturesForAddress: vi.fn(),
+    };
+    const client = {
+      decodeQueuedWithdrawalLifecycleEvents: vi.fn(
+        async (_ctx: unknown, input: { logs: readonly string[] }) =>
+          input.logs[0] === "history-9"
+            ? [
+                {
+                  kind: "withdrawalFulfilled",
+                  requestAddress: REQUEST_ADDRESS,
+                  owner: OWNER,
+                  nonce: "7",
+                  assetMint: TOKEN_MINT,
+                  sharesBurned: "10",
+                  assetsPaid: "9.8",
+                  fulfilledAt: "1700000200",
+                },
+              ]
+            : []
+      ),
+    };
+    const history = Array.from({ length: 12 }, (_, index) => ({
+      signature: `history-${index}`,
+      err: null,
+    }));
+
+    await expect(
+      findClosingEventInHistoryPage(env, rpc as never, request(), client as never, history)
+    ).resolves.toMatchObject({ signature: "history-9" });
+    expect(maxActive).toBe(8);
+    expect(rpc.getTransaction).toHaveBeenCalledTimes(12);
   });
 
   it("recovers a live request PDA when signature history is missing after expiry", async () => {

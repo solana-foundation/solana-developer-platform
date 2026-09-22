@@ -25,8 +25,11 @@ import type { Env } from "@/types/env";
 
 const ACTION_BATCH_SIZE = 128;
 const REQUEST_BATCH_SIZE = 128;
+const OPEN_REQUEST_POLL_MS = 60_000;
+const PENDING_REQUEST_MAX_POLL_MS = 15 * 60_000;
 const CLOSING_HISTORY_PAGE_SIZE = 1_000;
 const CLOSING_HISTORY_MAX_PAGES = 10;
+const CLOSING_HISTORY_LOOKUP_CONCURRENCY = 8;
 
 type QueueLedger = EarnVaultWithdrawalRequestsRepository;
 type RequestedLifecycleEvent = Extract<
@@ -649,7 +652,38 @@ async function projectLiveRequest(
     maturityTimestamp: lookup.request.maturityTimestamp,
     deadlineTimestamp: lookup.request.deadlineTimestamp,
     lastIndexError: null,
+    nextCheckAt: nextQueuedWithdrawalCheckAt(
+      toStatus,
+      lookup.request.maturityTimestamp,
+      Date.now()
+    ),
   });
+}
+
+/**
+ * Schedule the next provider read without delaying a meaningful transition.
+ *
+ * Pending queue requests cannot be fulfilled or cancelled before their
+ * provider-authenticated maturity, so they may back off for up to 15 minutes.
+ * The schedule never adds delay beyond maturity or the normal one-minute
+ * cadence. Every other open state remains on that one-minute cadence.
+ */
+export function nextQueuedWithdrawalCheckAt(
+  status: EarnVaultWithdrawalRequestRow["status"],
+  maturityTimestamp: string,
+  nowMs = Date.now()
+): string | null {
+  if (status === "fulfilled" || status === "cancelled" || status === "failed") return null;
+  const minimumNextMs = nowMs + OPEN_REQUEST_POLL_MS;
+  if (status !== "pending") return new Date(minimumNextMs).toISOString();
+
+  const nowSeconds = BigInt(Math.floor(nowMs / 1_000));
+  const maturitySeconds = BigInt(maturityTimestamp);
+  const maximumNextSeconds = nowSeconds + BigInt(PENDING_REQUEST_MAX_POLL_MS / 1_000);
+  const usefulNextSeconds =
+    maturitySeconds < maximumNextSeconds ? maturitySeconds : maximumNextSeconds;
+  const usefulNextMs = Number(usefulNextSeconds) * 1_000;
+  return new Date(Math.max(minimumNextMs, usefulNextMs)).toISOString();
 }
 
 async function reconcileRequest(
@@ -684,6 +718,11 @@ async function reconcileRequest(
       organizationId: request.organization_id,
       toStatus: "closed_or_unknown",
       lastIndexError: "Queue PDA closed without a matching finalized lifecycle event yet",
+      nextCheckAt: nextQueuedWithdrawalCheckAt(
+        "closed_or_unknown",
+        request.maturity_timestamp,
+        Date.now()
+      ),
     });
     return "closedUnknown";
   }
@@ -744,21 +783,8 @@ async function findClosingEvent(
         ...(request.creation_signature ? { until: request.creation_signature as Signature } : {}),
       })
       .send();
-    for (const entry of history) {
-      if (entry.err !== null) continue;
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- history is newest-first and stops at the first authoritative close event.
-      const logs = await transactionLogs(rpc, entry.signature);
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- provider decoding may resolve provider-owned lifecycle configuration per finalized transaction.
-      const events = await lifecycleEvents(env, client, request, logs);
-      const event = events.find(
-        (candidate) =>
-          (candidate.kind === "withdrawalCancelled" || candidate.kind === "withdrawalFulfilled") &&
-          String(candidate.requestAddress) === request.request_address
-      );
-      if (event?.kind === "withdrawalCancelled" || event?.kind === "withdrawalFulfilled") {
-        return { signature: entry.signature, event };
-      }
-    }
+    const closing = await findClosingEventInHistoryPage(env, rpc, request, client, history);
+    if (closing) return closing;
     if (history.length < CLOSING_HISTORY_PAGE_SIZE) return null;
     const oldest = history.at(-1)?.signature;
     if (!oldest) return null;
@@ -767,4 +793,45 @@ async function findClosingEvent(
   throw new Error(
     `Queued withdrawal ${request.id} closing history exceeded ${CLOSING_HISTORY_MAX_PAGES} pages`
   );
+}
+
+/**
+ * Decode finalized history in small parallel windows while preserving its
+ * newest-first decision order. A window avoids a serial getTransaction
+ * waterfall, but bounded concurrency protects the RPC and provider decoder.
+ */
+export async function findClosingEventInHistoryPage(
+  env: Env,
+  rpc: RawHistoryRpc,
+  request: EarnVaultWithdrawalRequestRow,
+  client: EarnVaultQueuedWithdrawProvider,
+  history: readonly RawSignatureInfo[]
+): Promise<ClosingEventObservation | null> {
+  const candidates = history.filter((entry) => entry.err === null);
+  for (let offset = 0; offset < candidates.length; offset += CLOSING_HISTORY_LOOKUP_CONCURRENCY) {
+    const batch = candidates.slice(offset, offset + CLOSING_HISTORY_LOOKUP_CONCURRENCY);
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each bounded window must finish before the next reaches the RPC.
+    const observations = await Promise.allSettled(
+      batch.map(async (entry): Promise<ClosingEventObservation | null> => {
+        const logs = await transactionLogs(rpc, entry.signature);
+        const events = await lifecycleEvents(env, client, request, logs);
+        const event = events.find(
+          (candidate) =>
+            (candidate.kind === "withdrawalCancelled" ||
+              candidate.kind === "withdrawalFulfilled") &&
+            String(candidate.requestAddress) === request.request_address
+        );
+        return event?.kind === "withdrawalCancelled" || event?.kind === "withdrawalFulfilled"
+          ? { signature: entry.signature, event }
+          : null;
+      })
+    );
+    // Promise results retain input order. Throwing a failure encountered before
+    // a match and ignoring one after it preserves the former serial semantics.
+    for (const observation of observations) {
+      if (observation.status === "rejected") throw observation.reason;
+      if (observation.value) return observation.value;
+    }
+  }
+  return null;
 }

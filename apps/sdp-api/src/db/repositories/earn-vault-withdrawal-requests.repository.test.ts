@@ -976,5 +976,17 @@ describe("Earn queued withdrawal repository", () => {
     });
     const claimed = await repository.claimOpenRequests(16);
     expect(claimed.map(({ id }) => id)).toContain(created.request.id);
+
+    // The claim itself is a lease. A second worker cannot pick up the same
+    // provider read until either the worker schedules it or the lease expires.
+    const overlapping = await repository.claimOpenRequests(16);
+    expect(overlapping.map(({ id }) => id)).not.toContain(created.request.id);
+
+    await getDb(env)
+      .prepare("UPDATE earn_vault_withdrawal_requests SET next_check_at = ? WHERE id = ?")
+      .bind("2020-01-01T00:00:00.000Z", created.request.id)
+      .run();
+    const retried = await repository.claimOpenRequests(16);
+    expect(retried.map(({ id }) => id)).toContain(created.request.id);
   });
 });

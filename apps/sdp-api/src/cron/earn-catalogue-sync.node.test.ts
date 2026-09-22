@@ -24,6 +24,7 @@ const MONITOR_SLOT_KEY = "cron:earn-catalogue-sync:disabled-monitor-slot";
 const mocks = vi.hoisted(() => ({
   providerClients: {} as Record<string, EarnVaultProvider>,
   upsertStrategy: vi.fn(),
+  upsertStrategies: vi.fn(),
   deprecateUnlistedStrategies: vi.fn(),
   listStrategyFigures: vi.fn(),
   logEvent: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock("@sdp/earn", async (importOriginal) => {
 vi.mock("@/db/repositories", () => ({
   createEarnRepository: vi.fn(() => ({
     upsertStrategy: mocks.upsertStrategy,
+    upsertStrategies: mocks.upsertStrategies,
     deprecateUnlistedStrategies: mocks.deprecateUnlistedStrategies,
     listStrategyFigures: mocks.listStrategyFigures,
   })),
@@ -116,6 +118,10 @@ function installProviders(providers: Record<string, EarnVaultProvider>): void {
 describe("runEarnCatalogueSyncIfDue", () => {
   beforeEach(() => {
     mocks.upsertStrategy.mockReset().mockResolvedValue(undefined);
+    mocks.upsertStrategies.mockReset().mockImplementation(async (inputs: unknown[]) => {
+      for (const input of inputs) await mocks.upsertStrategy(input);
+      return inputs.length;
+    });
     mocks.deprecateUnlistedStrategies.mockReset().mockResolvedValue([]);
     mocks.listStrategyFigures.mockReset().mockResolvedValue([]);
     mocks.logEvent.mockReset();
@@ -129,6 +135,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
         () =>
           ({
             upsertStrategy: mocks.upsertStrategy,
+            upsertStrategies: mocks.upsertStrategies,
             deprecateUnlistedStrategies: mocks.deprecateUnlistedStrategies,
             listStrategyFigures: mocks.listStrategyFigures,
           }) as never

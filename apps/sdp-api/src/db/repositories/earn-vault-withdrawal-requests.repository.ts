@@ -60,6 +60,8 @@ export interface EarnVaultWithdrawalRequestRow {
   created_at: string;
   updated_at: string;
   last_checked_at: string | null;
+  /** Durable due time and short claim lease for provider reconciliation. */
+  next_check_at: string | null;
 }
 
 export interface EarnVaultWithdrawalRequestActionRow {
@@ -321,6 +323,8 @@ export interface EarnVaultWithdrawalRequestsRepository {
     lastIndexError?: string | null;
     fulfilledAt?: string | null;
     cancelledAt?: string | null;
+    /** Next useful provider read. Terminal transitions always clear it. */
+    nextCheckAt?: string | null;
   }): Promise<EarnVaultWithdrawalRequestRow | null>;
   recordIndexError(input: { withdrawalRequestId: string; error: string }): Promise<void>;
   claimUnsettledActions(limit: number): Promise<EarnVaultWithdrawalRequestActionRow[]>;
@@ -1057,7 +1061,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .prepare(
             `UPDATE earn_vault_withdrawal_requests
                 SET status = 'cancelling', cancel_signature = ?,
-                    failure_reason = NULL, updated_at = sdp_iso_now()
+                    failure_reason = NULL, next_check_at = NULL,
+                    updated_at = sdp_iso_now()
               WHERE id = ? AND organization_id = ? AND status = 'expired_cancelable'
               RETURNING *`
           )
@@ -1153,6 +1158,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                     deadline_timestamp = COALESCE(?, deadline_timestamp),
                     failure_reason = CASE WHEN ? = 'failed' THEN ? ELSE NULL END,
                     last_index_error = ?,
+                    next_check_at = NULL,
                     updated_at = sdp_iso_now()
               WHERE id = ? AND organization_id = ?
                 AND status = ANY (?::text[])
@@ -1256,6 +1262,10 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                     THEN COALESCE(?, fulfilled_at, sdp_iso_now()) ELSE NULL END,
                   cancelled_at = CASE WHEN ? = 'cancelled'
                     THEN COALESCE(?, cancelled_at, sdp_iso_now()) ELSE NULL END,
+                  next_check_at = CASE
+                    WHEN ? IN ('fulfilled', 'cancelled', 'failed') THEN NULL
+                    ELSE ?
+                  END,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND organization_id = ? AND status = ANY (?::text[])
             RETURNING *`
@@ -1277,6 +1287,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.fulfilledAt ?? null,
             input.toStatus,
             input.cancelledAt ?? null,
+            input.toStatus,
+            input.nextCheckAt ?? null,
             input.withdrawalRequestId,
             input.organizationId,
             [...sources]
@@ -1378,23 +1390,25 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                 'creating', 'pending', 'fulfillable', 'expired_cancelable',
                 'cancelling', 'closed_or_unknown'
               )
+                AND COALESCE(request.next_check_at, request.updated_at) <= sdp_iso_now()
                 AND EXISTS (
                   SELECT 1 FROM earn_vault_withdrawal_request_actions action
                    WHERE action.withdrawal_request_id = request.id
                      AND action.action = 'request'
                      AND action.status IN ('submitted', 'confirmed', 'finalized')
                 )
-              ORDER BY COALESCE(request.last_checked_at, request.updated_at), request.id
+              ORDER BY COALESCE(request.next_check_at, request.updated_at), request.id
               LIMIT ?
               FOR UPDATE SKIP LOCKED
            )
            UPDATE earn_vault_withdrawal_requests request
-              SET last_checked_at = sdp_iso_now()
+              SET last_checked_at = sdp_iso_now(),
+                  next_check_at = ?
              FROM candidates
             WHERE request.id = candidates.id
             RETURNING request.*`
         )
-        .bind(limit)
+        .bind(limit, new Date(Date.now() + 2 * 60_000).toISOString())
         .all<Record<string, unknown>>();
       return result.results.map(mapRequest);
     },
