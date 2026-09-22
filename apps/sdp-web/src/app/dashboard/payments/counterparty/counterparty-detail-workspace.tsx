@@ -141,6 +141,8 @@ const PROVIDER_ACCOUNT_STATUS_TONE = {
   pending_agreement: "pending",
   pending_details: "pending",
   processing: "pending",
+  provisioning_funding_wallet: "pending",
+  provisioned_funding_wallet: "success",
 } as const;
 
 function ProviderAccountStatusBadge({ status }: { status: string }) {
@@ -180,6 +182,7 @@ interface ProviderCustomerGroup {
   provider: RampProviderId;
   customerLink: CounterpartyProviderCustomerLink | undefined;
   payoutAccounts: CounterpartyProviderAccount[];
+  fundingWallets: CounterpartyProviderAccount[];
 }
 
 /**
@@ -188,16 +191,26 @@ interface ProviderCustomerGroup {
  * @param accounts - Flat provider-account rows from the API.
  * @returns One group per provider in first-seen order.
  */
-function groupProviderAccounts(accounts: CounterpartyProviderAccount[]): ProviderCustomerGroup[] {
+export function groupProviderAccounts(
+  accounts: CounterpartyProviderAccount[]
+): ProviderCustomerGroup[] {
   const groups = new Map<RampProviderId, ProviderCustomerGroup>();
   for (const account of accounts) {
     let group = groups.get(account.provider);
     if (group === undefined) {
-      group = { provider: account.provider, customerLink: undefined, payoutAccounts: [] };
+      group = {
+        provider: account.provider,
+        customerLink: undefined,
+        payoutAccounts: [],
+        fundingWallets: [],
+      };
       groups.set(account.provider, group);
     }
     if (account.kind === "payout_account") {
       group.payoutAccounts.push(account);
+    }
+    if (account.kind === "funding_wallet") {
+      group.fundingWallets.push(account);
     }
     if (account.customerLink !== undefined) {
       group.customerLink = account.customerLink;
@@ -338,16 +351,56 @@ function CustomerLinkMeta({ customerLink }: { customerLink: CounterpartyProvider
   );
 }
 
+/**
+ * Renders the live-balance cell of a funding-wallet row: the formatted amount
+ * plus currency when available, a muted badge when the provider read failed,
+ * and an em dash while no provider wallet exists yet.
+ *
+ * @param balance - The row's just-in-time balance, absent during provisioning.
+ * @returns The balance cell content.
+ */
+export function ProviderWalletBalanceCell({
+  balance,
+}: {
+  balance: CounterpartyProviderAccount["balance"];
+}) {
+  const t = useTranslations();
+  if (balance === undefined) {
+    return <span className="text-sm text-tertiary">—</span>;
+  }
+  if (balance.state === "unavailable") {
+    return (
+      <span className="rounded-full bg-fill-strong px-2 py-0.5 text-xs font-medium text-tertiary">
+        {t("DashboardPayments.counterparty.providerAccountBalanceUnavailable")}
+      </span>
+    );
+  }
+  return (
+    <span className="whitespace-nowrap text-sm tabular-nums text-primary">
+      {formatDisplayAmount(balance.amount, balance.currency)}
+    </span>
+  );
+}
+
 function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
   const t = useTranslations();
   const [open, setOpen] = useState(true);
-  const { provider, customerLink, payoutAccounts } = group;
-  const expandable = payoutAccounts.length > 0 || RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
+  const { provider, customerLink, payoutAccounts, fundingWallets } = group;
+  const expandable =
+    payoutAccounts.length > 0 ||
+    fundingWallets.length > 0 ||
+    RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
   const headers = [
     t("DashboardPayments.counterparty.providerAccountCorridor"),
     t("DashboardPayments.counterparty.providerAccountRail"),
     t("DashboardPayments.counterparty.providerAccountBank"),
     t("DashboardPayments.counterparty.providerAccountNumber"),
+    t("DashboardPayments.counterparty.providerAccountStatus"),
+  ];
+  const walletHeaders = [
+    t("DashboardPayments.counterparty.providerAccountCurrency"),
+    t("DashboardPayments.counterparty.providerAccountWallet"),
+    t("DashboardPayments.counterparty.providerAccountBalance"),
     t("DashboardPayments.counterparty.providerAccountStatus"),
   ];
 
@@ -380,69 +433,127 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
         <CustomerLinkAgreements agreements={customerLink.agreements} />
       ) : null}
       {expandable && open ? (
-        payoutAccounts.length === 0 ? (
-          <p className="border-t border-border-default px-4 py-3 text-sm text-tertiary">
-            {t("DashboardPayments.counterparty.noPayoutAccounts")}
-          </p>
-        ) : (
-          <div className="overflow-x-auto border-t border-border-default">
-            <table className="w-full min-w-max border-collapse text-left">
-              <thead>
-                <tr className="border-b border-border-default">
-                  {headers.map((header) => (
+        <>
+          {fundingWallets.length > 0 ? (
+            <div className="overflow-x-auto border-t border-border-default">
+              <table className="w-full min-w-max border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-border-default">
                     <th
-                      key={header}
+                      colSpan={walletHeaders.length}
                       className="whitespace-nowrap px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-secondary"
                     >
-                      {header}
+                      {t("DashboardPayments.counterparty.providerAccountVirtualWallets")}
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {payoutAccounts.map((account) => {
-                  const flag =
-                    account.destinationCountry === null
-                      ? null
-                      : regionFlagEmoji(account.destinationCountry);
-                  return (
+                  </tr>
+                  <tr className="border-b border-border-default">
+                    {walletHeaders.map((header) => (
+                      <th
+                        key={header}
+                        className="whitespace-nowrap px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-secondary"
+                      >
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {fundingWallets.map((account) => (
                     <tr key={account.id} className="border-b border-border-default last:border-b-0">
-                      <td className="whitespace-nowrap px-4 py-3">
-                        <div className="flex items-center gap-2 text-sm text-primary">
-                          <span>{account.fiatCurrency}</span>
-                          {flag !== null ? (
-                            <>
-                              <span aria-hidden="true">{flag}</span>
-                              <span className="sr-only">{account.destinationCountry}</span>
-                            </>
-                          ) : null}
-                        </div>
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
+                        {account.fiatCurrency}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
-                        {account.paymentRail !== null ? (
-                          <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs font-medium text-secondary">
-                            {account.paymentRail}
+                        {account.providerAccountReference !== undefined ? (
+                          <span
+                            className="block max-w-40 truncate font-mono text-xs text-secondary"
+                            title={account.providerAccountReference}
+                          >
+                            {account.providerAccountReference}
                           </span>
-                        ) : null}
+                        ) : (
+                          <span className="text-sm text-tertiary">—</span>
+                        )}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
-                        {account.bankName}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
-                        {account.accountNumberLast4 !== undefined
-                          ? `•••• ${account.accountNumberLast4}`
-                          : null}
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <ProviderWalletBalanceCell balance={account.balance} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <ProviderAccountStatusBadge status={providerAccountStatus(account)} />
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {payoutAccounts.length === 0 ? (
+            <p className="border-t border-border-default px-4 py-3 text-sm text-tertiary">
+              {t("DashboardPayments.counterparty.noPayoutAccounts")}
+            </p>
+          ) : (
+            <div className="overflow-x-auto border-t border-border-default">
+              <table className="w-full min-w-max border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-border-default">
+                    {headers.map((header) => (
+                      <th
+                        key={header}
+                        className="whitespace-nowrap px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-secondary"
+                      >
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {payoutAccounts.map((account) => {
+                    const flag =
+                      account.destinationCountry === null
+                        ? null
+                        : regionFlagEmoji(account.destinationCountry);
+                    return (
+                      <tr
+                        key={account.id}
+                        className="border-b border-border-default last:border-b-0"
+                      >
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <div className="flex items-center gap-2 text-sm text-primary">
+                            <span>{account.fiatCurrency}</span>
+                            {flag !== null ? (
+                              <>
+                                <span aria-hidden="true">{flag}</span>
+                                <span className="sr-only">{account.destinationCountry}</span>
+                              </>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          {account.paymentRail !== null ? (
+                            <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs font-medium text-secondary">
+                              {account.paymentRail}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
+                          {account.bankName}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
+                          {account.accountNumberLast4 !== undefined
+                            ? `•••• ${account.accountNumberLast4}`
+                            : null}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <ProviderAccountStatusBadge status={providerAccountStatus(account)} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       ) : null}
     </div>
   );
